@@ -1,0 +1,12 @@
+.claude
+.vscode
+.idea
+.DS_Store
+.env
+
+target
+perf.data*
+
+Cargo.lock
+
+flamegraph.svg
