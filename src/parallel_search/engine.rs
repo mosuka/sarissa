@@ -12,8 +12,7 @@ use crate::parallel_search::{
 use crate::query::{Query, SearchResults};
 use crate::search::{Search, SearchRequest};
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Parallel search engine for executing queries across multiple indices.
@@ -29,29 +28,25 @@ pub struct ParallelSearchEngine {
     
     /// Metrics collector.
     metrics: Arc<SearchMetricsCollector>,
-    
-    /// Task queue for scheduling.
-    task_queue: Arc<Mutex<VecDeque<SearchTask>>>,
 }
 
 impl ParallelSearchEngine {
     /// Create a new parallel search engine.
     pub fn new(config: ParallelSearchConfig) -> Result<Self> {
         let thread_pool_size = config.thread_pool_size
-            .unwrap_or_else(|| num_cpus::get());
+            .unwrap_or_else(num_cpus::get);
         
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(thread_pool_size)
-            .thread_name(|i| format!("parallel-search-{}", i))
+            .thread_name(|i| format!("parallel-search-{i}"))
             .build()
-            .map_err(|e| SarissaError::internal(format!("Failed to create thread pool: {}", e)))?;
+            .map_err(|e| SarissaError::internal(format!("Failed to create thread pool: {e}")))?;
         
         Ok(Self {
             config,
             index_manager: Arc::new(IndexManager::new()),
             thread_pool: Arc::new(thread_pool),
             metrics: Arc::new(SearchMetricsCollector::new()),
-            task_queue: Arc::new(Mutex::new(VecDeque::new())),
         })
     }
     
