@@ -391,6 +391,7 @@ impl ResultProcessor {
             FieldValue::Boolean(b) => b.to_string(),
             FieldValue::Binary(_) => "[binary data]".to_string(),
             FieldValue::DateTime(dt) => dt.to_rfc3339(),
+            FieldValue::Geo(point) => format!("{},{}", point.lat, point.lon),
             FieldValue::Null => "null".to_string(),
         }
     }

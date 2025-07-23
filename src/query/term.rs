@@ -59,8 +59,7 @@ impl Query for TermQuery {
         match reader.postings(&self.field, &self.term)? {
             Some(posting_iter) => {
                 // Create a matcher from the posting iterator
-                let cost = posting_iter.cost();
-                Ok(Box::new(PostingMatcher::new(cost)))
+                Ok(Box::new(PostingMatcher::new(posting_iter)))
             }
             None => {
                 // Term not found in index

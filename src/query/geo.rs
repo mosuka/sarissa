@@ -803,6 +803,166 @@ impl Scorer for GeoScorer {
     }
 }
 
+/// Unified geo query API for convenient geographical searching.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GeoQuery {
+    /// Distance-based query (within radius)
+    Distance(GeoDistanceQuery),
+    /// Bounding box query (within rectangular area)
+    BoundingBox(GeoBoundingBoxQuery),
+}
+
+impl GeoQuery {
+    /// Create a distance-based geo query (search within radius).
+    /// 
+    /// # Arguments
+    /// * `field` - The field containing geographical coordinates
+    /// * `lat` - Center latitude in degrees (-90 to 90)
+    /// * `lon` - Center longitude in degrees (-180 to 180)
+    /// * `radius_km` - Search radius in kilometers
+    /// 
+    /// # Example
+    /// ```rust
+    /// use sarissa::query::geo::GeoQuery;
+    /// 
+    /// let query = GeoQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
+    /// ```
+    pub fn within_radius<F: Into<String>>(field: F, lat: f64, lon: f64, radius_km: f64) -> Result<Self> {
+        let center = GeoPoint::new(lat, lon)?;
+        Ok(GeoQuery::Distance(GeoDistanceQuery::new(field, center, radius_km)))
+    }
+
+    /// Create a bounding box geo query (search within rectangular area).
+    /// 
+    /// # Arguments
+    /// * `field` - The field containing geographical coordinates
+    /// * `min_lat` - Minimum latitude (bottom edge)
+    /// * `min_lon` - Minimum longitude (left edge)
+    /// * `max_lat` - Maximum latitude (top edge)
+    /// * `max_lon` - Maximum longitude (right edge)
+    /// 
+    /// # Example
+    /// ```rust
+    /// use sarissa::query::geo::GeoQuery;
+    /// 
+    /// let query = GeoQuery::within_bounding_box("location", 40.0, -75.0, 41.0, -74.0).unwrap();
+    /// ```
+    pub fn within_bounding_box<F: Into<String>>(
+        field: F,
+        min_lat: f64,
+        min_lon: f64,
+        max_lat: f64,
+        max_lon: f64,
+    ) -> Result<Self> {
+        let top_left = GeoPoint::new(max_lat, min_lon)?;
+        let bottom_right = GeoPoint::new(min_lat, max_lon)?;
+        let bbox = GeoBoundingBox::new(top_left, bottom_right)?;
+        Ok(GeoQuery::BoundingBox(GeoBoundingBoxQuery::new(field, bbox)))
+    }
+
+    /// Create a geo query from a center point and radius.
+    pub fn from_center_and_radius<F: Into<String>>(
+        field: F,
+        center: GeoPoint,
+        radius_km: f64,
+    ) -> Self {
+        GeoQuery::Distance(GeoDistanceQuery::new(field, center, radius_km))
+    }
+
+    /// Create a geo query from a bounding box.
+    pub fn from_bounding_box<F: Into<String>>(field: F, bbox: GeoBoundingBox) -> Self {
+        GeoQuery::BoundingBox(GeoBoundingBoxQuery::new(field, bbox))
+    }
+
+    /// Set the boost factor for this query.
+    pub fn with_boost(mut self, boost: f32) -> Self {
+        match &mut self {
+            GeoQuery::Distance(query) => {
+                *query = query.clone().with_boost(boost);
+            }
+            GeoQuery::BoundingBox(query) => {
+                *query = query.clone().with_boost(boost);
+            }
+        }
+        self
+    }
+
+    /// Get the field name for this query.
+    pub fn field(&self) -> &str {
+        match self {
+            GeoQuery::Distance(query) => query.field(),
+            GeoQuery::BoundingBox(query) => query.field(),
+        }
+    }
+
+    /// Get the boost factor for this query.
+    pub fn boost(&self) -> f32 {
+        match self {
+            GeoQuery::Distance(query) => query.boost(),
+            GeoQuery::BoundingBox(query) => query.boost(),
+        }
+    }
+}
+
+impl Query for GeoQuery {
+    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+        match self {
+            GeoQuery::Distance(query) => query.matcher(reader),
+            GeoQuery::BoundingBox(query) => query.matcher(reader),
+        }
+    }
+
+    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+        match self {
+            GeoQuery::Distance(query) => query.scorer(reader),
+            GeoQuery::BoundingBox(query) => query.scorer(reader),
+        }
+    }
+
+    fn boost(&self) -> f32 {
+        match self {
+            GeoQuery::Distance(query) => query.boost(),
+            GeoQuery::BoundingBox(query) => query.boost(),
+        }
+    }
+
+    fn set_boost(&mut self, boost: f32) {
+        match self {
+            GeoQuery::Distance(query) => query.set_boost(boost),
+            GeoQuery::BoundingBox(query) => query.set_boost(boost),
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn Query> {
+        Box::new(self.clone())
+    }
+
+    fn description(&self) -> String {
+        match self {
+            GeoQuery::Distance(query) => query.description(),
+            GeoQuery::BoundingBox(query) => query.description(),
+        }
+    }
+
+    fn is_empty(&self, reader: &dyn IndexReader) -> Result<bool> {
+        match self {
+            GeoQuery::Distance(query) => query.is_empty(reader),
+            GeoQuery::BoundingBox(query) => query.is_empty(reader),
+        }
+    }
+
+    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+        match self {
+            GeoQuery::Distance(query) => query.cost(reader),
+            GeoQuery::BoundingBox(query) => query.cost(reader),
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

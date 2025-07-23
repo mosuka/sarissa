@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::index::reader::IndexReader;
-use crate::query::matcher::{AllMatcher, EmptyMatcher, Matcher};
+use crate::query::matcher::{AllMatcher, DisjunctionMatcher, EmptyMatcher, Matcher};
 use crate::query::query::Query;
 use crate::query::scorer::{BM25Scorer, Scorer};
 
@@ -171,10 +171,22 @@ impl Query for BooleanQuery {
             let first_must = &must_clauses[0];
             first_must.query.matcher(reader)
         } else if !should_clauses.is_empty() {
-            // If we have SHOULD clauses, create a matcher for the first one
-            // TODO: Implement proper disjunction matcher
-            let first_should = &should_clauses[0];
-            first_should.query.matcher(reader)
+            // Create disjunction matcher for SHOULD clauses (OR operation)
+            let mut matchers = Vec::new();
+            for clause in should_clauses {
+                let matcher = clause.query.matcher(reader)?;
+                if !matcher.is_exhausted() {
+                    matchers.push(matcher);
+                }
+            }
+            
+            if matchers.is_empty() {
+                Ok(Box::new(EmptyMatcher::new()))
+            } else if matchers.len() == 1 {
+                Ok(matchers.into_iter().next().unwrap())
+            } else {
+                Ok(Box::new(DisjunctionMatcher::new(matchers)))
+            }
         } else if !must_not_clauses.is_empty() {
             // If we only have MUST_NOT clauses, match all documents
             // TODO: Implement proper negation matcher

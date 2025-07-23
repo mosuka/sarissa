@@ -472,6 +472,7 @@ impl MergeEngine {
                         crate::schema::FieldValue::Boolean(b) => b.to_string(),
                         crate::schema::FieldValue::Binary(_) => "[binary]".to_string(),
                         crate::schema::FieldValue::DateTime(dt) => dt.to_rfc3339(),
+                        crate::schema::FieldValue::Geo(point) => format!("{},{}", point.lat, point.lon),
                         crate::schema::FieldValue::Null => "null".to_string(),
                     };
                     writer.write_string(&field_str)?;

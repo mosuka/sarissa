@@ -301,6 +301,13 @@ impl FileIndex {
         self.write_metadata()
     }
 
+    /// Update the document count in the index metadata.
+    pub fn update_doc_count(&mut self, additional_docs: u64) -> Result<()> {
+        self.check_closed()?;
+        self.metadata.doc_count += additional_docs;
+        self.update_metadata()
+    }
+
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {

@@ -10,3 +10,9 @@ pub mod schema;
 // Re-export commonly used types
 pub use field::*;
 pub use schema::*;
+
+// Re-export field types for convenience
+pub use field::{
+    BooleanField, DateTimeField, FieldDefinition, FieldType, GeoField, IdField, KeywordField,
+    NumericField, NumericType, StoredField, TextField,
+};

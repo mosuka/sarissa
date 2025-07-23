@@ -52,7 +52,7 @@ impl Default for SearchConfig {
             min_score: 0.0,
             load_documents: true,
             timeout_ms: None,
-            parallel: true, // Enable parallel search by default
+            parallel: false, // Disable parallel search to avoid complex boolean logic for now
         }
     }
 }
