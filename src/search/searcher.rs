@@ -22,6 +22,11 @@ impl Searcher {
             reader: Arc::from(reader),
         }
     }
+    
+    /// Create a new searcher with an Arc<dyn IndexReader>.
+    pub fn from_arc(reader: Arc<dyn IndexReader>) -> Self {
+        Searcher { reader }
+    }
 
     /// Get the index reader.
     pub fn reader(&self) -> &Arc<dyn IndexReader> {
