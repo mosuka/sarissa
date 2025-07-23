@@ -3,9 +3,9 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::{BooleanQuery, NumericRangeQuery, PhraseQuery, TermQuery};
-use sarissa::search::SearchRequest;
 use sarissa::schema::{IdField, NumericField, TextField};
 use sarissa::search::SearchEngine;
+use sarissa::search::SearchRequest;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -108,10 +108,15 @@ fn main() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("body", "programming")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -128,10 +133,15 @@ fn main() -> Result<()> {
     query.add_should(Box::new(TermQuery::new("body", "javascript")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -148,10 +158,15 @@ fn main() -> Result<()> {
     query.add_must_not(Box::new(TermQuery::new("body", "javascript")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -165,14 +180,27 @@ fn main() -> Result<()> {
     println!("\n4. Web development books with high rating (>= 4.2) and reasonable price (<= $50):");
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("category", "web-development")));
-    query.add_must(Box::new(NumericRangeQuery::f64_range("rating", Some(4.2), None)));
-    query.add_must(Box::new(NumericRangeQuery::f64_range("price", None, Some(50.0))));
+    query.add_must(Box::new(NumericRangeQuery::f64_range(
+        "rating",
+        Some(4.2),
+        None,
+    )));
+    query.add_must(Box::new(NumericRangeQuery::f64_range(
+        "price",
+        None,
+        Some(50.0),
+    )));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -196,13 +224,21 @@ fn main() -> Result<()> {
     println!("\n5. Data science books that contain 'machine learning' phrase:");
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("category", "data-science")));
-    query.add_must(Box::new(PhraseQuery::new("body", vec!["machine".to_string(), "learning".to_string()])));
+    query.add_must(Box::new(PhraseQuery::new(
+        "body",
+        vec!["machine".to_string(), "learning".to_string()],
+    )));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -217,17 +253,22 @@ fn main() -> Result<()> {
     let mut language_query = BooleanQuery::new();
     language_query.add_should(Box::new(TermQuery::new("body", "python")));
     language_query.add_should(Box::new(TermQuery::new("body", "javascript")));
-    
+
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("tags", "advanced")));
     query.add_must(Box::new(language_query));
-    
+
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -240,14 +281,23 @@ fn main() -> Result<()> {
     // Example 7: Exclude expensive books
     println!("\n7. Books under $60 that are NOT about web design:");
     let mut query = BooleanQuery::new();
-    query.add_must(Box::new(NumericRangeQuery::f64_range("price", None, Some(60.0))));
+    query.add_must(Box::new(NumericRangeQuery::f64_range(
+        "price",
+        None,
+        Some(60.0),
+    )));
     query.add_must_not(Box::new(TermQuery::new("body", "design")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -267,13 +317,22 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("category", "programming")));
     query.add_should(Box::new(TermQuery::new("body", "python")));
-    query.add_should(Box::new(NumericRangeQuery::f64_range("rating", Some(4.5), None)));
+    query.add_should(Box::new(NumericRangeQuery::f64_range(
+        "rating",
+        Some(4.5),
+        None,
+    )));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -288,28 +347,122 @@ fn main() -> Result<()> {
         }
     }
 
-    // Example 9: Count matching documents
-    println!("\n9. Counting books about either data science OR web development:");
+    // Example 9: Nested boolean queries - Complex logic
+    println!("\n9. Nested boolean queries - (Python OR JavaScript) AND (advanced OR high-rating) AND NOT expensive:");
+    
+    // First nested query: (Python OR JavaScript)
+    let mut language_query = BooleanQuery::new();
+    language_query.add_should(Box::new(TermQuery::new("body", "python")));
+    language_query.add_should(Box::new(TermQuery::new("body", "javascript")));
+    
+    // Second nested query: (advanced OR high-rating)
+    let mut quality_query = BooleanQuery::new();
+    quality_query.add_should(Box::new(TermQuery::new("tags", "advanced")));
+    quality_query.add_should(Box::new(NumericRangeQuery::f64_range(
+        "rating",
+        Some(4.5),
+        None,
+    )));
+    
+    // Main query combining all conditions
+    let mut main_query = BooleanQuery::new();
+    main_query.add_must(Box::new(language_query));    // Must match (Python OR JavaScript)
+    main_query.add_must(Box::new(quality_query));     // Must match (advanced OR high-rating)
+    main_query.add_must_not(Box::new(NumericRangeQuery::f64_range(  // Must NOT be expensive
+        "price",
+        Some(70.0),
+        None,
+    )));
+    
+    let request = SearchRequest::new(Box::new(main_query)).load_documents(true);
+    let results = engine.search_mut(request)?;
+    
+    println!("   Found {} results", results.total_hits);
+    for (i, hit) in results.hits.iter().enumerate() {
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
+        if let Some(doc) = &hit.document {
+            if let Some(field_value) = doc.get_field("title") {
+                if let Some(title) = field_value.as_text() {
+                    println!("      Title: {}", title);
+                }
+            }
+            if let Some(field_value) = doc.get_field("price") {
+                if let sarissa::schema::FieldValue::Float(price) = field_value {
+                    println!("      Price: ${:.2}", price);
+                }
+            }
+            if let Some(field_value) = doc.get_field("rating") {
+                if let sarissa::schema::FieldValue::Float(rating) = field_value {
+                    println!("      Rating: {:.1}", rating);
+                }
+            }
+        }
+    }
+
+    // Example 10: Triple-nested boolean query - More complex logic
+    println!("\n10. Triple-nested query - ((Python AND advanced) OR (JavaScript AND web)) AND price < $60:");
+    
+    // First nested sub-query: (Python AND advanced)
+    let mut python_advanced = BooleanQuery::new();
+    python_advanced.add_must(Box::new(TermQuery::new("body", "python")));
+    python_advanced.add_must(Box::new(TermQuery::new("tags", "advanced")));
+    
+    // Second nested sub-query: (JavaScript AND web)
+    let mut javascript_web = BooleanQuery::new();
+    javascript_web.add_must(Box::new(TermQuery::new("body", "javascript")));
+    javascript_web.add_must(Box::new(TermQuery::new("tags", "web")));
+    
+    // Combine the two sub-queries with OR
+    let mut combined_query = BooleanQuery::new();
+    combined_query.add_should(Box::new(python_advanced));
+    combined_query.add_should(Box::new(javascript_web));
+    
+    // Final query with price constraint
+    let mut final_query = BooleanQuery::new();
+    final_query.add_must(Box::new(combined_query));
+    final_query.add_must(Box::new(NumericRangeQuery::f64_range(
+        "price",
+        None,
+        Some(60.0),
+    )));
+    
+    let request = SearchRequest::new(Box::new(final_query)).load_documents(true);
+    let results = engine.search_mut(request)?;
+    
+    println!("   Found {} results", results.total_hits);
+    for (i, hit) in results.hits.iter().enumerate() {
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
+        if let Some(doc) = &hit.document {
+            if let Some(field_value) = doc.get_field("title") {
+                if let Some(title) = field_value.as_text() {
+                    println!("      Title: {}", title);
+                }
+            }
+            if let Some(field_value) = doc.get_field("price") {
+                if let sarissa::schema::FieldValue::Float(price) = field_value {
+                    println!("      Price: ${:.2}", price);
+                }
+            }
+        }
+    }
+
+    // Example 11: Count matching documents
+    println!("\n11. Counting books about either data science OR web development:");
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(TermQuery::new("category", "data-science")));
     query.add_should(Box::new(TermQuery::new("category", "web-development")));
     let count = engine.count_mut(Box::new(query))?;
     println!("   Count: {} books", count);
-
-    println!("\n=== BooleanQuery Key Features ===");
-    println!("• MUST (AND): All conditions must match");
-    println!("• SHOULD (OR): At least one condition should match");  
-    println!("• MUST_NOT (NOT): Conditions must not match");
-    println!("• Combines any query types (Term, Phrase, Range, etc.)");
-    println!("• Nested boolean queries for complex logic");
-    println!("• Relevance scoring based on matching conditions");
-
-    println!("\n=== Use Cases ===");
-    println!("• E-commerce filtering: category AND price range NOT out-of-stock");
-    println!("• Content search: (title:news OR body:news) AND author:smith");
-    println!("• User preferences: MUST match interests SHOULD match location");
-    println!("• Access control: MUST have permission NOT blocked");
-    println!("• Data analysis: complex multi-field conditions");
 
     engine.close()?;
     println!("\nBooleanQuery example completed successfully!");
