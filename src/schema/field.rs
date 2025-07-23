@@ -1,6 +1,7 @@
 //! Field types for schema definition.
 
 use crate::analysis::analyzer::Analyzer;
+use crate::query::geo::GeoPoint;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -719,6 +720,113 @@ impl FieldType for BooleanField {
 
     fn equals(&self, other: &dyn FieldType) -> bool {
         other.type_name() == "boolean"
+    }
+}
+
+/// A geographical field for storing location data.
+#[derive(Debug, Clone)]
+pub struct GeoField {
+    /// Whether the field value is stored
+    stored: bool,
+    /// Whether the field is indexed for searching
+    indexed: bool,
+    /// Whether to enable fast field access
+    fast_access: bool,
+}
+
+impl GeoField {
+    /// Create a new geo field with default settings.
+    pub fn new() -> Self {
+        GeoField {
+            stored: true,
+            indexed: true,
+            fast_access: true,
+        }
+    }
+
+    /// Set whether the field is stored.
+    pub fn stored(mut self, stored: bool) -> Self {
+        self.stored = stored;
+        self
+    }
+
+    /// Set whether the field is indexed.
+    pub fn indexed(mut self, indexed: bool) -> Self {
+        self.indexed = indexed;
+        self
+    }
+
+    /// Set whether the field supports fast access.
+    pub fn fast_access(mut self, fast_access: bool) -> Self {
+        self.fast_access = fast_access;
+        self
+    }
+
+    /// Parse a coordinate string into a GeoPoint.
+    /// Supports formats like "lat,lon" or "lat lon"
+    pub fn parse_geo_point(&self, input: &str) -> Result<GeoPoint, String> {
+        let input = input.trim();
+        
+        // Try comma-separated format first
+        if let Some((lat_str, lon_str)) = input.split_once(',') {
+            let lat = lat_str.trim().parse::<f64>()
+                .map_err(|_| format!("Invalid latitude: '{}'", lat_str.trim()))?;
+            let lon = lon_str.trim().parse::<f64>()
+                .map_err(|_| format!("Invalid longitude: '{}'", lon_str.trim()))?;
+            
+            return GeoPoint::new(lat, lon)
+                .map_err(|e| format!("Invalid coordinates: {}", e));
+        }
+        
+        // Try space-separated format
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        if parts.len() == 2 {
+            let lat = parts[0].parse::<f64>()
+                .map_err(|_| format!("Invalid latitude: '{}'", parts[0]))?;
+            let lon = parts[1].parse::<f64>()
+                .map_err(|_| format!("Invalid longitude: '{}'", parts[1]))?;
+            
+            return GeoPoint::new(lat, lon)
+                .map_err(|e| format!("Invalid coordinates: {}", e));
+        }
+        
+        Err(format!("Invalid coordinate format: '{}'. Expected 'lat,lon' or 'lat lon'", input))
+    }
+}
+
+impl Default for GeoField {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FieldType for GeoField {
+    fn analyzer(&self) -> Option<&Arc<dyn Analyzer>> {
+        None // Geo fields don't use analyzers
+    }
+
+    fn is_stored(&self) -> bool {
+        self.stored
+    }
+
+    fn is_indexed(&self) -> bool {
+        self.indexed
+    }
+
+    fn supports_fast_access(&self) -> bool {
+        self.fast_access
+    }
+
+    fn type_name(&self) -> &'static str {
+        "geo"
+    }
+
+    fn clone_box(&self) -> Box<dyn FieldType> {
+        Box::new(self.clone())
+    }
+
+    fn equals(&self, other: &dyn FieldType) -> bool {
+        other.type_name() == "geo"
     }
 }
 

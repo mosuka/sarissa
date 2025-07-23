@@ -429,6 +429,7 @@ impl SimilaritySearchEngine {
                         FieldValue::Boolean(value) => Ok(value.to_string()),
                         FieldValue::Binary(_) => Ok(String::new()), // Binary data can't be converted to meaningful text
                         FieldValue::DateTime(dt) => Ok(dt.to_rfc3339()),
+                        FieldValue::Geo(point) => Ok(format!("{},{}", point.lat, point.lon)),
                         FieldValue::Null => Ok(String::new()),
                     }
                 } else {

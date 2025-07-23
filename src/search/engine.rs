@@ -63,6 +63,9 @@ impl SearchEngine {
         writer.add_document(doc)?;
         writer.commit()?;
 
+        // Update index metadata with the new document count
+        self.index.update_doc_count(1)?;
+
         // Invalidate searcher cache
         *self.searcher.borrow_mut() = None;
 
@@ -71,6 +74,7 @@ impl SearchEngine {
 
     /// Add multiple documents to the index.
     pub fn add_documents(&mut self, docs: Vec<Document>) -> Result<()> {
+        let doc_count = docs.len() as u64;
         let mut writer = self.index.writer()?;
 
         for doc in docs {
@@ -78,6 +82,9 @@ impl SearchEngine {
         }
 
         writer.commit()?;
+
+        // Update index metadata with the new document count
+        self.index.update_doc_count(doc_count)?;
 
         // Invalidate searcher cache
         *self.searcher.borrow_mut() = None;
@@ -465,8 +472,8 @@ mod tests {
         let results = engine.search_str("Hello", "title").unwrap();
 
         // Should parse and execute the query
-        assert_eq!(results.hits.len(), 0); // No actual matches due to simplified implementation
-        assert_eq!(results.total_hits, 0);
+        assert_eq!(results.hits.len(), 1); // Now finds actual matches with our improved implementation
+        assert_eq!(results.total_hits, 1);
     }
 
     #[test]

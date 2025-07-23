@@ -2,7 +2,7 @@
 
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
-use sarissa::query::{BM25Scorer, Scorer, TermQuery};
+use sarissa::query::TermQuery;
 use sarissa::schema::{IdField, TextField};
 use sarissa::search::SearchEngine;
 use tempfile::TempDir;
@@ -57,6 +57,10 @@ fn main() -> Result<()> {
     println!("Adding {} documents to the index...", documents.len());
     engine.add_documents(documents)?;
 
+    // Commit the changes to ensure they are persisted
+    engine.commit()?;
+    println!("Documents committed to index");
+
     // Show index statistics
     let stats = engine.stats()?;
     println!("Index statistics:");
@@ -80,7 +84,7 @@ fn main() -> Result<()> {
 
     // Example 2: Field-specific search
     println!("\n2. Field-specific search (author:Orwell):");
-    let results = engine.search_field("author", "George Orwell")?;
+    let results = engine.search_field("author", "Orwell")?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -134,35 +138,12 @@ fn main() -> Result<()> {
         );
     }
 
-    // Example 6: Text analysis
-    println!("\n6. Text analysis example:");
-    let analyzer = StandardAnalyzer::new()?;
-    let tokens: Vec<_> = analyzer
-        .analyze("The Great Gatsby is a masterpiece!")?
-        .collect();
-    println!("   Original: \"The Great Gatsby is a masterpiece!\"");
-    println!(
-        "   Tokens: {:?}",
-        tokens.iter().map(|t| &t.text).collect::<Vec<_>>()
-    );
-
-    // Example 7: Count matching documents
-    println!("\n7. Count matching documents:");
+    // Example 6: Count matching documents
+    println!("\n6. Count matching documents:");
     let count = engine.count_mut(Box::new(TermQuery::new("body", "father")))?;
     println!("   Documents containing 'father': {count}");
 
-    println!("\n=== Advanced Features ===\n");
-
-    // Example 8: Custom scoring
-    println!("8. BM25 scoring parameters:");
-    let scorer = BM25Scorer::new(10, 100, 50, 10.0, 1000, 1.0);
-    println!("   Default k1: {}, b: {}", scorer.k1(), scorer.b());
-    println!("   Score for term_freq=2: {:.4}", scorer.score(0, 2.0));
-
-    // Note: Advanced search features not yet fully implemented
-    println!("\n9. Advanced search features coming soon!");
-
-    println!("\n=== Library Information ===\n");
+    println!("\n=== Library Information ===");
     println!("Sarissa version: {}", sarissa::VERSION);
     println!("Total tests in library: 179 (all passing)");
     println!("Architecture: Trait-based, extensible design");

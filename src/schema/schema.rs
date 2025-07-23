@@ -1,6 +1,7 @@
 //! Schema management for document structure definition.
 
 use crate::error::{SarissaError, Result};
+use crate::query::geo::GeoPoint;
 use crate::schema::field::{FieldDefinition, FieldType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -223,6 +224,8 @@ pub enum FieldValue {
     Binary(Vec<u8>),
     /// DateTime value
     DateTime(chrono::DateTime<chrono::Utc>),
+    /// Geographic point value
+    Geo(GeoPoint),
     /// Null value
     Null,
 }
@@ -369,6 +372,14 @@ impl DocumentBuilder {
         value: chrono::DateTime<chrono::Utc>,
     ) -> Self {
         self.document.add_field(name, FieldValue::DateTime(value));
+        self
+    }
+
+    /// Add a geo field to the document.
+    pub fn add_geo<S: Into<String>>(mut self, name: S, lat: f64, lon: f64) -> Self {
+        if let Ok(point) = GeoPoint::new(lat, lon) {
+            self.document.add_field(name, FieldValue::Geo(point));
+        }
         self
     }
 

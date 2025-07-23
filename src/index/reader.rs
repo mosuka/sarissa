@@ -150,6 +150,8 @@ impl BasicIndexReader {
             }
         }
 
+        // Debug: Print document cache size
+
         Ok(())
     }
 
@@ -210,21 +212,68 @@ impl IndexReader for BasicIndexReader {
     fn term_info(&self, field: &str, term: &str) -> Result<Option<ReaderTermInfo>> {
         self.check_closed()?;
 
-        // TODO: Implement proper term lookup
-        // For now, return None
-        let _field = field;
-        let _term = term;
-        Ok(None)
+        // Simple implementation: check if any document contains the term in the specified field
+        let term_lower = term.to_lowercase();
+        let mut doc_freq = 0u64;
+        let mut total_term_freq = 0u64;
+        
+        for doc in &self.document_cache {
+            if let Some(field_value) = doc.get_field(field) {
+                if let Some(text) = field_value.as_text() {
+                    // Simple tokenization and matching
+                    let text_lower = text.to_lowercase();
+                    if text_lower.contains(&term_lower) {
+                        doc_freq += 1;
+                        // Count occurrences (simplified)
+                        total_term_freq += text_lower.matches(&term_lower).count() as u64;
+                    }
+                }
+            }
+        }
+
+        if doc_freq > 0 {
+            Ok(Some(ReaderTermInfo {
+                field: field.to_string(),
+                term: term.to_string(),
+                doc_freq,
+                total_freq: total_term_freq,
+                posting_offset: 0, // Simplified implementation
+                posting_size: 0,   // Simplified implementation
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     fn postings(&self, field: &str, term: &str) -> Result<Option<Box<dyn PostingIterator>>> {
         self.check_closed()?;
 
-        // TODO: Implement proper posting list lookup
-        // For now, return None
-        let _field = field;
-        let _term = term;
-        Ok(None)
+
+        // Simple implementation: find documents containing the term
+        let term_lower = term.to_lowercase();
+        let mut matching_docs = Vec::new();
+        
+        for (doc_id, doc) in self.document_cache.iter().enumerate() {
+            if let Some(field_value) = doc.get_field(field) {
+                if let Some(text) = field_value.as_text() {
+                    let text_lower = text.to_lowercase();
+                    if text_lower.contains(&term_lower) {
+                        // Simple term frequency calculation
+                        let term_freq = text_lower.matches(&term_lower).count() as f32;
+                        matching_docs.push((doc_id as u64, term_freq));
+                    }
+                }
+            }
+        }
+
+
+        if matching_docs.is_empty() {
+            Ok(None)
+        } else {
+            let doc_ids: Vec<u64> = matching_docs.iter().map(|(id, _)| *id).collect();
+            let term_freqs: Vec<u64> = matching_docs.iter().map(|(_, freq)| *freq as u64).collect();
+            Ok(Some(Box::new(BasicPostingIterator::new(doc_ids, term_freqs)?)))
+        }
     }
 
     fn field_stats(&self, field: &str) -> Result<Option<FieldStats>> {

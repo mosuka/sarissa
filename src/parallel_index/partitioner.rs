@@ -317,6 +317,7 @@ impl DocumentPartitioner for ValuePartitioner {
             crate::schema::FieldValue::Boolean(b) => b.to_string(),
             crate::schema::FieldValue::Binary(b) => format!("{b:?}"),
             crate::schema::FieldValue::DateTime(dt) => dt.to_rfc3339(),
+            crate::schema::FieldValue::Geo(point) => format!("{},{}", point.lat, point.lon),
             crate::schema::FieldValue::Null => "null".to_string(),
         };
         
