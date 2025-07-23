@@ -76,7 +76,6 @@ impl MergeStrategy for ScoreBasedMerger {
                     // Wrap hit for heap ordering
                     let scored_hit = ScoredHit {
                         hit,
-                        index_id: task_result.index_id.clone(),
                     };
                     heap.push(scored_hit);
                 }
@@ -175,7 +174,6 @@ impl MergeStrategy for WeightedMerger {
                     
                     let scored_hit = ScoredHit {
                         hit,
-                        index_id: task_result.index_id.clone(),
                     };
                     heap.push(scored_hit);
                 }
@@ -202,6 +200,12 @@ impl MergeStrategy for WeightedMerger {
     
     fn name(&self) -> &str {
         "WeightedMerger"
+    }
+}
+
+impl Default for WeightedMerger {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -300,7 +304,6 @@ impl MergeStrategy for RoundRobinMerger {
 /// Helper struct for heap-based merging.
 struct ScoredHit {
     hit: SearchHit,
-    index_id: String,
 }
 
 impl Ord for ScoredHit {

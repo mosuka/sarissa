@@ -14,8 +14,10 @@ use std::sync::Arc;
 /// Example function demonstrating parallel search usage.
 pub fn example_parallel_search() -> Result<()> {
     // Create a configuration for parallel search
-    let mut config = ParallelSearchConfig::default();
-    config.max_concurrent_tasks = 4;
+    let config = ParallelSearchConfig {
+        max_concurrent_tasks: 4,
+        ..Default::default()
+    };
     
     // Create the parallel search engine
     let engine = ParallelSearchEngine::new(config)?;
@@ -29,7 +31,7 @@ pub fn example_parallel_search() -> Result<()> {
     for i in 0..3 {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader = Box::new(BasicIndexReader::new(schema.clone(), storage)?);
-        engine.add_index(format!("index_{}", i), reader, 1.0)?;
+        engine.add_index(format!("index_{i}"), reader, 1.0)?;
     }
     
     // Create a query

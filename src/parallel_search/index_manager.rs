@@ -137,8 +137,7 @@ impl IndexManager {
         
         if indices.contains_key(&id) {
             return Err(SarissaError::invalid_argument(format!(
-                "Index with ID '{}' already exists",
-                id
+                "Index with ID '{id}' already exists"
             )));
         }
         
@@ -160,7 +159,7 @@ impl IndexManager {
         })?;
         
         let handle = indices.remove(id).ok_or_else(|| {
-            SarissaError::not_found(format!("Index with ID '{}' not found", id))
+            SarissaError::not_found(format!("Index with ID '{id}' not found"))
         })?;
         
         // Update total weight
@@ -181,7 +180,7 @@ impl IndexManager {
         indices
             .get(id)
             .cloned()
-            .ok_or_else(|| SarissaError::not_found(format!("Index with ID '{}' not found", id)))
+            .ok_or_else(|| SarissaError::not_found(format!("Index with ID '{id}' not found")))
     }
     
     /// Get all active indices.
@@ -213,7 +212,7 @@ impl IndexManager {
         })?;
         
         let handle = indices.get_mut(id).ok_or_else(|| {
-            SarissaError::not_found(format!("Index with ID '{}' not found", id))
+            SarissaError::not_found(format!("Index with ID '{id}' not found"))
         })?;
         
         let old_weight = handle.weight;
@@ -235,7 +234,7 @@ impl IndexManager {
         })?;
         
         let handle = indices.get_mut(id).ok_or_else(|| {
-            SarissaError::not_found(format!("Index with ID '{}' not found", id))
+            SarissaError::not_found(format!("Index with ID '{id}' not found"))
         })?;
         
         handle.is_active = active;
