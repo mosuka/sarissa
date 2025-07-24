@@ -311,37 +311,6 @@ fn main() -> Result<()> {
     let count = engine.count_mut(Box::new(query))?;
     println!("    Count: {} documents", count);
 
-    println!("\n=== Edit Distance Examples ===");
-    println!("Edit Distance 1: Single character insertion, deletion, or substitution");
-    println!("  'cat' -> 'bat' (substitution)");
-    println!("  'cat' -> 'cats' (insertion)");
-    println!("  'cats' -> 'cat' (deletion)");
-    println!("\nEdit Distance 2: Up to two operations");
-    println!("  'programming' -> 'programing' (deletion + deletion)");
-    println!("  'javascript' -> 'javscript' (deletion + substitution)");
-
-    println!("\n=== FuzzyQuery Key Features ===");
-    println!("• Handles typos and misspellings");
-    println!("• Configurable edit distance (Levenshtein distance)");
-    println!("• Works with any text field");
-    println!("• Useful for search-as-you-type functionality");
-    println!("• Improves user experience with forgiving search");
-    println!("• Scoring based on similarity to original term");
-
-    println!("\n=== Use Cases ===");
-    println!("• Search engines: handling user typos");
-    println!("• Product catalogs: fuzzy product name matching");
-    println!("• Person search: handling name variations");
-    println!("• Technical documentation: handling terminology variations");
-    println!("• Autocomplete: suggesting similar terms");
-    println!("• Data cleaning: finding similar records");
-
-    println!("\n=== Best Practices ===");
-    println!("• Use low edit distances (1-2) for performance");
-    println!("• Higher edit distances = more permissive but slower");
-    println!("• Combine with other query types for better results");
-    println!("• Consider prefix queries for better performance on long terms");
-
     engine.close()?;
     println!("\nFuzzyQuery example completed successfully!");
 
