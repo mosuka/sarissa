@@ -402,6 +402,9 @@ pub struct BasicPostingIterator {
 
     /// Whether we've reached the end.
     exhausted: bool,
+
+    /// Whether next() has been called at least once.
+    started: bool,
 }
 
 impl BasicPostingIterator {
@@ -418,6 +421,7 @@ impl BasicPostingIterator {
             term_freqs,
             position: 0,
             exhausted: false,
+            started: false,
         })
     }
 
@@ -428,6 +432,7 @@ impl BasicPostingIterator {
             term_freqs: Vec::new(),
             position: 0,
             exhausted: true,
+            started: false,
         }
     }
 }
@@ -455,24 +460,34 @@ impl PostingIterator for BasicPostingIterator {
     }
 
     fn next(&mut self) -> Result<bool> {
-        if self.exhausted {
+        if self.exhausted || self.doc_ids.is_empty() {
             return Ok(false);
         }
 
-        self.position += 1;
-
-        if self.position >= self.doc_ids.len() {
-            self.exhausted = true;
-            Ok(false)
-        } else {
+        if !self.started {
+            // First call - position at first document
+            self.started = true;
             Ok(true)
+        } else {
+            // Move to next document
+            self.position += 1;
+
+            if self.position >= self.doc_ids.len() {
+                self.exhausted = true;
+                Ok(false)
+            } else {
+                Ok(true)
+            }
         }
     }
 
     fn skip_to(&mut self, target: u64) -> Result<bool> {
-        if self.exhausted {
+        if self.exhausted || self.doc_ids.is_empty() {
             return Ok(false);
         }
+
+        // Mark as started
+        self.started = true;
 
         // Use binary search for efficient skip_to operation
         let search_range = &self.doc_ids[self.position..];
@@ -557,6 +572,11 @@ mod tests {
 
         let mut iter = BasicPostingIterator::new(doc_ids, term_freqs).unwrap();
 
+        // Initially not positioned at any document
+        assert_eq!(iter.doc_id(), 1);
+        assert_eq!(iter.term_freq(), 2);
+
+        assert!(iter.next().unwrap()); // Move to first document
         assert_eq!(iter.doc_id(), 1);
         assert_eq!(iter.term_freq(), 2);
 

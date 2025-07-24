@@ -129,11 +129,15 @@ pub struct PostingMatcher {
 
 impl PostingMatcher {
     /// Create a new posting matcher.
-    pub fn new(posting_iter: Box<dyn PostingIterator>) -> Self {
+    pub fn new(mut posting_iter: Box<dyn PostingIterator>) -> Self {
         let cost = posting_iter.cost();
+
+        // Position the iterator at the first document
+        let exhausted = !posting_iter.next().unwrap_or(false);
+
         PostingMatcher {
             posting_iter,
-            exhausted: false,
+            exhausted,
             cost,
         }
     }
