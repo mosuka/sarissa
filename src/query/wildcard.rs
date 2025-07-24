@@ -129,8 +129,20 @@ impl Query for WildcardQuery {
         Ok(Box::new(EmptyMatcher::new()))
     }
 
-    fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
-        Ok(Box::new(BM25Scorer::new(1, 1, 1, 1.0, 1, self.boost)))
+    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+        // Wildcard queries can match variable numbers of documents
+        let total_docs = reader.doc_count();
+        let estimated_doc_freq = total_docs / 8; // Estimate: 12.5% of docs might match
+        let estimated_term_freq = estimated_doc_freq * 2; // Average 2 occurrences per doc
+
+        Ok(Box::new(BM25Scorer::new(
+            estimated_doc_freq.max(1),
+            estimated_term_freq.max(1),
+            total_docs,
+            10.0, // Estimated average field length
+            total_docs,
+            self.boost,
+        )))
     }
 
     fn boost(&self) -> f32 {
