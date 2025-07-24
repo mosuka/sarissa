@@ -1,7 +1,7 @@
 //! Tokenizer implementations for text analysis.
 
 use crate::analysis::token::{Token, TokenStream};
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::util::simd;
 use regex::Regex;
 use std::sync::Arc;

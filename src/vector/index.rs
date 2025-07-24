@@ -5,7 +5,7 @@
 //! - HNSW index for large datasets with approximate search
 //! - IVF (Inverted File) index for memory-efficient approximate search
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::{
     DistanceMetric, Vector, VectorSearchConfig, VectorSearchResult, VectorSearchResults,
     VectorStats,

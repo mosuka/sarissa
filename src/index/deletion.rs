@@ -3,7 +3,7 @@
 //! This module provides efficient document deletion using bitmap-based
 //! logical deletion and periodic compaction for space reclamation.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::{Storage, StorageInput, StorageOutput, StructReader, StructWriter};
 use ahash::AHashMap;
 use bit_vec::BitVec;
@@ -1012,12 +1012,16 @@ mod tests {
         manager.initialize_segment("seg001", 1000).unwrap();
 
         // Delete documents
-        assert!(manager
-            .delete_document("seg001", 100, "test deletion")
-            .unwrap());
-        assert!(manager
-            .delete_document("seg001", 200, "test deletion")
-            .unwrap());
+        assert!(
+            manager
+                .delete_document("seg001", 100, "test deletion")
+                .unwrap()
+        );
+        assert!(
+            manager
+                .delete_document("seg001", 200, "test deletion")
+                .unwrap()
+        );
 
         // Check deletion status
         assert!(manager.is_deleted("seg001", 100));
@@ -1110,9 +1114,11 @@ mod tests {
         assert_eq!(global_state.total_deleted, 6); // 4 + 2
         assert!((global_state.global_deletion_ratio - 0.2).abs() < 0.001); // 6/30 = 0.2
         assert!(global_state.compaction_candidates.len() >= 1);
-        assert!(global_state
-            .compaction_candidates
-            .contains(&"seg001".to_string()));
+        assert!(
+            global_state
+                .compaction_candidates
+                .contains(&"seg001".to_string())
+        );
     }
 
     #[test]

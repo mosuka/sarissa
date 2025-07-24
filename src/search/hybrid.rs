@@ -10,9 +10,9 @@ use crate::error::Result;
 use crate::query::{Query, SearchResults};
 use crate::search::{Search, SearchRequest};
 use crate::vector::{
+    Vector, VectorSearchConfig, VectorSearchResults,
     embeddings::{EmbeddingConfig, TextEmbedder},
     index::{VectorIndex, VectorIndexConfig, VectorIndexFactory},
-    Vector, VectorSearchConfig, VectorSearchResults,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -784,9 +784,11 @@ mod tests {
         let keyword_scores = vec![0.8, 0.4];
         let vector_similarities = vec![];
 
-        assert!(engine
-            .normalize_scores(&mut results, &keyword_scores, &vector_similarities)
-            .is_ok());
+        assert!(
+            engine
+                .normalize_scores(&mut results, &keyword_scores, &vector_similarities)
+                .is_ok()
+        );
 
         // After min-max normalization, scores should be in [0, 1] range
         assert_eq!(results.get(&1).unwrap().keyword_score, Some(1.0));

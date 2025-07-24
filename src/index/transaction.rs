@@ -3,7 +3,7 @@
 //! This module provides transaction boundaries and atomic commit/rollback
 //! functionality to ensure data consistency during index operations.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::index::{
     deletion::{DeletionManager, GlobalDeletionState},
     merge_engine::MergeEngine,

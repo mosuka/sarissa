@@ -3,9 +3,9 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::GeoQuery;
-use sarissa::search::SearchRequest;
 use sarissa::schema::{GeoField, IdField, TextField};
 use sarissa::search::SearchEngine;
+use sarissa::search::SearchRequest;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -35,7 +35,10 @@ fn main() -> Result<()> {
     let documents = vec![
         Document::builder()
             .add_text("name", "Central Park")
-            .add_text("description", "Large public park in Manhattan, New York City")
+            .add_text(
+                "description",
+                "Large public park in Manhattan, New York City",
+            )
             .add_text("category", "park")
             .add_geo("location", 40.7829, -73.9654) // Central Park, NYC
             .add_text("city", "New York")
@@ -59,7 +62,10 @@ fn main() -> Result<()> {
             .build(),
         Document::builder()
             .add_text("name", "Alcatraz Island")
-            .add_text("description", "Former federal prison on island in San Francisco Bay")
+            .add_text(
+                "description",
+                "Former federal prison on island in San Francisco Bay",
+            )
             .add_text("category", "historical")
             .add_geo("location", 37.8267, -122.4233) // Alcatraz Island, SF
             .add_text("city", "San Francisco")
@@ -75,7 +81,10 @@ fn main() -> Result<()> {
             .build(),
         Document::builder()
             .add_text("name", "Santa Monica Pier")
-            .add_text("description", "Amusement park and pier on Santa Monica Beach")
+            .add_text(
+                "description",
+                "Amusement park and pier on Santa Monica Beach",
+            )
             .add_text("category", "entertainment")
             .add_geo("location", 34.0084, -118.4966) // Santa Monica Pier, LA
             .add_text("city", "Los Angeles")
@@ -109,10 +118,15 @@ fn main() -> Result<()> {
     let query = GeoQuery::within_radius("location", 40.7580, -73.9855, 5.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("name") {
                 if let Some(name) = field_value.as_text() {
@@ -132,10 +146,15 @@ fn main() -> Result<()> {
     let query = GeoQuery::within_radius("location", 37.7749, -122.4194, 10.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("name") {
                 if let Some(name) = field_value.as_text() {
@@ -156,10 +175,15 @@ fn main() -> Result<()> {
     let query = GeoQuery::within_bounding_box("location", 33.9, -118.6, 34.3, -118.1)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("name") {
                 if let Some(name) = field_value.as_text() {
@@ -179,10 +203,15 @@ fn main() -> Result<()> {
     let query = GeoQuery::within_radius("location", 37.7749, -122.4194, 1000.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("name") {
                 if let Some(name) = field_value.as_text() {
@@ -202,10 +231,15 @@ fn main() -> Result<()> {
     let query = GeoQuery::within_radius("location", 47.6062, -122.3321, 2.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("name") {
                 if let Some(name) = field_value.as_text() {
@@ -225,7 +259,7 @@ fn main() -> Result<()> {
     let query = GeoQuery::within_radius("location", 36.0, -125.0, 1.0)?; // Pacific Ocean
     let request = SearchRequest::new(Box::new(query));
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
 
     // Example 7: Bounding box covering the entire continental US (wide search)
@@ -234,10 +268,15 @@ fn main() -> Result<()> {
     let query = GeoQuery::within_bounding_box("location", 25.0, -125.0, 49.0, -66.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("name") {
                 if let Some(name) = field_value.as_text() {

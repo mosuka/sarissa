@@ -3,9 +3,9 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::PhraseQuery;
-use sarissa::search::SearchRequest;
 use sarissa::schema::{IdField, TextField};
 use sarissa::search::SearchEngine;
+use sarissa::search::SearchRequest;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -72,10 +72,15 @@ fn main() -> Result<()> {
     let query = PhraseQuery::new("body", vec!["machine".to_string(), "learning".to_string()]);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -87,17 +92,25 @@ fn main() -> Result<()> {
 
     // Example 2: Three-word phrase
     println!("\n2. Searching for phrase 'artificial neural networks' in body:");
-    let query = PhraseQuery::new("body", vec![
-        "artificial".to_string(), 
-        "neural".to_string(), 
-        "networks".to_string()
-    ]);
+    let query = PhraseQuery::new(
+        "body",
+        vec![
+            "artificial".to_string(),
+            "neural".to_string(),
+            "networks".to_string(),
+        ],
+    );
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -112,10 +125,15 @@ fn main() -> Result<()> {
     let query = PhraseQuery::new("title", vec!["deep".to_string(), "learning".to_string()]);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -127,13 +145,21 @@ fn main() -> Result<()> {
 
     // Example 4: Phrase with common words
     println!("\n4. Searching for phrase 'data science' in description:");
-    let query = PhraseQuery::new("description", vec!["data".to_string(), "science".to_string()]);
+    let query = PhraseQuery::new(
+        "description",
+        vec!["data".to_string(), "science".to_string()],
+    );
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -148,7 +174,7 @@ fn main() -> Result<()> {
     let query = PhraseQuery::new("body", vec!["quantum".to_string(), "computing".to_string()]);
     let request = SearchRequest::new(Box::new(query));
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
 
     // Example 6: Single word phrase (equivalent to TermQuery)
@@ -156,10 +182,15 @@ fn main() -> Result<()> {
     let query = PhraseQuery::new("body", vec!["intelligence".to_string()]);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -171,18 +202,26 @@ fn main() -> Result<()> {
 
     // Example 7: Longer phrase search
     println!("\n7. Searching for long phrase 'extract insights from data' in body:");
-    let query = PhraseQuery::new("body", vec![
-        "extract".to_string(),
-        "insights".to_string(),
-        "from".to_string(),
-        "data".to_string()
-    ]);
+    let query = PhraseQuery::new(
+        "body",
+        vec![
+            "extract".to_string(),
+            "insights".to_string(),
+            "from".to_string(),
+            "data".to_string(),
+        ],
+    );
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {

@@ -3,9 +3,9 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::NumericRangeQuery;
-use sarissa::search::SearchRequest;
 use sarissa::schema::{IdField, NumericField, TextField};
 use sarissa::search::SearchEngine;
+use sarissa::search::SearchRequest;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -35,7 +35,10 @@ fn main() -> Result<()> {
     let documents = vec![
         Document::builder()
             .add_text("title", "Introduction to Algorithms")
-            .add_text("description", "Comprehensive guide to algorithms and data structures")
+            .add_text(
+                "description",
+                "Comprehensive guide to algorithms and data structures",
+            )
             .add_float("price", 89.99)
             .add_float("rating", 4.8)
             .add_integer("year", 2009)
@@ -53,7 +56,10 @@ fn main() -> Result<()> {
             .build(),
         Document::builder()
             .add_text("title", "Design Patterns")
-            .add_text("description", "Elements of reusable object-oriented software")
+            .add_text(
+                "description",
+                "Elements of reusable object-oriented software",
+            )
             .add_float("price", 62.95)
             .add_float("rating", 4.5)
             .add_integer("year", 1994)
@@ -80,7 +86,10 @@ fn main() -> Result<()> {
             .build(),
         Document::builder()
             .add_text("title", "Code Complete")
-            .add_text("description", "A practical handbook of software construction")
+            .add_text(
+                "description",
+                "A practical handbook of software construction",
+            )
             .add_float("price", 73.99)
             .add_float("rating", 4.9)
             .add_integer("year", 2004)
@@ -99,10 +108,15 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::f64_range("price", Some(50.0), Some(70.0));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -122,10 +136,15 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::f64_range("rating", Some(4.5), None);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -145,10 +164,15 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::i64_range("year", Some(2010), None);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -168,10 +192,15 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::i64_range("pages", None, Some(400));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -191,10 +220,15 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::i64_range("year", Some(2008), Some(2009));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -214,10 +248,15 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::f64_range("price", None, Some(50.0));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -237,10 +276,15 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::i64_range("pages", Some(500), None);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -266,7 +310,7 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::f64_range("price", Some(200.0), Some(300.0));
     let request = SearchRequest::new(Box::new(query));
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
 
     println!("\n=== RangeQuery Key Features ===");

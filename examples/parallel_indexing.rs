@@ -1,8 +1,7 @@
 //! Parallel Indexing example - demonstrates distributed document indexing across multiple indices.
 
 use sarissa::parallel_index::{
-    HashPartitioner, ParallelIndexConfig, ParallelIndexEngine,
-    PartitionConfig, ValuePartitioner,
+    HashPartitioner, ParallelIndexConfig, ParallelIndexEngine, PartitionConfig, ValuePartitioner,
 };
 use sarissa::prelude::*;
 use sarissa::schema::{IdField, NumericField, TextField};
@@ -237,10 +236,7 @@ fn main() -> Result<()> {
 
     let metrics_region = parallel_engine_region.metrics();
     println!("Region Partitioning Results:");
-    println!(
-        "  Total operations: {}",
-        metrics_region.total_operations
-    );
+    println!("  Total operations: {}", metrics_region.total_operations);
 
     println!("\n=== Batch Processing Configuration ===\n");
 
@@ -248,7 +244,10 @@ fn main() -> Result<()> {
     println!("5. Batch processing configuration examples:");
 
     println!("  Current configuration:");
-    println!("    - Batch size: {} documents", parallel_engine.config().default_batch_size);
+    println!(
+        "    - Batch size: {} documents",
+        parallel_engine.config().default_batch_size
+    );
     println!(
         "    - Max concurrent partitions: {}",
         parallel_engine.config().max_concurrent_partitions
@@ -256,7 +255,8 @@ fn main() -> Result<()> {
     println!("    - Total documents: {}", documents.len());
     println!(
         "    - Expected batches: {}",
-        (documents.len() + parallel_engine.config().default_batch_size - 1) / parallel_engine.config().default_batch_size
+        (documents.len() + parallel_engine.config().default_batch_size - 1)
+            / parallel_engine.config().default_batch_size
     );
 
     // Show performance metrics
@@ -270,7 +270,10 @@ fn main() -> Result<()> {
         "    - Average operation time: {:.2}ms",
         metrics.avg_execution_time.as_millis()
     );
-    println!("    - Documents indexed: {}", metrics.total_documents_indexed);
+    println!(
+        "    - Documents indexed: {}",
+        metrics.total_documents_indexed
+    );
 
     println!("  Region partitioning:");
     println!(
@@ -281,7 +284,10 @@ fn main() -> Result<()> {
         "    - Average operation time: {:.2}ms",
         metrics_region.avg_execution_time.as_millis()
     );
-    println!("    - Documents indexed: {}", metrics_region.total_documents_indexed);
+    println!(
+        "    - Documents indexed: {}",
+        metrics_region.total_documents_indexed
+    );
 
     println!("\n=== Custom Partitioning Strategy ===\n");
 
@@ -317,7 +323,7 @@ fn main() -> Result<()> {
     println!("8. Committing changes across all indices...");
     let failed_commits = parallel_engine.commit_all()?;
     let failed_commits_region = parallel_engine_region.commit_all()?;
-    
+
     if failed_commits.is_empty() && failed_commits_region.is_empty() {
         println!("All commits successful!");
     } else {

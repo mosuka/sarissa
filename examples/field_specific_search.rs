@@ -20,10 +20,22 @@ fn main() -> Result<()> {
         Box::new(TextField::new().stored(true).indexed(true)),
     )?;
     schema.add_field("body", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("author", Box::new(TextField::new().stored(true).indexed(true)))?;
-    schema.add_field("category", Box::new(TextField::new().stored(true).indexed(true)))?;
-    schema.add_field("year", Box::new(NumericField::i64().stored(true).indexed(true)))?;
-    schema.add_field("tags", Box::new(TextField::new().stored(true).indexed(true)))?;
+    schema.add_field(
+        "author",
+        Box::new(TextField::new().stored(true).indexed(true)),
+    )?;
+    schema.add_field(
+        "category",
+        Box::new(TextField::new().stored(true).indexed(true)),
+    )?;
+    schema.add_field(
+        "year",
+        Box::new(NumericField::i64().stored(true).indexed(true)),
+    )?;
+    schema.add_field(
+        "tags",
+        Box::new(TextField::new().stored(true).indexed(true)),
+    )?;
     schema.add_field("id", Box::new(IdField::new()))?;
 
     // Create a search engine
@@ -211,27 +223,30 @@ fn main() -> Result<()> {
     // Example 7: Multi-field search comparison
     println!("\n7. Multi-field search comparison:");
     println!("   Searching for 'american' in different fields:");
-    
+
     // Search in tags
     let tags_results = engine.search_field("tags", "american")?;
     println!("   - In tags field: {} results", tags_results.total_hits);
-    
+
     // Search in body
     let body_results = engine.search_field("body", "american")?;
     println!("   - In body field: {} results", body_results.total_hits);
-    
+
     // Search in category
     let category_results = engine.search_field("category", "american")?;
-    println!("   - In category field: {} results", category_results.total_hits);
+    println!(
+        "   - In category field: {} results",
+        category_results.total_hits
+    );
 
     // Example 8: Using query parser with field specification
     println!("\n8. Using query parser with field specification:");
     let parser = engine.query_parser();
-    
+
     // Parse field:value syntax
     let query = parser.parse("author:austen OR category:dystopian")?;
     println!("   Query: author:austen OR category:dystopian");
-    
+
     let request = SearchRequest::new(query).load_documents(true);
     let results = engine.search_mut(request)?;
     println!("   Found {} results", results.total_hits);

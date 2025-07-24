@@ -3,9 +3,9 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::TermQuery;
-use sarissa::search::SearchRequest;
 use sarissa::schema::{IdField, TextField};
 use sarissa::search::SearchEngine;
+use sarissa::search::SearchRequest;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -32,31 +32,46 @@ fn main() -> Result<()> {
     let documents = vec![
         Document::builder()
             .add_text("title", "Rust Programming Language")
-            .add_text("body", "Rust is a systems programming language focused on safety, speed, and concurrency")
+            .add_text(
+                "body",
+                "Rust is a systems programming language focused on safety, speed, and concurrency",
+            )
             .add_text("author", "Steve Klabnik")
             .add_text("category", "programming")
             .build(),
         Document::builder()
             .add_text("title", "Python for Beginners")
-            .add_text("body", "Python is a versatile and easy-to-learn programming language")
+            .add_text(
+                "body",
+                "Python is a versatile and easy-to-learn programming language",
+            )
             .add_text("author", "John Smith")
             .add_text("category", "programming")
             .build(),
         Document::builder()
             .add_text("title", "JavaScript Essentials")
-            .add_text("body", "JavaScript is the language of the web, used for frontend and backend development")
+            .add_text(
+                "body",
+                "JavaScript is the language of the web, used for frontend and backend development",
+            )
             .add_text("author", "Jane Doe")
             .add_text("category", "web-development")
             .build(),
         Document::builder()
             .add_text("title", "Machine Learning Fundamentals")
-            .add_text("body", "Machine learning is a subset of artificial intelligence focused on algorithms")
+            .add_text(
+                "body",
+                "Machine learning is a subset of artificial intelligence focused on algorithms",
+            )
             .add_text("author", "Alice Johnson")
             .add_text("category", "data-science")
             .build(),
         Document::builder()
             .add_text("title", "Data Structures in C++")
-            .add_text("body", "Understanding data structures is crucial for efficient programming")
+            .add_text(
+                "body",
+                "Understanding data structures is crucial for efficient programming",
+            )
             .add_text("author", "Bob Wilson")
             .add_text("category", "programming")
             .build(),
@@ -72,10 +87,15 @@ fn main() -> Result<()> {
     let query = TermQuery::new("title", "rust");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -90,10 +110,15 @@ fn main() -> Result<()> {
     let query = TermQuery::new("body", "language");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -108,10 +133,15 @@ fn main() -> Result<()> {
     let query = TermQuery::new("category", "programming");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -126,7 +156,7 @@ fn main() -> Result<()> {
     let query = TermQuery::new("title", "golang");
     let request = SearchRequest::new(Box::new(query));
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
 
     // Example 5: Case sensitivity demonstration
@@ -134,7 +164,7 @@ fn main() -> Result<()> {
     let query = TermQuery::new("title", "RUST");
     let request = SearchRequest::new(Box::new(query));
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     println!("   Note: TermQuery is case-sensitive by default");
 
@@ -143,10 +173,15 @@ fn main() -> Result<()> {
     let query = TermQuery::new("author", "John Smith");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {

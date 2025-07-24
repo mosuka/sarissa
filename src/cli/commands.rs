@@ -2,10 +2,10 @@
 
 use crate::cli::args::*;
 use crate::cli::output::*;
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::query::*;
-use crate::schema::field::TextField;
 use crate::schema::Schema;
+use crate::schema::field::TextField;
 use crate::search::spell_corrected::*;
 use crate::spelling::*;
 use serde_json::Value;
@@ -183,11 +183,12 @@ fn search_index(args: SearchArgs, cli_args: &SarissaArgs) -> Result<()> {
     // Create mock search results
     for i in 0..args.limit.min(5) {
         let mut fields = HashMap::new();
-        let effective_query = if let Some(info) = correction_info.as_ref().filter(|_| used_correction) {
-            info.query()
-        } else {
-            &args.query
-        };
+        let effective_query =
+            if let Some(info) = correction_info.as_ref().filter(|_| used_correction) {
+                info.query()
+            } else {
+                &args.query
+            };
 
         fields.insert(
             "title".to_string(),

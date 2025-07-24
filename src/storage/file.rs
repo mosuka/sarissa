@@ -1,6 +1,6 @@
 //! File-based storage implementation.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::traits::{
     LockManager, Storage, StorageConfig, StorageError, StorageInput, StorageLock, StorageOutput,
 };

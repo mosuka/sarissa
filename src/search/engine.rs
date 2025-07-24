@@ -2,8 +2,8 @@
 
 use crate::error::Result;
 use crate::index::{
-    index::{FileIndex, IndexConfig},
     Index,
+    index::{FileIndex, IndexConfig},
 };
 use crate::query::{Query, QueryParser, SearchResults};
 use crate::schema::{Document, Schema};
@@ -179,12 +179,22 @@ impl SearchEngine {
 impl Search for SearchEngine {
     fn search(&self, request: SearchRequest) -> Result<SearchResults> {
         let searcher = self.get_searcher()?;
-        Search::search(&*searcher, request)
+        let results = Search::search(&*searcher, request.clone())?;
+
+        // Note: Post-processing is no longer needed as BKD Tree handles numeric filtering
+        // The apply_numeric_range_filtering method is kept for backward compatibility
+        // but is not used when BKD Trees are available
+
+        Ok(results)
     }
 
     fn count(&self, query: Box<dyn Query>) -> Result<u64> {
         let searcher = self.get_searcher()?;
-        Search::count(&*searcher, query)
+        let count = Search::count(&*searcher, query.clone_box())?;
+
+        // Note: Post-processing is no longer needed as BKD Tree handles numeric filtering
+
+        Ok(count)
     }
 }
 

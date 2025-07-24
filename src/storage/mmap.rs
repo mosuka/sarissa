@@ -1,6 +1,6 @@
 //! Memory-mapped storage backend for high-performance file access.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::{Storage, StorageConfig, StorageInput, StorageOutput};
 use memmap2::{Mmap, MmapOptions};
 use std::collections::HashMap;
@@ -78,9 +78,9 @@ impl MmapStorage {
             .map_err(|e| SarissaError::storage(format!("Failed to open file {name}: {e}")))?;
 
         let mmap = unsafe {
-            MmapOptions::new().map(&file).map_err(|e| {
-                SarissaError::storage(format!("Failed to mmap file {name}: {e}"))
-            })?
+            MmapOptions::new()
+                .map(&file)
+                .map_err(|e| SarissaError::storage(format!("Failed to mmap file {name}: {e}")))?
         };
 
         let mmap_arc = Arc::new(mmap);
@@ -209,9 +209,8 @@ impl Storage for MmapStorage {
         self.invalidate_cache(name);
 
         if file_path.exists() {
-            std::fs::remove_file(&file_path).map_err(|e| {
-                SarissaError::storage(format!("Failed to delete file {name}: {e}"))
-            })?;
+            std::fs::remove_file(&file_path)
+                .map_err(|e| SarissaError::storage(format!("Failed to delete file {name}: {e}")))?;
         }
 
         Ok(())
@@ -678,9 +677,7 @@ mod tests {
         for i in 0..5 {
             let filename = format!("file{i}.txt");
             let mut output = storage.create_output(&filename).unwrap();
-            output
-                .write_all(format!("Content {i}").as_bytes())
-                .unwrap();
+            output.write_all(format!("Content {i}").as_bytes()).unwrap();
             output.flush_and_sync().unwrap();
         }
 

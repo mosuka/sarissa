@@ -1,6 +1,6 @@
 //! Index management and coordination.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::index::reader::IndexReader;
 use crate::index::writer::IndexWriter;
 use crate::schema::Schema;

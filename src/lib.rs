@@ -45,7 +45,7 @@ pub mod vector;
 pub mod prelude {
     // Core types
     pub use crate::analysis::{Analyzer, StandardAnalyzer};
-    pub use crate::error::{SarissaError, Result};
+    pub use crate::error::{Result, SarissaError};
     pub use crate::index::{Index, IndexReader, IndexWriter};
     pub use crate::query::{BM25Scorer, Hit, Query, RangeQuery, SearchResults, TermQuery};
     pub use crate::schema::{

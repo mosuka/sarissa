@@ -2,9 +2,9 @@
 
 use crate::error::Result;
 use crate::index::reader::IndexReader;
-use crate::query::matcher::{EmptyMatcher, Matcher};
-use crate::query::scorer::{BM25Scorer, Scorer};
 use crate::query::Query;
+use crate::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
+use crate::query::scorer::{BM25Scorer, Scorer};
 use crate::schema::field::NumericType;
 use chrono::{DateTime, Utc};
 use std::fmt::Debug;
@@ -375,17 +375,84 @@ impl NumericRangeQuery {
         let encoded = Self::encode_numeric(value, self.numeric_type);
         self.contains_encoded(&encoded)
     }
+
+    /// Get the minimum f64 value if the range has a lower bound.
+    pub fn min_f64(&self) -> Option<f64> {
+        self.lower_bound
+            .as_ref()
+            .map(|bytes| match self.numeric_type {
+                NumericType::F64 => {
+                    f64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8]))
+                }
+                NumericType::F32 => {
+                    f32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
+                }
+                NumericType::I64 => {
+                    i64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8])) as f64
+                }
+                NumericType::I32 => {
+                    i32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
+                }
+                NumericType::U64 => {
+                    u64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8])) as f64
+                }
+                NumericType::U32 => {
+                    u32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
+                }
+            })
+    }
+
+    /// Get the maximum f64 value if the range has an upper bound.
+    pub fn max_f64(&self) -> Option<f64> {
+        self.upper_bound
+            .as_ref()
+            .map(|bytes| match self.numeric_type {
+                NumericType::F64 => {
+                    f64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8]))
+                }
+                NumericType::F32 => {
+                    f32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
+                }
+                NumericType::I64 => {
+                    i64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8])) as f64
+                }
+                NumericType::I32 => {
+                    i32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
+                }
+                NumericType::U64 => {
+                    u64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8])) as f64
+                }
+                NumericType::U32 => {
+                    u32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
+                }
+            })
+    }
+
+    /// Get the minimum i64 value if the range has a lower bound.
+    pub fn min_i64(&self) -> Option<i64> {
+        self.min_f64().map(|v| v as i64)
+    }
+
+    /// Get the maximum i64 value if the range has an upper bound.
+    pub fn max_i64(&self) -> Option<i64> {
+        self.max_f64().map(|v| v as i64)
+    }
 }
 
 impl Query for NumericRangeQuery {
-    fn matcher(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
-        Ok(Box::new(NumericRangeMatcher::new(
-            self.lower_bound.clone(),
-            self.upper_bound.clone(),
-            self.lower_inclusive,
-            self.upper_inclusive,
-            self.boost,
-        )))
+    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+        // Try to use BKD Tree if available
+        if let Some(bkd_tree) = reader.get_bkd_tree(&self.field)? {
+            let min_value = self.min_f64();
+            let max_value = self.max_f64();
+
+            let doc_ids = bkd_tree.range_search(min_value, max_value);
+            return Ok(Box::new(PreComputedMatcher::new(doc_ids)));
+        }
+
+        // Fallback: use AllMatcher (will be filtered by post-processing)
+        use crate::query::matcher::AllMatcher;
+        Ok(Box::new(AllMatcher::new(reader.max_doc())))
     }
 
     fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
@@ -522,6 +589,111 @@ impl Matcher for NumericRangeMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.exhausted
+    }
+}
+
+/// A specialized matcher for numeric range queries that filters documents.
+#[derive(Debug)]
+pub struct NumericRangeFilterMatcher {
+    /// The numeric range query for reference.
+    query: NumericRangeQuery,
+    /// The underlying AllMatcher.
+    all_matcher: crate::query::matcher::AllMatcher,
+    /// Reader reference for document access.
+    reader: Option<std::sync::Arc<dyn IndexReader>>,
+}
+
+impl NumericRangeFilterMatcher {
+    /// Create a new numeric range filter matcher.
+    pub fn new(query: NumericRangeQuery, reader: std::sync::Arc<dyn IndexReader>) -> Self {
+        let max_doc = reader.max_doc();
+        NumericRangeFilterMatcher {
+            query,
+            all_matcher: crate::query::matcher::AllMatcher::new(max_doc),
+            reader: Some(reader),
+        }
+    }
+
+    /// Check if the current document matches the numeric range.
+    fn check_current_document(&self) -> bool {
+        if let Some(ref reader) = self.reader {
+            let doc_id = self.all_matcher.doc_id();
+            if doc_id == u64::MAX {
+                return false;
+            }
+
+            // Get the document
+            if let Ok(Some(doc)) = reader.document(doc_id) {
+                // Get the field value
+                if let Some(field_value) = doc.get_field(&self.query.field) {
+                    // Check if it's a numeric field and extract the value
+                    let numeric_value = match field_value {
+                        crate::schema::FieldValue::Float(f) => *f,
+                        crate::schema::FieldValue::Integer(i) => *i as f64,
+                        _ => return false, // Not a numeric field
+                    };
+
+                    // Check if the value is within range
+                    return self.query.contains_numeric(numeric_value);
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Advance to the next document that matches the range.
+    fn advance_to_next_matching(&mut self) -> Result<bool> {
+        loop {
+            // If exhausted, return false
+            if self.all_matcher.is_exhausted() {
+                return Ok(false);
+            }
+
+            // Check if current document matches
+            if self.check_current_document() {
+                return Ok(true);
+            }
+
+            // Move to next document
+            if !self.all_matcher.next()? {
+                return Ok(false);
+            }
+        }
+    }
+}
+
+impl Matcher for NumericRangeFilterMatcher {
+    fn doc_id(&self) -> u64 {
+        self.all_matcher.doc_id()
+    }
+
+    fn next(&mut self) -> Result<bool> {
+        // Move to next document in AllMatcher
+        if !self.all_matcher.next()? {
+            return Ok(false);
+        }
+
+        // Find the next matching document
+        self.advance_to_next_matching()
+    }
+
+    fn skip_to(&mut self, target: u64) -> Result<bool> {
+        // Skip AllMatcher to target
+        if !self.all_matcher.skip_to(target)? {
+            return Ok(false);
+        }
+
+        // Find the next matching document from target
+        self.advance_to_next_matching()
+    }
+
+    fn cost(&self) -> u64 {
+        self.all_matcher.cost()
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.all_matcher.is_exhausted()
     }
 }
 

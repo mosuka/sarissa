@@ -348,13 +348,15 @@ fn main() -> Result<()> {
     }
 
     // Example 9: Nested boolean queries - Complex logic
-    println!("\n9. Nested boolean queries - (Python OR JavaScript) AND (advanced OR high-rating) AND NOT expensive:");
-    
+    println!(
+        "\n9. Nested boolean queries - (Python OR JavaScript) AND (advanced OR high-rating) AND NOT expensive:"
+    );
+
     // First nested query: (Python OR JavaScript)
     let mut language_query = BooleanQuery::new();
     language_query.add_should(Box::new(TermQuery::new("body", "python")));
     language_query.add_should(Box::new(TermQuery::new("body", "javascript")));
-    
+
     // Second nested query: (advanced OR high-rating)
     let mut quality_query = BooleanQuery::new();
     quality_query.add_should(Box::new(TermQuery::new("tags", "advanced")));
@@ -363,20 +365,21 @@ fn main() -> Result<()> {
         Some(4.5),
         None,
     )));
-    
+
     // Main query combining all conditions
     let mut main_query = BooleanQuery::new();
-    main_query.add_must(Box::new(language_query));    // Must match (Python OR JavaScript)
-    main_query.add_must(Box::new(quality_query));     // Must match (advanced OR high-rating)
-    main_query.add_must_not(Box::new(NumericRangeQuery::f64_range(  // Must NOT be expensive
+    main_query.add_must(Box::new(language_query)); // Must match (Python OR JavaScript)
+    main_query.add_must(Box::new(quality_query)); // Must match (advanced OR high-rating)
+    main_query.add_must_not(Box::new(NumericRangeQuery::f64_range(
+        // Must NOT be expensive
         "price",
         Some(70.0),
         None,
     )));
-    
+
     let request = SearchRequest::new(Box::new(main_query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -405,23 +408,25 @@ fn main() -> Result<()> {
     }
 
     // Example 10: Triple-nested boolean query - More complex logic
-    println!("\n10. Triple-nested query - ((Python AND advanced) OR (JavaScript AND web)) AND price < $60:");
-    
+    println!(
+        "\n10. Triple-nested query - ((Python AND advanced) OR (JavaScript AND web)) AND price < $60:"
+    );
+
     // First nested sub-query: (Python AND advanced)
     let mut python_advanced = BooleanQuery::new();
     python_advanced.add_must(Box::new(TermQuery::new("body", "python")));
     python_advanced.add_must(Box::new(TermQuery::new("tags", "advanced")));
-    
+
     // Second nested sub-query: (JavaScript AND web)
     let mut javascript_web = BooleanQuery::new();
     javascript_web.add_must(Box::new(TermQuery::new("body", "javascript")));
     javascript_web.add_must(Box::new(TermQuery::new("tags", "web")));
-    
+
     // Combine the two sub-queries with OR
     let mut combined_query = BooleanQuery::new();
     combined_query.add_should(Box::new(python_advanced));
     combined_query.add_should(Box::new(javascript_web));
-    
+
     // Final query with price constraint
     let mut final_query = BooleanQuery::new();
     final_query.add_must(Box::new(combined_query));
@@ -430,10 +435,10 @@ fn main() -> Result<()> {
         None,
         Some(60.0),
     )));
-    
+
     let request = SearchRequest::new(Box::new(final_query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(

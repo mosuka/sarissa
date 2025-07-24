@@ -2,9 +2,9 @@
 
 use crate::error::Result;
 use crate::index::reader::IndexReader;
+use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher};
 use crate::query::scorer::{BM25Scorer, Scorer};
-use crate::query::Query;
 use std::fmt::Debug;
 
 /// A query that matches documents containing an exact phrase.
@@ -72,14 +72,22 @@ impl PhraseQuery {
 }
 
 impl Query for PhraseQuery {
-    fn matcher(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
         if self.terms.is_empty() {
             return Ok(Box::new(EmptyMatcher::new()));
         }
 
-        // For now, return an empty matcher - full implementation would
-        // require position information from the index
-        Ok(Box::new(EmptyMatcher::new()))
+        // Simplified implementation: check if all terms exist in the field
+        // This is not a true phrase query but at least finds documents with all terms
+        use crate::query::boolean::BooleanQuery;
+        use crate::query::term::TermQuery;
+
+        let mut bool_query = BooleanQuery::new();
+        for term in &self.terms {
+            bool_query.add_must(Box::new(TermQuery::new(&self.field, term)));
+        }
+
+        bool_query.matcher(reader)
     }
 
     fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {

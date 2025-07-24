@@ -11,7 +11,7 @@
 //! - Excellent performance for high-dimensional vectors
 //! - Incremental updates (add/remove vectors)
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::index::VectorIndex;
 use crate::vector::{
     DistanceMetric, Vector, VectorSearchConfig, VectorSearchResult, VectorSearchResults,

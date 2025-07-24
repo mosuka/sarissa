@@ -3,9 +3,9 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::FuzzyQuery;
-use sarissa::search::SearchRequest;
 use sarissa::schema::{IdField, TextField};
 use sarissa::search::SearchEngine;
+use sarissa::search::SearchRequest;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -33,49 +33,70 @@ fn main() -> Result<()> {
     let documents = vec![
         Document::builder()
             .add_text("title", "JavaScript Programming Guide")
-            .add_text("body", "Comprehensive guide to JavaScript development and programming techniques")
+            .add_text(
+                "body",
+                "Comprehensive guide to JavaScript development and programming techniques",
+            )
             .add_text("author", "John Smith")
             .add_text("tags", "javascript programming tutorial")
             .add_text("id", "doc001")
             .build(),
         Document::builder()
             .add_text("title", "Python Programming Fundamentals")
-            .add_text("body", "Learn Python programming language from scratch with practical examples")
+            .add_text(
+                "body",
+                "Learn Python programming language from scratch with practical examples",
+            )
             .add_text("author", "Alice Johnson")
             .add_text("tags", "python programming beginner")
             .add_text("id", "doc002")
             .build(),
         Document::builder()
             .add_text("title", "Machine Learning Algorithms")
-            .add_text("body", "Understanding algorithms used in machine learning and artificial intelligence")
+            .add_text(
+                "body",
+                "Understanding algorithms used in machine learning and artificial intelligence",
+            )
             .add_text("author", "Bob Wilson")
             .add_text("tags", "machine-learning algorithms ai")
             .add_text("id", "doc003")
             .build(),
         Document::builder()
             .add_text("title", "Database Management Systems")
-            .add_text("body", "Introduction to database systems, SQL, and data management principles")
+            .add_text(
+                "body",
+                "Introduction to database systems, SQL, and data management principles",
+            )
             .add_text("author", "Carol Davis")
             .add_text("tags", "database sql management")
             .add_text("id", "doc004")
             .build(),
         Document::builder()
             .add_text("title", "Web Development with React")
-            .add_text("body", "Building modern web applications using React framework and components")
+            .add_text(
+                "body",
+                "Building modern web applications using React framework and components",
+            )
             .add_text("author", "David Brown")
             .add_text("tags", "react web-development frontend")
             .add_text("id", "doc005")
             .build(),
         Document::builder()
             .add_text("title", "Artificial Intelligence Overview")
-            .add_text("body", "Introduction to artificial intelligence concepts, applications, and algorithms")
+            .add_text(
+                "body",
+                "Introduction to artificial intelligence concepts, applications, and algorithms",
+            )
             .add_text("author", "Eva Martinez")
             .add_text("tags", "artificial-intelligence overview concepts")
             .add_text("id", "doc006")
             .build(),
         Document::builder()
             .add_text("title", "Software Engineering Principles")
-            .add_text("body", "Best practices in software engineering, design patterns, and development")
+            .add_text(
+                "body",
+                "Best practices in software engineering, design patterns, and development",
+            )
             .add_text("author", "Frank Miller")
             .add_text("tags", "software engineering principles")
             .add_text("id", "doc007")
@@ -92,10 +113,15 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("body", "javascritp").max_edits(1);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -110,10 +136,15 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("body", "programing").max_edits(2);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -128,10 +159,15 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("title", "machne").max_edits(1);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -146,10 +182,15 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("author", "Jon").max_edits(1);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -169,10 +210,15 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("body", "algoritm").max_edits(2);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -187,10 +233,15 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("tags", "artifical").max_edits(1);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -205,10 +256,15 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("body", "python").max_edits(0);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -223,10 +279,15 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("body", "databse").max_edits(3);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
-        println!("   {}. Score: {:.4}, Doc ID: {}", i + 1, hit.score, hit.doc_id);
+        println!(
+            "   {}. Score: {:.4}, Doc ID: {}",
+            i + 1,
+            hit.score,
+            hit.doc_id
+        );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
@@ -241,7 +302,7 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("body", "xyz123").max_edits(2);
     let request = SearchRequest::new(Box::new(query));
     let results = engine.search_mut(request)?;
-    
+
     println!("   Found {} results", results.total_hits);
 
     // Example 10: Count fuzzy matches

@@ -3,7 +3,7 @@
 //! This module provides the core inverted index data structures for efficient
 //! term-to-document mapping with frequency and position information.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::{StorageInput, StorageOutput, StructReader, StructWriter};
 use ahash::AHashMap;
 

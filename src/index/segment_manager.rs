@@ -3,14 +3,14 @@
 //! This module provides comprehensive segment lifecycle management including
 //! creation, deletion, merging, and optimization based on configurable policies.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::index::SegmentInfo;
 use crate::storage::{Storage, StorageInput, StructReader, StructWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, RwLock,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -931,7 +931,9 @@ impl SegmentManager {
         // Determine best strategy based on current state
         let strategy = if !compaction_candidates.is_empty() {
             MergeStrategy::DeletionBased
-        } else if stats.total_segments > self.config.max_segments || stats.avg_segment_size < self.config.min_segment_size {
+        } else if stats.total_segments > self.config.max_segments
+            || stats.avg_segment_size < self.config.min_segment_size
+        {
             MergeStrategy::SizeBased
         } else {
             MergeStrategy::Balanced

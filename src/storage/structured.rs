@@ -3,7 +3,7 @@
 //! This module provides efficient binary serialization for search index data structures,
 //! similar to Whoosh's structfile.py but optimized for Rust and modern hardware.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::{StorageInput, StorageOutput};
 use crate::util::varint::{decode_u64, encode_u64};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
