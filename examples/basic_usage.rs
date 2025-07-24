@@ -82,21 +82,8 @@ fn main() -> Result<()> {
         );
     }
 
-    // Example 2: Field-specific search
-    println!("\n2. Field-specific search (author:Orwell):");
-    let results = engine.search_field("author", "Orwell")?;
-    println!("   Found {} results", results.total_hits);
-    for (i, hit) in results.hits.iter().enumerate() {
-        println!(
-            "   {}. Score: {:.2}, Doc ID: {}",
-            i + 1,
-            hit.score,
-            hit.doc_id
-        );
-    }
-
-    // Example 3: Boolean search
-    println!("\n3. Boolean search (title:pride AND author:austen):");
+    // Example 2: Boolean search
+    println!("\n2. Boolean search (title:pride AND author:austen):");
     let results = engine.search_str("title:pride AND author:austen", "title")?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -108,8 +95,8 @@ fn main() -> Result<()> {
         );
     }
 
-    // Example 4: Phrase search
-    println!("\n4. Phrase search (\"cold day\"):");
+    // Example 3: Phrase search
+    println!("\n3. Phrase search (\"cold day\"):");
     let results = engine.search_str("\"cold day\"", "body")?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -121,8 +108,8 @@ fn main() -> Result<()> {
         );
     }
 
-    // Example 5: Using query parser directly
-    println!("\n5. Using query parser directly:");
+    // Example 4: Using query parser directly
+    println!("\n4. Using query parser directly:");
     let parser = engine.query_parser_with_default("title");
     let query = parser.parse("mockingbird OR gatsby")?;
     println!("   Parsed query: {}", query.description());
@@ -138,8 +125,8 @@ fn main() -> Result<()> {
         );
     }
 
-    // Example 6: Count matching documents
-    println!("\n6. Count matching documents:");
+    // Example 5: Count matching documents
+    println!("\n5. Count matching documents:");
     let count = engine.count_mut(Box::new(TermQuery::new("body", "father")))?;
     println!("   Documents containing 'father': {count}");
 
