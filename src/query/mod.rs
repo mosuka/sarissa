@@ -23,7 +23,9 @@ pub use self::advanced_query::{
 pub use self::boolean::{BooleanClause, BooleanQuery, BooleanQueryBuilder, Occur};
 pub use self::collector::{Collector, CountCollector, TopDocsCollector};
 pub use self::fuzzy::{FuzzyConfig, FuzzyMatch, FuzzyQuery};
-pub use self::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoMatch, GeoPoint, GeoQuery};
+pub use self::geo::{
+    GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoMatch, GeoPoint, GeoQuery,
+};
 pub use self::matcher::Matcher;
 pub use self::parser::{QueryParser, QueryParserBuilder};
 pub use self::phrase::PhraseQuery;

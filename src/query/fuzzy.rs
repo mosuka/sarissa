@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Matcher, Query, Scorer};
 use crate::spelling::levenshtein::{
-    damerau_levenshtein_distance, levenshtein_distance, LevenshteinMatcher, TypoPatterns,
+    LevenshteinMatcher, TypoPatterns, damerau_levenshtein_distance, levenshtein_distance,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

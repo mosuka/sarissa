@@ -1,6 +1,6 @@
 //! Searcher implementation for executing queries against an index.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::index::reader::IndexReader;
 use crate::query::{Collector, CountCollector, Query, SearchHit, SearchResults, TopDocsCollector};
 use crate::search::{Search, SearchRequest};
@@ -22,7 +22,7 @@ impl Searcher {
             reader: Arc::from(reader),
         }
     }
-    
+
     /// Create a new searcher with an Arc<dyn IndexReader>.
     pub fn from_arc(reader: Arc<dyn IndexReader>) -> Self {
         Searcher { reader }

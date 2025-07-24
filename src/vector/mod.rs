@@ -11,7 +11,7 @@ pub mod hnsw;
 pub mod index;
 pub mod similarity;
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -147,7 +147,6 @@ pub enum DistanceMetric {
     /// Angular distance
     Angular,
 }
-
 
 impl DistanceMetric {
     /// Calculate the distance between two vectors using this metric.

@@ -1,6 +1,7 @@
 //! Index writer for adding and updating documents.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
+use crate::index::SegmentInfo;
 use crate::index::deletion::{DeletionConfig, DeletionManager};
 use crate::index::merge_engine::{MergeConfig, MergeEngine};
 use crate::index::segment_manager::{
@@ -9,7 +10,6 @@ use crate::index::segment_manager::{
 use crate::index::transaction::{
     AtomicOperations, IsolationLevel, Transaction, TransactionManager, TransactionResult,
 };
-use crate::index::SegmentInfo;
 use crate::schema::{Document, Schema};
 use crate::storage::Storage;
 use std::sync::{Arc, Mutex};
@@ -209,8 +209,9 @@ impl BasicIndexWriter {
     }
 }
 
-impl IndexWriter for BasicIndexWriter {
-    fn add_document(&mut self, doc: Document) -> Result<()> {
+impl BasicIndexWriter {
+    /// Internal method to add document with optional statistics update.
+    fn add_document_internal(&mut self, doc: Document, update_stats: bool) -> Result<()> {
         self.check_closed()?;
 
         // Validate document against schema
@@ -219,8 +220,10 @@ impl IndexWriter for BasicIndexWriter {
         // Add to pending documents
         self.pending_documents.push(doc);
 
-        // Update statistics
-        self.stats.docs_added += 1;
+        // Update statistics conditionally
+        if update_stats {
+            self.stats.docs_added += 1;
+        }
 
         // Flush if needed
         if self.should_flush() {
@@ -233,6 +236,12 @@ impl IndexWriter for BasicIndexWriter {
         }
 
         Ok(())
+    }
+}
+
+impl IndexWriter for BasicIndexWriter {
+    fn add_document(&mut self, doc: Document) -> Result<()> {
+        self.add_document_internal(doc, true)
     }
 
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
@@ -272,7 +281,8 @@ impl IndexWriter for BasicIndexWriter {
 
         // Delete old document and add new one (atomic operation)
         let deleted_count = self.delete_documents(field, value)?;
-        self.add_document(doc)?;
+        // Add new document - this should count as an add operation
+        self.add_document_internal(doc, true)?;
 
         // Update statistics
         if deleted_count > 0 {
@@ -285,20 +295,17 @@ impl IndexWriter for BasicIndexWriter {
     fn commit(&mut self) -> Result<()> {
         self.check_closed()?;
 
-        // Update document count before flushing
-        let docs_to_commit = self.pending_documents.len() as u64;
-        
         // Flush any pending documents
         self.flush()?;
 
         // Update statistics
         self.stats.commits += 1;
-        self.stats.docs_added += docs_to_commit;
+        // Note: docs_added is already updated in add_document, no need to double-count
 
         // Update index metadata with current document count
         // Note: This is a simplified implementation
         // In a full implementation, this would update persistent metadata
-        
+
         // TODO: Optimize if configured
 
         Ok(())
@@ -486,7 +493,6 @@ pub struct WriterStats {
     /// Number of rollbacks.
     pub rollbacks: u32,
 }
-
 
 #[cfg(test)]
 mod tests {

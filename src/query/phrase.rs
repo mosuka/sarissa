@@ -2,9 +2,9 @@
 
 use crate::error::Result;
 use crate::index::reader::IndexReader;
+use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher};
 use crate::query::scorer::{BM25Scorer, Scorer};
-use crate::query::Query;
 use std::fmt::Debug;
 
 /// A query that matches documents containing an exact phrase.
@@ -81,12 +81,12 @@ impl Query for PhraseQuery {
         // This is not a true phrase query but at least finds documents with all terms
         use crate::query::boolean::BooleanQuery;
         use crate::query::term::TermQuery;
-        
+
         let mut bool_query = BooleanQuery::new();
         for term in &self.terms {
             bool_query.add_must(Box::new(TermQuery::new(&self.field, term)));
         }
-        
+
         bool_query.matcher(reader)
     }
 

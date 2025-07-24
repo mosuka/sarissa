@@ -8,7 +8,7 @@
 //! - Integration points for external embedding models (OpenAI, Sentence Transformers, etc.)
 
 use crate::analysis::{Analyzer, StandardAnalyzer};
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
@@ -480,7 +480,9 @@ impl TextEmbedder {
                     hasher.finish()
                 };
 
-                for (i, embedding_val) in embedding.iter_mut().enumerate().take(self.config.dimension) {
+                for (i, embedding_val) in
+                    embedding.iter_mut().enumerate().take(self.config.dimension)
+                {
                     let seed = term_hash.wrapping_add(i as u64);
                     let value = ((seed as f64 * 0.00001) % 2.0) - 1.0; // Range [-1, 1]
                     *embedding_val += value as f32;

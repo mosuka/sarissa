@@ -1,8 +1,8 @@
 //! Index reader for searching and retrieving documents.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::index::bkd_tree::SimpleBKDTree;
-use crate::schema::{Document, Schema, FieldValue};
+use crate::schema::{Document, FieldValue, Schema};
 use crate::storage::Storage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -193,7 +193,7 @@ impl BasicIndexReader {
             // Check if this is a numeric field by type name
             if field_def.field_type().type_name() == "numeric" {
                 let mut entries = Vec::new();
-                
+
                 // Extract numeric values from all documents
                 for (doc_id, doc) in self.document_cache.iter().enumerate() {
                     if let Some(field_value) = doc.get_field(field_name) {
@@ -202,7 +202,7 @@ impl BasicIndexReader {
                         }
                     }
                 }
-                
+
                 // Build BKD Tree for this field
                 if !entries.is_empty() {
                     let bkd_tree = SimpleBKDTree::new(field_name.to_string(), entries);
@@ -210,10 +210,10 @@ impl BasicIndexReader {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Extract numeric value from a field value.
     fn extract_numeric_value(&self, field_value: &FieldValue) -> Option<f64> {
         match field_value {
@@ -269,7 +269,7 @@ impl IndexReader for BasicIndexReader {
         let term_lower = term.to_lowercase();
         let mut doc_freq = 0u64;
         let mut total_term_freq = 0u64;
-        
+
         for doc in &self.document_cache {
             if let Some(field_value) = doc.get_field(field) {
                 if let Some(text) = field_value.as_text() {
@@ -301,11 +301,10 @@ impl IndexReader for BasicIndexReader {
     fn postings(&self, field: &str, term: &str) -> Result<Option<Box<dyn PostingIterator>>> {
         self.check_closed()?;
 
-
         // Simple implementation: find documents containing the term
         let term_lower = term.to_lowercase();
         let mut matching_docs = Vec::new();
-        
+
         for (doc_id, doc) in self.document_cache.iter().enumerate() {
             if let Some(field_value) = doc.get_field(field) {
                 if let Some(text) = field_value.as_text() {
@@ -319,13 +318,14 @@ impl IndexReader for BasicIndexReader {
             }
         }
 
-
         if matching_docs.is_empty() {
             Ok(None)
         } else {
             let doc_ids: Vec<u64> = matching_docs.iter().map(|(id, _)| *id).collect();
             let term_freqs: Vec<u64> = matching_docs.iter().map(|(_, freq)| *freq as u64).collect();
-            Ok(Some(Box::new(BasicPostingIterator::new(doc_ids, term_freqs)?)))
+            Ok(Some(Box::new(BasicPostingIterator::new(
+                doc_ids, term_freqs,
+            )?)))
         }
     }
 

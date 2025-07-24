@@ -6,7 +6,7 @@
 //! - Similarity aggregation and combination functions
 //! - Utilities for normalizing and comparing similarity scores
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::{DistanceMetric, Vector, VectorSearchResult};
 use serde::{Deserialize, Serialize};
 
@@ -143,11 +143,7 @@ impl SimilarityMetric {
             .zip(b.iter())
             .map(|(x, y)| {
                 let sum = x.abs() + y.abs();
-                if sum > 0.0 {
-                    (x - y).abs() / sum
-                } else {
-                    0.0
-                }
+                if sum > 0.0 { (x - y).abs() / sum } else { 0.0 }
             })
             .sum();
 

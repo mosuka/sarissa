@@ -12,7 +12,10 @@ fn test_boolean_query_must_not() -> Result<()> {
     // Create temporary directory and schema
     let temp_dir = TempDir::new().unwrap();
     let mut schema = Schema::new();
-    schema.add_field("title", Box::new(TextField::new().stored(true).indexed(true)))?;
+    schema.add_field(
+        "title",
+        Box::new(TextField::new().stored(true).indexed(true)),
+    )?;
     schema.add_field("category", Box::new(TextField::new().indexed(true)))?;
     schema.add_field("tags", Box::new(TextField::new().indexed(true)))?;
     schema.add_field("id", Box::new(IdField::new()))?;
@@ -49,7 +52,7 @@ fn test_boolean_query_must_not() -> Result<()> {
     query.add_must_not(Box::new(TermQuery::new("tags", "javascript")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
+
     assert_eq!(results.total_hits, 2, "Should exclude JavaScript document");
     assert!(results.hits.iter().all(|hit| hit.doc_id != 1));
 
@@ -59,8 +62,11 @@ fn test_boolean_query_must_not() -> Result<()> {
     query.add_must_not(Box::new(TermQuery::new("tags", "javascript")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
-    assert_eq!(results.total_hits, 1, "Should find only Python programming doc");
+
+    assert_eq!(
+        results.total_hits, 1,
+        "Should find only Python programming doc"
+    );
     assert_eq!(results.hits[0].doc_id, 0);
 
     // Test 3: Multiple MUST_NOT clauses
@@ -69,8 +75,11 @@ fn test_boolean_query_must_not() -> Result<()> {
     query.add_must_not(Box::new(TermQuery::new("category", "cooking")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
-    assert_eq!(results.total_hits, 1, "Should exclude both JavaScript and cooking docs");
+
+    assert_eq!(
+        results.total_hits, 1,
+        "Should exclude both JavaScript and cooking docs"
+    );
     assert_eq!(results.hits[0].doc_id, 0);
 
     // Test 4: Multiple MUST clauses
@@ -79,8 +88,11 @@ fn test_boolean_query_must_not() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("category", "programming")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
-    assert_eq!(results.total_hits, 1, "Should find only doc matching both conditions");
+
+    assert_eq!(
+        results.total_hits, 1,
+        "Should find only doc matching both conditions"
+    );
     assert_eq!(results.hits[0].doc_id, 0);
 
     engine.close()?;
@@ -140,8 +152,11 @@ fn test_boolean_query_complex() -> Result<()> {
 
     let request = SearchRequest::new(Box::new(main_query)).load_documents(true);
     let results = engine.search_mut(request)?;
-    
-    assert_eq!(results.total_hits, 2, "Should find rust tutorial and rust library (not js)");
+
+    assert_eq!(
+        results.total_hits, 2,
+        "Should find rust tutorial and rust library (not js)"
+    );
     let doc_ids: Vec<u64> = results.hits.iter().map(|h| h.doc_id).collect();
     assert!(doc_ids.contains(&0)); // rust tutorial
     assert!(doc_ids.contains(&1)); // rust library (not js)

@@ -1,6 +1,6 @@
 //! Schema management for document structure definition.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::query::geo::GeoPoint;
 use crate::schema::field::{FieldDefinition, FieldType};
 use serde::{Deserialize, Serialize};

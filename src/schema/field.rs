@@ -766,31 +766,37 @@ impl GeoField {
     /// Supports formats like "lat,lon" or "lat lon"
     pub fn parse_geo_point(&self, input: &str) -> Result<GeoPoint, String> {
         let input = input.trim();
-        
+
         // Try comma-separated format first
         if let Some((lat_str, lon_str)) = input.split_once(',') {
-            let lat = lat_str.trim().parse::<f64>()
+            let lat = lat_str
+                .trim()
+                .parse::<f64>()
                 .map_err(|_| format!("Invalid latitude: '{}'", lat_str.trim()))?;
-            let lon = lon_str.trim().parse::<f64>()
+            let lon = lon_str
+                .trim()
+                .parse::<f64>()
                 .map_err(|_| format!("Invalid longitude: '{}'", lon_str.trim()))?;
-            
-            return GeoPoint::new(lat, lon)
-                .map_err(|e| format!("Invalid coordinates: {e}"));
+
+            return GeoPoint::new(lat, lon).map_err(|e| format!("Invalid coordinates: {e}"));
         }
-        
+
         // Try space-separated format
         let parts: Vec<&str> = input.split_whitespace().collect();
         if parts.len() == 2 {
-            let lat = parts[0].parse::<f64>()
+            let lat = parts[0]
+                .parse::<f64>()
                 .map_err(|_| format!("Invalid latitude: '{}'", parts[0]))?;
-            let lon = parts[1].parse::<f64>()
+            let lon = parts[1]
+                .parse::<f64>()
                 .map_err(|_| format!("Invalid longitude: '{}'", parts[1]))?;
-            
-            return GeoPoint::new(lat, lon)
-                .map_err(|e| format!("Invalid coordinates: {e}"));
+
+            return GeoPoint::new(lat, lon).map_err(|e| format!("Invalid coordinates: {e}"));
         }
-        
-        Err(format!("Invalid coordinate format: '{input}'. Expected 'lat,lon' or 'lat lon'"))
+
+        Err(format!(
+            "Invalid coordinate format: '{input}'. Expected 'lat,lon' or 'lat lon'"
+        ))
     }
 }
 

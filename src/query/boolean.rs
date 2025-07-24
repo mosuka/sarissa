@@ -2,7 +2,10 @@
 
 use crate::error::Result;
 use crate::index::reader::IndexReader;
-use crate::query::matcher::{AllMatcher, DisjunctionMatcher, EmptyMatcher, Matcher, ConjunctionMatcher, ConjunctionNotMatcher, NotMatcher};
+use crate::query::matcher::{
+    AllMatcher, ConjunctionMatcher, ConjunctionNotMatcher, DisjunctionMatcher, EmptyMatcher,
+    Matcher, NotMatcher,
+};
 use crate::query::query::Query;
 use crate::query::scorer::{BM25Scorer, Scorer};
 
@@ -209,12 +212,19 @@ impl Query for BooleanQuery {
                             )))
                         } else {
                             // Multiple MUST_NOT clauses - combine them with DisjunctionMatcher
-                            let combined_negatives = Box::new(DisjunctionMatcher::new(negative_matchers));
-                            Ok(Box::new(NotMatcher::new(combined_negatives, reader.max_doc())))
+                            let combined_negatives =
+                                Box::new(DisjunctionMatcher::new(negative_matchers));
+                            Ok(Box::new(NotMatcher::new(
+                                combined_negatives,
+                                reader.max_doc(),
+                            )))
                         }
                     } else {
                         // Both MUST and MUST_NOT clauses - use ConjunctionNotMatcher
-                        Ok(Box::new(ConjunctionNotMatcher::new(positive_matcher, negative_matchers)))
+                        Ok(Box::new(ConjunctionNotMatcher::new(
+                            positive_matcher,
+                            negative_matchers,
+                        )))
                     }
                 } else {
                     // All negative matchers are exhausted, just return positive matcher
@@ -233,7 +243,7 @@ impl Query for BooleanQuery {
                     matchers.push(matcher);
                 }
             }
-            
+
             if matchers.is_empty() {
                 Ok(Box::new(EmptyMatcher::new()))
             } else if matchers.len() == 1 {

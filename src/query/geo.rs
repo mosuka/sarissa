@@ -814,37 +814,44 @@ pub enum GeoQuery {
 
 impl GeoQuery {
     /// Create a distance-based geo query (search within radius).
-    /// 
+    ///
     /// # Arguments
     /// * `field` - The field containing geographical coordinates
     /// * `lat` - Center latitude in degrees (-90 to 90)
     /// * `lon` - Center longitude in degrees (-180 to 180)
     /// * `radius_km` - Search radius in kilometers
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// use sarissa::query::geo::GeoQuery;
-    /// 
+    ///
     /// let query = GeoQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
     /// ```
-    pub fn within_radius<F: Into<String>>(field: F, lat: f64, lon: f64, radius_km: f64) -> Result<Self> {
+    pub fn within_radius<F: Into<String>>(
+        field: F,
+        lat: f64,
+        lon: f64,
+        radius_km: f64,
+    ) -> Result<Self> {
         let center = GeoPoint::new(lat, lon)?;
-        Ok(GeoQuery::Distance(GeoDistanceQuery::new(field, center, radius_km)))
+        Ok(GeoQuery::Distance(GeoDistanceQuery::new(
+            field, center, radius_km,
+        )))
     }
 
     /// Create a bounding box geo query (search within rectangular area).
-    /// 
+    ///
     /// # Arguments
     /// * `field` - The field containing geographical coordinates
     /// * `min_lat` - Minimum latitude (bottom edge)
     /// * `min_lon` - Minimum longitude (left edge)
     /// * `max_lat` - Maximum latitude (top edge)
     /// * `max_lon` - Maximum longitude (right edge)
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// use sarissa::query::geo::GeoQuery;
-    /// 
+    ///
     /// let query = GeoQuery::within_bounding_box("location", 40.0, -75.0, 41.0, -74.0).unwrap();
     /// ```
     pub fn within_bounding_box<F: Into<String>>(

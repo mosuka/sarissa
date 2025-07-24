@@ -7,7 +7,7 @@ use tempfile::TempDir;
 
 fn main() -> sarissa::error::Result<()> {
     let temp_dir = TempDir::new().unwrap();
-    
+
     let mut schema = Schema::new();
     schema.add_field("body", Box::new(TextField::new().indexed(true)))?;
     schema.add_field("id", Box::new(IdField::new()))?;
@@ -29,7 +29,7 @@ fn main() -> sarissa::error::Result<()> {
 
     // Test individual term queries
     println!("=== Individual Term Queries ===");
-    
+
     println!("Searching for 'python' in body:");
     let query = TermQuery::new("body", "python");
     let request = SearchRequest::new(Box::new(query));

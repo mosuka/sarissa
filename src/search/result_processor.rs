@@ -543,10 +543,7 @@ impl ResultProcessor {
                 .unwrap_or(&"[no value]".to_string())
                 .clone();
 
-            groups
-                .entry(group_key)
-                .or_default()
-                .push(hit.clone());
+            groups.entry(group_key).or_default().push(hit.clone());
         }
 
         let result_groups = groups

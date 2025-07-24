@@ -3,13 +3,13 @@
 //! This module provides the core functionality for merging multiple segments
 //! into a single optimized segment with proper handling of deletions and updates.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::index::{
+    InvertedIndex, SegmentInfo, TermInfo,
     advanced_reader::AdvancedIndexReader,
     dictionary::TermDictionaryBuilder,
     reader::IndexReader,
     segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy},
-    InvertedIndex, SegmentInfo, TermInfo,
 };
 use crate::schema::{Document, Schema};
 use crate::storage::{Storage, StructWriter};
@@ -398,7 +398,9 @@ impl MergeEngine {
             // Add document to index
             // Convert document to the expected format for add_document
             let document_terms: Vec<(String, u32, Option<Vec<u32>>)> = document
-                .fields().keys().map(|field_name| {
+                .fields()
+                .keys()
+                .map(|field_name| {
                     (field_name.clone(), 1, None) // Simple frequency, no positions for now
                 })
                 .collect();
@@ -472,7 +474,9 @@ impl MergeEngine {
                         crate::schema::FieldValue::Boolean(b) => b.to_string(),
                         crate::schema::FieldValue::Binary(_) => "[binary]".to_string(),
                         crate::schema::FieldValue::DateTime(dt) => dt.to_rfc3339(),
-                        crate::schema::FieldValue::Geo(point) => format!("{},{}", point.lat, point.lon),
+                        crate::schema::FieldValue::Geo(point) => {
+                            format!("{},{}", point.lat, point.lon)
+                        }
                         crate::schema::FieldValue::Null => "null".to_string(),
                     };
                     writer.write_string(&field_str)?;
@@ -513,8 +517,8 @@ impl MergeEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::segment_manager::ManagedSegmentInfo;
     use crate::index::SegmentInfo;
+    use crate::index::segment_manager::ManagedSegmentInfo;
     use crate::schema::{Schema, TextField};
     use crate::storage::{MemoryStorage, StorageConfig};
 

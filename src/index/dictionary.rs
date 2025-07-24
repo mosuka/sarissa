@@ -3,7 +3,7 @@
 //! This module provides a high-performance term dictionary implementation
 //! based on sorted arrays and hash tables for different use cases.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::{StorageInput, StorageOutput, StructReader, StructWriter};
 use ahash::AHashMap;
 use std::collections::BTreeMap;

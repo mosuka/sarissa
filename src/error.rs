@@ -128,17 +128,17 @@ impl SarissaError {
     pub fn invalid_argument<S: Into<String>>(msg: S) -> Self {
         SarissaError::Other(format!("Invalid argument: {}", msg.into()))
     }
-    
+
     /// Create a new internal error.
     pub fn internal<S: Into<String>>(msg: S) -> Self {
         SarissaError::Other(format!("Internal error: {}", msg.into()))
     }
-    
+
     /// Create a new not found error.
     pub fn not_found<S: Into<String>>(msg: S) -> Self {
         SarissaError::Other(format!("Not found: {}", msg.into()))
     }
-    
+
     /// Create a new cancelled error.
     pub fn cancelled<S: Into<String>>(msg: S) -> Self {
         SarissaError::OperationCancelled(msg.into())

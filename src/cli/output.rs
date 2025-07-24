@@ -1,6 +1,6 @@
 //! Output formatting for CLI commands.
 
-use crate::cli::args::{SarissaArgs, OutputFormat};
+use crate::cli::args::{OutputFormat, SarissaArgs};
 use crate::error::Result;
 use crate::query::Hit;
 use serde::{Deserialize, Serialize};
@@ -469,10 +469,7 @@ fn format_value(value: &serde_json::Value) -> String {
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Array(arr) => {
-            let formatted_values = arr.iter()
-                .map(format_value)
-                .collect::<Vec<_>>()
-                .join(", ");
+            let formatted_values = arr.iter().map(format_value).collect::<Vec<_>>().join(", ");
             format!("[{formatted_values}]")
         }
         serde_json::Value::Object(_) => "[object]".to_string(),
@@ -494,10 +491,7 @@ fn format_csv_value(value: &serde_json::Value) -> String {
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Array(arr) => {
-            let formatted_values = arr.iter()
-                .map(format_value)
-                .collect::<Vec<_>>()
-                .join("; ");
+            let formatted_values = arr.iter().map(format_value).collect::<Vec<_>>().join("; ");
             format!("\"[{formatted_values}]\"")
         }
         serde_json::Value::Object(_) => "\"[object]\"".to_string(),

@@ -4,9 +4,9 @@
 //! inverted indexes with term dictionaries and posting lists.
 
 use crate::analysis::{Analyzer, Token};
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::index::dictionary::TermInfo;
-use crate::index::{dictionary::TermDictionaryBuilder, InvertedIndex, Posting};
+use crate::index::{InvertedIndex, Posting, dictionary::TermDictionaryBuilder};
 use crate::schema::{Document, FieldValue, Schema};
 use crate::storage::{Storage, StructWriter};
 use ahash::AHashMap;

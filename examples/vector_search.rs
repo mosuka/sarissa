@@ -4,10 +4,8 @@ use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::schema::{IdField, TextField};
 use sarissa::search::SearchEngine;
-use sarissa::vector::{
-    DistanceMetric, Vector, VectorSearchConfig,
-};
 use sarissa::vector::index::{VectorIndexConfig, VectorIndexFactory, VectorIndexType};
+use sarissa::vector::{DistanceMetric, Vector, VectorSearchConfig};
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -43,9 +41,11 @@ fn main() -> Result<()> {
 
     // Create vector index
     let mut vector_index = VectorIndexFactory::create(vector_config)?;
-    println!("Created {} index with {} dimensions", 
-             vector_index.distance_metric().name(), 
-             vector_index.dimension());
+    println!(
+        "Created {} index with {} dimensions",
+        vector_index.distance_metric().name(),
+        vector_index.dimension()
+    );
 
     // Add sample documents with corresponding vectors
     println!("\n=== Adding Documents and Vectors ===\n");
@@ -54,7 +54,10 @@ fn main() -> Result<()> {
         (
             Document::builder()
                 .add_text("title", "Machine Learning Fundamentals")
-                .add_text("content", "Introduction to algorithms, neural networks, and data science concepts")
+                .add_text(
+                    "content",
+                    "Introduction to algorithms, neural networks, and data science concepts",
+                )
                 .add_text("category", "technology")
                 .add_text("id", "doc001")
                 .build(),
@@ -63,7 +66,10 @@ fn main() -> Result<()> {
         (
             Document::builder()
                 .add_text("title", "Deep Learning with Python")
-                .add_text("content", "Advanced neural network architectures and machine learning frameworks")
+                .add_text(
+                    "content",
+                    "Advanced neural network architectures and machine learning frameworks",
+                )
                 .add_text("category", "technology")
                 .add_text("id", "doc002")
                 .build(),
@@ -72,7 +78,10 @@ fn main() -> Result<()> {
         (
             Document::builder()
                 .add_text("title", "Cooking Italian Pasta")
-                .add_text("content", "Traditional recipes and techniques for making authentic Italian pasta dishes")
+                .add_text(
+                    "content",
+                    "Traditional recipes and techniques for making authentic Italian pasta dishes",
+                )
                 .add_text("category", "cooking")
                 .add_text("id", "doc003")
                 .build(),
@@ -81,7 +90,10 @@ fn main() -> Result<()> {
         (
             Document::builder()
                 .add_text("title", "French Cuisine Masterclass")
-                .add_text("content", "Classic French cooking techniques and gourmet recipe collection")
+                .add_text(
+                    "content",
+                    "Classic French cooking techniques and gourmet recipe collection",
+                )
                 .add_text("category", "cooking")
                 .add_text("id", "doc004")
                 .build(),
@@ -90,7 +102,10 @@ fn main() -> Result<()> {
         (
             Document::builder()
                 .add_text("title", "Digital Photography Basics")
-                .add_text("content", "Camera settings, composition techniques, and photo editing fundamentals")
+                .add_text(
+                    "content",
+                    "Camera settings, composition techniques, and photo editing fundamentals",
+                )
                 .add_text("category", "photography")
                 .add_text("id", "doc005")
                 .build(),
@@ -99,7 +114,10 @@ fn main() -> Result<()> {
         (
             Document::builder()
                 .add_text("title", "Portrait Photography Guide")
-                .add_text("content", "Professional techniques for capturing stunning portrait photographs")
+                .add_text(
+                    "content",
+                    "Professional techniques for capturing stunning portrait photographs",
+                )
                 .add_text("category", "photography")
                 .add_text("id", "doc006")
                 .build(),
@@ -108,7 +126,10 @@ fn main() -> Result<()> {
         (
             Document::builder()
                 .add_text("title", "Travel Planning Essentials")
-                .add_text("content", "Tips for booking flights, accommodations, and creating travel itineraries")
+                .add_text(
+                    "content",
+                    "Tips for booking flights, accommodations, and creating travel itineraries",
+                )
                 .add_text("category", "travel")
                 .add_text("id", "doc007")
                 .build(),
@@ -117,7 +138,10 @@ fn main() -> Result<()> {
         (
             Document::builder()
                 .add_text("title", "Budget Travel Hacks")
-                .add_text("content", "Money-saving strategies for affordable travel and backpacking")
+                .add_text(
+                    "content",
+                    "Money-saving strategies for affordable travel and backpacking",
+                )
                 .add_text("category", "travel")
                 .add_text("id", "doc008")
                 .build(),
@@ -126,7 +150,10 @@ fn main() -> Result<()> {
     ];
 
     // Add documents to text search engine
-    let documents: Vec<Document> = documents_with_vectors.iter().map(|(doc, _)| doc.clone()).collect();
+    let documents: Vec<Document> = documents_with_vectors
+        .iter()
+        .map(|(doc, _)| doc.clone())
+        .collect();
     engine.add_documents(documents)?;
 
     // Add vectors to vector index
@@ -136,7 +163,10 @@ fn main() -> Result<()> {
         println!("Added vector for document {}: {:?}", doc_id, vector.data);
     }
 
-    println!("\nAdded {} documents and vectors to indices", documents_with_vectors.len());
+    println!(
+        "\nAdded {} documents and vectors to indices",
+        documents_with_vectors.len()
+    );
 
     // Display vector index statistics
     let stats = vector_index.stats();
@@ -164,14 +194,23 @@ fn main() -> Result<()> {
         include_metadata: false,
         parallel: false,
     };
-    
+
     let results = vector_index.search(&tech_query, &search_config)?;
     println!("   Query vector: {:?}", tech_query.data);
-    println!("   Found {} results in {}ms", results.len(), results.query_time_ms);
-    
+    println!(
+        "   Found {} results in {}ms",
+        results.len(),
+        results.query_time_ms
+    );
+
     for (i, result) in results.results.iter().enumerate() {
-        println!("   {}. Doc ID: {}, Similarity: {:.4}, Distance: {:.4}", 
-                 i + 1, result.doc_id, result.similarity, result.distance);
+        println!(
+            "   {}. Doc ID: {}, Similarity: {:.4}, Distance: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.similarity,
+            result.distance
+        );
         if let Some(vector) = &result.vector {
             println!("      Vector: {:?}", vector.data);
         }
@@ -182,11 +221,20 @@ fn main() -> Result<()> {
     let cooking_query = Vector::new(vec![0.0, 1.0, 0.0, 0.0]); // Pure cooking vector
     let results = vector_index.search(&cooking_query, &search_config)?;
     println!("   Query vector: {:?}", cooking_query.data);
-    println!("   Found {} results in {}ms", results.len(), results.query_time_ms);
-    
+    println!(
+        "   Found {} results in {}ms",
+        results.len(),
+        results.query_time_ms
+    );
+
     for (i, result) in results.results.iter().enumerate() {
-        println!("   {}. Doc ID: {}, Similarity: {:.4}, Distance: {:.4}", 
-                 i + 1, result.doc_id, result.similarity, result.distance);
+        println!(
+            "   {}. Doc ID: {}, Similarity: {:.4}, Distance: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.similarity,
+            result.distance
+        );
     }
 
     // Example 3: Search for photography-related content
@@ -194,11 +242,20 @@ fn main() -> Result<()> {
     let photo_query = Vector::new(vec![0.0, 0.0, 1.0, 0.0]); // Pure photography vector
     let results = vector_index.search(&photo_query, &search_config)?;
     println!("   Query vector: {:?}", photo_query.data);
-    println!("   Found {} results in {}ms", results.len(), results.query_time_ms);
-    
+    println!(
+        "   Found {} results in {}ms",
+        results.len(),
+        results.query_time_ms
+    );
+
     for (i, result) in results.results.iter().enumerate() {
-        println!("   {}. Doc ID: {}, Similarity: {:.4}, Distance: {:.4}", 
-                 i + 1, result.doc_id, result.similarity, result.distance);
+        println!(
+            "   {}. Doc ID: {}, Similarity: {:.4}, Distance: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.similarity,
+            result.distance
+        );
     }
 
     // Example 4: Search with mixed interests
@@ -206,11 +263,20 @@ fn main() -> Result<()> {
     let mixed_query = Vector::new(vec![0.7, 0.3, 0.0, 0.0]); // 70% tech, 30% cooking
     let results = vector_index.search(&mixed_query, &search_config)?;
     println!("   Query vector: {:?}", mixed_query.data);
-    println!("   Found {} results in {}ms", results.len(), results.query_time_ms);
-    
+    println!(
+        "   Found {} results in {}ms",
+        results.len(),
+        results.query_time_ms
+    );
+
     for (i, result) in results.results.iter().enumerate() {
-        println!("   {}. Doc ID: {}, Similarity: {:.4}, Distance: {:.4}", 
-                 i + 1, result.doc_id, result.similarity, result.distance);
+        println!(
+            "   {}. Doc ID: {}, Similarity: {:.4}, Distance: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.similarity,
+            result.distance
+        );
     }
 
     println!("\n=== Distance Metrics Comparison ===\n");
@@ -235,8 +301,12 @@ fn main() -> Result<()> {
     for metric in metrics {
         let distance = metric.distance(&query_vector.data, &target_vector.data)?;
         let similarity = metric.similarity(&query_vector.data, &target_vector.data)?;
-        println!("{:12}: Distance = {:.4}, Similarity = {:.4}", 
-                 metric.name(), distance, similarity);
+        println!(
+            "{:12}: Distance = {:.4}, Similarity = {:.4}",
+            metric.name(),
+            distance,
+            similarity
+        );
     }
 
     println!("\n=== Advanced Search Configuration ===\n");
@@ -248,18 +318,25 @@ fn main() -> Result<()> {
         top_k: 10,
         ..search_config
     };
-    
+
     let tech_results = vector_index.search(&tech_query, &high_threshold_config)?;
-    println!("   Found {} results with similarity >= 0.8", tech_results.len());
-    
+    println!(
+        "   Found {} results with similarity >= 0.8",
+        tech_results.len()
+    );
+
     for (i, result) in tech_results.results.iter().enumerate() {
-        println!("   {}. Doc ID: {}, Similarity: {:.4}", 
-                 i + 1, result.doc_id, result.similarity);
+        println!(
+            "   {}. Doc ID: {}, Similarity: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.similarity
+        );
     }
 
     // Example 6: Search with different distance metrics
     println!("\n6. Comparing search results with different distance metrics:");
-    
+
     let euclidean_config = VectorSearchConfig {
         distance_metric: DistanceMetric::Euclidean,
         top_k: 3,
@@ -280,7 +357,7 @@ fn main() -> Result<()> {
     };
 
     let mut euclidean_index = VectorIndexFactory::create(euclidean_index_config)?;
-    
+
     // Add same vectors to euclidean index
     for (i, (_, vector)) in documents_with_vectors.iter().enumerate() {
         let doc_id = (i + 1) as u64;
@@ -292,25 +369,33 @@ fn main() -> Result<()> {
 
     println!("   Cosine similarity results:");
     for (i, result) in cosine_results.results.iter().take(3).enumerate() {
-        println!("     {}. Doc ID: {}, Similarity: {:.4}", 
-                 i + 1, result.doc_id, result.similarity);
+        println!(
+            "     {}. Doc ID: {}, Similarity: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.similarity
+        );
     }
 
     println!("   Euclidean distance results:");
     for (i, result) in euclidean_results.results.iter().take(3).enumerate() {
-        println!("     {}. Doc ID: {}, Similarity: {:.4}", 
-                 i + 1, result.doc_id, result.similarity);
+        println!(
+            "     {}. Doc ID: {}, Similarity: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.similarity
+        );
     }
 
     println!("\n=== Vector Operations Demo ===\n");
 
     // Example 7: Vector operations and analysis
     println!("7. Vector operations and analysis:");
-    
+
     let mut demo_vector = Vector::new(vec![3.0, 4.0, 0.0, 0.0]);
     println!("   Original vector: {:?}", demo_vector.data);
     println!("   Vector norm: {:.4}", demo_vector.norm());
-    
+
     demo_vector.normalize();
     println!("   Normalized vector: {:?}", demo_vector.data);
     println!("   Normalized norm: {:.4}", demo_vector.norm());
@@ -323,21 +408,25 @@ fn main() -> Result<()> {
     // Vector validation
     let valid_vector = Vector::new(vec![1.0, 2.0, 3.0, 4.0]);
     let invalid_vector = Vector::new(vec![1.0, f32::NAN, 3.0, 4.0]);
-    
+
     println!("   Valid vector check: {}", valid_vector.is_valid());
     println!("   Invalid vector check: {}", invalid_vector.is_valid());
 
     // Dimension validation
-    println!("   Dimension validation (4D): {}", 
-             valid_vector.validate_dimension(4).is_ok());
-    println!("   Dimension validation (3D): {}", 
-             valid_vector.validate_dimension(3).is_ok());
+    println!(
+        "   Dimension validation (4D): {}",
+        valid_vector.validate_dimension(4).is_ok()
+    );
+    println!(
+        "   Dimension validation (3D): {}",
+        valid_vector.validate_dimension(3).is_ok()
+    );
 
     println!("\n=== Batch Operations Demo ===\n");
 
     // Example 8: Batch vector operations
     println!("8. Batch vector operations:");
-    
+
     let query_batch = vec![1.0, 0.0, 0.0, 0.0];
     let v1 = vec![0.9, 0.1, 0.0, 0.0];
     let v2 = vec![0.0, 1.0, 0.0, 0.0];
@@ -345,10 +434,10 @@ fn main() -> Result<()> {
     let v4 = vec![0.5, 0.5, 0.0, 0.0];
     let vector_batch = vec![v1.as_slice(), v2.as_slice(), v3.as_slice(), v4.as_slice()];
 
-    let batch_distances = DistanceMetric::Cosine
-        .batch_distance_parallel(&query_batch, &vector_batch)?;
-    let batch_similarities = DistanceMetric::Cosine
-        .batch_similarity_parallel(&query_batch, &vector_batch)?;
+    let batch_distances =
+        DistanceMetric::Cosine.batch_distance_parallel(&query_batch, &vector_batch)?;
+    let batch_similarities =
+        DistanceMetric::Cosine.batch_similarity_parallel(&query_batch, &vector_batch)?;
 
     println!("   Query vector: {:?}", query_batch);
     println!("   Batch distances: {:?}", batch_distances);
@@ -377,7 +466,7 @@ fn main() -> Result<()> {
 
     // Example 9: Performance measurement
     println!("9. Performance measurement:");
-    
+
     let start_time = std::time::Instant::now();
     let performance_query = Vector::new(vec![0.25, 0.25, 0.25, 0.25]);
     let results = vector_index.search(&performance_query, &search_config)?;

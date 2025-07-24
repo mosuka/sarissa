@@ -7,13 +7,13 @@ pub mod column;
 pub mod file;
 pub mod memory;
 pub mod mmap;
-pub mod traits;
 pub mod structured;
+pub mod traits;
 
 // Re-export commonly used types
 pub use column::*;
 pub use file::*;
 pub use memory::*;
 pub use mmap::*;
-pub use traits::*;
 pub use structured::*;
+pub use traits::*;

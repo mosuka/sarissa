@@ -26,7 +26,7 @@ pub mod writer;
 pub use advanced_reader::AdvancedIndexReader;
 pub use advanced_writer::AdvancedIndexWriter;
 pub use background_tasks::BackgroundTask;
-pub use bkd_tree::{SimpleBKDTree, BKDTreeStats};
+pub use bkd_tree::{BKDTreeStats, SimpleBKDTree};
 pub use deletion::DeletionManager;
 pub use dictionary::{HashTermDictionary, TermInfo};
 pub use index::{Index, IndexStats, SegmentInfo};

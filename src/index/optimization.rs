@@ -3,7 +3,7 @@
 //! This module provides advanced optimization strategies for index structure,
 //! segment organization, and query performance improvements.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::index::{
     deletion::DeletionManager,
     merge_engine::{MergeConfig, MergeEngine, MergeResult},
@@ -534,8 +534,6 @@ pub enum RecommendationPriority {
     /// High priority - optimization strongly recommended.
     High,
 }
-
-
 
 #[cfg(test)]
 mod tests {

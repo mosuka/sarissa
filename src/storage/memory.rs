@@ -552,9 +552,7 @@ mod tests {
         // Create multiple files
         for i in 0..5 {
             let mut output = storage.create_output(&format!("file_{i}.txt")).unwrap();
-            output
-                .write_all(format!("Content {i}").as_bytes())
-                .unwrap();
+            output.write_all(format!("Content {i}").as_bytes()).unwrap();
             output.close().unwrap();
         }
 

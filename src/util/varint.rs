@@ -3,7 +3,7 @@
 //! This module provides efficient variable-length integer encoding and decoding,
 //! similar to what's used in protocol buffers and other binary formats.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use byteorder::ReadBytesExt;
 use std::io::{Read, Write};
 

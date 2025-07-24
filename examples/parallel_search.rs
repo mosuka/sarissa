@@ -12,7 +12,7 @@ fn main() -> Result<()> {
 
     println!("This is a simplified example of parallel search functionality.");
     println!("For a complete implementation, refer to the parallel search module documentation.");
-    
+
     println!("\n=== Parallel Search Key Features ===");
     println!("• Search across multiple indices concurrently");
     println!("• Merge results using different strategies");

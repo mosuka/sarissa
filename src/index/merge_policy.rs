@@ -399,8 +399,8 @@ impl MergePolicy for NoMergePolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::segment_manager::ManagedSegmentInfo;
     use crate::index::SegmentInfo;
+    use crate::index::segment_manager::ManagedSegmentInfo;
 
     #[allow(dead_code)]
     fn create_test_segment(

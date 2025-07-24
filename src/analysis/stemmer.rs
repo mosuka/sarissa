@@ -267,8 +267,7 @@ impl PorterStemmer {
                 let stem = &word[..word.len() - suffix.len()];
                 if self.measure(stem) > 1 {
                     // Special case for ion
-                    if *suffix != "ion" || self.ends_with(stem, "s") || self.ends_with(stem, "t")
-                    {
+                    if *suffix != "ion" || self.ends_with(stem, "s") || self.ends_with(stem, "t") {
                         return stem.to_string();
                     }
                 }
