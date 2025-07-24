@@ -99,8 +99,13 @@ impl BM25Scorer {
         let n = self.total_docs as f32;
         let df = self.doc_freq as f32;
 
-        // IDF = log((N - df + 0.5) / (df + 0.5))
-        ((n - df + 0.5) / (df + 0.5)).ln()
+        // Modified IDF calculation to ensure minimum score
+        // IDF = log((N - df + 0.5) / (df + 0.5)) + epsilon
+        let base_idf = ((n - df + 0.5) / (df + 0.5)).ln();
+
+        // Add a small epsilon to prevent zero IDF, making all terms have some relevance
+        let epsilon = 0.1;
+        (base_idf + epsilon).max(epsilon)
     }
 
     /// Calculate the TF (Term Frequency) component.

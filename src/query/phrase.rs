@@ -90,9 +90,20 @@ impl Query for PhraseQuery {
         bool_query.matcher(reader)
     }
 
-    fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
-        // Create a BM25 scorer for phrase queries
-        Ok(Box::new(BM25Scorer::new(1, 1, 1, 1.0, 1, self.boost)))
+    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+        // Phrase queries are more selective than individual term queries
+        let total_docs = reader.doc_count();
+        let estimated_doc_freq = total_docs / 20; // Estimate: 5% of docs might match a phrase
+        let estimated_term_freq = estimated_doc_freq; // Usually one occurrence per matching doc
+
+        Ok(Box::new(BM25Scorer::new(
+            estimated_doc_freq.max(1),
+            estimated_term_freq.max(1),
+            total_docs,
+            10.0, // Estimated average field length
+            total_docs,
+            self.boost,
+        )))
     }
 
     fn boost(&self) -> f32 {

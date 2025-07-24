@@ -140,8 +140,20 @@ impl Query for RangeQuery {
         Ok(Box::new(EmptyMatcher::new()))
     }
 
-    fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
-        Ok(Box::new(BM25Scorer::new(1, 1, 1, 1.0, 1, self.boost)))
+    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+        // Range queries typically match fewer documents than term queries
+        let total_docs = reader.doc_count();
+        let estimated_doc_freq = total_docs / 10; // Estimate: 10% of docs might match a range
+        let estimated_term_freq = estimated_doc_freq * 2; // Average 2 occurrences per doc
+
+        Ok(Box::new(BM25Scorer::new(
+            estimated_doc_freq.max(1),
+            estimated_term_freq.max(1),
+            total_docs,
+            10.0, // Estimated average field length
+            total_docs,
+            self.boost,
+        )))
     }
 
     fn boost(&self) -> f32 {
@@ -455,8 +467,20 @@ impl Query for NumericRangeQuery {
         Ok(Box::new(AllMatcher::new(reader.max_doc())))
     }
 
-    fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
-        Ok(Box::new(BM25Scorer::new(1, 1, 1, 1.0, 1, self.boost)))
+    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+        // Range queries typically match fewer documents than term queries
+        let total_docs = reader.doc_count();
+        let estimated_doc_freq = total_docs / 10; // Estimate: 10% of docs might match a range
+        let estimated_term_freq = estimated_doc_freq * 2; // Average 2 occurrences per doc
+
+        Ok(Box::new(BM25Scorer::new(
+            estimated_doc_freq.max(1),
+            estimated_term_freq.max(1),
+            total_docs,
+            10.0, // Estimated average field length
+            total_docs,
+            self.boost,
+        )))
     }
 
     fn boost(&self) -> f32 {
@@ -813,8 +837,20 @@ impl Query for DateTimeRangeQuery {
         )))
     }
 
-    fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
-        Ok(Box::new(BM25Scorer::new(1, 1, 1, 1.0, 1, self.boost)))
+    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+        // Range queries typically match fewer documents than term queries
+        let total_docs = reader.doc_count();
+        let estimated_doc_freq = total_docs / 10; // Estimate: 10% of docs might match a range
+        let estimated_term_freq = estimated_doc_freq * 2; // Average 2 occurrences per doc
+
+        Ok(Box::new(BM25Scorer::new(
+            estimated_doc_freq.max(1),
+            estimated_term_freq.max(1),
+            total_docs,
+            10.0, // Estimated average field length
+            total_docs,
+            self.boost,
+        )))
     }
 
     fn boost(&self) -> f32 {

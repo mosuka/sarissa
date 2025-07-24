@@ -332,10 +332,41 @@ impl IndexReader for BasicIndexReader {
     fn field_stats(&self, field: &str) -> Result<Option<FieldStats>> {
         self.check_closed()?;
 
-        // TODO: Implement field statistics calculation
-        // For now, return None
-        let _field = field;
-        Ok(None)
+        let mut doc_count = 0u64;
+        let mut total_length = 0u64;
+        let mut term_count = 0u64;
+        let mut min_length = u64::MAX;
+        let mut max_length = 0u64;
+
+        for doc in &self.document_cache {
+            if let Some(field_value) = doc.get_field(field) {
+                if let Some(text) = field_value.as_text() {
+                    doc_count += 1;
+                    // Simple tokenization by whitespace
+                    let tokens: Vec<&str> = text.split_whitespace().collect();
+                    let field_length = tokens.len() as u64;
+                    total_length += field_length;
+                    term_count += field_length;
+                    min_length = min_length.min(field_length);
+                    max_length = max_length.max(field_length);
+                }
+            }
+        }
+
+        if doc_count > 0 {
+            let avg_length = total_length as f64 / doc_count as f64;
+            Ok(Some(FieldStats {
+                field: field.to_string(),
+                doc_count,
+                unique_terms: term_count / doc_count.max(1), // Rough estimate
+                total_terms: term_count,
+                avg_length,
+                min_length,
+                max_length,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     fn close(&mut self) -> Result<()> {
