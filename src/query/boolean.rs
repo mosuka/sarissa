@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::index::reader::IndexReader;
-use crate::query::matcher::{AllMatcher, DisjunctionMatcher, EmptyMatcher, Matcher};
+use crate::query::matcher::{AllMatcher, DisjunctionMatcher, EmptyMatcher, Matcher, ConjunctionMatcher, ConjunctionNotMatcher, NotMatcher};
 use crate::query::query::Query;
 use crate::query::scorer::{BM25Scorer, Scorer};
 
@@ -164,16 +164,70 @@ impl Query for BooleanQuery {
         let should_clauses = self.clauses_by_occur(Occur::Should);
         let must_not_clauses = self.clauses_by_occur(Occur::MustNot);
 
-        // For now, create a simple matcher based on the query structure
-        if !must_clauses.is_empty() {
-            // If we have MUST clauses, create a matcher for the first one
-            // TODO: Implement proper conjunction matcher
-            let first_must = &must_clauses[0];
-            first_must.query.matcher(reader)
+        // Handle MUST and MUST_NOT clauses
+        if !must_clauses.is_empty() || !must_not_clauses.is_empty() {
+            // Create positive matcher from MUST clauses
+            let positive_matcher = if !must_clauses.is_empty() {
+                if must_clauses.len() == 1 {
+                    // Single MUST clause
+                    must_clauses[0].query.matcher(reader)?
+                } else {
+                    // Multiple MUST clauses - use ConjunctionMatcher
+                    let mut matchers = Vec::new();
+                    for clause in &must_clauses {
+                        let matcher = clause.query.matcher(reader)?;
+                        if matcher.is_exhausted() {
+                            return Ok(Box::new(EmptyMatcher::new()));
+                        }
+                        matchers.push(matcher);
+                    }
+                    Box::new(ConjunctionMatcher::new(matchers))
+                }
+            } else {
+                // No MUST clauses, but we have MUST_NOT clauses
+                // Match all documents and exclude the ones matching MUST_NOT
+                Box::new(AllMatcher::new(reader.max_doc()))
+            };
+
+            // Handle MUST_NOT clauses
+            if !must_not_clauses.is_empty() {
+                let mut negative_matchers = Vec::new();
+                for clause in &must_not_clauses {
+                    let matcher = clause.query.matcher(reader)?;
+                    if !matcher.is_exhausted() {
+                        negative_matchers.push(matcher);
+                    }
+                }
+
+                if !negative_matchers.is_empty() {
+                    if must_clauses.is_empty() {
+                        // Only MUST_NOT clauses - use NotMatcher
+                        if negative_matchers.len() == 1 {
+                            Ok(Box::new(NotMatcher::new(
+                                negative_matchers.into_iter().next().unwrap(),
+                                reader.max_doc(),
+                            )))
+                        } else {
+                            // Multiple MUST_NOT clauses - combine them with DisjunctionMatcher
+                            let combined_negatives = Box::new(DisjunctionMatcher::new(negative_matchers));
+                            Ok(Box::new(NotMatcher::new(combined_negatives, reader.max_doc())))
+                        }
+                    } else {
+                        // Both MUST and MUST_NOT clauses - use ConjunctionNotMatcher
+                        Ok(Box::new(ConjunctionNotMatcher::new(positive_matcher, negative_matchers)))
+                    }
+                } else {
+                    // All negative matchers are exhausted, just return positive matcher
+                    Ok(positive_matcher)
+                }
+            } else {
+                // No MUST_NOT clauses, just return positive matcher
+                Ok(positive_matcher)
+            }
         } else if !should_clauses.is_empty() {
-            // Create disjunction matcher for SHOULD clauses (OR operation)
+            // Only SHOULD clauses - create disjunction matcher (OR operation)
             let mut matchers = Vec::new();
-            for clause in should_clauses {
+            for clause in &should_clauses {
                 let matcher = clause.query.matcher(reader)?;
                 if !matcher.is_exhausted() {
                     matchers.push(matcher);
@@ -187,10 +241,6 @@ impl Query for BooleanQuery {
             } else {
                 Ok(Box::new(DisjunctionMatcher::new(matchers)))
             }
-        } else if !must_not_clauses.is_empty() {
-            // If we only have MUST_NOT clauses, match all documents
-            // TODO: Implement proper negation matcher
-            Ok(Box::new(AllMatcher::new(reader.max_doc())))
         } else {
             Ok(Box::new(EmptyMatcher::new()))
         }

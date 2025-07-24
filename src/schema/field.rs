@@ -775,7 +775,7 @@ impl GeoField {
                 .map_err(|_| format!("Invalid longitude: '{}'", lon_str.trim()))?;
             
             return GeoPoint::new(lat, lon)
-                .map_err(|e| format!("Invalid coordinates: {}", e));
+                .map_err(|e| format!("Invalid coordinates: {e}"));
         }
         
         // Try space-separated format
@@ -787,10 +787,10 @@ impl GeoField {
                 .map_err(|_| format!("Invalid longitude: '{}'", parts[1]))?;
             
             return GeoPoint::new(lat, lon)
-                .map_err(|e| format!("Invalid coordinates: {}", e));
+                .map_err(|e| format!("Invalid coordinates: {e}"));
         }
         
-        Err(format!("Invalid coordinate format: '{}'. Expected 'lat,lon' or 'lat lon'", input))
+        Err(format!("Invalid coordinate format: '{input}'. Expected 'lat,lon' or 'lat lon'"))
     }
 }
 

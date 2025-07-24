@@ -66,6 +66,15 @@ pub struct SearchRequest {
     pub config: SearchConfig,
 }
 
+impl Clone for SearchRequest {
+    fn clone(&self) -> Self {
+        SearchRequest {
+            query: self.query.clone_box(),
+            config: self.config.clone(),
+        }
+    }
+}
+
 impl SearchRequest {
     /// Create a new search request.
     pub fn new(query: Box<dyn Query>) -> Self {

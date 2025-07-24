@@ -1,8 +1,10 @@
 //! Index reader for searching and retrieving documents.
 
 use crate::error::{SarissaError, Result};
-use crate::schema::{Document, Schema};
+use crate::index::bkd_tree::SimpleBKDTree;
+use crate::schema::{Document, Schema, FieldValue};
 use crate::storage::Storage;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Trait for index readers.
@@ -36,6 +38,13 @@ pub trait IndexReader: Send + Sync + std::fmt::Debug {
 
     /// Check if the reader is closed.
     fn is_closed(&self) -> bool;
+
+    /// Get BKD Tree for a numeric field, if available.
+    fn get_bkd_tree(&self, field: &str) -> Result<Option<&SimpleBKDTree>> {
+        // Default implementation returns None (no BKD Tree support)
+        let _ = field;
+        Ok(None)
+    }
 }
 
 /// Information about a term in the index.
@@ -118,6 +127,9 @@ pub struct BasicIndexReader {
     /// Cached documents.
     document_cache: Vec<Document>,
 
+    /// BKD Trees for numeric fields.
+    bkd_trees: HashMap<String, SimpleBKDTree>,
+
     /// Whether the reader is closed.
     closed: bool,
 }
@@ -129,11 +141,15 @@ impl BasicIndexReader {
             schema,
             storage,
             document_cache: Vec::new(),
+            bkd_trees: HashMap::new(),
             closed: false,
         };
 
         // Load existing segments
         reader.load_segments()?;
+
+        // Build BKD Trees for numeric fields
+        reader.build_bkd_trees()?;
 
         Ok(reader)
     }
@@ -168,6 +184,43 @@ impl BasicIndexReader {
         self.document_cache.extend(documents);
 
         Ok(())
+    }
+
+    /// Build BKD Trees for all numeric fields.
+    fn build_bkd_trees(&mut self) -> Result<()> {
+        // Find all numeric fields in the schema
+        for (field_name, field_def) in self.schema.fields() {
+            // Check if this is a numeric field by type name
+            if field_def.field_type().type_name() == "numeric" {
+                let mut entries = Vec::new();
+                
+                // Extract numeric values from all documents
+                for (doc_id, doc) in self.document_cache.iter().enumerate() {
+                    if let Some(field_value) = doc.get_field(field_name) {
+                        if let Some(numeric_value) = self.extract_numeric_value(field_value) {
+                            entries.push((numeric_value, doc_id as u64));
+                        }
+                    }
+                }
+                
+                // Build BKD Tree for this field
+                if !entries.is_empty() {
+                    let bkd_tree = SimpleBKDTree::new(field_name.to_string(), entries);
+                    self.bkd_trees.insert(field_name.to_string(), bkd_tree);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Extract numeric value from a field value.
+    fn extract_numeric_value(&self, field_value: &FieldValue) -> Option<f64> {
+        match field_value {
+            FieldValue::Float(f) => Some(*f),
+            FieldValue::Integer(i) => Some(*i as f64),
+            _ => None,
+        }
     }
 
     /// Check if the reader is closed.
@@ -289,12 +342,18 @@ impl IndexReader for BasicIndexReader {
         if !self.closed {
             self.closed = true;
             self.document_cache.clear();
+            self.bkd_trees.clear();
         }
         Ok(())
     }
 
     fn is_closed(&self) -> bool {
         self.closed
+    }
+
+    fn get_bkd_tree(&self, field: &str) -> Result<Option<&SimpleBKDTree>> {
+        self.check_closed()?;
+        Ok(self.bkd_trees.get(field))
     }
 }
 
