@@ -328,23 +328,32 @@ impl ParallelIndexEngine {
     pub fn config(&self) -> &ParallelIndexConfig {
         &self.config
     }
-    
+
     /// Get detailed statistics for all partitions.
-    pub fn partition_statistics(&self) -> Result<Vec<(String, crate::parallel_index::writer_manager::IndexPartitionStats)>> {
+    pub fn partition_statistics(
+        &self,
+    ) -> Result<
+        Vec<(
+            String,
+            crate::parallel_index::writer_manager::IndexPartitionStats,
+        )>,
+    > {
         let writers = self.writer_manager.get_all_writers()?;
         let mut stats = Vec::new();
-        
+
         for writer in writers {
             let partition_id = writer.partition_id().to_string();
             let partition_stats = writer.stats()?;
             stats.push((partition_id, partition_stats));
         }
-        
+
         Ok(stats)
     }
-    
+
     /// Get aggregated statistics from all partitions.
-    pub fn aggregated_statistics(&self) -> Result<crate::parallel_index::writer_manager::IndexPartitionStats> {
+    pub fn aggregated_statistics(
+        &self,
+    ) -> Result<crate::parallel_index::writer_manager::IndexPartitionStats> {
         self.writer_manager.get_aggregated_stats()
     }
 
@@ -499,8 +508,10 @@ mod tests {
 
     #[test]
     fn test_metrics_collection() {
-        let mut config = ParallelIndexConfig::default();
-        config.enable_metrics = true;
+        let config = ParallelIndexConfig {
+            enable_metrics: true,
+            ..Default::default()
+        };
 
         let engine = ParallelIndexEngine::new(config).unwrap();
 

@@ -125,34 +125,34 @@ impl WildcardQuery {
     fn calculate_pattern_complexity(&self) -> f32 {
         let mut complexity = 1.0;
         let pattern_chars: Vec<char> = self.pattern.chars().collect();
-        
+
         // Base complexity factors
         let asterisk_count = pattern_chars.iter().filter(|&&c| c == '*').count();
         let question_count = pattern_chars.iter().filter(|&&c| c == '?').count();
         let literal_count = pattern_chars.len() - asterisk_count - question_count;
-        
+
         // Leading wildcard increases complexity (slower)
         if pattern_chars.first() == Some(&'*') {
             complexity *= 0.7; // Leading wildcards are less precise
         }
-        
+
         // Trailing wildcard is more efficient
         if pattern_chars.last() == Some(&'*') && pattern_chars.first() != Some(&'*') {
             complexity *= 1.2; // Prefix matching is efficient
         }
-        
+
         // More literals make patterns more selective
         complexity *= 1.0 + (literal_count as f32 * 0.1);
-        
+
         // Multiple wildcards increase complexity
         complexity *= 1.0 - ((asterisk_count + question_count) as f32 * 0.05);
-        
+
         // Exact patterns (no wildcards) are most precise
         if asterisk_count == 0 && question_count == 0 {
             complexity *= 1.5;
         }
-        
-        complexity.max(0.1).min(2.0)
+
+        complexity.clamp(0.1, 2.0)
     }
 }
 
@@ -164,7 +164,9 @@ impl Query for WildcardQuery {
         }
 
         // Get field type to determine matching strategy
-        let field_type = reader.schema().get_field(&self.field)
+        let field_type = reader
+            .schema()
+            .get_field(&self.field)
             .map(|field_def| field_def.field_type().type_name());
 
         let mut matching_doc_ids = Vec::new();
@@ -197,7 +199,9 @@ impl Query for WildcardQuery {
         if matching_doc_ids.is_empty() {
             Ok(Box::new(EmptyMatcher::new()))
         } else {
-            Ok(Box::new(crate::query::matcher::PreComputedMatcher::new(matching_doc_ids)))
+            Ok(Box::new(crate::query::matcher::PreComputedMatcher::new(
+                matching_doc_ids,
+            )))
         }
     }
 
@@ -209,7 +213,9 @@ impl Query for WildcardQuery {
         let mut field_lengths = Vec::new();
 
         // Get field type for matching strategy
-        let field_type = reader.schema().get_field(&self.field)
+        let field_type = reader
+            .schema()
+            .get_field(&self.field)
             .map(|field_def| field_def.field_type().type_name());
 
         // Count actual matches and collect field statistics
@@ -226,7 +232,10 @@ impl Query for WildcardQuery {
                             _ => {
                                 // TextField: token-based matching with count
                                 let tokens: Vec<&str> = text.split_whitespace().collect();
-                                let match_count = tokens.iter().filter(|token| self.regex.is_match(token)).count();
+                                let match_count = tokens
+                                    .iter()
+                                    .filter(|token| self.regex.is_match(token))
+                                    .count();
                                 (match_count > 0, match_count, tokens.len())
                             }
                         };
@@ -350,10 +359,10 @@ impl WildcardScorer {
 
         let n = self.total_docs as f32;
         let df = self.doc_freq as f32;
-        
+
         // Standard IDF with wildcard selectivity adjustment
         let base_idf = ((n - df + 0.5) / (df + 0.5)).ln().max(0.1);
-        
+
         // Apply selectivity boost for more discriminating patterns
         base_idf * self.selectivity
     }
@@ -369,9 +378,9 @@ impl WildcardScorer {
         let b = 0.75;
         let field_length = self.avg_field_length as f32;
         let norm_factor = 1.0 - b + b * (field_length / self.avg_field_length as f32);
-        
+
         let tf_component = (term_freq * (k1 + 1.0)) / (term_freq + k1 * norm_factor);
-        
+
         // Apply complexity factor - more complex patterns get slight boost
         tf_component * self.complexity
     }
@@ -385,10 +394,10 @@ impl crate::query::scorer::Scorer for WildcardScorer {
 
         let idf = self.calculate_idf();
         let tf = self.calculate_tf(term_freq);
-        
+
         // Final score with document frequency variation
         let doc_factor = 1.0 + (self.total_term_freq as f32 / self.doc_freq.max(1) as f32) * 0.1;
-        
+
         self.boost * idf * tf * doc_factor
     }
 
@@ -403,8 +412,9 @@ impl crate::query::scorer::Scorer for WildcardScorer {
     fn max_score(&self) -> f32 {
         let max_idf = self.calculate_idf();
         let max_tf = self.calculate_tf(10.0); // Assume max term frequency
-        let max_doc_factor = 1.0 + (self.total_term_freq as f32 / self.doc_freq.max(1) as f32) * 0.1;
-        
+        let max_doc_factor =
+            1.0 + (self.total_term_freq as f32 / self.doc_freq.max(1) as f32) * 0.1;
+
         self.boost * max_idf * max_tf * max_doc_factor
     }
 

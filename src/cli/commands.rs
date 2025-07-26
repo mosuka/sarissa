@@ -524,36 +524,6 @@ fn create_mock_field_stats() -> HashMap<String, FieldStats> {
     stats
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_schema_creation() {
-        // Test that default schema can be created without errors
-        let schema = create_default_schema();
-        assert!(schema.is_ok());
-    }
-
-    #[test]
-    fn test_create_default_schema() {
-        let schema = create_default_schema().unwrap();
-        assert!(schema.fields().len() >= 3);
-    }
-
-    #[test]
-    fn test_mock_data_creation() {
-        let facets = create_mock_facets();
-        assert!(!facets.is_empty());
-
-        let highlights = create_mock_highlights();
-        assert!(!highlights.is_empty());
-
-        let field_stats = create_mock_field_stats();
-        assert!(!field_stats.is_empty());
-    }
-}
-
 /// Validate index integrity.
 fn validate_index(args: ValidateArgs, cli_args: &SarissaArgs) -> Result<()> {
     if cli_args.verbosity() > 0 {
@@ -708,4 +678,33 @@ fn calculate_directory_size(path: &Path) -> Result<u64> {
     }
 
     Ok(size)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_schema_creation() {
+        // Test that default schema can be created without errors
+        let schema = create_default_schema();
+        assert!(schema.is_ok());
+    }
+
+    #[test]
+    fn test_create_default_schema() {
+        let schema = create_default_schema().unwrap();
+        assert!(schema.fields().len() >= 3);
+    }
+
+    #[test]
+    fn test_mock_data_creation() {
+        let facets = create_mock_facets();
+        assert!(!facets.is_empty());
+
+        let highlights = create_mock_highlights();
+        assert!(!highlights.is_empty());
+
+        let field_stats = create_mock_field_stats();
+        assert!(!field_stats.is_empty());
+    }
 }

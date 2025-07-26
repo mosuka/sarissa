@@ -298,17 +298,29 @@ impl NumericRangeQuery {
     }
 
     /// Create a range query for floats with exclusive upper bound.
-    pub fn f64_range_exclusive_upper<S: Into<String>>(field: S, lower: Option<f64>, upper: Option<f64>) -> Self {
+    pub fn f64_range_exclusive_upper<S: Into<String>>(
+        field: S,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> Self {
         Self::new(field, NumericType::F64, lower, upper, true, false)
     }
 
     /// Create a range query for floats with exclusive lower bound.
-    pub fn f64_range_exclusive_lower<S: Into<String>>(field: S, lower: Option<f64>, upper: Option<f64>) -> Self {
+    pub fn f64_range_exclusive_lower<S: Into<String>>(
+        field: S,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> Self {
         Self::new(field, NumericType::F64, lower, upper, false, true)
     }
 
     /// Create a range query for floats with both bounds exclusive.
-    pub fn f64_range_exclusive<S: Into<String>>(field: S, lower: Option<f64>, upper: Option<f64>) -> Self {
+    pub fn f64_range_exclusive<S: Into<String>>(
+        field: S,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> Self {
         Self::new(field, NumericType::F64, lower, upper, false, false)
     }
 
@@ -520,7 +532,7 @@ impl RangeScorer {
         let range_width = match (lower_bound, upper_bound) {
             (Some(lower), Some(upper)) => (upper - lower).abs(),
             (Some(_), None) | (None, Some(_)) => 1000.0, // Large default for unbounded ranges
-            (None, None) => f64::INFINITY, // Unbounded range
+            (None, None) => f64::INFINITY,               // Unbounded range
         };
 
         RangeScorer {
@@ -541,10 +553,10 @@ impl RangeScorer {
 
         let n = self.total_docs as f32;
         let df = self.matching_docs as f32;
-        
+
         // Base IDF calculation
         let base_idf = ((n - df + 0.5) / (df + 0.5)).ln();
-        
+
         // Apply range selectivity bonus - narrower ranges get higher scores
         let selectivity_multiplier = if self.range_width.is_finite() && self.range_width > 0.0 {
             // Smaller range width = higher selectivity = higher score
@@ -552,7 +564,7 @@ impl RangeScorer {
         } else {
             1.0_f32 // No bonus for unbounded ranges
         };
-        
+
         let epsilon = 0.1_f32;
         (base_idf + epsilon).max(epsilon) * selectivity_multiplier
     }
@@ -565,7 +577,7 @@ impl RangeScorer {
                 let center = (lower + upper) / 2.0;
                 let distance_from_center = (value - center).abs();
                 let max_distance = (upper - lower) / 2.0;
-                
+
                 if max_distance > 0.0 {
                     // Values closer to center get higher scores
                     (1.0 + (1.0 - (distance_from_center / max_distance)).max(0.0)) as f32
@@ -590,7 +602,7 @@ impl Scorer for RangeScorer {
     fn score(&self, _doc_id: u64, value: f32) -> f32 {
         let idf = self.range_idf();
         let proximity = self.proximity_score(value as f64);
-        
+
         // Final score combines IDF with proximity bonus
         self.boost * idf * proximity
     }
@@ -607,7 +619,7 @@ impl Scorer for RangeScorer {
         if self.matching_docs == 0 {
             return 0.0;
         }
-        
+
         let idf = self.range_idf();
         let max_proximity = 2.0; // Maximum proximity bonus
         self.boost * idf * max_proximity

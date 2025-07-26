@@ -1062,8 +1062,10 @@ mod tests {
 
     #[test]
     fn test_compaction_candidates() {
-        let mut config = DeletionConfig::default();
-        config.compaction_threshold = 0.1; // 10%
+        let config = DeletionConfig {
+            compaction_threshold: 0.1, // 10%
+            ..Default::default()
+        };
 
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();
@@ -1113,7 +1115,7 @@ mod tests {
         assert_eq!(global_state.total_documents, 30); // 10 + 20
         assert_eq!(global_state.total_deleted, 6); // 4 + 2
         assert!((global_state.global_deletion_ratio - 0.2).abs() < 0.001); // 6/30 = 0.2
-        assert!(global_state.compaction_candidates.len() >= 1);
+        assert!(!global_state.compaction_candidates.is_empty());
         assert!(
             global_state
                 .compaction_candidates
@@ -1180,10 +1182,12 @@ mod tests {
 
     #[test]
     fn test_auto_compaction_trigger() {
-        let mut config = DeletionConfig::default();
-        config.auto_compaction = true;
-        config.compaction_threshold = 0.2; // 20% threshold
-        config.compaction_interval_secs = 1; // 1 second interval
+        let config = DeletionConfig {
+            auto_compaction: true,
+            compaction_threshold: 0.2,   // 20% threshold
+            compaction_interval_secs: 1, // 1 second interval
+            ..Default::default()
+        };
 
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();

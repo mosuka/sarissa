@@ -158,12 +158,12 @@ impl Scorer for BM25Scorer {
         } else {
             base_field_length
         };
-        
+
         let tf = self.tf(term_freq, field_length);
 
         // Add document frequency factor for more score variation
         let df_factor = 1.0 + (self.doc_freq as f32 / self.total_docs as f32);
-        
+
         self.boost * idf * tf * df_factor
     }
 

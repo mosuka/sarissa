@@ -99,10 +99,10 @@ impl GeoBoundingBox {
     /// Check if a point is within this bounding box.
     pub fn contains(&self, point: &GeoPoint) -> bool {
         point.within_bounds(
-            self.bottom_right.lat,  // min_lat
-            self.top_left.lat,      // max_lat  
-            self.top_left.lon,      // min_lon
-            self.bottom_right.lon,  // max_lon
+            self.bottom_right.lat, // min_lat
+            self.top_left.lat,     // max_lat
+            self.top_left.lon,     // min_lon
+            self.bottom_right.lon, // max_lon
         )
     }
 
@@ -129,7 +129,7 @@ impl GeoBoundingBox {
             &GeoPoint::new(self.top_left.lat, self.bottom_right.lon).unwrap(),
             &GeoPoint::new(self.bottom_right.lat, self.top_left.lon).unwrap(),
         ];
-        
+
         corners
             .iter()
             .map(|corner| center.distance_to(corner))
@@ -250,17 +250,14 @@ impl GeoDistanceQuery {
         )
         .unwrap_or(self.center);
 
-        let bbox = GeoBoundingBox::new(top_left, bottom_right).unwrap_or_else(|_| {
+        GeoBoundingBox::new(top_left, bottom_right).unwrap_or_else(|_| {
             // Fallback to a small box around center
             let fallback_top_left =
                 GeoPoint::new(self.center.lat + 0.01, self.center.lon - 0.01).unwrap();
             let fallback_bottom_right =
                 GeoPoint::new(self.center.lat - 0.01, self.center.lon + 0.01).unwrap();
             GeoBoundingBox::new(fallback_top_left, fallback_bottom_right).unwrap()
-        });
-
-
-        bbox
+        })
     }
 
     /// Get spatial candidates from the index within the bounding box.
@@ -287,7 +284,7 @@ impl GeoDistanceQuery {
                             let distance = self.center.distance_to(geo_point);
                             // Double-check with exact distance calculation
                             if distance <= self.distance_km {
-                                candidates.push((doc_id as u32, geo_point.clone()));
+                                candidates.push((doc_id as u32, *geo_point));
                             }
                         }
                     }
@@ -297,7 +294,6 @@ impl GeoDistanceQuery {
 
         Ok(candidates)
     }
-
 
     /// Calculate relevance score based on distance (closer = higher score).
     #[allow(dead_code)]
@@ -474,7 +470,7 @@ impl GeoBoundingBoxQuery {
             if self.bounding_box.contains(&point) {
                 let center = self.bounding_box.center();
                 let distance = center.distance_to(&point);
-                
+
                 // Simple scoring based on position within bounding box
                 let relevance_score = if distance == 0.0 {
                     1.0
@@ -521,7 +517,7 @@ impl GeoBoundingBoxQuery {
                     if let Some(geo_point) = field_value.as_geo() {
                         // Check if the point is within the bounding box
                         if self.bounding_box.contains(geo_point) {
-                            candidates.push((doc_id as u32, geo_point.clone()));
+                            candidates.push((doc_id as u32, *geo_point));
                         }
                     }
                 }
@@ -729,14 +725,18 @@ impl GeoMatcher {
     /// Create a new geo matcher.
     pub fn new(mut matches: Vec<GeoMatch>) -> Self {
         // Sort matches by distance (closest first)
-        matches.sort_by(|a, b| a.distance_km.partial_cmp(&b.distance_km).unwrap_or(std::cmp::Ordering::Equal));
-        
+        matches.sort_by(|a, b| {
+            a.distance_km
+                .partial_cmp(&b.distance_km)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
         let current_doc_id = if matches.is_empty() {
-            u64::MAX  // Invalid state when no matches
+            u64::MAX // Invalid state when no matches
         } else {
-            matches[0].doc_id as u64  // Position at first match
+            matches[0].doc_id as u64 // Position at first match
         };
-        
+
         GeoMatcher {
             matches,
             current_index: 0,
@@ -748,7 +748,7 @@ impl GeoMatcher {
 impl Matcher for GeoMatcher {
     fn doc_id(&self) -> u64 {
         if self.current_index >= self.matches.len() {
-            u64::MAX  // Invalid state when exhausted
+            u64::MAX // Invalid state when exhausted
         } else {
             self.current_doc_id
         }
@@ -758,7 +758,7 @@ impl Matcher for GeoMatcher {
         if self.current_index >= self.matches.len() {
             return Ok(false);
         }
-        
+
         self.current_index += 1;
         if self.current_index < self.matches.len() {
             self.current_doc_id = self.matches[self.current_index].doc_id as u64;
@@ -1115,11 +1115,11 @@ mod tests {
         // Should return documents in distance-sorted order (closest first)
         // After sorting: doc_id: 3 (1.0km) comes before doc_id: 1 (2.0km)
         // Initial state: pointing to first document (doc_id: 3)
-        assert_eq!(matcher.doc_id(), 3);  // Initial position: closest document
-        
-        assert!(matcher.next().unwrap());  // Move to next
-        assert_eq!(matcher.doc_id(), 1);   // Second document (farther)
-        
+        assert_eq!(matcher.doc_id(), 3); // Initial position: closest document
+
+        assert!(matcher.next().unwrap()); // Move to next
+        assert_eq!(matcher.doc_id(), 1); // Second document (farther)
+
         assert!(!matcher.next().unwrap()); // No more documents
     }
 
