@@ -1,7 +1,7 @@
 //! Phrase query implementation for exact phrase matching.
 
 use crate::error::Result;
-use crate::index::reader::{IndexReader, PostingIterator};
+use crate::index::reader::IndexReader;
 use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher};
 use crate::query::scorer::{BM25Scorer, Scorer};
@@ -68,7 +68,7 @@ impl PhraseMatcher {
         
         // Find documents that contain all terms
         for (term_idx, iter) in iterators.iter_mut().enumerate() {
-            let mut iter = iter;
+            let iter = iter;
             while iter.next()? {
                 let doc_id = iter.doc_id();
                 if doc_id == u64::MAX {
