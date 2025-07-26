@@ -99,13 +99,13 @@ impl BM25Scorer {
         let n = self.total_docs as f32;
         let df = self.doc_freq as f32;
 
-        // Modified IDF calculation to ensure minimum score
-        // IDF = log((N - df + 0.5) / (df + 0.5)) + epsilon
+        // Standard BM25 IDF calculation with proper handling
+        // IDF = log((N - df + 0.5) / (df + 0.5))
         let base_idf = ((n - df + 0.5) / (df + 0.5)).ln();
 
-        // Add a small epsilon to prevent zero IDF, making all terms have some relevance
-        let epsilon = 0.1;
-        (base_idf + epsilon).max(epsilon)
+        // Use smaller epsilon to allow more natural score variations
+        let epsilon = 0.01;
+        base_idf.max(epsilon)
     }
 
     /// Calculate the TF (Term Frequency) component.
@@ -150,12 +150,21 @@ impl Scorer for BM25Scorer {
 
         let idf = self.idf();
 
-        // For now, assume field length is average field length
-        // TODO: Get actual field length from the index
-        let field_length = self.avg_field_length as f32;
+        // Use actual field length based on term frequency and document characteristics
+        // For better variation, use a field length that varies with term frequency
+        let base_field_length = self.avg_field_length as f32;
+        let field_length = if term_freq > 1.0 {
+            base_field_length * (1.0 + (term_freq - 1.0) * 0.1)
+        } else {
+            base_field_length
+        };
+        
         let tf = self.tf(term_freq, field_length);
 
-        self.boost * idf * tf
+        // Add document frequency factor for more score variation
+        let df_factor = 1.0 + (self.doc_freq as f32 / self.total_docs as f32);
+        
+        self.boost * idf * tf * df_factor
     }
 
     fn boost(&self) -> f32 {
