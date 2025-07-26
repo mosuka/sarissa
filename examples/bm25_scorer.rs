@@ -86,8 +86,8 @@ fn main() -> Result<()> {
     println!("\n3. Impact of k1 parameter (term frequency saturation):");
     let k1_values = [0.5, 1.2, 2.0, 3.0];
     for k1 in k1_values {
-        let scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0);
-        // Note: In real implementation, k1 would be configurable
+        let mut scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0);
+        scorer.set_k1(k1);
         let score = scorer.score(0, 3.0); // Fixed term frequency
         println!("   k1 = {}: Score = {:.4}", k1, score);
     }
@@ -96,8 +96,8 @@ fn main() -> Result<()> {
     println!("\n4. Impact of b parameter (field length normalization):");
     let b_values = [0.0, 0.25, 0.75, 1.0];
     for b in b_values {
-        let scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0);
-        // Note: In real implementation, b would be configurable
+        let mut scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0);
+        scorer.set_b(b);
         let score = scorer.score(0, 2.0); // Fixed term frequency
         println!("   b = {}: Score = {:.4}", b, score);
     }

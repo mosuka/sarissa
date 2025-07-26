@@ -73,8 +73,7 @@ impl Searcher {
             }
 
             // Calculate score for this document
-            // TODO: Get actual term frequency from posting iterator
-            let term_freq = 1.0; // Placeholder
+            let term_freq = matcher.term_freq() as f32;
             let score = scorer.score(doc_id, term_freq);
 
             // Collect the result

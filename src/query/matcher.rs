@@ -22,6 +22,11 @@ pub trait Matcher: Send + Debug {
 
     /// Check if this matcher is exhausted.
     fn is_exhausted(&self) -> bool;
+
+    /// Get the term frequency for the current document.
+    fn term_freq(&self) -> u64 {
+        1 // Default implementation for matchers that don't track term frequency
+    }
 }
 
 /// A matcher that matches no documents.
@@ -196,6 +201,14 @@ impl Matcher for PostingMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.exhausted
+    }
+
+    fn term_freq(&self) -> u64 {
+        if self.exhausted {
+            0
+        } else {
+            self.posting_iter.term_freq()
+        }
     }
 }
 
