@@ -33,6 +33,8 @@ pub mod index;
 // pub mod ml;
 pub mod parallel_index;
 pub mod parallel_search;
+pub mod parallel_vector_index;
+pub mod parallel_vector_search;
 pub mod query;
 pub mod schema;
 pub mod search;
