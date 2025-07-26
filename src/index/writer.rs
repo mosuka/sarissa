@@ -494,643 +494,6 @@ pub struct WriterStats {
     pub rollbacks: u32,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::schema::{Schema, TextField};
-    use crate::storage::{MemoryStorage, StorageConfig};
-    use std::sync::Arc;
-
-    #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
-
-    fn create_test_document() -> Document {
-        Document::builder()
-            .add_text("title", "Test Document")
-            .add_text("body", "This is a test document for indexing")
-            .build()
-    }
-
-    #[test]
-    fn test_writer_creation() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        assert!(!writer.is_closed());
-        assert_eq!(writer.pending_docs(), 0);
-        assert_eq!(writer.schema().len(), 2);
-    }
-
-    #[test]
-    fn test_add_document() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-        let doc = create_test_document();
-
-        writer.add_document(doc).unwrap();
-
-        assert_eq!(writer.pending_docs(), 1);
-    }
-
-    #[test]
-    fn test_commit() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage.clone(), config).unwrap();
-        let doc = create_test_document();
-
-        writer.add_document(doc).unwrap();
-        assert_eq!(writer.pending_docs(), 1);
-
-        writer.commit().unwrap();
-        assert_eq!(writer.pending_docs(), 0);
-
-        // Check that a segment file was created
-        let files = storage.list_files().unwrap();
-        assert!(files.iter().any(|f| f.starts_with("segment_")));
-    }
-
-    #[test]
-    fn test_rollback() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-        let doc = create_test_document();
-
-        writer.add_document(doc).unwrap();
-        assert_eq!(writer.pending_docs(), 1);
-
-        writer.rollback().unwrap();
-        assert_eq!(writer.pending_docs(), 0);
-    }
-
-    #[test]
-    fn test_auto_flush() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig {
-            max_buffered_docs: 2,
-            ..Default::default()
-        };
-
-        let mut writer = BasicIndexWriter::new(schema, storage.clone(), config).unwrap();
-
-        // Add first document
-        writer.add_document(create_test_document()).unwrap();
-        assert_eq!(writer.pending_docs(), 1);
-
-        // Add second document - should trigger flush
-        writer.add_document(create_test_document()).unwrap();
-        assert_eq!(writer.pending_docs(), 0);
-
-        // Check that a segment file was created
-        let files = storage.list_files().unwrap();
-        assert!(files.iter().any(|f| f.starts_with("segment_")));
-    }
-
-    #[test]
-    fn test_writer_close() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-        let doc = create_test_document();
-
-        writer.add_document(doc).unwrap();
-        assert_eq!(writer.pending_docs(), 1);
-
-        writer.close().unwrap();
-
-        assert!(writer.is_closed());
-        assert_eq!(writer.pending_docs(), 0);
-
-        // Operations should fail after close
-        let result = writer.add_document(create_test_document());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_document() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Create document with invalid field
-        let doc = Document::builder()
-            .add_text("invalid_field", "This field doesn't exist in schema")
-            .build();
-
-        let result = writer.add_document(doc);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_writer_config() {
-        let config = WriterConfig::default();
-
-        assert_eq!(config.max_buffered_docs, 1000);
-        assert_eq!(config.max_buffer_memory, 16 * 1024 * 1024);
-        assert!(!config.auto_commit);
-        assert!(!config.optimize_on_commit);
-    }
-
-    #[test]
-    fn test_writer_stats() {
-        let stats = WriterStats::default();
-
-        assert_eq!(stats.docs_added, 0);
-        assert_eq!(stats.docs_deleted, 0);
-        assert_eq!(stats.docs_updated, 0);
-        assert_eq!(stats.segments_created, 0);
-        assert_eq!(stats.bytes_written, 0);
-        assert_eq!(stats.commits, 0);
-        assert_eq!(stats.rollbacks, 0);
-    }
-
-    #[test]
-    fn test_document_deletion() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add a document first
-        let doc = create_test_document();
-        writer.add_document(doc).unwrap();
-
-        // Commit to create a segment
-        writer.commit().unwrap();
-
-        // Delete documents
-        let deleted_count = writer.delete_documents("title", "Test Document").unwrap();
-        assert!(deleted_count > 0);
-
-        // Check stats
-        let stats = writer.get_stats();
-        assert_eq!(stats.docs_added, 1);
-        assert!(stats.docs_deleted > 0);
-
-        // Check deletion manager stats
-        let deletion_stats = writer.get_deletion_stats();
-        assert!(deletion_stats.total_deleted > 0);
-    }
-
-    #[test]
-    fn test_document_update() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add original document
-        let doc1 = create_test_document();
-        writer.add_document(doc1).unwrap();
-        writer.commit().unwrap();
-
-        // Update document
-        let doc2 = Document::builder()
-            .add_text("title", "Updated Document")
-            .add_text("body", "This is an updated document")
-            .build();
-
-        writer
-            .update_document("title", "Test Document", doc2)
-            .unwrap();
-
-        // Check stats
-        let stats = writer.get_stats();
-        assert_eq!(stats.docs_added, 2); // Original + updated
-        assert!(stats.docs_updated > 0);
-    }
-
-    #[test]
-    fn test_deletion_by_query() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add multiple documents
-        for i in 0..5 {
-            let doc = Document::builder()
-                .add_text("title", &format!("Document {i}"))
-                .add_text("body", "Test content")
-                .build();
-            writer.add_document(doc).unwrap();
-        }
-        writer.commit().unwrap();
-
-        // Delete by multiple values
-        let values = vec!["Document 1", "Document 3"];
-        let deleted_count = writer.delete_by_query("title", &values).unwrap();
-        assert!(deleted_count > 0);
-
-        let deletion_stats = writer.get_deletion_stats();
-        assert!(deletion_stats.total_deleted > 0);
-    }
-
-    #[test]
-    fn test_compaction_candidates() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add and commit documents to create segments
-        for i in 0..10 {
-            let doc = Document::builder()
-                .add_text("title", &format!("Document {i}"))
-                .add_text("body", "Test content")
-                .build();
-            writer.add_document(doc).unwrap();
-        }
-        writer.commit().unwrap();
-
-        // Delete some documents to trigger compaction threshold
-        for i in 0..5 {
-            writer
-                .delete_documents("title", &format!("Document {i}"))
-                .unwrap();
-        }
-
-        // Check compaction candidates
-        let candidates = writer.get_compaction_candidates();
-        // Note: Depending on deletion threshold, we might have candidates
-        println!("Compaction candidates: {candidates:?}");
-    }
-
-    #[test]
-    fn test_global_deletion_report() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add multiple documents
-        for i in 0..20 {
-            let doc = Document::builder()
-                .add_text("title", &format!("Document {i}"))
-                .add_text("body", "Test content")
-                .build();
-            writer.add_document(doc).unwrap();
-        }
-        writer.commit().unwrap();
-
-        // Delete some documents
-        for i in 0..8 {
-            // 40% deletion
-            writer
-                .delete_documents("title", &format!("Document {i}"))
-                .unwrap();
-        }
-
-        // Get comprehensive deletion report
-        let report = writer.get_deletion_report();
-
-        println!("Deletion Report:");
-        println!(
-            "  Global deletion ratio: {:.2}%",
-            report.global_state.global_deletion_ratio * 100.0
-        );
-        println!(
-            "  Compaction candidates: {}",
-            report.global_state.compaction_candidates.len()
-        );
-        println!(
-            "  Reclaimable space: {} bytes",
-            report.global_state.reclaimable_space
-        );
-        println!(
-            "  Auto-compaction enabled: {}",
-            report.auto_compaction_enabled
-        );
-
-        // Test summary metrics
-        let (ratio, _candidates, _space, _needs_compaction) = report.summary();
-        assert!(ratio > 0.0);
-        // Note: space may be 0 if deletion ratio is below compaction threshold
-        // space is u64, so >= 0 check is redundant
-
-        // Test urgency classification
-        let (urgent, moderate, low) = report.segments_by_urgency();
-        println!(
-            "  Urgent: {:?}, Moderate: {:?}, Low: {:?}",
-            urgent, moderate, low
-        );
-    }
-
-    #[test]
-    fn test_auto_compaction_detection() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add and commit documents to create segments
-        for i in 0..50 {
-            let doc = Document::builder()
-                .add_text("title", &format!("Document {i}"))
-                .add_text("body", "Test content")
-                .build();
-            writer.add_document(doc).unwrap();
-        }
-        writer.commit().unwrap();
-
-        // Delete enough documents to potentially trigger auto-compaction
-        for i in 0..20 {
-            // 40% deletion
-            writer
-                .delete_documents("title", &format!("Document {i}"))
-                .unwrap();
-        }
-
-        // Check if auto-compaction should be triggered
-        let should_compact = writer.should_trigger_auto_compaction();
-        println!("Should trigger auto-compaction: {should_compact}");
-
-        // Get global deletion state
-        let global_state = writer.get_global_deletion_state();
-        println!("Global deletion state:");
-        println!("  Total documents: {}", global_state.total_documents);
-        println!("  Total deleted: {}", global_state.total_deleted);
-        println!(
-            "  Deletion ratio: {:.2}%",
-            global_state.global_deletion_ratio * 100.0
-        );
-        println!(
-            "  Compaction candidates: {:?}",
-            global_state.compaction_candidates
-        );
-    }
-
-    #[test]
-    fn test_compaction_completion() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add documents to multiple segments
-        for batch in 0..3 {
-            for i in 0..10 {
-                let doc = Document::builder()
-                    .add_text("title", &format!("Batch {batch} Document {i}"))
-                    .add_text("body", "Test content")
-                    .build();
-                writer.add_document(doc).unwrap();
-            }
-            writer.commit().unwrap(); // Force segment creation
-        }
-
-        // Delete some documents to create compaction candidates
-        writer
-            .delete_documents("title", "Batch 0 Document 1")
-            .unwrap();
-        writer
-            .delete_documents("title", "Batch 0 Document 2")
-            .unwrap();
-        writer
-            .delete_documents("title", "Batch 1 Document 1")
-            .unwrap();
-
-        let report_before = writer.get_deletion_report();
-        println!(
-            "Before compaction: {} segments tracked",
-            report_before.deletion_stats.segments_tracked
-        );
-
-        // Simulate compaction completion
-        let segments_to_compact = vec!["segment_000000".to_string()];
-        let result = writer.mark_compaction_completed(&segments_to_compact);
-        assert!(result.is_ok());
-
-        let report_after = writer.get_deletion_report();
-        println!(
-            "After compaction: {} segments tracked",
-            report_after.deletion_stats.segments_tracked
-        );
-        println!(
-            "Compaction operations: {}",
-            report_after.deletion_stats.compaction_operations
-        );
-    }
-
-    #[test]
-    fn test_segment_management_integration() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add documents to create multiple segments
-        for batch in 0..3 {
-            for i in 0..5 {
-                let doc = Document::builder()
-                    .add_text("title", &format!("Batch {batch} Document {i}"))
-                    .add_text("body", "Test content for segment management")
-                    .build();
-                writer.add_document(doc).unwrap();
-            }
-            writer.commit().unwrap(); // Force segment creation
-        }
-
-        // Test segment statistics
-        let segment_stats = writer.get_segment_stats();
-        println!("Segment Statistics:");
-        println!("  Total segments: {}", segment_stats.total_segments);
-        println!("  Total documents: {}", segment_stats.total_doc_count);
-        println!("  Total size: {} bytes", segment_stats.total_size_bytes);
-        println!(
-            "  Average segment size: {} bytes",
-            segment_stats.avg_segment_size
-        );
-
-        assert_eq!(segment_stats.total_segments, 3);
-        assert_eq!(segment_stats.total_doc_count, 15);
-
-        // Test managed segments
-        let managed_segments = writer.get_managed_segments();
-        assert_eq!(managed_segments.len(), 3);
-
-        for (i, segment) in managed_segments.iter().enumerate() {
-            println!(
-                "  Segment {}: {} docs, tier {}, {} bytes",
-                i, segment.segment_info.doc_count, segment.tier, segment.size_bytes
-            );
-        }
-
-        // Test segments by tier
-        let tiers = writer.get_segments_by_tier();
-        println!("Segments by tier:");
-        for (tier, segments) in tiers.iter().enumerate() {
-            println!("  Tier {}: {} segments", tier, segments.len());
-        }
-
-        // Test merge candidates generation
-        let size_candidates = writer.generate_merge_candidates(MergeStrategy::SizeBased);
-        println!("Size-based merge candidates: {}", size_candidates.len());
-
-        let balanced_candidates = writer.generate_merge_candidates(MergeStrategy::Balanced);
-        println!("Balanced merge candidates: {}", balanced_candidates.len());
-
-        // Test merge plan
-        let merge_plan = writer.get_merge_plan();
-        println!("Merge Plan:");
-        println!("  Strategy: {:?}", merge_plan.strategy);
-        println!("  Candidates: {}", merge_plan.candidates.len());
-        println!("  Estimated benefit: {:.2}", merge_plan.estimated_benefit);
-        println!("  Urgency: {:?}", merge_plan.urgency);
-
-        // Test marking segments as merging
-        if let Some(candidate) = merge_plan.candidates.first() {
-            if !candidate.segments.is_empty() {
-                writer
-                    .mark_segments_merging(&candidate.segments, true)
-                    .unwrap();
-
-                let updated_segments = writer.get_managed_segments();
-                let merging_count = updated_segments.iter().filter(|s| s.is_merging).count();
-
-                println!("Segments marked as merging: {merging_count}");
-                assert!(merging_count > 0);
-
-                // Unmark
-                writer
-                    .mark_segments_merging(&candidate.segments, false)
-                    .unwrap();
-            }
-        }
-    }
-
-    #[test]
-    fn test_segment_merge_completion() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Create multiple small segments
-        for i in 0..4 {
-            let doc = Document::builder()
-                .add_text("title", &format!("Document {i}"))
-                .add_text("body", "Small segment content")
-                .build();
-            writer.add_document(doc).unwrap();
-            writer.commit().unwrap(); // Force individual segments
-        }
-
-        let initial_stats = writer.get_segment_stats();
-        assert_eq!(initial_stats.total_segments, 4);
-
-        // Simulate merge completion
-        let segments = writer.get_managed_segments();
-        let old_segment_ids: Vec<String> = segments
-            .iter()
-            .take(2)
-            .map(|s| s.segment_info.segment_id.clone())
-            .collect();
-
-        let new_segment = SegmentInfo {
-            segment_id: "merged_segment".to_string(),
-            doc_count: 2,
-            doc_offset: 0,
-            generation: 100,
-            has_deletions: false,
-        };
-
-        writer
-            .complete_segment_merge(
-                &old_segment_ids,
-                new_segment,
-                vec!["merged_segment.json".to_string()],
-            )
-            .unwrap();
-
-        let final_stats = writer.get_segment_stats();
-        assert_eq!(final_stats.total_segments, 3); // 4 - 2 + 1
-        assert_eq!(final_stats.merge_operations, 1);
-
-        println!(
-            "Merge completed: {} -> {} segments",
-            initial_stats.total_segments, final_stats.total_segments
-        );
-    }
-
-    #[test]
-    fn test_segment_tier_rebalancing() {
-        let schema = create_test_schema();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = WriterConfig::default();
-
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-
-        // Add documents to create segments
-        for i in 0..10 {
-            let doc = Document::builder()
-                .add_text("title", &format!("Document {i}"))
-                .add_text("body", "Content for tier testing")
-                .build();
-            writer.add_document(doc).unwrap();
-        }
-        writer.commit().unwrap();
-
-        let tiers_before = writer.get_segments_by_tier();
-        println!("Tiers before rebalancing:");
-        for (tier, segments) in tiers_before.iter().enumerate() {
-            println!("  Tier {}: {} segments", tier, segments.len());
-        }
-
-        // Force rebalance
-        writer.rebalance_segment_tiers().unwrap();
-
-        let tiers_after = writer.get_segments_by_tier();
-        println!("Tiers after rebalancing:");
-        for (tier, segments) in tiers_after.iter().enumerate() {
-            println!("  Tier {}: {} segments", tier, segments.len());
-        }
-
-        // Verify that rebalancing was performed
-        let managed_segments = writer.get_managed_segments();
-        for segment in &managed_segments {
-            println!(
-                "  Segment {}: tier {}, size {} bytes",
-                segment.segment_info.segment_id, segment.tier, segment.size_bytes
-            );
-        }
-    }
-}
-
 impl AtomicOperations for BasicIndexWriter {
     /// Execute multiple operations atomically.
     fn execute_atomically<F, R>(&mut self, operations: F) -> Result<R>
@@ -1381,5 +744,639 @@ impl BasicIndexWriter {
 
             Ok(result)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{Schema, TextField};
+    use crate::storage::{MemoryStorage, StorageConfig};
+    use std::sync::Arc;
+
+    #[allow(dead_code)]
+    fn create_test_schema() -> Schema {
+        let mut schema = Schema::new();
+        schema
+            .add_field("title", Box::new(TextField::new().stored(true)))
+            .unwrap();
+        schema
+            .add_field("body", Box::new(TextField::new()))
+            .unwrap();
+        schema
+    }
+
+    fn create_test_document() -> Document {
+        Document::builder()
+            .add_text("title", "Test Document")
+            .add_text("body", "This is a test document for indexing")
+            .build()
+    }
+
+    #[test]
+    fn test_writer_creation() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        assert!(!writer.is_closed());
+        assert_eq!(writer.pending_docs(), 0);
+        assert_eq!(writer.schema().len(), 2);
+    }
+
+    #[test]
+    fn test_add_document() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let doc = create_test_document();
+
+        writer.add_document(doc).unwrap();
+
+        assert_eq!(writer.pending_docs(), 1);
+    }
+
+    #[test]
+    fn test_commit() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage.clone(), config).unwrap();
+        let doc = create_test_document();
+
+        writer.add_document(doc).unwrap();
+        assert_eq!(writer.pending_docs(), 1);
+
+        writer.commit().unwrap();
+        assert_eq!(writer.pending_docs(), 0);
+
+        // Check that a segment file was created
+        let files = storage.list_files().unwrap();
+        assert!(files.iter().any(|f| f.starts_with("segment_")));
+    }
+
+    #[test]
+    fn test_rollback() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let doc = create_test_document();
+
+        writer.add_document(doc).unwrap();
+        assert_eq!(writer.pending_docs(), 1);
+
+        writer.rollback().unwrap();
+        assert_eq!(writer.pending_docs(), 0);
+    }
+
+    #[test]
+    fn test_auto_flush() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig {
+            max_buffered_docs: 2,
+            ..Default::default()
+        };
+
+        let mut writer = BasicIndexWriter::new(schema, storage.clone(), config).unwrap();
+
+        // Add first document
+        writer.add_document(create_test_document()).unwrap();
+        assert_eq!(writer.pending_docs(), 1);
+
+        // Add second document - should trigger flush
+        writer.add_document(create_test_document()).unwrap();
+        assert_eq!(writer.pending_docs(), 0);
+
+        // Check that a segment file was created
+        let files = storage.list_files().unwrap();
+        assert!(files.iter().any(|f| f.starts_with("segment_")));
+    }
+
+    #[test]
+    fn test_writer_close() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let doc = create_test_document();
+
+        writer.add_document(doc).unwrap();
+        assert_eq!(writer.pending_docs(), 1);
+
+        writer.close().unwrap();
+
+        assert!(writer.is_closed());
+        assert_eq!(writer.pending_docs(), 0);
+
+        // Operations should fail after close
+        let result = writer.add_document(create_test_document());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_document() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Create document with invalid field
+        let doc = Document::builder()
+            .add_text("invalid_field", "This field doesn't exist in schema")
+            .build();
+
+        let result = writer.add_document(doc);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_writer_config() {
+        let config = WriterConfig::default();
+
+        assert_eq!(config.max_buffered_docs, 1000);
+        assert_eq!(config.max_buffer_memory, 16 * 1024 * 1024);
+        assert!(!config.auto_commit);
+        assert!(!config.optimize_on_commit);
+    }
+
+    #[test]
+    fn test_writer_stats() {
+        let stats = WriterStats::default();
+
+        assert_eq!(stats.docs_added, 0);
+        assert_eq!(stats.docs_deleted, 0);
+        assert_eq!(stats.docs_updated, 0);
+        assert_eq!(stats.segments_created, 0);
+        assert_eq!(stats.bytes_written, 0);
+        assert_eq!(stats.commits, 0);
+        assert_eq!(stats.rollbacks, 0);
+    }
+
+    #[test]
+    fn test_document_deletion() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add a document first
+        let doc = create_test_document();
+        writer.add_document(doc).unwrap();
+
+        // Commit to create a segment
+        writer.commit().unwrap();
+
+        // Delete documents
+        let deleted_count = writer.delete_documents("title", "Test Document").unwrap();
+        assert!(deleted_count > 0);
+
+        // Check stats
+        let stats = writer.get_stats();
+        assert_eq!(stats.docs_added, 1);
+        assert!(stats.docs_deleted > 0);
+
+        // Check deletion manager stats
+        let deletion_stats = writer.get_deletion_stats();
+        assert!(deletion_stats.total_deleted > 0);
+    }
+
+    #[test]
+    fn test_document_update() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add original document
+        let doc1 = create_test_document();
+        writer.add_document(doc1).unwrap();
+        writer.commit().unwrap();
+
+        // Update document
+        let doc2 = Document::builder()
+            .add_text("title", "Updated Document")
+            .add_text("body", "This is an updated document")
+            .build();
+
+        writer
+            .update_document("title", "Test Document", doc2)
+            .unwrap();
+
+        // Check stats
+        let stats = writer.get_stats();
+        assert_eq!(stats.docs_added, 2); // Original + updated
+        assert!(stats.docs_updated > 0);
+    }
+
+    #[test]
+    fn test_deletion_by_query() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add multiple documents
+        for i in 0..5 {
+            let doc = Document::builder()
+                .add_text("title", format!("Document {i}"))
+                .add_text("body", "Test content")
+                .build();
+            writer.add_document(doc).unwrap();
+        }
+        writer.commit().unwrap();
+
+        // Delete by multiple values
+        let values = vec!["Document 1", "Document 3"];
+        let deleted_count = writer.delete_by_query("title", &values).unwrap();
+        assert!(deleted_count > 0);
+
+        let deletion_stats = writer.get_deletion_stats();
+        assert!(deletion_stats.total_deleted > 0);
+    }
+
+    #[test]
+    fn test_compaction_candidates() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add and commit documents to create segments
+        for i in 0..10 {
+            let doc = Document::builder()
+                .add_text("title", format!("Document {i}"))
+                .add_text("body", "Test content")
+                .build();
+            writer.add_document(doc).unwrap();
+        }
+        writer.commit().unwrap();
+
+        // Delete some documents to trigger compaction threshold
+        for i in 0..5 {
+            writer
+                .delete_documents("title", &format!("Document {i}"))
+                .unwrap();
+        }
+
+        // Check compaction candidates
+        let candidates = writer.get_compaction_candidates();
+        // Note: Depending on deletion threshold, we might have candidates
+        println!("Compaction candidates: {candidates:?}");
+    }
+
+    #[test]
+    fn test_global_deletion_report() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add multiple documents
+        for i in 0..20 {
+            let doc = Document::builder()
+                .add_text("title", format!("Document {i}"))
+                .add_text("body", "Test content")
+                .build();
+            writer.add_document(doc).unwrap();
+        }
+        writer.commit().unwrap();
+
+        // Delete some documents
+        for i in 0..8 {
+            // 40% deletion
+            writer
+                .delete_documents("title", &format!("Document {i}"))
+                .unwrap();
+        }
+
+        // Get comprehensive deletion report
+        let report = writer.get_deletion_report();
+
+        println!("Deletion Report:");
+        println!(
+            "  Global deletion ratio: {:.2}%",
+            report.global_state.global_deletion_ratio * 100.0
+        );
+        println!(
+            "  Compaction candidates: {}",
+            report.global_state.compaction_candidates.len()
+        );
+        println!(
+            "  Reclaimable space: {} bytes",
+            report.global_state.reclaimable_space
+        );
+        println!(
+            "  Auto-compaction enabled: {}",
+            report.auto_compaction_enabled
+        );
+
+        // Test summary metrics
+        let (ratio, _candidates, _space, _needs_compaction) = report.summary();
+        assert!(ratio > 0.0);
+        // Note: space may be 0 if deletion ratio is below compaction threshold
+        // space is u64, so >= 0 check is redundant
+
+        // Test urgency classification
+        let (urgent, moderate, low) = report.segments_by_urgency();
+        println!("  Urgent: {urgent:?}, Moderate: {moderate:?}, Low: {low:?}");
+    }
+
+    #[test]
+    fn test_auto_compaction_detection() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add and commit documents to create segments
+        for i in 0..50 {
+            let doc = Document::builder()
+                .add_text("title", format!("Document {i}"))
+                .add_text("body", "Test content")
+                .build();
+            writer.add_document(doc).unwrap();
+        }
+        writer.commit().unwrap();
+
+        // Delete enough documents to potentially trigger auto-compaction
+        for i in 0..20 {
+            // 40% deletion
+            writer
+                .delete_documents("title", &format!("Document {i}"))
+                .unwrap();
+        }
+
+        // Check if auto-compaction should be triggered
+        let should_compact = writer.should_trigger_auto_compaction();
+        println!("Should trigger auto-compaction: {should_compact}");
+
+        // Get global deletion state
+        let global_state = writer.get_global_deletion_state();
+        println!("Global deletion state:");
+        println!("  Total documents: {}", global_state.total_documents);
+        println!("  Total deleted: {}", global_state.total_deleted);
+        println!(
+            "  Deletion ratio: {:.2}%",
+            global_state.global_deletion_ratio * 100.0
+        );
+        println!(
+            "  Compaction candidates: {:?}",
+            global_state.compaction_candidates
+        );
+    }
+
+    #[test]
+    fn test_compaction_completion() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add documents to multiple segments
+        for batch in 0..3 {
+            for i in 0..10 {
+                let doc = Document::builder()
+                    .add_text("title", format!("Batch {batch} Document {i}"))
+                    .add_text("body", "Test content")
+                    .build();
+                writer.add_document(doc).unwrap();
+            }
+            writer.commit().unwrap(); // Force segment creation
+        }
+
+        // Delete some documents to create compaction candidates
+        writer
+            .delete_documents("title", "Batch 0 Document 1")
+            .unwrap();
+        writer
+            .delete_documents("title", "Batch 0 Document 2")
+            .unwrap();
+        writer
+            .delete_documents("title", "Batch 1 Document 1")
+            .unwrap();
+
+        let report_before = writer.get_deletion_report();
+        println!(
+            "Before compaction: {} segments tracked",
+            report_before.deletion_stats.segments_tracked
+        );
+
+        // Simulate compaction completion
+        let segments_to_compact = vec!["segment_000000".to_string()];
+        let result = writer.mark_compaction_completed(&segments_to_compact);
+        assert!(result.is_ok());
+
+        let report_after = writer.get_deletion_report();
+        println!(
+            "After compaction: {} segments tracked",
+            report_after.deletion_stats.segments_tracked
+        );
+        println!(
+            "Compaction operations: {}",
+            report_after.deletion_stats.compaction_operations
+        );
+    }
+
+    #[test]
+    fn test_segment_management_integration() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add documents to create multiple segments
+        for batch in 0..3 {
+            for i in 0..5 {
+                let doc = Document::builder()
+                    .add_text("title", format!("Batch {batch} Document {i}"))
+                    .add_text("body", "Test content for segment management")
+                    .build();
+                writer.add_document(doc).unwrap();
+            }
+            writer.commit().unwrap(); // Force segment creation
+        }
+
+        // Test segment statistics
+        let segment_stats = writer.get_segment_stats();
+        println!("Segment Statistics:");
+        println!("  Total segments: {}", segment_stats.total_segments);
+        println!("  Total documents: {}", segment_stats.total_doc_count);
+        println!("  Total size: {} bytes", segment_stats.total_size_bytes);
+        println!(
+            "  Average segment size: {} bytes",
+            segment_stats.avg_segment_size
+        );
+
+        assert_eq!(segment_stats.total_segments, 3);
+        assert_eq!(segment_stats.total_doc_count, 15);
+
+        // Test managed segments
+        let managed_segments = writer.get_managed_segments();
+        assert_eq!(managed_segments.len(), 3);
+
+        for (i, segment) in managed_segments.iter().enumerate() {
+            println!(
+                "  Segment {}: {} docs, tier {}, {} bytes",
+                i, segment.segment_info.doc_count, segment.tier, segment.size_bytes
+            );
+        }
+
+        // Test segments by tier
+        let tiers = writer.get_segments_by_tier();
+        println!("Segments by tier:");
+        for (tier, segments) in tiers.iter().enumerate() {
+            println!("  Tier {}: {} segments", tier, segments.len());
+        }
+
+        // Test merge candidates generation
+        let size_candidates = writer.generate_merge_candidates(MergeStrategy::SizeBased);
+        println!("Size-based merge candidates: {}", size_candidates.len());
+
+        let balanced_candidates = writer.generate_merge_candidates(MergeStrategy::Balanced);
+        println!("Balanced merge candidates: {}", balanced_candidates.len());
+
+        // Test merge plan
+        let merge_plan = writer.get_merge_plan();
+        println!("Merge Plan:");
+        println!("  Strategy: {:?}", merge_plan.strategy);
+        println!("  Candidates: {}", merge_plan.candidates.len());
+        println!("  Estimated benefit: {:.2}", merge_plan.estimated_benefit);
+        println!("  Urgency: {:?}", merge_plan.urgency);
+
+        // Test marking segments as merging
+        if let Some(candidate) = merge_plan.candidates.first() {
+            if !candidate.segments.is_empty() {
+                writer
+                    .mark_segments_merging(&candidate.segments, true)
+                    .unwrap();
+
+                let updated_segments = writer.get_managed_segments();
+                let merging_count = updated_segments.iter().filter(|s| s.is_merging).count();
+
+                println!("Segments marked as merging: {merging_count}");
+                assert!(merging_count > 0);
+
+                // Unmark
+                writer
+                    .mark_segments_merging(&candidate.segments, false)
+                    .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_segment_merge_completion() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Create multiple small segments
+        for i in 0..4 {
+            let doc = Document::builder()
+                .add_text("title", format!("Document {i}"))
+                .add_text("body", "Small segment content")
+                .build();
+            writer.add_document(doc).unwrap();
+            writer.commit().unwrap(); // Force individual segments
+        }
+
+        let initial_stats = writer.get_segment_stats();
+        assert_eq!(initial_stats.total_segments, 4);
+
+        // Simulate merge completion
+        let segments = writer.get_managed_segments();
+        let old_segment_ids: Vec<String> = segments
+            .iter()
+            .take(2)
+            .map(|s| s.segment_info.segment_id.clone())
+            .collect();
+
+        let new_segment = SegmentInfo {
+            segment_id: "merged_segment".to_string(),
+            doc_count: 2,
+            doc_offset: 0,
+            generation: 100,
+            has_deletions: false,
+        };
+
+        writer
+            .complete_segment_merge(
+                &old_segment_ids,
+                new_segment,
+                vec!["merged_segment.json".to_string()],
+            )
+            .unwrap();
+
+        let final_stats = writer.get_segment_stats();
+        assert_eq!(final_stats.total_segments, 3); // 4 - 2 + 1
+        assert_eq!(final_stats.merge_operations, 1);
+
+        println!(
+            "Merge completed: {} -> {} segments",
+            initial_stats.total_segments, final_stats.total_segments
+        );
+    }
+
+    #[test]
+    fn test_segment_tier_rebalancing() {
+        let schema = create_test_schema();
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+
+        // Add documents to create segments
+        for i in 0..10 {
+            let doc = Document::builder()
+                .add_text("title", format!("Document {i}"))
+                .add_text("body", "Content for tier testing")
+                .build();
+            writer.add_document(doc).unwrap();
+        }
+        writer.commit().unwrap();
+
+        let tiers_before = writer.get_segments_by_tier();
+        println!("Tiers before rebalancing:");
+        for (tier, segments) in tiers_before.iter().enumerate() {
+            println!("  Tier {}: {} segments", tier, segments.len());
+        }
+
+        // Force rebalance
+        writer.rebalance_segment_tiers().unwrap();
+
+        let tiers_after = writer.get_segments_by_tier();
+        println!("Tiers after rebalancing:");
+        for (tier, segments) in tiers_after.iter().enumerate() {
+            println!("  Tier {}: {} segments", tier, segments.len());
+        }
+
+        // Verify that rebalancing was performed
+        let managed_segments = writer.get_managed_segments();
+        for segment in &managed_segments {
+            println!(
+                "  Segment {}: tier {}, size {} bytes",
+                segment.segment_info.segment_id, segment.tier, segment.size_bytes
+            );
+        }
     }
 }

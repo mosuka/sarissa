@@ -1212,8 +1212,10 @@ mod tests {
 
     #[test]
     fn test_compaction_candidates() {
-        let mut config = SegmentManagerConfig::default();
-        config.max_deletion_ratio = 0.2;
+        let config = SegmentManagerConfig {
+            max_deletion_ratio: 0.2,
+            ..Default::default()
+        };
 
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
@@ -1368,8 +1370,10 @@ mod tests {
 
     #[test]
     fn test_merge_plan_generation() {
-        let mut config = SegmentManagerConfig::default();
-        config.max_segments = 3;
+        let config = SegmentManagerConfig {
+            max_segments: 3,
+            ..Default::default()
+        };
 
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();

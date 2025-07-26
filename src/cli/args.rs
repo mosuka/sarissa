@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_search_modes() {
-        let args = SarissaArgs::try_parse_from(&[
+        let args = SarissaArgs::try_parse_from([
             "sarissa",
             "search",
             "/path/to/index",
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn test_spell_correction_flags() {
         // Spell correction enabled
-        let args = SarissaArgs::try_parse_from(&[
+        let args = SarissaArgs::try_parse_from([
             "sarissa",
             "search",
             "/path/to/index",
@@ -490,7 +490,7 @@ mod tests {
         }
 
         // Spell correction disabled
-        let args = SarissaArgs::try_parse_from(&[
+        let args = SarissaArgs::try_parse_from([
             "sarissa",
             "search",
             "/path/to/index",

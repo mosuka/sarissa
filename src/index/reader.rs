@@ -303,7 +303,9 @@ impl IndexReader for BasicIndexReader {
         self.check_closed()?;
 
         // Get field type to determine matching strategy
-        let field_type = self.schema.get_field(field)
+        let field_type = self
+            .schema
+            .get_field(field)
             .map(|field_def| field_def.field_type().type_name());
 
         let mut doc_freq = 0u64;
@@ -325,7 +327,7 @@ impl IndexReader for BasicIndexReader {
                             let tokens: Vec<&str> = text.split_whitespace().collect();
                             let mut found_in_doc = false;
                             let mut term_count_in_doc = 0u64;
-                            
+
                             for token in tokens {
                                 if token == term {
                                     if !found_in_doc {
@@ -360,7 +362,9 @@ impl IndexReader for BasicIndexReader {
         self.check_closed()?;
 
         // Get field type to determine matching strategy
-        let field_type = self.schema.get_field(field)
+        let field_type = self
+            .schema
+            .get_field(field)
             .map(|field_def| field_def.field_type().type_name());
 
         let mut matching_docs = Vec::new();
@@ -380,14 +384,14 @@ impl IndexReader for BasicIndexReader {
                             let tokens: Vec<&str> = text.split_whitespace().collect();
                             let mut positions = Vec::new();
                             let mut term_freq = 0;
-                            
+
                             for (pos, token) in tokens.iter().enumerate() {
                                 if *token == term {
                                     positions.push(pos as u64);
                                     term_freq += 1;
                                 }
                             }
-                            
+
                             if term_freq > 0 {
                                 matching_docs.push((doc_id as u64, term_freq, positions));
                             }
@@ -402,10 +406,15 @@ impl IndexReader for BasicIndexReader {
         } else {
             let doc_ids: Vec<u64> = matching_docs.iter().map(|(id, _, _)| *id).collect();
             let term_freqs: Vec<u64> = matching_docs.iter().map(|(_, freq, _)| *freq).collect();
-            let positions_vec: Vec<Vec<u64>> = matching_docs.iter().map(|(_, _, pos)| pos.clone()).collect();
-            
+            let positions_vec: Vec<Vec<u64>> = matching_docs
+                .iter()
+                .map(|(_, _, pos)| pos.clone())
+                .collect();
+
             Ok(Some(Box::new(BasicPostingIterator::with_positions(
-                doc_ids, term_freqs, positions_vec,
+                doc_ids,
+                term_freqs,
+                positions_vec,
             )?)))
         }
     }
@@ -514,7 +523,11 @@ impl BasicPostingIterator {
     }
 
     /// Create a new posting iterator with position information.
-    pub fn with_positions(doc_ids: Vec<u64>, term_freqs: Vec<u64>, positions: Vec<Vec<u64>>) -> Result<Self> {
+    pub fn with_positions(
+        doc_ids: Vec<u64>,
+        term_freqs: Vec<u64>,
+        positions: Vec<Vec<u64>>,
+    ) -> Result<Self> {
         if doc_ids.len() != term_freqs.len() || doc_ids.len() != positions.len() {
             return Err(SarissaError::index(
                 "Document IDs, term frequencies, and positions must have the same length",

@@ -1,12 +1,12 @@
 //! Parallel Indexing example - demonstrates distributed document indexing across multiple indices.
 
+use sarissa::index::writer::{BasicIndexWriter, WriterConfig};
 use sarissa::parallel_index::{
-    HashPartitioner, ParallelIndexConfig, ParallelIndexEngine, PartitionConfig, ValuePartitioner,
-    config::IndexingOptions, DocumentPartitioner,
+    DocumentPartitioner, HashPartitioner, ParallelIndexConfig, ParallelIndexEngine,
+    PartitionConfig, ValuePartitioner, config::IndexingOptions,
 };
 use sarissa::prelude::*;
 use sarissa::schema::{IdField, NumericField, TextField};
-use sarissa::index::writer::{BasicIndexWriter, WriterConfig};
 use sarissa::storage::{MemoryStorage, StorageConfig};
 use std::path::Path;
 use std::sync::Arc;
@@ -61,18 +61,18 @@ fn main() -> Result<()> {
     };
 
     let mut parallel_engine = ParallelIndexEngine::new(parallel_config)?;
-    
+
     // Set up hash partitioner
     let hash_partitioner = HashPartitioner::new("user_id".to_string(), 4);
     parallel_engine.set_partitioner(Box::new(hash_partitioner.clone()))?;
-    
+
     // Add writers for each partition
     for i in 0..4 {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let writer = Box::new(BasicIndexWriter::new(
-            schema.clone(), 
-            storage, 
-            WriterConfig::default()
+            schema.clone(),
+            storage,
+            WriterConfig::default(),
         )?);
         let partition_config = PartitionConfig::new(format!("partition_{}", i));
         parallel_engine.add_partition(format!("partition_{}", i), writer, partition_config)?;
@@ -184,9 +184,10 @@ fn main() -> Result<()> {
         "Indexing {} documents with hash partitioning...",
         documents.len()
     );
-    
+
     // Index documents using the parallel engine
-    let indexing_result = parallel_engine.index_documents(documents.clone(), IndexingOptions::default())?;
+    let indexing_result =
+        parallel_engine.index_documents(documents.clone(), IndexingOptions::default())?;
 
     // Show partitioning results
     println!("Hash Partitioning Results:");
@@ -197,11 +198,14 @@ fn main() -> Result<()> {
         "  Execution time: {:.2}ms",
         indexing_result.execution_time.as_millis()
     );
-    
+
     let metrics = parallel_engine.metrics();
     println!("  Engine metrics:");
     println!("    - Total operations: {}", metrics.total_operations);
-    println!("    - Successful operations: {}", metrics.successful_operations);
+    println!(
+        "    - Successful operations: {}",
+        metrics.successful_operations
+    );
 
     // Demonstrate hash partitioner directly
     println!("\n2. Hash Partition Distribution:");
@@ -258,29 +262,43 @@ fn main() -> Result<()> {
     let _index_paths_region: Vec<&Path> = temp_dirs_region.iter().map(|dir| dir.path()).collect();
 
     let mut parallel_engine_region = ParallelIndexEngine::new(parallel_config_region)?;
-    
+
     // Set up value partitioner for region-based processing
     parallel_engine_region.set_partitioner(Box::new(value_partitioner.clone()))?;
-    
+
     // Add writers for region partitions
     for i in 0..3 {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let writer = Box::new(BasicIndexWriter::new(
-            schema.clone(), 
-            storage, 
-            WriterConfig::default()
+            schema.clone(),
+            storage,
+            WriterConfig::default(),
         )?);
         let partition_config = PartitionConfig::new(format!("region_partition_{}", i));
-        parallel_engine_region.add_partition(format!("region_partition_{}", i), writer, partition_config)?;
+        parallel_engine_region.add_partition(
+            format!("region_partition_{}", i),
+            writer,
+            partition_config,
+        )?;
     }
 
     println!("\n4. Indexing with region-based partitioning...");
-    let region_indexing_result = parallel_engine_region.index_documents(documents.clone(), IndexingOptions::default())?;
+    let region_indexing_result =
+        parallel_engine_region.index_documents(documents.clone(), IndexingOptions::default())?;
 
     println!("Region Partitioning Results:");
-    println!("  Total documents: {}", region_indexing_result.total_documents);
-    println!("  Documents indexed: {}", region_indexing_result.documents_indexed);
-    println!("  Documents failed: {}", region_indexing_result.documents_failed);
+    println!(
+        "  Total documents: {}",
+        region_indexing_result.total_documents
+    );
+    println!(
+        "  Documents indexed: {}",
+        region_indexing_result.documents_indexed
+    );
+    println!(
+        "  Documents failed: {}",
+        region_indexing_result.documents_failed
+    );
     println!(
         "  Execution time: {:.2}ms",
         region_indexing_result.execution_time.as_millis()
@@ -310,16 +328,33 @@ fn main() -> Result<()> {
     // Show performance metrics
     println!("\n6. Performance metrics:");
     println!("  Hash partitioning:");
-    println!("    - Documents indexed: {}", indexing_result.documents_indexed);
-    println!("    - Execution time: {:.2}ms", indexing_result.execution_time.as_millis());
-    println!("    - Throughput: {:.1} docs/sec", 
-        indexing_result.documents_indexed as f64 / indexing_result.execution_time.as_secs_f64());
+    println!(
+        "    - Documents indexed: {}",
+        indexing_result.documents_indexed
+    );
+    println!(
+        "    - Execution time: {:.2}ms",
+        indexing_result.execution_time.as_millis()
+    );
+    println!(
+        "    - Throughput: {:.1} docs/sec",
+        indexing_result.documents_indexed as f64 / indexing_result.execution_time.as_secs_f64()
+    );
 
     println!("  Region partitioning:");
-    println!("    - Documents indexed: {}", region_indexing_result.documents_indexed);
-    println!("    - Execution time: {:.2}ms", region_indexing_result.execution_time.as_millis());
-    println!("    - Throughput: {:.1} docs/sec", 
-        region_indexing_result.documents_indexed as f64 / region_indexing_result.execution_time.as_secs_f64());
+    println!(
+        "    - Documents indexed: {}",
+        region_indexing_result.documents_indexed
+    );
+    println!(
+        "    - Execution time: {:.2}ms",
+        region_indexing_result.execution_time.as_millis()
+    );
+    println!(
+        "    - Throughput: {:.1} docs/sec",
+        region_indexing_result.documents_indexed as f64
+            / region_indexing_result.execution_time.as_secs_f64()
+    );
 
     println!("\n=== Custom Partitioning Strategy ===\n");
 
@@ -353,38 +388,46 @@ fn main() -> Result<()> {
 
     // Example 8: Verify partition states and document distribution
     println!("8. Verifying partition states and document distribution...");
-    
+
     // Check hash partitioning results
     println!("\n  Hash Partitioning Verification:");
     let hash_partition_stats = parallel_engine.partition_statistics()?;
     for (partition_id, stats) in hash_partition_stats {
-        println!("    Partition {}: {} documents indexed, {} operations", 
-            partition_id, stats.documents_indexed, stats.successful_operations);
+        println!(
+            "    Partition {}: {} documents indexed, {} operations",
+            partition_id, stats.documents_indexed, stats.successful_operations
+        );
         if stats.failed_operations > 0 {
             println!("      ⚠️  {} failed operations", stats.failed_operations);
         }
     }
-    
+
     // Check region partitioning results
     println!("\n  Region Partitioning Verification:");
     let region_partition_stats = parallel_engine_region.partition_statistics()?;
     for (partition_id, stats) in region_partition_stats {
-        println!("    Partition {}: {} documents indexed, {} operations", 
-            partition_id, stats.documents_indexed, stats.successful_operations);
+        println!(
+            "    Partition {}: {} documents indexed, {} operations",
+            partition_id, stats.documents_indexed, stats.successful_operations
+        );
         if stats.failed_operations > 0 {
             println!("      ⚠️  {} failed operations", stats.failed_operations);
         }
     }
-    
+
     // Aggregated statistics
     println!("\n  Aggregated Statistics:");
     let hash_aggregated = parallel_engine.aggregated_statistics()?;
     let region_aggregated = parallel_engine_region.aggregated_statistics()?;
-    
-    println!("    Hash partitioning total: {} documents across {} commits", 
-        hash_aggregated.documents_indexed, hash_aggregated.commit_count);
-    println!("    Region partitioning total: {} documents across {} commits", 
-        region_aggregated.documents_indexed, region_aggregated.commit_count);
+
+    println!(
+        "    Hash partitioning total: {} documents across {} commits",
+        hash_aggregated.documents_indexed, hash_aggregated.commit_count
+    );
+    println!(
+        "    Region partitioning total: {} documents across {} commits",
+        region_aggregated.documents_indexed, region_aggregated.commit_count
+    );
 
     println!("\n=== Commit and Optimization ===\n");
 
@@ -395,14 +438,20 @@ fn main() -> Result<()> {
 
     if failed_commits.is_empty() && failed_commits_region.is_empty() {
         println!("All commits successful!");
-        
+
         // Final verification after commit
         println!("\n  Post-commit verification:");
         let final_hash_stats = parallel_engine.aggregated_statistics()?;
         let final_region_stats = parallel_engine_region.aggregated_statistics()?;
-        
-        println!("    Hash partitioning: {} commits completed", final_hash_stats.commit_count);
-        println!("    Region partitioning: {} commits completed", final_region_stats.commit_count);
+
+        println!(
+            "    Hash partitioning: {} commits completed",
+            final_hash_stats.commit_count
+        );
+        println!(
+            "    Region partitioning: {} commits completed",
+            final_region_stats.commit_count
+        );
     } else {
         println!("Some commits failed: {:?}", failed_commits);
     }

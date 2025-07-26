@@ -572,13 +572,19 @@ mod tests {
 
     #[test]
     fn test_merge_stats_space_savings() {
-        let mut stats = MergeStats::default();
-        stats.size_before = 1000;
-        stats.size_after = 800;
+        let stats = MergeStats {
+            size_before: 1000,
+            size_after: 800,
+            ..Default::default()
+        };
 
         assert_eq!(stats.space_savings(), 20.0);
 
-        stats.size_before = 0;
-        assert_eq!(stats.space_savings(), 0.0);
+        let stats_zero = MergeStats {
+            size_before: 0,
+            size_after: 0,
+            ..Default::default()
+        };
+        assert_eq!(stats_zero.space_savings(), 0.0);
     }
 }

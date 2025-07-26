@@ -358,8 +358,10 @@ mod tests {
 
     #[test]
     fn test_metrics_collection() {
-        let mut config = ParallelSearchConfig::default();
-        config.enable_metrics = true;
+        let config = ParallelSearchConfig {
+            enable_metrics: true,
+            ..Default::default()
+        };
 
         let engine = ParallelSearchEngine::new(config).unwrap();
         engine
