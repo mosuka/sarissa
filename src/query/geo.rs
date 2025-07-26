@@ -312,6 +312,7 @@ impl GeoDistanceQuery {
     }
 
     /// Calculate enhanced relevance score with multiple factors.
+    #[allow(dead_code)]
     fn calculate_distance_score_enhanced(&self, distance_km: f64, point: &GeoPoint) -> f32 {
         if distance_km > self.distance_km {
             return 0.0;
@@ -334,6 +335,7 @@ impl GeoDistanceQuery {
     }
 
     /// Calculate geographic relevance based on point characteristics.
+    #[allow(dead_code)]
     fn calculate_geographic_relevance(&self, point: &GeoPoint) -> f32 {
         // Bonus for points in certain latitudinal zones (e.g., temperate zones)
         let lat_abs = point.lat.abs();
@@ -355,6 +357,7 @@ impl GeoDistanceQuery {
     }
 
     /// Estimate population density bonus (simplified simulation).
+    #[allow(dead_code)]
     fn estimate_population_density(&self, point: &GeoPoint) -> f32 {
         // Simplified heuristic: higher density near major coordinates
         let lat_density = (1.0 - (point.lat.abs() / 90.0)) as f32;
@@ -529,6 +532,7 @@ impl GeoBoundingBoxQuery {
     }
 
     /// Generate candidates within and around the bounding box.
+    #[allow(dead_code)]
     fn generate_bounding_box_candidates(&self) -> Vec<(u32, GeoPoint)> {
         let mut candidates = Vec::new();
         let (width, height) = self.bounding_box.dimensions();
@@ -571,6 +575,7 @@ impl GeoBoundingBoxQuery {
     }
 
     /// Calculate relevance score for points within the bounding box.
+    #[allow(dead_code)]
     fn calculate_bounding_box_score(&self, point: &GeoPoint) -> f32 {
         let center = self.bounding_box.center();
         let (width, height) = self.bounding_box.dimensions();
@@ -593,6 +598,7 @@ impl GeoBoundingBoxQuery {
     }
 
     /// Calculate bonus for points near edges of the bounding box.
+    #[allow(dead_code)]
     fn calculate_edge_proximity_bonus(&self, point: &GeoPoint) -> f32 {
         let (width, height) = self.bounding_box.dimensions();
         let edge_threshold = 0.1; // 10% of dimension
@@ -617,6 +623,7 @@ impl GeoBoundingBoxQuery {
     }
 
     /// Calculate bonus for points near corners of the bounding box.
+    #[allow(dead_code)]
     fn calculate_corner_bonus(&self, point: &GeoPoint) -> f32 {
         let corners = [
             self.bounding_box.top_left,

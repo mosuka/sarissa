@@ -327,39 +327,6 @@ fn main() -> Result<()> {
     let count = engine.count_mut(Box::new(query))?;
     println!("    Count: {} files", count);
 
-    println!("\n=== Wildcard Pattern Examples ===");
-    println!("* (asterisk): Matches zero or more characters");
-    println!("  'cat*' matches: 'cat', 'cats', 'category', 'catalog'");
-    println!("  '*ing' matches: 'running', 'walking', 'programming'");
-    println!("  '*test*' matches: 'testing', 'contest', 'testcase'");
-    println!();
-    println!("? (question mark): Matches exactly one character");
-    println!("  'c?t' matches: 'cat', 'cot', 'cut' (but not 'coat')");
-    println!("  '???' matches: any 3-character string");
-    println!("  'file?.txt' matches: 'file1.txt', 'filea.txt'");
-
-    println!("\n=== WildcardQuery Key Features ===");
-    println!("• Pattern matching with * and ? wildcards");
-    println!("• * matches zero or more characters");
-    println!("• ? matches exactly one character");
-    println!("• Case-sensitive matching");
-    println!("• Works with any text field");
-    println!("• Useful for filename and path matching");
-
-    println!("\n=== Use Cases ===");
-    println!("• File system searches: '*.pdf', '*.js'");
-    println!("• Product codes: 'PROD-*-2024'");
-    println!("• Email patterns: '*@company.com'");
-    println!("• Version matching: 'v?.?.?'");
-    println!("• Log file patterns: 'app-*-error.log'");
-    println!("• URL path matching: '/api/*/users'");
-
-    println!("\n=== Performance Notes ===");
-    println!("• Leading wildcards (*pattern) are slower");
-    println!("• Patterns starting with literals are faster");
-    println!("• Multiple wildcards increase complexity");
-    println!("• Consider prefix queries for simple prefix matching");
-
     engine.close()?;
     println!("\nWildcardQuery example completed successfully!");
 
