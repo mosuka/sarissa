@@ -3,7 +3,6 @@
 pub mod engine;
 pub mod facet;
 pub mod highlight;
-pub mod hybrid;
 pub mod result_processor;
 pub mod scoring;
 pub mod searcher;
@@ -13,7 +12,6 @@ pub mod spell_corrected;
 pub use self::engine::SearchEngine;
 pub use self::facet::*;
 pub use self::highlight::*;
-pub use self::hybrid::*;
 pub use self::result_processor::*;
 pub use self::scoring::*;
 pub use self::searcher::Searcher;

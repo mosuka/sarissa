@@ -28,6 +28,7 @@
 pub mod analysis;
 pub mod cli;
 pub mod error;
+pub mod hybrid_search;
 pub mod index;
 // Temporarily disable ML module to test core functionality
 // pub mod ml;
