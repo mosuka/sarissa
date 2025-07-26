@@ -1,7 +1,16 @@
-//! Parallel Search example - demonstrates concurrent searches across multiple indices with result merging.
+//! Parallel Search example - demonstrates parallel indexing followed by concurrent searches across multiple indices.
+//!
+//! This example combines parallel indexing and parallel search to show a complete workflow:
+//! 1. Create multiple indices using parallel indexing with different partitioning strategies
+//! 2. Perform concurrent searches across the indices with various merge strategies
+//! 3. Demonstrate performance metrics and optimization techniques
 
 use sarissa::index::reader::BasicIndexReader;
 use sarissa::index::writer::{BasicIndexWriter, WriterConfig};
+use sarissa::parallel_index::{
+    HashPartitioner, ParallelIndexConfig, ParallelIndexEngine, PartitionConfig,
+    config::IndexingOptions,
+};
 use sarissa::parallel_search::{
     MergeStrategyType, ParallelSearchConfig, ParallelSearchEngine, config::SearchOptions,
 };
@@ -9,194 +18,268 @@ use sarissa::prelude::*;
 use sarissa::query::{PhraseQuery, TermQuery};
 use sarissa::schema::{IdField, NumericField, TextField};
 use sarissa::storage::{MemoryStorage, StorageConfig};
+use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
-    println!("=== Parallel Search Example - Concurrent Multi-Index Search ===\n");
+    println!("=== Parallel Search Example - Complete Indexing and Search Workflow ===\n");
+
+    // ========================================================================
+    // PART 1: PARALLEL INDEXING
+    // ========================================================================
+
+    println!("PART 1: PARALLEL INDEXING\n");
 
     // Create temporary directories for multiple indices
-    let temp_dirs: Vec<TempDir> = (0..3).map(|_| TempDir::new().unwrap()).collect();
+    let temp_dirs: Vec<TempDir> = (0..4).map(|_| TempDir::new().unwrap()).collect();
+    let index_paths: Vec<&Path> = temp_dirs.iter().map(|dir| dir.path()).collect();
 
-    println!("Creating {} indices for parallel search:", temp_dirs.len());
-    for (i, dir) in temp_dirs.iter().enumerate() {
-        println!("  Index {}: {:?}", i, dir.path());
+    println!("Creating {} parallel indices:", index_paths.len());
+    for (i, path) in index_paths.iter().enumerate() {
+        println!("  Index {}: {:?}", i, path);
     }
 
-    // Create schema for product catalog
+    // Create a comprehensive schema
     let mut schema = Schema::new();
     schema.add_field("id", Box::new(IdField::new()))?;
     schema.add_field(
         "title",
         Box::new(TextField::new().stored(true).indexed(true)),
     )?;
+    schema.add_field("content", Box::new(TextField::new().indexed(true)))?;
     schema.add_field("description", Box::new(TextField::new().indexed(true)))?;
+    schema.add_field("author", Box::new(TextField::new().indexed(true)))?;
     schema.add_field("category", Box::new(TextField::new().indexed(true)))?;
+    schema.add_field("user_id", Box::new(NumericField::u64().indexed(true)))?;
+    schema.add_field("region", Box::new(TextField::new().indexed(true)))?;
+    schema.add_field("priority", Box::new(NumericField::u64().indexed(true)))?;
     schema.add_field("price", Box::new(NumericField::f64().indexed(true)))?;
 
-    println!("\n=== Setting Up Indices ===\n");
+    println!("\n=== Hash Partitioning for Document Indexing ===\n");
 
-    // Create and populate indices with different product categories
-    let indices_data = vec![
-        // Index 0: Electronics
-        vec![
-            (
-                "E001",
-                "Laptop Pro X",
-                "High-performance laptop with latest processor",
-                "electronics",
-                1299.99,
-            ),
-            (
-                "E002",
-                "Smartphone Ultra",
-                "Latest smartphone with advanced camera system",
-                "electronics",
-                999.99,
-            ),
-            (
-                "E003",
-                "Wireless Headphones",
-                "Premium noise-canceling wireless headphones",
-                "electronics",
-                349.99,
-            ),
-            (
-                "E004",
-                "Tablet Pro",
-                "Professional tablet for creative work",
-                "electronics",
-                799.99,
-            ),
-            (
-                "E005",
-                "Smart Watch",
-                "Advanced fitness and health tracking smartwatch",
-                "electronics",
-                399.99,
-            ),
-        ],
-        // Index 1: Books
-        vec![
-            (
-                "B001",
-                "The Rust Programming Language",
-                "Official guide to learning Rust programming",
-                "books",
-                49.99,
-            ),
-            (
-                "B002",
-                "Computer Science Fundamentals",
-                "Comprehensive guide to CS concepts",
-                "books",
-                59.99,
-            ),
-            (
-                "B003",
-                "Machine Learning Basics",
-                "Introduction to machine learning algorithms",
-                "books",
-                44.99,
-            ),
-            (
-                "B004",
-                "Data Structures and Algorithms",
-                "Essential algorithms for programmers",
-                "books",
-                54.99,
-            ),
-            (
-                "B005",
-                "Cloud Architecture Patterns",
-                "Best practices for cloud systems",
-                "books",
-                64.99,
-            ),
-        ],
-        // Index 2: Home & Garden
-        vec![
-            (
-                "H001",
-                "Smart Home Hub",
-                "Central control for all smart home devices",
-                "home",
-                199.99,
-            ),
-            (
-                "H002",
-                "Robot Vacuum Pro",
-                "Advanced robotic vacuum with mapping",
-                "home",
-                599.99,
-            ),
-            (
-                "H003",
-                "Smart Thermostat",
-                "Energy-efficient programmable thermostat",
-                "home",
-                249.99,
-            ),
-            (
-                "H004",
-                "Garden Tool Set",
-                "Professional quality gardening tools",
-                "garden",
-                149.99,
-            ),
-            (
-                "H005",
-                "Smart Security Camera",
-                "HD security camera with night vision",
-                "home",
-                179.99,
-            ),
-        ],
-    ];
+    // Configure parallel indexing engine
+    let parallel_config = ParallelIndexConfig {
+        max_concurrent_partitions: 4,
+        default_batch_size: 10,
+        max_buffer_memory: 512 * 1024 * 1024,
+        commit_interval: std::time::Duration::from_secs(30),
+        retry_attempts: 3,
+        operation_timeout: std::time::Duration::from_secs(60),
+        enable_metrics: true,
+        thread_pool_size: None,
+        allow_partial_failures: true,
+        auto_commit_threshold: 10000,
+    };
 
-    // Create indices and add documents
-    let mut index_readers = Vec::new();
+    let mut parallel_engine = ParallelIndexEngine::new(parallel_config)?;
 
-    for (index_num, (_temp_dir, products)) in temp_dirs.iter().zip(indices_data.iter()).enumerate()
-    {
+    // Set up hash partitioner by user_id
+    let hash_partitioner = HashPartitioner::new("user_id".to_string(), 4);
+    parallel_engine.set_partitioner(Box::new(hash_partitioner))?;
+
+    // Storage for later search operations
+    let mut storages: Vec<Arc<dyn sarissa::storage::Storage>> = Vec::new();
+
+    // Add writers for each partition
+    for i in 0..4 {
         let storage: Arc<dyn sarissa::storage::Storage> =
             Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let mut writer = BasicIndexWriter::new(
+        storages.push(Arc::clone(&storage));
+
+        let writer = Box::new(BasicIndexWriter::new(
             schema.clone(),
             Arc::clone(&storage),
             WriterConfig::default(),
-        )?;
-
-        println!(
-            "Populating Index {} with {} products",
-            index_num,
-            products.len()
-        );
-
-        for (id, title, description, category, price) in products {
-            let doc = Document::builder()
-                .add_text("id", *id)
-                .add_text("title", *title)
-                .add_text("description", *description)
-                .add_text("category", *category)
-                .add_float("price", *price)
-                .build();
-
-            writer.add_document(doc)?;
-        }
-
-        writer.commit()?;
-
-        // Create reader for this index
-        let reader = Box::new(BasicIndexReader::new(schema.clone(), Arc::clone(&storage))?);
-        index_readers.push((format!("index_{}", index_num), reader));
+        )?);
+        let partition_config = PartitionConfig::new(format!("partition_{}", i));
+        parallel_engine.add_partition(format!("partition_{}", i), writer, partition_config)?;
     }
 
-    println!("\n=== Configuring Parallel Search Engine ===\n");
+    // Create comprehensive test documents
+    let documents = vec![
+        // Technology products
+        Document::builder()
+            .add_text("id", "T001")
+            .add_text("title", "Laptop Pro X Advanced")
+            .add_text(
+                "content",
+                "High-performance laptop with latest processor technology",
+            )
+            .add_text(
+                "description",
+                "Professional laptop for developers and creators",
+            )
+            .add_text("author", "TechCorp")
+            .add_text("category", "electronics")
+            .add_integer("user_id", 1001)
+            .add_text("region", "north-america")
+            .add_integer("priority", 1)
+            .add_float("price", 1299.99)
+            .build(),
+        Document::builder()
+            .add_text("id", "T002")
+            .add_text("title", "Smartphone Ultra Smart")
+            .add_text(
+                "content",
+                "Latest smartphone with advanced camera system and AI",
+            )
+            .add_text("description", "Premium smartphone with professional camera")
+            .add_text("author", "PhoneCorp")
+            .add_text("category", "electronics")
+            .add_integer("user_id", 2002)
+            .add_text("region", "europe")
+            .add_integer("priority", 2)
+            .add_float("price", 999.99)
+            .build(),
+        Document::builder()
+            .add_text("id", "T003")
+            .add_text("title", "Smart Watch Pro")
+            .add_text("content", "Advanced fitness and health tracking smartwatch")
+            .add_text(
+                "description",
+                "Professional smartwatch for health monitoring",
+            )
+            .add_text("author", "WearTech")
+            .add_text("category", "electronics")
+            .add_integer("user_id", 3003)
+            .add_text("region", "asia-pacific")
+            .add_integer("priority", 1)
+            .add_float("price", 399.99)
+            .build(),
+        // Books and education
+        Document::builder()
+            .add_text("id", "B001")
+            .add_text("title", "The Rust Programming Language Guide")
+            .add_text(
+                "content",
+                "Official comprehensive guide to learning Rust programming",
+            )
+            .add_text(
+                "description",
+                "Professional programming guide for developers",
+            )
+            .add_text("author", "Steve Klabnik")
+            .add_text("category", "books")
+            .add_integer("user_id", 4004)
+            .add_text("region", "north-america")
+            .add_integer("priority", 2)
+            .add_float("price", 49.99)
+            .build(),
+        Document::builder()
+            .add_text("id", "B002")
+            .add_text("title", "Advanced Machine Learning")
+            .add_text(
+                "content",
+                "Comprehensive guide to advanced machine learning algorithms",
+            )
+            .add_text(
+                "description",
+                "Professional guide to ML for data scientists",
+            )
+            .add_text("author", "Dr. Alice Wilson")
+            .add_text("category", "books")
+            .add_integer("user_id", 5005)
+            .add_text("region", "europe")
+            .add_integer("priority", 1)
+            .add_float("price", 79.99)
+            .build(),
+        // Home products
+        Document::builder()
+            .add_text("id", "H001")
+            .add_text("title", "Smart Home Hub Pro")
+            .add_text(
+                "content",
+                "Central control system for all smart home devices",
+            )
+            .add_text("description", "Professional smart home automation center")
+            .add_text("author", "HomeTech")
+            .add_text("category", "home")
+            .add_integer("user_id", 6006)
+            .add_text("region", "asia-pacific")
+            .add_integer("priority", 2)
+            .add_float("price", 199.99)
+            .build(),
+        Document::builder()
+            .add_text("id", "H002")
+            .add_text("title", "Robot Vacuum Advanced")
+            .add_text(
+                "content",
+                "Advanced robotic vacuum with smart mapping and AI",
+            )
+            .add_text(
+                "description",
+                "Professional cleaning robot with advanced features",
+            )
+            .add_text("author", "CleanBot")
+            .add_text("category", "home")
+            .add_integer("user_id", 7007)
+            .add_text("region", "north-america")
+            .add_integer("priority", 3)
+            .add_float("price", 599.99)
+            .build(),
+        Document::builder()
+            .add_text("id", "H003")
+            .add_text("title", "Smart Security Camera Pro")
+            .add_text(
+                "content",
+                "HD security camera with night vision and smart detection",
+            )
+            .add_text("description", "Professional security monitoring system")
+            .add_text("author", "SecureTech")
+            .add_text("category", "home")
+            .add_integer("user_id", 8008)
+            .add_text("region", "europe")
+            .add_integer("priority", 1)
+            .add_float("price", 249.99)
+            .build(),
+    ];
+
+    println!(
+        "Indexing {} documents with hash partitioning...",
+        documents.len()
+    );
+
+    // Index documents using the parallel engine
+    let indexing_result =
+        parallel_engine.index_documents(documents.clone(), IndexingOptions::default())?;
+
+    println!("Indexing Results:");
+    println!("  Total documents: {}", indexing_result.total_documents);
+    println!("  Documents indexed: {}", indexing_result.documents_indexed);
+    println!("  Documents failed: {}", indexing_result.documents_failed);
+    println!(
+        "  Execution time: {:.2}ms",
+        indexing_result.execution_time.as_millis()
+    );
+
+    // Commit all indices
+    println!("\nCommitting all indices...");
+    let failed_commits = parallel_engine.commit_all()?;
+    if failed_commits.is_empty() {
+        println!("All commits successful!");
+    } else {
+        println!("Some commits failed: {:?}", failed_commits);
+    }
+
+    // ========================================================================
+    // PART 2: PARALLEL SEARCH
+    // ========================================================================
+
+    println!("\n{}", "=".repeat(80));
+    println!("PART 2: PARALLEL SEARCH\n");
+
+    // Create readers from the indexed storages
+    let mut index_readers = Vec::new();
+
+    for (i, storage) in storages.into_iter().enumerate() {
+        let reader = Box::new(BasicIndexReader::new(schema.clone(), storage)?);
+        index_readers.push((format!("partition_{}", i), reader));
+    }
 
     // Configure parallel search engine
-    let config = ParallelSearchConfig {
-        max_concurrent_tasks: 3,
+    let search_config = ParallelSearchConfig {
+        max_concurrent_tasks: 4,
         max_results_per_index: 100,
         enable_metrics: true,
         default_merge_strategy: MergeStrategyType::ScoreBased,
@@ -204,28 +287,27 @@ fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let engine = ParallelSearchEngine::new(config)?;
+    let search_engine = ParallelSearchEngine::new(search_config)?;
 
-    // Add indices to the engine with different weights
+    // Add indices to the search engine with different weights
     for (i, (name, reader)) in index_readers.into_iter().enumerate() {
         let weight = match i {
-            0 => 1.0, // Electronics - normal weight
-            1 => 1.5, // Books - higher weight
-            2 => 0.8, // Home - lower weight
+            0 => 1.0, // Electronics partition
+            1 => 1.5, // Books partition - higher weight
+            2 => 0.8, // Home partition - lower weight
+            3 => 1.0, // Mixed partition
             _ => 1.0,
         };
-        engine.add_index(name, reader, weight)?;
+        search_engine.add_index(name, reader, weight)?;
     }
 
     println!(
         "Added {} indices to parallel search engine",
-        engine.index_count()?
+        search_engine.index_count()?
     );
-    println!("  - index_0 (Electronics): weight = 1.0");
-    println!("  - index_1 (Books): weight = 1.5");
-    println!("  - index_2 (Home & Garden): weight = 0.8");
+    println!("Index weights: [1.0, 1.5, 0.8, 1.0] for different content priorities");
 
-    println!("\n=== Example 1: Simple Term Search ===\n");
+    println!("\n=== Example 1: Smart Device Search ===\n");
 
     // Search for "Smart" across all indices
     let query = Box::new(TermQuery::new("title", "Smart"));
@@ -233,7 +315,7 @@ fn main() -> Result<()> {
         .with_metrics(true)
         .with_timeout(std::time::Duration::from_secs(5));
 
-    let results = engine.search(query, options)?;
+    let results = search_engine.search(query, options)?;
 
     println!("Searching for 'Smart' in title field:");
     println!("Total hits: {}", results.total_hits);
@@ -244,22 +326,58 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
                 if let Some(id) = doc.get_field("id").and_then(|f| f.as_text()) {
-                    println!("  {}. {} [{}] (score: {:.4})", i + 1, title, id, hit.score);
-                } else {
-                    println!("  {}. {} (score: {:.4})", i + 1, title, hit.score);
+                    if let Some(category) = doc.get_field("category").and_then(|f| f.as_text()) {
+                        println!(
+                            "  {}. {} [{}:{}] (score: {:.4})",
+                            i + 1,
+                            title,
+                            id,
+                            category,
+                            hit.score
+                        );
+                    }
                 }
             }
         }
     }
 
-    // Debug: Show which Smart products should be found
-    println!("  Expected products with 'Smart' in title:");
-    println!("    - E005: Smart Watch");
-    println!("    - H001: Smart Home Hub");
-    println!("    - H003: Smart Thermostat");
-    println!("    - H005: Smart Security Camera");
+    println!("\n=== Example 2: Professional/Advanced Products ===\n");
 
-    println!("\n=== Example 2: Phrase Search with Different Merge Strategy ===\n");
+    // Search for "Professional" or "Advanced"
+    let query = Box::new(TermQuery::new("description", "Professional"));
+    let options = SearchOptions::new(10)
+        .with_merge_strategy(MergeStrategyType::Weighted)
+        .with_metrics(true);
+
+    let results = search_engine.search(query, options)?;
+
+    println!("Searching for 'Professional' in description field:");
+    println!("Using weighted merge strategy - Books index boosted 1.5x");
+    println!("Total hits: {}", results.total_hits);
+
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
+                if let Some(price) = doc.get_field("price").and_then(|f| match f {
+                    sarissa::schema::FieldValue::Float(v) => Some(*v),
+                    _ => None,
+                }) {
+                    if let Some(category) = doc.get_field("category").and_then(|f| f.as_text()) {
+                        println!(
+                            "  {}. {} [{}] - ${:.2} (weighted score: {:.4})",
+                            i + 1,
+                            title,
+                            category,
+                            price,
+                            hit.score
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    println!("\n=== Example 3: Programming Language Search ===\n");
 
     // Search for phrase "Programming Language"
     let query = Box::new(PhraseQuery::new(
@@ -270,24 +388,20 @@ fn main() -> Result<()> {
         .with_merge_strategy(MergeStrategyType::Weighted)
         .with_metrics(true);
 
-    let results = engine.search(query, options)?;
+    let results = search_engine.search(query, options)?;
 
     println!("Searching for phrase 'Programming Language':");
-    println!("Using weighted merge strategy (Books index has 1.5x weight)");
     println!("Total hits: {}", results.total_hits);
 
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
-                if let Some(price) = doc.get_field("price").and_then(|f| match f {
-                    sarissa::schema::FieldValue::Float(v) => Some(*v),
-                    _ => None,
-                }) {
+                if let Some(author) = doc.get_field("author").and_then(|f| f.as_text()) {
                     println!(
-                        "  {}. {} - ${:.2} (score: {:.4})",
+                        "  {}. {} by {} (score: {:.4})",
                         i + 1,
                         title,
-                        price,
+                        author,
                         hit.score
                     );
                 }
@@ -295,17 +409,17 @@ fn main() -> Result<()> {
         }
     }
 
-    println!("\n=== Example 3: Search with Minimum Score Filter ===\n");
+    println!("\n=== Example 4: Advanced Features Search ===\n");
 
     // Search for "Advanced" with minimum score threshold
-    let query = Box::new(TermQuery::new("description", "Advanced"));
+    let query = Box::new(TermQuery::new("content", "Advanced"));
     let options = SearchOptions::new(10)
-        .with_min_score(0.5)
+        .with_min_score(0.1)
         .with_metrics(true);
 
-    let results = engine.search(query, options)?;
+    let results = search_engine.search(query, options)?;
 
-    println!("Searching for 'Advanced' in descriptions with min score 0.5:");
+    println!("Searching for 'Advanced' in content with min score 0.1:");
     println!("Total hits: {}", results.total_hits);
 
     for (i, hit) in results.hits.iter().enumerate() {
@@ -324,145 +438,109 @@ fn main() -> Result<()> {
         }
     }
 
-    println!("\n=== Example 4: Performance Metrics ===\n");
-
-    let metrics = engine.metrics();
-    println!("Search Performance Metrics:");
-    println!("  Total searches: {}", metrics.total_searches);
-    println!("  Successful searches: {}", metrics.successful_searches);
-    println!("  Failed searches: {}", metrics.failed_searches);
-    println!(
-        "  Average execution time: {:.2}μs",
-        metrics.avg_execution_time.as_micros()
-    );
-    println!("  Total hits returned: {}", metrics.total_hits_returned);
-
-    println!("\n=== Example 5: Concurrent Search Demonstration ===\n");
-
-    // Reset metrics for clean measurement
-    engine.reset_metrics();
+    println!("\n=== Example 5: Concurrent Multi-Term Search ===\n");
 
     // Execute multiple searches to demonstrate concurrency
-    let search_terms = vec!["Pro", "Smart", "Advanced", "quality", "Premium"];
-    let mut total_time = std::time::Duration::new(0, 0);
-
-    println!(
-        "Executing {} parallel searches across {} indices...",
-        search_terms.len(),
-        engine.index_count()?
-    );
-
-    let search_fields = vec![
+    let search_terms = vec![
         ("title", "Pro"),
-        ("title", "Smart"),
-        ("description", "Advanced"),
-        ("description", "quality"),
-        ("description", "Premium"),
+        ("content", "system"),
+        ("description", "guide"),
+        ("category", "electronics"),
+        ("author", "Tech"),
     ];
 
-    for (field, term) in &search_fields {
+    println!(
+        "Executing {} concurrent searches across {} indices...",
+        search_terms.len(),
+        search_engine.index_count()?
+    );
+
+    let mut total_time = std::time::Duration::new(0, 0);
+    let mut total_hits = 0;
+
+    for (field, term) in &search_terms {
         let start = std::time::Instant::now();
         let query = Box::new(TermQuery::new(*field, *term));
-        let options = SearchOptions::new(10).with_metrics(true);
+        let options = SearchOptions::new(5).with_metrics(true);
 
-        let results = engine.search(query, options)?;
+        let results = search_engine.search(query, options)?;
         let elapsed = start.elapsed();
         total_time += elapsed;
+        total_hits += results.total_hits;
 
         println!(
-            "  Search '{}' in '{}': {} hits ({} returned) in {:.2}μs",
+            "  Search '{}' in '{}': {} hits in {:.2}μs",
             term,
             field,
             results.total_hits,
-            results.hits.len(),
             elapsed.as_micros()
         );
     }
 
-    println!("\nTotal search time: {:.2}μs", total_time.as_micros());
+    println!("\nConcurrent Search Summary:");
+    println!("  Total search time: {:.2}μs", total_time.as_micros());
     println!(
-        "Average time per search: {:.2}μs",
+        "  Average time per search: {:.2}μs",
         total_time.as_micros() / search_terms.len() as u128
     );
+    println!("  Total hits across all searches: {}", total_hits);
+
+    println!("\n=== Performance Metrics ===\n");
+
+    let search_metrics = search_engine.metrics();
+    println!("Search Engine Performance:");
+    println!("  Total searches: {}", search_metrics.total_searches);
     println!(
-        "Note: Searches are executed concurrently across {} indices",
-        engine.index_count()?
+        "  Successful searches: {}",
+        search_metrics.successful_searches
+    );
+    println!(
+        "  Success rate: {:.1}%",
+        (search_metrics.successful_searches as f64 / search_metrics.total_searches as f64) * 100.0
+    );
+    println!(
+        "  Average execution time: {:.2}μs",
+        search_metrics.avg_execution_time.as_micros()
+    );
+    println!(
+        "  Total hits returned: {}",
+        search_metrics.total_hits_returned
     );
 
-    println!("\n=== Example 6: Cross-Index Weighted Search ===\n");
-
-    // Demonstrate how weighting affects ranking when items appear in multiple indices
-    let query = Box::new(TermQuery::new("description", "Professional"));
-    let options = SearchOptions::new(10)
-        .with_merge_strategy(MergeStrategyType::Weighted)
-        .with_metrics(true);
-
-    let results = engine.search(query, options)?;
-
-    println!("Searching for 'Professional' in description field:");
+    let index_metrics = parallel_engine.metrics();
+    println!("\nIndexing Engine Performance:");
+    println!("  Total operations: {}", index_metrics.total_operations);
     println!(
-        "Results are weighted by index importance (Books: 1.5x, Electronics: 1.0x, Home: 0.8x)"
+        "  Successful operations: {}",
+        index_metrics.successful_operations
     );
-    println!("Total hits: {}", results.total_hits);
-
-    for (i, hit) in results.hits.iter().enumerate() {
-        if let Some(doc) = &hit.document {
-            if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
-                if let Some(category) = doc.get_field("category").and_then(|f| f.as_text()) {
-                    if let Some(id) = doc.get_field("id").and_then(|f| f.as_text()) {
-                        println!(
-                            "  {}. {} [{}:{}] (weighted score: {:.4})",
-                            i + 1,
-                            title,
-                            id,
-                            category,
-                            hit.score
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // Debug: Show which products should contain 'Professional'
-    println!("  Expected products with 'Professional' in description:");
-    println!("    - E004: Tablet Pro - 'Professional tablet for creative work'");
-    println!("    - H004: Garden Tool Set - 'Professional quality gardening tools'");
+    println!(
+        "  Success rate: {:.1}%",
+        (index_metrics.successful_operations as f64 / index_metrics.total_operations as f64)
+            * 100.0
+    );
 
     println!("\n=== Summary ===\n");
 
-    let final_metrics = engine.metrics();
-    println!("Parallel Search Engine Summary:");
-    println!("  • Indices managed: {}", engine.index_count()?);
+    println!("Parallel Search Workflow Complete!");
     println!(
-        "  • Total searches executed: {}",
-        final_metrics.total_searches
+        "✓ Indexed {} documents across {} partitions using hash partitioning",
+        indexing_result.documents_indexed, 4
     );
     println!(
-        "  • Success rate: {:.1}%",
-        (final_metrics.successful_searches as f64 / final_metrics.total_searches as f64) * 100.0
+        "✓ Executed {} searches across {} indices with different merge strategies",
+        search_metrics.total_searches,
+        search_engine.index_count()?
     );
-    println!(
-        "  • Total hits returned: {}",
-        final_metrics.total_hits_returned
-    );
-    println!(
-        "  • Average latency: {:.2}μs",
-        final_metrics.avg_execution_time.as_micros()
-    );
+    println!("✓ Demonstrated weighted scoring, phrase search, and concurrent execution");
+    println!("✓ Measured performance metrics for both indexing and search operations");
 
-    println!("\n=== Key Takeaways ===\n");
-    println!("1. Parallel search enables concurrent queries across multiple indices");
-    println!(
-        "2. Different merge strategies (score-based, weighted, round-robin) optimize for different use cases"
-    );
-    println!(
-        "3. Index weights allow prioritizing certain data sources (e.g., Books index has 1.5x weight)"
-    );
-    println!("4. Performance metrics help monitor search quality and latency");
-    println!("5. The engine gracefully handles timeouts and partial failures");
-
-    println!("\nParallel Search example completed successfully!");
+    println!("\nKey Benefits Demonstrated:");
+    println!("• Parallel indexing: Distributes documents efficiently across multiple indices");
+    println!("• Concurrent search: Executes searches simultaneously across all indices");
+    println!("• Flexible merging: Different strategies (score-based, weighted) for result ranking");
+    println!("• Performance monitoring: Comprehensive metrics for optimization");
+    println!("• Scalability: Handles multiple indices with configurable concurrency");
 
     Ok(())
 }
