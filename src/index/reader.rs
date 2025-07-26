@@ -45,6 +45,30 @@ pub trait IndexReader: Send + Sync + std::fmt::Debug {
         let _ = field;
         Ok(None)
     }
+
+    /// Get document frequency for a specific term in a field.
+    fn term_doc_freq(&self, field: &str, term: &str) -> Result<u64> {
+        match self.term_info(field, term)? {
+            Some(term_info) => Ok(term_info.doc_freq),
+            None => Ok(0),
+        }
+    }
+
+    /// Get field statistics including average field length.
+    fn field_statistics(&self, field: &str) -> Result<FieldStatistics> {
+        match self.field_stats(field)? {
+            Some(field_stats) => Ok(FieldStatistics {
+                avg_field_length: field_stats.avg_length,
+                doc_count: field_stats.doc_count,
+                total_terms: field_stats.total_terms,
+            }),
+            None => Ok(FieldStatistics {
+                avg_field_length: 10.0, // Default fallback
+                doc_count: 0,
+                total_terms: 0,
+            }),
+        }
+    }
 }
 
 /// Information about a term in the index.
@@ -92,6 +116,19 @@ pub struct FieldStats {
 
     /// Maximum field length.
     pub max_length: u64,
+}
+
+/// Simplified field statistics for query scoring.
+#[derive(Debug, Clone)]
+pub struct FieldStatistics {
+    /// Average field length.
+    pub avg_field_length: f64,
+
+    /// Number of documents with this field.
+    pub doc_count: u64,
+
+    /// Total number of terms.
+    pub total_terms: u64,
 }
 
 /// Iterator over posting lists.
@@ -301,7 +338,7 @@ impl IndexReader for BasicIndexReader {
     fn postings(&self, field: &str, term: &str) -> Result<Option<Box<dyn PostingIterator>>> {
         self.check_closed()?;
 
-        // Simple implementation: find documents containing the term
+        // Enhanced implementation: find documents containing the term with position information
         let term_lower = term.to_lowercase();
         let mut matching_docs = Vec::new();
 
@@ -309,10 +346,21 @@ impl IndexReader for BasicIndexReader {
             if let Some(field_value) = doc.get_field(field) {
                 if let Some(text) = field_value.as_text() {
                     let text_lower = text.to_lowercase();
-                    if text_lower.contains(&term_lower) {
-                        // Simple term frequency calculation
-                        let term_freq = text_lower.matches(&term_lower).count() as f32;
-                        matching_docs.push((doc_id as u64, term_freq));
+                    
+                    // Tokenize and find positions
+                    let tokens: Vec<&str> = text_lower.split_whitespace().collect();
+                    let mut positions = Vec::new();
+                    let mut term_freq = 0;
+                    
+                    for (pos, token) in tokens.iter().enumerate() {
+                        if token.contains(&term_lower) {
+                            positions.push(pos as u64);
+                            term_freq += 1;
+                        }
+                    }
+                    
+                    if term_freq > 0 {
+                        matching_docs.push((doc_id as u64, term_freq, positions));
                     }
                 }
             }
@@ -321,10 +369,12 @@ impl IndexReader for BasicIndexReader {
         if matching_docs.is_empty() {
             Ok(None)
         } else {
-            let doc_ids: Vec<u64> = matching_docs.iter().map(|(id, _)| *id).collect();
-            let term_freqs: Vec<u64> = matching_docs.iter().map(|(_, freq)| *freq as u64).collect();
-            Ok(Some(Box::new(BasicPostingIterator::new(
-                doc_ids, term_freqs,
+            let doc_ids: Vec<u64> = matching_docs.iter().map(|(id, _, _)| *id).collect();
+            let term_freqs: Vec<u64> = matching_docs.iter().map(|(_, freq, _)| *freq).collect();
+            let positions_vec: Vec<Vec<u64>> = matching_docs.iter().map(|(_, _, pos)| pos.clone()).collect();
+            
+            Ok(Some(Box::new(BasicPostingIterator::with_positions(
+                doc_ids, term_freqs, positions_vec,
             )?)))
         }
     }
@@ -397,6 +447,9 @@ pub struct BasicPostingIterator {
     /// Term frequencies for each document.
     term_freqs: Vec<u64>,
 
+    /// Positions of terms within each document.
+    positions: Vec<Vec<u64>>,
+
     /// Current position in the posting list.
     position: usize,
 
@@ -416,9 +469,31 @@ impl BasicPostingIterator {
             ));
         }
 
+        // Create empty positions for backward compatibility
+        let positions = vec![Vec::new(); doc_ids.len()];
+
         Ok(BasicPostingIterator {
             doc_ids,
             term_freqs,
+            positions,
+            position: 0,
+            exhausted: false,
+            started: false,
+        })
+    }
+
+    /// Create a new posting iterator with position information.
+    pub fn with_positions(doc_ids: Vec<u64>, term_freqs: Vec<u64>, positions: Vec<Vec<u64>>) -> Result<Self> {
+        if doc_ids.len() != term_freqs.len() || doc_ids.len() != positions.len() {
+            return Err(SarissaError::index(
+                "Document IDs, term frequencies, and positions must have the same length",
+            ));
+        }
+
+        Ok(BasicPostingIterator {
+            doc_ids,
+            term_freqs,
+            positions,
             position: 0,
             exhausted: false,
             started: false,
@@ -430,6 +505,7 @@ impl BasicPostingIterator {
         BasicPostingIterator {
             doc_ids: Vec::new(),
             term_freqs: Vec::new(),
+            positions: Vec::new(),
             position: 0,
             exhausted: true,
             started: false,
@@ -455,8 +531,11 @@ impl PostingIterator for BasicPostingIterator {
     }
 
     fn positions(&self) -> Result<Vec<u64>> {
-        // TODO: Implement position tracking
-        Ok(Vec::new())
+        if self.exhausted || self.position >= self.positions.len() {
+            Ok(Vec::new())
+        } else {
+            Ok(self.positions[self.position].clone())
+        }
     }
 
     fn next(&mut self) -> Result<bool> {

@@ -237,21 +237,6 @@ fn main() -> Result<()> {
     let count = engine.count_mut(Box::new(query))?;
     println!("   Count: {} documents", count);
 
-    println!("\n=== PhraseQuery Key Features ===");
-    println!("• Exact word sequence matching");
-    println!("• Maintains word order");
-    println!("• More precise than individual term searches");
-    println!("• Useful for finding specific concepts or names");
-    println!("• Can handle phrases of any length");
-    println!("• Case-sensitive by default");
-
-    println!("\n=== Use Cases ===");
-    println!("• Finding proper nouns: 'New York City'");
-    println!("• Technical terms: 'machine learning algorithm'");
-    println!("• Exact quotes: 'to be or not to be'");
-    println!("• Brand names: 'Coca Cola'");
-    println!("• Academic concepts: 'artificial intelligence'");
-
     engine.close()?;
     println!("\nPhraseQuery example completed successfully!");
 
