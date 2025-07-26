@@ -302,20 +302,41 @@ impl IndexReader for BasicIndexReader {
     fn term_info(&self, field: &str, term: &str) -> Result<Option<ReaderTermInfo>> {
         self.check_closed()?;
 
-        // Simple implementation: check if any document contains the term in the specified field
-        let term_lower = term.to_lowercase();
+        // Get field type to determine matching strategy
+        let field_type = self.schema.get_field(field)
+            .map(|field_def| field_def.field_type().type_name());
+
         let mut doc_freq = 0u64;
         let mut total_term_freq = 0u64;
 
         for doc in &self.document_cache {
             if let Some(field_value) = doc.get_field(field) {
                 if let Some(text) = field_value.as_text() {
-                    // Simple tokenization and matching
-                    let text_lower = text.to_lowercase();
-                    if text_lower.contains(&term_lower) {
-                        doc_freq += 1;
-                        // Count occurrences (simplified)
-                        total_term_freq += text_lower.matches(&term_lower).count() as u64;
+                    match field_type {
+                        Some("id") => {
+                            // IdField: exact string matching (case-sensitive)
+                            if text == term {
+                                doc_freq += 1;
+                                total_term_freq += 1;
+                            }
+                        }
+                        _ => {
+                            // TextField: token-based matching (case-sensitive)
+                            let tokens: Vec<&str> = text.split_whitespace().collect();
+                            let mut found_in_doc = false;
+                            let mut term_count_in_doc = 0u64;
+                            
+                            for token in tokens {
+                                if token == term {
+                                    if !found_in_doc {
+                                        doc_freq += 1;
+                                        found_in_doc = true;
+                                    }
+                                    term_count_in_doc += 1;
+                                }
+                            }
+                            total_term_freq += term_count_in_doc;
+                        }
                     }
                 }
             }
@@ -338,29 +359,39 @@ impl IndexReader for BasicIndexReader {
     fn postings(&self, field: &str, term: &str) -> Result<Option<Box<dyn PostingIterator>>> {
         self.check_closed()?;
 
-        // Enhanced implementation: find documents containing the term with position information
-        let term_lower = term.to_lowercase();
+        // Get field type to determine matching strategy
+        let field_type = self.schema.get_field(field)
+            .map(|field_def| field_def.field_type().type_name());
+
         let mut matching_docs = Vec::new();
 
         for (doc_id, doc) in self.document_cache.iter().enumerate() {
             if let Some(field_value) = doc.get_field(field) {
                 if let Some(text) = field_value.as_text() {
-                    let text_lower = text.to_lowercase();
-                    
-                    // Tokenize and find positions
-                    let tokens: Vec<&str> = text_lower.split_whitespace().collect();
-                    let mut positions = Vec::new();
-                    let mut term_freq = 0;
-                    
-                    for (pos, token) in tokens.iter().enumerate() {
-                        if token.contains(&term_lower) {
-                            positions.push(pos as u64);
-                            term_freq += 1;
+                    match field_type {
+                        Some("id") => {
+                            // IdField: exact string matching
+                            if text == term {
+                                matching_docs.push((doc_id as u64, 1, vec![0]));
+                            }
                         }
-                    }
-                    
-                    if term_freq > 0 {
-                        matching_docs.push((doc_id as u64, term_freq, positions));
+                        _ => {
+                            // TextField: token-based matching with positions
+                            let tokens: Vec<&str> = text.split_whitespace().collect();
+                            let mut positions = Vec::new();
+                            let mut term_freq = 0;
+                            
+                            for (pos, token) in tokens.iter().enumerate() {
+                                if *token == term {
+                                    positions.push(pos as u64);
+                                    term_freq += 1;
+                                }
+                            }
+                            
+                            if term_freq > 0 {
+                                matching_docs.push((doc_id as u64, term_freq, positions));
+                            }
+                        }
                     }
                 }
             }

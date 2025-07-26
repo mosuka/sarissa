@@ -83,8 +83,8 @@ fn main() -> Result<()> {
     println!("\n=== TermQuery Examples ===\n");
 
     // Example 1: Search for exact term in title field
-    println!("1. Searching for 'rust' in title field:");
-    let query = TermQuery::new("title", "rust");
+    println!("1. Searching for 'Rust' in title field:");
+    let query = TermQuery::new("title", "Rust");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
 
@@ -160,8 +160,8 @@ fn main() -> Result<()> {
     println!("   Found {} results", results.total_hits);
 
     // Example 5: Case sensitivity demonstration
-    println!("\n5. Case sensitivity - searching for 'RUST' (uppercase):");
-    let query = TermQuery::new("title", "RUST");
+    println!("\n5. Case sensitivity - searching for 'rust' (lowercase):");
+    let query = TermQuery::new("title", "rust");
     let request = SearchRequest::new(Box::new(query));
     let results = engine.search_mut(request)?;
 
@@ -201,13 +201,6 @@ fn main() -> Result<()> {
     let query = TermQuery::new("body", "programming");
     let count = engine.count_mut(Box::new(query))?;
     println!("   Count: {} documents", count);
-
-    println!("\n=== TermQuery Key Features ===");
-    println!("• Exact term matching");
-    println!("• Case-sensitive by default");
-    println!("• Works with any indexed field");
-    println!("• Fast and efficient for single term lookups");
-    println!("• Foundation for more complex queries");
 
     engine.close()?;
     println!("\nTermQuery example completed successfully!");
