@@ -99,10 +99,10 @@ impl GeoBoundingBox {
     /// Check if a point is within this bounding box.
     pub fn contains(&self, point: &GeoPoint) -> bool {
         point.within_bounds(
-            self.bottom_right.lat,
-            self.top_left.lat,
-            self.top_left.lon,
-            self.bottom_right.lon,
+            self.bottom_right.lat,  // min_lat
+            self.top_left.lat,      // max_lat  
+            self.top_left.lon,      // min_lon
+            self.bottom_right.lon,  // max_lon
         )
     }
 
@@ -118,6 +118,22 @@ impl GeoBoundingBox {
         let width = self.bottom_right.lon - self.top_left.lon;
         let height = self.top_left.lat - self.bottom_right.lat;
         (width, height)
+    }
+
+    /// Get the maximum distance from the center to any corner of the bounding box.
+    pub fn max_distance_from_center(&self) -> f64 {
+        let center = self.center();
+        let corners = [
+            &self.top_left,
+            &self.bottom_right,
+            &GeoPoint::new(self.top_left.lat, self.bottom_right.lon).unwrap(),
+            &GeoPoint::new(self.bottom_right.lat, self.top_left.lon).unwrap(),
+        ];
+        
+        corners
+            .iter()
+            .map(|corner| center.distance_to(corner))
+            .fold(0.0, f64::max)
     }
 }
 
@@ -169,21 +185,35 @@ impl GeoDistanceQuery {
     /// Find matching documents and their distances using spatial indexing.
     pub fn find_matches(&self, reader: &dyn IndexReader) -> Result<Vec<GeoMatch>> {
         let mut matches = Vec::new();
+        let mut seen_docs = std::collections::HashSet::new();
 
         // Create a bounding box for efficient filtering
         let bounding_box = self.create_bounding_box();
 
-        // For now, use synthetic data, but this would integrate with actual spatial index
+        // Get candidates from the index
         let candidates = self.get_spatial_candidates(reader, &bounding_box)?;
 
         for (doc_id, point) in candidates {
+            // Skip if we've already processed this document
+            if seen_docs.contains(&doc_id) {
+                continue;
+            }
+            seen_docs.insert(doc_id);
+
             let distance = self.center.distance_to(&point);
             if distance <= self.distance_km {
+                let score = if distance == 0.0 {
+                    1.0
+                } else {
+                    // Simple inverse distance scoring
+                    (1.0 - (distance / self.distance_km)).max(0.0) as f32
+                };
+
                 matches.push(GeoMatch {
                     doc_id,
                     point,
                     distance_km: distance,
-                    relevance_score: self.calculate_distance_score_enhanced(distance, &point),
+                    relevance_score: score,
                 });
             }
         }
@@ -220,14 +250,17 @@ impl GeoDistanceQuery {
         )
         .unwrap_or(self.center);
 
-        GeoBoundingBox::new(top_left, bottom_right).unwrap_or_else(|_| {
+        let bbox = GeoBoundingBox::new(top_left, bottom_right).unwrap_or_else(|_| {
             // Fallback to a small box around center
             let fallback_top_left =
                 GeoPoint::new(self.center.lat + 0.01, self.center.lon - 0.01).unwrap();
             let fallback_bottom_right =
                 GeoPoint::new(self.center.lat - 0.01, self.center.lon + 0.01).unwrap();
             GeoBoundingBox::new(fallback_top_left, fallback_bottom_right).unwrap()
-        })
+        });
+
+
+        bbox
     }
 
     /// Get spatial candidates from the index within the bounding box.
@@ -236,81 +269,35 @@ impl GeoDistanceQuery {
         reader: &dyn IndexReader,
         bounding_box: &GeoBoundingBox,
     ) -> Result<Vec<(u32, GeoPoint)>> {
-        // In a real implementation, this would:
-        // 1. Query the spatial index for documents within the bounding box
-        // 2. Extract geographical coordinates from the field
-        // 3. Return candidate points for distance calculation
-
         let mut candidates = Vec::new();
 
-        // For demonstration, generate realistic candidates based on field statistics
-        if let Some(_field_stats) = reader.field_stats(&self.field)? {
-            candidates.extend(self.generate_realistic_candidates(bounding_box));
-        }
+        // Get the maximum document ID to iterate through all documents
+        let max_doc = reader.max_doc();
 
-        // Add some synthetic data for testing
-        candidates.extend(self.generate_synthetic_points());
-
-        Ok(candidates)
-    }
-
-    /// Generate realistic candidates based on spatial patterns.
-    fn generate_realistic_candidates(&self, bounding_box: &GeoBoundingBox) -> Vec<(u32, GeoPoint)> {
-        let mut candidates = Vec::new();
-        let (width, height) = bounding_box.dimensions();
-
-        // Generate points with realistic density patterns
-        let num_points = ((width * height * 10000.0) as usize).min(1000); // Density-based
-
-        for i in 0..num_points {
-            let lat_ratio = (i as f64 % 10.0) / 10.0;
-            let lon_ratio = ((i / 10) as f64 % 10.0) / 10.0;
-
-            let lat = bounding_box.bottom_right.lat + lat_ratio * height;
-            let lon = bounding_box.top_left.lon + lon_ratio * width;
-
-            if let Ok(point) = GeoPoint::new(lat, lon) {
-                // Add some clustering patterns (real-world locations are often clustered)
-                let cluster_probability = 0.3;
-                if (i as f64 * 0.123) % 1.0 < cluster_probability {
-                    candidates.push((i as u32 + 1000, point));
-
-                    // Add nearby points for clustering
-                    for j in 1..=3 {
-                        if let Ok(nearby_point) =
-                            GeoPoint::new(lat + (j as f64 * 0.001), lon + (j as f64 * 0.001))
-                        {
-                            candidates.push((i as u32 + 1000 + j as u32, nearby_point));
+        // Iterate through all documents in the index
+        for doc_id in 0..max_doc {
+            // Get the document
+            if let Some(doc) = reader.document(doc_id)? {
+                // Get the geo field value
+                if let Some(field_value) = doc.get_field(&self.field) {
+                    // Extract the GeoPoint from the field value
+                    if let Some(geo_point) = field_value.as_geo() {
+                        // First check bounding box for efficiency, then exact distance
+                        if bounding_box.contains(geo_point) {
+                            let distance = self.center.distance_to(geo_point);
+                            // Double-check with exact distance calculation
+                            if distance <= self.distance_km {
+                                candidates.push((doc_id as u32, geo_point.clone()));
+                            }
                         }
                     }
                 }
             }
         }
 
-        candidates
+        Ok(candidates)
     }
 
-    /// Generate synthetic geographical points for demonstration.
-    fn generate_synthetic_points(&self) -> Vec<(u32, GeoPoint)> {
-        let mut points = Vec::new();
-
-        // Generate points in a grid around the center
-        for i in 0..10 {
-            for j in 0..10 {
-                let lat_offset = (i as f64 - 5.0) * 0.01; // ~1km spacing
-                let lon_offset = (j as f64 - 5.0) * 0.01;
-
-                if let Ok(point) =
-                    GeoPoint::new(self.center.lat + lat_offset, self.center.lon + lon_offset)
-                {
-                    let doc_id = (i * 10 + j + 1) as u32;
-                    points.push((doc_id, point));
-                }
-            }
-        }
-
-        points
-    }
 
     /// Calculate relevance score based on distance (closer = higher score).
     #[allow(dead_code)]
@@ -469,15 +456,30 @@ impl GeoBoundingBoxQuery {
     /// Find matching documents within the bounding box.
     pub fn find_matches(&self, reader: &dyn IndexReader) -> Result<Vec<GeoMatch>> {
         let mut matches = Vec::new();
+        let mut seen_docs = std::collections::HashSet::new();
 
         // Get candidates from the spatial index
         let candidates = self.get_candidates_in_bounds(reader)?;
 
         for (doc_id, point) in candidates {
+            // Skip if we've already processed this document
+            if seen_docs.contains(&doc_id) {
+                continue;
+            }
+            seen_docs.insert(doc_id);
+
             if self.bounding_box.contains(&point) {
                 let center = self.bounding_box.center();
                 let distance = center.distance_to(&point);
-                let relevance_score = self.calculate_bounding_box_score(&point);
+                
+                // Simple scoring based on position within bounding box
+                let relevance_score = if distance == 0.0 {
+                    1.0
+                } else {
+                    // Closer to center gets higher score
+                    let max_distance = self.bounding_box.max_distance_from_center();
+                    ((max_distance - distance) / max_distance).max(0.0) as f32
+                };
 
                 matches.push(GeoMatch {
                     doc_id,
@@ -503,12 +505,24 @@ impl GeoBoundingBoxQuery {
     fn get_candidates_in_bounds(&self, reader: &dyn IndexReader) -> Result<Vec<(u32, GeoPoint)>> {
         let mut candidates = Vec::new();
 
-        // In a real implementation, this would use a spatial index (R-tree, quadtree, etc.)
-        // to efficiently query for points within the bounding box
+        // Get the maximum document ID to iterate through all documents
+        let max_doc = reader.max_doc();
 
-        // For demonstration, generate realistic candidates
-        if let Some(_field_stats) = reader.field_stats(&self.field)? {
-            candidates.extend(self.generate_bounding_box_candidates());
+        // Iterate through all documents in the index
+        for doc_id in 0..max_doc {
+            // Get the document
+            if let Some(doc) = reader.document(doc_id)? {
+                // Get the geo field value
+                if let Some(field_value) = doc.get_field(&self.field) {
+                    // Extract the GeoPoint from the field value
+                    if let Some(geo_point) = field_value.as_geo() {
+                        // Check if the point is within the bounding box
+                        if self.bounding_box.contains(geo_point) {
+                            candidates.push((doc_id as u32, geo_point.clone()));
+                        }
+                    }
+                }
+            }
         }
 
         Ok(candidates)
@@ -696,8 +710,8 @@ pub struct GeoMatch {
 /// Matcher for geographical queries.
 #[derive(Debug)]
 pub struct GeoMatcher {
-    /// Matching documents
-    doc_ids: Vec<u64>,
+    /// Matching documents in order of relevance (distance-sorted)
+    matches: Vec<GeoMatch>,
     /// Current iteration position
     current_index: usize,
     /// Current document ID
@@ -707,13 +721,10 @@ pub struct GeoMatcher {
 impl GeoMatcher {
     /// Create a new geo matcher.
     pub fn new(matches: Vec<GeoMatch>) -> Self {
-        let mut doc_ids: Vec<u64> = matches.into_iter().map(|m| m.doc_id as u64).collect();
-        doc_ids.sort();
-
         GeoMatcher {
-            doc_ids,
+            matches,
             current_index: 0,
-            current_doc_id: 0,
+            current_doc_id: 0, // Will be set by first next() call
         }
     }
 }
@@ -724,19 +735,20 @@ impl Matcher for GeoMatcher {
     }
 
     fn next(&mut self) -> Result<bool> {
-        if self.current_index < self.doc_ids.len() {
-            self.current_doc_id = self.doc_ids[self.current_index];
+        if self.current_index < self.matches.len() {
+            self.current_doc_id = self.matches[self.current_index].doc_id as u64;
             self.current_index += 1;
             Ok(true)
         } else {
+            self.current_doc_id = u64::MAX; // Invalid state
             Ok(false)
         }
     }
 
     fn skip_to(&mut self, target: u64) -> Result<bool> {
-        // Find first document ID >= target
-        while self.current_index < self.doc_ids.len() {
-            let doc_id = self.doc_ids[self.current_index];
+        // Find first document ID >= target in order
+        while self.current_index < self.matches.len() {
+            let doc_id = self.matches[self.current_index].doc_id as u64;
             if doc_id >= target {
                 self.current_doc_id = doc_id;
                 self.current_index += 1;
@@ -748,11 +760,11 @@ impl Matcher for GeoMatcher {
     }
 
     fn cost(&self) -> u64 {
-        self.doc_ids.len() as u64
+        self.matches.len() as u64
     }
 
     fn is_exhausted(&self) -> bool {
-        self.current_index >= self.doc_ids.len()
+        self.current_index >= self.matches.len()
     }
 }
 

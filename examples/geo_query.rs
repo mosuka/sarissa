@@ -297,47 +297,6 @@ fn main() -> Result<()> {
     let count = engine.count_mut(Box::new(query))?;
     println!("   Count: {} locations", count);
 
-    println!("\n=== Geographic Coordinate Examples ===");
-    println!("Major US Cities Coordinates:");
-    println!("• New York City: 40.7128° N, 74.0060° W");
-    println!("• San Francisco: 37.7749° N, 122.4194° W");
-    println!("• Los Angeles: 34.0522° N, 118.2437° W");
-    println!("• Seattle: 47.6062° N, 122.3321° W");
-    println!("• Chicago: 41.8781° N, 87.6298° W");
-    println!("• Miami: 25.7617° N, 80.1918° W");
-
-    println!("\n=== Distance Examples ===");
-    println!("Approximate distances:");
-    println!("• 1 km ≈ 0.62 miles");
-    println!("• 5 km ≈ 3.1 miles (walking distance)");
-    println!("• 10 km ≈ 6.2 miles (cycling distance)");
-    println!("• 50 km ≈ 31 miles (suburban area)");
-    println!("• 100 km ≈ 62 miles (metropolitan area)");
-
-    println!("\n=== GeoQuery Key Features ===");
-    println!("• Radius-based searches (within_radius)");
-    println!("• Bounding box searches (within_bounding_box)");
-    println!("• Distance calculations using great circle distance");
-    println!("• Works with latitude/longitude coordinates");
-    println!("• Efficient spatial indexing");
-    println!("• Distance-based relevance scoring");
-
-    println!("\n=== Use Cases ===");
-    println!("• Location-based services: 'Find restaurants near me'");
-    println!("• Real estate: 'Homes within 10km of downtown'");
-    println!("• Logistics: 'Warehouses within delivery radius'");
-    println!("• Tourism: 'Attractions within walking distance'");
-    println!("• Emergency services: 'Nearest hospitals'");
-    println!("• Social media: 'Posts from this area'");
-    println!("• Weather services: 'Stations in region'");
-
-    println!("\n=== Coordinate System Notes ===");
-    println!("• Uses WGS84 coordinate system (GPS standard)");
-    println!("• Latitude: -90° (South Pole) to +90° (North Pole)");
-    println!("• Longitude: -180° (West) to +180° (East)");
-    println!("• Distance calculations account for Earth's curvature");
-    println!("• Precision: ~11 meters at equator per 0.0001°");
-
     engine.close()?;
     println!("\nGeoQuery example completed successfully!");
 
