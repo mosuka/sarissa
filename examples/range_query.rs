@@ -245,7 +245,7 @@ fn main() -> Result<()> {
 
     // Example 6: Budget-friendly books (price under $50)
     println!("\n6. Budget-friendly books (price under $50.00):");
-    let query = NumericRangeQuery::f64_range("price", None, Some(50.0));
+    let query = NumericRangeQuery::f64_range_exclusive_upper("price", None, Some(50.0));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search_mut(request)?;
 
@@ -312,22 +312,6 @@ fn main() -> Result<()> {
     let results = engine.search_mut(request)?;
 
     println!("   Found {} results", results.total_hits);
-
-    println!("\n=== RangeQuery Key Features ===");
-    println!("• Numeric range searches (integers and floats)");
-    println!("• Open-ended ranges (min-only or max-only)");
-    println!("• Closed ranges (both min and max)");
-    println!("• Works with any numeric field type");
-    println!("• Efficient for filtering by price, date, rating, etc.");
-    println!("• Inclusive boundaries by default");
-
-    println!("\n=== Use Cases ===");
-    println!("• E-commerce: price filtering");
-    println!("• Content: publication date ranges");
-    println!("• Reviews: rating thresholds");
-    println!("• Inventory: quantity ranges");
-    println!("• Analytics: metric boundaries");
-    println!("• Time series: temporal filtering");
 
     engine.close()?;
     println!("\nRangeQuery example completed successfully!");

@@ -292,9 +292,24 @@ impl NumericRangeQuery {
         )
     }
 
-    /// Create a range query for floats.
+    /// Create a range query for floats with inclusive bounds.
     pub fn f64_range<S: Into<String>>(field: S, lower: Option<f64>, upper: Option<f64>) -> Self {
         Self::new(field, NumericType::F64, lower, upper, true, true)
+    }
+
+    /// Create a range query for floats with exclusive upper bound.
+    pub fn f64_range_exclusive_upper<S: Into<String>>(field: S, lower: Option<f64>, upper: Option<f64>) -> Self {
+        Self::new(field, NumericType::F64, lower, upper, true, false)
+    }
+
+    /// Create a range query for floats with exclusive lower bound.
+    pub fn f64_range_exclusive_lower<S: Into<String>>(field: S, lower: Option<f64>, upper: Option<f64>) -> Self {
+        Self::new(field, NumericType::F64, lower, upper, false, true)
+    }
+
+    /// Create a range query for floats with both bounds exclusive.
+    pub fn f64_range_exclusive<S: Into<String>>(field: S, lower: Option<f64>, upper: Option<f64>) -> Self {
+        Self::new(field, NumericType::F64, lower, upper, false, false)
     }
 
     /// Create a greater than query.
@@ -449,6 +464,158 @@ impl NumericRangeQuery {
     pub fn max_i64(&self) -> Option<i64> {
         self.max_f64().map(|v| v as i64)
     }
+
+    /// Count the number of documents that match this range query.
+    pub fn count_matching_documents(&self, reader: &dyn IndexReader) -> Result<u64> {
+        let mut count = 0u64;
+        let total_docs = reader.max_doc();
+
+        for doc_id in 0..total_docs {
+            if let Ok(Some(doc)) = reader.document(doc_id) {
+                if let Some(field_value) = doc.get_field(&self.field) {
+                    let numeric_value = match field_value {
+                        crate::schema::FieldValue::Float(f) => *f,
+                        crate::schema::FieldValue::Integer(i) => *i as f64,
+                        _ => continue, // Not a numeric field
+                    };
+
+                    if self.contains_numeric(numeric_value) {
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(count)
+    }
+}
+
+/// A scorer specialized for numeric range queries.
+#[derive(Debug, Clone)]
+pub struct RangeScorer {
+    /// Lower bound value for proximity calculation.
+    lower_bound: Option<f64>,
+    /// Upper bound value for proximity calculation.
+    upper_bound: Option<f64>,
+    /// Range width for selectivity calculation.
+    range_width: f64,
+    /// Total number of documents.
+    total_docs: u64,
+    /// Number of documents matching the range.
+    matching_docs: u64,
+    /// Boost factor.
+    boost: f32,
+}
+
+impl RangeScorer {
+    /// Create a new range scorer.
+    pub fn new(
+        lower_bound: Option<f64>,
+        upper_bound: Option<f64>,
+        matching_docs: u64,
+        total_docs: u64,
+        boost: f32,
+    ) -> Self {
+        // Calculate range width for selectivity scoring
+        let range_width = match (lower_bound, upper_bound) {
+            (Some(lower), Some(upper)) => (upper - lower).abs(),
+            (Some(_), None) | (None, Some(_)) => 1000.0, // Large default for unbounded ranges
+            (None, None) => f64::INFINITY, // Unbounded range
+        };
+
+        RangeScorer {
+            lower_bound,
+            upper_bound,
+            range_width,
+            total_docs,
+            matching_docs,
+            boost,
+        }
+    }
+
+    /// Calculate selectivity-based IDF for the range.
+    fn range_idf(&self) -> f32 {
+        if self.matching_docs == 0 || self.total_docs == 0 {
+            return 0.0;
+        }
+
+        let n = self.total_docs as f32;
+        let df = self.matching_docs as f32;
+        
+        // Base IDF calculation
+        let base_idf = ((n - df + 0.5) / (df + 0.5)).ln();
+        
+        // Apply range selectivity bonus - narrower ranges get higher scores
+        let selectivity_multiplier = if self.range_width.is_finite() && self.range_width > 0.0 {
+            // Smaller range width = higher selectivity = higher score
+            1.0_f32 + (100.0_f32 / (self.range_width as f32 + 1.0_f32)).min(2.0_f32)
+        } else {
+            1.0_f32 // No bonus for unbounded ranges
+        };
+        
+        let epsilon = 0.1_f32;
+        (base_idf + epsilon).max(epsilon) * selectivity_multiplier
+    }
+
+    /// Calculate proximity-based score for a numeric value.
+    fn proximity_score(&self, value: f64) -> f32 {
+        match (self.lower_bound, self.upper_bound) {
+            (Some(lower), Some(upper)) => {
+                // For bounded ranges, calculate distance from range center
+                let center = (lower + upper) / 2.0;
+                let distance_from_center = (value - center).abs();
+                let max_distance = (upper - lower) / 2.0;
+                
+                if max_distance > 0.0 {
+                    // Values closer to center get higher scores
+                    (1.0 + (1.0 - (distance_from_center / max_distance)).max(0.0)) as f32
+                } else {
+                    1.0_f32
+                }
+            }
+            (Some(bound), None) | (None, Some(bound)) => {
+                // For single-bounded ranges, closer to bound is better
+                let distance = (value - bound).abs();
+                (1.0 + (1.0 / (distance + 1.0)).min(1.0)) as f32
+            }
+            (None, None) => {
+                // Unbounded range - constant score
+                1.0_f32
+            }
+        }
+    }
+}
+
+impl Scorer for RangeScorer {
+    fn score(&self, _doc_id: u64, value: f32) -> f32 {
+        let idf = self.range_idf();
+        let proximity = self.proximity_score(value as f64);
+        
+        // Final score combines IDF with proximity bonus
+        self.boost * idf * proximity
+    }
+
+    fn boost(&self) -> f32 {
+        self.boost
+    }
+
+    fn set_boost(&mut self, boost: f32) {
+        self.boost = boost;
+    }
+
+    fn max_score(&self) -> f32 {
+        if self.matching_docs == 0 {
+            return 0.0;
+        }
+        
+        let idf = self.range_idf();
+        let max_proximity = 2.0; // Maximum proximity bonus
+        self.boost * idf * max_proximity
+    }
+
+    fn name(&self) -> &'static str {
+        "RangeScorer"
+    }
 }
 
 impl Query for NumericRangeQuery {
@@ -468,16 +635,19 @@ impl Query for NumericRangeQuery {
     }
 
     fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
-        // Range queries typically match fewer documents than term queries
         let total_docs = reader.doc_count();
-        let estimated_doc_freq = total_docs / 10; // Estimate: 10% of docs might match a range
-        let estimated_term_freq = estimated_doc_freq * 2; // Average 2 occurrences per doc
+        if total_docs == 0 {
+            return Ok(Box::new(BM25Scorer::new(0, 0, 0, 1.0, 1, self.boost)));
+        }
 
-        Ok(Box::new(BM25Scorer::new(
-            estimated_doc_freq.max(1),
-            estimated_term_freq.max(1),
-            total_docs,
-            10.0, // Estimated average field length
+        // Count actual matching documents for accurate scoring
+        let matching_docs = self.count_matching_documents(reader)?;
+
+        // Create specialized range scorer with actual statistics
+        Ok(Box::new(RangeScorer::new(
+            self.min_f64(),
+            self.max_f64(),
+            matching_docs,
             total_docs,
             self.boost,
         )))
