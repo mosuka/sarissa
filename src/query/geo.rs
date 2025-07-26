@@ -727,7 +727,10 @@ pub struct GeoMatcher {
 
 impl GeoMatcher {
     /// Create a new geo matcher.
-    pub fn new(matches: Vec<GeoMatch>) -> Self {
+    pub fn new(mut matches: Vec<GeoMatch>) -> Self {
+        // Sort matches by distance (closest first)
+        matches.sort_by(|a, b| a.distance_km.partial_cmp(&b.distance_km).unwrap_or(std::cmp::Ordering::Equal));
+        
         let current_doc_id = if matches.is_empty() {
             u64::MAX  // Invalid state when no matches
         } else {
@@ -752,6 +755,10 @@ impl Matcher for GeoMatcher {
     }
 
     fn next(&mut self) -> Result<bool> {
+        if self.current_index >= self.matches.len() {
+            return Ok(false);
+        }
+        
         self.current_index += 1;
         if self.current_index < self.matches.len() {
             self.current_doc_id = self.matches[self.current_index].doc_id as u64;
@@ -1105,12 +1112,15 @@ mod tests {
 
         let mut matcher = GeoMatcher::new(matches);
 
-        // Should return documents in sorted order
-        assert!(matcher.next().unwrap());
-        assert_eq!(matcher.doc_id(), 1);
-        assert!(matcher.next().unwrap());
-        assert_eq!(matcher.doc_id(), 3);
-        assert!(!matcher.next().unwrap());
+        // Should return documents in distance-sorted order (closest first)
+        // After sorting: doc_id: 3 (1.0km) comes before doc_id: 1 (2.0km)
+        // Initial state: pointing to first document (doc_id: 3)
+        assert_eq!(matcher.doc_id(), 3);  // Initial position: closest document
+        
+        assert!(matcher.next().unwrap());  // Move to next
+        assert_eq!(matcher.doc_id(), 1);   // Second document (farther)
+        
+        assert!(!matcher.next().unwrap()); // No more documents
     }
 
     #[test]
