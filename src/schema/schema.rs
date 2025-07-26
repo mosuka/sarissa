@@ -459,6 +459,14 @@ impl FieldValue {
             _ => None,
         }
     }
+
+    /// Convert to GeoPoint if this is a geo value.
+    pub fn as_geo(&self) -> Option<&GeoPoint> {
+        match self {
+            FieldValue::Geo(point) => Some(point),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
