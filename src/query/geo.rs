@@ -721,23 +721,33 @@ pub struct GeoMatcher {
 impl GeoMatcher {
     /// Create a new geo matcher.
     pub fn new(matches: Vec<GeoMatch>) -> Self {
+        let current_doc_id = if matches.is_empty() {
+            u64::MAX  // Invalid state when no matches
+        } else {
+            matches[0].doc_id as u64  // Position at first match
+        };
+        
         GeoMatcher {
             matches,
             current_index: 0,
-            current_doc_id: 0, // Will be set by first next() call
+            current_doc_id,
         }
     }
 }
 
 impl Matcher for GeoMatcher {
     fn doc_id(&self) -> u64 {
-        self.current_doc_id
+        if self.current_index >= self.matches.len() {
+            u64::MAX  // Invalid state when exhausted
+        } else {
+            self.current_doc_id
+        }
     }
 
     fn next(&mut self) -> Result<bool> {
+        self.current_index += 1;
         if self.current_index < self.matches.len() {
             self.current_doc_id = self.matches[self.current_index].doc_id as u64;
-            self.current_index += 1;
             Ok(true)
         } else {
             self.current_doc_id = u64::MAX; // Invalid state
@@ -751,11 +761,11 @@ impl Matcher for GeoMatcher {
             let doc_id = self.matches[self.current_index].doc_id as u64;
             if doc_id >= target {
                 self.current_doc_id = doc_id;
-                self.current_index += 1;
                 return Ok(true);
             }
             self.current_index += 1;
         }
+        self.current_doc_id = u64::MAX; // No match found
         Ok(false)
     }
 
