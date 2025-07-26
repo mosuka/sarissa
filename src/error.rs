@@ -51,6 +51,18 @@ pub enum SarissaError {
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
 
+    /// Resource exhausted
+    #[error("Resource exhausted: {0}")]
+    ResourceExhausted(String),
+
+    /// Serialization error
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
+    /// Not implemented
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+
     /// JSON serialization/deserialization errors
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),

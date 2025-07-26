@@ -10,13 +10,15 @@ use crate::error::Result;
 use crate::query::{Query, SearchResults};
 use crate::search::{Search, SearchRequest};
 use crate::vector::{
-    Vector, VectorSearchConfig, VectorSearchResults,
-    embeddings::{EmbeddingConfig, TextEmbedder},
-    index::{VectorIndex, VectorIndexConfig, VectorIndexFactory},
+    Vector,
+    types::{VectorSearchConfig, VectorSearchResults},
 };
+use crate::vector_index::embeddings::{EmbeddingConfig, EmbeddingEngine};
+use crate::vector_search::VectorSearchEngine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Configuration for hybrid search combining keyword and vector search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,10 +227,10 @@ impl HybridSearchResults {
 pub struct HybridSearchEngine {
     /// Configuration for hybrid search.
     config: HybridSearchConfig,
-    /// Vector index for semantic search.
-    vector_index: Box<dyn VectorIndex>,
+    /// Vector search engine for semantic search.
+    _vector_search_engine: VectorSearchEngine,
     /// Text embedder for converting queries to vectors.
-    embedder: Arc<RwLock<TextEmbedder>>,
+    embedder: Arc<RwLock<EmbeddingEngine>>,
     /// Document storage for retrieving full documents.
     document_store: Arc<RwLock<HashMap<u64, HashMap<String, String>>>>,
 }
@@ -236,40 +238,38 @@ pub struct HybridSearchEngine {
 impl HybridSearchEngine {
     /// Create a new hybrid search engine.
     pub fn new(config: HybridSearchConfig) -> Result<Self> {
-        let vector_index_config = VectorIndexConfig {
-            dimension: config.embedding_config.dimension,
-            distance_metric: config.vector_config.distance_metric,
-            ..Default::default()
-        };
-
-        let vector_index = VectorIndexFactory::create(vector_index_config)?;
-        let embedder = TextEmbedder::new(config.embedding_config.clone())?;
+        let vector_search_engine = VectorSearchEngine::new(Default::default())?;
+        let embedder = EmbeddingEngine::new(config.embedding_config.clone())?;
 
         Ok(Self {
             config,
-            vector_index,
+            _vector_search_engine: vector_search_engine,
             embedder: Arc::new(RwLock::new(embedder)),
             document_store: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
     /// Add a document to both keyword and vector indexes.
-    pub fn add_document(&mut self, doc_id: u64, fields: HashMap<String, String>) -> Result<()> {
+    pub async fn add_document(
+        &mut self,
+        doc_id: u64,
+        fields: HashMap<String, String>,
+    ) -> Result<()> {
         // Store the document
         {
-            let mut store = self.document_store.write().unwrap();
+            let mut store = self.document_store.write().await;
             store.insert(doc_id, fields.clone());
         }
 
         // Create text content for embedding
         let text_content = self.extract_text_content(&fields);
 
-        // Generate embedding and add to vector index
+        // Generate embedding (vector indexing would be handled separately)
         {
-            let embedder = self.embedder.read().unwrap();
+            let embedder = self.embedder.read().await;
             if embedder.is_trained() {
-                let vector = embedder.embed_text(&text_content)?;
-                self.vector_index.add_vector(doc_id, vector)?;
+                let _vector = embedder.embed(&text_content)?;
+                // TODO: Add to vector index through vector_index module
             }
         }
 
@@ -277,34 +277,33 @@ impl HybridSearchEngine {
     }
 
     /// Train the embedder on a collection of documents.
-    pub fn train_embedder(&mut self, documents: &[String]) -> Result<()> {
-        let mut embedder = self.embedder.write().unwrap();
-        embedder.train(documents)?;
+    pub async fn train_embedder(&mut self, documents: &[&str]) -> Result<()> {
+        let mut embedder = self.embedder.write().await;
+        embedder.train(documents).await?;
         Ok(())
     }
 
     /// Check if the embedder is trained.
-    pub fn is_embedder_trained(&self) -> bool {
-        let embedder = self.embedder.read().unwrap();
+    pub async fn is_embedder_trained(&self) -> bool {
+        let embedder = self.embedder.read().await;
         embedder.is_trained()
     }
 
     /// Remove a document from both indexes.
-    pub fn remove_document(&mut self, doc_id: u64) -> Result<bool> {
+    pub async fn remove_document(&mut self, doc_id: u64) -> Result<bool> {
         // Remove from document store
         let existed = {
-            let mut store = self.document_store.write().unwrap();
+            let mut store = self.document_store.write().await;
             store.remove(&doc_id).is_some()
         };
 
-        // Remove from vector index
-        self.vector_index.remove_vector(doc_id)?;
+        // TODO: Remove from vector index through vector_index module
 
         Ok(existed)
     }
 
     /// Perform hybrid search combining keyword and vector search.
-    pub fn search<S: Search>(
+    pub async fn search<S: Search>(
         &self,
         query_text: &str,
         keyword_searcher: &S,
@@ -320,27 +319,31 @@ impl HybridSearchEngine {
         let keyword_results = keyword_searcher.search(keyword_request)?;
 
         // Perform vector search if embedder is trained
-        let vector_results = if self.is_embedder_trained() {
-            let embedder = self.embedder.read().unwrap();
-            let query_vector = embedder.embed_text(query_text)?;
+        let vector_results = if self.is_embedder_trained().await {
+            let embedder = self.embedder.read().await;
+            let _query_vector = embedder.embed(query_text)?;
             drop(embedder);
 
             let mut vector_config = self.config.vector_config.clone();
             vector_config.top_k = self.config.max_results * 2;
             vector_config.min_similarity = self.config.min_vector_similarity;
 
-            Some(self.vector_index.search(&query_vector, &vector_config)?)
+            // TODO: Use vector search engine
+            // Some(self.vector_search_engine.search(&query_vector, &vector_config).await?)
+            None
         } else {
             None
         };
 
         // Merge and rank results
-        let hybrid_results = self.merge_results(
-            keyword_results,
-            vector_results,
-            query_text.to_string(),
-            start_time.elapsed().as_millis() as u64,
-        )?;
+        let hybrid_results = self
+            .merge_results(
+                keyword_results,
+                vector_results,
+                query_text.to_string(),
+                start_time.elapsed().as_millis() as u64,
+            )
+            .await?;
 
         Ok(hybrid_results)
     }
@@ -353,7 +356,7 @@ impl HybridSearchEngine {
     }
 
     /// Merge keyword and vector search results into hybrid results.
-    fn merge_results(
+    async fn merge_results(
         &self,
         keyword_results: SearchResults,
         vector_results: Option<VectorSearchResults>,
@@ -406,7 +409,7 @@ impl HybridSearchEngine {
         }
 
         // Add document content if available
-        self.add_document_content(&mut result_map)?;
+        self.add_document_content(&mut result_map).await?;
 
         // Convert to vector and sort
         let mut results: Vec<HybridSearchResult> = result_map.into_values().collect();
@@ -421,7 +424,7 @@ impl HybridSearchEngine {
             results.truncate(self.config.max_results);
         }
 
-        let total_searched = self.document_store.read().unwrap().len();
+        let total_searched = self.document_store.read().await.len();
         let keyword_matches = keyword_results.hits.len();
         let vector_matches = vector_results.map(|vr| vr.results.len()).unwrap_or(0);
 
@@ -605,8 +608,11 @@ impl HybridSearchEngine {
     }
 
     /// Add document content to results.
-    fn add_document_content(&self, results: &mut HashMap<u64, HybridSearchResult>) -> Result<()> {
-        let store = self.document_store.read().unwrap();
+    async fn add_document_content(
+        &self,
+        results: &mut HashMap<u64, HybridSearchResult>,
+    ) -> Result<()> {
+        let store = self.document_store.read().await;
 
         for (doc_id, result) in results.iter_mut() {
             if let Some(document) = store.get(doc_id) {
@@ -618,24 +624,23 @@ impl HybridSearchEngine {
     }
 
     /// Get statistics about the hybrid search engine.
-    pub fn stats(&self) -> HybridSearchStats {
-        let document_count = self.document_store.read().unwrap().len();
-        let vector_stats = self.vector_index.stats();
-        let embedder_trained = self.is_embedder_trained();
+    pub async fn stats(&self) -> HybridSearchStats {
+        let document_count = self.document_store.read().await.len();
+        let embedder_trained = self.is_embedder_trained().await;
 
         HybridSearchStats {
             total_documents: document_count,
-            vector_index_size: vector_stats.total_vectors,
+            vector_index_size: 0, // TODO: Get from vector search engine
             embedder_trained,
             embedding_dimension: self.config.embedding_config.dimension,
-            vector_memory_usage: vector_stats.memory_usage_bytes,
+            vector_memory_usage: 0, // TODO: Get from vector search engine
         }
     }
 
     /// Clear all indexed data.
-    pub fn clear(&mut self) -> Result<()> {
-        self.vector_index.clear();
-        self.document_store.write().unwrap().clear();
+    pub async fn clear(&mut self) -> Result<()> {
+        // TODO: Clear vector search engine
+        self.document_store.write().await.clear();
         Ok(())
     }
 }
@@ -732,8 +737,8 @@ mod tests {
         assert!(engine.is_ok());
     }
 
-    #[test]
-    fn test_add_and_remove_document() {
+    #[tokio::test]
+    async fn test_add_and_remove_document() {
         let config = HybridSearchConfig::default();
         let mut engine = HybridSearchEngine::new(config).unwrap();
 
@@ -741,32 +746,29 @@ mod tests {
         fields.insert("title".to_string(), "Test Document".to_string());
         fields.insert("content".to_string(), "This is test content".to_string());
 
-        assert!(engine.add_document(1, fields).is_ok());
+        assert!(engine.add_document(1, fields).await.is_ok());
 
-        let stats = engine.stats();
+        let stats = engine.stats().await;
         assert_eq!(stats.total_documents, 1);
 
-        assert!(engine.remove_document(1).unwrap());
-        assert!(!engine.remove_document(1).unwrap()); // Already removed
+        assert!(engine.remove_document(1).await.unwrap());
+        assert!(!engine.remove_document(1).await.unwrap()); // Already removed
 
-        let stats = engine.stats();
+        let stats = engine.stats().await;
         assert_eq!(stats.total_documents, 0);
     }
 
-    #[test]
-    fn test_embedder_training() {
+    #[tokio::test]
+    async fn test_embedder_training() {
         let config = HybridSearchConfig::default();
         let mut engine = HybridSearchEngine::new(config).unwrap();
 
-        assert!(!engine.is_embedder_trained());
+        assert!(!engine.is_embedder_trained().await);
 
-        let documents = vec![
-            "This is a test document".to_string(),
-            "Another test document".to_string(),
-        ];
+        let documents = vec!["This is a test document", "Another test document"];
 
-        assert!(engine.train_embedder(&documents).is_ok());
-        assert!(engine.is_embedder_trained());
+        assert!(engine.train_embedder(&documents).await.is_ok());
+        assert!(engine.is_embedder_trained().await);
     }
 
     #[test]
@@ -795,8 +797,8 @@ mod tests {
         assert_eq!(results.get(&2).unwrap().keyword_score, Some(0.0));
     }
 
-    #[test]
-    fn test_hybrid_search_with_mock() {
+    #[tokio::test]
+    async fn test_hybrid_search_with_mock() {
         let config = HybridSearchConfig::default();
         let engine = HybridSearchEngine::new(config).unwrap();
 
@@ -816,7 +818,7 @@ mod tests {
         let mock_searcher = MockSearch::new(keyword_results);
         let query = Box::new(TermQuery::new("title", "test"));
 
-        let results = engine.search("test query", &mock_searcher, query);
+        let results = engine.search("test query", &mock_searcher, query).await;
         assert!(results.is_ok());
 
         let results = results.unwrap();
@@ -839,30 +841,30 @@ mod tests {
         assert!(text.contains("Test Content"));
     }
 
-    #[test]
-    fn test_hybrid_search_stats() {
+    #[tokio::test]
+    async fn test_hybrid_search_stats() {
         let config = HybridSearchConfig::default();
         let engine = HybridSearchEngine::new(config).unwrap();
 
-        let stats = engine.stats();
+        let stats = engine.stats().await;
         assert_eq!(stats.total_documents, 0);
         assert_eq!(stats.vector_index_size, 0);
         assert!(!stats.embedder_trained);
         assert_eq!(stats.embedding_dimension, 128); // Default dimension
     }
 
-    #[test]
-    fn test_clear_engine() {
+    #[tokio::test]
+    async fn test_clear_engine() {
         let config = HybridSearchConfig::default();
         let mut engine = HybridSearchEngine::new(config).unwrap();
 
         let mut fields = HashMap::new();
         fields.insert("title".to_string(), "Test".to_string());
-        engine.add_document(1, fields).unwrap();
+        engine.add_document(1, fields).await.unwrap();
 
-        assert_eq!(engine.stats().total_documents, 1);
+        assert_eq!(engine.stats().await.total_documents, 1);
 
-        engine.clear().unwrap();
-        assert_eq!(engine.stats().total_documents, 0);
+        engine.clear().await.unwrap();
+        assert_eq!(engine.stats().await.total_documents, 0);
     }
 }
