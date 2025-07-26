@@ -2,10 +2,14 @@
 
 use sarissa::parallel_index::{
     HashPartitioner, ParallelIndexConfig, ParallelIndexEngine, PartitionConfig, ValuePartitioner,
+    config::IndexingOptions, DocumentPartitioner,
 };
 use sarissa::prelude::*;
 use sarissa::schema::{IdField, NumericField, TextField};
+use sarissa::index::writer::{BasicIndexWriter, WriterConfig};
+use sarissa::storage::{MemoryStorage, StorageConfig};
 use std::path::Path;
+use std::sync::Arc;
 use tempfile::TempDir;
 fn main() -> Result<()> {
     println!("=== Parallel Indexing Example - Distributed Document Processing ===\n");
@@ -56,7 +60,23 @@ fn main() -> Result<()> {
         auto_commit_threshold: 10000,
     };
 
-    let parallel_engine = ParallelIndexEngine::new(parallel_config)?;
+    let mut parallel_engine = ParallelIndexEngine::new(parallel_config)?;
+    
+    // Set up hash partitioner
+    let hash_partitioner = HashPartitioner::new("user_id".to_string(), 4);
+    parallel_engine.set_partitioner(Box::new(hash_partitioner.clone()))?;
+    
+    // Add writers for each partition
+    for i in 0..4 {
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let writer = Box::new(BasicIndexWriter::new(
+            schema.clone(), 
+            storage, 
+            WriterConfig::default()
+        )?);
+        let partition_config = PartitionConfig::new(format!("partition_{}", i));
+        parallel_engine.add_partition(format!("partition_{}", i), writer, partition_config)?;
+    }
 
     // Create documents with various user_ids for hash partitioning
     let documents = vec![
@@ -164,29 +184,34 @@ fn main() -> Result<()> {
         "Indexing {} documents with hash partitioning...",
         documents.len()
     );
-    // Note: This is a simplified example. Real implementation would need proper document partitioning.
-    // parallel_engine.add_documents(documents.clone()).await?;
+    
+    // Index documents using the parallel engine
+    let indexing_result = parallel_engine.index_documents(documents.clone(), IndexingOptions::default())?;
 
     // Show partitioning results
-    let metrics = parallel_engine.metrics();
     println!("Hash Partitioning Results:");
-    println!("  Total operations: {}", metrics.total_operations);
-    println!("  Successful operations: {}", metrics.successful_operations);
+    println!("  Total documents: {}", indexing_result.total_documents);
+    println!("  Documents indexed: {}", indexing_result.documents_indexed);
+    println!("  Documents failed: {}", indexing_result.documents_failed);
     println!(
-        "  Average operation time: {:.2}ms",
-        metrics.avg_execution_time.as_millis()
+        "  Execution time: {:.2}ms",
+        indexing_result.execution_time.as_millis()
     );
+    
+    let metrics = parallel_engine.metrics();
+    println!("  Engine metrics:");
+    println!("    - Total operations: {}", metrics.total_operations);
+    println!("    - Successful operations: {}", metrics.successful_operations);
 
     // Demonstrate hash partitioner directly
     println!("\n2. Hash Partition Distribution:");
-    let _hash_partitioner = HashPartitioner::new("user_id".to_string(), 4);
+    let hash_partitioner = HashPartitioner::new("user_id".to_string(), 4);
 
     for doc in &documents {
         if let Some(field_value) = doc.get_field("user_id") {
             if let sarissa::schema::FieldValue::Integer(user_id) = field_value {
-                // Note: HashPartitioner needs document reference for partitioning
-                // let partition = hash_partitioner.partition(doc)?;
-                println!("  User ID {}: -> Partition (example)", user_id);
+                let partition = hash_partitioner.partition(doc)?;
+                println!("  User ID {}: -> Partition {}", user_id, partition);
             }
         }
     }
@@ -196,14 +221,18 @@ fn main() -> Result<()> {
     // Example 2: Value-based partitioning by region
     println!("3. Value-based partitioning by region:");
 
-    let _value_partitioner = ValuePartitioner::new("region".to_string(), 4);
+    // Set up value-based mapping for regions
+    let value_partitioner = ValuePartitioner::new("region".to_string(), 3)
+        .add_mapping("north-america".to_string(), 0)?
+        .add_mapping("europe".to_string(), 1)?
+        .add_mapping("asia-pacific".to_string(), 2)?
+        .with_default_partition(2)?; // Default to partition 2
 
     for doc in &documents {
         if let Some(field_value) = doc.get_field("region") {
             if let Some(region) = field_value.as_text() {
-                // Note: ValuePartitioner needs document reference for partitioning
-                // let partition = value_partitioner.partition(doc)?;
-                println!("  Region '{}': -> Partition (example)", region);
+                let partition = value_partitioner.partition(doc)?;
+                println!("  Region '{}': -> Partition {}", region, partition);
             }
         }
     }
@@ -228,15 +257,34 @@ fn main() -> Result<()> {
     let temp_dirs_region: Vec<TempDir> = (0..3).map(|_| TempDir::new().unwrap()).collect();
     let _index_paths_region: Vec<&Path> = temp_dirs_region.iter().map(|dir| dir.path()).collect();
 
-    let parallel_engine_region = ParallelIndexEngine::new(parallel_config_region)?;
+    let mut parallel_engine_region = ParallelIndexEngine::new(parallel_config_region)?;
+    
+    // Set up value partitioner for region-based processing
+    parallel_engine_region.set_partitioner(Box::new(value_partitioner.clone()))?;
+    
+    // Add writers for region partitions
+    for i in 0..3 {
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let writer = Box::new(BasicIndexWriter::new(
+            schema.clone(), 
+            storage, 
+            WriterConfig::default()
+        )?);
+        let partition_config = PartitionConfig::new(format!("region_partition_{}", i));
+        parallel_engine_region.add_partition(format!("region_partition_{}", i), writer, partition_config)?;
+    }
 
     println!("\n4. Indexing with region-based partitioning...");
-    // Note: This is a simplified example. Real implementation would need proper document partitioning.
-    // parallel_engine_region.add_documents(documents.clone()).await?;
+    let region_indexing_result = parallel_engine_region.index_documents(documents.clone(), IndexingOptions::default())?;
 
-    let metrics_region = parallel_engine_region.metrics();
     println!("Region Partitioning Results:");
-    println!("  Total operations: {}", metrics_region.total_operations);
+    println!("  Total documents: {}", region_indexing_result.total_documents);
+    println!("  Documents indexed: {}", region_indexing_result.documents_indexed);
+    println!("  Documents failed: {}", region_indexing_result.documents_failed);
+    println!(
+        "  Execution time: {:.2}ms",
+        region_indexing_result.execution_time.as_millis()
+    );
 
     println!("\n=== Batch Processing Configuration ===\n");
 
@@ -262,32 +310,16 @@ fn main() -> Result<()> {
     // Show performance metrics
     println!("\n6. Performance metrics:");
     println!("  Hash partitioning:");
-    println!(
-        "    - Operations/second: {:.1}",
-        metrics.throughput.ops_per_second
-    );
-    println!(
-        "    - Average operation time: {:.2}ms",
-        metrics.avg_execution_time.as_millis()
-    );
-    println!(
-        "    - Documents indexed: {}",
-        metrics.total_documents_indexed
-    );
+    println!("    - Documents indexed: {}", indexing_result.documents_indexed);
+    println!("    - Execution time: {:.2}ms", indexing_result.execution_time.as_millis());
+    println!("    - Throughput: {:.1} docs/sec", 
+        indexing_result.documents_indexed as f64 / indexing_result.execution_time.as_secs_f64());
 
     println!("  Region partitioning:");
-    println!(
-        "    - Operations/second: {:.1}",
-        metrics_region.throughput.ops_per_second
-    );
-    println!(
-        "    - Average operation time: {:.2}ms",
-        metrics_region.avg_execution_time.as_millis()
-    );
-    println!(
-        "    - Documents indexed: {}",
-        metrics_region.total_documents_indexed
-    );
+    println!("    - Documents indexed: {}", region_indexing_result.documents_indexed);
+    println!("    - Execution time: {:.2}ms", region_indexing_result.execution_time.as_millis());
+    println!("    - Throughput: {:.1} docs/sec", 
+        region_indexing_result.documents_indexed as f64 / region_indexing_result.execution_time.as_secs_f64());
 
     println!("\n=== Custom Partitioning Strategy ===\n");
 
@@ -317,65 +349,63 @@ fn main() -> Result<()> {
         }
     }
 
+    println!("\n=== Index Verification ===\n");
+
+    // Example 8: Verify partition states and document distribution
+    println!("8. Verifying partition states and document distribution...");
+    
+    // Check hash partitioning results
+    println!("\n  Hash Partitioning Verification:");
+    let hash_partition_stats = parallel_engine.partition_statistics()?;
+    for (partition_id, stats) in hash_partition_stats {
+        println!("    Partition {}: {} documents indexed, {} operations", 
+            partition_id, stats.documents_indexed, stats.successful_operations);
+        if stats.failed_operations > 0 {
+            println!("      ⚠️  {} failed operations", stats.failed_operations);
+        }
+    }
+    
+    // Check region partitioning results
+    println!("\n  Region Partitioning Verification:");
+    let region_partition_stats = parallel_engine_region.partition_statistics()?;
+    for (partition_id, stats) in region_partition_stats {
+        println!("    Partition {}: {} documents indexed, {} operations", 
+            partition_id, stats.documents_indexed, stats.successful_operations);
+        if stats.failed_operations > 0 {
+            println!("      ⚠️  {} failed operations", stats.failed_operations);
+        }
+    }
+    
+    // Aggregated statistics
+    println!("\n  Aggregated Statistics:");
+    let hash_aggregated = parallel_engine.aggregated_statistics()?;
+    let region_aggregated = parallel_engine_region.aggregated_statistics()?;
+    
+    println!("    Hash partitioning total: {} documents across {} commits", 
+        hash_aggregated.documents_indexed, hash_aggregated.commit_count);
+    println!("    Region partitioning total: {} documents across {} commits", 
+        region_aggregated.documents_indexed, region_aggregated.commit_count);
+
     println!("\n=== Commit and Optimization ===\n");
 
-    // Example 5: Commit all indices
-    println!("8. Committing changes across all indices...");
+    // Example 9: Commit all indices
+    println!("9. Committing changes across all indices...");
     let failed_commits = parallel_engine.commit_all()?;
     let failed_commits_region = parallel_engine_region.commit_all()?;
 
     if failed_commits.is_empty() && failed_commits_region.is_empty() {
         println!("All commits successful!");
+        
+        // Final verification after commit
+        println!("\n  Post-commit verification:");
+        let final_hash_stats = parallel_engine.aggregated_statistics()?;
+        let final_region_stats = parallel_engine_region.aggregated_statistics()?;
+        
+        println!("    Hash partitioning: {} commits completed", final_hash_stats.commit_count);
+        println!("    Region partitioning: {} commits completed", final_region_stats.commit_count);
     } else {
         println!("Some commits failed: {:?}", failed_commits);
     }
-
-    println!("\n=== Parallel Indexing Key Features ===");
-    println!("• Distribute documents across multiple indices");
-    println!("• Hash-based partitioning for even distribution");
-    println!("• Value-based partitioning for logical grouping");
-    println!("• Configurable batch processing for performance");
-    println!("• Concurrent indexing across multiple writers");
-    println!("• Real-time metrics and performance monitoring");
-    println!("• Automatic load balancing across partitions");
-
-    println!("\n=== Partitioning Strategies ===");
-    println!("Hash Partitioning:");
-    println!("  • Even distribution across indices");
-    println!("  • Good for load balancing");
-    println!("  • Based on field value hash");
-    println!("  • Predictable partition assignment");
-
-    println!("\nValue Partitioning:");
-    println!("  • Logical grouping by field values");
-    println!("  • Good for regional/categorical data");
-    println!("  • Custom partition mapping");
-    println!("  • Domain-specific organization");
-
-    println!("\n=== Use Cases ===");
-    println!("• Large-scale document processing");
-    println!("• Multi-tenant applications (partition by tenant)");
-    println!("• Geographic data distribution (partition by region)");
-    println!("• Time-series data (partition by time period)");
-    println!("• User-generated content (partition by user)");
-    println!("• E-commerce catalogs (partition by category)");
-    println!("• Log processing (partition by service/severity)");
-
-    println!("\n=== Performance Benefits ===");
-    println!("• Parallel processing reduces indexing time");
-    println!("• Distributed load across multiple cores/disks");
-    println!("• Smaller index sizes improve search performance");
-    println!("• Independent index optimization");
-    println!("• Horizontal scaling capability");
-    println!("• Fault isolation per partition");
-
-    println!("\n=== Best Practices ===");
-    println!("• Choose partition field with good distribution");
-    println!("• Balance partition sizes for even load");
-    println!("• Monitor metrics to tune batch sizes");
-    println!("• Consider query patterns when partitioning");
-    println!("• Use appropriate concurrency levels");
-    println!("• Plan for partition growth over time");
 
     // Engines will be automatically closed when dropped
 
