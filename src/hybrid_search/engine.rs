@@ -7,8 +7,11 @@ use super::types::HybridSearchResults;
 use crate::error::Result;
 use crate::query::Query;
 use crate::search::{Search, SearchRequest};
+use crate::vector::{
+    DistanceMetric, Vector,
+    types::{VectorSearchResult, VectorSearchResults},
+};
 use crate::vector_index::embeddings::EmbeddingEngine;
-use crate::vector_search::VectorSearchEngine;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -17,12 +20,12 @@ use tokio::sync::RwLock;
 pub struct HybridSearchEngine {
     /// Configuration for hybrid search.
     config: HybridSearchConfig,
-    /// Vector search engine for semantic search.
-    _vector_search_engine: VectorSearchEngine,
     /// Text embedder for converting queries to vectors.
     embedder: Arc<RwLock<EmbeddingEngine>>,
     /// Document storage for retrieving full documents.
     document_store: Arc<RwLock<HashMap<u64, HashMap<String, String>>>>,
+    /// Vector storage for similarity search.
+    vector_store: Arc<RwLock<HashMap<u64, Vector>>>,
     /// Result merger for combining search results.
     merger: ResultMerger,
 }
@@ -30,15 +33,14 @@ pub struct HybridSearchEngine {
 impl HybridSearchEngine {
     /// Create a new hybrid search engine.
     pub fn new(config: HybridSearchConfig) -> Result<Self> {
-        let vector_search_engine = VectorSearchEngine::new(Default::default())?;
         let embedder = EmbeddingEngine::new(config.embedding_config.clone())?;
         let merger = ResultMerger::new(config.clone());
 
         Ok(Self {
             config,
-            _vector_search_engine: vector_search_engine,
             embedder: Arc::new(RwLock::new(embedder)),
             document_store: Arc::new(RwLock::new(HashMap::new())),
+            vector_store: Arc::new(RwLock::new(HashMap::new())),
             merger,
         })
     }
@@ -58,12 +60,16 @@ impl HybridSearchEngine {
         // Create text content for embedding
         let text_content = self.extract_text_content(&fields);
 
-        // Generate embedding (vector indexing would be handled separately)
+        // Generate embedding and store vector
         {
             let embedder = self.embedder.read().await;
             if embedder.is_trained() {
-                let _vector = embedder.embed(&text_content)?;
-                // TODO: Add to vector index through vector_index module
+                let vector = embedder.embed(&text_content)?;
+                drop(embedder);
+
+                // Store the vector for similarity search
+                let mut vector_store = self.vector_store.write().await;
+                vector_store.insert(doc_id, vector);
             }
         }
 
@@ -91,7 +97,11 @@ impl HybridSearchEngine {
             store.remove(&doc_id).is_some()
         };
 
-        // TODO: Remove from vector index through vector_index module
+        // Remove from vector store
+        {
+            let mut vector_store = self.vector_store.write().await;
+            vector_store.remove(&doc_id);
+        }
 
         Ok(existed)
     }
@@ -115,16 +125,16 @@ impl HybridSearchEngine {
         // Perform vector search if embedder is trained
         let vector_results = if self.is_embedder_trained().await {
             let embedder = self.embedder.read().await;
-            let _query_vector = embedder.embed(query_text)?;
+            let query_vector = embedder.embed(query_text)?;
             drop(embedder);
 
-            let mut vector_config = self.config.vector_config.clone();
-            vector_config.top_k = self.config.max_results * 2;
-            vector_config.min_similarity = self.config.min_vector_similarity;
+            let vector_config = self.config.vector_config.clone();
 
-            // TODO: Use vector search engine
-            // Some(self.vector_search_engine.search(&query_vector, &vector_config).await?)
-            None
+            // Perform similarity search on stored vectors
+            Some(
+                self.vector_similarity_search(&query_vector, &vector_config)
+                    .await?,
+            )
         } else {
             None
         };
@@ -152,24 +162,74 @@ impl HybridSearchEngine {
         fields.values().cloned().collect::<Vec<String>>().join(" ")
     }
 
+    /// Perform vector similarity search on stored vectors.
+    async fn vector_similarity_search(
+        &self,
+        query_vector: &Vector,
+        config: &crate::vector::types::VectorSearchConfig,
+    ) -> Result<VectorSearchResults> {
+        let vector_store = self.vector_store.read().await;
+        let mut similarities = Vec::new();
+
+        // Calculate similarity for each stored vector
+        for (doc_id, doc_vector) in vector_store.iter() {
+            let similarity =
+                DistanceMetric::Cosine.similarity(&query_vector.data, &doc_vector.data)?;
+            let distance = DistanceMetric::Cosine.distance(&query_vector.data, &doc_vector.data)?;
+
+            if similarity >= config.min_similarity {
+                similarities.push(VectorSearchResult {
+                    doc_id: *doc_id,
+                    similarity,
+                    distance,
+                    vector: if config.include_vectors {
+                        Some(doc_vector.clone())
+                    } else {
+                        None
+                    },
+                    metadata: HashMap::new(),
+                });
+            }
+        }
+
+        // Sort by similarity (descending)
+        similarities.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Limit results
+        similarities.truncate(config.top_k);
+
+        Ok(VectorSearchResults {
+            results: similarities,
+            candidates_examined: vector_store.len(),
+            search_time_ms: 0.0, // We could measure this if needed
+            query_metadata: HashMap::new(),
+        })
+    }
+
     /// Get statistics about the hybrid search engine.
     pub async fn stats(&self) -> HybridSearchStats {
         let document_count = self.document_store.read().await.len();
         let embedder_trained = self.is_embedder_trained().await;
 
+        let vector_count = self.vector_store.read().await.len();
+
         HybridSearchStats {
             total_documents: document_count,
-            vector_index_size: 0, // TODO: Get from vector search engine
+            vector_index_size: vector_count,
             embedder_trained,
             embedding_dimension: self.config.embedding_config.dimension,
-            vector_memory_usage: 0, // TODO: Get from vector search engine
+            vector_memory_usage: vector_count * self.config.embedding_config.dimension * 4, // Approximate bytes
         }
     }
 
     /// Clear all indexed data.
     pub async fn clear(&mut self) -> Result<()> {
-        // TODO: Clear vector search engine
         self.document_store.write().await.clear();
+        self.vector_store.write().await.clear();
         Ok(())
     }
 }
