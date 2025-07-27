@@ -3,23 +3,22 @@
 //! This module provides machine learning capabilities to enhance search quality
 //! through learning-to-rank, query expansion, recommendations, and anomaly detection.
 
-pub mod ranking;
-pub mod query_expansion;
-pub mod recommendation;
 pub mod anomaly;
-pub mod optimization;
 pub mod features;
 pub mod models;
+pub mod optimization;
+pub mod query_expansion;
+pub mod ranking;
+pub mod recommendation;
 
-pub use ranking::*;
-pub use query_expansion::*;
-pub use recommendation::*;
 pub use anomaly::*;
-pub use optimization::*;
 pub use features::*;
 pub use models::*;
+pub use optimization::*;
+pub use query_expansion::*;
+pub use ranking::*;
+pub use recommendation::*;
 
-use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -145,19 +144,19 @@ pub enum FeedbackType {
 pub enum MLError {
     #[error("Model not trained: {message}")]
     ModelNotTrained { message: String },
-    
+
     #[error("Invalid feature vector: {message}")]
     InvalidFeatureVector { message: String },
-    
+
     #[error("Training data insufficient: need at least {min_samples} samples, got {actual}")]
     InsufficientTrainingData { min_samples: usize, actual: usize },
-    
+
     #[error("Model loading failed: {path}")]
     ModelLoadError { path: String },
-    
+
     #[error("Model saving failed: {path}")]
     ModelSaveError { path: String },
-    
+
     #[error("Feature extraction failed: {message}")]
     FeatureExtractionError { message: String },
 }
@@ -190,7 +189,7 @@ mod tests {
             relevance_score: 0.8,
             timestamp: chrono::Utc::now(),
         };
-        
+
         assert_eq!(feedback.query, "test query");
         assert_eq!(feedback.document_id, "doc1");
         assert_eq!(feedback.relevance_score, 0.8);

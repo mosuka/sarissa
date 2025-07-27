@@ -7,10 +7,10 @@
 //! - User preference learning
 
 use crate::error::Result;
-use crate::ml::{MLError, MLContext, UserSession, SearchHistoryItem, FeedbackSignal};
+use crate::ml::{FeedbackSignal, MLContext, SearchHistoryItem, UserSession};
 use crate::schema::Document;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Configuration for recommendation system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,15 +100,13 @@ impl RecommendationSystem {
         // Get user ID for personalization
         let user_id = user_context
             .and_then(|session| session.user_id.as_ref())
-            .map(|id| id.clone());
+            .cloned();
 
         // Generate collaborative filtering recommendations
         if self.config.enable_collaborative {
-            if let Some(collab_recs) = self.collaborative_recommendations(
-                &user_id,
-                candidate_documents,
-                search_context,
-            )? {
+            if let Some(collab_recs) =
+                self.collaborative_recommendations(&user_id, candidate_documents, search_context)?
+            {
                 recommendations.extend(collab_recs);
             }
         }
@@ -146,13 +144,15 @@ impl RecommendationSystem {
         )?;
 
         // Update item popularity
-        let popularity = self.item_popularity
+        let popularity = self
+            .item_popularity
             .entry(feedback.document_id.clone())
             .or_insert_with(PopularityStats::new);
         popularity.add_interaction(feedback.relevance_score);
 
         // Invalidate similarity cache for affected items
-        self.similarity_cache.invalidate_for_item(&feedback.document_id);
+        self.similarity_cache
+            .invalidate_for_item(&feedback.document_id);
 
         Ok(())
     }
@@ -163,7 +163,8 @@ impl RecommendationSystem {
         user_id: &str,
         search_history: &[SearchHistoryItem],
     ) -> Result<()> {
-        let mut profile = self.user_profiles
+        let profile = self
+            .user_profiles
             .entry(user_id.to_string())
             .or_insert_with(UserProfile::new);
 
@@ -173,11 +174,7 @@ impl RecommendationSystem {
     }
 
     /// Add document features for content-based filtering.
-    pub fn add_document_features(
-        &mut self,
-        document_id: &str,
-        document: &Document,
-    ) -> Result<()> {
+    pub fn add_document_features(&mut self, document_id: &str, document: &Document) -> Result<()> {
         let features = self.extract_document_features(document)?;
         self.item_features.add_item(document_id, features);
         Ok(())
@@ -192,13 +189,19 @@ impl RecommendationSystem {
         context: &MLContext,
     ) -> Result<Option<Vec<Recommendation>>> {
         if let Some(uid) = user_id {
-            if self.interaction_matrix.get_user_interaction_count(uid) >= self.config.min_user_interactions {
-                return Ok(Some(self.generate_collaborative_recommendations(uid, candidates, context)?));
+            if self.interaction_matrix.get_user_interaction_count(uid)
+                >= self.config.min_user_interactions
+            {
+                return Ok(Some(self.generate_collaborative_recommendations(
+                    uid, candidates, context,
+                )?));
             }
         }
 
         // Fall back to popularity-based recommendations for new users
-        Ok(Some(self.generate_popularity_based_recommendations(candidates)?))
+        Ok(Some(
+            self.generate_popularity_based_recommendations(candidates)?,
+        ))
     }
 
     fn generate_collaborative_recommendations(
@@ -214,12 +217,18 @@ impl RecommendationSystem {
 
         // Recommend items liked by similar users
         for candidate in candidates {
-            if !self.interaction_matrix.has_user_interacted(user_id, candidate) {
+            if !self
+                .interaction_matrix
+                .has_user_interacted(user_id, candidate)
+            {
                 let mut score = 0.0;
                 let mut similarity_sum = 0.0;
 
                 for (similar_user, similarity) in &similar_users {
-                    if let Some(interaction_score) = self.interaction_matrix.get_interaction(similar_user, candidate) {
+                    if let Some(interaction_score) = self
+                        .interaction_matrix
+                        .get_interaction(similar_user, candidate)
+                    {
                         score += similarity * interaction_score;
                         similarity_sum += similarity.abs();
                     }
@@ -237,7 +246,9 @@ impl RecommendationSystem {
                             document_id: candidate.clone(),
                             score: score * self.config.collaborative_weight,
                             recommendation_type: RecommendationType::Collaborative,
-                            explanation: Some(format!("Users with similar interests also liked this")),
+                            explanation: Some(
+                                "Users with similar interests also liked this".to_string(),
+                            ),
                             confidence: similarity_sum / similar_users.len() as f64,
                         });
                     }
@@ -257,7 +268,7 @@ impl RecommendationSystem {
         for candidate in candidates {
             if let Some(popularity) = self.item_popularity.get(candidate) {
                 let score = popularity.average_score * self.config.popularity_boost;
-                
+
                 if score >= self.config.similarity_threshold {
                     recommendations.push(Recommendation {
                         document_id: candidate.clone(),
@@ -278,7 +289,7 @@ impl RecommendationSystem {
         query: &str,
         user_id: &Option<String>,
         candidates: &[String],
-        context: &MLContext,
+        _context: &MLContext,
     ) -> Result<Vec<Recommendation>> {
         let mut recommendations = Vec::new();
 
@@ -287,6 +298,7 @@ impl RecommendationSystem {
 
         // Get user preferences if available
         let user_preferences = user_id
+            .as_ref()
             .and_then(|id| self.user_profiles.get(id))
             .map(|profile| &profile.preferences)
             .cloned()
@@ -295,8 +307,9 @@ impl RecommendationSystem {
         for candidate in candidates {
             if let Some(item_features) = self.item_features.get_features(candidate) {
                 // Calculate content similarity
-                let content_similarity = self.calculate_feature_similarity(&query_features, item_features)?;
-                
+                let content_similarity =
+                    self.calculate_feature_similarity(&query_features, item_features)?;
+
                 // Calculate user preference similarity
                 let user_similarity = if !user_preferences.is_empty() {
                     self.calculate_feature_similarity(&user_preferences, item_features)?
@@ -323,8 +336,11 @@ impl RecommendationSystem {
         Ok(recommendations)
     }
 
-    fn merge_recommendations(&self, recommendations: Vec<Recommendation>) -> Result<Vec<Recommendation>> {
-        let mut merged = HashMap::new();
+    fn merge_recommendations(
+        &self,
+        recommendations: Vec<Recommendation>,
+    ) -> Result<Vec<Recommendation>> {
+        let mut merged: HashMap<String, Recommendation> = HashMap::new();
 
         for rec in recommendations {
             match merged.get_mut(&rec.document_id) {
@@ -332,11 +348,13 @@ impl RecommendationSystem {
                     // Combine scores and update metadata
                     existing.score = (existing.score + rec.score).max(existing.score);
                     existing.confidence = existing.confidence.max(rec.confidence);
-                    
+
                     // Combine explanations
-                    if let (Some(ref mut existing_exp), Some(rec_exp)) = (&mut existing.explanation, rec.explanation) {
-                        if !existing_exp.contains(&rec_exp) {
-                            existing_exp.push_str(&format!("; {}", rec_exp));
+                    if let (Some(existing_exp), Some(rec_exp)) =
+                        (&mut existing.explanation, &rec.explanation)
+                    {
+                        if !existing_exp.contains(rec_exp) {
+                            existing_exp.push_str(&format!("; {rec_exp}"));
                         }
                     } else if existing.explanation.is_none() {
                         existing.explanation = rec.explanation;
@@ -361,7 +379,7 @@ impl RecommendationSystem {
             if other_user != user_id {
                 let other_vector = self.interaction_matrix.get_user_vector(&other_user);
                 let similarity = self.cosine_similarity(&user_vector, &other_vector);
-                
+
                 if similarity > 0.0 {
                     similarities.push((other_user, similarity));
                 }
@@ -430,7 +448,7 @@ impl RecommendationSystem {
     fn extract_document_features(&self, document: &Document) -> Result<Vec<f64>> {
         // Extract features from document content
         let mut features = vec![0.0; 100]; // Fixed size feature vector
-        
+
         // Extract text from all fields
         let mut all_text = String::new();
         for field_name in document.field_names() {
@@ -443,7 +461,7 @@ impl RecommendationSystem {
         }
 
         let terms: Vec<&str> = all_text.split_whitespace().collect();
-        
+
         // Create feature vector
         for term in terms {
             let hash = self.simple_hash(term);
@@ -521,14 +539,15 @@ impl UserItemMatrix {
         user_id: &str,
         item_id: &str,
         score: f64,
-        timestamp: chrono::DateTime<chrono::Utc>,
+        _timestamp: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
         self.interactions
             .entry(user_id.to_string())
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(item_id.to_string(), score);
 
-        *self.user_interaction_counts
+        *self
+            .user_interaction_counts
             .entry(user_id.to_string())
             .or_insert(0) += 1;
 
@@ -536,10 +555,7 @@ impl UserItemMatrix {
     }
 
     fn get_interaction(&self, user_id: &str, item_id: &str) -> Option<f64> {
-        self.interactions
-            .get(user_id)?
-            .get(item_id)
-            .copied()
+        self.interactions.get(user_id)?.get(item_id).copied()
     }
 
     fn has_user_interacted(&self, user_id: &str, item_id: &str) -> bool {
@@ -550,7 +566,10 @@ impl UserItemMatrix {
     }
 
     fn get_user_interaction_count(&self, user_id: &str) -> usize {
-        self.user_interaction_counts.get(user_id).copied().unwrap_or(0)
+        self.user_interaction_counts
+            .get(user_id)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn get_user_vector(&self, user_id: &str) -> Vec<f64> {
@@ -604,7 +623,7 @@ impl UserProfile {
 
     fn update_from_history(&mut self, history: &[SearchHistoryItem]) -> Result<()> {
         // Simple preference learning from search history
-        for item in history {
+        for _item in history {
             // Update preferences based on clicked documents
             // This is a simplified implementation
         }
@@ -682,10 +701,14 @@ mod tests {
     #[test]
     fn test_user_item_matrix() {
         let mut matrix = UserItemMatrix::new();
-        
-        matrix.add_interaction("user1", "item1", 0.8, chrono::Utc::now()).unwrap();
-        matrix.add_interaction("user1", "item2", 0.6, chrono::Utc::now()).unwrap();
-        
+
+        matrix
+            .add_interaction("user1", "item1", 0.8, chrono::Utc::now())
+            .unwrap();
+        matrix
+            .add_interaction("user1", "item2", 0.6, chrono::Utc::now())
+            .unwrap();
+
         assert_eq!(matrix.get_interaction("user1", "item1"), Some(0.8));
         assert!(matrix.has_user_interacted("user1", "item1"));
         assert!(!matrix.has_user_interacted("user1", "item3"));
@@ -695,7 +718,7 @@ mod tests {
     #[test]
     fn test_recommendation_feedback_update() {
         let mut system = RecommendationSystem::new(RecommendationConfig::default());
-        
+
         let feedback = FeedbackSignal {
             query: "rust programming".to_string(),
             document_id: "doc1".to_string(),
@@ -703,7 +726,7 @@ mod tests {
             relevance_score: 0.9,
             timestamp: chrono::Utc::now(),
         };
-        
+
         let result = system.update_with_feedback(&feedback);
         assert!(result.is_ok());
     }
@@ -711,17 +734,17 @@ mod tests {
     #[test]
     fn test_cosine_similarity() {
         let system = RecommendationSystem::new(RecommendationConfig::default());
-        
+
         let vec1 = vec![1.0, 2.0, 3.0];
         let vec2 = vec![1.0, 2.0, 3.0];
         let similarity = system.cosine_similarity(&vec1, &vec2);
-        
+
         // Should be 1.0 for identical vectors
         assert!((similarity - 1.0).abs() < 0.0001);
-        
+
         let vec3 = vec![0.0, 0.0, 0.0];
         let similarity2 = system.cosine_similarity(&vec1, &vec3);
-        
+
         // Should be 0.0 for zero vector
         assert_eq!(similarity2, 0.0);
     }
@@ -735,7 +758,7 @@ mod tests {
             explanation: Some("Similar users liked this".to_string()),
             confidence: 0.7,
         };
-        
+
         assert_eq!(rec.document_id, "doc1");
         assert_eq!(rec.score, 0.8);
         assert_eq!(rec.recommendation_type, RecommendationType::Collaborative);

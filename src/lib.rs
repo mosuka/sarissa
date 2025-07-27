@@ -30,8 +30,7 @@ pub mod cli;
 pub mod error;
 pub mod hybrid_search;
 pub mod index;
-// Temporarily disable ML module to test core functionality
-// pub mod ml;
+pub mod ml;
 pub mod parallel_index;
 pub mod parallel_search;
 pub mod parallel_vector_index;
