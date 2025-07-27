@@ -6,7 +6,7 @@ use sarissa::prelude::*;
 use sarissa::query::TermQuery;
 use sarissa::schema::{IdField, TextField};
 use sarissa::search::{SearchEngine, SearchRequest};
-use sarissa::vector_index::embeddings::{EmbeddingConfig, EmbeddingMethod};
+use sarissa::embeding::{EmbeddingConfig, EmbeddingMethod};
 use std::collections::HashMap;
 use tempfile::TempDir;
 

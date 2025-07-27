@@ -11,7 +11,7 @@ use crate::vector::{
     DistanceMetric, Vector,
     types::{VectorSearchResult, VectorSearchResults},
 };
-use crate::vector_index::embeddings::EmbeddingEngine;
+use crate::embeding::EmbeddingEngine;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

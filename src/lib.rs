@@ -27,6 +27,7 @@
 
 pub mod analysis;
 pub mod cli;
+pub mod embeding;
 pub mod error;
 pub mod hybrid_search;
 pub mod index;
