@@ -1,7 +1,7 @@
 //! Configuration for hybrid search.
 
 use crate::vector::types::VectorSearchConfig;
-use crate::vector_index::embeddings::EmbeddingConfig;
+use crate::embeding::EmbeddingConfig;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for hybrid search combining keyword and vector search.

@@ -6,7 +6,6 @@
 //! - Vector quantization and compression
 //! - Index optimization and maintenance
 
-pub mod embeddings;
 pub mod flat_builder;
 pub mod hnsw_builder;
 pub mod ivf_builder;
@@ -14,7 +13,6 @@ pub mod optimization;
 pub mod quantization;
 pub mod writer;
 
-pub use embeddings::{EmbeddingConfig, EmbeddingEngine, EmbeddingMethod};
 pub use flat_builder::FlatVectorIndexBuilder;
 pub use hnsw_builder::HnswIndexBuilder;
 pub use ivf_builder::IvfIndexBuilder;
