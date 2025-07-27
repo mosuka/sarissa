@@ -135,6 +135,11 @@ impl SarissaError {
         SarissaError::Other(format!("Timeout: {}", msg.into()))
     }
 
+    /// Create a new invalid config error.
+    pub fn invalid_config<S: Into<String>>(msg: S) -> Self {
+        SarissaError::Other(format!("Invalid configuration: {}", msg.into()))
+    }
+
     /// Create a new invalid argument error.
     pub fn invalid_argument<S: Into<String>>(msg: S) -> Self {
         SarissaError::Other(format!("Invalid argument: {}", msg.into()))
