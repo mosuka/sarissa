@@ -4,14 +4,12 @@
 //! filtering, and analysis pipelines. It's inspired by Whoosh's analysis system.
 
 pub mod analyzer;
-pub mod filter;
-pub mod stemmer;
 pub mod token;
+pub mod token_filter;
 pub mod tokenizer;
 
 // Re-export commonly used types
 pub use analyzer::*;
-pub use filter::*;
-pub use stemmer::*;
 pub use token::*;
+pub use token_filter::*;
 pub use tokenizer::*;

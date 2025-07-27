@@ -1,6 +1,6 @@
 //! Analyzer implementations that combine tokenizers and filters.
 
-use crate::analysis::filter::Filter;
+use crate::analysis::token_filter::Filter;
 use crate::analysis::token::TokenStream;
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
@@ -138,7 +138,7 @@ pub struct StandardAnalyzer {
 impl StandardAnalyzer {
     /// Create a new standard analyzer with default settings.
     pub fn new() -> Result<Self> {
-        use crate::analysis::filter::{LowercaseFilter, StopFilter};
+        use crate::analysis::token_filter::{LowercaseFilter, StopFilter};
         use crate::analysis::tokenizer::RegexTokenizer;
 
         let tokenizer = Arc::new(RegexTokenizer::new()?);
@@ -152,7 +152,7 @@ impl StandardAnalyzer {
 
     /// Create a new standard analyzer without stop word filtering.
     pub fn without_stop_words() -> Result<Self> {
-        use crate::analysis::filter::LowercaseFilter;
+        use crate::analysis::token_filter::LowercaseFilter;
         use crate::analysis::tokenizer::RegexTokenizer;
 
         let tokenizer = Arc::new(RegexTokenizer::new()?);
@@ -267,7 +267,7 @@ impl Analyzer for NoOpAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::filter::{LowercaseFilter, StopFilter};
+    use crate::analysis::token_filter::{LowercaseFilter, StopFilter};
     use crate::analysis::token::Token;
     use crate::analysis::tokenizer::RegexTokenizer;
 
