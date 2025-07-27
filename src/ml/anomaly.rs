@@ -7,7 +7,7 @@
 //! - User behavior anomalies
 
 use crate::error::Result;
-use crate::ml::{MLError, MLContext, SearchHistoryItem, FeedbackSignal};
+use crate::ml::{FeedbackSignal, MLContext};
 use crate::query::SearchResults;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -39,7 +39,7 @@ impl Default for AnomalyDetectionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            window_size_minutes: 60, // 1 hour window
+            window_size_minutes: 60,    // 1 hour window
             anomaly_threshold_std: 2.0, // 2 standard deviations
             min_samples: 10,
             enable_pattern_detection: true,
@@ -97,28 +97,38 @@ impl AnomalyDetection {
 
         // Detect search pattern anomalies
         if self.config.enable_pattern_detection {
-            if let Some(pattern_anomaly) = self.pattern_detector.detect_anomaly(query, &timestamp)? {
+            if let Some(pattern_anomaly) =
+                self.pattern_detector.detect_anomaly(query, &timestamp)?
+            {
                 anomalies.push(pattern_anomaly);
             }
         }
 
         // Detect result quality anomalies
         if self.config.enable_quality_detection {
-            if let Some(quality_anomaly) = self.quality_detector.detect_anomaly(query, results, &timestamp)? {
+            if let Some(quality_anomaly) = self
+                .quality_detector
+                .detect_anomaly(query, results, &timestamp)?
+            {
                 anomalies.push(quality_anomaly);
             }
         }
 
         // Detect performance anomalies
         if self.config.enable_performance_detection {
-            if let Some(perf_anomaly) = self.performance_detector.detect_anomaly(response_time_ms, &timestamp)? {
+            if let Some(perf_anomaly) = self
+                .performance_detector
+                .detect_anomaly(response_time_ms, &timestamp)?
+            {
                 anomalies.push(perf_anomaly);
             }
         }
 
         // Detect user behavior anomalies
         if self.config.enable_behavior_detection {
-            if let Some(behavior_anomaly) = self.behavior_detector.detect_anomaly(context, &timestamp)? {
+            if let Some(behavior_anomaly) =
+                self.behavior_detector.detect_anomaly(context, &timestamp)?
+            {
                 anomalies.push(behavior_anomaly);
             }
         }
@@ -126,7 +136,7 @@ impl AnomalyDetection {
         // Store anomalies in history
         for anomaly in &anomalies {
             self.anomaly_history.push_back(anomaly.clone());
-            
+
             // Limit history size
             while self.anomaly_history.len() > 1000 {
                 self.anomaly_history.pop_front();
@@ -146,8 +156,10 @@ impl AnomalyDetection {
     /// Get recent anomaly statistics.
     pub fn get_anomaly_stats(&self, last_hours: u64) -> AnomalyStats {
         let cutoff_time = chrono::Utc::now() - chrono::Duration::hours(last_hours as i64);
-        
-        let recent_anomalies: Vec<_> = self.anomaly_history.iter()
+
+        let recent_anomalies: Vec<_> = self
+            .anomaly_history
+            .iter()
             .filter(|a| a.timestamp >= cutoff_time)
             .collect();
 
@@ -186,7 +198,7 @@ impl AnomalyDetection {
     /// Check if system health is degraded.
     pub fn is_system_healthy(&self) -> bool {
         let stats = self.get_anomaly_stats(1); // Last hour
-        
+
         // Simple health check based on recent high-severity anomalies
         stats.high_severity_count < 5 && stats.average_severity < self.config.alert_threshold
     }
@@ -215,9 +227,7 @@ impl SearchPatternDetector {
         timestamp: &chrono::DateTime<chrono::Utc>,
     ) -> Result<Option<AnomalyEvent>> {
         // Track query frequency
-        let query_times = self.query_frequency
-            .entry(query.to_string())
-            .or_insert_with(VecDeque::new);
+        let query_times = self.query_frequency.entry(query.to_string()).or_default();
 
         query_times.push_back(*timestamp);
 
@@ -228,11 +238,12 @@ impl SearchPatternDetector {
         }
 
         // Check for suspicious frequency patterns
-        if query_times.len() >= 20 { // More than 20 identical queries in window
+        if query_times.len() >= 20 {
+            // More than 20 identical queries in window
             return Ok(Some(AnomalyEvent {
                 anomaly_type: AnomalyType::SearchPattern,
                 severity: 0.8,
-                message: format!("High frequency of identical query: '{}'", query),
+                message: format!("High frequency of identical query: '{query}'"),
                 details: HashMap::from([
                     ("query".to_string(), query.to_string()),
                     ("frequency".to_string(), query_times.len().to_string()),
@@ -252,7 +263,7 @@ impl SearchPatternDetector {
 
             if std_dev > 0.0 {
                 let z_score = (current_rate - mean) / std_dev;
-                
+
                 if z_score.abs() > self.config.anomaly_threshold_std {
                     return Ok(Some(AnomalyEvent {
                         anomaly_type: AnomalyType::SearchPattern,
@@ -276,6 +287,7 @@ impl SearchPatternDetector {
 /// Result quality anomaly detector.
 #[derive(Debug)]
 struct ResultQualityDetector {
+    #[allow(dead_code)]
     click_through_rates: MovingStatistics,
     result_counts: MovingStatistics,
     relevance_scores: MovingStatistics,
@@ -299,7 +311,8 @@ impl ResultQualityDetector {
         timestamp: &chrono::DateTime<chrono::Utc>,
     ) -> Result<Option<AnomalyEvent>> {
         // Update statistics
-        self.result_counts.add_value(results.hits.len() as f64, *timestamp);
+        self.result_counts
+            .add_value(results.hits.len() as f64, *timestamp);
 
         // Check for unusual result count
         if self.result_counts.sample_count() >= self.config.min_samples {
@@ -309,7 +322,7 @@ impl ResultQualityDetector {
 
             if std_dev > 0.0 {
                 let z_score = (current_count - mean) / std_dev;
-                
+
                 if z_score < -self.config.anomaly_threshold_std {
                     return Ok(Some(AnomalyEvent {
                         anomaly_type: AnomalyType::ResultQuality,
@@ -330,7 +343,8 @@ impl ResultQualityDetector {
     }
 
     fn add_feedback(&mut self, feedback: &FeedbackSignal) -> Result<()> {
-        self.relevance_scores.add_value(feedback.relevance_score, feedback.timestamp);
+        self.relevance_scores
+            .add_value(feedback.relevance_score, feedback.timestamp);
         Ok(())
     }
 }
@@ -364,7 +378,7 @@ impl PerformanceDetector {
 
             if std_dev > 0.0 {
                 let z_score = (response_time - mean) / std_dev;
-                
+
                 if z_score > self.config.anomaly_threshold_std {
                     return Ok(Some(AnomalyEvent {
                         anomaly_type: AnomalyType::Performance,
@@ -388,8 +402,10 @@ impl PerformanceDetector {
 /// User behavior anomaly detector.
 #[derive(Debug)]
 struct UserBehaviorDetector {
+    #[allow(dead_code)]
     session_lengths: MovingStatistics,
     query_patterns: HashMap<String, usize>,
+    #[allow(dead_code)]
     config: AnomalyDetectionConfig,
 }
 
@@ -409,7 +425,9 @@ impl UserBehaviorDetector {
     ) -> Result<Option<AnomalyEvent>> {
         // Check for suspicious query patterns
         if context.search_history.len() > 10 {
-            let recent_queries: Vec<_> = context.search_history.iter()
+            let recent_queries: Vec<_> = context
+                .search_history
+                .iter()
                 .rev()
                 .take(10)
                 .map(|item| &item.query)
@@ -417,15 +435,21 @@ impl UserBehaviorDetector {
 
             // Check for repetitive patterns
             let unique_queries: std::collections::HashSet<_> = recent_queries.iter().collect();
-            
+
             if unique_queries.len() <= 2 && recent_queries.len() >= 10 {
                 return Ok(Some(AnomalyEvent {
                     anomaly_type: AnomalyType::UserBehavior,
                     severity: 0.6,
                     message: "Repetitive query pattern detected".to_string(),
                     details: HashMap::from([
-                        ("unique_queries".to_string(), unique_queries.len().to_string()),
-                        ("total_queries".to_string(), recent_queries.len().to_string()),
+                        (
+                            "unique_queries".to_string(),
+                            unique_queries.len().to_string(),
+                        ),
+                        (
+                            "total_queries".to_string(),
+                            recent_queries.len().to_string(),
+                        ),
                     ]),
                     timestamp: *timestamp,
                 }));
@@ -437,7 +461,10 @@ impl UserBehaviorDetector {
 
     fn add_feedback(&mut self, feedback: &FeedbackSignal) -> Result<()> {
         // Track feedback patterns for anomaly detection
-        *self.query_patterns.entry(feedback.query.clone()).or_insert(0) += 1;
+        *self
+            .query_patterns
+            .entry(feedback.query.clone())
+            .or_insert(0) += 1;
         Ok(())
     }
 }
@@ -464,7 +491,12 @@ impl MovingStatistics {
     fn add_value(&mut self, value: f64, timestamp: chrono::DateTime<chrono::Utc>) {
         // Remove old values
         let cutoff = timestamp - chrono::Duration::minutes(self.window_size_minutes as i64);
-        while self.values.front().map(|(_, t)| *t < cutoff).unwrap_or(false) {
+        while self
+            .values
+            .front()
+            .map(|(_, t)| *t < cutoff)
+            .unwrap_or(false)
+        {
             let (old_value, _) = self.values.pop_front().unwrap();
             self.sum -= old_value;
             self.sum_squared -= old_value * old_value;
@@ -576,11 +608,11 @@ mod tests {
     fn test_moving_statistics() {
         let mut stats = MovingStatistics::new(60);
         let timestamp = chrono::Utc::now();
-        
+
         stats.add_value(10.0, timestamp);
         stats.add_value(20.0, timestamp);
         stats.add_value(30.0, timestamp);
-        
+
         assert_eq!(stats.sample_count(), 3);
         assert_eq!(stats.mean(), 20.0);
         assert!(stats.std_deviation() > 0.0);
@@ -592,12 +624,10 @@ mod tests {
             anomaly_type: AnomalyType::Performance,
             severity: 0.8,
             message: "High response time".to_string(),
-            details: HashMap::from([
-                ("response_time".to_string(), "1000ms".to_string()),
-            ]),
+            details: HashMap::from([("response_time".to_string(), "1000ms".to_string())]),
             timestamp: chrono::Utc::now(),
         };
-        
+
         assert_eq!(event.anomaly_type, AnomalyType::Performance);
         assert_eq!(event.severity, 0.8);
     }
@@ -605,7 +635,7 @@ mod tests {
     #[test]
     fn test_anomaly_detection_with_feedback() {
         let mut detector = AnomalyDetection::new(AnomalyDetectionConfig::default());
-        
+
         let feedback = FeedbackSignal {
             query: "test query".to_string(),
             document_id: "doc1".to_string(),
@@ -613,7 +643,7 @@ mod tests {
             relevance_score: 0.5,
             timestamp: chrono::Utc::now(),
         };
-        
+
         let result = detector.process_feedback(&feedback);
         assert!(result.is_ok());
     }
@@ -621,7 +651,7 @@ mod tests {
     #[test]
     fn test_system_health_check() {
         let detector = AnomalyDetection::new(AnomalyDetectionConfig::default());
-        
+
         // Should be healthy with no anomalies
         assert!(detector.is_system_healthy());
     }
@@ -630,7 +660,7 @@ mod tests {
     fn test_anomaly_stats() {
         let detector = AnomalyDetection::new(AnomalyDetectionConfig::default());
         let stats = detector.get_anomaly_stats(24);
-        
+
         assert_eq!(stats.total_anomalies, 0);
         assert_eq!(stats.average_severity, 0.0);
     }

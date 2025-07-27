@@ -84,12 +84,11 @@ pub enum SarissaError {
 pub type Result<T> = std::result::Result<T, SarissaError>;
 
 /// Implement From<MLError> for SarissaError
-// Temporarily disabled while ML module is disabled
-// impl From<crate::ml::MLError> for SarissaError {
-//     fn from(err: crate::ml::MLError) -> Self {
-//         SarissaError::ML(err.to_string())
-//     }
-// }
+impl From<crate::ml::MLError> for SarissaError {
+    fn from(err: crate::ml::MLError) -> Self {
+        SarissaError::ML(err.to_string())
+    }
+}
 impl SarissaError {
     /// Create a new index error.
     pub fn index<S: Into<String>>(msg: S) -> Self {

@@ -7,7 +7,7 @@
 //! - Performance optimization
 
 use crate::error::Result;
-use crate::ml::{MLError, MLContext, FeedbackSignal, AnomalyEvent};
+use crate::ml::{AnomalyEvent, FeedbackSignal, MLContext};
 use crate::query::SearchResults;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -118,10 +118,14 @@ impl AutoOptimization {
     }
 
     /// Apply optimization recommendation.
-    pub fn apply_optimization(&mut self, recommendation: &OptimizationRecommendation) -> Result<()> {
+    pub fn apply_optimization(
+        &mut self,
+        recommendation: &OptimizationRecommendation,
+    ) -> Result<()> {
         match &recommendation.optimization_type {
             OptimizationType::ParameterTuning => {
-                self.parameter_optimizer.apply_optimization(recommendation)?;
+                self.parameter_optimizer
+                    .apply_optimization(recommendation)?;
             }
             OptimizationType::AlgorithmSelection => {
                 self.algorithm_selector.apply_optimization(recommendation)?;
@@ -141,7 +145,7 @@ impl AutoOptimization {
         results: &SearchResults,
         feedback_signals: &[FeedbackSignal],
         response_time_ms: u64,
-        context: &MLContext,
+        _context: &MLContext,
     ) -> Result<()> {
         let performance_data = SearchPerformanceData {
             query: query.to_string(),
@@ -153,21 +157,30 @@ impl AutoOptimization {
         };
 
         self.performance_tracker.add_data(performance_data)?;
-        self.parameter_optimizer.add_performance_data(query, results, feedback_signals)?;
-        self.algorithm_selector.add_performance_data(query, results, feedback_signals)?;
-        self.ab_tester.add_performance_data(query, results, feedback_signals)?;
+        self.parameter_optimizer
+            .add_performance_data(query, results, feedback_signals)?;
+        self.algorithm_selector
+            .add_performance_data(query, results, feedback_signals)?;
+        self.ab_tester
+            .add_performance_data(query, results, feedback_signals)?;
 
         Ok(())
     }
 
     /// Handle anomaly events for optimization.
-    pub fn handle_anomaly(&mut self, anomaly: &AnomalyEvent) -> Result<Vec<OptimizationRecommendation>> {
+    pub fn handle_anomaly(
+        &mut self,
+        anomaly: &AnomalyEvent,
+    ) -> Result<Vec<OptimizationRecommendation>> {
         let mut recommendations = Vec::new();
 
         match &anomaly.anomaly_type {
             crate::ml::anomaly::AnomalyType::Performance => {
                 // Recommend parameter adjustments for performance issues
-                if let Some(rec) = self.parameter_optimizer.handle_performance_anomaly(anomaly)? {
+                if let Some(rec) = self
+                    .parameter_optimizer
+                    .handle_performance_anomaly(anomaly)?
+                {
                     recommendations.push(rec);
                 }
             }
@@ -186,7 +199,7 @@ impl AutoOptimization {
     /// Get optimization statistics.
     pub fn get_optimization_stats(&self) -> OptimizationStats {
         OptimizationStats {
-            total_optimizations: self.parameter_optimizer.optimization_count() 
+            total_optimizations: self.parameter_optimizer.optimization_count()
                 + self.algorithm_selector.optimization_count()
                 + self.ab_tester.optimization_count(),
             parameter_optimizations: self.parameter_optimizer.optimization_count(),
@@ -204,7 +217,8 @@ impl AutoOptimization {
             return 0.0;
         }
 
-        let click_count = feedback_signals.iter()
+        let click_count = feedback_signals
+            .iter()
             .filter(|f| matches!(f.feedback_type, crate::ml::FeedbackType::Click))
             .count();
 
@@ -238,7 +252,7 @@ impl ParameterOptimizer {
 
         // Analyze current performance
         let current_performance = self.calculate_current_performance();
-        
+
         // Generate parameter suggestions using grid search
         if let Some(better_params) = self.find_better_parameters(current_performance)? {
             return Ok(Some(OptimizationRecommendation {
@@ -246,7 +260,7 @@ impl ParameterOptimizer {
                 recommendation: format!("Adjust search parameters: {:?}", better_params.changes),
                 expected_improvement: better_params.expected_improvement,
                 confidence: better_params.confidence,
-                parameters: better_params.parameters,
+                parameters: Some(better_params.parameters),
                 timestamp: chrono::Utc::now(),
             }));
         }
@@ -264,13 +278,14 @@ impl ParameterOptimizer {
 
     fn add_performance_data(
         &mut self,
-        query: &str,
+        _query: &str,
         results: &SearchResults,
         feedback: &[FeedbackSignal],
     ) -> Result<()> {
         let performance = ParameterPerformance {
             parameters: self.current_params.clone(),
-            avg_relevance: feedback.iter().map(|f| f.relevance_score).sum::<f64>() / feedback.len().max(1) as f64,
+            avg_relevance: feedback.iter().map(|f| f.relevance_score).sum::<f64>()
+                / feedback.len().max(1) as f64,
             response_time_score: 1.0 / (results.hits.len() as f64 + 1.0), // Simplified metric
             result_count: results.hits.len(),
             timestamp: chrono::Utc::now(),
@@ -286,7 +301,10 @@ impl ParameterOptimizer {
         Ok(())
     }
 
-    fn handle_performance_anomaly(&mut self, anomaly: &AnomalyEvent) -> Result<Option<OptimizationRecommendation>> {
+    fn handle_performance_anomaly(
+        &mut self,
+        _anomaly: &AnomalyEvent,
+    ) -> Result<Option<OptimizationRecommendation>> {
         // Generate immediate optimization for performance issues
         Ok(Some(OptimizationRecommendation {
             optimization_type: OptimizationType::ParameterTuning,
@@ -306,30 +324,34 @@ impl ParameterOptimizer {
     }
 
     // Private helper methods
-    
+
     fn calculate_current_performance(&self) -> f64 {
         if self.performance_history.is_empty() {
             return 0.0;
         }
 
-        let recent_performances: Vec<_> = self.performance_history.iter()
-            .rev()
-            .take(50)
-            .collect();
+        let recent_performances: Vec<_> = self.performance_history.iter().rev().take(50).collect();
 
-        let avg_relevance: f64 = recent_performances.iter()
+        let avg_relevance: f64 = recent_performances
+            .iter()
             .map(|p| p.avg_relevance)
-            .sum::<f64>() / recent_performances.len() as f64;
+            .sum::<f64>()
+            / recent_performances.len() as f64;
 
-        let avg_response_score: f64 = recent_performances.iter()
+        let avg_response_score: f64 = recent_performances
+            .iter()
             .map(|p| p.response_time_score)
-            .sum::<f64>() / recent_performances.len() as f64;
+            .sum::<f64>()
+            / recent_performances.len() as f64;
 
         // Combined score
         0.7 * avg_relevance + 0.3 * avg_response_score
     }
 
-    fn find_better_parameters(&self, current_performance: f64) -> Result<Option<ParameterSuggestion>> {
+    fn find_better_parameters(
+        &self,
+        _current_performance: f64,
+    ) -> Result<Option<ParameterSuggestion>> {
         // Simplified parameter optimization - in practice, this would use more sophisticated methods
         let mut best_suggestion = None;
         let mut best_improvement = 0.0;
@@ -343,11 +365,13 @@ impl ParameterOptimizer {
 
         for variant in param_variants {
             let expected_improvement = 0.05; // Simplified estimation
-            if expected_improvement > best_improvement && expected_improvement > self.config.improvement_threshold {
+            if expected_improvement > best_improvement
+                && expected_improvement > self.config.improvement_threshold
+            {
                 best_improvement = expected_improvement;
                 best_suggestion = Some(ParameterSuggestion {
                     parameters: variant.clone(),
-                    changes: format!("Parameter adjustment: {:?}", variant),
+                    changes: format!("Parameter adjustment: {variant:?}"),
                     expected_improvement,
                     confidence: 0.6,
                 });
@@ -364,6 +388,7 @@ struct AlgorithmSelector {
     current_algorithms: AlgorithmConfiguration,
     algorithm_performance: HashMap<String, Vec<f64>>,
     optimization_count: usize,
+    #[allow(dead_code)]
     config: AutoOptimizationConfig,
 }
 
@@ -383,12 +408,10 @@ impl AlgorithmSelector {
             if best_algo != self.current_algorithms.primary_algorithm {
                 return Ok(Some(OptimizationRecommendation {
                     optimization_type: OptimizationType::AlgorithmSelection,
-                    recommendation: format!("Switch to {} algorithm", best_algo),
+                    recommendation: format!("Switch to {best_algo} algorithm"),
                     expected_improvement: 0.08,
                     confidence: 0.8,
-                    parameters: Some(HashMap::from([
-                        ("algorithm".to_string(), best_algo),
-                    ])),
+                    parameters: Some(HashMap::from([("algorithm".to_string(), best_algo)])),
                     timestamp: chrono::Utc::now(),
                 }));
             }
@@ -409,29 +432,34 @@ impl AlgorithmSelector {
 
     fn add_performance_data(
         &mut self,
-        query: &str,
-        results: &SearchResults,
+        _query: &str,
+        _results: &SearchResults,
         feedback: &[FeedbackSignal],
     ) -> Result<()> {
-        let performance = feedback.iter().map(|f| f.relevance_score).sum::<f64>() / feedback.len().max(1) as f64;
-        
+        let performance =
+            feedback.iter().map(|f| f.relevance_score).sum::<f64>() / feedback.len().max(1) as f64;
+
         self.algorithm_performance
             .entry(self.current_algorithms.primary_algorithm.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(performance);
 
         Ok(())
     }
 
-    fn handle_quality_anomaly(&mut self, anomaly: &AnomalyEvent) -> Result<Option<OptimizationRecommendation>> {
+    fn handle_quality_anomaly(
+        &mut self,
+        _anomaly: &AnomalyEvent,
+    ) -> Result<Option<OptimizationRecommendation>> {
         Ok(Some(OptimizationRecommendation {
             optimization_type: OptimizationType::AlgorithmSelection,
             recommendation: "Switch algorithm to address quality issues".to_string(),
             expected_improvement: 0.12,
             confidence: 0.6,
-            parameters: Some(HashMap::from([
-                ("algorithm".to_string(), "BM25Plus".to_string()),
-            ])),
+            parameters: Some(HashMap::from([(
+                "algorithm".to_string(),
+                "BM25Plus".to_string(),
+            )])),
             timestamp: chrono::Utc::now(),
         }))
     }
@@ -480,19 +508,22 @@ impl ABTester {
 
         // Check for completed A/B tests
         let mut completed_test_ids = Vec::new();
-        
+
         for (test_id, test) in &self.active_tests {
             if test.is_completed(&self.config) {
                 if let Some(winner) = test.get_winner(&self.config)? {
                     recommendations.push(OptimizationRecommendation {
                         optimization_type: OptimizationType::ABTest,
-                        recommendation: format!("A/B test '{}' completed. Winner: {}", test_id, winner.variant_name),
+                        recommendation: format!(
+                            "A/B test '{}' completed. Winner: {}",
+                            test_id, winner.variant_name
+                        ),
                         expected_improvement: winner.improvement,
                         confidence: winner.confidence,
                         parameters: winner.parameters.clone(),
                         timestamp: chrono::Utc::now(),
                     });
-                    
+
                     completed_test_ids.push(test_id.clone());
                 }
             }
@@ -514,7 +545,9 @@ impl ABTester {
 
     fn apply_optimization(&mut self, recommendation: &OptimizationRecommendation) -> Result<()> {
         // Start new A/B test or apply winning variant
-        if recommendation.recommendation.contains("A/B test") && recommendation.recommendation.contains("completed") {
+        if recommendation.recommendation.contains("A/B test")
+            && recommendation.recommendation.contains("completed")
+        {
             // Apply winning variant - implementation would update system configuration
         } else {
             // Start new A/B test
@@ -573,8 +606,11 @@ impl ABTester {
 #[derive(Debug, Clone)]
 struct SearchParameters {
     bm25_k1: f64,
+    #[allow(dead_code)]
     bm25_b: f64,
+    #[allow(dead_code)]
     max_results: usize,
+    #[allow(dead_code)]
     timeout_ms: u64,
 }
 
@@ -592,9 +628,11 @@ impl Default for SearchParameters {
 impl SearchParameters {
     fn update_from_map(&mut self, params: &HashMap<String, String>) -> Result<()> {
         if let Some(k1) = params.get("bm25_k1") {
-            self.bm25_k1 = k1.parse().map_err(|_| MLError::InvalidFeatureVector {
-                message: "Invalid bm25_k1 value".to_string(),
-            })?;
+            self.bm25_k1 = k1
+                .parse()
+                .map_err(|_| crate::ml::MLError::InvalidFeatureVector {
+                    message: "Invalid bm25_k1 value".to_string(),
+                })?;
         }
         // Similar for other parameters...
         Ok(())
@@ -604,6 +642,7 @@ impl SearchParameters {
 #[derive(Debug, Clone)]
 struct AlgorithmConfiguration {
     primary_algorithm: String,
+    #[allow(dead_code)]
     fallback_algorithm: String,
 }
 
@@ -618,10 +657,13 @@ impl Default for AlgorithmConfiguration {
 
 #[derive(Debug)]
 struct ParameterPerformance {
+    #[allow(dead_code)]
     parameters: SearchParameters,
     avg_relevance: f64,
     response_time_score: f64,
+    #[allow(dead_code)]
     result_count: usize,
+    #[allow(dead_code)]
     timestamp: chrono::DateTime<chrono::Utc>,
 }
 
@@ -635,7 +677,9 @@ struct ParameterSuggestion {
 
 #[derive(Debug)]
 struct ABTest {
+    #[allow(dead_code)]
     test_id: String,
+    #[allow(dead_code)]
     description: String,
     variants: Vec<ABTestVariant>,
     start_time: chrono::DateTime<chrono::Utc>,
@@ -643,12 +687,13 @@ struct ABTest {
 
 impl ABTest {
     fn new(test_id: String, description: String, params: Option<HashMap<String, String>>) -> Self {
-        let mut variants = vec![
-            ABTestVariant::new("control".to_string(), None),
-        ];
+        let mut variants = vec![ABTestVariant::new("control".to_string(), None)];
 
         if let Some(test_params) = params {
-            variants.push(ABTestVariant::new("variant_a".to_string(), Some(test_params)));
+            variants.push(ABTestVariant::new(
+                "variant_a".to_string(),
+                Some(test_params),
+            ));
         }
 
         Self {
@@ -661,21 +706,24 @@ impl ABTest {
 
     fn add_performance_data(
         &mut self,
-        query: &str,
-        results: &SearchResults,
+        _query: &str,
+        _results: &SearchResults,
         feedback: &[FeedbackSignal],
     ) -> Result<()> {
         // Randomly assign to variant and record performance
-        let variant_index = rand::random::<usize>() % self.variants.len();
-        let performance = feedback.iter().map(|f| f.relevance_score).sum::<f64>() / feedback.len().max(1) as f64;
-        
+        let variant_index = rand::random::<u8>() as usize % self.variants.len();
+        let performance =
+            feedback.iter().map(|f| f.relevance_score).sum::<f64>() / feedback.len().max(1) as f64;
+
         self.variants[variant_index].add_performance(performance);
         Ok(())
     }
 
     fn is_completed(&self, config: &AutoOptimizationConfig) -> bool {
         // Check if test has enough samples and statistical significance
-        self.variants.iter().all(|v| v.sample_count >= config.min_samples)
+        self.variants
+            .iter()
+            .all(|v| v.sample_count >= config.min_samples)
             && (chrono::Utc::now() - self.start_time).num_hours() >= 24
     }
 
@@ -699,9 +747,11 @@ impl ABTest {
         if let Some(winner) = best_variant {
             // Calculate statistical significance (simplified)
             let control_performance = self.variants[0].average_performance();
-            let improvement = (best_performance - control_performance) / control_performance.max(0.001);
-            
-            if improvement > 0.02 { // 2% improvement threshold
+            let improvement =
+                (best_performance - control_performance) / control_performance.max(0.001);
+
+            if improvement > 0.02 {
+                // 2% improvement threshold
                 return Ok(Some(ABTestWinner {
                     variant_name: winner.variant_name.clone(),
                     improvement,
@@ -768,7 +818,8 @@ impl PerformanceTracker {
     }
 
     fn add_data(&mut self, data: SearchPerformanceData) -> Result<()> {
-        let performance_score = data.relevance_scores.iter().sum::<f64>() / data.relevance_scores.len().max(1) as f64;
+        let performance_score =
+            data.relevance_scores.iter().sum::<f64>() / data.relevance_scores.len().max(1) as f64;
         self.performance_history.push_back(performance_score);
 
         // Limit history
@@ -785,7 +836,14 @@ impl PerformanceTracker {
         }
 
         let recent: f64 = self.performance_history.iter().rev().take(50).sum::<f64>() / 50.0;
-        let older: f64 = self.performance_history.iter().rev().skip(50).take(50).sum::<f64>() / 50.0;
+        let older: f64 = self
+            .performance_history
+            .iter()
+            .rev()
+            .skip(50)
+            .take(50)
+            .sum::<f64>()
+            / 50.0;
 
         if older > 0.0 {
             (recent - older) / older
@@ -796,7 +854,6 @@ impl PerformanceTracker {
 }
 
 /// Public API structures
-
 /// Optimization recommendation from the system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationRecommendation {
@@ -828,11 +885,16 @@ pub enum OptimizationType {
 /// Search performance data for optimization.
 #[derive(Debug, Clone)]
 struct SearchPerformanceData {
+    #[allow(dead_code)]
     query: String,
+    #[allow(dead_code)]
     result_count: usize,
+    #[allow(dead_code)]
     response_time_ms: u64,
     relevance_scores: Vec<f64>,
+    #[allow(dead_code)]
     click_through_rate: f64,
+    #[allow(dead_code)]
     timestamp: chrono::DateTime<chrono::Utc>,
 }
 
@@ -856,8 +918,8 @@ pub struct OptimizationStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ml::{FeedbackType, FeedbackSignal};
-    use crate::query::{SearchResults, SearchHit};
+    use crate::ml::{FeedbackSignal, FeedbackType};
+    use crate::query::{SearchHit, SearchResults};
 
     #[test]
     fn test_auto_optimization_config_default() {
@@ -889,20 +951,21 @@ mod tests {
             recommendation: "Adjust BM25 parameters".to_string(),
             expected_improvement: 0.1,
             confidence: 0.8,
-            parameters: Some(HashMap::from([
-                ("bm25_k1".to_string(), "1.5".to_string()),
-            ])),
+            parameters: Some(HashMap::from([("bm25_k1".to_string(), "1.5".to_string())])),
             timestamp: chrono::Utc::now(),
         };
 
-        assert_eq!(recommendation.optimization_type, OptimizationType::ParameterTuning);
+        assert_eq!(
+            recommendation.optimization_type,
+            OptimizationType::ParameterTuning
+        );
         assert_eq!(recommendation.expected_improvement, 0.1);
     }
 
     #[test]
     fn test_performance_tracking() {
         let mut tracker = PerformanceTracker::new();
-        
+
         let data = SearchPerformanceData {
             query: "test".to_string(),
             result_count: 10,
