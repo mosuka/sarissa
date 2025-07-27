@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
     println!("\n=== Query Expansion Example ===");
 
     // Initialize query expander
-    let mut query_expander = QueryExpansion::new(ml_config.query_expansion.clone())?;
+    let query_expander = QueryExpansion::new(ml_config.query_expansion.clone())?;
 
     // Note: In a real implementation, synonyms would be loaded from a dictionary file
     // For this example, we'll proceed without adding synonyms manually
@@ -183,7 +183,7 @@ async fn main() -> Result<()> {
     println!("\n=== Learning to Rank Example ===");
 
     // Initialize LTR system
-    let mut ltr_system = LearningToRank::new(ml_config.ranking.clone())?;
+    let ltr_system = LearningToRank::new(ml_config.ranking.clone())?;
 
     // Simulate user feedback
     let feedback_signals = vec![
@@ -232,7 +232,7 @@ async fn main() -> Result<()> {
     search_request.config.load_documents = true;
     search_request.config.max_docs = 10;
 
-    let mut search_results = engine.search_mut(search_request)?;
+    let search_results = engine.search_mut(search_request)?;
 
     println!("\nOriginal search results:");
     for (i, hit) in search_results.hits.iter().take(3).enumerate() {
@@ -327,7 +327,7 @@ async fn main() -> Result<()> {
     println!("\n=== Feature Extraction Example ===");
 
     let feature_extractor = sarissa::ml::features::FeatureExtractor::new();
-    let feature_context = sarissa::ml::features::FeatureContext {
+    let _feature_context = sarissa::ml::features::FeatureContext {
         document_id: "doc1".to_string(),
         vector_similarity: Some(0.85),
         semantic_distance: Some(0.3),

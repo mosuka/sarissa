@@ -587,7 +587,6 @@ pub struct AnomalyStats {
 mod tests {
     use super::*;
     use crate::ml::FeedbackType;
-    use crate::query::SearchHit;
 
     #[test]
     fn test_anomaly_detection_config_default() {

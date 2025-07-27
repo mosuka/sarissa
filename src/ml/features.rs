@@ -654,7 +654,6 @@ fn edit_distance(s1: &[char], s2: &[char]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Document, FieldValue};
 
     #[test]
     fn test_feature_extractor_creation() {

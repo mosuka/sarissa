@@ -856,8 +856,6 @@ pub struct RerankingContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::SearchHit;
-    use crate::schema::{Document, FieldValue};
 
     #[test]
     fn test_ranking_config_default() {

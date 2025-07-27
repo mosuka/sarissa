@@ -918,8 +918,6 @@ pub struct OptimizationStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ml::{FeedbackSignal, FeedbackType};
-    use crate::query::{SearchHit, SearchResults};
 
     #[test]
     fn test_auto_optimization_config_default() {
