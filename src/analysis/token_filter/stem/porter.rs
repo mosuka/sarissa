@@ -1,18 +1,7 @@
-//! Stemming algorithms for reducing words to their root forms.
+//! Porter stemming algorithm implementation.
 
-use crate::analysis::filter::Filter;
-use crate::analysis::token::TokenStream;
-use crate::error::Result;
+use super::Stemmer;
 use std::collections::HashMap;
-
-/// Trait for stemming algorithms.
-pub trait Stemmer: Send + Sync {
-    /// Stem a word to its root form.
-    fn stem(&self, word: &str) -> String;
-
-    /// Get the name of this stemmer.
-    fn name(&self) -> &'static str;
-}
 
 /// Porter stemming algorithm implementation.
 ///
@@ -321,156 +310,9 @@ impl Stemmer for PorterStemmer {
     }
 }
 
-/// Simple stemmer that just removes common suffixes.
-#[derive(Debug, Clone, Default)]
-pub struct SimpleStemmer {
-    /// Common English suffixes to remove.
-    suffixes: Vec<String>,
-}
-
-impl SimpleStemmer {
-    /// Create a new simple stemmer.
-    pub fn new() -> Self {
-        let suffixes = vec![
-            "ing".to_string(),
-            "ed".to_string(),
-            "er".to_string(),
-            "est".to_string(),
-            "ly".to_string(),
-            "s".to_string(),
-            "es".to_string(),
-            "ies".to_string(),
-            "ied".to_string(),
-            "tion".to_string(),
-            "sion".to_string(),
-            "able".to_string(),
-            "ible".to_string(),
-            "ment".to_string(),
-            "ness".to_string(),
-            "ful".to_string(),
-        ];
-
-        SimpleStemmer { suffixes }
-    }
-
-    /// Create a simple stemmer with custom suffixes.
-    pub fn with_suffixes(suffixes: Vec<String>) -> Self {
-        SimpleStemmer { suffixes }
-    }
-}
-
-impl Stemmer for SimpleStemmer {
-    fn stem(&self, word: &str) -> String {
-        let word = word.to_lowercase();
-
-        if word.len() <= 3 {
-            return word;
-        }
-
-        // Try to remove suffixes, longest first
-        let mut sorted_suffixes = self.suffixes.clone();
-        sorted_suffixes.sort_by_key(|b| std::cmp::Reverse(b.len()));
-
-        for suffix in &sorted_suffixes {
-            if word.len() > suffix.len() + 2 && word.ends_with(suffix) {
-                return word[..word.len() - suffix.len()].to_string();
-            }
-        }
-
-        word
-    }
-
-    fn name(&self) -> &'static str {
-        "simple"
-    }
-}
-
-/// Identity stemmer that returns words unchanged.
-#[derive(Debug, Clone, Default)]
-pub struct IdentityStemmer;
-
-impl IdentityStemmer {
-    pub fn new() -> Self {
-        IdentityStemmer
-    }
-}
-
-impl Stemmer for IdentityStemmer {
-    fn stem(&self, word: &str) -> String {
-        word.to_string()
-    }
-
-    fn name(&self) -> &'static str {
-        "identity"
-    }
-}
-
-/// Filter that applies stemming to tokens.
-pub struct StemFilter {
-    /// The stemmer to use.
-    stemmer: Box<dyn Stemmer>,
-}
-
-impl std::fmt::Debug for StemFilter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StemFilter")
-            .field("stemmer", &"<stemmer>")
-            .finish()
-    }
-}
-
-impl StemFilter {
-    /// Create a new stem filter with the Porter stemmer.
-    pub fn new() -> Self {
-        StemFilter {
-            stemmer: Box::new(PorterStemmer::new()),
-        }
-    }
-
-    /// Create a stem filter with a custom stemmer.
-    pub fn with_stemmer(stemmer: Box<dyn Stemmer>) -> Self {
-        StemFilter { stemmer }
-    }
-
-    /// Create a stem filter with the simple stemmer.
-    pub fn simple() -> Self {
-        StemFilter {
-            stemmer: Box::new(SimpleStemmer::new()),
-        }
-    }
-}
-
-impl Default for StemFilter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Filter for StemFilter {
-    fn filter(&self, tokens: TokenStream) -> Result<TokenStream> {
-        let filtered_tokens = tokens
-            .map(|token| {
-                if token.is_stopped() {
-                    token
-                } else {
-                    let stemmed = self.stemmer.stem(&token.text);
-                    token.with_text(stemmed)
-                }
-            })
-            .collect::<Vec<_>>();
-
-        Ok(Box::new(filtered_tokens.into_iter()))
-    }
-
-    fn name(&self) -> &'static str {
-        "stem"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::token::Token;
 
     #[test]
     fn test_porter_stemmer() {
@@ -485,58 +327,6 @@ mod tests {
         assert_eq!(stemmer.stem("itemization"), "item");
         assert_eq!(stemmer.stem("sensational"), "sensat");
         assert_eq!(stemmer.stem("traditional"), "tradit");
-    }
-
-    #[test]
-    fn test_simple_stemmer() {
-        let stemmer = SimpleStemmer::new();
-
-        assert_eq!(stemmer.stem("running"), "runn");
-        assert_eq!(stemmer.stem("flies"), "fli");
-        assert_eq!(stemmer.stem("beautiful"), "beauti");
-        assert_eq!(stemmer.stem("agreement"), "agree");
-        assert_eq!(stemmer.stem("happiness"), "happi");
-    }
-
-    #[test]
-    fn test_identity_stemmer() {
-        let stemmer = IdentityStemmer::new();
-
-        assert_eq!(stemmer.stem("running"), "running");
-        assert_eq!(stemmer.stem("flies"), "flies");
-        assert_eq!(stemmer.stem("test"), "test");
-    }
-
-    #[test]
-    fn test_stem_filter() {
-        let filter = StemFilter::new();
-        let tokens = vec![
-            Token::new("running", 0),
-            Token::new("flies", 1),
-            Token::new("test", 2).stop(),
-        ];
-        let token_stream = Box::new(tokens.into_iter());
-
-        let result: Vec<Token> = filter.filter(token_stream).unwrap().collect();
-
-        assert_eq!(result.len(), 3);
-        assert_eq!(result[0].text, "run");
-        assert_eq!(result[1].text, "fli");
-        assert_eq!(result[2].text, "test"); // Stopped tokens are not processed
-        assert!(result[2].is_stopped());
-    }
-
-    #[test]
-    fn test_simple_stem_filter() {
-        let filter = StemFilter::simple();
-        let tokens = vec![Token::new("running", 0), Token::new("beautiful", 1)];
-        let token_stream = Box::new(tokens.into_iter());
-
-        let result: Vec<Token> = filter.filter(token_stream).unwrap().collect();
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].text, "runn");
-        assert_eq!(result[1].text, "beauti");
     }
 
     #[test]
