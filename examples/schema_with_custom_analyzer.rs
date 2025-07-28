@@ -1,0 +1,110 @@
+//! Example demonstrating schema with custom default analyzer
+//!
+//! This example shows how to create schemas with custom default analyzers
+//! for different use cases.
+
+use sarissa::analysis::{KeywordAnalyzer, StandardAnalyzer};
+use sarissa::index::writer::{BasicIndexWriter, IndexWriter, WriterConfig};
+use sarissa::schema::{Document, FieldValue, Schema, TextField};
+use sarissa::storage::{MemoryStorage, StorageConfig};
+use std::sync::Arc;
+
+fn main() -> sarissa::error::Result<()> {
+    println!("=== Schema with Custom Default Analyzer Example ===\n");
+
+    // Example 1: Schema with StandardAnalyzer (default)
+    println!("=== Schema with StandardAnalyzer (default) ===");
+    let schema1 = Schema::new()?;
+    println!(
+        "✓ Schema1 default analyzer: {}",
+        schema1.default_analyzer().name()
+    );
+
+    // Example 2: Schema with KeywordAnalyzer
+    println!("\n=== Schema with KeywordAnalyzer ===");
+    let keyword_analyzer = Arc::new(KeywordAnalyzer::new());
+    let mut schema2 = Schema::new_with_default_analyzer(keyword_analyzer.clone());
+    schema2.add_field("title", Box::new(TextField::new()))?;
+    schema2.add_field("description", Box::new(TextField::new()))?;
+    schema2.add_field("category", Box::new(TextField::new()))?;
+    schema2.add_field("content", Box::new(TextField::new()))?;
+    println!(
+        "✓ Schema2 default analyzer: {}",
+        schema2.default_analyzer().name()
+    );
+
+    // Example 3: Schema with StandardAnalyzer using builder
+    println!("\n=== Schema with StandardAnalyzer using builder ===");
+    let standard_analyzer = Arc::new(StandardAnalyzer::new()?);
+    let mut schema3 = Schema::builder()?
+        .with_default_analyzer(standard_analyzer.clone())
+        .add_field("title", Box::new(TextField::new()))?
+        .add_field("description", Box::new(TextField::new()))?
+        .build()?;
+
+    println!(
+        "✓ Schema3 default analyzer: {}",
+        schema3.default_analyzer().name()
+    );
+
+    // Example 4: Changing default analyzer after creation
+    println!("\n=== Changing default analyzer after creation ===");
+    let new_standard_analyzer = Arc::new(StandardAnalyzer::new()?);
+    schema3.set_default_analyzer(new_standard_analyzer.clone());
+    println!(
+        "✓ Schema3 updated default analyzer: {}",
+        schema3.default_analyzer().name()
+    );
+
+    // Example 5: Using schema with IndexWriter
+    println!("\n=== Using schema with IndexWriter ===");
+    let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+    let config = WriterConfig::default();
+    let mut writer = BasicIndexWriter::new(schema2, storage, config)?;
+
+    // Add documents that will use the schema's default analyzer (KeywordAnalyzer)
+    let mut doc1 = Document::new();
+    doc1.add_field(
+        "title",
+        FieldValue::Text("Hello World! This is a TEST.".to_string()),
+    );
+    doc1.add_field(
+        "description",
+        FieldValue::Text("This will be analyzed with KeywordAnalyzer".to_string()),
+    );
+    writer.add_document(doc1)?;
+
+    let mut doc2 = Document::new();
+    // This field will get StandardAnalyzer (explicit)
+    let explicit_standard_analyzer = Arc::new(StandardAnalyzer::new()?);
+    doc2.add_field_with_analyzer(
+        "category",
+        FieldValue::Text("electronics-gadgets".to_string()),
+        explicit_standard_analyzer.clone(),
+    );
+    // This field will get schema's default analyzer (KeywordAnalyzer)
+    doc2.add_field(
+        "content",
+        FieldValue::Text("Amazing Electronic Gadgets!".to_string()),
+    );
+    writer.add_document(doc2)?;
+
+    writer.commit()?;
+    println!("✓ Added documents using schema's default analyzer");
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_schema_custom_analyzer_example() {
+        let result = main();
+        assert!(
+            result.is_ok(),
+            "Schema custom analyzer example should run successfully"
+        );
+    }
+}

@@ -1118,7 +1118,7 @@ mod tests {
         fn schema(&self) -> &crate::schema::Schema {
             // Return a minimal schema for testing
             static SCHEMA: std::sync::OnceLock<crate::schema::Schema> = std::sync::OnceLock::new();
-            SCHEMA.get_or_init(|| crate::schema::Schema::new())
+            SCHEMA.get_or_init(|| crate::schema::Schema::new().unwrap())
         }
         fn term_info(
             &self,

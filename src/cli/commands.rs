@@ -459,7 +459,7 @@ fn load_schema_from_file(path: &Path) -> Result<Schema> {
 
 /// Create default schema.
 fn create_default_schema() -> Result<Schema> {
-    let mut schema = Schema::new();
+    let mut schema = Schema::new()?;
 
     // Add default fields
     schema.add_field("title", Box::new(TextField::new()))?;

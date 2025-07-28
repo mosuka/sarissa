@@ -608,7 +608,7 @@ mod tests {
 
     #[allow(dead_code)]
     fn create_test_schema() -> Schema {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("title", Box::new(TextField::new().stored(true)))
             .unwrap();
@@ -723,7 +723,7 @@ mod tests {
 
     #[test]
     fn test_multiple_field_types() {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("title", Box::new(TextField::new().stored(true)))
             .unwrap();

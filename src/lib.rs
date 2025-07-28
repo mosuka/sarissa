@@ -10,20 +10,6 @@
 //! - Pluggable storage backends
 //! - Multiple query types
 //! - BM25 scoring
-//!
-//! ## Quick Start
-//!
-//! ```rust
-//! use sarissa::prelude::*;
-//!
-//! // Create a schema
-//! let mut schema = Schema::new();
-//! schema.add_field("title", Box::new(TextField::new())).unwrap();
-//! schema.add_field("body", Box::new(TextField::new())).unwrap();
-//!
-//! // Create an index
-//! // let index = Index::create_in_dir("index_dir", schema)?;
-//! ```
 
 pub mod analysis;
 pub mod cli;

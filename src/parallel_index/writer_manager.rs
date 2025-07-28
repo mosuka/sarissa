@@ -368,7 +368,7 @@ mod tests {
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_writer() -> Box<dyn IndexWriter> {
-        let schema = Schema::new();
+        let schema = Schema::new().unwrap();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(
             BasicIndexWriter::new(

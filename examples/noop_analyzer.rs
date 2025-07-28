@@ -23,7 +23,7 @@ fn main() -> sarissa::error::Result<()> {
         "UPPERCASE lowercase MixedCase",
         "Multiple\nLines\nOf\nText",
         "   Spaces   everywhere   ",
-        "",  // Empty string
+        "", // Empty string
     ];
 
     for (i, input) in test_inputs.iter().enumerate() {
@@ -45,9 +45,9 @@ fn main() -> sarissa::error::Result<()> {
     // Example 3: Comparing with other analyzers
     println!("3. Comparison with other analyzers:");
     let comparison_text = "The quick brown fox";
-    
+
     let noop_tokens: Vec<_> = analyzer.analyze(comparison_text)?.collect();
-    
+
     println!("   Input: \"{}\"", comparison_text);
     println!("   NoOpAnalyzer tokens: {}", noop_tokens.len());
     println!("   Other analyzers would produce multiple tokens");

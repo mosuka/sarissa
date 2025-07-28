@@ -37,15 +37,13 @@ fn main() -> Result<()> {
     // Example 6: Real-world sentence
     println!("\n6. Real-world sentence:");
     let tokens = create_test_tokens(&[
-        "The", "Quick", "Brown", "FOX", "jumps", "OVER", "the", "LAZY", "dog"
+        "The", "Quick", "Brown", "FOX", "jumps", "OVER", "the", "LAZY", "dog",
     ]);
     demonstrate_filter(&filter, tokens, "Mixed case sentence")?;
 
     // Example 7: Programming code
     println!("\n7. Programming identifiers:");
-    let tokens = create_test_tokens(&[
-        "getUserName", "API_ENDPOINT", "MAX_SIZE", "isValid"
-    ]);
+    let tokens = create_test_tokens(&["getUserName", "API_ENDPOINT", "MAX_SIZE", "isValid"]);
     demonstrate_filter(&filter, tokens, "Code identifiers")?;
 
     // Example 8: Empty and special cases
@@ -55,7 +53,7 @@ fn main() -> Result<()> {
 
     println!("\n=== Filter Properties ===\n");
     println!("Filter name: {}", filter.name());
-    
+
     println!("\n=== Use Cases ===\n");
     println!("LowercaseFilter is ideal for:");
     println!("  • Case-insensitive search and matching");
@@ -75,38 +73,37 @@ fn main() -> Result<()> {
 }
 
 fn create_test_tokens(texts: &[&str]) -> TokenStream {
-    let tokens: Vec<Token> = texts.iter()
+    let tokens: Vec<Token> = texts
+        .iter()
         .enumerate()
         .map(|(i, text)| Token::new(*text, i))
         .collect();
     Box::new(tokens.into_iter())
 }
 
-fn demonstrate_filter(
-    filter: &dyn Filter,
-    tokens: TokenStream,
-    description: &str,
-) -> Result<()> {
+fn demonstrate_filter(filter: &dyn Filter, tokens: TokenStream, description: &str) -> Result<()> {
     println!("Description: {}", description);
-    
+
     let input_tokens: Vec<Token> = tokens.collect();
     let input_count = input_tokens.len();
-    println!("Input:  {:?}", 
-        input_tokens.iter().map(|t| &t.text).collect::<Vec<_>>());
-    
+    println!(
+        "Input:  {:?}",
+        input_tokens.iter().map(|t| &t.text).collect::<Vec<_>>()
+    );
+
     let input_clone = input_tokens.clone();
     let input_stream = Box::new(input_tokens.into_iter());
     let filtered_tokens: Vec<Token> = filter.filter(input_stream)?.collect();
-    
-    println!("Output: {:?}", 
-        filtered_tokens.iter().map(|t| &t.text).collect::<Vec<_>>());
-    
+
+    println!(
+        "Output: {:?}",
+        filtered_tokens.iter().map(|t| &t.text).collect::<Vec<_>>()
+    );
+
     // Show transformations
     println!("Changes:");
     let mut changes = 0;
-    for (i, (input, output)) in input_clone.iter()
-        .zip(filtered_tokens.iter())
-        .enumerate() {
+    for (i, (input, output)) in input_clone.iter().zip(filtered_tokens.iter()).enumerate() {
         if input.text != output.text {
             println!("  {}: '{}' → '{}'", i, input.text, output.text);
             changes += 1;
@@ -115,8 +112,8 @@ fn demonstrate_filter(
     if changes == 0 {
         println!("  (no changes)");
     }
-    
+
     println!("Count: {} → {}", input_count, filtered_tokens.len());
-    
+
     Ok(())
 }

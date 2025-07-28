@@ -281,7 +281,7 @@ mod tests {
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_reader() -> Box<dyn IndexReader> {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("text", Box::new(TextField::new()))
             .unwrap();

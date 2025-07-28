@@ -10,31 +10,19 @@ fn main() -> Result<()> {
     // Example 1: Basic boost multiplication
     println!("1. Basic boost multiplication:");
     let boost_filter = BoostFilter::new(2.0);
-    let tokens = create_boosted_tokens(&[
-        ("important", 1.0),
-        ("normal", 1.0),
-        ("critical", 1.5),
-    ]);
+    let tokens = create_boosted_tokens(&[("important", 1.0), ("normal", 1.0), ("critical", 1.5)]);
     demonstrate_boost_filter(&boost_filter, tokens, "2x boost multiplier")?;
 
     // Example 2: Fractional boost (dampening)
     println!("\n2. Fractional boost (dampening):");
     let dampen_filter = BoostFilter::new(0.5);
-    let tokens = create_boosted_tokens(&[
-        ("loud", 3.0),
-        ("medium", 2.0),
-        ("quiet", 1.0),
-    ]);
+    let tokens = create_boosted_tokens(&[("loud", 3.0), ("medium", 2.0), ("quiet", 1.0)]);
     demonstrate_boost_filter(&dampen_filter, tokens, "0.5x dampening factor")?;
 
     // Example 3: High precision boost
     println!("\n3. High precision boost:");
     let precise_filter = BoostFilter::new(1.25);
-    let tokens = create_boosted_tokens(&[
-        ("keyword", 1.0),
-        ("title", 2.0),
-        ("meta", 0.8),
-    ]);
+    let tokens = create_boosted_tokens(&[("keyword", 1.0), ("title", 2.0), ("meta", 0.8)]);
     demonstrate_boost_filter(&precise_filter, tokens, "1.25x precision boost")?;
 
     // Example 4: Zero boost handling
@@ -51,11 +39,7 @@ fn main() -> Result<()> {
     // Example 5: Large boost values
     println!("\n5. Large boost values:");
     let large_filter = BoostFilter::new(10.0);
-    let tokens = create_boosted_tokens(&[
-        ("regular", 1.0),
-        ("important", 1.5),
-        ("critical", 2.0),
-    ]);
+    let tokens = create_boosted_tokens(&[("regular", 1.0), ("important", 1.5), ("critical", 2.0)]);
     demonstrate_boost_filter(&large_filter, tokens, "10x large boost")?;
 
     // Example 6: Search relevance simulation
@@ -73,10 +57,10 @@ fn main() -> Result<()> {
     println!("\n7. Document section boosting:");
     let section_filter = BoostFilter::new(2.5);
     let tokens = create_boosted_tokens(&[
-        ("title_word", 4.0),    // Title has highest weight
-        ("header_word", 2.0),   // Headers are important
-        ("body_word", 1.0),     // Body text baseline
-        ("footer_word", 0.5),   // Footer less important
+        ("title_word", 4.0),  // Title has highest weight
+        ("header_word", 2.0), // Headers are important
+        ("body_word", 1.0),   // Body text baseline
+        ("footer_word", 0.5), // Footer less important
     ]);
     demonstrate_boost_filter(&section_filter, tokens, "Document structure weighting")?;
 
@@ -84,10 +68,10 @@ fn main() -> Result<()> {
     println!("\n8. Category-based boosting:");
     let category_filter = BoostFilter::new(1.8);
     let tokens = create_boosted_tokens(&[
-        ("technology", 2.5),  // Tech category
-        ("business", 2.0),    // Business category
-        ("general", 1.0),     // General content
-        ("archive", 0.3),     // Archived content
+        ("technology", 2.5), // Tech category
+        ("business", 2.0),   // Business category
+        ("general", 1.0),    // General content
+        ("archive", 0.3),    // Archived content
     ]);
     demonstrate_boost_filter(&category_filter, tokens, "Content category weighting")?;
 
@@ -101,7 +85,7 @@ fn main() -> Result<()> {
     println!("   new_boost = original_boost × boost_factor");
     println!("   • Preserves relative importance");
     println!("   • Scales all values proportionally");
-    
+
     println!("\n2. Common boost factors:");
     println!("   • 1.0: No change (identity)");
     println!("   • > 1.0: Increase importance");
@@ -113,12 +97,12 @@ fn main() -> Result<()> {
     println!("  • Query term matching boost");
     println!("  • Document freshness weighting");
     println!("  • Authority domain boost");
-    
+
     println!("\nContent management:");
     println!("  • Featured content highlighting");
     println!("  • Section importance weighting");
     println!("  • User preference adjustments");
-    
+
     println!("\nMachine learning:");
     println!("  • Feature importance scaling");
     println!("  • Training data weighting");
@@ -134,7 +118,8 @@ fn main() -> Result<()> {
 }
 
 fn create_boosted_tokens(data: &[(&str, f32)]) -> TokenStream {
-    let tokens: Vec<Token> = data.iter()
+    let tokens: Vec<Token> = data
+        .iter()
         .enumerate()
         .map(|(i, (text, boost))| {
             let mut token = Token::new(*text, i);
@@ -151,32 +136,36 @@ fn demonstrate_boost_filter(
     description: &str,
 ) -> Result<()> {
     println!("Description: {}", description);
-    
+
     let input_tokens: Vec<Token> = tokens.collect();
     println!("Input tokens with boost:");
     for (i, token) in input_tokens.iter().enumerate() {
         println!("  {}: '{}' (boost: {:.2})", i, token.text, token.boost);
     }
-    
+
     let input_clone = input_tokens.clone();
     let input_stream = Box::new(input_tokens.into_iter());
     let filtered_tokens: Vec<Token> = filter.filter(input_stream)?.collect();
-    
+
     println!("Output tokens with boost:");
     for (i, token) in filtered_tokens.iter().enumerate() {
         println!("  {}: '{}' (boost: {:.2})", i, token.text, token.boost);
     }
-    
+
     // Show boost changes
     println!("Boost changes:");
-    for (i, (input, output)) in input_clone.iter()
-        .zip(filtered_tokens.iter())
-        .enumerate() {
+    for (i, (input, output)) in input_clone.iter().zip(filtered_tokens.iter()).enumerate() {
         let change = output.boost - input.boost;
-        let multiplier = if input.boost != 0.0 { output.boost / input.boost } else { 0.0 };
-        println!("  {}: {:.2} → {:.2} (×{:.2}, +{:.2})", 
-            i, input.boost, output.boost, multiplier, change);
+        let multiplier = if input.boost != 0.0 {
+            output.boost / input.boost
+        } else {
+            0.0
+        };
+        println!(
+            "  {}: {:.2} → {:.2} (×{:.2}, +{:.2})",
+            i, input.boost, output.boost, multiplier, change
+        );
     }
-    
+
     Ok(())
 }

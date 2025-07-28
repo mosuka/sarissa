@@ -1,29 +1,58 @@
 //! Schema management for document structure definition.
 
+use crate::analysis::Analyzer;
 use crate::error::{Result, SarissaError};
 use crate::query::geo::GeoPoint;
 use crate::schema::field::{FieldDefinition, FieldType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A schema defines the structure of documents in an index.
 ///
 /// Similar to Whoosh's Schema, this defines what fields are available,
 /// how they are processed, and how they are stored.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Schema {
     /// Map of field names to their definitions
     fields: HashMap<String, FieldDefinition>,
     /// Ordered list of field names (for consistent ordering)
     field_names: Vec<String>,
+    /// Default analyzer for text fields without explicit analyzers
+    default_analyzer: Arc<dyn Analyzer>,
+}
+
+// Manual Debug implementation to handle Arc<dyn Analyzer>
+impl std::fmt::Debug for Schema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Schema")
+            .field("fields", &self.fields)
+            .field("field_names", &self.field_names)
+            .field(
+                "default_analyzer",
+                &format!("<{}>", self.default_analyzer.name()),
+            )
+            .finish()
+    }
 }
 
 impl Schema {
-    /// Create a new empty schema.
-    pub fn new() -> Self {
+    /// Create a new empty schema with StandardAnalyzer as default.
+    pub fn new() -> Result<Self> {
+        use crate::analysis::StandardAnalyzer;
+        Ok(Schema {
+            fields: HashMap::new(),
+            field_names: Vec::new(),
+            default_analyzer: Arc::new(StandardAnalyzer::new()?),
+        })
+    }
+
+    /// Create a new empty schema with a custom default analyzer.
+    pub fn new_with_default_analyzer(default_analyzer: Arc<dyn Analyzer>) -> Self {
         Schema {
             fields: HashMap::new(),
             field_names: Vec::new(),
+            default_analyzer,
         }
     }
 
@@ -151,30 +180,62 @@ impl Schema {
         Ok(())
     }
 
+    /// Get the default analyzer for this schema.
+    pub fn default_analyzer(&self) -> &Arc<dyn Analyzer> {
+        &self.default_analyzer
+    }
+
+    /// Set the default analyzer for this schema.
+    pub fn set_default_analyzer(&mut self, analyzer: Arc<dyn Analyzer>) {
+        self.default_analyzer = analyzer;
+    }
+
     /// Create a builder for constructing schemas.
-    pub fn builder() -> SchemaBuilder {
+    pub fn builder() -> Result<SchemaBuilder> {
         SchemaBuilder::new()
     }
 }
 
 impl Default for Schema {
     fn default() -> Self {
-        Self::new()
+        // Use unwrap here as StandardAnalyzer::new() should not fail in normal circumstances
+        Self::new().unwrap()
     }
 }
 
 /// A builder for constructing schemas in a fluent manner.
-#[derive(Debug)]
 pub struct SchemaBuilder {
     schema: Schema,
 }
 
+// Manual Debug implementation to handle Arc<dyn Analyzer>
+impl std::fmt::Debug for SchemaBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SchemaBuilder")
+            .field("schema", &self.schema)
+            .finish()
+    }
+}
+
 impl SchemaBuilder {
-    /// Create a new schema builder.
-    pub fn new() -> Self {
+    /// Create a new schema builder with StandardAnalyzer as default.
+    pub fn new() -> Result<Self> {
+        Ok(SchemaBuilder {
+            schema: Schema::new()?,
+        })
+    }
+
+    /// Create a new schema builder with a custom default analyzer.
+    pub fn new_with_default_analyzer(default_analyzer: Arc<dyn Analyzer>) -> Self {
         SchemaBuilder {
-            schema: Schema::new(),
+            schema: Schema::new_with_default_analyzer(default_analyzer),
         }
+    }
+
+    /// Set the default analyzer for the schema being built.
+    pub fn with_default_analyzer(mut self, analyzer: Arc<dyn Analyzer>) -> Self {
+        self.schema.set_default_analyzer(analyzer);
+        self
     }
 
     /// Add a field to the schema being built.
@@ -196,17 +257,21 @@ impl SchemaBuilder {
 
 impl Default for SchemaBuilder {
     fn default() -> Self {
-        Self::new()
+        // Use unwrap here as StandardAnalyzer::new() should not fail in normal circumstances
+        Self::new().unwrap()
     }
 }
 
 /// A document represents a single item to be indexed.
 ///
 /// Documents are collections of field values that conform to a schema.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Document {
     /// The field values for this document
     fields: HashMap<String, FieldValue>,
+    /// Optional analyzers for specific fields (for schema-less mode)
+    #[serde(skip)]
+    field_analyzers: HashMap<String, Arc<dyn Analyzer>>,
 }
 
 /// Represents a value for a field in a document.
@@ -230,17 +295,42 @@ pub enum FieldValue {
     Null,
 }
 
+impl std::fmt::Debug for Document {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Document")
+            .field("fields", &self.fields)
+            .field(
+                "field_analyzers",
+                &format!("<{} analyzers>", self.field_analyzers.len()),
+            )
+            .finish()
+    }
+}
+
 impl Document {
     /// Create a new empty document.
     pub fn new() -> Self {
         Document {
             fields: HashMap::new(),
+            field_analyzers: HashMap::new(),
         }
     }
 
     /// Add a field value to the document.
     pub fn add_field<S: Into<String>>(&mut self, name: S, value: FieldValue) {
         self.fields.insert(name.into(), value);
+    }
+
+    /// Add a field value with a specific analyzer (for schema-less mode).
+    pub fn add_field_with_analyzer<S: Into<String>>(
+        &mut self,
+        name: S,
+        value: FieldValue,
+        analyzer: Arc<dyn Analyzer>,
+    ) {
+        let field_name = name.into();
+        self.fields.insert(field_name.clone(), value);
+        self.field_analyzers.insert(field_name, analyzer);
     }
 
     /// Get a field value from the document.
@@ -266,6 +356,21 @@ impl Document {
     /// Get all field values.
     pub fn fields(&self) -> &HashMap<String, FieldValue> {
         &self.fields
+    }
+
+    /// Get the analyzer for a specific field (if set).
+    pub fn get_field_analyzer(&self, name: &str) -> Option<&Arc<dyn Analyzer>> {
+        self.field_analyzers.get(name)
+    }
+
+    /// Get all field analyzers.
+    pub fn field_analyzers(&self) -> &HashMap<String, Arc<dyn Analyzer>> {
+        &self.field_analyzers
+    }
+
+    /// Set an analyzer for a specific field (internal use).
+    pub(crate) fn set_field_analyzer(&mut self, field_name: String, analyzer: Arc<dyn Analyzer>) {
+        self.field_analyzers.insert(field_name, analyzer);
     }
 
     /// Get the number of fields.
@@ -332,6 +437,18 @@ impl DocumentBuilder {
     pub fn add_text<S: Into<String>, T: Into<String>>(mut self, name: S, value: T) -> Self {
         self.document
             .add_field(name, FieldValue::Text(value.into()));
+        self
+    }
+
+    /// Add a text field with a specific analyzer to the document.
+    pub fn add_text_with_analyzer<S: Into<String>, T: Into<String>>(
+        mut self,
+        name: S,
+        value: T,
+        analyzer: Arc<dyn Analyzer>,
+    ) -> Self {
+        self.document
+            .add_field_with_analyzer(name, FieldValue::Text(value.into()), analyzer);
         self
     }
 
@@ -476,7 +593,7 @@ mod tests {
 
     #[test]
     fn test_schema_creation() {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
 
         assert!(schema.is_empty());
         assert_eq!(schema.len(), 0);
@@ -495,7 +612,7 @@ mod tests {
 
     #[test]
     fn test_schema_field_queries() {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
 
         schema
             .add_field(
@@ -530,10 +647,10 @@ mod tests {
 
     #[test]
     fn test_schema_validation() {
-        let schema = Schema::new();
+        let schema = Schema::new().unwrap();
         assert!(schema.validate().is_err()); // Empty schema
 
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field(
                 "stored_only",
@@ -542,7 +659,7 @@ mod tests {
             .unwrap();
         assert!(schema.validate().is_err()); // No indexed fields
 
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("indexed", Box::new(TextField::new().indexed(true)))
             .unwrap();
@@ -552,6 +669,7 @@ mod tests {
     #[test]
     fn test_schema_builder() {
         let schema = Schema::builder()
+            .unwrap()
             .add_field("title", Box::new(TextField::new().stored(true)))
             .unwrap()
             .add_field("id", Box::new(IdField::new()))
@@ -606,7 +724,7 @@ mod tests {
 
     #[test]
     fn test_document_validation() {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("title", Box::new(TextField::new()))
             .unwrap();

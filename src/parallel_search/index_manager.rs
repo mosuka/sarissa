@@ -291,7 +291,7 @@ mod tests {
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_reader() -> Arc<dyn IndexReader> {
-        let schema = Schema::new();
+        let schema = Schema::new().unwrap();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Arc::new(BasicIndexReader::new(schema, storage).unwrap())
     }
