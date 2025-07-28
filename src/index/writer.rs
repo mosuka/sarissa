@@ -1570,7 +1570,7 @@ mod tests {
 
     #[test]
     fn test_unified_api() {
-        use crate::analysis::{KeywordAnalyzer, StandardAnalyzer};
+        use crate::analysis::KeywordAnalyzer;
         use crate::schema::FieldValue;
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
@@ -1606,7 +1606,6 @@ mod tests {
 
     #[test]
     fn test_default_analyzer_application() {
-        use crate::analysis::StandardAnalyzer;
         use crate::schema::FieldValue;
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
