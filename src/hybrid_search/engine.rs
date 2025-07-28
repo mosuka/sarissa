@@ -4,6 +4,7 @@ use super::config::HybridSearchConfig;
 use super::merger::ResultMerger;
 use super::stats::HybridSearchStats;
 use super::types::HybridSearchResults;
+use crate::embeding::EmbeddingEngine;
 use crate::error::Result;
 use crate::query::Query;
 use crate::search::{Search, SearchRequest};
@@ -11,7 +12,6 @@ use crate::vector::{
     DistanceMetric, Vector,
     types::{VectorSearchResult, VectorSearchResults},
 };
-use crate::embeding::EmbeddingEngine;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

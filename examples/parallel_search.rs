@@ -41,7 +41,7 @@ fn main() -> Result<()> {
     }
 
     // Create a comprehensive schema
-    let mut schema = Schema::new();
+    let mut schema = Schema::new()?;
     schema.add_field("id", Box::new(IdField::new()))?;
     schema.add_field(
         "title",
@@ -532,15 +532,6 @@ fn main() -> Result<()> {
         search_metrics.total_searches,
         search_engine.index_count()?
     );
-    println!("✓ Demonstrated weighted scoring, phrase search, and concurrent execution");
-    println!("✓ Measured performance metrics for both indexing and search operations");
-
-    println!("\nKey Benefits Demonstrated:");
-    println!("• Parallel indexing: Distributes documents efficiently across multiple indices");
-    println!("• Concurrent search: Executes searches simultaneously across all indices");
-    println!("• Flexible merging: Different strategies (score-based, weighted) for result ranking");
-    println!("• Performance monitoring: Comprehensive metrics for optimization");
-    println!("• Scalability: Handles multiple indices with configurable concurrency");
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 //! Analyzer implementations that combine tokenizers and filters.
 
+#[allow(clippy::module_inception)]
 mod analyzer;
 mod keyword;
 mod noop;

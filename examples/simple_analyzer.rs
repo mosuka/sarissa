@@ -18,7 +18,7 @@ fn main() -> sarissa::error::Result<()> {
     let simple_regex = SimpleAnalyzer::new(regex_tokenizer);
 
     let tokens: Vec<_> = simple_regex.analyze(text)?.collect();
-    
+
     println!("   Input: \"{}\"", text);
     println!("   Tokens:");
     for token in &tokens {
@@ -32,7 +32,7 @@ fn main() -> sarissa::error::Result<()> {
     let simple_whitespace = SimpleAnalyzer::new(whitespace_tokenizer);
 
     let tokens: Vec<_> = simple_whitespace.analyze(text)?.collect();
-    
+
     println!("   Input: \"{}\"", text);
     println!("   Tokens:");
     for token in &tokens {
@@ -44,7 +44,7 @@ fn main() -> sarissa::error::Result<()> {
     println!("3. Case preservation:");
     let case_text = "UPPERCASE lowercase MixedCase";
     let tokens: Vec<_> = simple_regex.analyze(case_text)?.collect();
-    
+
     println!("   Input: \"{}\"", case_text);
     println!("   Tokens:");
     for token in &tokens {

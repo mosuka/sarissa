@@ -15,14 +15,19 @@ fn main() -> sarissa::error::Result<()> {
     // Create a pipeline analyzer with multiple filters
     let analyzer = PipelineAnalyzer::new(tokenizer.clone())
         .add_filter(Arc::new(LowercaseFilter::new()))
-        .add_filter(Arc::new(StopFilter::from_words(vec!["the", "and", "a", "an"])))
+        .add_filter(Arc::new(StopFilter::from_words(vec![
+            "the", "and", "a", "an",
+        ])))
         .with_name("custom_pipeline");
 
     // Sample text to analyze
     let text = "The Quick Brown Fox and the Lazy Dog";
 
     println!("Analyzing text: \"{}\"", text);
-    println!("Using pipeline: {} tokenizer -> lowercase filter -> stop filter", tokenizer.name());
+    println!(
+        "Using pipeline: {} tokenizer -> lowercase filter -> stop filter",
+        tokenizer.name()
+    );
     println!();
 
     // Analyze the text
@@ -33,11 +38,7 @@ fn main() -> sarissa::error::Result<()> {
     for (i, token) in tokens.iter().enumerate() {
         println!(
             "  [{}] \"{}\" (offset: {}-{}, position: {})",
-            i,
-            token.text,
-            token.start_offset,
-            token.end_offset,
-            token.position
+            i, token.text, token.start_offset, token.end_offset, token.position
         );
     }
 
@@ -46,8 +47,8 @@ fn main() -> sarissa::error::Result<()> {
 
     // Create another pipeline without stop words
     println!("\n--- Pipeline without stop words ---");
-    let analyzer_no_stop = PipelineAnalyzer::new(tokenizer)
-        .add_filter(Arc::new(LowercaseFilter::new()));
+    let analyzer_no_stop =
+        PipelineAnalyzer::new(tokenizer).add_filter(Arc::new(LowercaseFilter::new()));
 
     let tokens_no_stop: Vec<_> = analyzer_no_stop.analyze(text)?.collect();
 
@@ -55,11 +56,7 @@ fn main() -> sarissa::error::Result<()> {
     for (i, token) in tokens_no_stop.iter().enumerate() {
         println!(
             "  [{}] \"{}\" (offset: {}-{}, position: {})",
-            i,
-            token.text,
-            token.start_offset,
-            token.end_offset,
-            token.position
+            i, token.text, token.start_offset, token.end_offset, token.position
         );
     }
 

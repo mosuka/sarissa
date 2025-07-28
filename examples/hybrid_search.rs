@@ -1,12 +1,12 @@
 //! Hybrid Search example - demonstrates combining keyword and vector search.
 
+use sarissa::embeding::{EmbeddingConfig, EmbeddingMethod};
 use sarissa::hybrid_search::{HybridSearchConfig, HybridSearchEngine, ScoreNormalization};
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::TermQuery;
 use sarissa::schema::{IdField, TextField};
 use sarissa::search::{SearchEngine, SearchRequest};
-use sarissa::embeding::{EmbeddingConfig, EmbeddingMethod};
 use std::collections::HashMap;
 use tempfile::TempDir;
 
@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     println!("Creating index in: {:?}", temp_dir.path());
 
     // Create a schema for traditional keyword search
-    let mut schema = Schema::new();
+    let mut schema = Schema::new()?;
     schema.add_field(
         "title",
         Box::new(TextField::new().stored(true).indexed(true)),

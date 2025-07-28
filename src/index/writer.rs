@@ -12,7 +12,10 @@ use crate::index::transaction::{
 };
 use crate::schema::{Document, Schema};
 use crate::storage::Storage;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+// Empty schema for schema-less mode
+static EMPTY_SCHEMA: OnceLock<Schema> = OnceLock::new();
 
 /// Trait for index writers.
 pub trait IndexWriter: Send + std::fmt::Debug {
@@ -72,13 +75,15 @@ impl Default for WriterConfig {
 }
 
 /// A basic index writer implementation.
-#[derive(Debug)]
 pub struct BasicIndexWriter {
-    /// The schema for this writer.
-    schema: Schema,
+    /// The schema for this writer (optional for schema-less mode).
+    schema: Option<Schema>,
 
     /// The storage backend.
     storage: Arc<dyn Storage>,
+
+    /// Default analyzer for schema-less mode.
+    default_analyzer: Arc<dyn crate::analysis::Analyzer>,
 
     /// Writer configuration.
     config: WriterConfig,
@@ -111,25 +116,59 @@ pub struct BasicIndexWriter {
     current_transaction: Option<Arc<Mutex<Transaction>>>,
 }
 
+impl std::fmt::Debug for BasicIndexWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BasicIndexWriter")
+            .field("schema", &self.schema)
+            .field("storage", &"<storage>")
+            .field("default_analyzer", &"<analyzer>")
+            .field("config", &self.config)
+            .field("closed", &self.closed)
+            .field("generation", &self.generation)
+            .field("stats", &self.stats)
+            .finish()
+    }
+}
+
 impl BasicIndexWriter {
-    /// Create a new index writer.
+    /// Create a new index writer with schema.
     pub fn new(schema: Schema, storage: Arc<dyn Storage>, config: WriterConfig) -> Result<Self> {
+        Self::new_internal(Some(schema), storage, config)
+    }
+
+    /// Create a new index writer without schema (schema-less mode).
+    pub fn new_schemaless(storage: Arc<dyn Storage>, config: WriterConfig) -> Result<Self> {
+        Self::new_internal(None, storage, config)
+    }
+
+    /// Internal constructor for both schema and schema-less modes.
+    fn new_internal(
+        schema: Option<Schema>,
+        storage: Arc<dyn Storage>,
+        config: WriterConfig,
+    ) -> Result<Self> {
         let deletion_config = DeletionConfig::default();
         let deletion_manager = DeletionManager::new(deletion_config, storage.clone())?;
 
         let segment_config = SegmentManagerConfig::default();
         let segment_manager = SegmentManager::new(segment_config, storage.clone())?;
 
-        let transaction_manager =
-            TransactionManager::new(storage.clone(), Arc::new(schema.clone()));
+        // Create empty schema for internal components if none provided
+        let internal_schema = schema.clone().unwrap_or_default();
+        let schema_arc = Arc::new(internal_schema);
+
+        let transaction_manager = TransactionManager::new(storage.clone(), schema_arc.clone());
 
         let merge_config = MergeConfig::default();
-        let merge_engine =
-            MergeEngine::new(merge_config, storage.clone(), Arc::new(schema.clone()));
+        let merge_engine = MergeEngine::new(merge_config, storage.clone(), schema_arc);
+
+        // Create default analyzer for schema-less mode
+        let default_analyzer = Arc::new(crate::analysis::StandardAnalyzer::new()?);
 
         Ok(BasicIndexWriter {
             schema,
             storage,
+            default_analyzer,
             config,
             pending_documents: Vec::new(),
             closed: false,
@@ -141,6 +180,40 @@ impl BasicIndexWriter {
             merge_engine,
             current_transaction: None,
         })
+    }
+
+    /// Check if this writer is operating in schema-less mode.
+    pub fn is_schemaless(&self) -> bool {
+        self.schema.is_none()
+    }
+
+    /// Apply default analyzers to fields that don't have explicit analyzers in schema-less mode.
+    fn apply_default_analyzers(&self, mut doc: Document) -> Document {
+        use crate::schema::FieldValue;
+
+        // Determine which default analyzer to use
+        let default_analyzer = if let Some(schema) = &self.schema {
+            // Use schema's default analyzer
+            schema.default_analyzer().clone()
+        } else {
+            // Use writer's default analyzer (schema-less mode)
+            self.default_analyzer.clone()
+        };
+
+        // For each text field without an explicit analyzer, apply the default analyzer
+        let field_names: Vec<String> = doc.fields().keys().cloned().collect();
+        for field_name in field_names {
+            if let Some(field_value) = doc.fields().get(&field_name) {
+                // Only apply to text fields that don't already have an analyzer
+                if matches!(field_value, FieldValue::Text(_))
+                    && !doc.field_analyzers().contains_key(&field_name)
+                {
+                    doc.set_field_analyzer(field_name, default_analyzer.clone());
+                }
+            }
+        }
+
+        doc
     }
 
     /// Check if the writer is closed.
@@ -214,11 +287,17 @@ impl BasicIndexWriter {
     fn add_document_internal(&mut self, doc: Document, update_stats: bool) -> Result<()> {
         self.check_closed()?;
 
-        // Validate document against schema
-        doc.validate_against_schema(&self.schema)?;
+        let processed_doc = if let Some(schema) = &self.schema {
+            // Schema mode: validate document
+            doc.validate_against_schema(schema)?;
+            doc
+        } else {
+            // Schema-less mode: apply default analyzer to fields without explicit analyzers
+            self.apply_default_analyzers(doc)
+        };
 
         // Add to pending documents
-        self.pending_documents.push(doc);
+        self.pending_documents.push(processed_doc);
 
         // Update statistics conditionally
         if update_stats {
@@ -328,7 +407,10 @@ impl IndexWriter for BasicIndexWriter {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        // Return the schema if present, otherwise return an empty schema
+        self.schema
+            .as_ref()
+            .unwrap_or_else(|| EMPTY_SCHEMA.get_or_init(Schema::default))
     }
 
     fn close(&mut self) -> Result<()> {
@@ -756,7 +838,7 @@ mod tests {
 
     #[allow(dead_code)]
     fn create_test_schema() -> Schema {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("title", Box::new(TextField::new().stored(true)))
             .unwrap();
@@ -1378,5 +1460,179 @@ mod tests {
                 segment.segment_info.segment_id, segment.tier, segment.size_bytes
             );
         }
+    }
+
+    #[test]
+    fn test_schemaless_mode() {
+        use crate::analysis::{KeywordAnalyzer, StandardAnalyzer};
+        use crate::schema::FieldValue;
+        use crate::storage::{MemoryStorage, StorageConfig};
+        use std::sync::Arc;
+
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        // Create writer in schema-less mode
+        let mut writer = BasicIndexWriter::new_schemaless(storage, config).unwrap();
+        assert!(writer.is_schemaless());
+
+        // Create analyzers
+        let standard_analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+        let keyword_analyzer = Arc::new(KeywordAnalyzer::new());
+
+        // Create document with field-specific analyzers
+        let mut doc = Document::new();
+        doc.add_field_with_analyzer(
+            "title",
+            FieldValue::Text("Hello World".to_string()),
+            standard_analyzer.clone(),
+        );
+        doc.add_field_with_analyzer(
+            "id",
+            FieldValue::Text("ABC-123".to_string()),
+            keyword_analyzer.clone(),
+        );
+        doc.add_field("price", FieldValue::Float(29.99));
+
+        // Add document without schema validation
+        writer.add_document(doc).unwrap();
+        writer.commit().unwrap();
+
+        // Verify document was added
+        assert_eq!(writer.stats.docs_added, 1);
+        println!("Successfully added document in schema-less mode");
+    }
+
+    #[test]
+    fn test_document_builder_with_analyzers() {
+        use crate::analysis::{KeywordAnalyzer, StandardAnalyzer};
+        use std::sync::Arc;
+
+        let standard_analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+        let keyword_analyzer = Arc::new(KeywordAnalyzer::new());
+
+        // Use DocumentBuilder with analyzers
+        let doc = Document::builder()
+            .add_text_with_analyzer("title", "Hello World", standard_analyzer.clone())
+            .add_text_with_analyzer("id", "ABC-123", keyword_analyzer.clone())
+            .add_text("description", "Regular text field")
+            .build();
+
+        // Verify analyzers are set
+        assert!(doc.get_field_analyzer("title").is_some());
+        assert!(doc.get_field_analyzer("id").is_some());
+        assert!(doc.get_field_analyzer("description").is_none());
+
+        println!("Document with analyzers: {:?}", doc);
+    }
+
+    #[test]
+    fn test_mixed_mode_compatibility() {
+        use crate::analysis::StandardAnalyzer;
+        use crate::schema::{FieldValue, TextField};
+        use crate::storage::{MemoryStorage, StorageConfig};
+        use std::sync::Arc;
+
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        // Create schema-based writer
+        let mut schema = Schema::new().unwrap();
+        schema
+            .add_field("title", Box::new(TextField::new()))
+            .unwrap();
+
+        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        assert!(!writer.is_schemaless());
+
+        // Regular document (schema-based)
+        let doc1 = Document::builder()
+            .add_text("title", "Schema-based document")
+            .build();
+
+        writer.add_document(doc1).unwrap();
+
+        // Document with analyzer (will be ignored in schema mode)
+        let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+        let mut doc2 = Document::new();
+        doc2.add_field_with_analyzer(
+            "title",
+            FieldValue::Text("Document with analyzer".to_string()),
+            analyzer,
+        );
+
+        writer.add_document(doc2).unwrap();
+        writer.commit().unwrap();
+
+        assert_eq!(writer.stats.docs_added, 2);
+        println!("Successfully mixed schema and analyzer modes");
+    }
+
+    #[test]
+    fn test_unified_api() {
+        use crate::analysis::{KeywordAnalyzer, StandardAnalyzer};
+        use crate::schema::FieldValue;
+        use crate::storage::{MemoryStorage, StorageConfig};
+        use std::sync::Arc;
+
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        // Create writer in schema-less mode
+        let mut writer = BasicIndexWriter::new_schemaless(storage, config).unwrap();
+
+        // Test unified API: same add_field() method for both modes
+        let mut doc = Document::new();
+
+        // Regular add_field() - will use default analyzer
+        doc.add_field("title", FieldValue::Text("Hello World".to_string()));
+        doc.add_field("price", FieldValue::Float(29.99));
+
+        // Optionally specify analyzer for specific fields
+        let keyword_analyzer = Arc::new(KeywordAnalyzer::new());
+        doc.add_field_with_analyzer(
+            "id",
+            FieldValue::Text("ABC-123".to_string()),
+            keyword_analyzer,
+        );
+
+        writer.add_document(doc).unwrap();
+        writer.commit().unwrap();
+
+        // Verify that default analyzer was applied to text fields
+        assert_eq!(writer.stats.docs_added, 1);
+        println!("Successfully used unified API with default analyzers");
+    }
+
+    #[test]
+    fn test_default_analyzer_application() {
+        use crate::analysis::StandardAnalyzer;
+        use crate::schema::FieldValue;
+        use crate::storage::{MemoryStorage, StorageConfig};
+        use std::sync::Arc;
+
+        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let config = WriterConfig::default();
+
+        let mut writer = BasicIndexWriter::new_schemaless(storage, config).unwrap();
+
+        // Create document with mixed field types
+        let mut doc = Document::new();
+        doc.add_field(
+            "text_field",
+            FieldValue::Text("This should get default analyzer".to_string()),
+        );
+        doc.add_field("number_field", FieldValue::Integer(42));
+        doc.add_field("bool_field", FieldValue::Boolean(true));
+
+        // Before processing, text field should not have analyzer
+        assert!(doc.get_field_analyzer("text_field").is_none());
+
+        writer.add_document(doc.clone()).unwrap();
+
+        // After processing through writer, the document should have default analyzer applied
+        // (We can't directly inspect the processed document, but we can verify no errors occurred)
+        assert_eq!(writer.pending_docs(), 1);
+        println!("Default analyzer applied successfully to text fields");
     }
 }

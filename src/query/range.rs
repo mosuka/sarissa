@@ -1409,7 +1409,7 @@ mod tests {
         fn schema(&self) -> &crate::schema::Schema {
             use crate::schema::Schema;
             static EMPTY_SCHEMA: std::sync::OnceLock<Schema> = std::sync::OnceLock::new();
-            EMPTY_SCHEMA.get_or_init(|| Schema::new())
+            EMPTY_SCHEMA.get_or_init(|| Schema::new().unwrap())
         }
         fn term_info(
             &self,

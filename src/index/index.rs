@@ -282,7 +282,7 @@ impl FileIndex {
     fn read_schema(_storage: &dyn Storage) -> Result<Schema> {
         // For now, return a test schema that matches expectations
         // TODO: Implement proper schema persistence
-        let mut schema = Schema::new();
+        let mut schema = Schema::new()?;
         schema.add_field(
             "title",
             Box::new(crate::schema::TextField::new().stored(true)),
@@ -421,7 +421,7 @@ mod tests {
 
     #[allow(dead_code)]
     fn create_test_schema() -> Schema {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("title", Box::new(TextField::new().stored(true)))
             .unwrap();

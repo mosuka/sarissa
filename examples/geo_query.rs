@@ -16,7 +16,7 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}", temp_dir.path());
 
     // Create a schema with geographic fields
-    let mut schema = Schema::new();
+    let mut schema = Schema::new()?;
     schema.add_field(
         "name",
         Box::new(TextField::new().stored(true).indexed(true)),

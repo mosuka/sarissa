@@ -441,7 +441,7 @@ mod tests {
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_schema() -> Schema {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("title", Box::new(TextField::new().stored(true)))
             .unwrap();

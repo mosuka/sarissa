@@ -23,7 +23,7 @@ pub fn example_parallel_search() -> Result<()> {
     let engine = ParallelSearchEngine::new(config)?;
 
     // Create some test indices
-    let mut schema = Schema::new();
+    let mut schema = Schema::new()?;
     schema.add_field("title", Box::new(TextField::new()))?;
     schema.add_field("content", Box::new(TextField::new()))?;
 

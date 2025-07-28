@@ -847,7 +847,7 @@ mod tests {
         use std::sync::Arc;
 
         // Create a test schema and reader
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema
             .add_field("content", Box::new(TextField::new()))
             .unwrap();

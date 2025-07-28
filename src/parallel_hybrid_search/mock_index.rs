@@ -1,7 +1,7 @@
 //! Mock index implementation for testing parallel hybrid search.
 
 use crate::error::Result;
-use crate::index::reader::{IndexReader, PostingIterator, ReaderTermInfo, FieldStats};
+use crate::index::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
 use crate::query::{Query, SearchHit, SearchResults};
 use crate::schema::{Document, FieldValue, Schema};
 use crate::search::{Search, SearchRequest};
@@ -23,38 +23,43 @@ impl MockIndexReader {
             documents: Arc::new(Mutex::new(HashMap::new())),
         }
     }
-    
+
     /// Add a document to the mock index.
     pub fn add_document(&self, doc_id: u64, doc: Document) {
         let mut docs = self.documents.lock().unwrap();
         docs.insert(doc_id, doc);
     }
-    
+
     /// Simple keyword search implementation.
     fn search_documents(&self, field: &str, term: &str) -> Vec<SearchHit> {
         let docs = self.documents.lock().unwrap();
         let mut results = Vec::new();
-        
+
         for (doc_id, doc) in docs.iter() {
             if let Some(field_value) = doc.get_field(field) {
                 let matches = match field_value {
                     FieldValue::Text(text) => text.to_lowercase().contains(&term.to_lowercase()),
                     _ => false,
                 };
-                
+
                 if matches {
                     // Calculate score based on content
                     let score = match field_value {
                         FieldValue::Text(text) => {
                             let text_lower = text.to_lowercase();
-                            if text_lower.contains("rust") { 0.95 }
-                            else if text_lower.contains("python") { 0.87 }
-                            else if text_lower.contains("javascript") { 0.76 }
-                            else { 0.5 }
-                        },
+                            if text_lower.contains("rust") {
+                                0.95
+                            } else if text_lower.contains("python") {
+                                0.87
+                            } else if text_lower.contains("javascript") {
+                                0.76
+                            } else {
+                                0.5
+                            }
+                        }
                         _ => 0.5,
                     };
-                    
+
                     results.push(SearchHit {
                         doc_id: *doc_id,
                         score,
@@ -63,10 +68,11 @@ impl MockIndexReader {
                 }
             }
         }
-        
+
         // Sort by score descending, then by doc_id for consistent results
         results.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score)
+            b.score
+                .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.doc_id.cmp(&b.doc_id))
         });
@@ -144,7 +150,7 @@ impl Search for MockSearcher {
     fn search(&self, request: SearchRequest) -> Result<SearchResults> {
         // Extract field and term from the query
         let (field, term) = extract_term_query(request.query.as_ref());
-        
+
         if field.is_empty() || term.is_empty() {
             return Ok(SearchResults {
                 hits: Vec::new(),
@@ -152,34 +158,34 @@ impl Search for MockSearcher {
                 max_score: 0.0,
             });
         }
-        
+
         let mut hits = self.reader.search_documents(&field, &term);
-        
+
         // Apply score threshold
         if request.config.min_score > 0.0 {
             hits.retain(|hit| hit.score >= request.config.min_score);
         }
-        
+
         // Limit results
         let total_hits = hits.len() as u64;
         hits.truncate(request.config.max_docs);
-        
+
         let max_score = hits.first().map(|h| h.score).unwrap_or(0.0);
-        
+
         Ok(SearchResults {
             hits,
             total_hits,
             max_score,
         })
     }
-    
+
     fn count(&self, query: Box<dyn Query>) -> Result<u64> {
         let (field, term) = extract_term_query(query.as_ref());
-        
+
         if field.is_empty() || term.is_empty() {
             return Ok(0);
         }
-        
+
         let hits = self.reader.search_documents(&field, &term);
         Ok(hits.len() as u64)
     }

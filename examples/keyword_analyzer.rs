@@ -28,20 +28,17 @@ fn main() -> sarissa::error::Result<()> {
         println!("   Token count: {}", tokens.len());
         if let Some(token) = tokens.first() {
             println!("   Token text: \"{}\"", token.text);
-            println!("   Position: {}, Offset: {}-{}", 
-                     token.position, token.start_offset, token.end_offset);
+            println!(
+                "   Position: {}, Offset: {}-{}",
+                token.position, token.start_offset, token.end_offset
+            );
         }
         println!();
     }
 
     // Example 2: Use case - product SKUs
     println!("2. Use case - Product SKUs:");
-    let skus = vec![
-        "ABC-123-XYZ",
-        "DEF 456 UVW",
-        "ghi_789_rst",
-        "JKL/012/MNO",
-    ];
+    let skus = vec!["ABC-123-XYZ", "DEF 456 UVW", "ghi_789_rst", "JKL/012/MNO"];
 
     println!("   Processing product SKUs that must remain intact:");
     for sku in &skus {
@@ -72,7 +69,7 @@ fn main() -> sarissa::error::Result<()> {
     // Example 4: Comparing with other analyzers
     println!("4. Comparison with tokenizing analyzers:");
     let comparison_text = "This-Would-Be-Split-By-Other-Analyzers";
-    
+
     let tokens: Vec<_> = analyzer.analyze(comparison_text)?.collect();
     println!("   Input: \"{}\"", comparison_text);
     println!("   KeywordAnalyzer result: {} token(s)", tokens.len());
@@ -100,13 +97,6 @@ fn main() -> sarissa::error::Result<()> {
         }
         println!();
     }
-
-    println!("KeywordAnalyzer is ideal for:");
-    println!("- Product IDs and SKUs");
-    println!("- Email addresses");
-    println!("- URLs");
-    println!("- User IDs");
-    println!("- Any field requiring exact matching");
 
     Ok(())
 }

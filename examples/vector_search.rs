@@ -165,11 +165,5 @@ fn main() -> Result<()> {
     println!("  Include vectors: {}", search_config.include_vectors);
     println!("  Timeout: {:?} ms", search_config.timeout_ms);
 
-    println!("\n=== Example Complete ===");
-    println!("This example demonstrates the new separated vector API:");
-    println!("- vector_index module: For building and indexing vectors");
-    println!("- vector_search module: For searching and querying vectors");
-    println!("- vector module: Core types and distance metrics");
-
     Ok(())
 }

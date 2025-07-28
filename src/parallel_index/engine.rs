@@ -372,7 +372,7 @@ mod tests {
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_writer() -> Box<dyn IndexWriter> {
-        let mut schema = Schema::new();
+        let mut schema = Schema::new().unwrap();
         schema.add_field("id", Box::new(TextField::new())).unwrap();
         schema
             .add_field("content", Box::new(TextField::new()))
