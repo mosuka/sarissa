@@ -1,6 +1,6 @@
 //! StandardAnalyzer example - demonstrates text analysis and tokenization.
 
-use sarissa::analysis::analyzer::{Analyzer, StandardAnalyzer};
+use sarissa::analysis::{Analyzer, StandardAnalyzer};
 use sarissa::error::Result;
 
 fn main() -> Result<()> {
