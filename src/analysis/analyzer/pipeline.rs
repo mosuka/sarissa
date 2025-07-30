@@ -1,11 +1,12 @@
 //! Pipeline analyzer that combines tokenizers and filters.
 
+use std::sync::Arc;
+
 use crate::analysis::analyzer::Analyzer;
 use crate::analysis::token::TokenStream;
 use crate::analysis::token_filter::Filter;
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
-use std::sync::Arc;
 
 /// A configurable analyzer that combines a tokenizer with a chain of filters.
 ///

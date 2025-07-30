@@ -16,11 +16,13 @@ pub use executor::{IndexTask, IndexTaskResult, ParallelIndexExecutor};
 pub use merger::{MergeStrategy, SegmentMerger};
 pub use segment::{SegmentMetadata, VectorIndexSegment};
 
-use crate::error::Result;
-use crate::vector_index::VectorIndexBuildConfig;
+use std::sync::Arc;
+
 use rayon::ThreadPool;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
+use crate::error::Result;
+use crate::vector_index::VectorIndexBuildConfig;
 
 /// Configuration for parallel vector index construction.
 #[derive(Debug, Clone, Serialize, Deserialize)]

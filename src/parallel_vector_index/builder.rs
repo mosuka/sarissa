@@ -1,5 +1,10 @@
 //! Parallel vector index builder implementation.
 
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use rayon::ThreadPool;
+
 use super::{
     IndexTask, ParallelIndexExecutor, ParallelIndexStats, ParallelVectorIndexConfig, SegmentMerger,
     VectorIndexSegment,
@@ -7,9 +12,6 @@ use super::{
 use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
 use crate::vector_index::VectorIndexBuilder;
-use rayon::ThreadPool;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 /// Parallel vector index builder for high-performance construction.
 pub struct ParallelVectorIndexBuilder {

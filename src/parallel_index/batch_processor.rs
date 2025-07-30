@@ -1,12 +1,13 @@
 //! Batch processing functionality for efficient document indexing.
 
-use crate::error::{Result, SarissaError};
-use crate::parallel_index::{
-    config::IndexingOptions, partitioner::DocumentPartitioner, writer_manager::IndexWriterHandle,
-};
-use crate::schema::Document;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+use crate::error::{Result, SarissaError};
+use crate::parallel_index::config::IndexingOptions;
+use crate::parallel_index::partitioner::DocumentPartitioner;
+use crate::parallel_index::writer_manager::IndexWriterHandle;
+use crate::schema::Document;
 
 /// Represents a batch of documents for a specific partition.
 #[derive(Debug)]

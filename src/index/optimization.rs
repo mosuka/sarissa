@@ -3,16 +3,15 @@
 //! This module provides advanced optimization strategies for index structure,
 //! segment organization, and query performance improvements.
 
-use crate::error::{Result, SarissaError};
-use crate::index::{
-    deletion::DeletionManager,
-    merge_engine::{MergeConfig, MergeEngine, MergeResult},
-    segment_manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager},
-};
-use crate::schema::Schema;
-use crate::storage::Storage;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::error::{Result, SarissaError};
+use crate::index::deletion::DeletionManager;
+use crate::index::merge_engine::{MergeConfig, MergeEngine, MergeResult};
+use crate::index::segment_manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
+use crate::schema::Schema;
+use crate::storage::Storage;
 
 /// Optimization strategy types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

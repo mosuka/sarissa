@@ -1,10 +1,12 @@
 //! Spelling suggestion generation algorithms.
 
-use crate::spelling::dictionary::SpellingDictionary;
-use crate::spelling::levenshtein::{LevenshteinMatcher, TypoPatterns};
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
+
+use serde::{Deserialize, Serialize};
+
+use crate::spelling::dictionary::SpellingDictionary;
+use crate::spelling::levenshtein::{LevenshteinMatcher, TypoPatterns};
 
 /// A spelling suggestion with a score indicating confidence.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

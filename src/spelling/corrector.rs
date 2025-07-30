@@ -1,11 +1,13 @@
 //! Main spelling corrector that integrates all spelling correction functionality.
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::spelling::dictionary::{BuiltinDictionary, SpellingDictionary};
 use crate::spelling::suggest::{Suggestion, SuggestionConfig, SuggestionEngine};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Configuration for the spelling corrector.
 #[derive(Debug, Clone, Serialize, Deserialize)]

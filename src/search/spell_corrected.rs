@@ -1,10 +1,11 @@
 //! Spell-corrected search functionality that integrates spelling correction with search.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::query::{Query, SearchResults};
 use crate::search::{Search, SearchEngine, SearchRequest};
 use crate::spelling::{CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector};
-use serde::{Deserialize, Serialize};
 
 /// Search results with spelling correction information.
 #[derive(Debug, Clone, Serialize, Deserialize)]

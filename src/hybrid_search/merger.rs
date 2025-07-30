@@ -1,12 +1,14 @@
 //! Result merging functionality for hybrid search.
 
+use std::collections::HashMap;
+
 use super::config::HybridSearchConfig;
 use super::scorer::ScoreNormalizer;
 use super::types::{HybridSearchResult, HybridSearchResults};
+
 use crate::error::Result;
 use crate::query::SearchResults;
 use crate::vector::types::VectorSearchResults;
-use std::collections::HashMap;
 
 /// Result merger for combining keyword and vector search results.
 pub struct ResultMerger {

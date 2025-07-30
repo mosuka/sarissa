@@ -1,17 +1,20 @@
 //! Parallel hybrid search engine implementation.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
+
+use tokio::sync::RwLock;
+
 use super::config::{LoadBalancingStrategy, ParallelHybridSearchConfig};
 use super::executor::ParallelHybridSearchExecutor;
 use super::types::{CacheStats, ParallelHybridSearchResults, SearchTimeBreakdown};
+
 use crate::embeding::EmbeddingEngine;
 use crate::error::{Result, SarissaError};
 use crate::index::reader::IndexReader;
 use crate::query::Query;
 use crate::vector::reader::VectorIndexReader;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::RwLock;
 
 /// Index handle containing both keyword and vector readers.
 pub struct HybridIndexHandle {

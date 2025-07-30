@@ -6,11 +6,13 @@
 //! - A/B testing framework
 //! - Performance optimization
 
+use std::collections::{HashMap, VecDeque};
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::ml::{AnomalyEvent, FeedbackSignal, MLContext};
 use crate::query::SearchResults;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
 
 /// Configuration for auto-optimization system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

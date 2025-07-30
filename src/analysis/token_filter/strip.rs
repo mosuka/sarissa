@@ -1,6 +1,7 @@
 //! Strip filter implementation.
 
 use super::Filter;
+
 use crate::analysis::token::TokenStream;
 use crate::error::Result;
 

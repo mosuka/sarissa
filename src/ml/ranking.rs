@@ -1,15 +1,17 @@
 //! Learning to Rank (LTR) system for improving search relevance.
 
+use std::collections::{HashMap, VecDeque};
+use std::path::Path;
+use std::sync::{Arc, RwLock};
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::ml::features::{FeatureContext, FeatureExtractor, QueryDocumentFeatures};
 use crate::ml::models::{GBDTRanker, LabeledExample, RankingModel, TrainingStats};
 use crate::ml::{FeedbackSignal, FeedbackType, MLError};
 use crate::query::SearchResults;
 use crate::schema::Document;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use std::path::Path;
-use std::sync::{Arc, RwLock};
 
 /// Configuration for Learning to Rank system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

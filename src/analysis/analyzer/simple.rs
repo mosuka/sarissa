@@ -1,10 +1,11 @@
 //! Simple analyzer that performs tokenization without filtering.
 
+use std::sync::Arc;
+
 use crate::analysis::analyzer::Analyzer;
 use crate::analysis::token::TokenStream;
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
-use std::sync::Arc;
 
 /// A simple analyzer that just tokenizes without any filtering.
 #[derive(Clone)]

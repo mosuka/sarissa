@@ -3,13 +3,14 @@
 //! This module provides efficient document deletion using bitmap-based
 //! logical deletion and periodic compaction for space reclamation.
 
+use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::error::{Result, SarissaError};
 use crate::storage::{Storage, StorageInput, StorageOutput, StructReader, StructWriter};
 use ahash::AHashMap;
 use bit_vec::BitVec;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Configuration for deletion management.
 #[derive(Debug, Clone, Serialize, Deserialize)]

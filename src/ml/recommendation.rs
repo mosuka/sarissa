@@ -6,11 +6,13 @@
 //! - Hybrid recommendation approaches
 //! - User preference learning
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::ml::{FeedbackSignal, MLContext, SearchHistoryItem, UserSession};
 use crate::schema::Document;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Configuration for recommendation system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

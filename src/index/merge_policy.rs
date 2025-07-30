@@ -3,8 +3,9 @@
 //! This module provides different strategies for determining when and how
 //! to merge segments to maintain optimal search performance.
 
-use crate::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use std::collections::HashMap;
+
+use crate::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 
 /// Trait for defining merge policies.
 pub trait MergePolicy: Send + Sync + std::fmt::Debug {

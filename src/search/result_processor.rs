@@ -1,14 +1,16 @@
 //! Advanced result processing including aggregation, highlighting, and faceting.
 
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Query, QueryResult};
 use crate::schema::FieldValue;
 use crate::search::facet::{FacetCollector, FacetResults};
 use crate::search::highlight::{HighlightConfig, Highlighter};
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 /// Configuration for result processing.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,7 +1,8 @@
 //! Scoring implementations for ranking search results.
 
-use crate::util::simd;
 use std::fmt::Debug;
+
+use crate::util::simd;
 
 /// Trait for document scorers.
 pub trait Scorer: Send + Debug {

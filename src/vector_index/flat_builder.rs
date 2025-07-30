@@ -1,9 +1,10 @@
 //! Flat vector index builder for exact search.
 
+use rayon::prelude::*;
+
 use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
 use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilder};
-use rayon::prelude::*;
 
 /// Builder for flat vector indexes (exact search).
 pub struct FlatVectorIndexBuilder {

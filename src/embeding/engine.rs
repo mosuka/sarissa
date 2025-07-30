@@ -1,9 +1,11 @@
 //! Text embedding generation for vector indexing.
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Configuration for embedding generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]

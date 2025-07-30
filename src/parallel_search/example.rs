@@ -1,15 +1,14 @@
 //! Example usage of the parallel search module.
 
+use std::sync::Arc;
+
 use crate::error::Result;
 use crate::index::reader::BasicIndexReader;
-use crate::parallel_search::{
-    config::{ParallelSearchConfig, SearchOptions},
-    engine::ParallelSearchEngine,
-};
+use crate::parallel_search::config::{ParallelSearchConfig, SearchOptions};
+use crate::parallel_search::engine::ParallelSearchEngine;
 use crate::query::TermQuery;
 use crate::schema::{Schema, TextField};
 use crate::storage::{MemoryStorage, StorageConfig};
-use std::sync::Arc;
 
 /// Example function demonstrating parallel search usage.
 pub fn example_parallel_search() -> Result<()> {

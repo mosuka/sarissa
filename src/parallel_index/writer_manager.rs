@@ -1,12 +1,14 @@
 //! Writer management for parallel indexing operations.
 
-use crate::error::{Result, SarissaError};
-use crate::index::writer::IndexWriter;
-use crate::parallel_index::config::PartitionConfig;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{Result, SarissaError};
+use crate::index::writer::IndexWriter;
+use crate::parallel_index::config::PartitionConfig;
 
 /// Statistics for a specific index partition.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

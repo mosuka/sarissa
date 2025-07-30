@@ -3,18 +3,18 @@
 //! This module provides transaction boundaries and atomic commit/rollback
 //! functionality to ensure data consistency during index operations.
 
-use crate::error::{Result, SarissaError};
-use crate::index::{
-    deletion::{DeletionManager, GlobalDeletionState},
-    merge_engine::MergeEngine,
-    segment_manager::SegmentManager,
-};
-use crate::schema::{Document, Schema};
-use crate::storage::Storage;
-use ahash::AHashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use ahash::AHashMap;
 use uuid::Uuid;
+
+use crate::error::{Result, SarissaError};
+use crate::index::deletion::{DeletionManager, GlobalDeletionState};
+use crate::index::merge_engine::MergeEngine;
+use crate::index::segment_manager::SegmentManager;
+use crate::schema::{Document, Schema};
+use crate::storage::Storage;
 
 /// Transaction isolation levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

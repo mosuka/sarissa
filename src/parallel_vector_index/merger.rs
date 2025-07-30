@@ -1,11 +1,14 @@
 //! Segment merging functionality for parallel vector indexes.
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use super::{SegmentMetadata, VectorIndexSegment};
+
 use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
 use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Strategy for merging vector index segments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

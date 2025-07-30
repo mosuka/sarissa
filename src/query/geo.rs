@@ -1,10 +1,12 @@
 //! Geographical search functionality for location-based queries.
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Matcher, Query, Scorer};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// A geographical point with latitude and longitude.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

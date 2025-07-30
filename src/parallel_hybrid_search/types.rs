@@ -1,8 +1,10 @@
 //! Types for parallel hybrid search.
 
-use crate::query::SearchHit;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::query::SearchHit;
 
 /// Result from parallel hybrid search.
 #[derive(Debug, Clone, Serialize, Deserialize)]

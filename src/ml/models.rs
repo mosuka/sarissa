@@ -1,11 +1,13 @@
 //! Machine learning models for ranking and classification.
 
+use std::collections::HashMap;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::ml::MLError;
 use crate::ml::features::QueryDocumentFeatures;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::Path;
 
 /// Trait for machine learning models.
 pub trait MLModel: Send + Sync {

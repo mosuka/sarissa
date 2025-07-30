@@ -1,17 +1,16 @@
 //! High-level search engine that combines indexing and searching.
 
+use std::cell::RefCell;
+use std::path::Path;
+use std::sync::Arc;
+
 use crate::error::Result;
-use crate::index::{
-    Index,
-    index::{FileIndex, IndexConfig},
-};
+use crate::index::Index;
+use crate::index::index::{FileIndex, IndexConfig};
 use crate::query::{Query, QueryParser, SearchResults};
 use crate::schema::{Document, Schema};
 use crate::search::{Search, SearchRequest, Searcher};
 use crate::storage::Storage;
-use std::cell::RefCell;
-use std::path::Path;
-use std::sync::Arc;
 
 /// A high-level search engine that provides both indexing and searching capabilities.
 #[derive(Debug)]

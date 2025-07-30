@@ -1,10 +1,12 @@
 //! Document partitioning strategies for distributing documents across multiple indices.
 
-use crate::error::{Result, SarissaError};
-use crate::schema::Document;
-use ahash::AHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+
+use ahash::AHasher;
+
+use crate::error::{Result, SarissaError};
+use crate::schema::Document;
 
 /// Trait for partitioning documents across multiple indices.
 pub trait DocumentPartitioner: Send + Sync {

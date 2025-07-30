@@ -1,9 +1,10 @@
 //! Index optimization and maintenance operations.
 
+use std::sync::Arc;
+
 use crate::error::Result;
 use crate::index::segment::{MergeOperation, Segment, SegmentManager};
 use crate::storage::Storage;
-use std::sync::Arc;
 
 /// Index optimizer for maintenance operations.
 #[derive(Debug)]

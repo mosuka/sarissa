@@ -1,5 +1,11 @@
 //! Parallel executor for hybrid search tasks.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use rayon::ThreadPool;
+
 use super::config::ParallelHybridSearchConfig;
 use super::engine::HybridIndexHandle;
 use super::merger::ParallelHybridResultMerger;
@@ -7,14 +13,11 @@ use super::types::{
     HybridSearchTask, HybridSearchTaskResult, IndexSearchStats, ParallelHybridSearchResults,
     SearchTimeBreakdown,
 };
+
 use crate::error::{Result, SarissaError};
 use crate::index::reader::IndexReader;
 use crate::query::{Query, SearchHit, SearchResults};
 use crate::vector::Vector;
-use rayon::ThreadPool;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 /// Executor for parallel hybrid search operations.
 pub struct ParallelHybridSearchExecutor {

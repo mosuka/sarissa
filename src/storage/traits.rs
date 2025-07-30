@@ -1,7 +1,8 @@
 //! Storage abstraction trait and common types.
 
-use crate::error::{Result, SarissaError};
 use std::io::{Read, Seek, Write};
+
+use crate::error::{Result, SarissaError};
 
 /// File metadata information.
 #[derive(Debug, Clone)]

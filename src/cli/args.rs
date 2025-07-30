@@ -1,8 +1,9 @@
 //! Command line argument parsing for Sarissa CLI using clap.
 
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Sarissa - A fast, featureful full-text search engine
 #[derive(Parser, Debug, Clone)]

@@ -1,12 +1,14 @@
 //! Searcher implementation for executing queries against an index.
 
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use rayon::prelude::*;
+
 use crate::error::{Result, SarissaError};
 use crate::index::reader::IndexReader;
 use crate::query::{Collector, CountCollector, Query, SearchHit, SearchResults, TopDocsCollector};
 use crate::search::{Search, SearchRequest};
-use rayon::prelude::*;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 /// A searcher that executes queries against an index reader.
 #[derive(Debug)]

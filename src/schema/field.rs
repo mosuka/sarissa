@@ -1,10 +1,12 @@
 //! Field types for schema definition.
 
-use crate::analysis::analyzer::Analyzer;
-use crate::query::geo::GeoPoint;
+use std::sync::Arc;
+
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
+use crate::analysis::analyzer::Analyzer;
+use crate::query::geo::GeoPoint;
 
 /// Trait for field types that define how fields are processed and stored.
 pub trait FieldType: Send + Sync + std::fmt::Debug {

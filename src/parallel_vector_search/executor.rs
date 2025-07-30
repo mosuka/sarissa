@@ -2,17 +2,20 @@
 
 #![allow(clippy::await_holding_lock)]
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
+
+use rayon::ThreadPool;
+
 use super::{
     LoadBalancingStrategy, ParallelSearchStats, ParallelVectorSearchConfig, VectorResultMerger,
 };
+
 use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
 use crate::vector_search::{AdvancedSearchConfig, VectorSearchEngine};
-use rayon::ThreadPool;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
 
 /// Task for parallel vector search execution.
 #[derive(Debug, Clone)]

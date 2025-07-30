@@ -6,11 +6,13 @@
 //! - Query intent classification
 //! - Statistical co-occurrence expansion
 
-use crate::error::Result;
-use crate::ml::{MLContext, SearchHistoryItem};
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
+use crate::ml::{MLContext, SearchHistoryItem};
 
 /// Configuration for query expansion system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

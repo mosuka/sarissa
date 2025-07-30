@@ -1,11 +1,12 @@
 //! Index reader for searching and retrieving documents.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use crate::error::{Result, SarissaError};
 use crate::index::bkd_tree::SimpleBKDTree;
 use crate::schema::{Document, FieldValue, Schema};
 use crate::storage::Storage;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Trait for index readers.
 pub trait IndexReader: Send + Sync + std::fmt::Debug {

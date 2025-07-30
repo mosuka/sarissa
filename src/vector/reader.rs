@@ -1,8 +1,9 @@
 //! Vector index reader interface - bridges indexing and search modules.
 
+use std::sync::Arc;
+
 use crate::error::Result;
 use crate::vector::{DistanceMetric, Vector};
-use std::sync::Arc;
 
 /// Statistics about a vector index.
 #[derive(Debug, Clone)]

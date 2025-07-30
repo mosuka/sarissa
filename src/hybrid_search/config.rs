@@ -1,8 +1,9 @@
 //! Configuration for hybrid search.
 
+use serde::{Deserialize, Serialize};
+
 use crate::embeding::EmbeddingConfig;
 use crate::vector::types::VectorSearchConfig;
-use serde::{Deserialize, Serialize};
 
 /// Configuration for hybrid search combining keyword and vector search.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,13 +1,15 @@
 //! Memory-mapped storage backend for high-performance file access.
 
-use crate::error::{Result, SarissaError};
-use crate::storage::{Storage, StorageConfig, StorageInput, StorageOutput};
-use memmap2::{Mmap, MmapOptions};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+
+use memmap2::{Mmap, MmapOptions};
+
+use crate::error::{Result, SarissaError};
+use crate::storage::{Storage, StorageConfig, StorageInput, StorageOutput};
 
 /// Memory-mapped storage backend that uses mmap for efficient file access.
 #[derive(Debug)]

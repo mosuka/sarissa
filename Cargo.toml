@@ -6,12 +6,11 @@ description = "A fast, featureful full-text search library for Rust"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mosuka/sarissa"
 
-[[bin]]
-name = "sarissa"
-path = "src/bin/sarissa.rs"
 
 [dependencies]
 ahash = "0.8.12"
+env_logger = "0.11"
+log = "0.4"
 anyhow = "1.0.98"
 bincode = "1.3.3"
 bit-vec = "0.8.0"

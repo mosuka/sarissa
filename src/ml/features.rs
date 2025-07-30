@@ -1,10 +1,12 @@
 //! Feature extraction for machine learning models.
 
-use crate::error::Result;
-use crate::schema::Document;
+use std::collections::HashMap;
+
 use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use crate::error::Result;
+use crate::schema::Document;
 
 /// Features extracted from query-document pairs for ranking.
 #[derive(Debug, Clone, Serialize, Deserialize)]

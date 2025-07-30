@@ -9,10 +9,12 @@ pub mod types;
 pub use reader::{ValidationReport, VectorIndexMetadata, VectorIndexReader, VectorIterator};
 pub use types::*;
 
-use crate::error::{Result, SarissaError};
+use std::collections::HashMap;
+
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use crate::error::{Result, SarissaError};
 
 /// A dense vector representation for similarity search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

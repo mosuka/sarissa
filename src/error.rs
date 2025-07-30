@@ -1,7 +1,8 @@
 //! Error types for the Sarissa library.
 
-use anyhow;
 use std::io;
+
+use anyhow;
 use thiserror::Error;
 
 /// The main error type for Sarissa operations.

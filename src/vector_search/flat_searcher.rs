@@ -1,13 +1,12 @@
 //! Flat vector searcher for exact search.
 
-use crate::error::Result;
-use crate::vector::{
-    Vector,
-    reader::VectorIndexReader,
-    types::{VectorSearchConfig, VectorSearchResults},
-};
-use crate::vector_search::{AdvancedSearchConfig, SearchStats, VectorSearcher};
 use std::sync::Arc;
+
+use crate::error::Result;
+use crate::vector::Vector;
+use crate::vector::reader::VectorIndexReader;
+use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
+use crate::vector_search::{AdvancedSearchConfig, SearchStats, VectorSearcher};
 
 /// Flat vector searcher that performs exact (brute force) search.
 pub struct FlatVectorSearcher {

@@ -1,12 +1,13 @@
 //! In-memory storage implementation for testing and caching.
 
+use std::collections::HashMap;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::sync::{Arc, Mutex};
+
 use crate::error::{Result, SarissaError};
 use crate::storage::traits::{
     LockManager, Storage, StorageConfig, StorageError, StorageInput, StorageLock, StorageOutput,
 };
-use std::collections::HashMap;
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
-use std::sync::{Arc, Mutex};
 
 /// An in-memory storage implementation.
 ///

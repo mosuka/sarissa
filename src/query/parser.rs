@@ -1,10 +1,11 @@
 //! Query parser for converting string queries to structured query objects.
 
+use std::iter::Peekable;
+use std::str::Chars;
+
 use crate::error::{Result, SarissaError};
 use crate::query::{BooleanQuery, BooleanQueryBuilder, Occur, Query, TermQuery};
 use crate::schema::Schema;
-use std::iter::Peekable;
-use std::str::Chars;
 
 /// A simple query parser that supports basic query syntax.
 #[derive(Debug)]

@@ -1,9 +1,11 @@
 //! Unicode word tokenizer implementation.
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use super::Tokenizer;
+
 use crate::analysis::token::{Token, TokenStream};
 use crate::error::Result;
-use unicode_segmentation::UnicodeSegmentation;
 
 /// A tokenizer that splits text on Unicode word boundaries.
 #[derive(Clone, Debug, Default)]

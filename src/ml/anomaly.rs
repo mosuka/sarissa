@@ -6,11 +6,13 @@
 //! - Performance anomalies
 //! - User behavior anomalies
 
+use std::collections::{HashMap, VecDeque};
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::ml::{FeedbackSignal, MLContext};
 use crate::query::SearchResults;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
 
 /// Configuration for anomaly detection system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

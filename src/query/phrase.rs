@@ -1,12 +1,13 @@
 //! Phrase query implementation for exact phrase matching.
 
+use std::collections::HashMap;
+use std::fmt::Debug;
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher};
 use crate::query::scorer::{BM25Scorer, Scorer};
-use std::collections::HashMap;
-use std::fmt::Debug;
 
 /// A matcher that finds documents containing phrase matches.
 #[derive(Debug)]

@@ -3,10 +3,11 @@
 //! Span queries provide advanced search capabilities based on term positions
 //! within documents, enabling complex proximity and phrase searches.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Matcher, Query, Scorer};
-use serde::{Deserialize, Serialize};
 
 /// A span represents a term occurrence with position information.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

@@ -1,8 +1,10 @@
 //! Hybrid search engine combining keyword and vector search.
 
-use crate::error::Result;
-use crate::vector::{Vector, types::VectorSearchConfig};
 use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
+use crate::vector::Vector;
+use crate::vector::types::VectorSearchConfig;
 
 /// Configuration for hybrid search.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,18 +3,18 @@
 //! This module provides scheduling and execution of background tasks such as
 //! segment merging, compaction, and optimization with proper resource management.
 
-use crate::error::{Result, SarissaError};
-use crate::index::{
-    deletion::DeletionManager, merge_engine::MergeEngine, merge_policy::MergePolicy,
-    segment_manager::SegmentManager,
-};
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
-use std::sync::{
-    Arc, RwLock,
-    atomic::{AtomicBool, AtomicU64, Ordering},
-};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+
+use crate::error::{Result, SarissaError};
+use crate::index::deletion::DeletionManager;
+use crate::index::merge_engine::MergeEngine;
+use crate::index::merge_policy::MergePolicy;
+use crate::index::segment_manager::SegmentManager;
 
 /// Type of background task.
 #[derive(Debug, Clone, PartialEq)]
