@@ -3,16 +3,16 @@
 //! This module provides comprehensive segment lifecycle management including
 //! creation, deletion, merging, and optimization based on configurable policies.
 
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::{Result, SarissaError};
 use crate::index::SegmentInfo;
 use crate::storage::{Storage, StorageInput, StructReader, StructWriter};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::sync::{
-    Arc, RwLock,
-    atomic::{AtomicBool, AtomicU64, Ordering},
-};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Configuration for segment management.
 #[derive(Debug, Clone, Serialize, Deserialize)]

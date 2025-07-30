@@ -1,8 +1,9 @@
 //! Base vector searcher configuration and utilities.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
-use serde::{Deserialize, Serialize};
 
 /// Configuration for vector searchers.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,9 +1,10 @@
 //! Search task definitions for parallel execution.
 
-use crate::error::{Result, SarissaError};
-use crate::query::{Query, SearchResults};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use crate::error::{Result, SarissaError};
+use crate::query::{Query, SearchResults};
 
 /// A search task to be executed on a specific index.
 #[derive(Debug)]

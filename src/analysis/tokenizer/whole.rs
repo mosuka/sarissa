@@ -1,6 +1,7 @@
 //! Whole tokenizer implementation.
 
 use super::Tokenizer;
+
 use crate::analysis::token::{Token, TokenStream};
 use crate::error::Result;
 

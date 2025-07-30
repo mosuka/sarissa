@@ -1,7 +1,8 @@
 //! Configuration for parallel indexing operations.
 
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
 
 /// Configuration for parallel index engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,12 +1,15 @@
 //! Parallel execution engine for vector index tasks.
 
+use std::sync::Arc;
+use std::time::Instant;
+
+use rayon::ThreadPool;
+
 use super::{SegmentMetadata, VectorIndexSegment};
+
 use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
 use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
-use rayon::ThreadPool;
-use std::sync::Arc;
-use std::time::Instant;
 
 /// Task for parallel vector index construction.
 #[derive(Debug, Clone)]

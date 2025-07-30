@@ -1,11 +1,13 @@
 //! Segment management for efficient index organization.
 
-use crate::error::Result;
-use crate::storage::Storage;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
+use crate::storage::Storage;
 
 /// Segment metadata and management.
 #[derive(Debug, Clone, Serialize, Deserialize)]

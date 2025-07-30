@@ -1,12 +1,14 @@
 //! Text highlighting functionality for search results.
 
+use std::collections::HashSet;
+use std::ops::Range;
+
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+
 use crate::analysis::{Analyzer, StandardAnalyzer, Token};
 use crate::error::Result;
 use crate::query::Query;
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::ops::Range;
 
 /// Configuration for text highlighting.
 #[derive(Debug, Clone)]

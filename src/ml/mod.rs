@@ -19,8 +19,9 @@ pub use query_expansion::*;
 pub use ranking::*;
 pub use recommendation::*;
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
 
 /// Configuration for machine learning features.
 #[derive(Debug, Clone, Serialize, Deserialize)]

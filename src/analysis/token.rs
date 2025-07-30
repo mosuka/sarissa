@@ -1,7 +1,8 @@
 //! Token types and utilities for text analysis.
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 /// A token represents a single unit of text after tokenization.
 ///

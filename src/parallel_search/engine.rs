@@ -1,19 +1,19 @@
 //! Main parallel search engine implementation.
 
-use crate::error::{Result, SarissaError};
-use crate::index::reader::IndexReader;
-use crate::parallel_search::{
-    config::{ParallelSearchConfig, SearchOptions},
-    index_manager::{IndexHandle, IndexManager},
-    merger::MergerFactory,
-    metrics::{SearchMetricsCollector, Timer},
-    search_task::{SearchTask, TaskHandle, TaskResult, TaskStatus},
-};
-use crate::query::{Query, SearchResults};
-use crate::search::{Search, SearchRequest};
-use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::Arc;
 use std::time::Instant;
+
+use rayon::{ThreadPool, ThreadPoolBuilder};
+
+use crate::error::{Result, SarissaError};
+use crate::index::reader::IndexReader;
+use crate::parallel_search::config::{ParallelSearchConfig, SearchOptions};
+use crate::parallel_search::index_manager::{IndexHandle, IndexManager};
+use crate::parallel_search::merger::MergerFactory;
+use crate::parallel_search::metrics::{SearchMetricsCollector, Timer};
+use crate::parallel_search::search_task::{SearchTask, TaskHandle, TaskResult, TaskStatus};
+use crate::query::{Query, SearchResults};
+use crate::search::{Search, SearchRequest};
 
 /// Parallel search engine for executing queries across multiple indices.
 pub struct ParallelSearchEngine {

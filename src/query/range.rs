@@ -1,13 +1,15 @@
 //! Range query implementation for querying within value ranges.
 
+use std::fmt::Debug;
+
+use chrono::{DateTime, Utc};
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
 use crate::query::scorer::{BM25Scorer, Scorer};
 use crate::schema::field::NumericType;
-use chrono::{DateTime, Utc};
-use std::fmt::Debug;
 
 /// Bound type for range queries.
 #[derive(Debug, Clone, PartialEq)]

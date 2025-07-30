@@ -1,10 +1,11 @@
 //! Dictionary management for spelling correction.
 
-use crate::error::Result;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+
+use crate::error::Result;
 
 /// A dictionary that stores words and their frequencies for spelling correction.
 #[derive(Debug, Clone)]

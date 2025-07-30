@@ -1,8 +1,9 @@
 //! Vector search result ranking and reranking utilities.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::vector::types::VectorSearchResults;
-use serde::{Deserialize, Serialize};
 
 /// Configuration for result ranking.
 #[derive(Debug, Clone, Serialize, Deserialize)]

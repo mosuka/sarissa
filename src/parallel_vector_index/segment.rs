@@ -1,10 +1,12 @@
 //! Vector index segment management for parallel indexing.
 
+use std::time::SystemTime;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::{Result, SarissaError};
 use crate::vector::{DistanceMetric, Vector};
 use crate::vector_index::{VectorIndexBuilder, VectorIndexType};
-use serde::{Deserialize, Serialize};
-use std::time::SystemTime;
 
 /// Metadata for a vector index segment.
 #[derive(Debug, Clone, Serialize, Deserialize)]

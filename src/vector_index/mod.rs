@@ -20,9 +20,10 @@ pub use optimization::VectorIndexOptimizer;
 pub use quantization::{QuantizationMethod, VectorQuantizer};
 pub use writer::{VectorIndexWriter, VectorWriterConfig};
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::vector::{DistanceMetric, Vector};
-use serde::{Deserialize, Serialize};
 
 /// Configuration for vector index construction.
 #[derive(Debug, Clone, Serialize, Deserialize)]

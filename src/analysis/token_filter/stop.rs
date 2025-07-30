@@ -1,10 +1,12 @@
 //! Stop filter implementation.
 
-use super::Filter;
-use crate::analysis::token::{Token, TokenStream};
-use crate::error::Result;
 use std::collections::HashSet;
 use std::sync::Arc;
+
+use super::Filter;
+
+use crate::analysis::token::{Token, TokenStream};
+use crate::error::Result;
 
 /// A filter that removes stop words from the token stream.
 #[derive(Clone, Debug)]

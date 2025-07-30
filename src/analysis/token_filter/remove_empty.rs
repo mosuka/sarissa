@@ -1,6 +1,7 @@
 //! Remove empty filter implementation.
 
 use super::Filter;
+
 use crate::analysis::token::{Token, TokenStream};
 use crate::error::Result;
 

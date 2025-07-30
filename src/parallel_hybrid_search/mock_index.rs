@@ -1,12 +1,13 @@
 //! Mock index implementation for testing parallel hybrid search.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use crate::error::Result;
 use crate::index::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
 use crate::query::{Query, SearchHit, SearchResults};
 use crate::schema::{Document, FieldValue, Schema};
 use crate::search::{Search, SearchRequest};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 /// Mock index reader that stores documents in memory.
 #[derive(Clone)]

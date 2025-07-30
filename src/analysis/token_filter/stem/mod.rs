@@ -1,6 +1,7 @@
 //! Stemming token filter and stemmer implementations.
 
 use super::Filter;
+
 use crate::analysis::token::TokenStream;
 use crate::error::Result;
 

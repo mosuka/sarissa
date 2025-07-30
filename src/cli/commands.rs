@@ -1,5 +1,13 @@
 //! Command implementations for Sarissa CLI.
 
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
+use std::time::Instant;
+
+use serde_json::Value;
+
 use crate::cli::args::*;
 use crate::cli::output::*;
 use crate::error::{Result, SarissaError};
@@ -8,12 +16,6 @@ use crate::schema::Schema;
 use crate::schema::field::TextField;
 use crate::search::spell_corrected::*;
 use crate::spelling::*;
-use serde_json::Value;
-use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
-use std::time::Instant;
 
 /// Execute a CLI command.
 pub fn execute_command(args: SarissaArgs) -> Result<()> {

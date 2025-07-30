@@ -1,10 +1,11 @@
 //! Keyword analyzer that treats the entire input as a single token.
 
+use std::sync::Arc;
+
 use crate::analysis::analyzer::{Analyzer, SimpleAnalyzer};
 use crate::analysis::token::TokenStream;
 use crate::analysis::tokenizer::WholeTokenizer;
 use crate::error::Result;
-use std::sync::Arc;
 
 /// A keyword analyzer that treats the entire input as a single token.
 ///

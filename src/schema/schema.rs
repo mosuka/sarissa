@@ -1,12 +1,14 @@
 //! Schema management for document structure definition.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
 use crate::analysis::Analyzer;
 use crate::error::{Result, SarissaError};
 use crate::query::geo::GeoPoint;
 use crate::schema::field::{FieldDefinition, FieldType};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
 
 /// A schema defines the structure of documents in an index.
 ///

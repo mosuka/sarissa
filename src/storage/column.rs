@@ -3,14 +3,16 @@
 //! This module provides columnar storage capabilities for efficient
 //! faceting, sorting, and aggregation operations.
 
-use crate::error::Result;
-use crate::storage::Storage;
-use anyhow;
-use byteorder::{BigEndian, ByteOrder};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::{Arc, RwLock};
+
+use anyhow;
+use byteorder::{BigEndian, ByteOrder};
+use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
+use crate::storage::Storage;
 
 /// Column value types supported by the column storage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

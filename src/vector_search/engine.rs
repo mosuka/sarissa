@@ -1,18 +1,18 @@
 //! Main vector search engine implementation.
 
-use crate::error::{Result, SarissaError};
-use crate::vector::{
-    Vector,
-    reader::VectorIndexReader,
-    types::{VectorSearchConfig, VectorSearchResults},
-};
-use crate::vector_search::{
-    AdvancedSearchConfig, ExplainedSearchResults, SearchExplanation, SearchStats, SearchStrategy,
-    SearchTimeBreakdown, VectorSearcher, flat_searcher::FlatVectorSearcher,
-    hnsw_searcher::HnswSearcher,
-};
 use std::sync::Arc;
 use std::time::Instant;
+
+use crate::error::{Result, SarissaError};
+use crate::vector::Vector;
+use crate::vector::reader::VectorIndexReader;
+use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
+use crate::vector_search::flat_searcher::FlatVectorSearcher;
+use crate::vector_search::hnsw_searcher::HnswSearcher;
+use crate::vector_search::{
+    AdvancedSearchConfig, ExplainedSearchResults, SearchExplanation, SearchStats, SearchStrategy,
+    SearchTimeBreakdown, VectorSearcher,
+};
 
 /// Main vector search engine that coordinates different search strategies.
 pub struct VectorSearchEngine {

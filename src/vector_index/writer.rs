@@ -1,11 +1,13 @@
 //! Vector index writer for persisting indexes to storage.
 
-use crate::error::{Result, SarissaError};
-use crate::vector_index::VectorIndexBuilder;
-use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{Result, SarissaError};
+use crate::vector_index::VectorIndexBuilder;
 
 /// Configuration for vector index writer.
 #[derive(Debug, Clone, Serialize, Deserialize)]

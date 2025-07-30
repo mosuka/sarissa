@@ -1,7 +1,8 @@
 //! Configuration for parallel search operations.
 
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
 
 /// Configuration for parallel search engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]

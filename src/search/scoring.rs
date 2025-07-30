@@ -1,9 +1,11 @@
 //! Advanced scoring and ranking systems for search relevance.
 
-use crate::error::Result;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
 
 /// Configuration for scoring algorithms.
 #[derive(Debug, Clone, Serialize, Deserialize)]

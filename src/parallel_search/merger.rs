@@ -1,10 +1,11 @@
 //! Result merging strategies for parallel search.
 
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
+
 use crate::error::Result;
 use crate::parallel_search::search_task::TaskResult;
 use crate::query::{SearchHit, SearchResults};
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
 
 /// Trait for merging search results from multiple indices.
 pub trait MergeStrategy: Send + Sync {

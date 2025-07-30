@@ -1,13 +1,15 @@
 //! Index management and coordination.
 
+use std::path::Path;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::{Result, SarissaError};
 use crate::index::reader::IndexReader;
 use crate::index::writer::IndexWriter;
 use crate::schema::Schema;
 use crate::storage::Storage;
-use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::sync::Arc;
 
 /// Information about a segment in the index.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

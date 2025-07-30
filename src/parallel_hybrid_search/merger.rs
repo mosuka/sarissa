@@ -1,10 +1,12 @@
 //! Result merger for parallel hybrid search.
 
+use std::collections::HashMap;
+
 use super::config::{MergeStrategy, ParallelHybridSearchConfig};
 use super::types::{ParallelHybridSearchResult, ScoreExplanation};
+
 use crate::query::SearchHit;
 use crate::vector::types::VectorSearchResult;
-use std::collections::HashMap;
 
 /// Merger for combining keyword and vector search results.
 pub struct ParallelHybridResultMerger {

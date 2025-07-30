@@ -22,12 +22,11 @@ pub use ranking::{RankingConfig, RankingMethod, VectorRanker};
 pub use searcher::VectorSearcherConfig;
 pub use similarity::{AdvancedSimilarityMetric, SimilarityAggregator};
 
-use crate::error::Result;
-use crate::vector::{
-    Vector,
-    types::{VectorSearchConfig, VectorSearchResults},
-};
 use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
+use crate::vector::Vector;
+use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
 
 /// Configuration for vector search operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]

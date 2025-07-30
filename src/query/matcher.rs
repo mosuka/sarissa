@@ -1,10 +1,11 @@
 //! Matcher implementations for query execution.
 
-use crate::error::Result;
-use crate::index::reader::PostingIterator;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt::Debug;
+
+use crate::error::Result;
+use crate::index::reader::PostingIterator;
 
 /// Trait for document matchers.
 pub trait Matcher: Send + Debug {

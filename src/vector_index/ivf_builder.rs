@@ -1,9 +1,10 @@
 //! IVF (Inverted File) index builder for memory-efficient search.
 
+use rayon::prelude::*;
+
 use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
 use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilder};
-use rayon::prelude::*;
 
 /// Builder for IVF vector indexes (memory-efficient search).
 pub struct IvfIndexBuilder {

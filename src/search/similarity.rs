@@ -1,13 +1,15 @@
 //! Similarity search functionality for finding similar documents.
 
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+
+use serde::{Deserialize, Serialize};
+
 use crate::analysis::{Analyzer, StandardAnalyzer};
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Matcher, Query, Scorer};
 use crate::schema::FieldValue;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
 
 /// Configuration for similarity search.
 #[derive(Debug, Clone)]

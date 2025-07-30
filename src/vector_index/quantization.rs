@@ -1,8 +1,9 @@
 //! Vector quantization for memory-efficient storage.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
-use serde::{Deserialize, Serialize};
 
 /// Quantization methods for compressing vectors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

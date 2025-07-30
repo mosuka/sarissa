@@ -1,5 +1,7 @@
 //! Index writer for adding and updating documents.
 
+use std::sync::{Arc, Mutex, OnceLock};
+
 use crate::error::{Result, SarissaError};
 use crate::index::SegmentInfo;
 use crate::index::deletion::{DeletionConfig, DeletionManager};
@@ -12,7 +14,6 @@ use crate::index::transaction::{
 };
 use crate::schema::{Document, Schema};
 use crate::storage::Storage;
-use std::sync::{Arc, Mutex, OnceLock};
 
 // Empty schema for schema-less mode
 static EMPTY_SCHEMA: OnceLock<Schema> = OnceLock::new();

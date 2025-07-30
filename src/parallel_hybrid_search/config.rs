@@ -1,7 +1,8 @@
 //! Configuration for parallel hybrid search.
 
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
 
 /// Configuration for parallel hybrid search engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]

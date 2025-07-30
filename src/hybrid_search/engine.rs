@@ -1,5 +1,10 @@
 //! Hybrid search engine implementation.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use tokio::sync::RwLock;
+
 use super::config::HybridSearchConfig;
 use super::merger::ResultMerger;
 use super::stats::HybridSearchStats;
@@ -8,13 +13,8 @@ use crate::embeding::EmbeddingEngine;
 use crate::error::Result;
 use crate::query::Query;
 use crate::search::{Search, SearchRequest};
-use crate::vector::{
-    DistanceMetric, Vector,
-    types::{VectorSearchResult, VectorSearchResults},
-};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use crate::vector::types::{VectorSearchResult, VectorSearchResults};
+use crate::vector::{DistanceMetric, Vector};
 
 /// Hybrid search engine that combines keyword and vector search.
 pub struct HybridSearchEngine {

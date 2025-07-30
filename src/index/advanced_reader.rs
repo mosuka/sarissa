@@ -3,17 +3,17 @@
 //! This module provides a production-ready index reader that efficiently
 //! handles multiple segments, caching, and optimized posting list access.
 
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
+
+use ahash::AHashMap;
+
 use crate::error::{Result, SarissaError};
 use crate::index::dictionary::HybridTermDictionary;
 use crate::index::{SegmentInfo, TermInfo};
 use crate::schema::{Document, FieldValue, Schema};
 use crate::storage::{Storage, StructReader};
-use ahash::AHashMap;
-use std::collections::BTreeMap;
-use std::sync::{
-    Arc, RwLock,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-};
 
 /// Advanced index reader configuration.
 #[derive(Debug, Clone)]

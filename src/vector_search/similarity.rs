@@ -1,8 +1,9 @@
 //! Advanced similarity metrics and aggregation functions.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::vector::{DistanceMetric, Vector};
-use serde::{Deserialize, Serialize};
 
 /// Advanced similarity metrics beyond basic distance functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

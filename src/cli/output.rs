@@ -1,10 +1,12 @@
 //! Output formatting for CLI commands.
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::cli::args::{OutputFormat, SarissaArgs};
 use crate::error::Result;
 use crate::query::Hit;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Result structure for index creation.
 #[derive(Debug, Serialize, Deserialize)]

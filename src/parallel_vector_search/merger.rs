@@ -1,10 +1,12 @@
 //! Result merging functionality for parallel vector searches.
 
-use crate::error::{Result, SarissaError};
-use crate::vector::types::{VectorSearchResult, VectorSearchResults};
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{Result, SarissaError};
+use crate::vector::types::{VectorSearchResult, VectorSearchResults};
 
 /// Strategy for merging search results from multiple sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -3,15 +3,17 @@
 //! This module provides a production-ready index writer that builds
 //! inverted indexes with term dictionaries and posting lists.
 
-use crate::analysis::{Analyzer, Token};
-use crate::error::{Result, SarissaError};
-use crate::index::dictionary::TermInfo;
-use crate::index::{InvertedIndex, Posting, dictionary::TermDictionaryBuilder};
-use crate::schema::{Document, FieldValue, Schema};
-use crate::storage::{Storage, StructWriter};
-use ahash::AHashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use ahash::AHashMap;
+
+use crate::analysis::{Analyzer, Token};
+use crate::error::{Result, SarissaError};
+use crate::index::dictionary::{TermDictionaryBuilder, TermInfo};
+use crate::index::{InvertedIndex, Posting};
+use crate::schema::{Document, FieldValue, Schema};
+use crate::storage::{Storage, StructWriter};
 
 /// Advanced index writer configuration.
 #[derive(Debug, Clone)]

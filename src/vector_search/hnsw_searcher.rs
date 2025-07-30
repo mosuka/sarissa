@@ -1,13 +1,12 @@
 //! HNSW vector searcher for approximate search.
 
-use crate::error::Result;
-use crate::vector::{
-    Vector,
-    reader::VectorIndexReader,
-    types::{VectorSearchConfig, VectorSearchResults},
-};
-use crate::vector_search::{AdvancedSearchConfig, SearchStats, VectorSearcher};
 use std::sync::Arc;
+
+use crate::error::Result;
+use crate::vector::Vector;
+use crate::vector::reader::VectorIndexReader;
+use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
+use crate::vector_search::{AdvancedSearchConfig, SearchStats, VectorSearcher};
 
 /// HNSW vector searcher that performs approximate nearest neighbor search.
 pub struct HnswSearcher {

@@ -1,7 +1,8 @@
 //! Porter stemming algorithm implementation.
 
-use super::Stemmer;
 use std::collections::HashMap;
+
+use super::Stemmer;
 
 /// Porter stemming algorithm implementation.
 ///

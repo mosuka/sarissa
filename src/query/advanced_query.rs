@@ -1,10 +1,12 @@
 //! Advanced query system with complex query composition and optimization.
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{BooleanQuery, Matcher, Occur, Query, QueryResult, Scorer};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Configuration for advanced query execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]

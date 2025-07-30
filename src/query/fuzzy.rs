@@ -1,13 +1,15 @@
 //! Fuzzy query implementation for approximate string matching.
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Matcher, Query, Scorer};
 use crate::spelling::levenshtein::{
     TypoPatterns, damerau_levenshtein_distance, levenshtein_distance,
 };
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// A fuzzy query for approximate string matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]

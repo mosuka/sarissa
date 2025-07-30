@@ -1,11 +1,12 @@
 //! Base query trait and common query functionality.
 
+use std::any::Any;
+use std::fmt::Debug;
+
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::matcher::Matcher;
 use crate::query::scorer::Scorer;
-use std::any::Any;
-use std::fmt::Debug;
 
 /// Trait for search queries.
 pub trait Query: Send + Sync + Debug {

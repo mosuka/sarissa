@@ -1,10 +1,12 @@
 //! Index management for parallel search operations.
 
-use crate::error::{Result, SarissaError};
-use crate::index::reader::IndexReader;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{Result, SarissaError};
+use crate::index::reader::IndexReader;
 
 /// Metadata associated with an index.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,8 +1,10 @@
 //! Types and data structures for hybrid search.
 
-use crate::vector::Vector;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::vector::Vector;
 
 /// A single result from hybrid search containing both keyword and vector scores.
 #[derive(Debug, Clone, Serialize, Deserialize)]

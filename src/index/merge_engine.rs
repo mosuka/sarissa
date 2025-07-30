@@ -3,19 +3,19 @@
 //! This module provides the core functionality for merging multiple segments
 //! into a single optimized segment with proper handling of deletions and updates.
 
-use crate::error::{Result, SarissaError};
-use crate::index::{
-    InvertedIndex, SegmentInfo, TermInfo,
-    advanced_reader::AdvancedIndexReader,
-    dictionary::TermDictionaryBuilder,
-    reader::IndexReader,
-    segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy},
-};
-use crate::schema::{Document, Schema};
-use crate::storage::{Storage, StructWriter};
-use ahash::AHashSet;
 use std::sync::Arc;
 use std::time::SystemTime;
+
+use ahash::AHashSet;
+
+use crate::error::{Result, SarissaError};
+use crate::index::advanced_reader::AdvancedIndexReader;
+use crate::index::dictionary::TermDictionaryBuilder;
+use crate::index::reader::IndexReader;
+use crate::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
+use crate::index::{InvertedIndex, SegmentInfo, TermInfo};
+use crate::schema::{Document, Schema};
+use crate::storage::{Storage, StructWriter};
 
 /// Configuration for merge operations.
 #[derive(Debug, Clone)]

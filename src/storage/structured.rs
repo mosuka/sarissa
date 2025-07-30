@@ -3,11 +3,13 @@
 //! This module provides efficient binary serialization for search index data structures,
 //! similar to Whoosh's structfile.py but optimized for Rust and modern hardware.
 
+use std::collections::HashMap;
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
 use crate::error::{Result, SarissaError};
 use crate::storage::{StorageInput, StorageOutput};
 use crate::util::varint::{decode_u64, encode_u64};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::collections::HashMap;
 
 /// A structured file writer for binary data.
 pub struct StructWriter<W: StorageOutput> {

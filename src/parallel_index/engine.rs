@@ -1,18 +1,18 @@
 //! Main parallel indexing engine implementation.
 
-use crate::error::{Result, SarissaError};
-use crate::index::writer::IndexWriter;
-use crate::parallel_index::{
-    batch_processor::{BatchProcessingResult, BatchProcessor},
-    config::{IndexingOptions, ParallelIndexConfig, PartitionConfig},
-    metrics::{IndexingMetricsCollector, IndexingTimer},
-    partitioner::DocumentPartitioner,
-    writer_manager::{IndexWriterHandle, WriterManager},
-};
-use crate::schema::Document;
-use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::Arc;
 use std::time::Duration;
+
+use rayon::{ThreadPool, ThreadPoolBuilder};
+
+use crate::error::{Result, SarissaError};
+use crate::index::writer::IndexWriter;
+use crate::parallel_index::batch_processor::{BatchProcessingResult, BatchProcessor};
+use crate::parallel_index::config::{IndexingOptions, ParallelIndexConfig, PartitionConfig};
+use crate::parallel_index::metrics::{IndexingMetricsCollector, IndexingTimer};
+use crate::parallel_index::partitioner::DocumentPartitioner;
+use crate::parallel_index::writer_manager::{IndexWriterHandle, WriterManager};
+use crate::schema::Document;
 
 /// Result of a parallel indexing operation.
 #[derive(Debug)]

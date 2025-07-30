@@ -1,7 +1,8 @@
 //! Common types used by both vector indexing and search modules.
 
-use crate::error::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
 
 /// Configuration for vector search operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,10 +1,12 @@
 //! Regex-based tokenizer implementation.
 
+use std::sync::Arc;
+
+use regex::Regex;
+
 use super::Tokenizer;
 use crate::analysis::token::{Token, TokenStream};
 use crate::error::{Result, SarissaError};
-use regex::Regex;
-use std::sync::Arc;
 
 /// A regex-based tokenizer that extracts tokens using regular expressions.
 ///
