@@ -144,37 +144,20 @@ impl BM25Scorer {
 }
 
 impl Scorer for BM25Scorer {
-    fn score(&self, doc_id: u64, term_freq: f32) -> f32 {
+    fn score(&self, _doc_id: u64, term_freq: f32) -> f32 {
         if self.doc_freq == 0 || self.total_docs == 0 || term_freq == 0.0 {
             return 0.0;
         }
 
+        // Standard BM25 formula: score = boost × IDF × TF
         let idf = self.idf();
 
-        // Create document-specific variations for more diverse scoring
-        let doc_variation = ((doc_id as f64 * 0.31) % 1.0) as f32; // Pseudo-random based on doc_id
-        let position_factor = 1.0 - (doc_id as f32 * 0.05 / self.total_docs as f32).min(0.3);
-
-        // Use actual field length based on term frequency and document characteristics
-        let base_field_length = self.avg_field_length as f32;
-        let field_length = if term_freq > 1.0 {
-            base_field_length * (1.0 + (term_freq - 1.0) * 0.1 + doc_variation * 0.2)
-        } else {
-            base_field_length * (1.0 + doc_variation * 0.15)
-        };
-
+        // Use average field length for TF calculation
+        // In a real implementation, actual field length should be passed
+        let field_length = self.avg_field_length as f32;
         let tf = self.tf(term_freq, field_length);
 
-        // Add document-specific factors for score variation
-        let df_factor = 1.0 + (self.doc_freq as f32 / self.total_docs as f32);
-        let freshness_factor = 1.0 + doc_variation * 0.1; // Simulate document freshness
-        let relevance_factor = position_factor * freshness_factor;
-
-        let base_score = self.boost * idf * tf * df_factor;
-        let final_score = base_score * relevance_factor;
-
-        // Ensure minimum score variation for non-zero term frequencies
-        final_score.max(0.001)
+        self.boost * idf * tf
     }
 
     fn boost(&self) -> f32 {
@@ -211,11 +194,15 @@ impl BM25Scorer {
         if term_freqs.len() >= 4 {
             self.batch_score_optimized(term_freqs, field_lengths)
         } else {
-            // Fallback for small batches
+            // Fallback for small batches - use actual field lengths
             term_freqs
                 .iter()
-                .zip(field_lengths.iter())
-                .map(|(&tf, &_fl)| self.score(0, tf)) // doc_id not used in current implementation
+                .enumerate()
+                .map(|(i, &tf)| {
+                    let idf = self.idf();
+                    let tf_score = self.tf(tf, field_lengths[i]);
+                    self.boost * idf * tf_score
+                })
                 .collect()
         }
     }

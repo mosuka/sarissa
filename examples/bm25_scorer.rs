@@ -54,7 +54,8 @@ fn main() -> Result<()> {
 
     // Example 1: Default BM25 parameters
     println!("1. Default BM25 scoring parameters:");
-    let default_scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0); // Simulated realistic values
+    // Parameters: (doc_freq, total_term_freq, field_doc_count, avg_field_length, total_docs, boost)
+    let default_scorer = BM25Scorer::new(3, 50, 5, 100.0, 5, 1.0);
     println!(
         "   k1: {} (term frequency saturation point)",
         default_scorer.k1()
@@ -73,7 +74,7 @@ fn main() -> Result<()> {
     println!("\n3. Impact of k1 parameter (term frequency saturation):");
     let k1_values = [0.5, 1.2, 2.0, 3.0];
     for k1 in k1_values {
-        let mut scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0);
+        let mut scorer = BM25Scorer::new(3, 50, 5, 100.0, 5, 1.0);
         scorer.set_k1(k1);
         let score = scorer.score(0, 3.0); // Fixed term frequency
         println!("   k1 = {k1}: Score = {score:.4}");
@@ -83,7 +84,7 @@ fn main() -> Result<()> {
     println!("\n4. Impact of b parameter (field length normalization):");
     let b_values = [0.0, 0.25, 0.75, 1.0];
     for b in b_values {
-        let mut scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0);
+        let mut scorer = BM25Scorer::new(3, 50, 5, 100.0, 5, 1.0);
         scorer.set_b(b);
         let score = scorer.score(0, 2.0); // Fixed term frequency
         println!("   b = {b}: Score = {score:.4}");
@@ -114,9 +115,9 @@ fn main() -> Result<()> {
     // Example 6: Query boost effects
     println!("\n6. Query boost effects:");
     let boosted_scorers = [
-        ("Normal boost", BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0)),
-        ("High boost", BM25Scorer::new(5, 20, 5, 8.0, 5, 2.0)),
-        ("Very high boost", BM25Scorer::new(5, 20, 5, 8.0, 5, 5.0)),
+        ("Normal boost", BM25Scorer::new(3, 50, 5, 100.0, 5, 1.0)),
+        ("High boost", BM25Scorer::new(3, 50, 5, 100.0, 5, 2.0)),
+        ("Very high boost", BM25Scorer::new(3, 50, 5, 100.0, 5, 5.0)),
     ];
 
     for (description, scorer) in boosted_scorers {
@@ -130,18 +131,29 @@ fn main() -> Result<()> {
     }
 
     // Example 7: Term frequency vs Document frequency impact
-    println!("\n7. Term frequency vs Document frequency impact:");
+    println!("\n7. Document frequency impact (IDF):");
     let scenarios = [
-        ("Common term", 4, 15, 5),   // High doc freq, medium term freq
-        ("Rare term", 1, 3, 5),      // Low doc freq, medium term freq
-        ("Very rare term", 1, 1, 5), // Very low doc freq, medium term freq
+        ("Common term (high doc freq)", 4, 100.0, 5), // Appears in 4 out of 5 docs
+        ("Rare term (low doc freq)", 1, 100.0, 5),    // Appears in 1 out of 5 docs
     ];
 
-    for (description, doc_freq, term_freq, doc_count) in scenarios {
-        let scorer = BM25Scorer::new(doc_freq, term_freq, doc_count, 8.0, 5, 1.0);
+    println!("   With fixed term frequency = 2.0:");
+    for (description, doc_freq, avg_field_len, total_docs) in scenarios {
+        // Parameters: (doc_freq, total_term_freq, field_doc_count, avg_field_length, total_docs, boost)
+        let scorer = BM25Scorer::new(doc_freq, 50, 5, avg_field_len, total_docs, 1.0);
         let score = scorer.score(0, 2.0);
         println!("   {description}: Score = {score:.4}");
-        println!("     Doc freq: {doc_freq}, Term freq: {term_freq}, Total docs: {doc_count}");
+        println!("     Doc freq: {doc_freq}/{total_docs} documents");
+    }
+
+    // Example 8: Term frequency impact (TF)
+    println!("\n8. Term frequency impact (TF):");
+    println!("   With fixed document frequency = 2/5:");
+    let term_frequencies = [1.0, 2.0, 5.0, 10.0, 20.0];
+    let scorer = BM25Scorer::new(2, 50, 5, 100.0, 5, 1.0);
+    for tf in term_frequencies {
+        let score = scorer.score(0, tf);
+        println!("   Term freq {tf}: Score = {score:.4}");
     }
 
     engine.close()?;
