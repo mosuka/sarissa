@@ -12,7 +12,7 @@ use crate::parallel_index::config::{IndexingOptions, ParallelIndexConfig, Partit
 use crate::parallel_index::metrics::{IndexingMetricsCollector, IndexingTimer};
 use crate::parallel_index::partitioner::DocumentPartitioner;
 use crate::parallel_index::writer_manager::{IndexWriterHandle, WriterManager};
-use crate::schema::Document;
+use crate::document::Document;
 
 /// Result of a parallel indexing operation.
 #[derive(Debug)]
@@ -368,19 +368,14 @@ mod tests {
     use super::*;
     use crate::index::writer::BasicIndexWriter;
     use crate::parallel_index::partitioner::HashPartitioner;
-    use crate::schema::{FieldValue, Schema, TextField};
+    use crate::document::{FieldValue};
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_writer() -> Box<dyn IndexWriter> {
-        let mut schema = Schema::new().unwrap();
-        schema.add_field("id", Box::new(TextField::new())).unwrap();
-        schema
-            .add_field("content", Box::new(TextField::new()))
-            .unwrap();
+        
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(
             BasicIndexWriter::new(
-                schema,
                 storage,
                 crate::index::writer::WriterConfig::default(),
             )

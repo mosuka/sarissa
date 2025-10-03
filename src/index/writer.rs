@@ -1,6 +1,6 @@
 //! Index writer for adding and updating documents.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use crate::error::{Result, SarissaError};
 use crate::index::SegmentInfo;
@@ -12,11 +12,9 @@ use crate::index::segment_manager::{
 use crate::index::transaction::{
     AtomicOperations, IsolationLevel, Transaction, TransactionManager, TransactionResult,
 };
-use crate::schema::{Document, Schema};
+use crate::document::{Document};
 use crate::storage::Storage;
 
-// Empty schema for schema-less mode
-static EMPTY_SCHEMA: OnceLock<Schema> = OnceLock::new();
 
 /// Trait for index writers.
 pub trait IndexWriter: Send + std::fmt::Debug {
@@ -37,9 +35,6 @@ pub trait IndexWriter: Send + std::fmt::Debug {
 
     /// Get the number of documents added since the last commit.
     fn pending_docs(&self) -> u64;
-
-    /// Get the schema for this writer.
-    fn schema(&self) -> &Schema;
 
     /// Close the writer and release resources.
     fn close(&mut self) -> Result<()>;
@@ -75,11 +70,8 @@ impl Default for WriterConfig {
     }
 }
 
-/// A basic index writer implementation.
+/// A basic index writer implementation for schema-less indexing.
 pub struct BasicIndexWriter {
-    /// The schema for this writer (optional for schema-less mode).
-    schema: Option<Schema>,
-
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
@@ -120,7 +112,6 @@ pub struct BasicIndexWriter {
 impl std::fmt::Debug for BasicIndexWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BasicIndexWriter")
-            .field("schema", &self.schema)
             .field("storage", &"<storage>")
             .field("default_analyzer", &"<analyzer>")
             .field("config", &self.config)
@@ -132,42 +123,23 @@ impl std::fmt::Debug for BasicIndexWriter {
 }
 
 impl BasicIndexWriter {
-    /// Create a new index writer with schema.
-    pub fn new(schema: Schema, storage: Arc<dyn Storage>, config: WriterConfig) -> Result<Self> {
-        Self::new_internal(Some(schema), storage, config)
-    }
-
-    /// Create a new index writer without schema (schema-less mode).
-    pub fn new_schemaless(storage: Arc<dyn Storage>, config: WriterConfig) -> Result<Self> {
-        Self::new_internal(None, storage, config)
-    }
-
-    /// Internal constructor for both schema and schema-less modes.
-    fn new_internal(
-        schema: Option<Schema>,
-        storage: Arc<dyn Storage>,
-        config: WriterConfig,
-    ) -> Result<Self> {
+    /// Create a new index writer for schema-less indexing.
+    pub fn new(storage: Arc<dyn Storage>, config: WriterConfig) -> Result<Self> {
         let deletion_config = DeletionConfig::default();
         let deletion_manager = DeletionManager::new(deletion_config, storage.clone())?;
 
         let segment_config = SegmentManagerConfig::default();
         let segment_manager = SegmentManager::new(segment_config, storage.clone())?;
 
-        // Create empty schema for internal components if none provided
-        let internal_schema = schema.clone().unwrap_or_default();
-        let schema_arc = Arc::new(internal_schema);
-
-        let transaction_manager = TransactionManager::new(storage.clone(), schema_arc.clone());
+        let transaction_manager = TransactionManager::new(storage.clone());
 
         let merge_config = MergeConfig::default();
-        let merge_engine = MergeEngine::new(merge_config, storage.clone(), schema_arc);
+        let merge_engine = MergeEngine::new(merge_config, storage.clone());
 
         // Create default analyzer for schema-less mode
         let default_analyzer = Arc::new(crate::analysis::StandardAnalyzer::new()?);
 
         Ok(BasicIndexWriter {
-            schema,
             storage,
             default_analyzer,
             config,
@@ -183,23 +155,18 @@ impl BasicIndexWriter {
         })
     }
 
-    /// Check if this writer is operating in schema-less mode.
-    pub fn is_schemaless(&self) -> bool {
-        self.schema.is_none()
+    /// Deprecated: Use `new()` instead. Schema is no longer required.
+    #[deprecated(since = "0.2.0", note = "Use `new()` instead. Schema is no longer required.")]
+    pub fn new_schemaless(storage: Arc<dyn Storage>, config: WriterConfig) -> Result<Self> {
+        Self::new(storage, config)
     }
 
     /// Apply default analyzers to fields that don't have explicit analyzers in schema-less mode.
     fn apply_default_analyzers(&self, mut doc: Document) -> Document {
-        use crate::schema::FieldValue;
+        use crate::document::FieldValue;
 
-        // Determine which default analyzer to use
-        let default_analyzer = if let Some(schema) = &self.schema {
-            // Use schema's default analyzer
-            schema.default_analyzer().clone()
-        } else {
-            // Use writer's default analyzer (schema-less mode)
-            self.default_analyzer.clone()
-        };
+        // Use writer's default analyzer (schema-less mode)
+        let default_analyzer = self.default_analyzer.clone();
 
         // For each text field without an explicit analyzer, apply the default analyzer
         let field_names: Vec<String> = doc.fields().keys().cloned().collect();
@@ -288,14 +255,8 @@ impl BasicIndexWriter {
     fn add_document_internal(&mut self, doc: Document, update_stats: bool) -> Result<()> {
         self.check_closed()?;
 
-        let processed_doc = if let Some(schema) = &self.schema {
-            // Schema mode: validate document
-            doc.validate_against_schema(schema)?;
-            doc
-        } else {
-            // Schema-less mode: apply default analyzer to fields without explicit analyzers
-            self.apply_default_analyzers(doc)
-        };
+        // Schema-less mode: apply default analyzer to fields without explicit analyzers
+        let processed_doc = self.apply_default_analyzers(doc);
 
         // Add to pending documents
         self.pending_documents.push(processed_doc);
@@ -405,13 +366,6 @@ impl IndexWriter for BasicIndexWriter {
 
     fn pending_docs(&self) -> u64 {
         self.pending_documents.len() as u64
-    }
-
-    fn schema(&self) -> &Schema {
-        // Return the schema if present, otherwise return an empty schema
-        self.schema
-            .as_ref()
-            .unwrap_or_else(|| EMPTY_SCHEMA.get_or_init(Schema::default))
     }
 
     fn close(&mut self) -> Result<()> {
@@ -833,21 +787,11 @@ impl BasicIndexWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     fn create_test_document() -> Document {
         Document::builder()
@@ -858,24 +802,21 @@ mod tests {
 
     #[test]
     fn test_writer_creation() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let writer = BasicIndexWriter::new(storage, config).unwrap();
 
         assert!(!writer.is_closed());
         assert_eq!(writer.pending_docs(), 0);
-        assert_eq!(writer.schema().len(), 2);
     }
 
     #[test]
     fn test_add_document() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
         let doc = create_test_document();
 
         writer.add_document(doc).unwrap();
@@ -885,11 +826,10 @@ mod tests {
 
     #[test]
     fn test_commit() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage.clone(), config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage.clone(), config).unwrap();
         let doc = create_test_document();
 
         writer.add_document(doc).unwrap();
@@ -905,11 +845,10 @@ mod tests {
 
     #[test]
     fn test_rollback() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
         let doc = create_test_document();
 
         writer.add_document(doc).unwrap();
@@ -921,14 +860,13 @@ mod tests {
 
     #[test]
     fn test_auto_flush() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig {
             max_buffered_docs: 2,
             ..Default::default()
         };
 
-        let mut writer = BasicIndexWriter::new(schema, storage.clone(), config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage.clone(), config).unwrap();
 
         // Add first document
         writer.add_document(create_test_document()).unwrap();
@@ -945,11 +883,10 @@ mod tests {
 
     #[test]
     fn test_writer_close() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
         let doc = create_test_document();
 
         writer.add_document(doc).unwrap();
@@ -967,19 +904,18 @@ mod tests {
 
     #[test]
     fn test_invalid_document() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
-        // Create document with invalid field
+        // Schema-less mode: any field is accepted
         let doc = Document::builder()
             .add_text("invalid_field", "This field doesn't exist in schema")
             .build();
 
         let result = writer.add_document(doc);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -1007,11 +943,10 @@ mod tests {
 
     #[test]
     fn test_document_deletion() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add a document first
         let doc = create_test_document();
@@ -1036,11 +971,10 @@ mod tests {
 
     #[test]
     fn test_document_update() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add original document
         let doc1 = create_test_document();
@@ -1065,11 +999,10 @@ mod tests {
 
     #[test]
     fn test_deletion_by_query() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add multiple documents
         for i in 0..5 {
@@ -1092,11 +1025,10 @@ mod tests {
 
     #[test]
     fn test_compaction_candidates() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add and commit documents to create segments
         for i in 0..10 {
@@ -1123,11 +1055,10 @@ mod tests {
 
     #[test]
     fn test_global_deletion_report() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add multiple documents
         for i in 0..20 {
@@ -1181,11 +1112,10 @@ mod tests {
 
     #[test]
     fn test_auto_compaction_detection() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add and commit documents to create segments
         for i in 0..50 {
@@ -1226,11 +1156,10 @@ mod tests {
 
     #[test]
     fn test_compaction_completion() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add documents to multiple segments
         for batch in 0..3 {
@@ -1279,11 +1208,10 @@ mod tests {
 
     #[test]
     fn test_segment_management_integration() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add documents to create multiple segments
         for batch in 0..3 {
@@ -1367,11 +1295,10 @@ mod tests {
 
     #[test]
     fn test_segment_merge_completion() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Create multiple small segments
         for i in 0..4 {
@@ -1422,11 +1349,10 @@ mod tests {
 
     #[test]
     fn test_segment_tier_rebalancing() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Add documents to create segments
         for i in 0..10 {
@@ -1466,7 +1392,7 @@ mod tests {
     #[test]
     fn test_schemaless_mode() {
         use crate::analysis::{KeywordAnalyzer, StandardAnalyzer};
-        use crate::schema::FieldValue;
+        use crate::document::FieldValue;
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
 
@@ -1475,7 +1401,6 @@ mod tests {
 
         // Create writer in schema-less mode
         let mut writer = BasicIndexWriter::new_schemaless(storage, config).unwrap();
-        assert!(writer.is_schemaless());
 
         // Create analyzers
         let standard_analyzer = Arc::new(StandardAnalyzer::new().unwrap());
@@ -1530,7 +1455,7 @@ mod tests {
     #[test]
     fn test_mixed_mode_compatibility() {
         use crate::analysis::StandardAnalyzer;
-        use crate::schema::{FieldValue, TextField};
+        use crate::document::{FieldValue};
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
 
@@ -1538,13 +1463,9 @@ mod tests {
         let config = WriterConfig::default();
 
         // Create schema-based writer
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new()))
-            .unwrap();
+        
 
-        let mut writer = BasicIndexWriter::new(schema, storage, config).unwrap();
-        assert!(!writer.is_schemaless());
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Regular document (schema-based)
         let doc1 = Document::builder()
@@ -1572,7 +1493,7 @@ mod tests {
     #[test]
     fn test_unified_api() {
         use crate::analysis::KeywordAnalyzer;
-        use crate::schema::FieldValue;
+        use crate::document::FieldValue;
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
 
@@ -1607,7 +1528,7 @@ mod tests {
 
     #[test]
     fn test_default_analyzer_application() {
-        use crate::schema::FieldValue;
+        use crate::document::FieldValue;
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
 

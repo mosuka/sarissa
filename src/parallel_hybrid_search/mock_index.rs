@@ -6,21 +6,19 @@ use std::sync::{Arc, Mutex};
 use crate::error::Result;
 use crate::index::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
 use crate::query::{Query, SearchHit, SearchResults};
-use crate::schema::{Document, FieldValue, Schema};
+use crate::document::{Document, FieldValue};
 use crate::search::{Search, SearchRequest};
 
-/// Mock index reader that stores documents in memory.
+/// Mock index reader that stores documents in memory (schema-less mode).
 #[derive(Clone)]
 pub struct MockIndexReader {
-    schema: Schema,
     documents: Arc<Mutex<HashMap<u64, Document>>>,
 }
 
 impl MockIndexReader {
-    /// Create a new mock index reader.
-    pub fn new(schema: Schema) -> Self {
+    /// Create a new mock index reader (schema-less mode).
+    pub fn new() -> Self {
         Self {
-            schema,
             documents: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -98,10 +96,6 @@ impl IndexReader for MockIndexReader {
         Ok(self.documents.lock().unwrap().get(&doc_id).cloned())
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     fn term_info(&self, _field: &str, _term: &str) -> Result<Option<ReaderTermInfo>> {
         // Simplified implementation
         Ok(None)
@@ -129,7 +123,6 @@ impl IndexReader for MockIndexReader {
 impl std::fmt::Debug for MockIndexReader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MockIndexReader")
-            .field("schema", &self.schema)
             .field("doc_count", &self.doc_count())
             .finish()
     }

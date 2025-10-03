@@ -6,7 +6,7 @@ use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::schema::Document;
+use crate::document::Document;
 
 /// Features extracted from query-document pairs for ranking.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -16,7 +16,6 @@ use sarissa::parallel_search::{
 };
 use sarissa::prelude::*;
 use sarissa::query::{PhraseQuery, TermQuery};
-use sarissa::schema::{IdField, NumericField, TextField};
 use sarissa::storage::{MemoryStorage, StorageConfig};
 use std::path::Path;
 use std::sync::Arc;
@@ -41,20 +40,6 @@ fn main() -> Result<()> {
     }
 
     // Create a comprehensive schema
-    let mut schema = Schema::new()?;
-    schema.add_field("id", Box::new(IdField::new()))?;
-    schema.add_field(
-        "title",
-        Box::new(TextField::new().stored(true).indexed(true)),
-    )?;
-    schema.add_field("content", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("description", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("author", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("category", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("user_id", Box::new(NumericField::u64().indexed(true)))?;
-    schema.add_field("region", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("priority", Box::new(NumericField::u64().indexed(true)))?;
-    schema.add_field("price", Box::new(NumericField::f64().indexed(true)))?;
 
     println!("\n=== Hash Partitioning for Document Indexing ===\n");
 
@@ -88,7 +73,6 @@ fn main() -> Result<()> {
         storages.push(Arc::clone(&storage));
 
         let writer = Box::new(BasicIndexWriter::new(
-            schema.clone(),
             Arc::clone(&storage),
             WriterConfig::default(),
         )?);
@@ -273,7 +257,7 @@ fn main() -> Result<()> {
     let mut index_readers = Vec::new();
 
     for (i, storage) in storages.into_iter().enumerate() {
-        let reader = Box::new(BasicIndexReader::new(schema.clone(), storage)?);
+        let reader = Box::new(BasicIndexReader::new(storage)?);
         index_readers.push((format!("partition_{}", i), reader));
     }
 
@@ -359,7 +343,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
                 if let Some(price) = doc.get_field("price").and_then(|f| match f {
-                    sarissa::schema::FieldValue::Float(v) => Some(*v),
+                    sarissa::document::FieldValue::Float(v) => Some(*v),
                     _ => None,
                 }) {
                     if let Some(category) = doc.get_field("category").and_then(|f| f.as_text()) {

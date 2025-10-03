@@ -277,16 +277,13 @@ mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
     use crate::query::TermQuery;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_reader() -> Box<dyn IndexReader> {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("text", Box::new(TextField::new()))
-            .unwrap();
+        
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        Box::new(BasicIndexReader::new(schema, storage).unwrap())
+        Box::new(BasicIndexReader::new(storage).unwrap())
     }
 
     #[test]

@@ -4,8 +4,8 @@
 //! allowing maximum flexibility in document structure and field analyzers.
 
 use sarissa::analysis::{KeywordAnalyzer, NoOpAnalyzer, StandardAnalyzer};
+use sarissa::document::{Document, FieldValue};
 use sarissa::index::writer::{BasicIndexWriter, IndexWriter, WriterConfig};
-use sarissa::schema::{Document, FieldValue};
 use sarissa::storage::{MemoryStorage, StorageConfig};
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ fn main() -> sarissa::error::Result<()> {
     let config = WriterConfig::default();
 
     // Create writer in schema-less mode (no schema required!)
-    let mut writer = BasicIndexWriter::new_schemaless(storage, config)?;
+    let mut writer = BasicIndexWriter::new(storage, config)?;
     println!("✓ Created schema-less IndexWriter");
 
     // Prepare analyzers for different field types

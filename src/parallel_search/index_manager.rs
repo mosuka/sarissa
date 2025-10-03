@@ -289,13 +289,12 @@ impl Default for IndexManager {
 mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
-    use crate::schema::Schema;
+    
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_reader() -> Arc<dyn IndexReader> {
-        let schema = Schema::new().unwrap();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        Arc::new(BasicIndexReader::new(schema, storage).unwrap())
+        Arc::new(BasicIndexReader::new(storage).unwrap())
     }
 
     #[test]

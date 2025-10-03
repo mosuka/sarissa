@@ -5,7 +5,7 @@ use sarissa::parallel_hybrid_search::{
     MergeStrategy, MockIndexReader, ParallelHybridSearchConfig, ParallelHybridSearchEngine,
 };
 use sarissa::query::TermQuery;
-use sarissa::schema::{Document, FieldValue, Schema, TextField};
+use sarissa::document::{Document, FieldValue};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,17 +24,12 @@ async fn main() -> Result<()> {
     // Create the parallel hybrid search engine
     let engine = ParallelHybridSearchEngine::new(config)?;
 
-    // Create test schema
-    let mut schema = Schema::new()?;
-    schema.add_field("title", Box::new(TextField::new()))?;
-    schema.add_field("content", Box::new(TextField::new()))?;
-
     // Add multiple indices with mock data
     println!("Adding test indices...");
     let mock_readers = vec![
-        Arc::new(MockIndexReader::new(schema.clone())),
-        Arc::new(MockIndexReader::new(schema.clone())),
-        Arc::new(MockIndexReader::new(schema.clone())),
+        Arc::new(MockIndexReader::new()),
+        Arc::new(MockIndexReader::new()),
+        Arc::new(MockIndexReader::new()),
     ];
 
     // Add documents to mock indices
@@ -307,7 +302,7 @@ async fn main() -> Result<()> {
         let test_engine = ParallelHybridSearchEngine::new(config)?;
 
         // Add test indices with programming-related content
-        let mock_reader = Arc::new(MockIndexReader::new(schema.clone()));
+        let mock_reader = Arc::new(MockIndexReader::new());
         let mut doc1 = Document::new();
         doc1.add_field("title", FieldValue::Text("Rust Programming".to_string()));
         doc1.add_field(

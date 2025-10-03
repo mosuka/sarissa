@@ -12,7 +12,7 @@ use crate::analysis::{Analyzer, Token};
 use crate::error::{Result, SarissaError};
 use crate::index::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::index::{InvertedIndex, Posting};
-use crate::schema::{Document, FieldValue, Schema};
+use crate::document::Document;
 use crate::storage::{Storage, StructWriter};
 
 /// Advanced index writer configuration.
@@ -90,11 +90,8 @@ pub struct WriterStats {
     pub segments_created: u32,
 }
 
-/// Advanced index writer implementation.
+/// Advanced index writer implementation (schema-less mode).
 pub struct AdvancedIndexWriter {
-    /// The schema for this writer.
-    schema: Schema,
-
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
@@ -124,9 +121,8 @@ pub struct AdvancedIndexWriter {
 }
 
 impl AdvancedIndexWriter {
-    /// Create a new advanced index writer.
+    /// Create a new advanced index writer (schema-less mode).
     pub fn new(
-        schema: Schema,
         storage: Arc<dyn Storage>,
         config: AdvancedWriterConfig,
     ) -> Result<Self> {
@@ -152,7 +148,6 @@ impl AdvancedIndexWriter {
         );
 
         Ok(AdvancedIndexWriter {
-            schema,
             storage,
             config,
             inverted_index: InvertedIndex::new(),
@@ -175,9 +170,7 @@ impl AdvancedIndexWriter {
     pub fn add_document(&mut self, doc: Document) -> Result<()> {
         self.check_closed()?;
 
-        // Validate document against schema
-        doc.validate_against_schema(&self.schema)?;
-
+        // Schema-less mode: no validation needed
         // Analyze the document
         let analyzed_doc = self.analyze_document(doc)?;
 
@@ -204,23 +197,14 @@ impl AdvancedIndexWriter {
         let mut field_terms = AHashMap::new();
         let mut stored_fields = AHashMap::new();
 
-        // Process each field in the document
+        // Process each field in the document (schema-less mode)
         for (field_name, field_value) in doc.fields() {
-            let field_def = self
-                .schema
-                .get_field(field_name)
-                .ok_or_else(|| SarissaError::schema(format!("Unknown field: {field_name}")))?;
+            use crate::document::FieldValue;
 
-            match field_def.field_type().type_name() {
-                "text" => {
+            match field_value {
+                FieldValue::Text(text) => {
                     // Analyze text field
-                    let text = field_value
-                        .as_text()
-                        .ok_or_else(|| SarissaError::schema("Expected text value"))?;
-
-                    let analyzer_name = field_def
-                        .analyzer()
-                        .unwrap_or(&self.config.default_analyzer);
+                    let analyzer_name = &self.config.default_analyzer;
                     let analyzer = self.analyzers.get_mut(analyzer_name).ok_or_else(|| {
                         SarissaError::analysis(format!("Unknown analyzer: {analyzer_name}"))
                     })?;
@@ -230,36 +214,11 @@ impl AdvancedIndexWriter {
                     let analyzed_terms = self.tokens_to_analyzed_terms(token_vec);
 
                     field_terms.insert(field_name.clone(), analyzed_terms);
-
-                    // Store if configured
-                    if field_def.stored() {
-                        stored_fields.insert(field_name.clone(), text.to_string());
-                    }
+                    stored_fields.insert(field_name.clone(), text.to_string());
                 }
-                "keyword" | "id" => {
-                    // Keyword fields are not analyzed
-                    let text = field_value
-                        .as_text()
-                        .ok_or_else(|| SarissaError::schema("Expected text value"))?;
-
-                    let analyzed_term = AnalyzedTerm {
-                        term: text.to_string(),
-                        position: 0,
-                        frequency: 1,
-                        offset: (0, text.len()),
-                    };
-
-                    field_terms.insert(field_name.clone(), vec![analyzed_term]);
-
-                    if field_def.stored() {
-                        stored_fields.insert(field_name.clone(), text.to_string());
-                    }
-                }
-                "numeric" => {
-                    // Convert numeric to text for indexing
-                    let text = field_value
-                        .as_numeric()
-                        .ok_or_else(|| SarissaError::schema("Expected numeric value"))?;
+                FieldValue::Integer(num) => {
+                    // Convert integer to text for indexing
+                    let text = num.to_string();
 
                     let analyzed_term = AnalyzedTerm {
                         term: text.clone(),
@@ -269,19 +228,11 @@ impl AdvancedIndexWriter {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-
-                    if field_def.stored() {
-                        stored_fields.insert(field_name.clone(), text);
-                    }
+                    stored_fields.insert(field_name.clone(), text);
                 }
-                "datetime" => {
-                    // Handle DateTime field - check if it's already a DateTime or needs conversion
-                    let text = match field_value {
-                        FieldValue::DateTime(dt) => dt.to_rfc3339(),
-                        _ => field_value
-                            .as_datetime()
-                            .ok_or_else(|| SarissaError::schema("Expected datetime value"))?,
-                    };
+                FieldValue::Float(num) => {
+                    // Convert float to text for indexing
+                    let text = num.to_string();
 
                     let analyzed_term = AnalyzedTerm {
                         term: text.clone(),
@@ -291,16 +242,10 @@ impl AdvancedIndexWriter {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-
-                    if field_def.stored() {
-                        stored_fields.insert(field_name.clone(), text);
-                    }
+                    stored_fields.insert(field_name.clone(), text);
                 }
-                "boolean" => {
+                FieldValue::Boolean(boolean) => {
                     // Convert boolean to text
-                    let boolean = field_value
-                        .as_boolean()
-                        .ok_or_else(|| SarissaError::schema("Expected boolean value"))?;
                     let text = boolean.to_string();
 
                     let analyzed_term = AnalyzedTerm {
@@ -311,23 +256,24 @@ impl AdvancedIndexWriter {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-
-                    if field_def.stored() {
-                        stored_fields.insert(field_name.clone(), text);
-                    }
+                    stored_fields.insert(field_name.clone(), text);
                 }
-                "stored" => {
-                    // Stored-only field
-                    let text = field_value
-                        .as_text()
-                        .ok_or_else(|| SarissaError::schema("Expected text value"))?;
-                    stored_fields.insert(field_name.clone(), text.to_string());
+                FieldValue::DateTime(dt) => {
+                    // Handle DateTime field
+                    let text = dt.to_rfc3339();
+
+                    let analyzed_term = AnalyzedTerm {
+                        term: text.clone(),
+                        position: 0,
+                        frequency: 1,
+                        offset: (0, text.len()),
+                    };
+
+                    field_terms.insert(field_name.clone(), vec![analyzed_term]);
+                    stored_fields.insert(field_name.clone(), text);
                 }
                 _ => {
-                    return Err(SarissaError::schema(format!(
-                        "Unsupported field type: {}",
-                        field_def.field_type().type_name()
-                    )));
+                    // For other types (Binary, Geo, Null), skip indexing
                 }
             }
         }
@@ -588,11 +534,6 @@ impl AdvancedIndexWriter {
     pub fn pending_docs(&self) -> usize {
         self.buffered_docs.len()
     }
-
-    /// Get the schema.
-    pub fn schema(&self) -> &Schema {
-        &self.schema
-    }
 }
 
 impl Drop for AdvancedIndexWriter {
@@ -604,21 +545,11 @@ impl Drop for AdvancedIndexWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     fn create_test_document(title: &str, body: &str) -> Document {
         Document::builder()
@@ -629,11 +560,10 @@ mod tests {
 
     #[test]
     fn test_advanced_writer_creation() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = AdvancedWriterConfig::default();
 
-        let writer = AdvancedIndexWriter::new(schema, storage, config).unwrap();
+        let writer = AdvancedIndexWriter::new(storage, config).unwrap();
 
         assert_eq!(writer.pending_docs(), 0);
         assert_eq!(writer.stats().docs_added, 0);
@@ -641,11 +571,10 @@ mod tests {
 
     #[test]
     fn test_add_document() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = AdvancedWriterConfig::default();
 
-        let mut writer = AdvancedIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
         let doc = create_test_document("Test Title", "This is test content");
 
         writer.add_document(doc).unwrap();
@@ -657,14 +586,13 @@ mod tests {
 
     #[test]
     fn test_auto_flush() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = AdvancedWriterConfig {
             max_buffered_docs: 2,
             ..Default::default()
         };
 
-        let mut writer = AdvancedIndexWriter::new(schema, storage.clone(), config).unwrap();
+        let mut writer = AdvancedIndexWriter::new(storage.clone(), config).unwrap();
 
         // Add first document
         writer
@@ -686,11 +614,10 @@ mod tests {
 
     #[test]
     fn test_commit() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = AdvancedWriterConfig::default();
 
-        let mut writer = AdvancedIndexWriter::new(schema, storage.clone(), config).unwrap();
+        let mut writer = AdvancedIndexWriter::new(storage.clone(), config).unwrap();
 
         writer
             .add_document(create_test_document("Test", "Content"))
@@ -707,11 +634,10 @@ mod tests {
 
     #[test]
     fn test_rollback() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = AdvancedWriterConfig::default();
 
-        let mut writer = AdvancedIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
 
         writer
             .add_document(create_test_document("Test", "Content"))
@@ -725,26 +651,11 @@ mod tests {
 
     #[test]
     fn test_multiple_field_types() {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("id", Box::new(crate::schema::IdField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field(
-                "count",
-                Box::new(
-                    crate::schema::NumericField::new(crate::schema::NumericType::F64).stored(true),
-                ),
-            )
-            .unwrap();
-
+        // Schema-less mode: fields are inferred from document
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = AdvancedWriterConfig::default();
 
-        let mut writer = AdvancedIndexWriter::new(schema, storage, config).unwrap();
+        let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
 
         let doc = Document::builder()
             .add_text("title", "Test Document")

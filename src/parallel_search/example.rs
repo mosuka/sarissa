@@ -7,7 +7,7 @@ use crate::index::reader::BasicIndexReader;
 use crate::parallel_search::config::{ParallelSearchConfig, SearchOptions};
 use crate::parallel_search::engine::ParallelSearchEngine;
 use crate::query::TermQuery;
-use crate::schema::{Schema, TextField};
+
 use crate::storage::{MemoryStorage, StorageConfig};
 
 /// Example function demonstrating parallel search usage.
@@ -22,14 +22,11 @@ pub fn example_parallel_search() -> Result<()> {
     let engine = ParallelSearchEngine::new(config)?;
 
     // Create some test indices
-    let mut schema = Schema::new()?;
-    schema.add_field("title", Box::new(TextField::new()))?;
-    schema.add_field("content", Box::new(TextField::new()))?;
 
     // Add multiple indices to the engine
     for i in 0..3 {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = Box::new(BasicIndexReader::new(schema.clone(), storage)?);
+        let reader = Box::new(BasicIndexReader::new(storage)?);
         engine.add_index(format!("index_{i}"), reader, 1.0)?;
     }
 

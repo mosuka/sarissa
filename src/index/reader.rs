@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::error::{Result, SarissaError};
 use crate::index::bkd_tree::SimpleBKDTree;
-use crate::schema::{Document, FieldValue, Schema};
+use crate::document::{Document, FieldValue};
 use crate::storage::Storage;
 
 /// Trait for index readers.
@@ -21,9 +21,6 @@ pub trait IndexReader: Send + Sync + std::fmt::Debug {
 
     /// Get a document by ID.
     fn document(&self, doc_id: u64) -> Result<Option<Document>>;
-
-    /// Get the schema for this reader.
-    fn schema(&self) -> &Schema;
 
     /// Get term information for a field and term.
     fn term_info(&self, field: &str, term: &str) -> Result<Option<ReaderTermInfo>>;
@@ -153,12 +150,9 @@ pub trait PostingIterator: Send + std::fmt::Debug {
     fn cost(&self) -> u64;
 }
 
-/// A basic index reader implementation.
+/// A basic index reader implementation for schema-less indexing.
 #[derive(Debug)]
 pub struct BasicIndexReader {
-    /// The schema for this reader.
-    schema: Schema,
-
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
@@ -173,10 +167,9 @@ pub struct BasicIndexReader {
 }
 
 impl BasicIndexReader {
-    /// Create a new index reader.
-    pub fn new(schema: Schema, storage: Arc<dyn Storage>) -> Result<Self> {
+    /// Create a new index reader for schema-less indexing.
+    pub fn new(storage: Arc<dyn Storage>) -> Result<Self> {
         let mut reader = BasicIndexReader {
-            schema,
             storage,
             document_cache: Vec::new(),
             bkd_trees: HashMap::new(),
@@ -186,7 +179,7 @@ impl BasicIndexReader {
         // Load existing segments
         reader.load_segments()?;
 
-        // Build BKD Trees for numeric fields
+        // Build BKD Trees for numeric fields (dynamic detection)
         reader.build_bkd_trees()?;
 
         Ok(reader)
@@ -224,28 +217,30 @@ impl BasicIndexReader {
         Ok(())
     }
 
-    /// Build BKD Trees for all numeric fields.
+    /// Build BKD Trees for all numeric fields (schema-less dynamic detection).
     fn build_bkd_trees(&mut self) -> Result<()> {
-        // Find all numeric fields in the schema
-        for (field_name, field_def) in self.schema.fields() {
-            // Check if this is a numeric field by type name
-            if field_def.field_type().type_name() == "numeric" {
-                let mut entries = Vec::new();
+        use std::collections::HashMap;
 
-                // Extract numeric values from all documents
-                for (doc_id, doc) in self.document_cache.iter().enumerate() {
-                    if let Some(field_value) = doc.get_field(field_name) {
-                        if let Some(numeric_value) = self.extract_numeric_value(field_value) {
-                            entries.push((numeric_value, doc_id as u64));
-                        }
-                    }
-                }
+        // Dynamically discover numeric fields from documents
+        let mut numeric_fields: HashMap<String, Vec<(f64, u64)>> = HashMap::new();
 
-                // Build BKD Tree for this field
-                if !entries.is_empty() {
-                    let bkd_tree = SimpleBKDTree::new(field_name.to_string(), entries);
-                    self.bkd_trees.insert(field_name.to_string(), bkd_tree);
+        // Scan all documents to find numeric fields
+        for (doc_id, doc) in self.document_cache.iter().enumerate() {
+            for (field_name, field_value) in doc.fields() {
+                if let Some(numeric_value) = self.extract_numeric_value(field_value) {
+                    numeric_fields
+                        .entry(field_name.clone())
+                        .or_insert_with(Vec::new)
+                        .push((numeric_value, doc_id as u64));
                 }
+            }
+        }
+
+        // Build BKD Tree for each numeric field
+        for (field_name, entries) in numeric_fields {
+            if !entries.is_empty() {
+                let bkd_tree = SimpleBKDTree::new(field_name.clone(), entries);
+                self.bkd_trees.insert(field_name, bkd_tree);
             }
         }
 
@@ -296,51 +291,31 @@ impl IndexReader for BasicIndexReader {
         Ok(Some(doc))
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     fn term_info(&self, field: &str, term: &str) -> Result<Option<ReaderTermInfo>> {
         self.check_closed()?;
 
-        // Get field type to determine matching strategy
-        let field_type = self
-            .schema
-            .get_field(field)
-            .map(|field_def| field_def.field_type().type_name());
-
+        // Schema-less: use token-based matching for all text fields
         let mut doc_freq = 0u64;
         let mut total_term_freq = 0u64;
 
         for doc in &self.document_cache {
             if let Some(field_value) = doc.get_field(field) {
                 if let Some(text) = field_value.as_text() {
-                    match field_type {
-                        Some("id") => {
-                            // IdField: exact string matching (case-sensitive)
-                            if text == term {
-                                doc_freq += 1;
-                                total_term_freq += 1;
-                            }
-                        }
-                        _ => {
-                            // TextField: token-based matching (case-sensitive)
-                            let tokens: Vec<&str> = text.split_whitespace().collect();
-                            let mut found_in_doc = false;
-                            let mut term_count_in_doc = 0u64;
+                    // Token-based matching (case-sensitive)
+                    let tokens: Vec<&str> = text.split_whitespace().collect();
+                    let mut found_in_doc = false;
+                    let mut term_count_in_doc = 0u64;
 
-                            for token in tokens {
-                                if token == term {
-                                    if !found_in_doc {
-                                        doc_freq += 1;
-                                        found_in_doc = true;
-                                    }
-                                    term_count_in_doc += 1;
-                                }
+                    for token in tokens {
+                        if token == term {
+                            if !found_in_doc {
+                                doc_freq += 1;
+                                found_in_doc = true;
                             }
-                            total_term_freq += term_count_in_doc;
+                            term_count_in_doc += 1;
                         }
                     }
+                    total_term_freq += term_count_in_doc;
                 }
             }
         }
@@ -362,41 +337,26 @@ impl IndexReader for BasicIndexReader {
     fn postings(&self, field: &str, term: &str) -> Result<Option<Box<dyn PostingIterator>>> {
         self.check_closed()?;
 
-        // Get field type to determine matching strategy
-        let field_type = self
-            .schema
-            .get_field(field)
-            .map(|field_def| field_def.field_type().type_name());
-
+        // Schema-less: use token-based matching for all text fields
         let mut matching_docs = Vec::new();
 
         for (doc_id, doc) in self.document_cache.iter().enumerate() {
             if let Some(field_value) = doc.get_field(field) {
                 if let Some(text) = field_value.as_text() {
-                    match field_type {
-                        Some("id") => {
-                            // IdField: exact string matching
-                            if text == term {
-                                matching_docs.push((doc_id as u64, 1, vec![0]));
-                            }
-                        }
-                        _ => {
-                            // TextField: token-based matching with positions
-                            let tokens: Vec<&str> = text.split_whitespace().collect();
-                            let mut positions = Vec::new();
-                            let mut term_freq = 0;
+                    // Token-based matching with positions
+                    let tokens: Vec<&str> = text.split_whitespace().collect();
+                    let mut positions = Vec::new();
+                    let mut term_freq = 0;
 
-                            for (pos, token) in tokens.iter().enumerate() {
-                                if *token == term {
-                                    positions.push(pos as u64);
-                                    term_freq += 1;
-                                }
-                            }
-
-                            if term_freq > 0 {
-                                matching_docs.push((doc_id as u64, term_freq, positions));
-                            }
+                    for (pos, token) in tokens.iter().enumerate() {
+                        if *token == term {
+                            positions.push(pos as u64);
+                            term_freq += 1;
                         }
+                    }
+
+                    if term_freq > 0 {
+                        matching_docs.push((doc_id as u64, term_freq, positions));
                     }
                 }
             }
@@ -642,41 +602,28 @@ impl PostingIterator for BasicPostingIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_reader_creation() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
 
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         assert!(!reader.is_closed());
         assert_eq!(reader.doc_count(), 0);
         assert_eq!(reader.max_doc(), 0);
-        assert_eq!(reader.schema().len(), 2);
     }
 
     #[test]
     fn test_reader_close() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
 
-        let mut reader = BasicIndexReader::new(schema, storage).unwrap();
+        let mut reader = BasicIndexReader::new(storage).unwrap();
 
         assert!(!reader.is_closed());
 

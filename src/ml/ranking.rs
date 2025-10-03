@@ -11,7 +11,7 @@ use crate::ml::features::{FeatureContext, FeatureExtractor, QueryDocumentFeature
 use crate::ml::models::{GBDTRanker, LabeledExample, RankingModel, TrainingStats};
 use crate::ml::{FeedbackSignal, FeedbackType, MLError};
 use crate::query::SearchResults;
-use crate::schema::Document;
+use crate::document::Document;
 
 /// Configuration for Learning to Rank system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

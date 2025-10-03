@@ -5,7 +5,7 @@
 
 use sarissa::analysis::{KeywordAnalyzer, StandardAnalyzer};
 use sarissa::index::writer::{BasicIndexWriter, IndexWriter, WriterConfig};
-use sarissa::schema::{Document, FieldValue, Schema, TextField};
+use sarissa::document::{Document, FieldValue, Schema};
 use sarissa::storage::{MemoryStorage, StorageConfig};
 use std::sync::Arc;
 
@@ -24,10 +24,6 @@ fn main() -> sarissa::error::Result<()> {
     println!("\n=== Schema with KeywordAnalyzer ===");
     let keyword_analyzer = Arc::new(KeywordAnalyzer::new());
     let mut schema2 = Schema::new_with_default_analyzer(keyword_analyzer.clone());
-    schema2.add_field("title", Box::new(TextField::new()))?;
-    schema2.add_field("description", Box::new(TextField::new()))?;
-    schema2.add_field("category", Box::new(TextField::new()))?;
-    schema2.add_field("content", Box::new(TextField::new()))?;
     println!(
         "✓ Schema2 default analyzer: {}",
         schema2.default_analyzer().name()
@@ -38,8 +34,6 @@ fn main() -> sarissa::error::Result<()> {
     let standard_analyzer = Arc::new(StandardAnalyzer::new()?);
     let mut schema3 = Schema::builder()?
         .with_default_analyzer(standard_analyzer.clone())
-        .add_field("title", Box::new(TextField::new()))?
-        .add_field("description", Box::new(TextField::new()))?
         .build()?;
 
     println!(
@@ -65,7 +59,6 @@ fn main() -> sarissa::error::Result<()> {
     // Add documents that will use the schema's default analyzer (KeywordAnalyzer)
     let mut doc1 = Document::new();
     doc1.add_field(
-        "title",
         FieldValue::Text("Hello World! This is a TEST.".to_string()),
     );
     doc1.add_field(

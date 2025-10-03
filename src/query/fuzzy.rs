@@ -844,17 +844,14 @@ mod tests {
     #[test]
     fn test_fuzzy_matcher() {
         use crate::index::reader::BasicIndexReader;
-        use crate::schema::{Schema, TextField};
+        
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
 
         // Create a test schema and reader
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("content", Box::new(TextField::new()))
-            .unwrap();
+        
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         let matches = vec![
             FuzzyMatch {

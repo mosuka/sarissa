@@ -12,7 +12,7 @@ use ahash::AHashMap;
 use crate::error::{Result, SarissaError};
 use crate::index::dictionary::HybridTermDictionary;
 use crate::index::{SegmentInfo, TermInfo};
-use crate::schema::{Document, FieldValue, Schema};
+use crate::document::{Document, FieldValue};
 use crate::storage::{Storage, StructReader};
 
 /// Advanced index reader configuration.
@@ -215,15 +215,11 @@ impl crate::index::reader::PostingIterator for AdvancedPostingIterator {
     }
 }
 
-/// Reader for a single segment.
+/// Reader for a single segment (schema-less mode).
 #[derive(Debug)]
 pub struct SegmentReader {
     /// Segment information.
     info: SegmentInfo,
-
-    /// Schema for this segment.
-    #[allow(dead_code)]
-    schema: Arc<Schema>,
 
     /// Storage backend.
     storage: Arc<dyn Storage>,
@@ -239,11 +235,10 @@ pub struct SegmentReader {
 }
 
 impl SegmentReader {
-    /// Open a segment reader.
-    pub fn open(info: SegmentInfo, schema: Arc<Schema>, storage: Arc<dyn Storage>) -> Result<Self> {
+    /// Open a segment reader (schema-less mode).
+    pub fn open(info: SegmentInfo, storage: Arc<dyn Storage>) -> Result<Self> {
         let reader = SegmentReader {
             info,
-            schema,
             storage,
             term_dictionary: None,
             stored_documents: RwLock::new(None),
@@ -251,6 +246,12 @@ impl SegmentReader {
         };
 
         Ok(reader)
+    }
+
+    /// Deprecated: Use `open()` instead. Schema is no longer required.
+    #[deprecated(since = "0.2.0", note = "Use `open()` instead. Schema is no longer required.")]
+    pub fn open_with_schema(info: SegmentInfo, _schema: Arc<()>, storage: Arc<dyn Storage>) -> Result<Self> {
+        Self::open(info, storage)
     }
 
     /// Load the segment data.
@@ -471,12 +472,9 @@ impl CacheStats {
     }
 }
 
-/// Advanced index reader with multi-segment support.
+/// Advanced index reader with multi-segment support (schema-less mode).
 #[derive(Debug)]
 pub struct AdvancedIndexReader {
-    /// Schema for this reader.
-    schema: Arc<Schema>,
-
     /// Segment readers.
     segment_readers: Vec<Arc<RwLock<SegmentReader>>>,
 
@@ -495,21 +493,19 @@ pub struct AdvancedIndexReader {
 }
 
 impl AdvancedIndexReader {
-    /// Create a new advanced index reader.
+    /// Create a new advanced index reader (schema-less mode).
     pub fn new(
-        schema: Schema,
         segments: Vec<SegmentInfo>,
         storage: Arc<dyn Storage>,
         config: AdvancedReaderConfig,
     ) -> Result<Self> {
-        let schema = Arc::new(schema);
         let cache_manager = Arc::new(CacheManager::new(config.max_cache_memory));
         let mut segment_readers = Vec::new();
         let mut total_doc_count = 0;
 
         for segment_info in segments {
             total_doc_count += segment_info.doc_count;
-            let mut reader = SegmentReader::open(segment_info, schema.clone(), storage.clone())?;
+            let mut reader = SegmentReader::open(segment_info, storage.clone())?;
 
             if config.preload_segments {
                 reader.load()?;
@@ -519,7 +515,6 @@ impl AdvancedIndexReader {
         }
 
         Ok(AdvancedIndexReader {
-            schema,
             segment_readers,
             cache_manager,
             config,
@@ -527,6 +522,7 @@ impl AdvancedIndexReader {
             total_doc_count,
         })
     }
+
 
     /// Get cache statistics.
     pub fn cache_stats(&self) -> CacheStats {
@@ -569,10 +565,6 @@ impl crate::index::reader::IndexReader for AdvancedIndexReader {
         }
 
         Ok(None)
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
     }
 
     fn term_info(

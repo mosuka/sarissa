@@ -4,7 +4,6 @@ use sarissa::error::Result;
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::{BM25Scorer, Scorer};
-use sarissa::schema::{IdField, TextField};
 use sarissa::search::SearchEngine;
 use tempfile::TempDir;
 
@@ -15,20 +14,9 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}", temp_dir.path());
 
-    // Create a schema
-    let mut schema = Schema::new()?;
-    schema.add_field(
-        "title",
-        Box::new(TextField::new().stored(true).indexed(true)),
-    )?;
-    schema.add_field(
-        "body",
-        Box::new(TextField::new().stored(true).indexed(true)),
-    )?;
-    schema.add_field("author", Box::new(IdField::new()))?;
 
     // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, IndexConfig::default())?;
+    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Add documents with varying term frequencies for demonstration
     let documents = vec![

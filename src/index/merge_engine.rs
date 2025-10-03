@@ -14,7 +14,7 @@ use crate::index::dictionary::TermDictionaryBuilder;
 use crate::index::reader::IndexReader;
 use crate::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::index::{InvertedIndex, SegmentInfo, TermInfo};
-use crate::schema::{Document, Schema};
+use crate::document::{Document};
 use crate::storage::{Storage, StructWriter};
 
 /// Configuration for merge operations.
@@ -107,7 +107,7 @@ pub struct MergeResult {
     pub file_paths: Vec<String>,
 }
 
-/// Core merge engine for segment operations.
+/// Core merge engine for segment operations (schema-less mode).
 #[derive(Debug)]
 pub struct MergeEngine {
     /// Configuration for merge operations.
@@ -115,18 +115,14 @@ pub struct MergeEngine {
 
     /// Storage backend.
     storage: Arc<dyn Storage>,
-
-    /// Schema for the index.
-    schema: Arc<Schema>,
 }
 
 impl MergeEngine {
-    /// Create a new merge engine.
-    pub fn new(config: MergeConfig, storage: Arc<dyn Storage>, schema: Arc<Schema>) -> Self {
+    /// Create a new merge engine (schema-less mode).
+    pub fn new(config: MergeConfig, storage: Arc<dyn Storage>) -> Self {
         MergeEngine {
             config,
             storage,
-            schema,
         }
     }
 
@@ -380,7 +376,6 @@ impl MergeEngine {
         let config = crate::index::advanced_reader::AdvancedReaderConfig::default();
 
         let reader = AdvancedIndexReader::new(
-            (*self.schema).clone(),
             segments,
             self.storage.clone(),
             config,
@@ -468,16 +463,16 @@ impl MergeEngine {
                 for (field_name, field_value) in document.fields() {
                     writer.write_string(field_name)?;
                     let field_str = match field_value {
-                        crate::schema::FieldValue::Text(s) => s.clone(),
-                        crate::schema::FieldValue::Integer(i) => i.to_string(),
-                        crate::schema::FieldValue::Float(f) => f.to_string(),
-                        crate::schema::FieldValue::Boolean(b) => b.to_string(),
-                        crate::schema::FieldValue::Binary(_) => "[binary]".to_string(),
-                        crate::schema::FieldValue::DateTime(dt) => dt.to_rfc3339(),
-                        crate::schema::FieldValue::Geo(point) => {
+                        crate::document::FieldValue::Text(s) => s.clone(),
+                        crate::document::FieldValue::Integer(i) => i.to_string(),
+                        crate::document::FieldValue::Float(f) => f.to_string(),
+                        crate::document::FieldValue::Boolean(b) => b.to_string(),
+                        crate::document::FieldValue::Binary(_) => "[binary]".to_string(),
+                        crate::document::FieldValue::DateTime(dt) => dt.to_rfc3339(),
+                        crate::document::FieldValue::Geo(point) => {
                             format!("{},{}", point.lat, point.lon)
                         }
-                        crate::schema::FieldValue::Null => "null".to_string(),
+                        crate::document::FieldValue::Null => "null".to_string(),
                     };
                     writer.write_string(&field_str)?;
                 }
@@ -519,20 +514,10 @@ mod tests {
     use super::*;
     use crate::index::SegmentInfo;
     use crate::index::segment_manager::ManagedSegmentInfo;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("content", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[allow(dead_code)]
     fn create_test_segment(id: &str, doc_count: u64) -> ManagedSegmentInfo {
@@ -551,9 +536,9 @@ mod tests {
     fn test_merge_engine_creation() {
         let config = MergeConfig::default();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let schema = Arc::new(create_test_schema());
+        
 
-        let engine = MergeEngine::new(config, storage, schema);
+        let engine = MergeEngine::new(config, storage);
         assert_eq!(engine.config.batch_size, 10000);
         assert!(engine.config.remove_deleted_docs);
     }

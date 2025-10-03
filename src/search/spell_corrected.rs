@@ -360,31 +360,19 @@ impl SpellSearchUtils {
 mod tests {
     use super::*;
     use crate::index::index::IndexConfig;
-    use crate::schema::{Schema, TextField};
+    
     use tempfile::TempDir;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_spell_corrected_search_engine_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
-        assert_eq!(spell_engine.engine().schema().len(), 2);
         assert!(spell_engine.config.enabled);
         assert!(spell_engine.config.retry_with_correction);
     }
@@ -392,10 +380,9 @@ mod tests {
     #[test]
     fn test_spell_corrected_search_disabled() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let engine_config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), schema, engine_config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), engine_config).unwrap();
 
         let spell_config = SpellCorrectedSearchConfig {
             enabled: false,
@@ -416,10 +403,9 @@ mod tests {
     #[test]
     fn test_spell_corrected_search_with_typos() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let mut spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         // Test with a query that might have typos
@@ -435,10 +421,9 @@ mod tests {
     #[test]
     fn test_word_correction_check() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         // Test with common words
@@ -494,10 +479,9 @@ mod tests {
     #[test]
     fn test_corrector_stats() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         let stats = spell_engine.corrector_stats();

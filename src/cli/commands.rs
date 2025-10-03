@@ -12,8 +12,8 @@ use crate::cli::args::*;
 use crate::cli::output::*;
 use crate::error::{Result, SarissaError};
 use crate::query::*;
-use crate::schema::Schema;
-use crate::schema::field::TextField;
+
+// Removed: use crate::document::field::TextField;
 use crate::search::spell_corrected::*;
 use crate::spelling::*;
 
@@ -51,28 +51,17 @@ fn create_index(args: CreateIndexArgs, cli_args: &SarissaArgs) -> Result<()> {
         ));
     }
 
-    // Load schema if provided
-    let schema = if let Some(schema_file) = &args.schema_file {
-        if cli_args.verbosity() > 1 {
-            println!("Loading schema from: {}", schema_file.display());
-        }
-        load_schema_from_file(schema_file)?
-    } else {
-        // Default schema
-        create_default_schema()?
-    };
-
     // Create directory if needed
     fs::create_dir_all(&args.index_path)?;
 
-    // Initialize index
-    // TODO: Implement actual index creation with schema
+    // Initialize index (schema-less mode)
+    // TODO: Implement actual index creation
 
     output_result(
         "Index created successfully",
         &IndexCreationResult {
             path: args.index_path.to_string_lossy().to_string(),
-            schema_fields: schema.fields().len(),
+            schema_fields: 0, // Schema-less mode
         },
         cli_args,
     )?;
@@ -449,29 +438,6 @@ fn save_benchmark_results(
     Ok(())
 }
 
-/// Load schema from file.
-fn load_schema_from_file(path: &Path) -> Result<Schema> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let _schema_def: Value = serde_json::from_reader(reader)?;
-
-    // TODO: Implement actual schema parsing
-    create_default_schema()
-}
-
-/// Create default schema.
-fn create_default_schema() -> Result<Schema> {
-    let mut schema = Schema::new()?;
-
-    // Add default fields
-    schema.add_field("title", Box::new(TextField::new()))?;
-    schema.add_field("content", Box::new(TextField::new()))?;
-    schema.add_field("category", Box::new(TextField::new()))?;
-    schema.add_field("date", Box::new(TextField::new()))?;
-
-    Ok(schema)
-}
-
 /// Create mock facets for testing.
 fn create_mock_facets() -> HashMap<String, Vec<(String, u64)>> {
     let mut facets = HashMap::new();
@@ -684,19 +650,6 @@ fn calculate_directory_size(path: &Path) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_default_schema_creation() {
-        // Test that default schema can be created without errors
-        let schema = create_default_schema();
-        assert!(schema.is_ok());
-    }
-
-    #[test]
-    fn test_create_default_schema() {
-        let schema = create_default_schema().unwrap();
-        assert!(schema.fields().len() >= 3);
-    }
 
     #[test]
     fn test_mock_data_creation() {

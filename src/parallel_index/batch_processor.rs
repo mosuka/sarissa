@@ -7,7 +7,7 @@ use crate::error::{Result, SarissaError};
 use crate::parallel_index::config::IndexingOptions;
 use crate::parallel_index::partitioner::DocumentPartitioner;
 use crate::parallel_index::writer_manager::IndexWriterHandle;
-use crate::schema::Document;
+use crate::document::Document;
 
 /// Represents a batch of documents for a specific partition.
 #[derive(Debug)]
@@ -385,7 +385,7 @@ pub fn partition_documents_into_batches(
 mod tests {
     use super::*;
     use crate::parallel_index::partitioner::HashPartitioner;
-    use crate::schema::FieldValue;
+    use crate::document::FieldValue;
 
     fn create_test_document(id: &str) -> Document {
         let mut doc = Document::new();

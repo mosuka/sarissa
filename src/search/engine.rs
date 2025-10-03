@@ -8,7 +8,7 @@ use crate::error::Result;
 use crate::index::Index;
 use crate::index::index::{FileIndex, IndexConfig};
 use crate::query::{Query, QueryParser, SearchResults};
-use crate::schema::{Document, Schema};
+use crate::document::{Document};
 use crate::search::{Search, SearchRequest, Searcher};
 use crate::storage::Storage;
 
@@ -30,13 +30,12 @@ impl SearchEngine {
         }
     }
 
-    /// Create a new search engine in the given directory.
+    /// Create a new search engine in the given directory (schema-less mode).
     pub fn create_in_dir<P: AsRef<Path>>(
         dir: P,
-        schema: Schema,
         index_config: IndexConfig,
     ) -> Result<Self> {
-        let index = FileIndex::create_in_dir(dir, schema, index_config)?;
+        let index = FileIndex::create_in_dir(dir, index_config)?;
         Ok(SearchEngine::new(index))
     }
 
@@ -44,11 +43,6 @@ impl SearchEngine {
     pub fn open_dir<P: AsRef<Path>>(dir: P, index_config: IndexConfig) -> Result<Self> {
         let index = FileIndex::open_dir(dir, index_config)?;
         Ok(SearchEngine::new(index))
-    }
-
-    /// Get the schema for this search engine.
-    pub fn schema(&self) -> &Schema {
-        self.index.schema()
     }
 
     /// Get the storage backend.
@@ -215,26 +209,26 @@ impl SearchEngine {
 
     /// Parse and search with a query string.
     pub fn search_str(&mut self, query_str: &str, default_field: &str) -> Result<SearchResults> {
-        let parser = QueryParser::new(self.schema().clone()).with_default_field(default_field);
+        let parser = QueryParser::new().with_default_field(default_field);
         let query = parser.parse(query_str)?;
         self.search_query(query)
     }
 
     /// Parse and search with a query string in a specific field.
     pub fn search_field(&mut self, field: &str, query_str: &str) -> Result<SearchResults> {
-        let parser = QueryParser::new(self.schema().clone());
+        let parser = QueryParser::new();
         let query = parser.parse_field(field, query_str)?;
         self.search_query(query)
     }
 
     /// Create a query parser for this search engine.
     pub fn query_parser(&self) -> QueryParser {
-        QueryParser::new(self.schema().clone())
+        QueryParser::new()
     }
 
     /// Create a query parser with a default field.
     pub fn query_parser_with_default(&self, default_field: &str) -> QueryParser {
-        QueryParser::new(self.schema().clone()).with_default_field(default_field)
+        QueryParser::new().with_default_field(default_field)
     }
 }
 
@@ -242,20 +236,10 @@ impl SearchEngine {
 mod tests {
     use super::*;
     use crate::query::TermQuery;
-    use crate::schema::{Schema, TextField};
+    
     use tempfile::TempDir;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     fn create_test_document(title: &str, body: &str) -> Document {
         Document::builder()
@@ -267,40 +251,37 @@ mod tests {
     #[test]
     fn test_search_engine_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
-        assert_eq!(engine.schema().len(), 2);
+        // Schema-less mode: no schema() method available
         assert!(!engine.is_closed());
     }
 
     #[test]
     fn test_search_engine_open() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
         // Create engine
         let mut engine =
-            SearchEngine::create_in_dir(temp_dir.path(), schema, config.clone()).unwrap();
+            SearchEngine::create_in_dir(temp_dir.path(), config.clone()).unwrap();
         engine.close().unwrap();
 
         // Open engine
         let engine = SearchEngine::open_dir(temp_dir.path(), config).unwrap();
 
-        assert_eq!(engine.schema().len(), 2);
+        // Schema-less mode: no schema() method available
         assert!(!engine.is_closed());
     }
 
     #[test]
     fn test_add_document() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let doc = create_test_document("Hello World", "This is a test document");
         engine.add_document(doc).unwrap();
@@ -315,10 +296,9 @@ mod tests {
     #[test]
     fn test_add_multiple_documents() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let docs = vec![
             create_test_document("First Document", "Content of first document"),
@@ -335,10 +315,9 @@ mod tests {
     #[test]
     fn test_search_empty_index() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let request = SearchRequest::new(query);
@@ -352,10 +331,9 @@ mod tests {
     #[test]
     fn test_search_with_documents() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -378,10 +356,9 @@ mod tests {
     #[test]
     fn test_count_query() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let count = engine.count_mut(query).unwrap();
@@ -393,10 +370,9 @@ mod tests {
     #[test]
     fn test_engine_refresh() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Add a document
         let doc = create_test_document("Test Document", "Test content");
@@ -415,10 +391,9 @@ mod tests {
     #[test]
     fn test_engine_stats() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let stats = engine.stats().unwrap();
         // doc_count is usize, so >= 0 check is redundant
@@ -429,10 +404,9 @@ mod tests {
     #[test]
     fn test_engine_close() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         assert!(!engine.is_closed());
 
@@ -444,10 +418,9 @@ mod tests {
     #[test]
     fn test_search_request_configuration() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let request = SearchRequest::new(query)
@@ -465,10 +438,9 @@ mod tests {
     #[test]
     fn test_search_with_string_query() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -488,10 +460,9 @@ mod tests {
     #[test]
     fn test_search_field_with_string() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Search specific field
         let results = engine.search_field("title", "hello world").unwrap();
@@ -504,13 +475,11 @@ mod tests {
     #[test]
     fn test_query_parser_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let parser = engine.query_parser();
-        assert_eq!(parser.schema().len(), 2);
         assert!(parser.default_field().is_none());
 
         let parser_with_default = engine.query_parser_with_default("title");
@@ -520,10 +489,9 @@ mod tests {
     #[test]
     fn test_complex_string_query() {
         let temp_dir = TempDir::new().unwrap();
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, config).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Test complex query parsing
         let results = engine

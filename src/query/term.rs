@@ -50,11 +50,7 @@ impl TermQuery {
 
 impl Query for TermQuery {
     fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
-        // Check if the field exists in the schema
-        if !reader.schema().has_field(&self.field) {
-            return Ok(Box::new(EmptyMatcher::new()));
-        }
-
+        // Schema-less: no field validation needed
         // Try to get posting list for this term
         match reader.postings(&self.field, &self.term)? {
             Some(posting_iter) => {
@@ -114,10 +110,7 @@ impl Query for TermQuery {
     }
 
     fn is_empty(&self, reader: &dyn IndexReader) -> Result<bool> {
-        if !reader.schema().has_field(&self.field) {
-            return Ok(true);
-        }
-
+        // Schema-less: no field validation needed
         match reader.term_info(&self.field, &self.term)? {
             Some(term_info) => Ok(term_info.doc_freq == 0),
             None => Ok(true),
@@ -140,21 +133,11 @@ impl Query for TermQuery {
 mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_term_query_creation() {
@@ -176,9 +159,8 @@ mod tests {
 
     #[test]
     fn test_term_query_matcher() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -189,9 +171,8 @@ mod tests {
 
     #[test]
     fn test_term_query_scorer() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -203,9 +184,8 @@ mod tests {
 
     #[test]
     fn test_term_query_is_empty() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -219,9 +199,8 @@ mod tests {
 
     #[test]
     fn test_term_query_cost() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
