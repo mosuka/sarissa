@@ -1377,7 +1377,10 @@ mod tests {
         fn is_deleted(&self, _doc_id: u64) -> bool {
             false
         }
-        fn document(&self, _doc_id: u64) -> crate::error::Result<Option<crate::document::Document>> {
+        fn document(
+            &self,
+            _doc_id: u64,
+        ) -> crate::error::Result<Option<crate::document::Document>> {
             Ok(None)
         }
         fn term_info(

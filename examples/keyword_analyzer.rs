@@ -24,7 +24,7 @@ fn main() -> sarissa::error::Result<()> {
 
     for text in &texts {
         let tokens: Vec<_> = analyzer.analyze(text)?.collect();
-        println!("   Input: \"{}\"", text);
+        println!("   Input: \"{text}\"");
         println!("   Token count: {}", tokens.len());
         if let Some(token) = tokens.first() {
             println!("   Token text: \"{}\"", token.text);
@@ -71,7 +71,7 @@ fn main() -> sarissa::error::Result<()> {
     let comparison_text = "This-Would-Be-Split-By-Other-Analyzers";
 
     let tokens: Vec<_> = analyzer.analyze(comparison_text)?.collect();
-    println!("   Input: \"{}\"", comparison_text);
+    println!("   Input: \"{comparison_text}\"");
     println!("   KeywordAnalyzer result: {} token(s)", tokens.len());
     if let Some(token) = tokens.first() {
         println!("     Token: \"{}\"", token.text);

@@ -277,11 +277,10 @@ mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
     use crate::query::TermQuery;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_reader() -> Box<dyn IndexReader> {
-        
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(BasicIndexReader::new(storage).unwrap())
     }

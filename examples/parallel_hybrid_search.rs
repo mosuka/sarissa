@@ -1,11 +1,11 @@
 //! Example of parallel hybrid search combining keyword and vector search.
 
+use sarissa::document::{Document, FieldValue};
 use sarissa::error::Result;
 use sarissa::parallel_hybrid_search::{
     MergeStrategy, MockIndexReader, ParallelHybridSearchConfig, ParallelHybridSearchEngine,
 };
 use sarissa::query::TermQuery;
-use sarissa::document::{Document, FieldValue};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;

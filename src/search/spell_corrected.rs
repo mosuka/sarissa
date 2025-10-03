@@ -360,11 +360,10 @@ impl SpellSearchUtils {
 mod tests {
     use super::*;
     use crate::index::index::IndexConfig;
-    
+
     use tempfile::TempDir;
 
     #[allow(dead_code)]
-
     #[test]
     fn test_spell_corrected_search_engine_creation() {
         let temp_dir = TempDir::new().unwrap();

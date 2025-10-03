@@ -108,17 +108,17 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("category") {
                 if let Some(category) = field_value.as_text() {
-                    println!("      Category: {}", category);
+                    println!("      Category: {category}");
                 }
             }
             if let Some(field_value) = doc.get_field("year") {
                 if let sarissa::document::FieldValue::Integer(year) = field_value {
-                    println!("      Year: {}", year);
+                    println!("      Year: {year}");
                 }
             }
         }
@@ -153,17 +153,17 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("author") {
                 if let Some(author) = field_value.as_text() {
-                    println!("      Author: {}", author);
+                    println!("      Author: {author}");
                 }
             }
             if let Some(field_value) = doc.get_field("tags") {
                 if let Some(tags) = field_value.as_text() {
-                    println!("      Tags: {}", tags);
+                    println!("      Tags: {tags}");
                 }
             }
         }
@@ -235,17 +235,17 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("author") {
                 if let Some(author) = field_value.as_text() {
-                    println!("      Author: {}", author);
+                    println!("      Author: {author}");
                 }
             }
             if let Some(field_value) = doc.get_field("category") {
                 if let Some(category) = field_value.as_text() {
-                    println!("      Category: {}", category);
+                    println!("      Category: {category}");
                 }
             }
         }

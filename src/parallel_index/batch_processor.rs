@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use crate::document::Document;
 use crate::error::{Result, SarissaError};
 use crate::parallel_index::config::IndexingOptions;
 use crate::parallel_index::partitioner::DocumentPartitioner;
 use crate::parallel_index::writer_manager::IndexWriterHandle;
-use crate::document::Document;
 
 /// Represents a batch of documents for a specific partition.
 #[derive(Debug)]
@@ -384,8 +384,8 @@ pub fn partition_documents_into_batches(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parallel_index::partitioner::HashPartitioner;
     use crate::document::FieldValue;
+    use crate::parallel_index::partitioner::HashPartitioner;
 
     fn create_test_document(id: &str) -> Document {
         let mut doc = Document::new();

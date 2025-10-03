@@ -4,11 +4,11 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::document::Document;
 use crate::error::Result;
 use crate::index::Index;
 use crate::index::index::{FileIndex, IndexConfig};
 use crate::query::{Query, QueryParser, SearchResults};
-use crate::document::{Document};
 use crate::search::{Search, SearchRequest, Searcher};
 use crate::storage::Storage;
 
@@ -31,10 +31,7 @@ impl SearchEngine {
     }
 
     /// Create a new search engine in the given directory (schema-less mode).
-    pub fn create_in_dir<P: AsRef<Path>>(
-        dir: P,
-        index_config: IndexConfig,
-    ) -> Result<Self> {
+    pub fn create_in_dir<P: AsRef<Path>>(dir: P, index_config: IndexConfig) -> Result<Self> {
         let index = FileIndex::create_in_dir(dir, index_config)?;
         Ok(SearchEngine::new(index))
     }
@@ -236,11 +233,10 @@ impl SearchEngine {
 mod tests {
     use super::*;
     use crate::query::TermQuery;
-    
+
     use tempfile::TempDir;
 
     #[allow(dead_code)]
-
     fn create_test_document(title: &str, body: &str) -> Document {
         Document::builder()
             .add_text("title", title)
@@ -265,8 +261,7 @@ mod tests {
         let config = IndexConfig::default();
 
         // Create engine
-        let mut engine =
-            SearchEngine::create_in_dir(temp_dir.path(), config.clone()).unwrap();
+        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config.clone()).unwrap();
         engine.close().unwrap();
 
         // Open engine

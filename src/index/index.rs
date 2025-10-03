@@ -207,10 +207,7 @@ impl FileIndex {
     }
 
     /// Create an index in a directory (schema-less mode).
-    pub fn create_in_dir<P: AsRef<Path>>(
-        dir: P,
-        config: IndexConfig,
-    ) -> Result<Self> {
+    pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: IndexConfig) -> Result<Self> {
         use crate::storage::{FileStorage, StorageConfig};
 
         let storage_config = StorageConfig {
@@ -261,7 +258,6 @@ impl FileIndex {
         Ok(metadata)
     }
 
-
     /// Update metadata and write to storage.
     fn update_metadata(&mut self) -> Result<()> {
         self.metadata.modified = std::time::SystemTime::now()
@@ -304,10 +300,7 @@ impl Index for FileIndex {
 
         use crate::index::writer::{BasicIndexWriter, WriterConfig};
 
-        let writer = BasicIndexWriter::new(
-            self.storage.clone(),
-            WriterConfig::default(),
-        )?;
+        let writer = BasicIndexWriter::new(self.storage.clone(), WriterConfig::default())?;
         Ok(Box::new(writer))
     }
 
@@ -381,12 +374,11 @@ impl FileIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-
     #[test]
     fn test_index_creation() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));

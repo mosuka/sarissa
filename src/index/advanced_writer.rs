@@ -9,10 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ahash::AHashMap;
 
 use crate::analysis::{Analyzer, Token};
+use crate::document::Document;
 use crate::error::{Result, SarissaError};
 use crate::index::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::index::{InvertedIndex, Posting};
-use crate::document::Document;
 use crate::storage::{Storage, StructWriter};
 
 /// Advanced index writer configuration.
@@ -122,10 +122,7 @@ pub struct AdvancedIndexWriter {
 
 impl AdvancedIndexWriter {
     /// Create a new advanced index writer (schema-less mode).
-    pub fn new(
-        storage: Arc<dyn Storage>,
-        config: AdvancedWriterConfig,
-    ) -> Result<Self> {
+    pub fn new(storage: Arc<dyn Storage>, config: AdvancedWriterConfig) -> Result<Self> {
         let mut analyzers = AHashMap::new();
 
         // Add default analyzers
@@ -545,12 +542,11 @@ impl Drop for AdvancedIndexWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-
     fn create_test_document(title: &str, body: &str) -> Document {
         Document::builder()
             .add_text("title", title)

@@ -133,12 +133,11 @@ impl Query for TermQuery {
 mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-
     #[test]
     fn test_term_query_creation() {
         let query = TermQuery::new("title", "hello");

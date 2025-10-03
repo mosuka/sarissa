@@ -289,7 +289,7 @@ impl Default for IndexManager {
 mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_reader() -> Arc<dyn IndexReader> {

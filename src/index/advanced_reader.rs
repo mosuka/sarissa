@@ -9,10 +9,10 @@ use std::sync::{Arc, RwLock};
 
 use ahash::AHashMap;
 
+use crate::document::{Document, FieldValue};
 use crate::error::{Result, SarissaError};
 use crate::index::dictionary::HybridTermDictionary;
 use crate::index::{SegmentInfo, TermInfo};
-use crate::document::{Document, FieldValue};
 use crate::storage::{Storage, StructReader};
 
 /// Advanced index reader configuration.
@@ -249,8 +249,15 @@ impl SegmentReader {
     }
 
     /// Deprecated: Use `open()` instead. Schema is no longer required.
-    #[deprecated(since = "0.2.0", note = "Use `open()` instead. Schema is no longer required.")]
-    pub fn open_with_schema(info: SegmentInfo, _schema: Arc<()>, storage: Arc<dyn Storage>) -> Result<Self> {
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `open()` instead. Schema is no longer required."
+    )]
+    pub fn open_with_schema(
+        info: SegmentInfo,
+        _schema: Arc<()>,
+        storage: Arc<dyn Storage>,
+    ) -> Result<Self> {
         Self::open(info, storage)
     }
 
@@ -522,7 +529,6 @@ impl AdvancedIndexReader {
             total_doc_count,
         })
     }
-
 
     /// Get cache statistics.
     pub fn cache_stats(&self) -> CacheStats {

@@ -135,7 +135,7 @@ fn demonstrate_boost_filter(
     tokens: TokenStream,
     description: &str,
 ) -> Result<()> {
-    println!("Description: {}", description);
+    println!("Description: {description}");
 
     let input_tokens: Vec<Token> = tokens.collect();
     println!("Input tokens with boost:");

@@ -293,12 +293,11 @@ mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
     use crate::query::{BooleanQuery, BooleanQueryBuilder, TermQuery};
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-
     fn create_test_searcher() -> Searcher {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader = Box::new(BasicIndexReader::new(storage).unwrap());
@@ -308,7 +307,6 @@ mod tests {
     #[test]
     fn test_searcher_creation() {
         let searcher = create_test_searcher();
-
     }
 
     #[test]

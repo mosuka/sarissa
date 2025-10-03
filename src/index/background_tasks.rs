@@ -677,10 +677,8 @@ impl Clone for BackgroundScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[allow(dead_code)]
-
     #[test]
     fn test_background_task_creation() {
         let task_type = TaskType::Merge {

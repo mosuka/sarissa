@@ -174,9 +174,9 @@ fn demonstrate_stemmer(stemmer: &dyn Stemmer, words: &[&str]) -> Result<()> {
     for word in words {
         let stemmed = stemmer.stem(word);
         if stemmed != *word {
-            println!("  '{}' → '{}'", word, stemmed);
+            println!("  '{word}' → '{stemmed}'");
         } else {
-            println!("  '{}' (unchanged)", word);
+            println!("  '{word}' (unchanged)");
         }
     }
 
@@ -184,7 +184,7 @@ fn demonstrate_stemmer(stemmer: &dyn Stemmer, words: &[&str]) -> Result<()> {
 }
 
 fn demonstrate_filter(filter: &dyn Filter, tokens: TokenStream, description: &str) -> Result<()> {
-    println!("Description: {}", description);
+    println!("Description: {description}");
 
     let input_tokens: Vec<Token> = tokens.collect();
     println!(

@@ -86,7 +86,7 @@ fn main() -> Result<()> {
 }
 
 fn demonstrate_tokenizer(tokenizer: &dyn Tokenizer, text: &str) -> Result<()> {
-    println!("Input: \"{}\"", text);
+    println!("Input: \"{text}\"");
 
     let tokens: Vec<_> = tokenizer.tokenize(text)?.collect();
 
@@ -126,10 +126,10 @@ fn word_boundary_demo(tokenizer: &UnicodeWordTokenizer) -> Result<()> {
     ];
 
     for (name, text) in examples {
-        println!("\n{}: \"{}\"", name, text);
+        println!("\n{name}: \"{text}\"");
         let tokens: Vec<_> = tokenizer.tokenize(text)?.collect();
         let words: Vec<String> = tokens.iter().map(|t| t.text.to_string()).collect();
-        println!("  Words: {:?}", words);
+        println!("  Words: {words:?}");
     }
 
     Ok(())

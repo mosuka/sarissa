@@ -16,7 +16,7 @@ fn main() -> Result<()> {
     println!("1. Basic text analysis:");
     let text = "The Great Gatsby is a masterpiece!";
     let tokens: Vec<_> = analyzer.analyze(text)?.collect();
-    println!("   Original: \"{}\"", text);
+    println!("   Original: \"{text}\"");
     println!(
         "   Tokens: {:?}",
         tokens.iter().map(|t| &t.text).collect::<Vec<_>>()
@@ -27,7 +27,7 @@ fn main() -> Result<()> {
     println!("\n2. Complex text with punctuation:");
     let complex_text = "Hello, World! This is a test... with various punctuation marks: (parentheses), [brackets], and 'quotes'.";
     let tokens: Vec<_> = analyzer.analyze(complex_text)?.collect();
-    println!("   Original: \"{}\"", complex_text);
+    println!("   Original: \"{complex_text}\"");
     println!(
         "   Tokens: {:?}",
         tokens.iter().map(|t| &t.text).collect::<Vec<_>>()
@@ -38,7 +38,7 @@ fn main() -> Result<()> {
     println!("\n3. Numbers and mixed content:");
     let mixed_text = "The year 2024 marks the 100th anniversary of this event in New York City.";
     let tokens: Vec<_> = analyzer.analyze(mixed_text)?.collect();
-    println!("   Original: \"{}\"", mixed_text);
+    println!("   Original: \"{mixed_text}\"");
     println!(
         "   Tokens: {:?}",
         tokens.iter().map(|t| &t.text).collect::<Vec<_>>()
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     println!("\n4. Case normalization:");
     let case_text = "UPPERCASE lowercase MiXeD CaSe";
     let tokens: Vec<_> = analyzer.analyze(case_text)?.collect();
-    println!("   Original: \"{}\"", case_text);
+    println!("   Original: \"{case_text}\"");
     println!(
         "   Tokens: {:?}",
         tokens.iter().map(|t| &t.text).collect::<Vec<_>>()
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
     println!("\n5. Empty and whitespace handling:");
     let whitespace_text = "   \t\n  spaced   out    text   \t\n  ";
     let tokens: Vec<_> = analyzer.analyze(whitespace_text)?.collect();
-    println!("   Original: {:?}", whitespace_text);
+    println!("   Original: {whitespace_text:?}");
     println!(
         "   Tokens: {:?}",
         tokens.iter().map(|t| &t.text).collect::<Vec<_>>()
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
     println!("\n6. Token positions and offsets:");
     let position_text = "search engine optimization";
     let tokens: Vec<_> = analyzer.analyze(position_text)?.collect();
-    println!("   Original: \"{}\"", position_text);
+    println!("   Original: \"{position_text}\"");
     println!("   Detailed token information:");
     for (i, token) in tokens.iter().enumerate() {
         println!(
@@ -88,7 +88,7 @@ fn main() -> Result<()> {
     println!("\n7. Special characters and Unicode:");
     let unicode_text = "café résumé naïve Москва 東京 🚀";
     let tokens: Vec<_> = analyzer.analyze(unicode_text)?.collect();
-    println!("   Original: \"{}\"", unicode_text);
+    println!("   Original: \"{unicode_text}\"");
     println!(
         "   Tokens: {:?}",
         tokens.iter().map(|t| &t.text).collect::<Vec<_>>()

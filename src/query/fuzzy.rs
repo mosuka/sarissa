@@ -844,12 +844,12 @@ mod tests {
     #[test]
     fn test_fuzzy_matcher() {
         use crate::index::reader::BasicIndexReader;
-        
+
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
 
         // Create a test schema and reader
-        
+
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader = BasicIndexReader::new(storage).unwrap();
 

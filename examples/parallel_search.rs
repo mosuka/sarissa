@@ -36,7 +36,7 @@ fn main() -> Result<()> {
 
     println!("Creating {} parallel indices:", index_paths.len());
     for (i, path) in index_paths.iter().enumerate() {
-        println!("  Index {}: {:?}", i, path);
+        println!("  Index {i}: {path:?}");
     }
 
     // Create a comprehensive schema
@@ -76,8 +76,8 @@ fn main() -> Result<()> {
             Arc::clone(&storage),
             WriterConfig::default(),
         )?);
-        let partition_config = PartitionConfig::new(format!("partition_{}", i));
-        parallel_engine.add_partition(format!("partition_{}", i), writer, partition_config)?;
+        let partition_config = PartitionConfig::new(format!("partition_{i}"));
+        parallel_engine.add_partition(format!("partition_{i}"), writer, partition_config)?;
     }
 
     // Create comprehensive test documents
@@ -243,7 +243,7 @@ fn main() -> Result<()> {
     if failed_commits.is_empty() {
         println!("All commits successful!");
     } else {
-        println!("Some commits failed: {:?}", failed_commits);
+        println!("Some commits failed: {failed_commits:?}");
     }
 
     // ========================================================================
@@ -258,7 +258,7 @@ fn main() -> Result<()> {
 
     for (i, storage) in storages.into_iter().enumerate() {
         let reader = Box::new(BasicIndexReader::new(storage)?);
-        index_readers.push((format!("partition_{}", i), reader));
+        index_readers.push((format!("partition_{i}"), reader));
     }
 
     // Configure parallel search engine
@@ -467,7 +467,7 @@ fn main() -> Result<()> {
         "  Average time per search: {:.2}μs",
         total_time.as_micros() / search_terms.len() as u128
     );
-    println!("  Total hits across all searches: {}", total_hits);
+    println!("  Total hits across all searches: {total_hits}");
 
     println!("\n=== Performance Metrics ===\n");
 

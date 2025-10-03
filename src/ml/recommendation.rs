@@ -10,9 +10,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::document::Document;
 use crate::error::Result;
 use crate::ml::{FeedbackSignal, MLContext, SearchHistoryItem, UserSession};
-use crate::document::Document;
 
 /// Configuration for recommendation system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -54,7 +54,7 @@ fn main() -> Result<()> {
 }
 
 fn basic_pipeline(text: &str) -> Result<()> {
-    println!("Input: {:?}", text);
+    println!("Input: {text:?}");
 
     // Step 1: Tokenize
     let tokenizer = WhitespaceTokenizer::new();
@@ -111,7 +111,7 @@ fn basic_pipeline(text: &str) -> Result<()> {
 }
 
 fn search_engine_pipeline(text: &str) -> Result<()> {
-    println!("Input: {:?}", text);
+    println!("Input: {text:?}");
 
     let tokenizer = RegexTokenizer::new()?;
     let mut tokens = tokenizer.tokenize(text)?;
@@ -140,7 +140,7 @@ fn search_engine_pipeline(text: &str) -> Result<()> {
 }
 
 fn social_media_pipeline(text: &str) -> Result<()> {
-    println!("Input: {:?}", text);
+    println!("Input: {text:?}");
 
     let tokenizer = WhitespaceTokenizer::new();
     let mut tokens = tokenizer.tokenize(text)?;
@@ -168,7 +168,7 @@ fn social_media_pipeline(text: &str) -> Result<()> {
 }
 
 fn academic_pipeline(text: &str) -> Result<()> {
-    println!("Input: {:?}", text);
+    println!("Input: {text:?}");
 
     let tokenizer = RegexTokenizer::new()?;
     let mut tokens = tokenizer.tokenize(text)?;
@@ -194,7 +194,7 @@ fn academic_pipeline(text: &str) -> Result<()> {
 }
 
 fn compare_pipelines(text: &str) -> Result<()> {
-    println!("Input: {:?}", text);
+    println!("Input: {text:?}");
 
     // Pipeline A: Minimal processing
     println!("\nPipeline A (Minimal):");
@@ -241,7 +241,7 @@ fn compare_pipelines(text: &str) -> Result<()> {
 }
 
 fn boosted_pipeline(text: &str) -> Result<()> {
-    println!("Input: {:?}", text);
+    println!("Input: {text:?}");
 
     let tokenizer = WhitespaceTokenizer::new();
     let mut tokens = tokenizer.tokenize(text)?;
@@ -265,7 +265,7 @@ fn boosted_pipeline(text: &str) -> Result<()> {
 }
 
 fn minimal_pipeline(text: &str) -> Result<()> {
-    println!("Input: {:?}", text);
+    println!("Input: {text:?}");
 
     let tokenizer = WhitespaceTokenizer::new();
     let tokens = tokenizer.tokenize(text)?;
@@ -279,7 +279,7 @@ fn minimal_pipeline(text: &str) -> Result<()> {
 }
 
 fn maximum_pipeline(text: &str) -> Result<()> {
-    println!("Input: {:?}", text);
+    println!("Input: {text:?}");
 
     let tokenizer = RegexTokenizer::new()?;
     let mut tokens = tokenizer.tokenize(text)?;

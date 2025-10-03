@@ -14,6 +14,12 @@ pub struct QueryParser {
     default_field: Option<String>,
 }
 
+impl Default for QueryParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QueryParser {
     /// Create a new query parser (schema-less).
     pub fn new() -> Self {
@@ -327,10 +333,8 @@ impl Default for QueryParserBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[allow(dead_code)]
-
     #[test]
     fn test_query_parser_creation() {
         let parser = QueryParser::new();
@@ -474,10 +478,7 @@ mod tests {
 
     #[test]
     fn test_query_parser_builder() {
-
-        let parser = QueryParserBuilder::new()
-            .default_field("title")
-            .build();
+        let parser = QueryParserBuilder::new().default_field("title").build();
 
         assert_eq!(parser.default_field(), Some("title"));
     }
