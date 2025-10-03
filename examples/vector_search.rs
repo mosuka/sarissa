@@ -70,8 +70,8 @@ fn main() -> Result<()> {
     let cosine_similarity =
         DistanceMetric::Cosine.similarity(&tech_query.data, &sample_doc.data)?;
 
-    println!("Cosine distance: {:.4}", cosine_distance);
-    println!("Cosine similarity: {:.4}", cosine_similarity);
+    println!("Cosine distance: {cosine_distance:.4}");
+    println!("Cosine similarity: {cosine_similarity:.4}");
 
     // Demonstrate different distance metrics
     println!("\n=== Distance Metrics Comparison ===");
@@ -141,12 +141,9 @@ fn main() -> Result<()> {
     let distances = DistanceMetric::Cosine.batch_distance_parallel(&query, &vectors)?;
     let similarities = DistanceMetric::Cosine.batch_similarity_parallel(&query, &vectors)?;
 
-    println!("Query: {:?}", query);
+    println!("Query: {query:?}");
     for (i, (dist, sim)) in distances.iter().zip(similarities.iter()).enumerate() {
-        println!(
-            "  Vector {}: distance={:.4}, similarity={:.4}",
-            i, dist, sim
-        );
+        println!("  Vector {i}: distance={dist:.4}, similarity={sim:.4}");
     }
 
     println!("\n=== Vector Search Configuration ===");

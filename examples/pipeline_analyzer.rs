@@ -23,7 +23,7 @@ fn main() -> sarissa::error::Result<()> {
     // Sample text to analyze
     let text = "The Quick Brown Fox and the Lazy Dog";
 
-    println!("Analyzing text: \"{}\"", text);
+    println!("Analyzing text: \"{text}\"");
     println!(
         "Using pipeline: {} tokenizer -> lowercase filter -> stop filter",
         tokenizer.name()

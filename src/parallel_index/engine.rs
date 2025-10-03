@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
+use crate::document::Document;
 use crate::error::{Result, SarissaError};
 use crate::index::writer::IndexWriter;
 use crate::parallel_index::batch_processor::{BatchProcessingResult, BatchProcessor};
@@ -12,7 +13,6 @@ use crate::parallel_index::config::{IndexingOptions, ParallelIndexConfig, Partit
 use crate::parallel_index::metrics::{IndexingMetricsCollector, IndexingTimer};
 use crate::parallel_index::partitioner::DocumentPartitioner;
 use crate::parallel_index::writer_manager::{IndexWriterHandle, WriterManager};
-use crate::document::Document;
 
 /// Result of a parallel indexing operation.
 #[derive(Debug)]
@@ -366,20 +366,15 @@ impl ParallelIndexEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::FieldValue;
     use crate::index::writer::BasicIndexWriter;
     use crate::parallel_index::partitioner::HashPartitioner;
-    use crate::document::{FieldValue};
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_writer() -> Box<dyn IndexWriter> {
-        
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(
-            BasicIndexWriter::new(
-                storage,
-                crate::index::writer::WriterConfig::default(),
-            )
-            .unwrap(),
+            BasicIndexWriter::new(storage, crate::index::writer::WriterConfig::default()).unwrap(),
         )
     }
 

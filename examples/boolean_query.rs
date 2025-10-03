@@ -14,7 +14,6 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}", temp_dir.path());
 
-
     // Create a search engine
     let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
@@ -106,7 +105,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
         }
@@ -131,7 +130,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
         }
@@ -156,7 +155,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
         }
@@ -190,17 +189,17 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
                 if let sarissa::document::FieldValue::Float(price) = field_value {
-                    println!("      Price: ${:.2}", price);
+                    println!("      Price: ${price:.2}");
                 }
             }
             if let Some(field_value) = doc.get_field("rating") {
                 if let sarissa::document::FieldValue::Float(rating) = field_value {
-                    println!("      Rating: {:.1}", rating);
+                    println!("      Rating: {rating:.1}");
                 }
             }
         }
@@ -228,7 +227,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
         }
@@ -258,7 +257,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
         }
@@ -287,12 +286,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
                 if let sarissa::document::FieldValue::Float(price) = field_value {
-                    println!("      Price: ${:.2}", price);
+                    println!("      Price: ${price:.2}");
                 }
             }
         }
@@ -322,12 +321,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("rating") {
                 if let sarissa::document::FieldValue::Float(rating) = field_value {
-                    println!("      Rating: {:.1}", rating);
+                    println!("      Rating: {rating:.1}");
                 }
             }
         }
@@ -377,17 +376,17 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
                 if let sarissa::document::FieldValue::Float(price) = field_value {
-                    println!("      Price: ${:.2}", price);
+                    println!("      Price: ${price:.2}");
                 }
             }
             if let Some(field_value) = doc.get_field("rating") {
                 if let sarissa::document::FieldValue::Float(rating) = field_value {
-                    println!("      Rating: {:.1}", rating);
+                    println!("      Rating: {rating:.1}");
                 }
             }
         }
@@ -436,12 +435,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
                 if let sarissa::document::FieldValue::Float(price) = field_value {
-                    println!("      Price: ${:.2}", price);
+                    println!("      Price: ${price:.2}");
                 }
             }
         }
@@ -453,7 +452,7 @@ fn main() -> Result<()> {
     query.add_should(Box::new(TermQuery::new("category", "data-science")));
     query.add_should(Box::new(TermQuery::new("category", "web-development")));
     let count = engine.count_mut(Box::new(query))?;
-    println!("   Count: {} books", count);
+    println!("   Count: {count} books");
 
     engine.close()?;
     println!("\nBooleanQuery example completed successfully!");

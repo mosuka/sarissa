@@ -6,12 +6,12 @@ use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 
+use crate::document::Document;
 use crate::error::Result;
 use crate::ml::features::{FeatureContext, FeatureExtractor, QueryDocumentFeatures};
 use crate::ml::models::{GBDTRanker, LabeledExample, RankingModel, TrainingStats};
 use crate::ml::{FeedbackSignal, FeedbackType, MLError};
 use crate::query::SearchResults;
-use crate::document::Document;
 
 /// Configuration for Learning to Rank system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -436,12 +436,11 @@ mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
     use crate::query::term::TermQuery;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-
     #[test]
     fn test_boolean_query_creation() {
         let query = BooleanQuery::new();

@@ -5,8 +5,8 @@ use std::hash::{Hash, Hasher};
 
 use ahash::AHasher;
 
-use crate::error::{Result, SarissaError};
 use crate::document::Document;
+use crate::error::{Result, SarissaError};
 
 /// Trait for partitioning documents across multiple indices.
 pub trait DocumentPartitioner: Send + Sync {

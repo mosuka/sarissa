@@ -19,7 +19,7 @@ fn main() -> sarissa::error::Result<()> {
 
     let tokens: Vec<_> = simple_regex.analyze(text)?.collect();
 
-    println!("   Input: \"{}\"", text);
+    println!("   Input: \"{text}\"");
     println!("   Tokens:");
     for token in &tokens {
         println!("     - \"{}\" (position: {})", token.text, token.position);
@@ -33,7 +33,7 @@ fn main() -> sarissa::error::Result<()> {
 
     let tokens: Vec<_> = simple_whitespace.analyze(text)?.collect();
 
-    println!("   Input: \"{}\"", text);
+    println!("   Input: \"{text}\"");
     println!("   Tokens:");
     for token in &tokens {
         println!("     - \"{}\" (position: {})", token.text, token.position);
@@ -45,7 +45,7 @@ fn main() -> sarissa::error::Result<()> {
     let case_text = "UPPERCASE lowercase MixedCase";
     let tokens: Vec<_> = simple_regex.analyze(case_text)?.collect();
 
-    println!("   Input: \"{}\"", case_text);
+    println!("   Input: \"{case_text}\"");
     println!("   Tokens:");
     for token in &tokens {
         println!("     - \"{}\"", token.text);

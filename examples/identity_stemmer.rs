@@ -130,9 +130,9 @@ fn demonstrate_stemmer(stemmer: &dyn Stemmer, words: &[&str]) -> Result<()> {
     for word in words {
         let stemmed = stemmer.stem(word);
         if stemmed != *word {
-            println!("  '{}' → '{}' (UNEXPECTED CHANGE!)", word, stemmed);
+            println!("  '{word}' → '{stemmed}' (UNEXPECTED CHANGE!)");
         } else {
-            println!("  '{}' (preserved)", word);
+            println!("  '{word}' (preserved)");
         }
     }
 
@@ -140,7 +140,7 @@ fn demonstrate_stemmer(stemmer: &dyn Stemmer, words: &[&str]) -> Result<()> {
 }
 
 fn demonstrate_filter(filter: &dyn Filter, tokens: TokenStream, description: &str) -> Result<()> {
-    println!("Description: {}", description);
+    println!("Description: {description}");
 
     let input_tokens: Vec<Token> = tokens.collect();
     println!(
@@ -172,7 +172,7 @@ fn demonstrate_filter(filter: &dyn Filter, tokens: TokenStream, description: &st
     if changes == 0 {
         println!("  (no changes - as expected)");
     } else {
-        println!("  WARNING: {} unexpected changes detected!", changes);
+        println!("  WARNING: {changes} unexpected changes detected!");
     }
 
     Ok(())

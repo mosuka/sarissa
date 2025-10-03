@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::document::Document;
 use crate::error::{Result, SarissaError};
 use crate::index::SegmentInfo;
 use crate::index::deletion::{DeletionConfig, DeletionManager};
@@ -12,9 +13,7 @@ use crate::index::segment_manager::{
 use crate::index::transaction::{
     AtomicOperations, IsolationLevel, Transaction, TransactionManager, TransactionResult,
 };
-use crate::document::{Document};
 use crate::storage::Storage;
-
 
 /// Trait for index writers.
 pub trait IndexWriter: Send + std::fmt::Debug {
@@ -156,7 +155,10 @@ impl BasicIndexWriter {
     }
 
     /// Deprecated: Use `new()` instead. Schema is no longer required.
-    #[deprecated(since = "0.2.0", note = "Use `new()` instead. Schema is no longer required.")]
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `new()` instead. Schema is no longer required."
+    )]
     pub fn new_schemaless(storage: Arc<dyn Storage>, config: WriterConfig) -> Result<Self> {
         Self::new(storage, config)
     }
@@ -787,12 +789,11 @@ impl BasicIndexWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-
     fn create_test_document() -> Document {
         Document::builder()
             .add_text("title", "Test Document")
@@ -1400,7 +1401,7 @@ mod tests {
         let config = WriterConfig::default();
 
         // Create writer in schema-less mode
-        let mut writer = BasicIndexWriter::new_schemaless(storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Create analyzers
         let standard_analyzer = Arc::new(StandardAnalyzer::new().unwrap());
@@ -1455,7 +1456,7 @@ mod tests {
     #[test]
     fn test_mixed_mode_compatibility() {
         use crate::analysis::StandardAnalyzer;
-        use crate::document::{FieldValue};
+        use crate::document::FieldValue;
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
 
@@ -1463,8 +1464,6 @@ mod tests {
         let config = WriterConfig::default();
 
         // Create schema-based writer
-        
-
         let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Regular document (schema-based)
@@ -1501,7 +1500,7 @@ mod tests {
         let config = WriterConfig::default();
 
         // Create writer in schema-less mode
-        let mut writer = BasicIndexWriter::new_schemaless(storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Test unified API: same add_field() method for both modes
         let mut doc = Document::new();
@@ -1535,7 +1534,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = WriterConfig::default();
 
-        let mut writer = BasicIndexWriter::new_schemaless(storage, config).unwrap();
+        let mut writer = BasicIndexWriter::new(storage, config).unwrap();
 
         // Create document with mixed field types
         let mut doc = Document::new();

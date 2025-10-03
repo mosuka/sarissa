@@ -561,10 +561,8 @@ impl Query for MultiFieldQuery {
 mod tests {
     use super::*;
     use crate::query::TermQuery;
-    
 
     #[allow(dead_code)]
-
     #[test]
     fn test_advanced_query_creation() {
         let core_query = Box::new(TermQuery::new("title".to_string(), "test".to_string()));

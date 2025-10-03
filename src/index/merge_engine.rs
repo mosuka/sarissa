@@ -8,13 +8,13 @@ use std::time::SystemTime;
 
 use ahash::AHashSet;
 
+use crate::document::Document;
 use crate::error::{Result, SarissaError};
 use crate::index::advanced_reader::AdvancedIndexReader;
 use crate::index::dictionary::TermDictionaryBuilder;
 use crate::index::reader::IndexReader;
 use crate::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::index::{InvertedIndex, SegmentInfo, TermInfo};
-use crate::document::{Document};
 use crate::storage::{Storage, StructWriter};
 
 /// Configuration for merge operations.
@@ -120,10 +120,7 @@ pub struct MergeEngine {
 impl MergeEngine {
     /// Create a new merge engine (schema-less mode).
     pub fn new(config: MergeConfig, storage: Arc<dyn Storage>) -> Self {
-        MergeEngine {
-            config,
-            storage,
-        }
+        MergeEngine { config, storage }
     }
 
     /// Merge segments according to the merge candidate.
@@ -375,11 +372,7 @@ impl MergeEngine {
         // Use default config for reader
         let config = crate::index::advanced_reader::AdvancedReaderConfig::default();
 
-        let reader = AdvancedIndexReader::new(
-            segments,
-            self.storage.clone(),
-            config,
-        )?;
+        let reader = AdvancedIndexReader::new(segments, self.storage.clone(), config)?;
         Ok(Box::new(reader) as Box<dyn IndexReader>)
     }
 
@@ -514,10 +507,8 @@ mod tests {
     use super::*;
     use crate::index::SegmentInfo;
     use crate::index::segment_manager::ManagedSegmentInfo;
-    
-    use crate::storage::{MemoryStorage, StorageConfig};
 
-    #[allow(dead_code)]
+    use crate::storage::{MemoryStorage, StorageConfig};
 
     #[allow(dead_code)]
     fn create_test_segment(id: &str, doc_count: u64) -> ManagedSegmentInfo {
@@ -536,7 +527,6 @@ mod tests {
     fn test_merge_engine_creation() {
         let config = MergeConfig::default();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        
 
         let engine = MergeEngine::new(config, storage);
         assert_eq!(engine.config.batch_size, 10000);

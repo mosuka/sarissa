@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::document::FieldValue;
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Query, QueryResult};
-use crate::document::FieldValue;
 use crate::search::facet::{FacetCollector, FacetResults};
 use crate::search::highlight::{HighlightConfig, Highlighter};
 
@@ -637,10 +637,8 @@ impl Default for ResultProcessorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[allow(dead_code)]
-
     #[test]
     fn test_result_processor_config() {
         let config = ResultProcessorConfig {

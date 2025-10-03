@@ -20,8 +20,7 @@ async fn main() -> Result<()> {
     // Create a schema for traditional keyword search
 
     // Create a keyword search engine
-    let mut keyword_engine =
-        SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let mut keyword_engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Create hybrid search configuration
     let hybrid_config = HybridSearchConfig {
@@ -178,18 +177,18 @@ async fn main() -> Result<()> {
             result.hybrid_score
         );
         if let Some(keyword_score) = result.keyword_score {
-            println!("      Keyword Score: {:.4}", keyword_score);
+            println!("      Keyword Score: {keyword_score:.4}");
         } else {
             println!("      Keyword Score: None");
         }
         if let Some(vector_similarity) = result.vector_similarity {
-            println!("      Vector Similarity: {:.4}", vector_similarity);
+            println!("      Vector Similarity: {vector_similarity:.4}");
         } else {
             println!("      Vector Similarity: None");
         }
         if let Some(document) = &result.document {
             if let Some(title) = document.get("title") {
-                println!("      Title: {}", title);
+                println!("      Title: {title}");
             }
         }
         println!();
@@ -218,18 +217,18 @@ async fn main() -> Result<()> {
             result.hybrid_score
         );
         if let Some(keyword_score) = result.keyword_score {
-            println!("      Keyword Score: {:.4}", keyword_score);
+            println!("      Keyword Score: {keyword_score:.4}");
         } else {
             println!("      Keyword Score: None");
         }
         if let Some(vector_similarity) = result.vector_similarity {
-            println!("      Vector Similarity: {:.4}", vector_similarity);
+            println!("      Vector Similarity: {vector_similarity:.4}");
         } else {
             println!("      Vector Similarity: None");
         }
         if let Some(document) = &result.document {
             if let Some(title) = document.get("title") {
-                println!("      Title: {}", title);
+                println!("      Title: {title}");
             }
         }
     }
@@ -254,21 +253,21 @@ async fn main() -> Result<()> {
             result.hybrid_score
         );
         if let Some(keyword_score) = result.keyword_score {
-            println!("      Keyword Score: {:.4}", keyword_score);
+            println!("      Keyword Score: {keyword_score:.4}");
         } else {
             println!("      Keyword Score: None");
         }
         if let Some(vector_similarity) = result.vector_similarity {
-            println!("      Vector Similarity: {:.4}", vector_similarity);
+            println!("      Vector Similarity: {vector_similarity:.4}");
         } else {
             println!("      Vector Similarity: None");
         }
         if let Some(document) = &result.document {
             if let Some(title) = document.get("title") {
-                println!("      Title: {}", title);
+                println!("      Title: {title}");
             }
             if let Some(category) = document.get("category") {
-                println!("      Category: {}", category);
+                println!("      Category: {category}");
             }
         }
     }
@@ -290,11 +289,11 @@ async fn main() -> Result<()> {
         config.max_results = 3;
 
         let _test_engine = HybridSearchEngine::new(config)?;
-        println!("   {} normalization:", name);
+        println!("   {name} normalization:");
 
         // Note: In a real implementation, we would need to re-add documents and train
         // For this example, we'll just show the configuration
-        println!("      Strategy: {:?}", strategy);
+        println!("      Strategy: {strategy:?}");
     }
     println!();
 
@@ -332,7 +331,7 @@ async fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
         }

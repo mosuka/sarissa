@@ -14,7 +14,6 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}", temp_dir.path());
 
-
     // Create a search engine
     let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
@@ -67,7 +66,7 @@ fn main() -> Result<()> {
     println!("\n2. Score calculation with different term frequencies:");
     for tf in [1.0, 2.0, 3.0, 5.0, 10.0] {
         let score = default_scorer.score(0, tf);
-        println!("   Term frequency {}: Score = {:.4}", tf, score);
+        println!("   Term frequency {tf}: Score = {score:.4}");
     }
 
     // Example 3: Different k1 values (term frequency saturation)
@@ -77,7 +76,7 @@ fn main() -> Result<()> {
         let mut scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0);
         scorer.set_k1(k1);
         let score = scorer.score(0, 3.0); // Fixed term frequency
-        println!("   k1 = {}: Score = {:.4}", k1, score);
+        println!("   k1 = {k1}: Score = {score:.4}");
     }
 
     // Example 4: Different b values (field length normalization)
@@ -87,7 +86,7 @@ fn main() -> Result<()> {
         let mut scorer = BM25Scorer::new(5, 20, 5, 8.0, 5, 1.0);
         scorer.set_b(b);
         let score = scorer.score(0, 2.0); // Fixed term frequency
-        println!("   b = {}: Score = {:.4}", b, score);
+        println!("   b = {b}: Score = {score:.4}");
     }
 
     // Example 5: Real search with scoring
@@ -106,7 +105,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
         }
@@ -141,11 +140,8 @@ fn main() -> Result<()> {
     for (description, doc_freq, term_freq, doc_count) in scenarios {
         let scorer = BM25Scorer::new(doc_freq, term_freq, doc_count, 8.0, 5, 1.0);
         let score = scorer.score(0, 2.0);
-        println!("   {}: Score = {:.4}", description, score);
-        println!(
-            "     Doc freq: {}, Term freq: {}, Total docs: {}",
-            doc_freq, term_freq, doc_count
-        );
+        println!("   {description}: Score = {score:.4}");
+        println!("     Doc freq: {doc_freq}, Term freq: {term_freq}, Total docs: {doc_count}");
     }
 
     engine.close()?;

@@ -136,7 +136,7 @@ async fn main() -> Result<()> {
 
     // Expand a query
     let original_query = "ML python";
-    println!("Original query: '{}'", original_query);
+    println!("Original query: '{original_query}'");
 
     let expanded_query = query_expander.expand_query(original_query, &ml_context)?;
     println!("Expanded query intent: {:?}", expanded_query.intent);
@@ -283,8 +283,8 @@ async fn main() -> Result<()> {
         .map(|hit| hit.score)
         .collect();
 
-    println!("Original scores: {:?}", original_scores);
-    println!("Re-ranked scores: {:?}", reranked_scores);
+    println!("Original scores: {original_scores:?}");
+    println!("Re-ranked scores: {reranked_scores:?}");
 
     if original_scores != reranked_scores {
         println!("✓ Learning-to-rank successfully modified the document scores!");
@@ -307,7 +307,7 @@ async fn main() -> Result<()> {
     );
     println!("User preferences:");
     for (category, weight) in &ml_context.user_preferences {
-        println!("  - {}: {:.2}", category, weight);
+        println!("  - {category}: {weight:.2}");
     }
 
     // Feature extraction example

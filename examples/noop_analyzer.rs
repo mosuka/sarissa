@@ -48,7 +48,7 @@ fn main() -> sarissa::error::Result<()> {
 
     let noop_tokens: Vec<_> = analyzer.analyze(comparison_text)?.collect();
 
-    println!("   Input: \"{}\"", comparison_text);
+    println!("   Input: \"{comparison_text}\"");
     println!("   NoOpAnalyzer tokens: {}", noop_tokens.len());
     println!("   Other analyzers would produce multiple tokens");
     println!("   NoOpAnalyzer always produces: 0 tokens\n");

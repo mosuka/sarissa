@@ -14,7 +14,6 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}", temp_dir.path());
 
-
     // Create a search engine
     let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
@@ -111,7 +110,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("filename") {
                 if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {}", filename);
+                    println!("      Filename: {filename}");
                 }
             }
         }
@@ -134,7 +133,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("filename") {
                 if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {}", filename);
+                    println!("      Filename: {filename}");
                 }
             }
         }
@@ -157,7 +156,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("filename") {
                 if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {}", filename);
+                    println!("      Filename: {filename}");
                 }
             }
         }
@@ -180,7 +179,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("extension") {
                 if let Some(ext) = field_value.as_text() {
-                    println!("      Extension: {}", ext);
+                    println!("      Extension: {ext}");
                 }
             }
         }
@@ -203,7 +202,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("category") {
                 if let Some(category) = field_value.as_text() {
-                    println!("      Category: {}", category);
+                    println!("      Category: {category}");
                 }
             }
         }
@@ -226,7 +225,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("filename") {
                 if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {}", filename);
+                    println!("      Filename: {filename}");
                 }
             }
         }
@@ -249,7 +248,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
         }
@@ -272,7 +271,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("extension") {
                 if let Some(ext) = field_value.as_text() {
-                    println!("      Extension: {}", ext);
+                    println!("      Extension: {ext}");
                 }
             }
         }
@@ -295,7 +294,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("filename") {
                 if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {}", filename);
+                    println!("      Filename: {filename}");
                 }
             }
         }
@@ -313,7 +312,7 @@ fn main() -> Result<()> {
     println!("\n11. Counting files with 'data' in filename using '*data*':");
     let query = WildcardQuery::new("filename", "*data*")?;
     let count = engine.count_mut(Box::new(query))?;
-    println!("    Count: {} files", count);
+    println!("    Count: {count} files");
 
     engine.close()?;
     println!("\nWildcardQuery example completed successfully!");

@@ -139,7 +139,7 @@ fn create_test_tokens(texts: &[&str]) -> TokenStream {
 }
 
 fn demonstrate_filter(filter: &dyn Filter, tokens: TokenStream, description: &str) -> Result<()> {
-    println!("Description: {}", description);
+    println!("Description: {description}");
 
     let input_tokens: Vec<Token> = tokens.collect();
     println!(
@@ -186,10 +186,7 @@ fn compare_stemming_algorithms(words: &[&str]) -> Result<()> {
         let simple_result = simple.stem(word);
         let identity_result = identity.stem(word);
 
-        println!(
-            "{:13} | {:10} | {:10} | {:10}",
-            word, porter_result, simple_result, identity_result
-        );
+        println!("{word:13} | {porter_result:10} | {simple_result:10} | {identity_result:10}");
     }
 
     Ok(())

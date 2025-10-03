@@ -108,12 +108,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
                 if let sarissa::document::FieldValue::Float(price) = field_value {
-                    println!("      Price: ${:.2}", price);
+                    println!("      Price: ${price:.2}");
                 }
             }
         }
@@ -136,12 +136,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("rating") {
                 if let sarissa::document::FieldValue::Float(rating) = field_value {
-                    println!("      Rating: {:.1}", rating);
+                    println!("      Rating: {rating:.1}");
                 }
             }
         }
@@ -164,12 +164,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("year") {
                 if let sarissa::document::FieldValue::Integer(year) = field_value {
-                    println!("      Year: {}", year);
+                    println!("      Year: {year}");
                 }
             }
         }
@@ -192,12 +192,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("pages") {
                 if let sarissa::document::FieldValue::Integer(pages) = field_value {
-                    println!("      Pages: {}", pages);
+                    println!("      Pages: {pages}");
                 }
             }
         }
@@ -220,12 +220,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("year") {
                 if let sarissa::document::FieldValue::Integer(year) = field_value {
-                    println!("      Year: {}", year);
+                    println!("      Year: {year}");
                 }
             }
         }
@@ -248,12 +248,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
                 if let sarissa::document::FieldValue::Float(price) = field_value {
-                    println!("      Price: ${:.2}", price);
+                    println!("      Price: ${price:.2}");
                 }
             }
         }
@@ -276,12 +276,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    println!("      Title: {}", title);
+                    println!("      Title: {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("pages") {
                 if let sarissa::document::FieldValue::Integer(pages) = field_value {
-                    println!("      Pages: {}", pages);
+                    println!("      Pages: {pages}");
                 }
             }
         }
@@ -291,7 +291,7 @@ fn main() -> Result<()> {
     println!("\n8. Counting books with price between $40.00 and $80.00:");
     let query = NumericRangeQuery::f64_range("price", Some(40.0), Some(80.0));
     let count = engine.count_mut(Box::new(query))?;
-    println!("   Count: {} books", count);
+    println!("   Count: {count} books");
 
     // Example 9: Empty range (no results expected)
     println!("\n9. Books with impossible price range ($200-$300):");

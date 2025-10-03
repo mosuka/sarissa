@@ -534,11 +534,10 @@ mod tests {
     use super::*;
     use crate::index::deletion::DeletionConfig;
     use crate::index::segment_manager::SegmentManagerConfig;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
 
     #[allow(dead_code)]
-
     #[test]
     fn test_optimization_config_default() {
         let config = OptimizationConfig::default();
@@ -571,7 +570,7 @@ mod tests {
     #[test]
     fn test_index_optimizer_creation() {
         let config = OptimizationConfig::default();
-        
+
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
 
         let optimizer = IndexOptimizer::new(config, storage);
@@ -581,7 +580,7 @@ mod tests {
     #[test]
     fn test_optimization_recommendations() {
         let config = OptimizationConfig::default();
-        
+
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
 
         let optimizer = IndexOptimizer::new(config, storage.clone());

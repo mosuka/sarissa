@@ -71,7 +71,7 @@ fn main() -> Result<()> {
 }
 
 fn demonstrate_tokenizer(tokenizer: &dyn Tokenizer, text: &str) -> Result<()> {
-    println!("Input: \"{}\"", text);
+    println!("Input: \"{text}\"");
 
     let tokens: Vec<_> = tokenizer.tokenize(text)?.collect();
 

@@ -9,11 +9,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ahash::AHashMap;
 use uuid::Uuid;
 
+use crate::document::Document;
 use crate::error::{Result, SarissaError};
 use crate::index::deletion::{DeletionManager, GlobalDeletionState};
 use crate::index::merge_engine::MergeEngine;
 use crate::index::segment_manager::SegmentManager;
-use crate::document::{Document};
 use crate::storage::Storage;
 
 /// Transaction isolation levels.
@@ -184,8 +184,14 @@ impl TransactionManager {
     }
 
     /// Deprecated: Use `new()` instead. Schema is no longer required.
-    #[deprecated(since = "0.2.0", note = "Use `new()` instead. Schema is no longer required.")]
-    pub fn with_schema(storage: Arc<dyn Storage>, schema: Arc<crate::document::FieldValue>) -> Self {
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `new()` instead. Schema is no longer required."
+    )]
+    pub fn with_schema(
+        storage: Arc<dyn Storage>,
+        schema: Arc<crate::document::FieldValue>,
+    ) -> Self {
         let _ = schema; // Ignore schema parameter
         Self::new(storage)
     }
@@ -440,9 +446,8 @@ pub trait AtomicOperations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    use crate::storage::{MemoryStorage, StorageConfig};
 
+    use crate::storage::{MemoryStorage, StorageConfig};
 
     #[test]
     fn test_transaction_creation() {
@@ -503,7 +508,7 @@ mod tests {
     #[test]
     fn test_transaction_manager() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        
+
         let manager = TransactionManager::new(storage);
 
         assert_eq!(manager.active_transaction_count(), 0);

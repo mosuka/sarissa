@@ -3,16 +3,22 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::document::{Document, FieldValue};
 use crate::error::Result;
 use crate::index::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
 use crate::query::{Query, SearchHit, SearchResults};
-use crate::document::{Document, FieldValue};
 use crate::search::{Search, SearchRequest};
 
 /// Mock index reader that stores documents in memory (schema-less mode).
 #[derive(Clone)]
 pub struct MockIndexReader {
     documents: Arc<Mutex<HashMap<u64, Document>>>,
+}
+
+impl Default for MockIndexReader {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockIndexReader {

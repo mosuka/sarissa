@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::document::{Document, FieldValue};
 use crate::error::{Result, SarissaError};
 use crate::index::bkd_tree::SimpleBKDTree;
-use crate::document::{Document, FieldValue};
 use crate::storage::Storage;
 
 /// Trait for index readers.
@@ -230,7 +230,7 @@ impl BasicIndexReader {
                 if let Some(numeric_value) = self.extract_numeric_value(field_value) {
                     numeric_fields
                         .entry(field_name.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push((numeric_value, doc_id as u64));
                 }
             }
@@ -602,12 +602,11 @@ impl PostingIterator for BasicPostingIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-
     #[test]
     fn test_reader_creation() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));

@@ -122,7 +122,7 @@ fn tokens_to_vec(tokens: TokenStream) -> Result<Vec<Token>> {
 }
 
 fn demonstrate_filter(filter: &dyn Filter, tokens: TokenStream, description: &str) -> Result<()> {
-    println!("Description: {}", description);
+    println!("Description: {description}");
 
     let input_tokens: Vec<Token> = tokens.collect();
     let input_count = input_tokens.len();
@@ -148,7 +148,7 @@ fn demonstrate_filter_with_boost(
     tokens: TokenStream,
     description: &str,
 ) -> Result<()> {
-    println!("Description: {}", description);
+    println!("Description: {description}");
 
     let input_tokens: Vec<Token> = tokens.collect();
     println!("Input tokens with boost:");
@@ -172,7 +172,7 @@ fn demonstrate_filter_with_stopped(
     tokens: TokenStream,
     description: &str,
 ) -> Result<()> {
-    println!("Description: {}", description);
+    println!("Description: {description}");
 
     let input_tokens: Vec<Token> = tokens.collect();
     println!(
