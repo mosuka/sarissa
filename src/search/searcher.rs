@@ -307,6 +307,17 @@ mod tests {
     #[test]
     fn test_searcher_creation() {
         let searcher = create_test_searcher();
+
+        // Verify searcher has a valid reader
+        let reader = searcher.reader();
+        assert!(Arc::strong_count(reader) >= 1, "Reader should be valid");
+
+        // Verify reader has expected initial state
+        assert_eq!(
+            reader.doc_count(),
+            0,
+            "New searcher should have 0 documents"
+        );
     }
 
     #[test]
