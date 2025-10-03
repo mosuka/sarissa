@@ -49,7 +49,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[allow(unused_imports)]
-use crate::schema::Document;
+use crate::document::Document;
 
 /// A search hit containing a document and its score.
 #[derive(Debug, Clone, Serialize, Deserialize)]

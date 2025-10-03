@@ -3,7 +3,6 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::WildcardQuery;
-use sarissa::schema::{IdField, TextField};
 use sarissa::search::SearchEngine;
 use sarissa::search::SearchRequest;
 use tempfile::TempDir;
@@ -15,20 +14,9 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}", temp_dir.path());
 
-    // Create a schema
-    let mut schema = Schema::new()?;
-    schema.add_field(
-        "title",
-        Box::new(TextField::new().stored(true).indexed(true)),
-    )?;
-    schema.add_field("filename", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("description", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("category", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("extension", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("id", Box::new(IdField::new()))?;
 
     // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, IndexConfig::default())?;
+    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Add documents with various patterns for wildcard matching
     let documents = vec![

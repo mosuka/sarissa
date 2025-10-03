@@ -3,7 +3,6 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::{BooleanQuery, NumericRangeQuery, PhraseQuery, TermQuery};
-use sarissa::schema::{IdField, NumericField, TextField};
 use sarissa::search::SearchEngine;
 use sarissa::search::SearchRequest;
 use tempfile::TempDir;
@@ -15,22 +14,9 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}", temp_dir.path());
 
-    // Create a schema
-    let mut schema = Schema::new()?;
-    schema.add_field(
-        "title",
-        Box::new(TextField::new().stored(true).indexed(true)),
-    )?;
-    schema.add_field("body", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("author", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("category", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("price", Box::new(NumericField::f64().indexed(true)))?;
-    schema.add_field("rating", Box::new(NumericField::f64().indexed(true)))?;
-    schema.add_field("tags", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("id", Box::new(IdField::new()))?;
 
     // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, IndexConfig::default())?;
+    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Add documents for testing boolean queries
     let documents = vec![
@@ -208,12 +194,12 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
-                if let sarissa::schema::FieldValue::Float(price) = field_value {
+                if let sarissa::document::FieldValue::Float(price) = field_value {
                     println!("      Price: ${:.2}", price);
                 }
             }
             if let Some(field_value) = doc.get_field("rating") {
-                if let sarissa::schema::FieldValue::Float(rating) = field_value {
+                if let sarissa::document::FieldValue::Float(rating) = field_value {
                     println!("      Rating: {:.1}", rating);
                 }
             }
@@ -305,7 +291,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
-                if let sarissa::schema::FieldValue::Float(price) = field_value {
+                if let sarissa::document::FieldValue::Float(price) = field_value {
                     println!("      Price: ${:.2}", price);
                 }
             }
@@ -340,7 +326,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("rating") {
-                if let sarissa::schema::FieldValue::Float(rating) = field_value {
+                if let sarissa::document::FieldValue::Float(rating) = field_value {
                     println!("      Rating: {:.1}", rating);
                 }
             }
@@ -395,12 +381,12 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
-                if let sarissa::schema::FieldValue::Float(price) = field_value {
+                if let sarissa::document::FieldValue::Float(price) = field_value {
                     println!("      Price: ${:.2}", price);
                 }
             }
             if let Some(field_value) = doc.get_field("rating") {
-                if let sarissa::schema::FieldValue::Float(rating) = field_value {
+                if let sarissa::document::FieldValue::Float(rating) = field_value {
                     println!("      Rating: {:.1}", rating);
                 }
             }
@@ -454,7 +440,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
-                if let sarissa::schema::FieldValue::Float(price) = field_value {
+                if let sarissa::document::FieldValue::Float(price) = field_value {
                     println!("      Price: ${:.2}", price);
                 }
             }

@@ -10,7 +10,7 @@ use crate::error::{Result, SarissaError};
 use crate::index::deletion::DeletionManager;
 use crate::index::merge_engine::{MergeConfig, MergeEngine, MergeResult};
 use crate::index::segment_manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
-use crate::schema::Schema;
+
 use crate::storage::Storage;
 
 /// Optimization strategy types.
@@ -137,18 +137,14 @@ pub struct IndexOptimizer {
     /// Merge engine for segment operations.
     merge_engine: MergeEngine,
 
-    /// Schema for the index.
-    #[allow(dead_code)]
-    schema: Arc<Schema>,
-
     /// Storage backend.
     #[allow(dead_code)]
     storage: Arc<dyn Storage>,
 }
 
 impl IndexOptimizer {
-    /// Create a new index optimizer.
-    pub fn new(config: OptimizationConfig, schema: Arc<Schema>, storage: Arc<dyn Storage>) -> Self {
+    /// Create a new index optimizer (schema-less mode).
+    pub fn new(config: OptimizationConfig, storage: Arc<dyn Storage>) -> Self {
         let merge_config = MergeConfig {
             max_memory_mb: config.max_memory_mb,
             batch_size: 50000,
@@ -158,12 +154,11 @@ impl IndexOptimizer {
             verify_after_merge: true,
         };
 
-        let merge_engine = MergeEngine::new(merge_config, storage.clone(), schema.clone());
+        let merge_engine = MergeEngine::new(merge_config, storage.clone());
 
         IndexOptimizer {
             config,
             merge_engine,
-            schema,
             storage,
         }
     }
@@ -539,17 +534,10 @@ mod tests {
     use super::*;
     use crate::index::deletion::DeletionConfig;
     use crate::index::segment_manager::SegmentManagerConfig;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_optimization_config_default() {
@@ -583,20 +571,20 @@ mod tests {
     #[test]
     fn test_index_optimizer_creation() {
         let config = OptimizationConfig::default();
-        let schema = Arc::new(create_test_schema());
+        
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
 
-        let optimizer = IndexOptimizer::new(config, schema, storage);
+        let optimizer = IndexOptimizer::new(config, storage);
         assert_eq!(optimizer.config.strategy, OptimizationStrategy::Balanced);
     }
 
     #[test]
     fn test_optimization_recommendations() {
         let config = OptimizationConfig::default();
-        let schema = Arc::new(create_test_schema());
+        
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
 
-        let optimizer = IndexOptimizer::new(config, schema.clone(), storage.clone());
+        let optimizer = IndexOptimizer::new(config, storage.clone());
 
         let segment_manager =
             SegmentManager::new(SegmentManagerConfig::default(), storage.clone()).unwrap();

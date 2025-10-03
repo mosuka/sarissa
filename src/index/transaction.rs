@@ -13,7 +13,7 @@ use crate::error::{Result, SarissaError};
 use crate::index::deletion::{DeletionManager, GlobalDeletionState};
 use crate::index::merge_engine::MergeEngine;
 use crate::index::segment_manager::SegmentManager;
-use crate::schema::{Document, Schema};
+use crate::document::{Document};
 use crate::storage::Storage;
 
 /// Transaction isolation levels.
@@ -161,7 +161,7 @@ impl Transaction {
     }
 }
 
-/// Transaction manager for coordinating atomic operations.
+/// Transaction manager for coordinating atomic operations (schema-less mode).
 #[derive(Debug)]
 pub struct TransactionManager {
     /// Active transactions.
@@ -171,20 +171,23 @@ pub struct TransactionManager {
     /// Storage backend.
     #[allow(dead_code)]
     storage: Arc<dyn Storage>,
-    /// Schema for validation.
-    #[allow(dead_code)]
-    schema: Arc<Schema>,
 }
 
 impl TransactionManager {
-    /// Create a new transaction manager.
-    pub fn new(storage: Arc<dyn Storage>, schema: Arc<Schema>) -> Self {
+    /// Create a new transaction manager (schema-less mode).
+    pub fn new(storage: Arc<dyn Storage>) -> Self {
         TransactionManager {
             active_transactions: Arc::new(RwLock::new(AHashMap::new())),
             transaction_counter: Arc::new(Mutex::new(0)),
             storage,
-            schema,
         }
+    }
+
+    /// Deprecated: Use `new()` instead. Schema is no longer required.
+    #[deprecated(since = "0.2.0", note = "Use `new()` instead. Schema is no longer required.")]
+    pub fn with_schema(storage: Arc<dyn Storage>, schema: Arc<crate::document::FieldValue>) -> Self {
+        let _ = schema; // Ignore schema parameter
+        Self::new(storage)
     }
 
     /// Begin a new transaction.
@@ -437,19 +440,9 @@ pub trait AtomicOperations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
 
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("content", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_transaction_creation() {
@@ -483,7 +476,7 @@ mod tests {
     fn test_transaction_operations() {
         let mut txn = Transaction::new(IsolationLevel::ReadCommitted);
 
-        let doc = crate::schema::Document::builder()
+        let doc = crate::document::Document::builder()
             .add_text("title", "Test")
             .build();
 
@@ -497,7 +490,7 @@ mod tests {
 
         // Cannot add operation to inactive transaction
         txn.state = TransactionState::Committed;
-        let doc2 = crate::schema::Document::builder()
+        let doc2 = crate::document::Document::builder()
             .add_text("title", "Test2")
             .build();
         let op2 = TransactionOperation::AddDocument {
@@ -510,8 +503,8 @@ mod tests {
     #[test]
     fn test_transaction_manager() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let schema = Arc::new(create_test_schema());
-        let manager = TransactionManager::new(storage, schema);
+        
+        let manager = TransactionManager::new(storage);
 
         assert_eq!(manager.active_transaction_count(), 0);
         assert_eq!(manager.total_transaction_count(), 0);

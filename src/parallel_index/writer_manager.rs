@@ -124,7 +124,7 @@ impl IndexWriterHandle {
     }
 
     /// Execute an indexing operation.
-    pub fn index_documents(&self, documents: Vec<crate::schema::Document>) -> Result<()> {
+    pub fn index_documents(&self, documents: Vec<crate::document::Document>) -> Result<()> {
         let start = Instant::now();
 
         // Update last operation timestamp
@@ -366,15 +366,13 @@ impl Clone for IndexWriterHandle {
 mod tests {
     use super::*;
     use crate::index::writer::BasicIndexWriter;
-    use crate::schema::Schema;
+    
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_writer() -> Box<dyn IndexWriter> {
-        let schema = Schema::new().unwrap();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(
             BasicIndexWriter::new(
-                schema,
                 storage,
                 crate::index::writer::WriterConfig::default(),
             )

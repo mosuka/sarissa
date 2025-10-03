@@ -13,6 +13,7 @@
 
 pub mod analysis;
 pub mod cli;
+pub mod document;
 pub mod embeding;
 pub mod error;
 pub mod hybrid_search;
@@ -24,7 +25,6 @@ pub mod parallel_search;
 pub mod parallel_vector_index;
 pub mod parallel_vector_search;
 pub mod query;
-pub mod schema;
 pub mod search;
 pub mod spelling;
 pub mod storage;
@@ -37,12 +37,10 @@ pub mod vector_search;
 pub mod prelude {
     // Core types
     pub use crate::analysis::{Analyzer, StandardAnalyzer};
+    pub use crate::document::{Document, FieldValue};
     pub use crate::error::{Result, SarissaError};
     pub use crate::index::{Index, IndexReader, IndexWriter};
     pub use crate::query::{BM25Scorer, Hit, Query, RangeQuery, SearchResults, TermQuery};
-    pub use crate::schema::{
-        BooleanField, Document, FieldType, IdField, KeywordField, NumericField, Schema, TextField,
-    };
     pub use crate::search::{Search, SearchConfig};
     pub use crate::storage::{MemoryStorage, Storage, StorageConfig};
 }

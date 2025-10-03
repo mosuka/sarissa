@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Query, QueryResult};
-use crate::schema::FieldValue;
+use crate::document::FieldValue;
 use crate::search::facet::{FacetCollector, FacetResults};
 use crate::search::highlight::{HighlightConfig, Highlighter};
 
@@ -637,19 +637,9 @@ impl Default for ResultProcessorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Schema, TextField};
+    
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("content", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_result_processor_config() {

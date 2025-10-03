@@ -293,26 +293,15 @@ mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
     use crate::query::{BooleanQuery, BooleanQueryBuilder, TermQuery};
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     fn create_test_searcher() -> Searcher {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = Box::new(BasicIndexReader::new(schema, storage).unwrap());
+        let reader = Box::new(BasicIndexReader::new(storage).unwrap());
         Searcher::new(reader)
     }
 
@@ -320,7 +309,6 @@ mod tests {
     fn test_searcher_creation() {
         let searcher = create_test_searcher();
 
-        assert_eq!(searcher.reader().schema().len(), 2);
     }
 
     #[test]

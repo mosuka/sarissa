@@ -436,21 +436,11 @@ mod tests {
     use super::*;
     use crate::index::reader::BasicIndexReader;
     use crate::query::term::TermQuery;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_boolean_query_creation() {
@@ -513,9 +503,8 @@ mod tests {
 
     #[test]
     fn test_boolean_query_matcher() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         let query = BooleanQueryBuilder::new()
             .must(Box::new(TermQuery::new("title", "hello")))
@@ -528,9 +517,8 @@ mod tests {
 
     #[test]
     fn test_boolean_query_scorer() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         let query = BooleanQueryBuilder::new()
             .must(Box::new(TermQuery::new("title", "hello")))
@@ -557,9 +545,8 @@ mod tests {
 
     #[test]
     fn test_empty_boolean_query() {
-        let schema = create_test_schema();
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(schema, storage).unwrap();
+        let reader = BasicIndexReader::new(storage).unwrap();
 
         let query = BooleanQuery::new();
 

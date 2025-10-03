@@ -9,7 +9,7 @@ use crate::analysis::{Analyzer, StandardAnalyzer};
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::{Matcher, Query, Scorer};
-use crate::schema::FieldValue;
+use crate::document::FieldValue;
 
 /// Configuration for similarity search.
 #[derive(Debug, Clone)]
@@ -1114,13 +1114,8 @@ mod tests {
         fn is_deleted(&self, _doc_id: u64) -> bool {
             false
         }
-        fn document(&self, _doc_id: u64) -> Result<Option<crate::schema::Document>> {
+        fn document(&self, _doc_id: u64) -> Result<Option<crate::document::Document>> {
             Ok(None)
-        }
-        fn schema(&self) -> &crate::schema::Schema {
-            // Return a minimal schema for testing
-            static SCHEMA: std::sync::OnceLock<crate::schema::Schema> = std::sync::OnceLock::new();
-            SCHEMA.get_or_init(|| crate::schema::Schema::new().unwrap())
         }
         fn term_info(
             &self,

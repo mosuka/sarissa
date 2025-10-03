@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::ml::{FeedbackSignal, MLContext, SearchHistoryItem, UserSession};
-use crate::schema::Document;
+use crate::document::Document;
 
 /// Configuration for recommendation system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

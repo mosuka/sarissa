@@ -3,7 +3,6 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::NumericRangeQuery;
-use sarissa::schema::{IdField, NumericField, TextField};
 use sarissa::search::SearchEngine;
 use sarissa::search::SearchRequest;
 use tempfile::TempDir;
@@ -16,20 +15,9 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}", temp_dir.path());
 
     // Create a schema with numeric fields
-    let mut schema = Schema::new()?;
-    schema.add_field(
-        "title",
-        Box::new(TextField::new().stored(true).indexed(true)),
-    )?;
-    schema.add_field("description", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("price", Box::new(NumericField::f64().indexed(true)))?;
-    schema.add_field("rating", Box::new(NumericField::f64().indexed(true)))?;
-    schema.add_field("year", Box::new(NumericField::u64().indexed(true)))?;
-    schema.add_field("pages", Box::new(NumericField::u64().indexed(true)))?;
-    schema.add_field("id", Box::new(IdField::new()))?;
 
     // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, IndexConfig::default())?;
+    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Add documents with various numeric values
     let documents = vec![
@@ -124,7 +112,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
-                if let sarissa::schema::FieldValue::Float(price) = field_value {
+                if let sarissa::document::FieldValue::Float(price) = field_value {
                     println!("      Price: ${:.2}", price);
                 }
             }
@@ -152,7 +140,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("rating") {
-                if let sarissa::schema::FieldValue::Float(rating) = field_value {
+                if let sarissa::document::FieldValue::Float(rating) = field_value {
                     println!("      Rating: {:.1}", rating);
                 }
             }
@@ -180,7 +168,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("year") {
-                if let sarissa::schema::FieldValue::Integer(year) = field_value {
+                if let sarissa::document::FieldValue::Integer(year) = field_value {
                     println!("      Year: {}", year);
                 }
             }
@@ -208,7 +196,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("pages") {
-                if let sarissa::schema::FieldValue::Integer(pages) = field_value {
+                if let sarissa::document::FieldValue::Integer(pages) = field_value {
                     println!("      Pages: {}", pages);
                 }
             }
@@ -236,7 +224,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("year") {
-                if let sarissa::schema::FieldValue::Integer(year) = field_value {
+                if let sarissa::document::FieldValue::Integer(year) = field_value {
                     println!("      Year: {}", year);
                 }
             }
@@ -264,7 +252,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("price") {
-                if let sarissa::schema::FieldValue::Float(price) = field_value {
+                if let sarissa::document::FieldValue::Float(price) = field_value {
                     println!("      Price: ${:.2}", price);
                 }
             }
@@ -292,7 +280,7 @@ fn main() -> Result<()> {
                 }
             }
             if let Some(field_value) = doc.get_field("pages") {
-                if let sarissa::schema::FieldValue::Integer(pages) = field_value {
+                if let sarissa::document::FieldValue::Integer(pages) = field_value {
                     println!("      Pages: {}", pages);
                 }
             }

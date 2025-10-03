@@ -5,22 +5,19 @@ use std::str::Chars;
 
 use crate::error::{Result, SarissaError};
 use crate::query::{BooleanQuery, BooleanQueryBuilder, Occur, Query, TermQuery};
-use crate::schema::Schema;
 
 /// A simple query parser that supports basic query syntax.
+/// Schema-less: no field validation, accepts any field name.
 #[derive(Debug)]
 pub struct QueryParser {
-    /// The schema to validate field names against.
-    schema: Schema,
     /// Default field to search in when no field is specified.
     default_field: Option<String>,
 }
 
 impl QueryParser {
-    /// Create a new query parser with the given schema.
-    pub fn new(schema: Schema) -> Self {
+    /// Create a new query parser (schema-less).
+    pub fn new() -> Self {
         QueryParser {
-            schema,
             default_field: None,
         }
     }
@@ -46,7 +43,7 @@ impl QueryParser {
             return Ok(Box::new(BooleanQuery::new()));
         }
 
-        let mut parser = QueryStringParser::new(trimmed, &self.schema, &self.default_field);
+        let mut parser = QueryStringParser::new(trimmed, &self.default_field);
         parser.parse()
     }
 
@@ -57,21 +54,10 @@ impl QueryParser {
             return Ok(Box::new(BooleanQuery::new()));
         }
 
-        // Validate field exists in schema
-        if !self.schema.has_field(field) {
-            return Err(SarissaError::schema(format!(
-                "Field '{field}' does not exist"
-            )));
-        }
-
+        // Schema-less: no field validation
         let field_name = Some(field.to_string());
-        let mut parser = QueryStringParser::new(trimmed, &self.schema, &field_name);
+        let mut parser = QueryStringParser::new(trimmed, &field_name);
         parser.parse()
-    }
-
-    /// Get the schema for this parser.
-    pub fn schema(&self) -> &Schema {
-        &self.schema
     }
 
     /// Get the default field.
@@ -83,15 +69,13 @@ impl QueryParser {
 /// Internal parser for parsing query strings.
 struct QueryStringParser<'a> {
     chars: Peekable<Chars<'a>>,
-    schema: &'a Schema,
     default_field: &'a Option<String>,
 }
 
 impl<'a> QueryStringParser<'a> {
-    fn new(query_str: &'a str, schema: &'a Schema, default_field: &'a Option<String>) -> Self {
+    fn new(query_str: &'a str, default_field: &'a Option<String>) -> Self {
         QueryStringParser {
             chars: query_str.chars().peekable(),
-            schema,
             default_field,
         }
     }
@@ -186,13 +170,7 @@ impl<'a> QueryStringParser<'a> {
                 let field = parts[0];
                 let term = parts[1];
 
-                // Validate field exists in schema
-                if !self.schema.has_field(field) {
-                    return Err(SarissaError::schema(format!(
-                        "Field '{field}' does not exist"
-                    )));
-                }
-
+                // Schema-less: no field validation needed
                 let query = Box::new(TermQuery::new(field, term));
                 return Ok(self.wrap_with_occur(query, occur));
             }
@@ -315,15 +293,13 @@ impl<'a> QueryStringParser<'a> {
 /// Builder for creating query parsers.
 #[derive(Debug)]
 pub struct QueryParserBuilder {
-    schema: Schema,
     default_field: Option<String>,
 }
 
 impl QueryParserBuilder {
-    /// Create a new query parser builder.
-    pub fn new(schema: Schema) -> Self {
+    /// Create a new query parser builder (schema-less).
+    pub fn new() -> Self {
         QueryParserBuilder {
-            schema,
             default_field: None,
         }
     }
@@ -337,53 +313,41 @@ impl QueryParserBuilder {
     /// Build the query parser.
     pub fn build(self) -> QueryParser {
         QueryParser {
-            schema: self.schema,
             default_field: self.default_field,
         }
+    }
+}
+
+impl Default for QueryParserBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Schema, TextField};
+    
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-            .add_field("author", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_query_parser_creation() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         assert!(parser.default_field().is_none());
-        assert_eq!(parser.schema().len(), 3);
     }
 
     #[test]
     fn test_query_parser_with_default_field() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema).with_default_field("title");
+        let parser = QueryParser::new().with_default_field("title");
 
         assert_eq!(parser.default_field(), Some("title"));
     }
 
     #[test]
     fn test_parse_simple_term() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema).with_default_field("title");
+        let parser = QueryParser::new().with_default_field("title");
 
         let query = parser.parse("hello").unwrap();
         assert_eq!(query.description(), "title:hello");
@@ -391,8 +355,7 @@ mod tests {
 
     #[test]
     fn test_parse_field_term() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse("title:hello").unwrap();
         assert_eq!(query.description(), "title:hello");
@@ -400,8 +363,7 @@ mod tests {
 
     #[test]
     fn test_parse_boolean_and() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse("title:hello AND body:world").unwrap();
         let desc = query.description();
@@ -411,8 +373,7 @@ mod tests {
 
     #[test]
     fn test_parse_boolean_or() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse("title:hello OR title:world").unwrap();
         let desc = query.description();
@@ -422,8 +383,7 @@ mod tests {
 
     #[test]
     fn test_parse_required_term() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse("+title:hello").unwrap();
         let desc = query.description();
@@ -432,8 +392,7 @@ mod tests {
 
     #[test]
     fn test_parse_forbidden_term() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse("-title:spam").unwrap();
         let desc = query.description();
@@ -442,8 +401,7 @@ mod tests {
 
     #[test]
     fn test_parse_phrase() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema).with_default_field("title");
+        let parser = QueryParser::new().with_default_field("title");
 
         let query = parser.parse("\"hello world\"").unwrap();
         assert_eq!(query.description(), "title:hello world");
@@ -451,8 +409,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty_query() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse("").unwrap();
         assert!(query.description().contains("()"));
@@ -460,8 +417,7 @@ mod tests {
 
     #[test]
     fn test_parse_whitespace_query() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse("   ").unwrap();
         assert!(query.description().contains("()"));
@@ -469,17 +425,16 @@ mod tests {
 
     #[test]
     fn test_parse_invalid_field() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
+        // Schema-less mode: no field validation, any field is accepted
         let result = parser.parse("invalid_field:hello");
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[test]
     fn test_parse_no_default_field() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let result = parser.parse("hello");
         assert!(result.is_err());
@@ -487,8 +442,7 @@ mod tests {
 
     #[test]
     fn test_parse_field_specific() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse_field("title", "hello world").unwrap();
         // The parser treats "hello world" as two separate terms with implicit AND
@@ -499,17 +453,16 @@ mod tests {
 
     #[test]
     fn test_parse_field_invalid() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
+        // Schema-less mode: no field validation, any field is accepted
         let result = parser.parse_field("invalid_field", "hello");
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[test]
     fn test_complex_query() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser
             .parse("title:hello AND (body:world OR author:john)")
@@ -521,20 +474,17 @@ mod tests {
 
     #[test]
     fn test_query_parser_builder() {
-        let schema = create_test_schema();
 
-        let parser = QueryParserBuilder::new(schema)
+        let parser = QueryParserBuilder::new()
             .default_field("title")
             .build();
 
         assert_eq!(parser.default_field(), Some("title"));
-        assert_eq!(parser.schema().len(), 3);
     }
 
     #[test]
     fn test_implicit_and() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser.parse("title:hello body:world").unwrap();
         let desc = query.description();
@@ -545,8 +495,7 @@ mod tests {
 
     #[test]
     fn test_mixed_operators() {
-        let schema = create_test_schema();
-        let parser = QueryParser::new(schema);
+        let parser = QueryParser::new();
 
         let query = parser
             .parse("+title:required -title:forbidden title:optional")

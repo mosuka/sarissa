@@ -160,17 +160,8 @@ impl WildcardQuery {
 
 impl Query for WildcardQuery {
     fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
-        // Check if the field exists in the schema
-        if !reader.schema().has_field(&self.field) {
-            return Ok(Box::new(EmptyMatcher::new()));
-        }
-
-        // Get field type to determine matching strategy
-        let field_type = reader
-            .schema()
-            .get_field(&self.field)
-            .map(|field_def| field_def.field_type().type_name());
-
+        // Schema-less: no field validation needed
+        // All fields are treated as text fields for wildcard matching
         let mut matching_doc_ids = Vec::new();
 
         // Iterate through all documents and find matches
@@ -178,17 +169,9 @@ impl Query for WildcardQuery {
             if let Ok(Some(doc)) = reader.document(doc_id) {
                 if let Some(field_value) = doc.get_field(&self.field) {
                     if let Some(text) = field_value.as_text() {
-                        let matches = match field_type {
-                            Some("id") => {
-                                // IdField: exact string matching
-                                self.regex.is_match(text)
-                            }
-                            _ => {
-                                // TextField: token-based matching
-                                let tokens: Vec<&str> = text.split_whitespace().collect();
-                                tokens.iter().any(|token| self.regex.is_match(token))
-                            }
-                        };
+                        // Schema-less: token-based matching for all text fields
+                        let tokens: Vec<&str> = text.split_whitespace().collect();
+                        let matches = tokens.iter().any(|token| self.regex.is_match(token));
 
                         if matches {
                             matching_doc_ids.push(doc_id);
@@ -214,33 +197,20 @@ impl Query for WildcardQuery {
         let mut total_term_freq = 0u64;
         let mut field_lengths = Vec::new();
 
-        // Get field type for matching strategy
-        let field_type = reader
-            .schema()
-            .get_field(&self.field)
-            .map(|field_def| field_def.field_type().type_name());
-
+        // Schema-less: treat all fields as text fields for wildcard matching
         // Count actual matches and collect field statistics
         for doc_id in 0..total_docs {
             if let Ok(Some(doc)) = reader.document(doc_id) {
                 if let Some(field_value) = doc.get_field(&self.field) {
                     if let Some(text) = field_value.as_text() {
-                        let (matches, match_count, field_len) = match field_type {
-                            Some("id") => {
-                                // IdField: exact string matching
-                                let matches = self.regex.is_match(text);
-                                (matches, if matches { 1 } else { 0 }, text.len())
-                            }
-                            _ => {
-                                // TextField: token-based matching with count
-                                let tokens: Vec<&str> = text.split_whitespace().collect();
-                                let match_count = tokens
-                                    .iter()
-                                    .filter(|token| self.regex.is_match(token))
-                                    .count();
-                                (match_count > 0, match_count, tokens.len())
-                            }
-                        };
+                        // Token-based matching with count
+                        let tokens: Vec<&str> = text.split_whitespace().collect();
+                        let match_count = tokens
+                            .iter()
+                            .filter(|token| self.regex.is_match(token))
+                            .count();
+                        let matches = match_count > 0;
+                        let field_len = tokens.len();
 
                         if matches {
                             actual_doc_freq += 1;

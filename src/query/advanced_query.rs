@@ -561,19 +561,9 @@ impl Query for MultiFieldQuery {
 mod tests {
     use super::*;
     use crate::query::TermQuery;
-    use crate::schema::{Schema, TextField};
+    
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("content", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_advanced_query_creation() {

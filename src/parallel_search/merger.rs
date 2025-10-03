@@ -358,7 +358,7 @@ impl MergerFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::Document;
+    use crate::document::Document;
 
     fn create_test_results() -> Vec<TaskResult> {
         vec![

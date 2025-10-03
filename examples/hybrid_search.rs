@@ -5,7 +5,6 @@ use sarissa::hybrid_search::{HybridSearchConfig, HybridSearchEngine, ScoreNormal
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::TermQuery;
-use sarissa::schema::{IdField, TextField};
 use sarissa::search::{SearchEngine, SearchRequest};
 use std::collections::HashMap;
 use tempfile::TempDir;
@@ -19,18 +18,10 @@ async fn main() -> Result<()> {
     println!("Creating index in: {:?}", temp_dir.path());
 
     // Create a schema for traditional keyword search
-    let mut schema = Schema::new()?;
-    schema.add_field(
-        "title",
-        Box::new(TextField::new().stored(true).indexed(true)),
-    )?;
-    schema.add_field("body", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("author", Box::new(IdField::new()))?;
-    schema.add_field("category", Box::new(TextField::new().indexed(true)))?;
 
     // Create a keyword search engine
     let mut keyword_engine =
-        SearchEngine::create_in_dir(temp_dir.path(), schema, IndexConfig::default())?;
+        SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Create hybrid search configuration
     let hybrid_config = HybridSearchConfig {

@@ -4,12 +4,12 @@ use std::fmt::Debug;
 
 use chrono::{DateTime, Utc};
 
+use crate::document::NumericType;
 use crate::error::Result;
 use crate::index::reader::IndexReader;
 use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
 use crate::query::scorer::{BM25Scorer, Scorer};
-use crate::schema::field::NumericType;
 
 /// Bound type for range queries.
 #[derive(Debug, Clone, PartialEq)]
@@ -286,7 +286,7 @@ impl NumericRangeQuery {
     pub fn i64_range<S: Into<String>>(field: S, lower: Option<i64>, upper: Option<i64>) -> Self {
         Self::new(
             field,
-            NumericType::I64,
+            NumericType::Integer,
             lower.map(|v| v as f64),
             upper.map(|v| v as f64),
             true,
@@ -296,7 +296,7 @@ impl NumericRangeQuery {
 
     /// Create a range query for floats with inclusive bounds.
     pub fn f64_range<S: Into<String>>(field: S, lower: Option<f64>, upper: Option<f64>) -> Self {
-        Self::new(field, NumericType::F64, lower, upper, true, true)
+        Self::new(field, NumericType::Float, lower, upper, true, true)
     }
 
     /// Create a range query for floats with exclusive upper bound.
@@ -305,7 +305,7 @@ impl NumericRangeQuery {
         lower: Option<f64>,
         upper: Option<f64>,
     ) -> Self {
-        Self::new(field, NumericType::F64, lower, upper, true, false)
+        Self::new(field, NumericType::Float, lower, upper, true, false)
     }
 
     /// Create a range query for floats with exclusive lower bound.
@@ -314,7 +314,7 @@ impl NumericRangeQuery {
         lower: Option<f64>,
         upper: Option<f64>,
     ) -> Self {
-        Self::new(field, NumericType::F64, lower, upper, false, true)
+        Self::new(field, NumericType::Float, lower, upper, false, true)
     }
 
     /// Create a range query for floats with both bounds exclusive.
@@ -323,7 +323,7 @@ impl NumericRangeQuery {
         lower: Option<f64>,
         upper: Option<f64>,
     ) -> Self {
-        Self::new(field, NumericType::F64, lower, upper, false, false)
+        Self::new(field, NumericType::Float, lower, upper, false, false)
     }
 
     /// Create a greater than query.
@@ -373,12 +373,8 @@ impl NumericRangeQuery {
     /// Encode a numeric value for efficient storage and comparison.
     pub fn encode_numeric(value: f64, numeric_type: NumericType) -> Vec<u8> {
         match numeric_type {
-            NumericType::I32 => (value as i32).to_be_bytes().to_vec(),
-            NumericType::I64 => (value as i64).to_be_bytes().to_vec(),
-            NumericType::U32 => (value as u32).to_be_bytes().to_vec(),
-            NumericType::U64 => (value as u64).to_be_bytes().to_vec(),
-            NumericType::F32 => (value as f32).to_be_bytes().to_vec(),
-            NumericType::F64 => value.to_be_bytes().to_vec(),
+            NumericType::Integer => (value as i64).to_be_bytes().to_vec(),
+            NumericType::Float => value.to_be_bytes().to_vec(),
         }
     }
 
@@ -422,23 +418,11 @@ impl NumericRangeQuery {
         self.lower_bound
             .as_ref()
             .map(|bytes| match self.numeric_type {
-                NumericType::F64 => {
+                NumericType::Float => {
                     f64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8]))
                 }
-                NumericType::F32 => {
-                    f32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
-                }
-                NumericType::I64 => {
+                NumericType::Integer => {
                     i64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8])) as f64
-                }
-                NumericType::I32 => {
-                    i32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
-                }
-                NumericType::U64 => {
-                    u64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8])) as f64
-                }
-                NumericType::U32 => {
-                    u32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
                 }
             })
     }
@@ -448,23 +432,11 @@ impl NumericRangeQuery {
         self.upper_bound
             .as_ref()
             .map(|bytes| match self.numeric_type {
-                NumericType::F64 => {
+                NumericType::Float => {
                     f64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8]))
                 }
-                NumericType::F32 => {
-                    f32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
-                }
-                NumericType::I64 => {
+                NumericType::Integer => {
                     i64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8])) as f64
-                }
-                NumericType::I32 => {
-                    i32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
-                }
-                NumericType::U64 => {
-                    u64::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 8])) as f64
-                }
-                NumericType::U32 => {
-                    u32::from_be_bytes(bytes.as_slice().try_into().unwrap_or([0; 4])) as f64
                 }
             })
     }
@@ -488,8 +460,8 @@ impl NumericRangeQuery {
             if let Ok(Some(doc)) = reader.document(doc_id) {
                 if let Some(field_value) = doc.get_field(&self.field) {
                     let numeric_value = match field_value {
-                        crate::schema::FieldValue::Float(f) => *f,
-                        crate::schema::FieldValue::Integer(i) => *i as f64,
+                        crate::document::FieldValue::Float(f) => *f,
+                        crate::document::FieldValue::Integer(i) => *i as f64,
                         _ => continue, // Not a numeric field
                     };
 
@@ -836,8 +808,8 @@ impl NumericRangeFilterMatcher {
                 if let Some(field_value) = doc.get_field(&self.query.field) {
                     // Check if it's a numeric field and extract the value
                     let numeric_value = match field_value {
-                        crate::schema::FieldValue::Float(f) => *f,
-                        crate::schema::FieldValue::Integer(i) => *i as f64,
+                        crate::document::FieldValue::Float(f) => *f,
+                        crate::document::FieldValue::Integer(i) => *i as f64,
                         _ => return false, // Not a numeric field
                     };
 
@@ -1263,7 +1235,7 @@ mod tests {
         let query = NumericRangeQuery::i64_range("price", Some(100), Some(200));
 
         assert_eq!(query.field(), "price");
-        assert_eq!(query.numeric_type(), NumericType::I64);
+        assert_eq!(query.numeric_type(), NumericType::Integer);
         assert!(query.contains_numeric(150.0));
         assert!(!query.contains_numeric(50.0));
         assert!(!query.contains_numeric(250.0));
@@ -1282,7 +1254,7 @@ mod tests {
 
     #[test]
     fn test_numeric_range_query_greater_than() {
-        let query = NumericRangeQuery::greater_than("rating", NumericType::I32, 3.0);
+        let query = NumericRangeQuery::greater_than("rating", NumericType::Integer, 3.0);
 
         assert!(query.contains_numeric(4.0));
         assert!(query.contains_numeric(5.0));
@@ -1292,7 +1264,7 @@ mod tests {
 
     #[test]
     fn test_numeric_range_query_less_than_or_equal() {
-        let query = NumericRangeQuery::less_than_or_equal("rating", NumericType::I32, 3.0);
+        let query = NumericRangeQuery::less_than_or_equal("rating", NumericType::Integer, 3.0);
 
         assert!(query.contains_numeric(3.0));
         assert!(query.contains_numeric(2.0));
@@ -1349,10 +1321,10 @@ mod tests {
         let values = [1.0, 2.0, 3.0, 100.0, 1000.0];
 
         for &numeric_type in &[
-            NumericType::I32,
-            NumericType::I64,
-            NumericType::F32,
-            NumericType::F64,
+            NumericType::Integer,
+            NumericType::Integer,
+            NumericType::Float,
+            NumericType::Float,
         ] {
             let encoded_values: Vec<_> = values
                 .iter()
@@ -1405,13 +1377,8 @@ mod tests {
         fn is_deleted(&self, _doc_id: u64) -> bool {
             false
         }
-        fn document(&self, _doc_id: u64) -> crate::error::Result<Option<crate::schema::Document>> {
+        fn document(&self, _doc_id: u64) -> crate::error::Result<Option<crate::document::Document>> {
             Ok(None)
-        }
-        fn schema(&self) -> &crate::schema::Schema {
-            use crate::schema::Schema;
-            static EMPTY_SCHEMA: std::sync::OnceLock<Schema> = std::sync::OnceLock::new();
-            EMPTY_SCHEMA.get_or_init(|| Schema::new().unwrap())
         }
         fn term_info(
             &self,

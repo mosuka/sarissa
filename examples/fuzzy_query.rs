@@ -3,7 +3,6 @@
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::FuzzyQuery;
-use sarissa::schema::{IdField, TextField};
 use sarissa::search::SearchEngine;
 use sarissa::search::SearchRequest;
 use tempfile::TempDir;
@@ -15,19 +14,9 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}", temp_dir.path());
 
-    // Create a schema
-    let mut schema = Schema::new()?;
-    schema.add_field(
-        "title",
-        Box::new(TextField::new().stored(true).indexed(true)),
-    )?;
-    schema.add_field("body", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("author", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("tags", Box::new(TextField::new().indexed(true)))?;
-    schema.add_field("id", Box::new(IdField::new()))?;
 
     // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), schema, IndexConfig::default())?;
+    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Add documents with various spellings and terms for fuzzy matching
     let documents = vec![

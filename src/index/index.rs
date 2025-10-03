@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, SarissaError};
 use crate::index::reader::IndexReader;
 use crate::index::writer::IndexWriter;
-use crate::schema::Schema;
+
 use crate::storage::Storage;
 
 /// Information about a segment in the index.
@@ -37,9 +37,6 @@ pub trait Index: Send + Sync + std::fmt::Debug {
 
     /// Get a writer for this index.
     fn writer(&self) -> Result<Box<dyn IndexWriter>>;
-
-    /// Get the schema for this index.
-    fn schema(&self) -> &Schema;
 
     /// Get the storage backend for this index.
     fn storage(&self) -> &Arc<dyn Storage>;
@@ -118,12 +115,9 @@ impl Default for IndexConfig {
     }
 }
 
-/// A concrete index implementation.
+/// A concrete index implementation for schema-less indexing.
 #[derive(Debug)]
 pub struct FileIndex {
-    /// The schema for this index.
-    schema: Schema,
-
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
@@ -175,16 +169,12 @@ impl Default for IndexMetadata {
 }
 
 impl FileIndex {
-    /// Create a new index in the given storage.
-    pub fn create(storage: Arc<dyn Storage>, schema: Schema, config: IndexConfig) -> Result<Self> {
-        // Validate schema
-        schema.validate()?;
-
+    /// Create a new index in the given storage (schema-less mode).
+    pub fn create(storage: Arc<dyn Storage>, config: IndexConfig) -> Result<Self> {
         // Create metadata
         let metadata = IndexMetadata::default();
 
         let index = FileIndex {
-            schema,
             storage,
             config,
             closed: false,
@@ -198,7 +188,7 @@ impl FileIndex {
         Ok(temp_index)
     }
 
-    /// Open an existing index from storage.
+    /// Open an existing index from storage (schema-less mode).
     pub fn open(storage: Arc<dyn Storage>, config: IndexConfig) -> Result<Self> {
         // Check if index exists
         if !storage.file_exists("metadata.json") {
@@ -208,11 +198,7 @@ impl FileIndex {
         // Read metadata
         let metadata = Self::read_metadata(storage.as_ref())?;
 
-        // Read schema
-        let schema = Self::read_schema(storage.as_ref())?;
-
         Ok(FileIndex {
-            schema,
             storage,
             config,
             closed: false,
@@ -220,10 +206,9 @@ impl FileIndex {
         })
     }
 
-    /// Create an index in a directory.
+    /// Create an index in a directory (schema-less mode).
     pub fn create_in_dir<P: AsRef<Path>>(
         dir: P,
-        schema: Schema,
         config: IndexConfig,
     ) -> Result<Self> {
         use crate::storage::{FileStorage, StorageConfig};
@@ -234,7 +219,7 @@ impl FileIndex {
         };
 
         let storage = Arc::new(FileStorage::new(dir, storage_config)?);
-        Self::create(storage, schema, config)
+        Self::create(storage, config)
     }
 
     /// Open an index from a directory.
@@ -259,11 +244,7 @@ impl FileIndex {
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
         output.close()?;
 
-        // For now, just write a simple schema indicator
-        let schema_info = format!("{{\"field_count\": {}}}", self.schema.len());
-        let mut output = self.storage.create_output("schema.json")?;
-        std::io::Write::write_all(&mut output, schema_info.as_bytes())?;
-        output.close()?;
+        // Schema-less mode: no schema file needed
 
         Ok(())
     }
@@ -280,18 +261,6 @@ impl FileIndex {
         Ok(metadata)
     }
 
-    /// Read schema from storage.
-    fn read_schema(_storage: &dyn Storage) -> Result<Schema> {
-        // For now, return a test schema that matches expectations
-        // TODO: Implement proper schema persistence
-        let mut schema = Schema::new()?;
-        schema.add_field(
-            "title",
-            Box::new(crate::schema::TextField::new().stored(true)),
-        )?;
-        schema.add_field("body", Box::new(crate::schema::TextField::new()))?;
-        Ok(schema)
-    }
 
     /// Update metadata and write to storage.
     fn update_metadata(&mut self) -> Result<()> {
@@ -326,7 +295,7 @@ impl Index for FileIndex {
 
         use crate::index::reader::BasicIndexReader;
 
-        let reader = BasicIndexReader::new(self.schema.clone(), self.storage.clone())?;
+        let reader = BasicIndexReader::new(self.storage.clone())?;
         Ok(Box::new(reader))
     }
 
@@ -336,15 +305,10 @@ impl Index for FileIndex {
         use crate::index::writer::{BasicIndexWriter, WriterConfig};
 
         let writer = BasicIndexWriter::new(
-            self.schema.clone(),
             self.storage.clone(),
             WriterConfig::default(),
         )?;
         Ok(Box::new(writer))
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
     }
 
     fn storage(&self) -> &Arc<dyn Storage> {
@@ -417,60 +381,43 @@ impl FileIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{Schema, TextField};
+    
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
-    fn create_test_schema() -> Schema {
-        let mut schema = Schema::new().unwrap();
-        schema
-            .add_field("title", Box::new(TextField::new().stored(true)))
-            .unwrap();
-        schema
-            .add_field("body", Box::new(TextField::new()))
-            .unwrap();
-        schema
-    }
 
     #[test]
     fn test_index_creation() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let index = FileIndex::create(storage, schema, config).unwrap();
+        let index = FileIndex::create(storage, config).unwrap();
 
         assert!(!index.is_closed());
-        assert_eq!(index.schema().len(), 2);
-        assert!(index.schema().has_field("title"));
-        assert!(index.schema().has_field("body"));
     }
 
     #[test]
     fn test_index_open() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
         // Create index
-        let mut index = FileIndex::create(storage.clone(), schema, config.clone()).unwrap();
+        let mut index = FileIndex::create(storage.clone(), config.clone()).unwrap();
         index.close().unwrap();
 
         // Open index
         let index = FileIndex::open(storage, config).unwrap();
 
         assert!(!index.is_closed());
-        assert_eq!(index.schema().len(), 2);
     }
 
     #[test]
     fn test_index_metadata() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let index = FileIndex::create(storage, schema, config).unwrap();
+        let index = FileIndex::create(storage, config).unwrap();
         let stats = index.stats().unwrap();
 
         assert_eq!(stats.doc_count, 0);
@@ -483,10 +430,9 @@ mod tests {
     #[test]
     fn test_index_close() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let mut index = FileIndex::create(storage, schema, config).unwrap();
+        let mut index = FileIndex::create(storage, config).unwrap();
 
         assert!(!index.is_closed());
 
@@ -515,14 +461,12 @@ mod tests {
     #[test]
     fn test_index_files() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let schema = create_test_schema();
         let config = IndexConfig::default();
 
-        let index = FileIndex::create(storage, schema, config).unwrap();
+        let index = FileIndex::create(storage, config).unwrap();
         let files = index.list_files().unwrap();
 
         // Should have metadata and schema files
         assert!(files.contains(&"metadata.json".to_string()));
-        assert!(files.contains(&"schema.json".to_string()));
     }
 }
