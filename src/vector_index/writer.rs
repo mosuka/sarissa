@@ -4,6 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SarissaError};
@@ -133,12 +134,13 @@ impl VectorIndexWriter {
             vector_count: self.get_vector_count(builder),
             index_type: self.get_index_type(builder),
             compressed: self.config.compress,
-            timestamp: chrono::Utc::now(),
+            timestamp: chrono::Utc::now().timestamp(),
         };
 
-        let header_bytes = bincode::serialize(&header).map_err(|e| {
-            SarissaError::SerializationError(format!("Failed to serialize header: {e}"))
-        })?;
+        let header_bytes =
+            bincode::encode_to_vec(&header, bincode::config::standard()).map_err(|e| {
+                SarissaError::SerializationError(format!("Failed to serialize header: {e}"))
+            })?;
 
         writer
             .write_all(&(header_bytes.len() as u32).to_le_bytes())
@@ -195,9 +197,10 @@ impl VectorIndexWriter {
             },
         };
 
-        let footer_bytes = bincode::serialize(&footer).map_err(|e| {
-            SarissaError::SerializationError(format!("Failed to serialize footer: {e}"))
-        })?;
+        let footer_bytes =
+            bincode::encode_to_vec(&footer, bincode::config::standard()).map_err(|e| {
+                SarissaError::SerializationError(format!("Failed to serialize footer: {e}"))
+            })?;
 
         writer
             .write_all(&(footer_bytes.len() as u32).to_le_bytes())
@@ -237,7 +240,7 @@ impl VectorIndexWriter {
 }
 
 /// Index file header.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
 struct IndexHeader {
     magic: Vec<u8>,
     version: u32,
@@ -245,18 +248,18 @@ struct IndexHeader {
     vector_count: usize,
     index_type: String,
     compressed: bool,
-    timestamp: chrono::DateTime<chrono::Utc>,
+    timestamp: i64, // Unix timestamp in seconds
 }
 
 /// Index file footer.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
 struct IndexFooter {
     checksum: u64,
     build_stats: BuildStats,
 }
 
 /// Statistics from index building.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
 struct BuildStats {
     build_time_ms: u64,
     memory_usage: usize,
