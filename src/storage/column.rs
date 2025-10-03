@@ -197,7 +197,7 @@ impl ColumnValue {
                     return Err(anyhow::anyhow!("Truncated string value").into());
                 }
                 let s = String::from_utf8(bytes[5..5 + len].to_vec())
-                    .map_err(|e| anyhow::anyhow!("UTF8 conversion error: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("UTF8 conversion error: {e}"))?;
                 Ok(ColumnValue::String(s))
             }
             1 => {
@@ -257,7 +257,7 @@ impl ColumnValue {
                 Ok(ColumnValue::DateTime(v))
             }
             255 => Ok(ColumnValue::Null),
-            _ => Err(anyhow::anyhow!("Unknown column value type: {}", type_marker).into()),
+            _ => Err(anyhow::anyhow!("Unknown column value type: {type_marker}").into()),
         }
     }
 }
