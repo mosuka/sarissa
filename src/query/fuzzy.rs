@@ -843,7 +843,7 @@ mod tests {
 
     #[test]
     fn test_fuzzy_matcher() {
-        use crate::index::reader::BasicIndexReader;
+        use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;
@@ -851,7 +851,7 @@ mod tests {
         // Create a test schema and reader
 
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(storage).unwrap();
+        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let matches = vec![
             FuzzyMatch {

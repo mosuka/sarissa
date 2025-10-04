@@ -275,14 +275,14 @@ impl ParallelSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::reader::BasicIndexReader;
+    use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
     use crate::query::TermQuery;
 
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_reader() -> Box<dyn IndexReader> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        Box::new(BasicIndexReader::new(storage).unwrap())
+        Box::new(AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap())
     }
 
     #[test]

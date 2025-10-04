@@ -291,7 +291,7 @@ impl Search for Searcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::reader::BasicIndexReader;
+    use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
     use crate::query::{BooleanQuery, BooleanQueryBuilder, TermQuery};
 
     use crate::storage::{MemoryStorage, StorageConfig};
@@ -300,7 +300,7 @@ mod tests {
     #[allow(dead_code)]
     fn create_test_searcher() -> Searcher {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = Box::new(BasicIndexReader::new(storage).unwrap());
+        let reader = Box::new(AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap());
         Searcher::new(reader)
     }
 

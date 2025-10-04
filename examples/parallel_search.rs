@@ -5,8 +5,8 @@
 //! 2. Perform concurrent searches across the indices with various merge strategies
 //! 3. Demonstrate performance metrics and optimization techniques
 
-use sarissa::index::reader::BasicIndexReader;
-use sarissa::index::writer::{BasicIndexWriter, WriterConfig};
+use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sarissa::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 use sarissa::parallel_index::{
     HashPartitioner, ParallelIndexConfig, ParallelIndexEngine, PartitionConfig,
     config::IndexingOptions,
@@ -72,9 +72,9 @@ fn main() -> Result<()> {
             Arc::new(MemoryStorage::new(StorageConfig::default()));
         storages.push(Arc::clone(&storage));
 
-        let writer = Box::new(BasicIndexWriter::new(
+        let writer = Box::new(AdvancedIndexWriter::new(
             Arc::clone(&storage),
-            WriterConfig::default(),
+            AdvancedWriterConfig::default(),
         )?);
         let partition_config = PartitionConfig::new(format!("partition_{i}"));
         parallel_engine.add_partition(format!("partition_{i}"), writer, partition_config)?;
@@ -257,7 +257,22 @@ fn main() -> Result<()> {
     let mut index_readers = Vec::new();
 
     for (i, storage) in storages.into_iter().enumerate() {
-        let reader = Box::new(BasicIndexReader::new(storage)?);
+        // Load segments for this storage
+        let files = storage.list_files()?;
+        let mut segments = Vec::new();
+        for file in files {
+            if file.starts_with("segment_") && file.ends_with(".meta") {
+                let mut input = storage.open_input(&file)?;
+                let mut data = Vec::new();
+                std::io::Read::read_to_end(&mut input, &mut data)?;
+                let segment_info: sarissa::index::SegmentInfo = serde_json::from_slice(&data)
+                    .map_err(|e| sarissa::error::SarissaError::index(format!("Failed to parse segment metadata: {e}")))?;
+                segments.push(segment_info);
+            }
+        }
+        segments.sort_by_key(|s| s.generation);
+
+        let reader = Box::new(AdvancedIndexReader::new(segments, storage, AdvancedReaderConfig::default())?);
         index_readers.push((format!("partition_{i}"), reader));
     }
 
