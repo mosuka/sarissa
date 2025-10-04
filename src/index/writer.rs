@@ -52,4 +52,10 @@ pub trait IndexWriter: Send + std::fmt::Debug {
 
     /// Check if the writer is closed.
     fn is_closed(&self) -> bool;
+
+    /// Add a custom analyzer with the given name.
+    fn add_analyzer(&mut self, name: &str, analyzer: Box<dyn crate::analysis::Analyzer>);
+
+    /// Configure a field to use a specific analyzer by name.
+    fn set_field_analyzer(&mut self, field: &str, analyzer_name: &str);
 }

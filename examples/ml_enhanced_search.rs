@@ -154,7 +154,7 @@ async fn main() -> Result<()> {
     search_request.config.load_documents = true;
     search_request.config.max_docs = 5;
 
-    let results = engine.search_mut(search_request)?;
+    let results = engine.search(search_request)?;
 
     println!("\nSearch results with query expansion:");
     for (i, hit) in results.hits.iter().enumerate() {
@@ -219,7 +219,7 @@ async fn main() -> Result<()> {
     search_request.config.load_documents = true;
     search_request.config.max_docs = 10;
 
-    let search_results = engine.search_mut(search_request)?;
+    let search_results = engine.search(search_request)?;
 
     println!("\nOriginal search results:");
     for (i, hit) in search_results.hits.iter().take(3).enumerate() {

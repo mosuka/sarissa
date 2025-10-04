@@ -97,7 +97,7 @@ fn main() -> Result<()> {
     println!("1. Files starting with 'java' using 'java*' pattern:");
     let query = WildcardQuery::new("filename", "java*")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -120,7 +120,7 @@ fn main() -> Result<()> {
     println!("\n2. Files ending with '.pdf' using '*.pdf' pattern:");
     let query = WildcardQuery::new("filename", "*.pdf")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -143,7 +143,7 @@ fn main() -> Result<()> {
     println!("\n3. Files with 'web' followed by anything ending in '.txt' using 'web*.txt':");
     let query = WildcardQuery::new("filename", "web*.txt")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -166,7 +166,7 @@ fn main() -> Result<()> {
     println!("\n4. Extensions with pattern '?sx' (jsx, tsx, etc.):");
     let query = WildcardQuery::new("extension", "?sx")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -189,7 +189,7 @@ fn main() -> Result<()> {
     println!("\n5. Categories starting with 'prog' and ending with 'ing' using 'prog*ing':");
     let query = WildcardQuery::new("category", "prog*ing")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -212,7 +212,7 @@ fn main() -> Result<()> {
     println!("\n6. Filenames with pattern '*_*.????' (underscore and 4-char extension):");
     let query = WildcardQuery::new("filename", "*_*.????")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -235,7 +235,7 @@ fn main() -> Result<()> {
     println!("\n7. Titles containing 'Development' using '*Development*':");
     let query = WildcardQuery::new("title", "*Development*")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -258,7 +258,7 @@ fn main() -> Result<()> {
     println!("\n8. Extensions with exactly 3 characters using '???':");
     let query = WildcardQuery::new("extension", "???")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -281,7 +281,7 @@ fn main() -> Result<()> {
     println!("\n9. All files with any extension using '*.*':");
     let query = WildcardQuery::new("filename", "*.*")?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -304,14 +304,14 @@ fn main() -> Result<()> {
     println!("\n10. Pattern with no matches using 'xyz*abc':");
     let query = WildcardQuery::new("filename", "xyz*abc")?;
     let request = SearchRequest::new(Box::new(query));
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
     // Example 11: Count matching documents
     println!("\n11. Counting files with 'data' in filename using '*data*':");
     let query = WildcardQuery::new("filename", "*data*")?;
-    let count = engine.count_mut(Box::new(query))?;
+    let count = engine.count(Box::new(query))?;
     println!("    Count: {count} files");
 
     engine.close()?;

@@ -57,6 +57,10 @@ impl Analyzer for StandardAnalyzer {
     fn name(&self) -> &'static str {
         "standard"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl std::fmt::Debug for StandardAnalyzer {

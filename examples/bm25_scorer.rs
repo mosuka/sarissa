@@ -4,7 +4,7 @@ use sarissa::error::Result;
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::{BM25Scorer, Scorer};
-use sarissa::search::SearchEngine;
+use sarissa::search::{SearchEngine, SearchRequest};
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -92,7 +92,9 @@ fn main() -> Result<()> {
 
     // Example 5: Real search with scoring
     println!("\n5. Real search results with BM25 scoring:");
-    let results = engine.search_str("programming", "body")?;
+    let parser = sarissa::query::QueryParser::new().with_default_field("body");
+    let query = parser.parse("programming")?;
+    let results = engine.search(SearchRequest::new(query))?;
     println!("   Search for 'programming' in body field:");
     println!("   Found {} results", results.total_hits);
 

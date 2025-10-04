@@ -95,11 +95,6 @@ impl Document {
         &self.field_analyzers
     }
 
-    /// Set an analyzer for a specific field (internal use).
-    pub(crate) fn set_field_analyzer(&mut self, field_name: String, analyzer: Arc<dyn Analyzer>) {
-        self.field_analyzers.insert(field_name, analyzer);
-    }
-
     /// Get the number of fields.
     pub fn len(&self) -> usize {
         self.fields.len()

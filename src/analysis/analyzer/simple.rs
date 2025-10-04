@@ -33,6 +33,10 @@ impl Analyzer for SimpleAnalyzer {
     fn name(&self) -> &'static str {
         "simple"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl std::fmt::Debug for SimpleAnalyzer {

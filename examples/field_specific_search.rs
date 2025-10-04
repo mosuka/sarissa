@@ -1,9 +1,10 @@
 //! Field-specific search example - demonstrates searching within specific fields.
 
+use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzerWrapper, StandardAnalyzer};
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
-
 use sarissa::search::{SearchEngine, SearchRequest};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -16,7 +17,13 @@ fn main() -> Result<()> {
     // Create a search engine
     let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
-    // Add some documents
+    // Set up per-field analyzer wrapper for query parsing
+    // Match the indexing configuration
+    let mut per_field_analyzer = PerFieldAnalyzerWrapper::new(Arc::new(StandardAnalyzer::new()?));
+    per_field_analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
+    per_field_analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
+
+    // Prepare documents
     let documents = vec![
         Document::builder()
             .add_text("title", "The Great Gatsby")
@@ -74,14 +81,48 @@ fn main() -> Result<()> {
             .build(),
     ];
 
-    println!("Adding {} documents to the index...", documents.len());
-    engine.add_documents(documents)?;
+    println!("Adding documents to the index...");
+
+    // Add documents with per-field analyzer configuration
+    // Note: We need to manually configure the writer since SearchEngine doesn't persist
+    // analyzer configuration across writer() calls yet
+    {
+        use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+
+        let storage = engine.storage().clone();
+        let mut config = AdvancedWriterConfig::default();
+
+        // Configure field-specific analyzers
+        // - category and id use KeywordAnalyzer (entire field as one token)
+        // - author uses StandardAnalyzer (default) for tokenized search
+        config
+            .field_analyzers
+            .insert("category".to_string(), "keyword".to_string());
+        config
+            .field_analyzers
+            .insert("id".to_string(), "keyword".to_string());
+
+        let mut writer = AdvancedIndexWriter::new(storage, config)?;
+
+        for doc in documents {
+            writer.add_document(doc)?;
+        }
+
+        writer.commit()?;
+    }
+
+    // Commit changes to engine
+    engine.commit()?;
 
     println!("\n=== Field-Specific Search Examples ===\n");
 
     // Example 1: Search by author
+    // Note: Now we can use "Orwell" (any case) because the parser automatically
+    // uses KeywordAnalyzer for the "author" field, which lowercases the input
     println!("1. Search by author (author:Orwell):");
-    let results = engine.search_field("author", "Orwell")?;
+    let parser = sarissa::query::QueryParser::with_analyzer(Arc::new(per_field_analyzer.clone()));
+    let query = parser.parse_field("author", "Orwell")?;
+    let results = engine.search(SearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -96,7 +137,7 @@ fn main() -> Result<()> {
     println!("\n2. Search by author with document details (author:Orwell):");
     let request = SearchRequest::new(Box::new(sarissa::query::TermQuery::new("author", "orwell")))
         .load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -126,7 +167,9 @@ fn main() -> Result<()> {
 
     // Example 3: Search by category
     println!("\n3. Search by category (category:classic):");
-    let results = engine.search_field("category", "classic")?;
+    let parser = sarissa::query::QueryParser::new();
+    let query = parser.parse_field("category", "classic")?;
+    let results = engine.search(SearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -141,7 +184,7 @@ fn main() -> Result<()> {
     println!("\n4. Search in tags field (tags:british):");
     let request = SearchRequest::new(Box::new(sarissa::query::TermQuery::new("tags", "british")))
         .load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -171,7 +214,9 @@ fn main() -> Result<()> {
 
     // Example 5: Search in title field
     println!("\n5. Search in title field (title:farm):");
-    let results = engine.search_field("title", "farm")?;
+    let parser = sarissa::query::QueryParser::new();
+    let query = parser.parse_field("title", "farm")?;
+    let results = engine.search(SearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -184,7 +229,9 @@ fn main() -> Result<()> {
 
     // Example 6: Search in body field
     println!("\n6. Search in body field (body:father):");
-    let results = engine.search_field("body", "father")?;
+    let parser = sarissa::query::QueryParser::new();
+    let query = parser.parse_field("body", "father")?;
+    let results = engine.search(SearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -200,15 +247,19 @@ fn main() -> Result<()> {
     println!("   Searching for 'american' in different fields:");
 
     // Search in tags
-    let tags_results = engine.search_field("tags", "american")?;
+    let parser = sarissa::query::QueryParser::new();
+    let query = parser.parse_field("tags", "american")?;
+    let tags_results = engine.search(SearchRequest::new(query))?;
     println!("   - In tags field: {} results", tags_results.total_hits);
 
     // Search in body
-    let body_results = engine.search_field("body", "american")?;
+    let query = parser.parse_field("body", "american")?;
+    let body_results = engine.search(SearchRequest::new(query))?;
     println!("   - In body field: {} results", body_results.total_hits);
 
     // Search in category
-    let category_results = engine.search_field("category", "american")?;
+    let query = parser.parse_field("category", "american")?;
+    let category_results = engine.search(SearchRequest::new(query))?;
     println!(
         "   - In category field: {} results",
         category_results.total_hits
@@ -216,14 +267,14 @@ fn main() -> Result<()> {
 
     // Example 8: Using query parser with field specification
     println!("\n8. Using query parser with field specification:");
-    let parser = engine.query_parser();
+    let parser = sarissa::query::QueryParser::new();
 
     // Parse field:value syntax
     let query = parser.parse("author:austen OR category:dystopian")?;
     println!("   Query: author:austen OR category:dystopian");
 
     let request = SearchRequest::new(query).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(

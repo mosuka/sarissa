@@ -315,7 +315,7 @@ async fn main() -> Result<()> {
     println!("6. Pure keyword search comparison:");
     let keyword_query = Box::new(TermQuery::new("body", "programming"));
     let keyword_request = SearchRequest::new(keyword_query).load_documents(true);
-    let keyword_results = keyword_engine.search_mut(keyword_request)?;
+    let keyword_results = keyword_engine.search(keyword_request)?;
 
     println!(
         "   Pure keyword search found {} results",

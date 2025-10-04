@@ -43,6 +43,10 @@ impl Analyzer for KeywordAnalyzer {
     fn name(&self) -> &'static str {
         "keyword"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl std::fmt::Debug for KeywordAnalyzer {

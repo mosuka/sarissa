@@ -4,6 +4,7 @@
 mod analyzer;
 mod keyword;
 mod noop;
+mod per_field;
 mod pipeline;
 mod simple;
 mod standard;
@@ -11,6 +12,7 @@ mod standard;
 pub use analyzer::Analyzer;
 pub use keyword::KeywordAnalyzer;
 pub use noop::NoOpAnalyzer;
+pub use per_field::PerFieldAnalyzerWrapper;
 pub use pipeline::PipelineAnalyzer;
 pub use simple::SimpleAnalyzer;
 pub use standard::StandardAnalyzer;
