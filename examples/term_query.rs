@@ -75,7 +75,7 @@ fn main() -> Result<()> {
     println!("1. Searching for 'Rust' in title field:");
     let query = TermQuery::new("title", "Rust");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
     println!("\n2. Searching for 'language' in body field:");
     let query = TermQuery::new("body", "language");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -121,7 +121,7 @@ fn main() -> Result<()> {
     println!("\n3. Searching for 'programming' in category field:");
     let query = TermQuery::new("category", "programming");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -144,7 +144,7 @@ fn main() -> Result<()> {
     println!("\n4. Searching for non-existent term 'golang':");
     let query = TermQuery::new("title", "golang");
     let request = SearchRequest::new(Box::new(query));
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
@@ -152,7 +152,7 @@ fn main() -> Result<()> {
     println!("\n5. Case sensitivity - searching for 'rust' (lowercase):");
     let query = TermQuery::new("title", "rust");
     let request = SearchRequest::new(Box::new(query));
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     println!("   Note: TermQuery is case-sensitive by default");
@@ -161,7 +161,7 @@ fn main() -> Result<()> {
     println!("\n6. Searching for exact author 'John Smith':");
     let query = TermQuery::new("author", "John Smith");
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -188,7 +188,7 @@ fn main() -> Result<()> {
     // Example 7: Count matching documents
     println!("\n7. Counting documents containing 'programming':");
     let query = TermQuery::new("body", "programming");
-    let count = engine.count_mut(Box::new(query))?;
+    let count = engine.count(Box::new(query))?;
     println!("   Count: {count} documents");
 
     engine.close()?;

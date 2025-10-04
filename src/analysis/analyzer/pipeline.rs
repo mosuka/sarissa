@@ -70,6 +70,10 @@ impl Analyzer for PipelineAnalyzer {
         // Instead, we'll use a default name
         "pipeline"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl std::fmt::Debug for PipelineAnalyzer {

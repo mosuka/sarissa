@@ -60,7 +60,7 @@ fn main() -> Result<()> {
     println!("1. Searching for phrase 'machine learning' in body:");
     let query = PhraseQuery::new("body", vec!["machine".to_string(), "learning".to_string()]);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
         ],
     );
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -113,7 +113,7 @@ fn main() -> Result<()> {
     println!("\n3. Searching for phrase 'deep learning' in title:");
     let query = PhraseQuery::new("title", vec!["deep".to_string(), "learning".to_string()]);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -139,7 +139,7 @@ fn main() -> Result<()> {
         vec!["data".to_string(), "science".to_string()],
     );
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -162,7 +162,7 @@ fn main() -> Result<()> {
     println!("\n5. Searching for non-existent phrase 'quantum computing':");
     let query = PhraseQuery::new("body", vec!["quantum".to_string(), "computing".to_string()]);
     let request = SearchRequest::new(Box::new(query));
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
@@ -170,7 +170,7 @@ fn main() -> Result<()> {
     println!("\n6. Searching for single word phrase 'intelligence' in body:");
     let query = PhraseQuery::new("body", vec!["intelligence".to_string()]);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -201,7 +201,7 @@ fn main() -> Result<()> {
         ],
     );
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -223,7 +223,7 @@ fn main() -> Result<()> {
     // Example 8: Count phrase matches
     println!("\n8. Counting documents with phrase 'computer vision':");
     let query = PhraseQuery::new("body", vec!["computer".to_string(), "vision".to_string()]);
-    let count = engine.count_mut(Box::new(query))?;
+    let count = engine.count(Box::new(query))?;
     println!("   Count: {count} documents");
 
     engine.close()?;

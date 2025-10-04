@@ -290,9 +290,9 @@ impl FileIndex {
         let mut segments = Vec::new();
 
         // Find all segment metadata files
-        for file in files {
+        for file in &files {
             if file.starts_with("segment_") && file.ends_with(".meta") {
-                let mut input = self.storage.open_input(&file)?;
+                let mut input = self.storage.open_input(file)?;
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
 

@@ -104,7 +104,7 @@ fn main() -> Result<()> {
     println!("1. Locations within 5km of Times Square (40.7580° N, 73.9855° W):");
     let query = GeoQuery::within_radius("location", 40.7580, -73.9855, 5.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -132,7 +132,7 @@ fn main() -> Result<()> {
     println!("\n2. Locations within 10km of downtown San Francisco (37.7749° N, 122.4194° W):");
     let query = GeoQuery::within_radius("location", 37.7749, -122.4194, 10.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -161,7 +161,7 @@ fn main() -> Result<()> {
     println!("   (33.9° N, 118.6° W) to (34.3° N, 118.1° W)");
     let query = GeoQuery::within_bounding_box("location", 33.9, -118.6, 34.3, -118.1)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -189,7 +189,7 @@ fn main() -> Result<()> {
     println!("\n4. All West Coast locations within 1000km of San Francisco:");
     let query = GeoQuery::within_radius("location", 37.7749, -122.4194, 1000.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -217,7 +217,7 @@ fn main() -> Result<()> {
     println!("\n5. Locations within 2km of downtown Seattle (47.6062° N, 122.3321° W):");
     let query = GeoQuery::within_radius("location", 47.6062, -122.3321, 2.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -245,7 +245,7 @@ fn main() -> Result<()> {
     println!("\n6. Locations within 1km of a specific point in the ocean:");
     let query = GeoQuery::within_radius("location", 36.0, -125.0, 1.0)?; // Pacific Ocean
     let request = SearchRequest::new(Box::new(query));
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
@@ -254,7 +254,7 @@ fn main() -> Result<()> {
     println!("   (25° N, 125° W) to (49° N, 66° W)");
     let query = GeoQuery::within_bounding_box("location", 25.0, -125.0, 49.0, -66.0)?;
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -281,7 +281,7 @@ fn main() -> Result<()> {
     // Example 8: Count locations within a specific area
     println!("\n8. Counting locations within 50km of Los Angeles center:");
     let query = GeoQuery::within_radius("location", 34.0522, -118.2437, 50.0)?;
-    let count = engine.count_mut(Box::new(query))?;
+    let count = engine.count(Box::new(query))?;
     println!("   Count: {count} locations");
 
     engine.close()?;

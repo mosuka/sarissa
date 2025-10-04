@@ -615,9 +615,31 @@ impl Query for NumericRangeQuery {
             return Ok(Box::new(PreComputedMatcher::new(doc_ids)));
         }
 
-        // Fallback: use AllMatcher (will be filtered by post-processing)
-        use crate::query::matcher::AllMatcher;
-        Ok(Box::new(AllMatcher::new(reader.max_doc())))
+        // Fallback: scan all documents and filter by numeric range
+        let mut matching_docs = Vec::new();
+        let max_doc = reader.max_doc();
+
+        for doc_id in 0..max_doc {
+            if let Ok(Some(doc)) = reader.document(doc_id) {
+                if let Some(field_value) = doc.get_field(&self.field) {
+                    let numeric_value = match field_value {
+                        crate::document::FieldValue::Float(f) => Some(*f),
+                        crate::document::FieldValue::Integer(i) => Some(*i as f64),
+                        // WORKAROUND: Parse text values as numbers (needed because stored docs lose type info)
+                        crate::document::FieldValue::Text(s) => s.parse::<f64>().ok(),
+                        _ => None,
+                    };
+
+                    if let Some(numeric_value) = numeric_value {
+                        if self.contains_numeric(numeric_value) {
+                            matching_docs.push(doc_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Box::new(PreComputedMatcher::new(matching_docs)))
     }
 
     fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {

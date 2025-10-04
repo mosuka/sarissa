@@ -52,12 +52,12 @@ fn main() -> Result<()> {
 
     // Example 1: Simple OR query (with correct case)
     println!("1. Simple OR query (Mockingbird OR Gatsby):");
-    let parser = engine.query_parser_with_default("title");
+    let parser = sarissa::query::QueryParser::new().with_default_field("title");
     let query = parser.parse("Mockingbird OR Gatsby")?;
     println!("   Parsed query: {}", query.description());
 
     let request = SearchRequest::new(query).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -81,7 +81,7 @@ fn main() -> Result<()> {
     println!("   Parsed query: {}", query.description());
 
     let request = SearchRequest::new(query).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -110,7 +110,7 @@ fn main() -> Result<()> {
     println!("   Parsed query: {}", query.description());
 
     let request = SearchRequest::new(query).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
     println!("   Parsed query: {}", query.description());
 
     let request = SearchRequest::new(query).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -158,7 +158,7 @@ fn main() -> Result<()> {
     println!("   Parsed query: {}", query.description());
 
     let request = SearchRequest::new(query).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -178,12 +178,12 @@ fn main() -> Result<()> {
 
     // Example 6: Different default field
     println!("\n6. Using 'body' as default field (father OR brother):");
-    let body_parser = engine.query_parser_with_default("body");
+    let body_parser = sarissa::query::QueryParser::new().with_default_field("body");
     let query = body_parser.parse("father OR brother")?;
     println!("   Parsed query: {}", query.description());
 
     let request = SearchRequest::new(query).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(

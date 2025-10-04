@@ -8,7 +8,7 @@ use crate::document::Document;
 use crate::error::Result;
 use crate::index::Index;
 use crate::index::index::{FileIndex, IndexConfig};
-use crate::query::{Query, QueryParser, SearchResults};
+use crate::query::{Query, SearchResults};
 use crate::search::{Search, SearchRequest, Searcher};
 use crate::storage::Storage;
 
@@ -79,6 +79,26 @@ impl SearchEngine {
         // Invalidate searcher cache
         *self.searcher.borrow_mut() = None;
 
+        Ok(())
+    }
+
+    /// Add an analyzer with a given name.
+    ///
+    /// This allows configuring custom analyzers for the index.
+    /// The analyzer name can then be used in per-field analyzer configuration.
+    pub fn add_analyzer(&mut self, name: &str, analyzer: Box<dyn crate::analysis::Analyzer>) -> Result<()> {
+        let mut writer = self.index.writer()?;
+        writer.add_analyzer(name, analyzer);
+        Ok(())
+    }
+
+    /// Configure a field to use a specific analyzer by name.
+    ///
+    /// This sets up per-field analyzer configuration, similar to Lucene's
+    /// PerFieldAnalyzerWrapper pattern.
+    pub fn set_field_analyzer(&mut self, field: &str, analyzer_name: &str) -> Result<()> {
+        let mut writer = self.index.writer()?;
+        writer.set_field_analyzer(field, analyzer_name);
         Ok(())
     }
 
@@ -189,43 +209,14 @@ impl Search for SearchEngine {
 }
 
 impl SearchEngine {
-    /// Search with mutable access (required for searcher management).
-    pub fn search_mut(&mut self, request: SearchRequest) -> Result<SearchResults> {
+    /// Search with the given request.
+    pub fn search(&mut self, request: SearchRequest) -> Result<SearchResults> {
         Search::search(self, request)
     }
 
-    /// Count with mutable access (required for searcher management).
-    pub fn count_mut(&mut self, query: Box<dyn Query>) -> Result<u64> {
+    /// Count documents matching the query.
+    pub fn count(&mut self, query: Box<dyn Query>) -> Result<u64> {
         Search::count(self, query)
-    }
-
-    /// Search with a query string and default configuration.
-    pub fn search_query(&mut self, query: Box<dyn Query>) -> Result<SearchResults> {
-        self.search_mut(SearchRequest::new(query))
-    }
-
-    /// Parse and search with a query string.
-    pub fn search_str(&mut self, query_str: &str, default_field: &str) -> Result<SearchResults> {
-        let parser = QueryParser::new().with_default_field(default_field);
-        let query = parser.parse(query_str)?;
-        self.search_query(query)
-    }
-
-    /// Parse and search with a query string in a specific field.
-    pub fn search_field(&mut self, field: &str, query_str: &str) -> Result<SearchResults> {
-        let parser = QueryParser::new();
-        let query = parser.parse_field(field, query_str)?;
-        self.search_query(query)
-    }
-
-    /// Create a query parser for this search engine.
-    pub fn query_parser(&self) -> QueryParser {
-        QueryParser::new()
-    }
-
-    /// Create a query parser with a default field.
-    pub fn query_parser_with_default(&self, default_field: &str) -> QueryParser {
-        QueryParser::new().with_default_field(default_field)
     }
 }
 
@@ -316,7 +307,7 @@ mod tests {
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let request = SearchRequest::new(query);
-        let results = engine.search_mut(request).unwrap();
+        let results = engine.search(request).unwrap();
 
         assert_eq!(results.hits.len(), 0);
         assert_eq!(results.total_hits, 0);
@@ -340,7 +331,7 @@ mod tests {
         // Search for documents
         let query = Box::new(TermQuery::new("title", "Hello"));
         let request = SearchRequest::new(query);
-        let _results = engine.search_mut(request).unwrap();
+        let _results = engine.search(request).unwrap();
 
         // Results depend on the actual indexing implementation
         // For now, we just check that search doesn't fail
@@ -356,7 +347,7 @@ mod tests {
         let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
-        let count = engine.count_mut(query).unwrap();
+        let count = engine.count(query).unwrap();
 
         // Should return 0 for empty index
         assert_eq!(count, 0);
@@ -379,7 +370,7 @@ mod tests {
         // Search should still work
         let query = Box::new(TermQuery::new("title", "Test"));
         let request = SearchRequest::new(query);
-        let _results = engine.search_mut(request).unwrap();
+        let _results = engine.search(request).unwrap();
         // hits.len() is usize, so >= 0 check is redundant
     }
 
@@ -423,7 +414,7 @@ mod tests {
             .min_score(0.5)
             .load_documents(false);
 
-        let results = engine.search_mut(request).unwrap();
+        let results = engine.search(request).unwrap();
 
         // Should respect the configuration
         assert_eq!(results.hits.len(), 0); // No matching documents
@@ -453,7 +444,7 @@ mod tests {
 
         // QueryParser analyzes "Hello" to "hello" before creating TermQuery
         let query = parser.parse("Hello").unwrap();
-        let results = engine.search_query(query).unwrap();
+        let results = engine.search(SearchRequest::new(query)).unwrap();
 
         // Should find the document
         // QueryParser analyzes "Hello" -> "hello", which matches the indexed "hello"
@@ -469,7 +460,10 @@ mod tests {
         let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Search specific field
-        let results = engine.search_field("title", "hello world").unwrap();
+        use crate::query::QueryParser;
+        let parser = QueryParser::new();
+        let query = parser.parse_field("title", "hello world").unwrap();
+        let results = engine.search(SearchRequest::new(query)).unwrap();
 
         // Should parse and execute the query
         assert_eq!(results.hits.len(), 0);
@@ -481,12 +475,13 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let _engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
-        let parser = engine.query_parser();
+        use crate::query::QueryParser;
+        let parser = QueryParser::new();
         assert!(parser.default_field().is_none());
 
-        let parser_with_default = engine.query_parser_with_default("title");
+        let parser_with_default = QueryParser::new().with_default_field("title");
         assert_eq!(parser_with_default.default_field(), Some("title"));
     }
 
@@ -498,9 +493,10 @@ mod tests {
         let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Test complex query parsing
-        let results = engine
-            .search_str("title:hello AND body:world", "title")
-            .unwrap();
+        use crate::query::QueryParser;
+        let parser = QueryParser::new().with_default_field("title");
+        let query = parser.parse("title:hello AND body:world").unwrap();
+        let results = engine.search(SearchRequest::new(query)).unwrap();
 
         // Should parse the complex query without error
         assert_eq!(results.hits.len(), 0);

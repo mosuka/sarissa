@@ -35,6 +35,9 @@ pub struct AdvancedWriterConfig {
 
     /// Default analyzer for text fields.
     pub default_analyzer: String,
+
+    /// Per-field analyzer configuration (field name -> analyzer name).
+    pub field_analyzers: AHashMap<String, String>,
 }
 
 impl Default for AdvancedWriterConfig {
@@ -46,6 +49,7 @@ impl Default for AdvancedWriterConfig {
             store_term_positions: true,
             optimize_segments: false,
             default_analyzer: "standard".to_string(),
+            field_analyzers: AHashMap::new(),
         }
     }
 }
@@ -199,6 +203,18 @@ impl AdvancedIndexWriter {
         Ok(())
     }
 
+    /// Add a custom analyzer with the given name.
+    pub fn add_analyzer(&mut self, name: &str, analyzer: Box<dyn Analyzer>) {
+        self.analyzers.insert(name.to_string(), analyzer);
+    }
+
+    /// Configure a field to use a specific analyzer by name.
+    pub fn set_field_analyzer(&mut self, field: &str, analyzer_name: &str) {
+        self.config
+            .field_analyzers
+            .insert(field.to_string(), analyzer_name.to_string());
+    }
+
     /// Analyze a document into terms.
     fn analyze_document(&mut self, doc: Document) -> Result<AnalyzedDocument> {
         let doc_id = self.next_doc_id;
@@ -213,8 +229,12 @@ impl AdvancedIndexWriter {
 
             match field_value {
                 FieldValue::Text(text) => {
-                    // Analyze text field
-                    let analyzer_name = &self.config.default_analyzer;
+                    // Analyze text field with per-field analyzer or default
+                    let analyzer_name = self
+                        .config
+                        .field_analyzers
+                        .get(field_name)
+                        .unwrap_or(&self.config.default_analyzer);
                     let analyzer = self.analyzers.get_mut(analyzer_name).ok_or_else(|| {
                         SarissaError::analysis(format!("Unknown analyzer: {analyzer_name}"))
                     })?;
@@ -634,6 +654,14 @@ impl crate::index::writer::IndexWriter for AdvancedIndexWriter {
 
     fn is_closed(&self) -> bool {
         AdvancedIndexWriter::is_closed(self)
+    }
+
+    fn add_analyzer(&mut self, name: &str, analyzer: Box<dyn Analyzer>) {
+        AdvancedIndexWriter::add_analyzer(self, name, analyzer)
+    }
+
+    fn set_field_analyzer(&mut self, field: &str, analyzer_name: &str) {
+        AdvancedIndexWriter::set_field_analyzer(self, field, analyzer_name)
     }
 }
 

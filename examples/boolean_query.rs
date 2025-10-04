@@ -94,7 +94,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("body", "python")));
     query.add_must(Box::new(TermQuery::new("body", "programming")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -119,7 +119,7 @@ fn main() -> Result<()> {
     query.add_should(Box::new(TermQuery::new("body", "python")));
     query.add_should(Box::new(TermQuery::new("body", "javascript")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -144,7 +144,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("category", "programming")));
     query.add_must_not(Box::new(TermQuery::new("body", "javascript")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -178,7 +178,7 @@ fn main() -> Result<()> {
         Some(50.0),
     )));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -216,7 +216,7 @@ fn main() -> Result<()> {
         vec!["machine".to_string(), "learning".to_string()],
     )));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -246,7 +246,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(language_query));
 
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -275,7 +275,7 @@ fn main() -> Result<()> {
     )));
     query.add_must_not(Box::new(TermQuery::new("body", "design")));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -310,7 +310,7 @@ fn main() -> Result<()> {
         None,
     )));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -365,7 +365,7 @@ fn main() -> Result<()> {
     )));
 
     let request = SearchRequest::new(Box::new(main_query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -424,7 +424,7 @@ fn main() -> Result<()> {
     )));
 
     let request = SearchRequest::new(Box::new(final_query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -453,7 +453,7 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(TermQuery::new("category", "data-science")));
     query.add_should(Box::new(TermQuery::new("category", "web-development")));
-    let count = engine.count_mut(Box::new(query))?;
+    let count = engine.count(Box::new(query))?;
     println!("   Count: {count} books");
 
     engine.close()?;

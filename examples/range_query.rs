@@ -88,6 +88,7 @@ fn main() -> Result<()> {
 
     println!("Adding {} documents to the index...", documents.len());
     engine.add_documents(documents)?;
+    engine.commit()?;
 
     println!("\n=== RangeQuery Examples ===\n");
 
@@ -95,7 +96,7 @@ fn main() -> Result<()> {
     println!("1. Books with price between $50.00 and $70.00:");
     let query = NumericRangeQuery::f64_range("price", Some(50.0), Some(70.0));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -123,7 +124,7 @@ fn main() -> Result<()> {
     println!("\n2. Books with rating 4.5 or higher:");
     let query = NumericRangeQuery::f64_range("rating", Some(4.5), None);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -151,7 +152,7 @@ fn main() -> Result<()> {
     println!("\n3. Books published after 2010:");
     let query = NumericRangeQuery::i64_range("year", Some(2010), None);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -179,7 +180,7 @@ fn main() -> Result<()> {
     println!("\n4. Books with 400 pages or fewer:");
     let query = NumericRangeQuery::i64_range("pages", None, Some(400));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -207,7 +208,7 @@ fn main() -> Result<()> {
     println!("\n5. Books published between 2008 and 2009:");
     let query = NumericRangeQuery::i64_range("year", Some(2008), Some(2009));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -235,7 +236,7 @@ fn main() -> Result<()> {
     println!("\n6. Budget-friendly books (price under $50.00):");
     let query = NumericRangeQuery::f64_range_exclusive_upper("price", None, Some(50.0));
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -263,7 +264,7 @@ fn main() -> Result<()> {
     println!("\n7. Large books (more than 500 pages):");
     let query = NumericRangeQuery::i64_range("pages", Some(500), None);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -290,14 +291,14 @@ fn main() -> Result<()> {
     // Example 8: Count books in price range
     println!("\n8. Counting books with price between $40.00 and $80.00:");
     let query = NumericRangeQuery::f64_range("price", Some(40.0), Some(80.0));
-    let count = engine.count_mut(Box::new(query))?;
+    let count = engine.count(Box::new(query))?;
     println!("   Count: {count} books");
 
     // Example 9: Empty range (no results expected)
     println!("\n9. Books with impossible price range ($200-$300):");
     let query = NumericRangeQuery::f64_range("price", Some(200.0), Some(300.0));
     let request = SearchRequest::new(Box::new(query));
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 

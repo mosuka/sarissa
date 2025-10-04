@@ -7,7 +7,7 @@ use std::iter::Peekable;
 use std::str::Chars;
 use std::sync::Arc;
 
-use crate::analysis::{Analyzer, StandardAnalyzer};
+use crate::analysis::{Analyzer, PerFieldAnalyzerWrapper, StandardAnalyzer};
 use crate::error::{Result, SarissaError};
 use crate::query::{BooleanQuery, BooleanQueryBuilder, Occur, Query, TermQuery};
 
@@ -132,9 +132,20 @@ impl<'a> QueryStringParser<'a> {
 
     /// Analyze a term using the configured analyzer.
     /// Returns the analyzed tokens or the original term if no analyzer is set.
-    fn analyze_term(&self, term: &str) -> Result<Vec<String>> {
+    /// If the analyzer is a PerFieldAnalyzerWrapper and a field is provided,
+    /// uses the field-specific analyzer.
+    fn analyze_term(&self, field: Option<&str>, term: &str) -> Result<Vec<String>> {
         if let Some(analyzer) = self.analyzer {
-            let token_stream = analyzer.analyze(term)?;
+            let token_stream = if let Some(field_name) = field {
+                // Try to downcast to PerFieldAnalyzerWrapper
+                if let Some(per_field) = analyzer.as_any().downcast_ref::<PerFieldAnalyzerWrapper>() {
+                    per_field.analyze_field(field_name, term)?
+                } else {
+                    analyzer.analyze(term)?
+                }
+            } else {
+                analyzer.analyze(term)?
+            };
             let tokens: Vec<String> = token_stream.map(|t| t.text).collect();
             Ok(tokens)
         } else {
@@ -250,7 +261,7 @@ impl<'a> QueryStringParser<'a> {
 
     /// Create a query for a term, applying analysis if configured.
     fn create_query_for_term(&self, field: &str, term: &str, occur: Occur) -> Result<Box<dyn Query>> {
-        let analyzed_terms = self.analyze_term(term)?;
+        let analyzed_terms = self.analyze_term(Some(field), term)?;
 
         if analyzed_terms.is_empty() {
             // Term was completely filtered out (e.g., stop word)

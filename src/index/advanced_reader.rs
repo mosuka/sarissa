@@ -356,21 +356,24 @@ impl SegmentReader {
     }
 
     /// Get a document by ID from this segment.
-    pub fn document(&self, doc_id: u64) -> Result<Option<Document>> {
+    pub fn document(&self, local_doc_id: u64) -> Result<Option<Document>> {
         // Ensure documents are loaded
         if !self.loaded.load(Ordering::Acquire) {
             // Load documents on-demand
             self.load_stored_documents()?;
         }
 
-        // Adjust document ID for this segment
-        if doc_id < self.info.doc_offset || doc_id >= self.info.doc_offset + self.info.doc_count {
+        // Check if local_doc_id is within this segment's range
+        if local_doc_id >= self.info.doc_count {
             return Ok(None);
         }
 
+        // Convert local doc_id to global doc_id for storage lookup
+        let global_doc_id = self.info.doc_offset + local_doc_id;
+
         let docs = self.stored_documents.read().unwrap();
         if let Some(ref documents) = *docs {
-            Ok(documents.get(&doc_id).cloned())
+            Ok(documents.get(&global_doc_id).cloned())
         } else {
             Ok(None)
         }
@@ -622,9 +625,9 @@ impl AdvancedIndexReader {
         let mut segment_readers = Vec::new();
         let mut total_doc_count = 0;
 
-        for segment_info in segments {
+        for segment_info in &segments {
             total_doc_count += segment_info.doc_count;
-            let mut reader = SegmentReader::open(segment_info, storage.clone())?;
+            let mut reader = SegmentReader::open(segment_info.clone(), storage.clone())?;
 
             if config.preload_segments {
                 reader.load()?;
@@ -677,8 +680,16 @@ impl crate::index::reader::IndexReader for AdvancedIndexReader {
         // Find the segment containing this document
         for segment_reader in &self.segment_readers {
             let reader = segment_reader.read().unwrap();
-            if let Some(doc) = reader.document(doc_id)? {
-                return Ok(Some(doc));
+            let segment_info = &reader.info;
+
+            // Check if this doc_id belongs to this segment
+            let segment_start = segment_info.doc_offset;
+            let segment_end = segment_start + segment_info.doc_count;
+
+            if doc_id >= segment_start && doc_id < segment_end {
+                // Convert to segment-local doc_id
+                let local_doc_id = doc_id - segment_start;
+                return reader.document(local_doc_id);
             }
         }
 

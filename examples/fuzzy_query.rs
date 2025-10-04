@@ -100,7 +100,7 @@ fn main() -> Result<()> {
     println!("1. Fuzzy search for 'javascritp' (typo for 'javascript') with edit distance 1:");
     let query = FuzzyQuery::new("body", "javascritp").max_edits(1);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -123,7 +123,7 @@ fn main() -> Result<()> {
     println!("\n2. Fuzzy search for 'programing' (missing 'm') with edit distance 2:");
     let query = FuzzyQuery::new("body", "programing").max_edits(2);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -146,7 +146,7 @@ fn main() -> Result<()> {
     println!("\n3. Fuzzy search for 'machne' (missing 'i') in title with edit distance 1:");
     let query = FuzzyQuery::new("title", "machne").max_edits(1);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -169,7 +169,7 @@ fn main() -> Result<()> {
     println!("\n4. Fuzzy search for 'Jon' (should match 'John') in author with edit distance 1:");
     let query = FuzzyQuery::new("author", "Jon").max_edits(1);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -197,7 +197,7 @@ fn main() -> Result<()> {
     println!("\n5. Fuzzy search for 'algoritm' (missing 'h') with edit distance 2:");
     let query = FuzzyQuery::new("body", "algoritm").max_edits(2);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -220,7 +220,7 @@ fn main() -> Result<()> {
     println!("\n6. Fuzzy search for 'artifical' (missing 'i') in tags with edit distance 1:");
     let query = FuzzyQuery::new("tags", "artifical").max_edits(1);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -243,7 +243,7 @@ fn main() -> Result<()> {
     println!("\n7. Fuzzy search for exact 'python' with edit distance 0:");
     let query = FuzzyQuery::new("body", "python").max_edits(0);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -266,7 +266,7 @@ fn main() -> Result<()> {
     println!("\n8. Fuzzy search for 'databse' (missing 'a') with edit distance 3:");
     let query = FuzzyQuery::new("body", "databse").max_edits(3);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -289,14 +289,14 @@ fn main() -> Result<()> {
     println!("\n9. Fuzzy search for 'xyz123' (no similar terms) with edit distance 2:");
     let query = FuzzyQuery::new("body", "xyz123").max_edits(2);
     let request = SearchRequest::new(Box::new(query));
-    let results = engine.search_mut(request)?;
+    let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
     // Example 10: Count fuzzy matches
     println!("\n10. Counting documents with fuzzy match for 'developement' (extra 'e'):");
     let query = FuzzyQuery::new("body", "developement").max_edits(2);
-    let count = engine.count_mut(Box::new(query))?;
+    let count = engine.count(Box::new(query))?;
     println!("    Count: {count} documents");
 
     engine.close()?;
