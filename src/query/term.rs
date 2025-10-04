@@ -19,6 +19,10 @@ pub struct TermQuery {
 
 impl TermQuery {
     /// Create a new term query.
+    ///
+    /// Like Lucene, TermQuery performs exact matching and does NOT analyze the term.
+    /// The term should already be in the normalized form (e.g., lowercased).
+    /// Use a query parser or analyzer to normalize query strings before creating TermQuery.
     pub fn new<F, T>(field: F, term: T) -> Self
     where
         F: Into<String>,
@@ -132,7 +136,7 @@ impl Query for TermQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::reader::BasicIndexReader;
+    use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;
@@ -159,7 +163,7 @@ mod tests {
     #[test]
     fn test_term_query_matcher() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(storage).unwrap();
+        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -171,7 +175,7 @@ mod tests {
     #[test]
     fn test_term_query_scorer() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(storage).unwrap();
+        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -184,7 +188,7 @@ mod tests {
     #[test]
     fn test_term_query_is_empty() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(storage).unwrap();
+        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -199,7 +203,7 @@ mod tests {
     #[test]
     fn test_term_query_cost() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = BasicIndexReader::new(storage).unwrap();
+        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = TermQuery::new("title", "hello");
 

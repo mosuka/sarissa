@@ -5,7 +5,7 @@
 
 use sarissa::analysis::{KeywordAnalyzer, NoOpAnalyzer, StandardAnalyzer};
 use sarissa::document::{Document, FieldValue};
-use sarissa::index::writer::{BasicIndexWriter, IndexWriter, WriterConfig};
+use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 use sarissa::storage::{MemoryStorage, StorageConfig};
 use std::sync::Arc;
 
@@ -14,10 +14,10 @@ fn main() -> sarissa::error::Result<()> {
 
     // Create storage and writer configuration
     let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-    let config = WriterConfig::default();
+    let config = AdvancedWriterConfig::default();
 
     // Create writer in schema-less mode (no schema required!)
-    let mut writer = BasicIndexWriter::new(storage, config)?;
+    let mut writer = AdvancedIndexWriter::new(storage, config)?;
     println!("✓ Created schema-less IndexWriter");
 
     // Prepare analyzers for different field types

@@ -62,6 +62,9 @@ pub struct AdvancedPostingIterator {
 
     /// Current block being processed.
     current_block: usize,
+
+    /// Whether next() has been called at least once.
+    started: bool,
 }
 
 /// A block of postings for efficient processing.
@@ -88,6 +91,7 @@ impl AdvancedPostingIterator {
             position: 0,
             block_cache: None,
             current_block: 0,
+            started: false,
         }
     }
 
@@ -99,6 +103,7 @@ impl AdvancedPostingIterator {
             position: 0,
             block_cache: Some(blocks),
             current_block: 0,
+            started: false,
         }
     }
 
@@ -182,15 +187,25 @@ impl crate::index::reader::PostingIterator for AdvancedPostingIterator {
     }
 
     fn next(&mut self) -> Result<bool> {
-        if self.position < self.postings.len() {
+        if self.postings.is_empty() {
+            return Ok(false);
+        }
+
+        if !self.started {
+            // First call - position at first document
+            self.started = true;
+            Ok(true)
+        } else {
+            // Move to next document
             self.position += 1;
             Ok(self.position < self.postings.len())
-        } else {
-            Ok(false)
         }
     }
 
     fn skip_to(&mut self, target_doc_id: u64) -> Result<bool> {
+        // Mark as started
+        self.started = true;
+
         // Use block optimization if available
         if let Some(block_idx) = self.find_block(target_doc_id) {
             if let Some(blocks) = &self.block_cache {
@@ -225,7 +240,7 @@ pub struct SegmentReader {
     storage: Arc<dyn Storage>,
 
     /// Term dictionary for efficient term lookup.
-    term_dictionary: Option<Arc<HybridTermDictionary>>,
+    term_dictionary: RwLock<Option<Arc<HybridTermDictionary>>>,
 
     /// Cached stored documents.
     stored_documents: RwLock<Option<BTreeMap<u64, Document>>>,
@@ -240,7 +255,7 @@ impl SegmentReader {
         let reader = SegmentReader {
             info,
             storage,
-            term_dictionary: None,
+            term_dictionary: RwLock::new(None),
             stored_documents: RwLock::new(None),
             loaded: AtomicBool::new(false),
         };
@@ -278,13 +293,14 @@ impl SegmentReader {
     }
 
     /// Load the term dictionary for this segment.
-    fn load_term_dictionary(&mut self) -> Result<()> {
+    fn load_term_dictionary(&self) -> Result<()> {
         let dict_file = format!("{}.dict", self.info.segment_id);
 
         if let Ok(input) = self.storage.open_input(&dict_file) {
             let mut reader = StructReader::new(input)?;
-            let dictionary = HybridTermDictionary::read_from_storage(&mut reader)?;
-            self.term_dictionary = Some(Arc::new(dictionary));
+            let dictionary = HybridTermDictionary::read_from_storage(&mut reader)
+                .map_err(|e| SarissaError::index(format!("Failed to read term dictionary from {}: {}", dict_file, e)))?;
+            *self.term_dictionary.write().unwrap() = Some(Arc::new(dictionary));
         }
 
         Ok(())
@@ -292,8 +308,28 @@ impl SegmentReader {
 
     /// Load stored documents for this segment.
     fn load_stored_documents(&self) -> Result<()> {
-        let docs_file = format!("{}.docs", self.info.segment_id);
+        // Try JSON format first (for compatibility)
+        let json_file = format!("{}.json", self.info.segment_id);
+        if self.storage.file_exists(&json_file) {
+            let mut input = self.storage.open_input(&json_file)?;
+            let mut json_data = String::new();
+            std::io::Read::read_to_string(&mut input, &mut json_data)?;
 
+            let docs: Vec<Document> = serde_json::from_str(&json_data)
+                .map_err(|e| SarissaError::index(format!("Failed to parse JSON documents: {e}")))?;
+
+            let mut documents = BTreeMap::new();
+            for (idx, doc) in docs.into_iter().enumerate() {
+                let doc_id = self.info.doc_offset + idx as u64;
+                documents.insert(doc_id, doc);
+            }
+
+            *self.stored_documents.write().unwrap() = Some(documents);
+            return Ok(());
+        }
+
+        // Fallback to binary format
+        let docs_file = format!("{}.docs", self.info.segment_id);
         if let Ok(input) = self.storage.open_input(&docs_file) {
             let mut reader = StructReader::new(input)?;
             let doc_count = reader.read_varint()? as usize;
@@ -321,16 +357,20 @@ impl SegmentReader {
 
     /// Get a document by ID from this segment.
     pub fn document(&self, doc_id: u64) -> Result<Option<Document>> {
+        // Ensure documents are loaded
+        if !self.loaded.load(Ordering::Acquire) {
+            // Load documents on-demand
+            self.load_stored_documents()?;
+        }
+
         // Adjust document ID for this segment
         if doc_id < self.info.doc_offset || doc_id >= self.info.doc_offset + self.info.doc_count {
             return Ok(None);
         }
 
-        let local_doc_id = doc_id - self.info.doc_offset;
-
         let docs = self.stored_documents.read().unwrap();
         if let Some(ref documents) = *docs {
-            Ok(documents.get(&local_doc_id).cloned())
+            Ok(documents.get(&doc_id).cloned())
         } else {
             Ok(None)
         }
@@ -338,7 +378,12 @@ impl SegmentReader {
 
     /// Get term information for a field and term.
     pub fn term_info(&self, field: &str, term: &str) -> Result<Option<TermInfo>> {
-        if let Some(ref dict) = self.term_dictionary {
+        // Lazy load term dictionary if not loaded
+        if self.term_dictionary.read().unwrap().is_none() && !self.loaded.load(Ordering::Acquire) {
+            self.load_term_dictionary()?;
+        }
+
+        if let Some(ref dict) = *self.term_dictionary.read().unwrap() {
             let full_term = format!("{field}:{term}");
             Ok(dict.get(&full_term).cloned())
         } else {
@@ -352,27 +397,94 @@ impl SegmentReader {
         field: &str,
         term: &str,
     ) -> Result<Option<Box<dyn crate::index::reader::PostingIterator>>> {
-        if let Some(_term_info) = self.term_info(field, term)? {
-            // For now, create a dummy posting list
-            // TODO: Implement actual posting list loading from storage
-            let postings = vec![
-                crate::index::Posting {
-                    doc_id: self.info.doc_offset + 1,
-                    frequency: 1,
-                    positions: Some(vec![0]),
-                    weight: 1.0,
-                },
-                crate::index::Posting {
-                    doc_id: self.info.doc_offset + 2,
-                    frequency: 1,
-                    positions: Some(vec![0]),
-                    weight: 1.0,
-                },
-            ];
+        // Load postings from storage
+        let postings_file = format!("{}.post", self.info.segment_id);
+
+        if !self.storage.file_exists(&postings_file) {
+            // No inverted index, fall back to document scanning
+            return self.scan_documents_for_term(field, term);
+        }
+
+        if let Some(term_info) = self.term_info(field, term)? {
+            let input = self.storage.open_input(&postings_file)?;
+            let mut reader = StructReader::new(input)?;
+
+            // Skip to the posting position
+            let mut current_pos = 0u64;
+            while current_pos < term_info.posting_offset {
+                reader.read_u8()?;
+                current_pos += 1;
+            }
+
+            // Decode the posting list
+            use crate::index::PostingList;
+            let posting_list = PostingList::decode(&mut reader)?;
 
             Ok(Some(Box::new(AdvancedPostingIterator::with_blocks(
-                postings, 64,
+                posting_list.postings,
+                64,
             ))))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Scan documents for a term (fallback when no inverted index).
+    fn scan_documents_for_term(
+        &self,
+        field: &str,
+        term: &str,
+    ) -> Result<Option<Box<dyn crate::index::reader::PostingIterator>>> {
+        // Ensure documents are loaded
+        if !self.loaded.load(Ordering::Acquire) {
+            // Load documents on-demand
+            self.load_stored_documents()?;
+        }
+
+        let docs = self.stored_documents.read().unwrap();
+        if let Some(documents) = docs.as_ref() {
+            let mut postings = Vec::new();
+            let default_analyzer = crate::analysis::StandardAnalyzer::new()?;
+
+            for (doc_id, doc) in documents.iter() {
+                if let Some(field_value) = doc.get_field(field) {
+                    if let Some(text) = field_value.as_text() {
+                        // Get analyzer
+                        let analyzer = doc
+                            .get_field_analyzer(field)
+                            .map(|a| a.as_ref())
+                            .unwrap_or(&default_analyzer as &dyn crate::analysis::Analyzer);
+
+                        // Analyze text
+                        let token_stream = analyzer.analyze(text)?;
+                        let tokens: Vec<crate::analysis::Token> = token_stream.collect();
+
+                        let mut positions = Vec::new();
+                        for token in tokens.iter() {
+                            if token.text == term {
+                                positions.push(token.position as u32);
+                            }
+                        }
+
+                        if !positions.is_empty() {
+                            postings.push(crate::index::Posting {
+                                doc_id: *doc_id,
+                                frequency: positions.len() as u32,
+                                positions: Some(positions),
+                                weight: 1.0,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if postings.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(Box::new(AdvancedPostingIterator::with_blocks(
+                    postings, 64,
+                ))))
+            }
         } else {
             Ok(None)
         }

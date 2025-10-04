@@ -83,10 +83,12 @@ fn main() -> Result<()> {
 
     println!("Adding {} documents to the index...", documents.len());
     engine.add_documents(documents)?;
+    engine.commit()?;
 
     println!("\n=== BooleanQuery Examples ===\n");
 
     // Example 1: Simple AND query
+    // Note: Using lowercase terms because StandardAnalyzer normalizes text
     println!("1. Books about Python AND programming:");
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("body", "python")));

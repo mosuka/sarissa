@@ -151,10 +151,9 @@ impl PostingMatcher {
     /// Create an exhausted posting matcher.
     pub fn exhausted() -> Self {
         // Create a dummy iterator that's already exhausted
-        let doc_ids = vec![];
-        let term_freqs = vec![];
+        let postings = vec![];
         let posting_iter =
-            Box::new(crate::index::reader::BasicPostingIterator::new(doc_ids, term_freqs).unwrap());
+            Box::new(crate::index::advanced_reader::AdvancedPostingIterator::new(postings));
         PostingMatcher {
             posting_iter,
             exhausted: true,
@@ -804,10 +803,40 @@ mod tests {
 
     #[test]
     fn test_posting_matcher() {
-        let doc_ids = vec![0, 1, 2, 3, 4];
-        let term_freqs = vec![1, 1, 1, 1, 1];
+        let postings = vec![
+            crate::index::Posting {
+                doc_id: 0,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 1,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 2,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 3,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 4,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+        ];
         let posting_iter =
-            Box::new(crate::index::reader::BasicPostingIterator::new(doc_ids, term_freqs).unwrap());
+            Box::new(crate::index::advanced_reader::AdvancedPostingIterator::new(postings));
         let mut matcher = PostingMatcher::new(posting_iter);
 
         assert_eq!(matcher.doc_id(), 0);
@@ -836,16 +865,82 @@ mod tests {
     #[test]
     fn test_conjunction_matcher() {
         // Create two posting matchers with overlapping documents
-        let doc_ids1 = vec![0, 2, 4, 6, 8];
-        let term_freqs1 = vec![1, 1, 1, 1, 1];
+        let postings1 = vec![
+            crate::index::Posting {
+                doc_id: 0,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 2,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 4,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 6,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 8,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+        ];
         let matcher1 = Box::new(PostingMatcher::new(Box::new(
-            crate::index::reader::BasicPostingIterator::new(doc_ids1, term_freqs1).unwrap(),
+            crate::index::advanced_reader::AdvancedPostingIterator::new(postings1),
         )));
 
-        let doc_ids2 = vec![1, 2, 3, 4, 5, 6];
-        let term_freqs2 = vec![1, 1, 1, 1, 1, 1];
+        let postings2 = vec![
+            crate::index::Posting {
+                doc_id: 1,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 2,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 3,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 4,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 5,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 6,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+        ];
         let matcher2 = Box::new(PostingMatcher::new(Box::new(
-            crate::index::reader::BasicPostingIterator::new(doc_ids2, term_freqs2).unwrap(),
+            crate::index::advanced_reader::AdvancedPostingIterator::new(postings2),
         )));
 
         let mut conjunction = ConjunctionMatcher::new(vec![matcher1, matcher2]);
@@ -867,17 +962,26 @@ mod tests {
     #[test]
     fn test_conjunction_not_matcher() {
         // Positive matcher: documents 0, 1, 2, 3, 4, 5
-        let doc_ids_pos = vec![0, 1, 2, 3, 4, 5];
-        let term_freqs_pos = vec![1, 1, 1, 1, 1, 1];
+        let postings_pos = vec![
+            crate::index::Posting { doc_id: 0, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 1, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 2, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 3, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 4, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 5, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+        ];
         let positive = Box::new(PostingMatcher::new(Box::new(
-            crate::index::reader::BasicPostingIterator::new(doc_ids_pos, term_freqs_pos).unwrap(),
+            crate::index::advanced_reader::AdvancedPostingIterator::new(postings_pos),
         )));
 
         // Negative matcher: documents 1, 3, 5
-        let doc_ids_neg = vec![1, 3, 5];
-        let term_freqs_neg = vec![1, 1, 1];
+        let postings_neg = vec![
+            crate::index::Posting { doc_id: 1, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 3, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 5, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+        ];
         let negative = Box::new(PostingMatcher::new(Box::new(
-            crate::index::reader::BasicPostingIterator::new(doc_ids_neg, term_freqs_neg).unwrap(),
+            crate::index::advanced_reader::AdvancedPostingIterator::new(postings_neg),
         )));
 
         let mut conj_not = ConjunctionNotMatcher::new(positive, vec![negative]);
@@ -899,10 +1003,13 @@ mod tests {
     #[test]
     fn test_not_matcher() {
         // Negative matcher: documents 1, 3, 5
-        let doc_ids_neg = vec![1, 3, 5];
-        let term_freqs_neg = vec![1, 1, 1];
+        let postings_neg = vec![
+            crate::index::Posting { doc_id: 1, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 3, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::index::Posting { doc_id: 5, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+        ];
         let negative = Box::new(PostingMatcher::new(Box::new(
-            crate::index::reader::BasicPostingIterator::new(doc_ids_neg, term_freqs_neg).unwrap(),
+            crate::index::advanced_reader::AdvancedPostingIterator::new(postings_neg),
         )));
 
         let mut not_matcher = NotMatcher::new(negative, 7);
@@ -934,16 +1041,52 @@ mod tests {
     #[test]
     fn test_conjunction_matcher_no_overlap() {
         // Create two posting matchers with no overlapping documents
-        let doc_ids1 = vec![0, 2, 4];
-        let term_freqs1 = vec![1, 1, 1];
+        let postings1 = vec![
+            crate::index::Posting {
+                doc_id: 0,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 2,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 4,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+        ];
         let matcher1 = Box::new(PostingMatcher::new(Box::new(
-            crate::index::reader::BasicPostingIterator::new(doc_ids1, term_freqs1).unwrap(),
+            crate::index::advanced_reader::AdvancedPostingIterator::new(postings1),
         )));
 
-        let doc_ids2 = vec![1, 3, 5];
-        let term_freqs2 = vec![1, 1, 1];
+        let postings2 = vec![
+            crate::index::Posting {
+                doc_id: 1,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 3,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::index::Posting {
+                doc_id: 5,
+                frequency: 1 as u32,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+        ];
         let matcher2 = Box::new(PostingMatcher::new(Box::new(
-            crate::index::reader::BasicPostingIterator::new(doc_ids2, term_freqs2).unwrap(),
+            crate::index::advanced_reader::AdvancedPostingIterator::new(postings2),
         )));
 
         let conjunction = ConjunctionMatcher::new(vec![matcher1, matcher2]);

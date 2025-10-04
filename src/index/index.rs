@@ -283,24 +283,52 @@ impl FileIndex {
             Ok(())
         }
     }
+
+    /// Load segment information from storage.
+    fn load_segments(&self) -> Result<Vec<SegmentInfo>> {
+        let files = self.storage.list_files()?;
+        let mut segments = Vec::new();
+
+        // Find all segment metadata files
+        for file in files {
+            if file.starts_with("segment_") && file.ends_with(".meta") {
+                let mut input = self.storage.open_input(&file)?;
+                let mut data = Vec::new();
+                std::io::Read::read_to_end(&mut input, &mut data)?;
+
+                let segment_info: SegmentInfo = serde_json::from_slice(&data)
+                    .map_err(|e| SarissaError::index(format!("Failed to parse segment metadata: {e}")))?;
+
+                segments.push(segment_info);
+            }
+        }
+
+        // Sort by generation for consistent ordering
+        segments.sort_by_key(|s| s.generation);
+
+        Ok(segments)
+    }
 }
 
 impl Index for FileIndex {
     fn reader(&self) -> Result<Box<dyn IndexReader>> {
         self.check_closed()?;
 
-        use crate::index::reader::BasicIndexReader;
+        use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 
-        let reader = BasicIndexReader::new(self.storage.clone())?;
+        // Load segment information
+        let segments = self.load_segments()?;
+
+        let reader = AdvancedIndexReader::new(segments, self.storage.clone(), AdvancedReaderConfig::default())?;
         Ok(Box::new(reader))
     }
 
     fn writer(&self) -> Result<Box<dyn IndexWriter>> {
         self.check_closed()?;
 
-        use crate::index::writer::{BasicIndexWriter, WriterConfig};
+        use crate::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 
-        let writer = BasicIndexWriter::new(self.storage.clone(), WriterConfig::default())?;
+        let writer = AdvancedIndexWriter::new(self.storage.clone(), AdvancedWriterConfig::default())?;
         Ok(Box::new(writer))
     }
 

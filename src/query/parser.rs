@@ -1,17 +1,38 @@
 //! Query parser for converting string queries to structured query objects.
+//!
+//! Similar to Lucene's QueryParser, this module parses query strings and
+//! uses analyzers to tokenize and normalize terms.
 
 use std::iter::Peekable;
 use std::str::Chars;
+use std::sync::Arc;
 
+use crate::analysis::{Analyzer, StandardAnalyzer};
 use crate::error::{Result, SarissaError};
 use crate::query::{BooleanQuery, BooleanQueryBuilder, Occur, Query, TermQuery};
 
-/// A simple query parser that supports basic query syntax.
+/// A query parser that supports basic query syntax with analyzer support.
+///
+/// Like Lucene's QueryParser, terms are analyzed using the configured analyzer
+/// before creating TermQuery objects. This ensures proper tokenization, lowercasing,
+/// and stop word removal.
+///
 /// Schema-less: no field validation, accepts any field name.
-#[derive(Debug)]
 pub struct QueryParser {
     /// Default field to search in when no field is specified.
     default_field: Option<String>,
+
+    /// Analyzer to use for parsing query terms.
+    analyzer: Option<Arc<dyn Analyzer>>,
+}
+
+impl std::fmt::Debug for QueryParser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryParser")
+            .field("default_field", &self.default_field)
+            .field("analyzer", &self.analyzer.as_ref().map(|_| "<Analyzer>"))
+            .finish()
+    }
 }
 
 impl Default for QueryParser {
@@ -21,10 +42,31 @@ impl Default for QueryParser {
 }
 
 impl QueryParser {
-    /// Create a new query parser (schema-less).
+    /// Create a new query parser without an analyzer (schema-less).
+    ///
+    /// Without an analyzer, terms are used as-is (case-sensitive, no tokenization).
     pub fn new() -> Self {
         QueryParser {
             default_field: None,
+            analyzer: None,
+        }
+    }
+
+    /// Create a query parser with the standard analyzer.
+    ///
+    /// This is the Lucene-style approach: terms are analyzed before matching.
+    pub fn with_standard_analyzer() -> Result<Self> {
+        Ok(QueryParser {
+            default_field: None,
+            analyzer: Some(Arc::new(StandardAnalyzer::new()?)),
+        })
+    }
+
+    /// Create a query parser with a custom analyzer.
+    pub fn with_analyzer(analyzer: Arc<dyn Analyzer>) -> Self {
+        QueryParser {
+            default_field: None,
+            analyzer: Some(analyzer),
         }
     }
 
@@ -49,7 +91,7 @@ impl QueryParser {
             return Ok(Box::new(BooleanQuery::new()));
         }
 
-        let mut parser = QueryStringParser::new(trimmed, &self.default_field);
+        let mut parser = QueryStringParser::new(trimmed, &self.default_field, &self.analyzer);
         parser.parse()
     }
 
@@ -62,7 +104,7 @@ impl QueryParser {
 
         // Schema-less: no field validation
         let field_name = Some(field.to_string());
-        let mut parser = QueryStringParser::new(trimmed, &field_name);
+        let mut parser = QueryStringParser::new(trimmed, &field_name, &self.analyzer);
         parser.parse()
     }
 
@@ -76,13 +118,28 @@ impl QueryParser {
 struct QueryStringParser<'a> {
     chars: Peekable<Chars<'a>>,
     default_field: &'a Option<String>,
+    analyzer: &'a Option<Arc<dyn Analyzer>>,
 }
 
 impl<'a> QueryStringParser<'a> {
-    fn new(query_str: &'a str, default_field: &'a Option<String>) -> Self {
+    fn new(query_str: &'a str, default_field: &'a Option<String>, analyzer: &'a Option<Arc<dyn Analyzer>>) -> Self {
         QueryStringParser {
             chars: query_str.chars().peekable(),
             default_field,
+            analyzer,
+        }
+    }
+
+    /// Analyze a term using the configured analyzer.
+    /// Returns the analyzed tokens or the original term if no analyzer is set.
+    fn analyze_term(&self, term: &str) -> Result<Vec<String>> {
+        if let Some(analyzer) = self.analyzer {
+            let token_stream = analyzer.analyze(term)?;
+            let tokens: Vec<String> = token_stream.map(|t| t.text).collect();
+            Ok(tokens)
+        } else {
+            // No analyzer - use term as-is
+            Ok(vec![term.to_string()])
         }
     }
 
@@ -176,20 +233,43 @@ impl<'a> QueryStringParser<'a> {
                 let field = parts[0];
                 let term = parts[1];
 
-                // Schema-less: no field validation needed
-                let query = Box::new(TermQuery::new(field, term));
-                return Ok(self.wrap_with_occur(query, occur));
+                // Analyze the term
+                return self.create_query_for_term(field, term, occur);
             }
         }
 
         // Use default field if available
         if let Some(default_field) = self.default_field {
-            let query = Box::new(TermQuery::new(default_field, word));
-            Ok(self.wrap_with_occur(query, occur))
+            self.create_query_for_term(default_field, &word, occur)
         } else {
             Err(SarissaError::schema(
                 "No default field specified and no field prefix found",
             ))
+        }
+    }
+
+    /// Create a query for a term, applying analysis if configured.
+    fn create_query_for_term(&self, field: &str, term: &str, occur: Occur) -> Result<Box<dyn Query>> {
+        let analyzed_terms = self.analyze_term(term)?;
+
+        if analyzed_terms.is_empty() {
+            // Term was completely filtered out (e.g., stop word)
+            return Ok(Box::new(BooleanQuery::new()));
+        }
+
+        if analyzed_terms.len() == 1 {
+            // Single term - create a TermQuery
+            let query = Box::new(TermQuery::new(field, &analyzed_terms[0]));
+            Ok(self.wrap_with_occur(query, occur))
+        } else {
+            // Multiple tokens (e.g., "don't" -> ["don", "t"])
+            // Create a BooleanQuery with SHOULD clauses
+            let mut builder = BooleanQueryBuilder::new();
+            for analyzed_term in analyzed_terms {
+                let term_query = Box::new(TermQuery::new(field, &analyzed_term));
+                builder = builder.should(term_query);
+            }
+            Ok(self.wrap_with_occur(Box::new(builder.build()), occur))
         }
     }
 
@@ -297,9 +377,18 @@ impl<'a> QueryStringParser<'a> {
 }
 
 /// Builder for creating query parsers.
-#[derive(Debug)]
 pub struct QueryParserBuilder {
     default_field: Option<String>,
+    analyzer: Option<Arc<dyn Analyzer>>,
+}
+
+impl std::fmt::Debug for QueryParserBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryParserBuilder")
+            .field("default_field", &self.default_field)
+            .field("analyzer", &self.analyzer.as_ref().map(|_| "<Analyzer>"))
+            .finish()
+    }
 }
 
 impl QueryParserBuilder {
@@ -307,6 +396,7 @@ impl QueryParserBuilder {
     pub fn new() -> Self {
         QueryParserBuilder {
             default_field: None,
+            analyzer: None,
         }
     }
 
@@ -316,10 +406,23 @@ impl QueryParserBuilder {
         self
     }
 
+    /// Set the analyzer.
+    pub fn analyzer(mut self, analyzer: Arc<dyn Analyzer>) -> Self {
+        self.analyzer = Some(analyzer);
+        self
+    }
+
+    /// Use the standard analyzer.
+    pub fn with_standard_analyzer(mut self) -> Result<Self> {
+        self.analyzer = Some(Arc::new(StandardAnalyzer::new()?));
+        Ok(self)
+    }
+
     /// Build the query parser.
     pub fn build(self) -> QueryParser {
         QueryParser {
             default_field: self.default_field,
+            analyzer: self.analyzer,
         }
     }
 }
@@ -481,6 +584,45 @@ mod tests {
         let parser = QueryParserBuilder::new().default_field("title").build();
 
         assert_eq!(parser.default_field(), Some("title"));
+    }
+
+    #[test]
+    fn test_query_parser_with_analyzer() {
+        let parser = QueryParser::with_standard_analyzer()
+            .unwrap()
+            .with_default_field("title");
+
+        // Should lowercase "HELLO"
+        let query = parser.parse("HELLO").unwrap();
+        let desc = query.description();
+        assert!(desc.contains("hello") && !desc.contains("HELLO"));
+    }
+
+    #[test]
+    fn test_query_parser_analyzer_stop_words() {
+        let parser = QueryParser::with_standard_analyzer()
+            .unwrap()
+            .with_default_field("title");
+
+        // "the" should be removed
+        let query = parser.parse("the quick fox").unwrap();
+        let desc = query.description();
+        assert!(!desc.contains("the"));
+        assert!(desc.contains("quick"));
+        assert!(desc.contains("fox"));
+    }
+
+    #[test]
+    fn test_query_parser_analyzer_multiple_tokens() {
+        let parser = QueryParser::with_standard_analyzer()
+            .unwrap()
+            .with_default_field("title");
+
+        // Should create OR query for multiple tokens
+        let query = parser.parse("Hello World").unwrap();
+        let desc = query.description();
+        assert!(desc.contains("hello"));
+        assert!(desc.contains("world"));
     }
 
     #[test]

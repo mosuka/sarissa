@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::index::reader::BasicIndexReader;
+use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 use crate::parallel_search::config::{ParallelSearchConfig, SearchOptions};
 use crate::parallel_search::engine::ParallelSearchEngine;
 use crate::query::TermQuery;
@@ -26,7 +26,7 @@ pub fn example_parallel_search() -> Result<()> {
     // Add multiple indices to the engine
     for i in 0..3 {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = Box::new(BasicIndexReader::new(storage)?);
+        let reader = Box::new(AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default())?);
         engine.add_index(format!("index_{i}"), reader, 1.0)?;
     }
 

@@ -367,14 +367,14 @@ impl ParallelIndexEngine {
 mod tests {
     use super::*;
     use crate::document::FieldValue;
-    use crate::index::writer::BasicIndexWriter;
+    use crate::index::advanced_writer::AdvancedIndexWriter;
     use crate::parallel_index::partitioner::HashPartitioner;
     use crate::storage::{MemoryStorage, StorageConfig};
 
     fn create_test_writer() -> Box<dyn IndexWriter> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(
-            BasicIndexWriter::new(storage, crate::index::writer::WriterConfig::default()).unwrap(),
+            AdvancedIndexWriter::new(storage, crate::index::advanced_writer::AdvancedWriterConfig::default()).unwrap(),
         )
     }
 

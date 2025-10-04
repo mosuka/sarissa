@@ -431,24 +431,33 @@ mod tests {
     }
 
     #[test]
-    fn test_search_with_string_query() {
+    fn test_search_with_query_parser() {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
         let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
-        // Add some documents
+        // Add some documents with lowercase titles for testing
         let docs = vec![
-            create_test_document("Hello World", "This is a test document"),
-            create_test_document("Goodbye World", "This is another test document"),
+            create_test_document("hello world", "This is a test document"),
+            create_test_document("goodbye world", "This is another test document"),
         ];
         engine.add_documents(docs).unwrap();
+        engine.commit().unwrap();
 
-        // Search with string query
-        let results = engine.search_str("Hello", "title").unwrap();
+        // Search with QueryParser (Lucene style)
+        use crate::query::QueryParser;
+        let parser = QueryParser::with_standard_analyzer()
+            .unwrap()
+            .with_default_field("title");
 
-        // Should parse and execute the query
-        assert_eq!(results.hits.len(), 1); // Now finds actual matches with our improved implementation
+        // QueryParser analyzes "Hello" to "hello" before creating TermQuery
+        let query = parser.parse("Hello").unwrap();
+        let results = engine.search_query(query).unwrap();
+
+        // Should find the document
+        // QueryParser analyzes "Hello" -> "hello", which matches the indexed "hello"
+        assert_eq!(results.hits.len(), 1);
         assert_eq!(results.total_hits, 1);
     }
 

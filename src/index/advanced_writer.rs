@@ -42,7 +42,7 @@ impl Default for AdvancedWriterConfig {
         AdvancedWriterConfig {
             max_buffered_docs: 10000,
             max_buffer_memory: 64 * 1024 * 1024, // 64MB
-            segment_prefix: "seg".to_string(),
+            segment_prefix: "segment".to_string(),
             store_term_positions: true,
             optimize_segments: false,
             default_analyzer: "standard".to_string(),
@@ -118,6 +118,19 @@ pub struct AdvancedIndexWriter {
 
     /// Writer statistics.
     stats: WriterStats,
+}
+
+impl std::fmt::Debug for AdvancedIndexWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AdvancedIndexWriter")
+            .field("config", &self.config)
+            .field("next_doc_id", &self.next_doc_id)
+            .field("current_segment", &self.current_segment)
+            .field("closed", &self.closed)
+            .field("buffered_docs_count", &self.buffered_docs.len())
+            .field("stats", &self.stats)
+            .finish()
+    }
 }
 
 impl AdvancedIndexWriter {
@@ -355,6 +368,9 @@ impl AdvancedIndexWriter {
         // Write segment metadata
         self.write_segment_metadata(&segment_name)?;
 
+        // COMPATIBILITY: Also write documents as JSON for BasicIndexReader
+        self.write_json_documents(&segment_name)?;
+
         // Clear buffers
         self.buffered_docs.clear();
         self.inverted_index = InvertedIndex::new();
@@ -436,25 +452,53 @@ impl AdvancedIndexWriter {
         Ok(())
     }
 
+    /// Write documents as JSON for compatibility with BasicIndexReader.
+    fn write_json_documents(&self, segment_name: &str) -> Result<()> {
+        use crate::document::FieldValue;
+
+        // Convert analyzed documents back to Document format
+        let mut documents = Vec::new();
+        for analyzed_doc in &self.buffered_docs {
+            let mut doc = Document::new();
+            for (field_name, field_value) in &analyzed_doc.stored_fields {
+                doc.add_field(field_name, FieldValue::Text(field_value.clone()));
+            }
+            documents.push(doc);
+        }
+
+        // Write as JSON
+        let json_file = format!("{segment_name}.json");
+        let mut output = self.storage.create_output(&json_file)?;
+        let segment_data = serde_json::to_string_pretty(&documents)
+            .map_err(|e| SarissaError::index(format!("Failed to serialize segment: {e}")))?;
+        std::io::Write::write_all(&mut output, segment_data.as_bytes())?;
+        output.close()?;
+
+        Ok(())
+    }
+
     /// Write segment metadata.
     fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
+        use crate::index::SegmentInfo;
+
+        // Create SegmentInfo
+        let segment_info = SegmentInfo {
+            segment_id: segment_name.to_string(),
+            doc_count: self.buffered_docs.len() as u64,
+            doc_offset: self.next_doc_id - self.buffered_docs.len() as u64,
+            generation: self.current_segment as u64,
+            has_deletions: false,
+        };
+
+        // Write as JSON for compatibility with FileIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
-        let meta_output = self.storage.create_output(&meta_file)?;
-        let mut meta_writer = StructWriter::new(meta_output);
+        let json_data = serde_json::to_string_pretty(&segment_info)
+            .map_err(|e| SarissaError::index(format!("Failed to serialize segment metadata: {e}")))?;
 
-        // Write metadata
-        meta_writer.write_u32(0x534D4554)?; // Magic "SMET"
-        meta_writer.write_u32(1)?; // Version
-        meta_writer.write_u64(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-        )?; // Timestamp
-        meta_writer.write_varint(self.buffered_docs.len() as u64)?; // Doc count
-        meta_writer.write_varint(self.inverted_index.term_count())?; // Term count
+        let mut output = self.storage.create_output(&meta_file)?;
+        std::io::Write::write_all(&mut output, json_data.as_bytes())?;
+        output.close()?;
 
-        meta_writer.close()?;
         Ok(())
     }
 
@@ -531,11 +575,65 @@ impl AdvancedIndexWriter {
     pub fn pending_docs(&self) -> usize {
         self.buffered_docs.len()
     }
+
+    /// Check if the writer is closed.
+    pub fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    /// Delete documents matching the given term.
+    /// Note: This is a simplified implementation for compatibility.
+    pub fn delete_documents(&mut self, _field: &str, _value: &str) -> Result<u64> {
+        // TODO: Implement proper deletion support
+        Ok(0)
+    }
+
+    /// Update a document (delete old, add new).
+    pub fn update_document(&mut self, field: &str, value: &str, doc: Document) -> Result<()> {
+        self.delete_documents(field, value)?;
+        self.add_document(doc)?;
+        Ok(())
+    }
 }
 
 impl Drop for AdvancedIndexWriter {
     fn drop(&mut self) {
         let _ = self.close();
+    }
+}
+
+// Implement IndexWriter trait for compatibility with existing code
+impl crate::index::writer::IndexWriter for AdvancedIndexWriter {
+    fn add_document(&mut self, doc: Document) -> Result<()> {
+        AdvancedIndexWriter::add_document(self, doc)
+    }
+
+    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
+        AdvancedIndexWriter::delete_documents(self, field, value)
+    }
+
+    fn update_document(&mut self, field: &str, value: &str, doc: Document) -> Result<()> {
+        AdvancedIndexWriter::update_document(self, field, value, doc)
+    }
+
+    fn commit(&mut self) -> Result<()> {
+        AdvancedIndexWriter::commit(self)
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        AdvancedIndexWriter::rollback(self)
+    }
+
+    fn pending_docs(&self) -> u64 {
+        AdvancedIndexWriter::pending_docs(self) as u64
+    }
+
+    fn close(&mut self) -> Result<()> {
+        AdvancedIndexWriter::close(self)
+    }
+
+    fn is_closed(&self) -> bool {
+        AdvancedIndexWriter::is_closed(self)
     }
 }
 
@@ -605,7 +703,7 @@ mod tests {
 
         // Check that files were created
         let files = storage.list_files().unwrap();
-        assert!(files.iter().any(|f| f.contains("seg_000000")));
+        assert!(files.iter().any(|f| f.contains("segment_000000")));
     }
 
     #[test]
@@ -625,7 +723,7 @@ mod tests {
         // Check that files were created
         let files = storage.list_files().unwrap();
         assert!(files.contains(&"index.meta".to_string()));
-        assert!(files.iter().any(|f| f.starts_with("seg_")));
+        assert!(files.iter().any(|f| f.starts_with("segment_")));
     }
 
     #[test]
