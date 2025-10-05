@@ -541,7 +541,7 @@ mod tests {
             .score(&query_terms, &doc_stats, &collection_stats, &config)
             .unwrap();
 
-        assert!(score >= 0.0 && score <= 1.0); // Cosine similarity range
+        assert!((0.0..=1.0).contains(&score)); // Cosine similarity range
         assert_eq!(scorer.name(), "Vector Space");
     }
 

@@ -1,11 +1,9 @@
 //! Document structure for schema-less indexing.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::Analyzer;
 use crate::document::FieldValue;
 use crate::query::geo::GeoPoint;
 
@@ -13,25 +11,13 @@ use crate::query::geo::GeoPoint;
 ///
 /// Documents are collections of field values in schema-less mode.
 /// Fields can be added dynamically without predefined schema.
-#[derive(Clone, Serialize, Deserialize)]
+///
+/// Analyzers are configured at the writer level (via `AdvancedWriterConfig`),
+/// not per-document, following Lucene's design.
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Document {
     /// The field values for this document
     fields: HashMap<String, FieldValue>,
-    /// Optional analyzers for specific fields
-    #[serde(skip)]
-    field_analyzers: HashMap<String, Arc<dyn Analyzer>>,
-}
-
-impl std::fmt::Debug for Document {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Document")
-            .field("fields", &self.fields)
-            .field(
-                "field_analyzers",
-                &format!("<{} analyzers>", self.field_analyzers.len()),
-            )
-            .finish()
-    }
 }
 
 impl Document {
@@ -39,25 +25,12 @@ impl Document {
     pub fn new() -> Self {
         Document {
             fields: HashMap::new(),
-            field_analyzers: HashMap::new(),
         }
     }
 
     /// Add a field value to the document.
     pub fn add_field<S: Into<String>>(&mut self, name: S, value: FieldValue) {
         self.fields.insert(name.into(), value);
-    }
-
-    /// Add a field value with a specific analyzer.
-    pub fn add_field_with_analyzer<S: Into<String>>(
-        &mut self,
-        name: S,
-        value: FieldValue,
-        analyzer: Arc<dyn Analyzer>,
-    ) {
-        let field_name = name.into();
-        self.fields.insert(field_name.clone(), value);
-        self.field_analyzers.insert(field_name, analyzer);
     }
 
     /// Get a field value from the document.
@@ -83,16 +56,6 @@ impl Document {
     /// Get all field values.
     pub fn fields(&self) -> &HashMap<String, FieldValue> {
         &self.fields
-    }
-
-    /// Get the analyzer for a specific field (if set).
-    pub fn get_field_analyzer(&self, name: &str) -> Option<&Arc<dyn Analyzer>> {
-        self.field_analyzers.get(name)
-    }
-
-    /// Get all field analyzers.
-    pub fn field_analyzers(&self) -> &HashMap<String, Arc<dyn Analyzer>> {
-        &self.field_analyzers
     }
 
     /// Get the number of fields.
@@ -132,21 +95,11 @@ impl DocumentBuilder {
     }
 
     /// Add a text field to the document.
+    ///
+    /// When indexing, the default analyzer or field-specific analyzer configured in the writer will be used.
     pub fn add_text<S: Into<String>, T: Into<String>>(mut self, name: S, value: T) -> Self {
         self.document
             .add_field(name, FieldValue::Text(value.into()));
-        self
-    }
-
-    /// Add a text field with a specific analyzer to the document.
-    pub fn add_text_with_analyzer<S: Into<String>, T: Into<String>>(
-        mut self,
-        name: S,
-        value: T,
-        analyzer: Arc<dyn Analyzer>,
-    ) -> Self {
-        self.document
-            .add_field_with_analyzer(name, FieldValue::Text(value.into()), analyzer);
         self
     }
 
@@ -199,6 +152,14 @@ impl DocumentBuilder {
     }
 
     /// Add a field with a generic value.
+    ///
+    /// This is a low-level method that accepts any `FieldValue` directly.
+    /// For most cases, prefer using type-safe methods like `add_text`, `add_integer`, `add_float`, etc.
+    ///
+    /// Use this method when:
+    /// - You already have a `FieldValue` instance
+    /// - You need to dynamically determine the field type at runtime
+    /// - You require low-level API flexibility
     pub fn add_field<S: Into<String>>(mut self, name: S, value: FieldValue) -> Self {
         self.document.add_field(name, value);
         self

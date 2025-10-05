@@ -806,31 +806,31 @@ mod tests {
         let postings = vec![
             crate::index::Posting {
                 doc_id: 0,
-                frequency: 1 as u32,
+                frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 1,
-                frequency: 1 as u32,
+                frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 2,
-                frequency: 1 as u32,
+                frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 3,
-                frequency: 1 as u32,
+                frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 4,
-                frequency: 1 as u32,
+                frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
@@ -868,31 +868,31 @@ mod tests {
         let postings1 = vec![
             crate::index::Posting {
                 doc_id: 0,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 2,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 4,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 6,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 8,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
@@ -904,37 +904,37 @@ mod tests {
         let postings2 = vec![
             crate::index::Posting {
                 doc_id: 1,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 2,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 3,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 4,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 5,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 6,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
@@ -1044,19 +1044,19 @@ mod tests {
         let postings1 = vec![
             crate::index::Posting {
                 doc_id: 0,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 2,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 4,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
@@ -1068,19 +1068,19 @@ mod tests {
         let postings2 = vec![
             crate::index::Posting {
                 doc_id: 1,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 3,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
             crate::index::Posting {
                 doc_id: 5,
-                frequency: 1 as u32,
+                frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },

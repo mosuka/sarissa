@@ -18,9 +18,9 @@ use std::sync::Arc;
 /// use sarissa::analysis::{PerFieldAnalyzerWrapper, StandardAnalyzer, KeywordAnalyzer};
 /// use std::sync::Arc;
 ///
-/// let mut wrapper = PerFieldAnalyzerWrapper::new(Arc::new(StandardAnalyzer::new()));
-/// wrapper.add_analyzer("id", Arc::new(KeywordAnalyzer));
-/// wrapper.add_analyzer("category", Arc::new(KeywordAnalyzer));
+/// let mut wrapper = PerFieldAnalyzerWrapper::new(Arc::new(StandardAnalyzer::new().unwrap()));
+/// wrapper.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
+/// wrapper.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
 /// // "title" and "body" will use StandardAnalyzer
 /// // "id" and "category" will use KeywordAnalyzer
 /// ```

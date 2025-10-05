@@ -16,7 +16,7 @@ use crate::index::{InvertedIndex, Posting};
 use crate::storage::{Storage, StructWriter};
 
 /// Advanced index writer configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AdvancedWriterConfig {
     /// Maximum number of documents to buffer before flushing to disk.
     pub max_buffered_docs: usize,
@@ -33,11 +33,21 @@ pub struct AdvancedWriterConfig {
     /// Whether to optimize segments after writing.
     pub optimize_segments: bool,
 
-    /// Default analyzer for text fields.
-    pub default_analyzer: String,
+    /// Analyzer for text fields (can be PerFieldAnalyzerWrapper for field-specific analysis).
+    pub analyzer: Arc<dyn Analyzer>,
+}
 
-    /// Per-field analyzer configuration (field name -> analyzer name).
-    pub field_analyzers: AHashMap<String, String>,
+impl std::fmt::Debug for AdvancedWriterConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AdvancedWriterConfig")
+            .field("max_buffered_docs", &self.max_buffered_docs)
+            .field("max_buffer_memory", &self.max_buffer_memory)
+            .field("segment_prefix", &self.segment_prefix)
+            .field("store_term_positions", &self.store_term_positions)
+            .field("optimize_segments", &self.optimize_segments)
+            .field("analyzer", &self.analyzer.name())
+            .finish()
+    }
 }
 
 impl Default for AdvancedWriterConfig {
@@ -48,8 +58,7 @@ impl Default for AdvancedWriterConfig {
             segment_prefix: "segment".to_string(),
             store_term_positions: true,
             optimize_segments: false,
-            default_analyzer: "standard".to_string(),
-            field_analyzers: AHashMap::new(),
+            analyzer: Arc::new(crate::analysis::StandardAnalyzer::new().unwrap()),
         }
     }
 }
@@ -114,9 +123,6 @@ pub struct AdvancedIndexWriter {
     /// Current segment number.
     current_segment: u32,
 
-    /// Available analyzers.
-    analyzers: AHashMap<String, Box<dyn Analyzer>>,
-
     /// Whether the writer is closed.
     closed: bool,
 
@@ -140,27 +146,6 @@ impl std::fmt::Debug for AdvancedIndexWriter {
 impl AdvancedIndexWriter {
     /// Create a new advanced index writer (schema-less mode).
     pub fn new(storage: Arc<dyn Storage>, config: AdvancedWriterConfig) -> Result<Self> {
-        let mut analyzers = AHashMap::new();
-
-        // Add default analyzers
-        analyzers.insert(
-            "standard".to_string(),
-            Box::new(crate::analysis::StandardAnalyzer::new()?) as Box<dyn Analyzer>,
-        );
-
-        // For SimpleAnalyzer, we need to provide a tokenizer
-        let regex_tokenizer = Arc::new(crate::analysis::tokenizer::RegexTokenizer::new()?);
-        analyzers.insert(
-            "simple".to_string(),
-            Box::new(crate::analysis::SimpleAnalyzer::new(regex_tokenizer)) as Box<dyn Analyzer>,
-        );
-
-        // For KeywordAnalyzer, use the existing implementation
-        analyzers.insert(
-            "keyword".to_string(),
-            Box::new(crate::analysis::KeywordAnalyzer::new()) as Box<dyn Analyzer>,
-        );
-
         Ok(AdvancedIndexWriter {
             storage,
             config,
@@ -168,7 +153,6 @@ impl AdvancedIndexWriter {
             buffered_docs: Vec::new(),
             next_doc_id: 0,
             current_segment: 0,
-            analyzers,
             closed: false,
             stats: WriterStats {
                 docs_added: 0,
@@ -203,18 +187,6 @@ impl AdvancedIndexWriter {
         Ok(())
     }
 
-    /// Add a custom analyzer with the given name.
-    pub fn add_analyzer(&mut self, name: &str, analyzer: Box<dyn Analyzer>) {
-        self.analyzers.insert(name.to_string(), analyzer);
-    }
-
-    /// Configure a field to use a specific analyzer by name.
-    pub fn set_field_analyzer(&mut self, field: &str, analyzer_name: &str) {
-        self.config
-            .field_analyzers
-            .insert(field.to_string(), analyzer_name.to_string());
-    }
-
     /// Analyze a document into terms.
     fn analyze_document(&mut self, doc: Document) -> Result<AnalyzedDocument> {
         let doc_id = self.next_doc_id;
@@ -229,17 +201,14 @@ impl AdvancedIndexWriter {
 
             match field_value {
                 FieldValue::Text(text) => {
-                    // Analyze text field with per-field analyzer or default
-                    let analyzer_name = self
-                        .config
-                        .field_analyzers
-                        .get(field_name)
-                        .unwrap_or(&self.config.default_analyzer);
-                    let analyzer = self.analyzers.get_mut(analyzer_name).ok_or_else(|| {
-                        SarissaError::analysis(format!("Unknown analyzer: {analyzer_name}"))
-                    })?;
+                    // Use analyzer from config (can be PerFieldAnalyzerWrapper for field-specific analysis)
+                    use crate::analysis::PerFieldAnalyzerWrapper;
 
-                    let tokens = analyzer.analyze(text)?;
+                    let tokens = if let Some(per_field) = self.config.analyzer.as_any().downcast_ref::<PerFieldAnalyzerWrapper>() {
+                        per_field.analyze_field(field_name, text)?
+                    } else {
+                        self.config.analyzer.analyze(text)?
+                    };
                     let token_vec: Vec<Token> = tokens.collect();
                     let analyzed_terms = self.tokens_to_analyzed_terms(token_vec);
 
@@ -654,14 +623,6 @@ impl crate::index::writer::IndexWriter for AdvancedIndexWriter {
 
     fn is_closed(&self) -> bool {
         AdvancedIndexWriter::is_closed(self)
-    }
-
-    fn add_analyzer(&mut self, name: &str, analyzer: Box<dyn Analyzer>) {
-        AdvancedIndexWriter::add_analyzer(self, name, analyzer)
-    }
-
-    fn set_field_analyzer(&mut self, field: &str, analyzer_name: &str) {
-        AdvancedIndexWriter::set_field_analyzer(self, field, analyzer_name)
     }
 }
 

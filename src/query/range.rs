@@ -1357,8 +1357,7 @@ mod tests {
             for i in 1..encoded_values.len() {
                 assert!(
                     encoded_values[i - 1] < encoded_values[i],
-                    "Ordering not preserved for {:?}",
-                    numeric_type
+                    "Ordering not preserved for {numeric_type:?}"
                 );
             }
         }

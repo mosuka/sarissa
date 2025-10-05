@@ -1,6 +1,6 @@
 //! Field-specific search example - demonstrates searching within specific fields.
 
-use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzerWrapper, StandardAnalyzer};
+use sarissa::analysis::{KeywordAnalyzer, StandardAnalyzer};
 use sarissa::index::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::search::{SearchEngine, SearchRequest};
@@ -16,12 +16,6 @@ fn main() -> Result<()> {
 
     // Create a search engine
     let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
-
-    // Set up per-field analyzer wrapper for query parsing
-    // Match the indexing configuration
-    let mut per_field_analyzer = PerFieldAnalyzerWrapper::new(Arc::new(StandardAnalyzer::new()?));
-    per_field_analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
-    per_field_analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
 
     // Prepare documents
     let documents = vec![
@@ -87,20 +81,22 @@ fn main() -> Result<()> {
     // Note: We need to manually configure the writer since SearchEngine doesn't persist
     // analyzer configuration across writer() calls yet
     {
+        use sarissa::analysis::PerFieldAnalyzerWrapper;
         use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 
         let storage = engine.storage().clone();
-        let mut config = AdvancedWriterConfig::default();
 
-        // Configure field-specific analyzers
+        // Configure field-specific analyzers using PerFieldAnalyzerWrapper (Lucene-style)
         // - category and id use KeywordAnalyzer (entire field as one token)
-        // - author uses StandardAnalyzer (default) for tokenized search
-        config
-            .field_analyzers
-            .insert("category".to_string(), "keyword".to_string());
-        config
-            .field_analyzers
-            .insert("id".to_string(), "keyword".to_string());
+        // - other fields use StandardAnalyzer (default) for tokenized search
+        let mut per_field_analyzer = PerFieldAnalyzerWrapper::new(Arc::new(StandardAnalyzer::new()?));
+        per_field_analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
+        per_field_analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
+
+        let config = AdvancedWriterConfig {
+            analyzer: Arc::new(per_field_analyzer),
+            ..Default::default()
+        };
 
         let mut writer = AdvancedIndexWriter::new(storage, config)?;
 
@@ -117,10 +113,8 @@ fn main() -> Result<()> {
     println!("\n=== Field-Specific Search Examples ===\n");
 
     // Example 1: Search by author
-    // Note: Now we can use "Orwell" (any case) because the parser automatically
-    // uses KeywordAnalyzer for the "author" field, which lowercases the input
     println!("1. Search by author (author:Orwell):");
-    let parser = sarissa::query::QueryParser::with_analyzer(Arc::new(per_field_analyzer.clone()));
+    let parser = sarissa::query::QueryParser::new();
     let query = parser.parse_field("author", "Orwell")?;
     let results = engine.search(SearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
@@ -157,10 +151,8 @@ fn main() -> Result<()> {
                     println!("      Category: {category}");
                 }
             }
-            if let Some(field_value) = doc.get_field("year") {
-                if let sarissa::document::FieldValue::Integer(year) = field_value {
-                    println!("      Year: {year}");
-                }
+            if let Some(sarissa::document::FieldValue::Integer(year)) = doc.get_field("year") {
+                println!("      Year: {year}");
             }
         }
     }

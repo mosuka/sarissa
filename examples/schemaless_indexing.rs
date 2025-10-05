@@ -1,9 +1,10 @@
 //! Example demonstrating schema-less indexing (Lucene-style)
 //!
 //! This example shows how to use Sarissa without predefined schemas,
-//! allowing maximum flexibility in document structure and field analyzers.
+//! allowing maximum flexibility in document structure.
+//! Analyzers are configured at the writer level using PerFieldAnalyzerWrapper.
 
-use sarissa::analysis::{KeywordAnalyzer, NoOpAnalyzer, StandardAnalyzer};
+use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzerWrapper, StandardAnalyzer};
 use sarissa::document::{Document, FieldValue};
 use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 use sarissa::storage::{MemoryStorage, StorageConfig};
@@ -12,30 +13,29 @@ use std::sync::Arc;
 fn main() -> sarissa::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");
 
+    // Configure per-field analyzers using PerFieldAnalyzerWrapper (Lucene-style)
+    let mut per_field_analyzer = PerFieldAnalyzerWrapper::new(Arc::new(StandardAnalyzer::new()?));
+    per_field_analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
+    per_field_analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
+    per_field_analyzer.add_analyzer("isbn", Arc::new(KeywordAnalyzer::new()));
+    per_field_analyzer.add_analyzer("user_id", Arc::new(KeywordAnalyzer::new()));
+    per_field_analyzer.add_analyzer("email", Arc::new(KeywordAnalyzer::new()));
+    per_field_analyzer.add_analyzer("post_id", Arc::new(KeywordAnalyzer::new()));
+
     // Create storage and writer configuration
     let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-    let config = AdvancedWriterConfig::default();
+    let mut config = AdvancedWriterConfig::default();
+    config.analyzer = Arc::new(per_field_analyzer);
 
     // Create writer in schema-less mode (no schema required!)
     let mut writer = AdvancedIndexWriter::new(storage, config)?;
-    println!("✓ Created schema-less IndexWriter");
-
-    // Prepare analyzers for different field types
-    let _standard_analyzer = Arc::new(StandardAnalyzer::new()?);
-    let keyword_analyzer = Arc::new(KeywordAnalyzer::new());
-    let _noop_analyzer = Arc::new(NoOpAnalyzer::new());
+    println!("✓ Created schema-less IndexWriter with PerFieldAnalyzerWrapper");
 
     println!("\n=== Adding E-commerce Product Documents ===");
 
     // Product 1: Electronics
     let mut product1 = Document::new();
-    // Use unified API - specify analyzer only when needed
-    product1.add_field_with_analyzer(
-        "id",
-        FieldValue::Text("ELEC-001".to_string()),
-        keyword_analyzer.clone(),
-    );
-    // Standard fields use default analyzer automatically
+    product1.add_field("id", FieldValue::Text("ELEC-001".to_string()));
     product1.add_field(
         "title",
         FieldValue::Text("Wireless Bluetooth Headphones".to_string()),
@@ -44,12 +44,7 @@ fn main() -> sarissa::error::Result<()> {
         "description",
         FieldValue::Text("High-quality wireless headphones with noise cancellation".to_string()),
     );
-    // Category needs exact matching
-    product1.add_field_with_analyzer(
-        "category",
-        FieldValue::Text("electronics".to_string()),
-        keyword_analyzer.clone(),
-    );
+    product1.add_field("category", FieldValue::Text("electronics".to_string()));
     product1.add_field("price", FieldValue::Float(199.99));
     product1.add_field("in_stock", FieldValue::Boolean(true));
 
@@ -58,12 +53,7 @@ fn main() -> sarissa::error::Result<()> {
 
     // Product 2: Book (different fields structure)
     let mut product2 = Document::new();
-    product2.add_field_with_analyzer(
-        "id",
-        FieldValue::Text("BOOK-002".to_string()),
-        keyword_analyzer.clone(),
-    );
-    // Text fields automatically get default analyzer (StandardAnalyzer)
+    product2.add_field("id", FieldValue::Text("BOOK-002".to_string()));
     product2.add_field(
         "title",
         FieldValue::Text("The Rust Programming Language".to_string()),
@@ -72,17 +62,8 @@ fn main() -> sarissa::error::Result<()> {
         "author",
         FieldValue::Text("Steve Klabnik and Carol Nichols".to_string()),
     );
-    // ISBN needs exact matching
-    product2.add_field_with_analyzer(
-        "isbn",
-        FieldValue::Text("978-1718500440".to_string()),
-        keyword_analyzer.clone(),
-    );
-    product2.add_field_with_analyzer(
-        "category",
-        FieldValue::Text("books".to_string()),
-        keyword_analyzer.clone(),
-    );
+    product2.add_field("isbn", FieldValue::Text("978-1718500440".to_string()));
+    product2.add_field("category", FieldValue::Text("books".to_string()));
     product2.add_field("price", FieldValue::Float(39.99));
     product2.add_field("pages", FieldValue::Integer(552));
 
@@ -91,17 +72,8 @@ fn main() -> sarissa::error::Result<()> {
 
     // User 1: Customer profile (completely different structure)
     let mut user1 = Document::new();
-    user1.add_field_with_analyzer(
-        "user_id",
-        FieldValue::Text("USER-12345".to_string()),
-        keyword_analyzer.clone(),
-    );
-    user1.add_field_with_analyzer(
-        "email",
-        FieldValue::Text("john.doe@example.com".to_string()),
-        keyword_analyzer.clone(), // Email should be exact match
-    );
-    // Name and bio get default analyzer (searchable text)
+    user1.add_field("user_id", FieldValue::Text("USER-12345".to_string()));
+    user1.add_field("email", FieldValue::Text("john.doe@example.com".to_string()));
     user1.add_field("full_name", FieldValue::Text("John Doe".to_string()));
     user1.add_field(
         "bio",
@@ -115,26 +87,18 @@ fn main() -> sarissa::error::Result<()> {
     writer.add_document(user1)?;
     println!("✓ Added user profile");
 
-    println!("\n=== Using DocumentBuilder with Analyzers ===");
+    println!("\n=== Using DocumentBuilder ===");
 
-    // Blog post using DocumentBuilder - demonstrating unified API
+    // Blog post using DocumentBuilder
     let blog_post = Document::builder()
-        .add_text_with_analyzer(
-            "post_id",
-            "POST-789",
-            keyword_analyzer.clone(), // Exact match for ID
-        )
-        .add_text("title", "Getting Started with Schema-less Search") // Uses default analyzer
+        .add_text("post_id", "POST-789")
+        .add_text("title", "Getting Started with Schema-less Search")
         .add_text(
             "content",
             "Schema-less search engines provide incredible flexibility...",
-        ) // Uses default analyzer
-        .add_text_with_analyzer(
-            "tags",
-            "rust,search,tutorial",
-            keyword_analyzer.clone(), // Exact match for tags
         )
-        .add_text("author", "Jane Smith") // Uses default analyzer
+        .add_text("tags", "rust,search,tutorial")
+        .add_text("author", "Jane Smith")
         .build();
 
     writer.add_document(blog_post)?;
