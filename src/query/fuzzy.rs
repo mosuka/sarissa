@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::index::reader::IndexReader;
+use crate::full_text::reader::IndexReader;
 use crate::query::{Matcher, Query, Scorer};
 use crate::spelling::levenshtein::{
     TypoPatterns, damerau_levenshtein_distance, levenshtein_distance,
@@ -843,7 +843,7 @@ mod tests {
 
     #[test]
     fn test_fuzzy_matcher() {
-        use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+        use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 
         use crate::storage::{MemoryStorage, StorageConfig};
         use std::sync::Arc;

@@ -15,7 +15,7 @@ use super::types::{
 };
 
 use crate::error::{Result, SarissaError};
-use crate::index::reader::IndexReader;
+use crate::full_text::reader::IndexReader;
 use crate::query::{Query, SearchHit, SearchResults};
 use crate::vector::Vector;
 

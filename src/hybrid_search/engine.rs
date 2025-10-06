@@ -11,10 +11,15 @@ use super::stats::HybridSearchStats;
 use super::types::HybridSearchResults;
 use crate::embeding::EmbeddingEngine;
 use crate::error::Result;
-use crate::query::Query;
-use crate::search::{Search, SearchRequest};
+use crate::query::{Query, SearchResults};
+use crate::full_text_search::{SearchRequest, Searcher};
 use crate::vector::types::{VectorSearchResult, VectorSearchResults};
 use crate::vector::{DistanceMetric, Vector};
+
+/// Trait for searchable types in hybrid search.
+pub trait Searchable: Send {
+    fn search(&self, request: SearchRequest) -> Result<SearchResults>;
+}
 
 /// Hybrid search engine that combines keyword and vector search.
 pub struct HybridSearchEngine {
@@ -107,7 +112,7 @@ impl HybridSearchEngine {
     }
 
     /// Perform hybrid search combining keyword and vector search.
-    pub async fn search<S: Search>(
+    pub async fn search<S: Searchable>(
         &self,
         query_text: &str,
         keyword_searcher: &S,
@@ -238,7 +243,7 @@ impl HybridSearchEngine {
 mod tests {
     use super::*;
     use crate::query::{SearchHit, SearchResults, TermQuery};
-    use crate::search::{Search, SearchRequest};
+    use crate::full_text_search::SearchRequest;
 
     struct MockSearch {
         results: Vec<SearchHit>,
@@ -250,17 +255,13 @@ mod tests {
         }
     }
 
-    impl Search for MockSearch {
+    impl Searchable for MockSearch {
         fn search(&self, _request: SearchRequest) -> Result<SearchResults> {
             Ok(SearchResults {
                 hits: self.results.clone(),
                 total_hits: self.results.len() as u64,
                 max_score: self.results.first().map(|r| r.score).unwrap_or(0.0),
             })
-        }
-
-        fn count(&self, _query: Box<dyn Query>) -> Result<u64> {
-            Ok(self.results.len() as u64)
         }
     }
 

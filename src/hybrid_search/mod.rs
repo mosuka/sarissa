@@ -14,7 +14,7 @@ pub mod stats;
 pub mod types;
 
 pub use config::{HybridSearchConfig, ScoreNormalization};
-pub use engine::HybridSearchEngine;
+pub use engine::{HybridSearchEngine, Searchable};
 pub use merger::ResultMerger;
 pub use scorer::ScoreNormalizer;
 pub use stats::HybridSearchStats;

@@ -1,0 +1,136 @@
+//! Full-text search execution and result processing.
+//!
+//! This module handles all read operations and search execution:
+//! - Query execution
+//! - Scoring and ranking
+//! - Result collection and processing
+//! - Faceting and aggregation
+//! - Highlighting and similarity
+
+pub mod advanced_reader;
+pub mod engine;
+pub mod facet;
+pub mod highlight;
+pub mod result_processor;
+pub mod scoring;
+pub mod searcher;
+pub mod similarity;
+pub mod spell_corrected;
+
+// Re-export commonly used types
+pub use advanced_reader::AdvancedIndexReader;
+pub use engine::SearchEngine;
+pub use facet::*;
+pub use highlight::*;
+pub use result_processor::*;
+pub use scoring::*;
+pub use searcher::Searcher;
+pub use similarity::*;
+pub use spell_corrected::*;
+
+// Re-export search functionality from query module
+pub use crate::query::{FuzzyConfig, FuzzyMatch, FuzzyQuery};
+pub use crate::query::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoMatch, GeoPoint};
+pub use crate::query::{
+    MoreLikeThisQuery, SimilarityAlgorithm, SimilarityConfig, SimilarityResult,
+};
+
+use crate::error::Result;
+use crate::query::{Query, SearchResults};
+
+/// Configuration for search operations.
+#[derive(Debug, Clone)]
+pub struct SearchConfig {
+    /// Maximum number of documents to return.
+    pub max_docs: usize,
+    /// Minimum score threshold.
+    pub min_score: f32,
+    /// Whether to load document content.
+    pub load_documents: bool,
+    /// Timeout for search operations in milliseconds.
+    pub timeout_ms: Option<u64>,
+    /// Enable parallel search for better performance on multi-core systems.
+    pub parallel: bool,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        SearchConfig {
+            max_docs: 10,
+            min_score: 0.0,
+            load_documents: true,
+            timeout_ms: None,
+            parallel: false,
+        }
+    }
+}
+
+/// Search request containing query and configuration.
+#[derive(Debug)]
+pub struct SearchRequest {
+    /// The query to execute.
+    pub query: Box<dyn Query>,
+    /// Search configuration.
+    pub config: SearchConfig,
+}
+
+impl Clone for SearchRequest {
+    fn clone(&self) -> Self {
+        SearchRequest {
+            query: self.query.clone_box(),
+            config: self.config.clone(),
+        }
+    }
+}
+
+impl SearchRequest {
+    /// Create a new search request.
+    pub fn new(query: Box<dyn Query>) -> Self {
+        SearchRequest {
+            query,
+            config: SearchConfig::default(),
+        }
+    }
+
+    /// Set the maximum number of documents to return.
+    pub fn max_docs(mut self, max_docs: usize) -> Self {
+        self.config.max_docs = max_docs;
+        self
+    }
+
+    /// Set the minimum score threshold.
+    pub fn min_score(mut self, min_score: f32) -> Self {
+        self.config.min_score = min_score;
+        self
+    }
+
+    /// Set whether to load document content.
+    pub fn load_documents(mut self, load_documents: bool) -> Self {
+        self.config.load_documents = load_documents;
+        self
+    }
+
+    /// Set the search timeout.
+    pub fn timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.config.timeout_ms = Some(timeout_ms);
+        self
+    }
+
+    /// Enable parallel search.
+    pub fn parallel(mut self, parallel: bool) -> Self {
+        self.config.parallel = parallel;
+        self
+    }
+
+    /// Execute the search request.
+    pub fn search(self, engine: &mut SearchEngine) -> Result<SearchResults> {
+        engine.search(self)
+    }
+}
+
+// Implement Searchable trait for SearchEngine to support hybrid search
+impl crate::hybrid_search::Searchable for SearchEngine {
+    fn search(&self, request: SearchRequest) -> Result<SearchResults> {
+        SearchEngine::search(self, request)
+    }
+}

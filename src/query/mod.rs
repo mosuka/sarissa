@@ -40,7 +40,7 @@ pub use self::term::TermQuery;
 pub use self::wildcard::WildcardQuery;
 
 // Re-export similarity types for convenience
-pub use crate::search::similarity::{
+pub use crate::full_text_search::similarity::{
     MoreLikeThisQuery, SimilarityAlgorithm, SimilarityConfig, SimilarityResult,
 };
 

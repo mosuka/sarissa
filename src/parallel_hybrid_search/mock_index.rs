@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::document::{Document, FieldValue};
 use crate::error::Result;
-use crate::index::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
+use crate::full_text::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
 use crate::query::{Query, SearchHit, SearchResults};
-use crate::search::{Search, SearchRequest};
+use crate::full_text_search::SearchRequest;
 
 /// Mock index reader that stores documents in memory (schema-less mode).
 #[derive(Clone)]
@@ -146,50 +146,50 @@ impl MockSearcher {
     }
 }
 
-impl Search for MockSearcher {
-    fn search(&self, request: SearchRequest) -> Result<SearchResults> {
-        // Extract field and term from the query
-        let (field, term) = extract_term_query(request.query.as_ref());
+// impl Search for MockSearcher {
+//     fn search(&self, request: SearchRequest) -> Result<SearchResults> {
+//         // Extract field and term from the query
+//         let (field, term) = extract_term_query(request.query.as_ref());
 
-        if field.is_empty() || term.is_empty() {
-            return Ok(SearchResults {
-                hits: Vec::new(),
-                total_hits: 0,
-                max_score: 0.0,
-            });
-        }
+//         if field.is_empty() || term.is_empty() {
+//             return Ok(SearchResults {
+//                 hits: Vec::new(),
+//                 total_hits: 0,
+//                 max_score: 0.0,
+//             });
+//         }
 
-        let mut hits = self.reader.search_documents(&field, &term);
+//         let mut hits = self.reader.search_documents(&field, &term);
 
-        // Apply score threshold
-        if request.config.min_score > 0.0 {
-            hits.retain(|hit| hit.score >= request.config.min_score);
-        }
+//         // Apply score threshold
+//         if request.config.min_score > 0.0 {
+//             hits.retain(|hit| hit.score >= request.config.min_score);
+//         }
 
-        // Limit results
-        let total_hits = hits.len() as u64;
-        hits.truncate(request.config.max_docs);
+//         // Limit results
+//         let total_hits = hits.len() as u64;
+//         hits.truncate(request.config.max_docs);
 
-        let max_score = hits.first().map(|h| h.score).unwrap_or(0.0);
+//         let max_score = hits.first().map(|h| h.score).unwrap_or(0.0);
 
-        Ok(SearchResults {
-            hits,
-            total_hits,
-            max_score,
-        })
-    }
+//         Ok(SearchResults {
+//             hits,
+//             total_hits,
+//             max_score,
+//         })
+//     }
 
-    fn count(&self, query: Box<dyn Query>) -> Result<u64> {
-        let (field, term) = extract_term_query(query.as_ref());
+//     fn count(&self, query: Box<dyn Query>) -> Result<u64> {
+//         let (field, term) = extract_term_query(query.as_ref());
 
-        if field.is_empty() || term.is_empty() {
-            return Ok(0);
-        }
+//         if field.is_empty() || term.is_empty() {
+//             return Ok(0);
+//         }
 
-        let hits = self.reader.search_documents(&field, &term);
-        Ok(hits.len() as u64)
-    }
-}
+//         let hits = self.reader.search_documents(&field, &term);
+//         Ok(hits.len() as u64)
+//     }
+// }
 
 /// Extract field and term from a query (simplified for testing).
 fn extract_term_query(_query: &dyn Query) -> (String, String) {

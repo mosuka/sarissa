@@ -1,7 +1,7 @@
 //! Boolean query implementation for combining multiple queries.
 
 use crate::error::Result;
-use crate::index::reader::IndexReader;
+use crate::full_text::reader::IndexReader;
 use crate::query::matcher::{
     AllMatcher, ConjunctionMatcher, ConjunctionNotMatcher, DisjunctionMatcher, EmptyMatcher,
     Matcher, NotMatcher,
@@ -434,7 +434,7 @@ impl Default for BooleanQueryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
     use crate::query::term::TermQuery;
 
     use crate::storage::{MemoryStorage, StorageConfig};

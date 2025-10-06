@@ -6,7 +6,7 @@
 
 use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
 use sarissa::document::{Document, FieldValue};
-use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sarissa::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
 use sarissa::storage::{MemoryStorage, StorageConfig};
 use std::sync::Arc;
 
