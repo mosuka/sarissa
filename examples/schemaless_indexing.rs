@@ -2,9 +2,9 @@
 //!
 //! This example shows how to use Sarissa without predefined schemas,
 //! allowing maximum flexibility in document structure.
-//! Analyzers are configured at the writer level using PerFieldAnalyzerWrapper.
+//! Analyzers are configured at the writer level using PerFieldAnalyzer.
 
-use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzerWrapper, StandardAnalyzer};
+use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
 use sarissa::document::{Document, FieldValue};
 use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 use sarissa::storage::{MemoryStorage, StorageConfig};
@@ -13,8 +13,8 @@ use std::sync::Arc;
 fn main() -> sarissa::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");
 
-    // Configure per-field analyzers using PerFieldAnalyzerWrapper (Lucene-style)
-    let mut per_field_analyzer = PerFieldAnalyzerWrapper::new(Arc::new(StandardAnalyzer::new()?));
+    // Configure per-field analyzers using PerFieldAnalyzer (Lucene-style)
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new()?));
     per_field_analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
     per_field_analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
     per_field_analyzer.add_analyzer("isbn", Arc::new(KeywordAnalyzer::new()));
@@ -29,7 +29,7 @@ fn main() -> sarissa::error::Result<()> {
 
     // Create writer in schema-less mode (no schema required!)
     let mut writer = AdvancedIndexWriter::new(storage, config)?;
-    println!("✓ Created schema-less IndexWriter with PerFieldAnalyzerWrapper");
+    println!("✓ Created schema-less IndexWriter with PerFieldAnalyzer");
 
     println!("\n=== Adding E-commerce Product Documents ===");
 

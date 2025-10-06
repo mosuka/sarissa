@@ -6,6 +6,7 @@
 
 use crate::document::Document;
 use crate::error::Result;
+use crate::index::advanced_writer::AnalyzedDocument;
 
 /// Trait for index writers.
 ///
@@ -31,6 +32,12 @@ use crate::error::Result;
 pub trait IndexWriter: Send + std::fmt::Debug {
     /// Add a document to the index.
     fn add_document(&mut self, doc: Document) -> Result<()>;
+
+    /// Add an already analyzed document to the index.
+    ///
+    /// This allows adding pre-analyzed documents that were processed
+    /// using DocumentParser or from external tokenization systems.
+    fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<()>;
 
     /// Delete documents matching the given term.
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64>;

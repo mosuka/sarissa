@@ -81,15 +81,15 @@ fn main() -> Result<()> {
     // Note: We need to manually configure the writer since SearchEngine doesn't persist
     // analyzer configuration across writer() calls yet
     {
-        use sarissa::analysis::PerFieldAnalyzerWrapper;
+        use sarissa::analysis::PerFieldAnalyzer;
         use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 
         let storage = engine.storage().clone();
 
-        // Configure field-specific analyzers using PerFieldAnalyzerWrapper (Lucene-style)
+        // Configure field-specific analyzers using PerFieldAnalyzer (Lucene-style)
         // - category and id use KeywordAnalyzer (entire field as one token)
         // - other fields use StandardAnalyzer (default) for tokenized search
-        let mut per_field_analyzer = PerFieldAnalyzerWrapper::new(Arc::new(StandardAnalyzer::new()?));
+        let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new()?));
         per_field_analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
         per_field_analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
 

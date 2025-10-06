@@ -33,7 +33,7 @@ pub struct AdvancedWriterConfig {
     /// Whether to optimize segments after writing.
     pub optimize_segments: bool,
 
-    /// Analyzer for text fields (can be PerFieldAnalyzerWrapper for field-specific analysis).
+    /// Analyzer for text fields (can be PerFieldAnalyzer for field-specific analysis).
     pub analyzer: Arc<dyn Analyzer>,
 }
 
@@ -64,28 +64,33 @@ impl Default for AdvancedWriterConfig {
 }
 
 /// A document with analyzed terms ready for indexing.
+///
+/// This structure represents a document after analysis (tokenization),
+/// ready to be written to the inverted index.
 #[derive(Debug, Clone)]
-struct AnalyzedDocument {
+pub struct AnalyzedDocument {
     /// Original document ID.
-    doc_id: u64,
+    pub doc_id: u64,
     /// Field name to analyzed terms mapping.
-    field_terms: AHashMap<String, Vec<AnalyzedTerm>>,
+    pub field_terms: AHashMap<String, Vec<AnalyzedTerm>>,
     /// Stored field values.
-    stored_fields: AHashMap<String, String>,
+    pub stored_fields: AHashMap<String, String>,
 }
 
 /// An analyzed term with position and metadata.
+///
+/// This represents a single token after analysis, including
+/// position information for phrase queries and proximity searches.
 #[derive(Debug, Clone)]
-struct AnalyzedTerm {
+pub struct AnalyzedTerm {
     /// The term text.
-    term: String,
+    pub term: String,
     /// Position in the field.
-    position: u32,
+    pub position: u32,
     /// Term frequency in the document.
-    frequency: u32,
+    pub frequency: u32,
     /// Offset in the original text.
-    #[allow(dead_code)]
-    offset: (usize, usize),
+    pub offset: (usize, usize),
 }
 
 /// Statistics about the writing process.
@@ -172,6 +177,51 @@ impl AdvancedIndexWriter {
         // Analyze the document
         let analyzed_doc = self.analyze_document(doc)?;
 
+        // Add the analyzed document
+        self.add_analyzed_document(analyzed_doc)
+    }
+
+    /// Add an already analyzed document to the index.
+    ///
+    /// This method allows you to add pre-analyzed documents directly,
+    /// bypassing the internal document analysis step. This is useful when:
+    /// - You want to use DocumentParser explicitly for better control
+    /// - You have pre-tokenized documents from external systems
+    /// - You need to customize the analysis process
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use sarissa::document::{Document, DocumentParser};
+    /// use sarissa::analysis::{PerFieldAnalyzer, StandardAnalyzer};
+    /// use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+    /// use sarissa::storage::{MemoryStorage, StorageConfig};
+    /// use std::sync::Arc;
+    ///
+    /// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+    /// let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
+    /// let config = AdvancedWriterConfig {
+    ///     analyzer: Arc::new(per_field.clone()),
+    ///     ..Default::default()
+    /// };
+    /// let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
+    ///
+    /// let doc = Document::builder()
+    ///     .add_text("title", "Rust Programming")
+    ///     .build();
+    ///
+    /// let doc_parser = DocumentParser::new(Arc::new(per_field));
+    /// let analyzed = doc_parser.parse(doc, 0).unwrap();
+    /// writer.add_analyzed_document(analyzed).unwrap();
+    /// ```
+    pub fn add_analyzed_document(&mut self, analyzed_doc: AnalyzedDocument) -> Result<()> {
+        self.check_closed()?;
+
+        // Update next_doc_id to ensure uniqueness
+        if analyzed_doc.doc_id >= self.next_doc_id {
+            self.next_doc_id = analyzed_doc.doc_id + 1;
+        }
+
         // Add to inverted index
         self.add_analyzed_document_to_index(&analyzed_doc)?;
 
@@ -201,10 +251,10 @@ impl AdvancedIndexWriter {
 
             match field_value {
                 FieldValue::Text(text) => {
-                    // Use analyzer from config (can be PerFieldAnalyzerWrapper for field-specific analysis)
-                    use crate::analysis::PerFieldAnalyzerWrapper;
+                    // Use analyzer from config (can be PerFieldAnalyzer for field-specific analysis)
+                    use crate::analysis::PerFieldAnalyzer;
 
-                    let tokens = if let Some(per_field) = self.config.analyzer.as_any().downcast_ref::<PerFieldAnalyzerWrapper>() {
+                    let tokens = if let Some(per_field) = self.config.analyzer.as_any().downcast_ref::<PerFieldAnalyzer>() {
                         per_field.analyze_field(field_name, text)?
                     } else {
                         self.config.analyzer.analyze(text)?
@@ -595,6 +645,10 @@ impl Drop for AdvancedIndexWriter {
 impl crate::index::writer::IndexWriter for AdvancedIndexWriter {
     fn add_document(&mut self, doc: Document) -> Result<()> {
         AdvancedIndexWriter::add_document(self, doc)
+    }
+
+    fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<()> {
+        AdvancedIndexWriter::add_analyzed_document(self, doc)
     }
 
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
