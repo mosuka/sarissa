@@ -6,7 +6,7 @@ use std::sync::Arc;
 use regex::Regex;
 
 use crate::error::Result;
-use crate::index::reader::IndexReader;
+use crate::full_text::reader::IndexReader;
 use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher};
 use crate::query::scorer::Scorer;

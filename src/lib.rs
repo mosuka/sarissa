@@ -16,16 +16,17 @@ pub mod cli;
 pub mod document;
 pub mod embeding;
 pub mod error;
+pub mod full_text;
+pub mod full_text_index;
+pub mod full_text_search;
 pub mod hybrid_search;
-pub mod index;
 pub mod ml;
 pub mod parallel_hybrid_search;
-pub mod parallel_index;
-pub mod parallel_search;
+pub mod parallel_full_text_index;
+pub mod parallel_full_text_search;
 pub mod parallel_vector_index;
 pub mod parallel_vector_search;
 pub mod query;
-pub mod search;
 pub mod spelling;
 pub mod storage;
 pub mod util;
@@ -39,9 +40,10 @@ pub mod prelude {
     pub use crate::analysis::{Analyzer, StandardAnalyzer};
     pub use crate::document::{Document, FieldValue};
     pub use crate::error::{Result, SarissaError};
-    pub use crate::index::{Index, IndexReader, IndexWriter};
+    pub use crate::full_text::{Index, IndexReader};
+    pub use crate::full_text_index::{AdvancedIndexWriter, IndexWriter};
+    pub use crate::full_text_search::{SearchConfig, SearchEngine, SearchRequest};
     pub use crate::query::{BM25Scorer, Hit, Query, RangeQuery, SearchResults, TermQuery};
-    pub use crate::search::{Search, SearchConfig};
     pub use crate::storage::{MemoryStorage, Storage, StorageConfig};
 }
 

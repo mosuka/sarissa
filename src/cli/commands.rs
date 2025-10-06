@@ -14,7 +14,7 @@ use crate::error::{Result, SarissaError};
 use crate::query::*;
 
 // Removed: use crate::document::field::TextField;
-use crate::search::spell_corrected::*;
+use crate::full_text_search::spell_corrected::*;
 use crate::spelling::*;
 
 /// Execute a CLI command.

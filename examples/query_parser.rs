@@ -10,10 +10,10 @@
 //! - Grouped queries
 //! - Actual search engine integration
 
-use sarissa::index::index::IndexConfig;
+use sarissa::full_text::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::QueryParser;
-use sarissa::search::{SearchEngine, SearchRequest};
+use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

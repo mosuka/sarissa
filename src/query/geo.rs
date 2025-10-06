@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::index::reader::IndexReader;
+use crate::full_text::reader::IndexReader;
 use crate::query::{Matcher, Query, Scorer};
 
 /// A geographical point with latitude and longitude.

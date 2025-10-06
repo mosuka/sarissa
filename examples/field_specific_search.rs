@@ -1,9 +1,9 @@
 //! Field-specific search example - demonstrates searching within specific fields.
 
 use sarissa::analysis::{KeywordAnalyzer, StandardAnalyzer};
-use sarissa::index::index::IndexConfig;
+use sarissa::full_text::index::IndexConfig;
 use sarissa::prelude::*;
-use sarissa::search::{SearchEngine, SearchRequest};
+use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -82,7 +82,7 @@ fn main() -> Result<()> {
     // analyzer configuration across writer() calls yet
     {
         use sarissa::analysis::PerFieldAnalyzer;
-        use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+        use sarissa::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
 
         let storage = engine.storage().clone();
 

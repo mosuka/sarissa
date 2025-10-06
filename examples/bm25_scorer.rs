@@ -1,10 +1,10 @@
 //! BM25 Scorer example - demonstrates BM25 scoring algorithm and parameters.
 
 use sarissa::error::Result;
-use sarissa::index::index::IndexConfig;
+use sarissa::full_text::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::{BM25Scorer, Scorer};
-use sarissa::search::{SearchEngine, SearchRequest};
+use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

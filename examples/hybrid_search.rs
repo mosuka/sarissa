@@ -2,10 +2,10 @@
 
 use sarissa::embeding::{EmbeddingConfig, EmbeddingMethod};
 use sarissa::hybrid_search::{HybridSearchConfig, HybridSearchEngine, ScoreNormalization};
-use sarissa::index::index::IndexConfig;
+use sarissa::full_text::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::TermQuery;
-use sarissa::search::{SearchEngine, SearchRequest};
+use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use std::collections::HashMap;
 use tempfile::TempDir;
 

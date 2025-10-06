@@ -5,13 +5,15 @@
 //! 2. Perform concurrent searches across the indices with various merge strategies
 //! 3. Demonstrate performance metrics and optimization techniques
 
-use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sarissa::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
-use sarissa::parallel_index::{
+use sarissa::full_text_index::AdvancedIndexWriter;
+use sarissa::full_text_index::AdvancedWriterConfig;
+use sarissa::full_text_search::AdvancedIndexReader;
+use sarissa::full_text_search::advanced_reader::AdvancedReaderConfig;
+use sarissa::parallel_full_text_index::{
     HashPartitioner, ParallelIndexConfig, ParallelIndexEngine, PartitionConfig,
     config::IndexingOptions,
 };
-use sarissa::parallel_search::{
+use sarissa::parallel_full_text_search::{
     MergeStrategyType, ParallelSearchConfig, ParallelSearchEngine, config::SearchOptions,
 };
 use sarissa::prelude::*;
@@ -265,7 +267,7 @@ fn main() -> Result<()> {
                 let mut input = storage.open_input(&file)?;
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
-                let segment_info: sarissa::index::SegmentInfo = serde_json::from_slice(&data)
+                let segment_info: sarissa::full_text::SegmentInfo = serde_json::from_slice(&data)
                     .map_err(|e| sarissa::error::SarissaError::index(format!("Failed to parse segment metadata: {e}")))?;
                 segments.push(segment_info);
             }

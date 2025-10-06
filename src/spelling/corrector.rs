@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::index::reader::IndexReader;
+use crate::full_text::reader::IndexReader;
 use crate::spelling::dictionary::{BuiltinDictionary, SpellingDictionary};
 use crate::spelling::suggest::{Suggestion, SuggestionConfig, SuggestionEngine};
 

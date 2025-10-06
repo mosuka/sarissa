@@ -6,9 +6,9 @@
 use tempfile::TempDir;
 
 use sarissa::document::{DocumentConverter, FieldValueDocumentConverter, JsonDocumentConverter};
-use sarissa::index::index::IndexConfig;
+use sarissa::full_text::index::IndexConfig;
 use sarissa::prelude::*;
-use sarissa::search::{SearchEngine, SearchRequest};
+use sarissa::full_text_search::{SearchEngine, SearchRequest};
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");

@@ -17,9 +17,9 @@ use tempfile::TempDir;
 use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
 use sarissa::document::{Document, DocumentParser};
 use sarissa::error::Result;
-use sarissa::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sarissa::index::index::IndexConfig;
-use sarissa::search::{SearchEngine, SearchRequest};
+use sarissa::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sarissa::full_text::index::IndexConfig;
+use sarissa::full_text_search::{SearchEngine, SearchRequest};
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");

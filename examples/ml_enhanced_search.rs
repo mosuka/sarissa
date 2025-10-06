@@ -3,7 +3,7 @@
 //! This example demonstrates how to use the ML module to enhance search quality
 //! with learning-to-rank and query expansion features.
 
-use sarissa::index::index::IndexConfig;
+use sarissa::full_text::index::IndexConfig;
 use sarissa::ml::query_expansion::{QueryExpansion, QueryExpansionConfig};
 use sarissa::ml::ranking::{LearningToRank, ModelType, RankingConfig};
 use sarissa::ml::{
@@ -12,7 +12,7 @@ use sarissa::ml::{
 use sarissa::prelude::*;
 use sarissa::query::{BooleanQuery, TermQuery};
 
-use sarissa::search::{SearchEngine, SearchRequest};
+use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use std::collections::HashMap;
 use tempfile::TempDir;
 

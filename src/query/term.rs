@@ -1,7 +1,7 @@
 //! Term query implementation for exact term matching.
 
 use crate::error::Result;
-use crate::index::reader::IndexReader;
+use crate::full_text::reader::IndexReader;
 use crate::query::matcher::{EmptyMatcher, Matcher, PostingMatcher};
 use crate::query::query::Query;
 use crate::query::scorer::{BM25Scorer, Scorer};
@@ -136,7 +136,7 @@ impl Query for TermQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 
     use crate::storage::{MemoryStorage, StorageConfig};
     use std::sync::Arc;

@@ -1,10 +1,10 @@
 //! WildcardQuery example - demonstrates pattern matching with * and ? wildcards.
 
-use sarissa::index::index::IndexConfig;
+use sarissa::full_text::index::IndexConfig;
 use sarissa::prelude::*;
 use sarissa::query::WildcardQuery;
-use sarissa::search::SearchEngine;
-use sarissa::search::SearchRequest;
+use sarissa::full_text_search::SearchEngine;
+use sarissa::full_text_search::SearchRequest;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

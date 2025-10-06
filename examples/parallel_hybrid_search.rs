@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
         engine
             .add_index(
                 format!("index_{i}"),
-                reader as Arc<dyn sarissa::index::reader::IndexReader>,
+                reader as Arc<dyn sarissa::full_text::reader::IndexReader>,
                 None, // No vector reader for this example
                 1.0,  // Equal weight for all indices
             )
@@ -322,7 +322,7 @@ async fn main() -> Result<()> {
         test_engine
             .add_index(
                 "test_index".to_string(),
-                mock_reader as Arc<dyn sarissa::index::reader::IndexReader>,
+                mock_reader as Arc<dyn sarissa::full_text::reader::IndexReader>,
                 None,
                 1.0,
             )

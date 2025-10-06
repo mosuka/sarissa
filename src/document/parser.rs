@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use crate::analysis::{Analyzer, PerFieldAnalyzer, Token};
 use crate::document::{Document, FieldValue};
 use crate::error::Result;
-use crate::index::advanced_writer::{AnalyzedDocument, AnalyzedTerm};
+use crate::full_text_index::advanced_writer::{AnalyzedDocument, AnalyzedTerm};
 
 /// A document parser that converts Documents into AnalyzedDocuments.
 ///
