@@ -79,6 +79,12 @@ fn main() -> Result<()> {
 
     demo_search(&mut engine, &parser)?;
 
+    println!("\n{}", "=".repeat(80));
+    println!("PART 3: Nested Boolean Queries");
+    println!("{}", "=".repeat(80));
+
+    demo_nested_queries(&parser);
+
     engine.close()?;
     println!("\n✓ Example completed successfully!");
 
@@ -222,6 +228,70 @@ fn execute_search(engine: &mut SearchEngine, parser: &QueryParser, query_str: &s
     }
 
     Ok(())
+}
+
+fn demo_nested_queries(parser: &QueryParser) {
+    let nested_queries = vec![
+        // Level 1: Simple nesting
+        ("(apple OR banana) AND cherry", "Simple: OR inside AND"),
+        ("apple AND (banana OR cherry)", "Simple: AND with OR group"),
+        ("(apple AND banana) OR (cherry AND date)", "Two AND groups with OR"),
+
+        // Level 2: Deeper nesting
+        ("((apple OR banana) AND cherry) OR date", "Double nesting"),
+        ("apple AND (banana OR (cherry AND date))", "Nested OR with AND inside"),
+        ("(apple OR (banana AND cherry)) AND date", "Nested AND inside OR"),
+
+        // Level 3: Complex nesting
+        ("((apple AND banana) OR (cherry AND date)) AND egg", "Two groups AND-ed"),
+        ("(apple OR banana) AND (cherry OR date) AND egg", "Multiple OR groups"),
+        ("((apple OR banana) AND (cherry OR date)) OR ((egg AND fig) AND grape)", "Complex nested"),
+
+        // With field specifications
+        ("(title:hello OR body:world) AND author:test", "Fields in nested"),
+
+        // With operators
+        ("+(apple OR banana) -cherry", "Required group + exclusion"),
+        ("+((apple AND banana) OR cherry) -(date OR egg)", "Complex required/excluded groups"),
+
+        // With boost
+        ("(apple OR banana)^2 AND cherry", "Boosted group"),
+        ("((apple OR banana)^2 AND cherry)^1.5", "Double boost"),
+
+        // With phrases
+        ("(\"hello world\" OR \"foo bar\") AND title:test", "Phrases in groups"),
+
+        // Very deep nesting (4 levels)
+        ("(((apple OR banana) AND (cherry OR date)) OR ((egg AND fig) OR (grape AND honey))) AND item", "Very deep nesting"),
+
+        // Mixed features
+        ("(title:important^2 OR body:urgent) AND year:[2020 TO 2025]", "Nested with boost and range"),
+        ("+(\"breaking news\"^2 OR title:urgent^3) -category:spam", "Nested phrases with boost and exclusion"),
+    ];
+
+    for (query_str, description) in nested_queries {
+        println!("\n  Query: {}", query_str);
+        println!("  Description: {}", description);
+
+        match parser.parse(query_str) {
+            Ok(query) => {
+                println!("  ✓ Successfully parsed");
+                let desc = query.description();
+                // Truncate if too long
+                if desc.len() > 100 {
+                    println!("    Structure: {}...", &desc[..97]);
+                } else {
+                    println!("    Structure: {}", desc);
+                }
+                if query.boost() != 1.0 {
+                    println!("    Boost: {}", query.boost());
+                }
+            }
+            Err(e) => {
+                println!("  ✗ Parse error: {}", e);
+            }
+        }
+    }
 }
 
 fn get_query_type(debug_str: &str) -> &str {
