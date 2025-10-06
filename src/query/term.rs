@@ -163,7 +163,8 @@ mod tests {
     #[test]
     fn test_term_query_matcher() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+        let reader =
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -175,7 +176,8 @@ mod tests {
     #[test]
     fn test_term_query_scorer() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+        let reader =
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -188,7 +190,8 @@ mod tests {
     #[test]
     fn test_term_query_is_empty() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+        let reader =
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -203,7 +206,8 @@ mod tests {
     #[test]
     fn test_term_query_cost() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+        let reader =
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = TermQuery::new("title", "hello");
 

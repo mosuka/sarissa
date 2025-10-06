@@ -1,10 +1,10 @@
 //! RangeQuery example - demonstrates range search for numeric and date values.
 
 use sarissa::full_text::index::IndexConfig;
-use sarissa::prelude::*;
-use sarissa::query::NumericRangeQuery;
 use sarissa::full_text_search::SearchEngine;
 use sarissa::full_text_search::SearchRequest;
+use sarissa::prelude::*;
+use sarissa::query::NumericRangeQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

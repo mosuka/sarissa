@@ -309,7 +309,8 @@ impl PhraseScorer {
 
         // Phrase TF calculation - phrases are more valuable than individual terms
         let enhanced_phrase_freq = phrase_freq * 1.5; // Boost phrase frequency
-        let tf = (enhanced_phrase_freq * (self.k1 + 1.0)) / (enhanced_phrase_freq + self.k1 * norm_factor);
+        let tf = (enhanced_phrase_freq * (self.k1 + 1.0))
+            / (enhanced_phrase_freq + self.k1 * norm_factor);
 
         // Check for NaN and return safe value
         if tf.is_nan() || tf.is_infinite() {

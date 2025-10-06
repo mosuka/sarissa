@@ -2,9 +2,9 @@
 
 use sarissa::error::Result;
 use sarissa::full_text::index::IndexConfig;
+use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use sarissa::prelude::*;
 use sarissa::query::{BM25Scorer, Scorer};
-use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

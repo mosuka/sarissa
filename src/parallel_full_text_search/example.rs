@@ -26,7 +26,11 @@ pub fn example_parallel_search() -> Result<()> {
     // Add multiple indices to the engine
     for i in 0..3 {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = Box::new(AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default())?);
+        let reader = Box::new(AdvancedIndexReader::new(
+            vec![],
+            storage,
+            AdvancedReaderConfig::default(),
+        )?);
         engine.add_index(format!("index_{i}"), reader, 1.0)?;
     }
 

@@ -294,7 +294,9 @@ mod tests {
 
     fn create_test_reader() -> Arc<dyn IndexReader> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        Arc::new(AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap())
+        Arc::new(
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap(),
+        )
     }
 
     #[test]

@@ -19,7 +19,9 @@ pub mod transaction;
 pub mod writer;
 
 // Re-export commonly used types
-pub use advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig, AnalyzedDocument, AnalyzedTerm};
+pub use advanced_writer::{
+    AdvancedIndexWriter, AdvancedWriterConfig, AnalyzedDocument, AnalyzedTerm,
+};
 pub use background_tasks::BackgroundTask;
 pub use deletion::DeletionManager;
 pub use merge_engine::MergeEngine;

@@ -372,7 +372,11 @@ mod tests {
     fn create_test_writer() -> Box<dyn IndexWriter> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(
-            AdvancedIndexWriter::new(storage, crate::full_text_index::advanced_writer::AdvancedWriterConfig::default()).unwrap(),
+            AdvancedIndexWriter::new(
+                storage,
+                crate::full_text_index::advanced_writer::AdvancedWriterConfig::default(),
+            )
+            .unwrap(),
         )
     }
 

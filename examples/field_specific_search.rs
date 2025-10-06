@@ -2,8 +2,8 @@
 
 use sarissa::analysis::{KeywordAnalyzer, StandardAnalyzer};
 use sarissa::full_text::index::IndexConfig;
-use sarissa::prelude::*;
 use sarissa::full_text_search::{SearchEngine, SearchRequest};
+use sarissa::prelude::*;
 use std::sync::Arc;
 use tempfile::TempDir;
 

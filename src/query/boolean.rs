@@ -503,7 +503,8 @@ mod tests {
     #[test]
     fn test_boolean_query_matcher() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+        let reader =
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = BooleanQueryBuilder::new()
             .must(Box::new(TermQuery::new("title", "hello")))
@@ -517,7 +518,8 @@ mod tests {
     #[test]
     fn test_boolean_query_scorer() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+        let reader =
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = BooleanQueryBuilder::new()
             .must(Box::new(TermQuery::new("title", "hello")))
@@ -545,7 +547,8 @@ mod tests {
     #[test]
     fn test_empty_boolean_query() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+        let reader =
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let query = BooleanQuery::new();
 

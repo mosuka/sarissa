@@ -152,8 +152,9 @@ impl PostingMatcher {
     pub fn exhausted() -> Self {
         // Create a dummy iterator that's already exhausted
         let postings = vec![];
-        let posting_iter =
-            Box::new(crate::full_text_search::advanced_reader::AdvancedPostingIterator::new(postings));
+        let posting_iter = Box::new(
+            crate::full_text_search::advanced_reader::AdvancedPostingIterator::new(postings),
+        );
         PostingMatcher {
             posting_iter,
             exhausted: true,
@@ -835,8 +836,9 @@ mod tests {
                 weight: 1.0,
             },
         ];
-        let posting_iter =
-            Box::new(crate::full_text_search::advanced_reader::AdvancedPostingIterator::new(postings));
+        let posting_iter = Box::new(
+            crate::full_text_search::advanced_reader::AdvancedPostingIterator::new(postings),
+        );
         let mut matcher = PostingMatcher::new(posting_iter);
 
         assert_eq!(matcher.doc_id(), 0);
@@ -963,12 +965,42 @@ mod tests {
     fn test_conjunction_not_matcher() {
         // Positive matcher: documents 0, 1, 2, 3, 4, 5
         let postings_pos = vec![
-            crate::full_text::Posting { doc_id: 0, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 1, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 2, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 3, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 4, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 5, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::full_text::Posting {
+                doc_id: 0,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 1,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 2,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 3,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 4,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 5,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
         ];
         let positive = Box::new(PostingMatcher::new(Box::new(
             crate::full_text_search::advanced_reader::AdvancedPostingIterator::new(postings_pos),
@@ -976,9 +1008,24 @@ mod tests {
 
         // Negative matcher: documents 1, 3, 5
         let postings_neg = vec![
-            crate::full_text::Posting { doc_id: 1, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 3, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 5, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::full_text::Posting {
+                doc_id: 1,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 3,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 5,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
         ];
         let negative = Box::new(PostingMatcher::new(Box::new(
             crate::full_text_search::advanced_reader::AdvancedPostingIterator::new(postings_neg),
@@ -1004,9 +1051,24 @@ mod tests {
     fn test_not_matcher() {
         // Negative matcher: documents 1, 3, 5
         let postings_neg = vec![
-            crate::full_text::Posting { doc_id: 1, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 3, frequency: 1, positions: Some(vec![]), weight: 1.0 },
-            crate::full_text::Posting { doc_id: 5, frequency: 1, positions: Some(vec![]), weight: 1.0 },
+            crate::full_text::Posting {
+                doc_id: 1,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 3,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
+            crate::full_text::Posting {
+                doc_id: 5,
+                frequency: 1,
+                positions: Some(vec![]),
+                weight: 1.0,
+            },
         ];
         let negative = Box::new(PostingMatcher::new(Box::new(
             crate::full_text_search::advanced_reader::AdvancedPostingIterator::new(postings_neg),

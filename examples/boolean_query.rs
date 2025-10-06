@@ -1,10 +1,10 @@
 //! BooleanQuery example - demonstrates complex boolean logic with AND, OR, NOT operations.
 
 use sarissa::full_text::index::IndexConfig;
-use sarissa::prelude::*;
-use sarissa::query::{BooleanQuery, NumericRangeQuery, PhraseQuery, TermQuery};
 use sarissa::full_text_search::SearchEngine;
 use sarissa::full_text_search::SearchRequest;
+use sarissa::prelude::*;
+use sarissa::query::{BooleanQuery, NumericRangeQuery, PhraseQuery, TermQuery};
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

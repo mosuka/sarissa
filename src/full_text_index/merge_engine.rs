@@ -10,11 +10,11 @@ use ahash::AHashSet;
 
 use crate::document::Document;
 use crate::error::{Result, SarissaError};
-use crate::full_text_search::AdvancedIndexReader;
 use crate::full_text::dictionary::TermDictionaryBuilder;
 use crate::full_text::reader::IndexReader;
-use crate::full_text_index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::full_text::{InvertedIndex, SegmentInfo, TermInfo};
+use crate::full_text_index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
+use crate::full_text_search::AdvancedIndexReader;
 use crate::storage::{Storage, StructWriter};
 
 /// Configuration for merge operations.

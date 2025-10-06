@@ -296,8 +296,9 @@ impl FileIndex {
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
 
-                let segment_info: SegmentInfo = serde_json::from_slice(&data)
-                    .map_err(|e| SarissaError::index(format!("Failed to parse segment metadata: {e}")))?;
+                let segment_info: SegmentInfo = serde_json::from_slice(&data).map_err(|e| {
+                    SarissaError::index(format!("Failed to parse segment metadata: {e}"))
+                })?;
 
                 segments.push(segment_info);
             }
@@ -319,7 +320,11 @@ impl Index for FileIndex {
         // Load segment information
         let segments = self.load_segments()?;
 
-        let reader = AdvancedIndexReader::new(segments, self.storage.clone(), AdvancedReaderConfig::default())?;
+        let reader = AdvancedIndexReader::new(
+            segments,
+            self.storage.clone(),
+            AdvancedReaderConfig::default(),
+        )?;
         Ok(Box::new(reader))
     }
 
@@ -328,7 +333,8 @@ impl Index for FileIndex {
 
         use crate::full_text_index::{AdvancedIndexWriter, advanced_writer::AdvancedWriterConfig};
 
-        let writer = AdvancedIndexWriter::new(self.storage.clone(), AdvancedWriterConfig::default())?;
+        let writer =
+            AdvancedIndexWriter::new(self.storage.clone(), AdvancedWriterConfig::default())?;
         Ok(Box::new(writer))
     }
 

@@ -268,13 +268,21 @@ fn main() -> Result<()> {
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
                 let segment_info: sarissa::full_text::SegmentInfo = serde_json::from_slice(&data)
-                    .map_err(|e| sarissa::error::SarissaError::index(format!("Failed to parse segment metadata: {e}")))?;
+                    .map_err(|e| {
+                    sarissa::error::SarissaError::index(format!(
+                        "Failed to parse segment metadata: {e}"
+                    ))
+                })?;
                 segments.push(segment_info);
             }
         }
         segments.sort_by_key(|s| s.generation);
 
-        let reader = Box::new(AdvancedIndexReader::new(segments, storage, AdvancedReaderConfig::default())?);
+        let reader = Box::new(AdvancedIndexReader::new(
+            segments,
+            storage,
+            AdvancedReaderConfig::default(),
+        )?);
         index_readers.push((format!("partition_{i}"), reader));
     }
 

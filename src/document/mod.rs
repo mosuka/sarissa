@@ -10,9 +10,7 @@ pub mod field_value;
 pub mod parser;
 
 // Re-export commonly used types
-pub use converter::{
-    DocumentConverter, FieldValueDocumentConverter, JsonDocumentConverter,
-};
+pub use converter::{DocumentConverter, FieldValueDocumentConverter, JsonDocumentConverter};
 pub use document::{Document, DocumentBuilder};
 pub use field_value::{FieldValue, NumericType};
 pub use parser::DocumentParser;

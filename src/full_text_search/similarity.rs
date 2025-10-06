@@ -1131,7 +1131,10 @@ mod tests {
         ) -> Result<Option<Box<dyn crate::full_text::reader::PostingIterator>>> {
             Ok(None)
         }
-        fn field_stats(&self, _field: &str) -> Result<Option<crate::full_text::reader::FieldStats>> {
+        fn field_stats(
+            &self,
+            _field: &str,
+        ) -> Result<Option<crate::full_text::reader::FieldStats>> {
             Ok(None)
         }
         fn is_closed(&self) -> bool {

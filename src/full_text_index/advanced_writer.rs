@@ -254,7 +254,12 @@ impl AdvancedIndexWriter {
                     // Use analyzer from config (can be PerFieldAnalyzer for field-specific analysis)
                     use crate::analysis::PerFieldAnalyzer;
 
-                    let tokens = if let Some(per_field) = self.config.analyzer.as_any().downcast_ref::<PerFieldAnalyzer>() {
+                    let tokens = if let Some(per_field) = self
+                        .config
+                        .analyzer
+                        .as_any()
+                        .downcast_ref::<PerFieldAnalyzer>()
+                    {
                         per_field.analyze_field(field_name, text)?
                     } else {
                         self.config.analyzer.analyze(text)?
@@ -531,8 +536,9 @@ impl AdvancedIndexWriter {
 
         // Write as JSON for compatibility with FileIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
-        let json_data = serde_json::to_string_pretty(&segment_info)
-            .map_err(|e| SarissaError::index(format!("Failed to serialize segment metadata: {e}")))?;
+        let json_data = serde_json::to_string_pretty(&segment_info).map_err(|e| {
+            SarissaError::index(format!("Failed to serialize segment metadata: {e}"))
+        })?;
 
         let mut output = self.storage.create_output(&meta_file)?;
         std::io::Write::write_all(&mut output, json_data.as_bytes())?;

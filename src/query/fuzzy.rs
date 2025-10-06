@@ -851,7 +851,8 @@ mod tests {
         // Create a test schema and reader
 
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+        let reader =
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
 
         let matches = vec![
             FuzzyMatch {

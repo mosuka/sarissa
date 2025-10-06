@@ -1438,7 +1438,8 @@ mod tests {
             &self,
             _field: &str,
             _term: &str,
-        ) -> crate::error::Result<Option<Box<dyn crate::full_text::reader::PostingIterator>>> {
+        ) -> crate::error::Result<Option<Box<dyn crate::full_text::reader::PostingIterator>>>
+        {
             Ok(None)
         }
         fn field_stats(

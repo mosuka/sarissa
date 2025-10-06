@@ -7,8 +7,8 @@ use rayon::prelude::*;
 
 use crate::error::{Result, SarissaError};
 use crate::full_text::reader::IndexReader;
-use crate::query::{Collector, CountCollector, Query, SearchHit, SearchResults, TopDocsCollector};
 use crate::full_text_search::SearchRequest;
+use crate::query::{Collector, CountCollector, Query, SearchHit, SearchResults, TopDocsCollector};
 
 /// A searcher that executes queries against an index reader.
 #[derive(Debug)]
@@ -300,7 +300,9 @@ mod tests {
     #[allow(dead_code)]
     fn create_test_searcher() -> Searcher {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = Box::new(AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap());
+        let reader = Box::new(
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap(),
+        );
         Searcher::new(reader)
     }
 

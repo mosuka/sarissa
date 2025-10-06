@@ -75,7 +75,10 @@ fn main() -> sarissa::error::Result<()> {
     // User 1: Customer profile (completely different structure)
     let mut user1 = Document::new();
     user1.add_field("user_id", FieldValue::Text("USER-12345".to_string()));
-    user1.add_field("email", FieldValue::Text("john.doe@example.com".to_string()));
+    user1.add_field(
+        "email",
+        FieldValue::Text("john.doe@example.com".to_string()),
+    );
     user1.add_field("full_name", FieldValue::Text("John Doe".to_string()));
     user1.add_field(
         "bio",

@@ -109,7 +109,10 @@ impl AdvancedPostingIterator {
     }
 
     /// Create posting blocks for efficient skip-to operations.
-    fn create_blocks(postings: &[crate::full_text::Posting], block_size: usize) -> Vec<PostingBlock> {
+    fn create_blocks(
+        postings: &[crate::full_text::Posting],
+        block_size: usize,
+    ) -> Vec<PostingBlock> {
         let mut blocks = Vec::new();
         let mut start = 0;
 
@@ -299,8 +302,11 @@ impl SegmentReader {
 
         if let Ok(input) = self.storage.open_input(&dict_file) {
             let mut reader = StructReader::new(input)?;
-            let dictionary = HybridTermDictionary::read_from_storage(&mut reader)
-                .map_err(|e| SarissaError::index(format!("Failed to read term dictionary from {dict_file}: {e}")))?;
+            let dictionary = HybridTermDictionary::read_from_storage(&mut reader).map_err(|e| {
+                SarissaError::index(format!(
+                    "Failed to read term dictionary from {dict_file}: {e}"
+                ))
+            })?;
             *self.term_dictionary.write().unwrap() = Some(Arc::new(dictionary));
         }
 

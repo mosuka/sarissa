@@ -1,7 +1,7 @@
 //! Per-field analyzer (Lucene-compatible).
 
-use crate::analysis::analyzer::Analyzer;
 use crate::analysis::TokenStream;
+use crate::analysis::analyzer::Analyzer;
 use crate::error::Result;
 use ahash::AHashMap;
 use std::sync::Arc;
@@ -116,7 +116,10 @@ mod tests {
         let analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
 
         let text = "Hello World";
-        let tokens: Vec<_> = analyzer.analyze_field("unknown_field", text).unwrap().collect();
+        let tokens: Vec<_> = analyzer
+            .analyze_field("unknown_field", text)
+            .unwrap()
+            .collect();
 
         // Should use default StandardAnalyzer
         assert_eq!(tokens.len(), 2);

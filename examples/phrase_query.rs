@@ -1,10 +1,10 @@
 //! PhraseQuery example - demonstrates phrase search for exact word sequences.
 
 use sarissa::full_text::index::IndexConfig;
-use sarissa::prelude::*;
-use sarissa::query::PhraseQuery;
 use sarissa::full_text_search::SearchEngine;
 use sarissa::full_text_search::SearchRequest;
+use sarissa::prelude::*;
+use sarissa::query::PhraseQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

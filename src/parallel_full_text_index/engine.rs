@@ -9,7 +9,9 @@ use crate::document::Document;
 use crate::error::{Result, SarissaError};
 use crate::full_text_index::IndexWriter;
 use crate::parallel_full_text_index::batch_processor::{BatchProcessingResult, BatchProcessor};
-use crate::parallel_full_text_index::config::{IndexingOptions, ParallelIndexConfig, PartitionConfig};
+use crate::parallel_full_text_index::config::{
+    IndexingOptions, ParallelIndexConfig, PartitionConfig,
+};
 use crate::parallel_full_text_index::metrics::{IndexingMetricsCollector, IndexingTimer};
 use crate::parallel_full_text_index::partitioner::DocumentPartitioner;
 use crate::parallel_full_text_index::writer_manager::{IndexWriterHandle, WriterManager};
@@ -292,7 +294,8 @@ impl ParallelIndexEngine {
         let mut processor = BatchProcessor::new(batch_config, 1);
 
         // Create a single batch from all documents
-        let mut batch = crate::parallel_full_text_index::batch_processor::DocumentBatch::new(partition_index);
+        let mut batch =
+            crate::parallel_full_text_index::batch_processor::DocumentBatch::new(partition_index);
         for doc in documents {
             batch.add_document(doc);
         }
@@ -374,7 +377,11 @@ mod tests {
     fn create_test_writer() -> Box<dyn IndexWriter> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(
-            AdvancedIndexWriter::new(storage, crate::full_text_index::advanced_writer::AdvancedWriterConfig::default()).unwrap(),
+            AdvancedIndexWriter::new(
+                storage,
+                crate::full_text_index::advanced_writer::AdvancedWriterConfig::default(),
+            )
+            .unwrap(),
         )
     }
 

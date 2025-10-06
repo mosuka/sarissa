@@ -8,8 +8,8 @@ use crate::document::Document;
 use crate::error::Result;
 use crate::full_text::Index;
 use crate::full_text::index::{FileIndex, IndexConfig};
-use crate::query::{Query, SearchResults};
 use crate::full_text_search::{SearchRequest, Searcher};
+use crate::query::{Query, SearchResults};
 use crate::storage::Storage;
 
 /// A high-level search engine that provides both indexing and searching capabilities.

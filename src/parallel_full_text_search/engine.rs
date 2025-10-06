@@ -7,13 +7,15 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::error::{Result, SarissaError};
 use crate::full_text::reader::IndexReader;
+use crate::full_text_search::SearchRequest;
 use crate::parallel_full_text_search::config::{ParallelSearchConfig, SearchOptions};
 use crate::parallel_full_text_search::index_manager::{IndexHandle, IndexManager};
 use crate::parallel_full_text_search::merger::MergerFactory;
 use crate::parallel_full_text_search::metrics::{SearchMetricsCollector, Timer};
-use crate::parallel_full_text_search::search_task::{SearchTask, TaskHandle, TaskResult, TaskStatus};
+use crate::parallel_full_text_search::search_task::{
+    SearchTask, TaskHandle, TaskResult, TaskStatus,
+};
 use crate::query::{Query, SearchResults};
-use crate::full_text_search::SearchRequest;
 
 /// Parallel search engine for executing queries across multiple indices.
 pub struct ParallelSearchEngine {
@@ -229,7 +231,8 @@ impl ParallelSearchEngine {
         };
 
         // Create searcher for this index
-        let searcher = crate::full_text_search::Searcher::from_arc(Arc::clone(&index_handle.reader));
+        let searcher =
+            crate::full_text_search::Searcher::from_arc(Arc::clone(&index_handle.reader));
 
         // Create search request
         let mut request = SearchRequest::new(task.query)
@@ -282,7 +285,9 @@ mod tests {
 
     fn create_test_reader() -> Box<dyn IndexReader> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        Box::new(AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap())
+        Box::new(
+            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap(),
+        )
     }
 
     #[test]

@@ -77,10 +77,8 @@ impl DocumentParser {
             match field_value {
                 FieldValue::Text(text) => {
                     // Analyze text field with per-field analyzer
-                    let tokens = if let Some(per_field) = self
-                        .analyzer
-                        .as_any()
-                        .downcast_ref::<PerFieldAnalyzer>()
+                    let tokens = if let Some(per_field) =
+                        self.analyzer.as_any().downcast_ref::<PerFieldAnalyzer>()
                     {
                         per_field.analyze_field(field_name, text)?
                     } else {
@@ -237,8 +235,7 @@ mod tests {
 
     #[test]
     fn test_per_field_analyzer() {
-        let mut per_field =
-            PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
+        let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
         per_field.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
 
         let parser = DocumentParser::new(Arc::new(per_field));
