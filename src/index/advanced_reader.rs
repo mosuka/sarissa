@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use ahash::AHashMap;
 
+use crate::analysis::Analyzer;
 use crate::document::{Document, FieldValue};
 use crate::error::{Result, SarissaError};
 use crate::index::dictionary::HybridTermDictionary;
@@ -299,7 +300,7 @@ impl SegmentReader {
         if let Ok(input) = self.storage.open_input(&dict_file) {
             let mut reader = StructReader::new(input)?;
             let dictionary = HybridTermDictionary::read_from_storage(&mut reader)
-                .map_err(|e| SarissaError::index(format!("Failed to read term dictionary from {}: {}", dict_file, e)))?;
+                .map_err(|e| SarissaError::index(format!("Failed to read term dictionary from {dict_file}: {e}")))?;
             *self.term_dictionary.write().unwrap() = Some(Arc::new(dictionary));
         }
 
@@ -452,14 +453,8 @@ impl SegmentReader {
             for (doc_id, doc) in documents.iter() {
                 if let Some(field_value) = doc.get_field(field) {
                     if let Some(text) = field_value.as_text() {
-                        // Get analyzer
-                        let analyzer = doc
-                            .get_field_analyzer(field)
-                            .map(|a| a.as_ref())
-                            .unwrap_or(&default_analyzer as &dyn crate::analysis::Analyzer);
-
-                        // Analyze text
-                        let token_stream = analyzer.analyze(text)?;
+                        // Use default analyzer (analyzers are configured at writer level)
+                        let token_stream = default_analyzer.analyze(text)?;
                         let tokens: Vec<crate::analysis::Token> = token_stream.collect();
 
                         let mut positions = Vec::new();

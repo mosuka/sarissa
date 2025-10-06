@@ -11,6 +11,6 @@ pub trait Analyzer: Send + Sync {
     /// Get the name of this analyzer (for debugging and configuration).
     fn name(&self) -> &'static str;
 
-    /// Provide access to the concrete type for downcasting (e.g., to PerFieldAnalyzerWrapper).
+    /// Provide access to the concrete type for downcasting (e.g., to PerFieldAnalyzer).
     fn as_any(&self) -> &dyn std::any::Any;
 }

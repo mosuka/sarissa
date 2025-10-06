@@ -7,7 +7,7 @@ use std::iter::Peekable;
 use std::str::Chars;
 use std::sync::Arc;
 
-use crate::analysis::{Analyzer, PerFieldAnalyzerWrapper, StandardAnalyzer};
+use crate::analysis::{Analyzer, PerFieldAnalyzer, StandardAnalyzer};
 use crate::error::{Result, SarissaError};
 use crate::query::{BooleanQuery, BooleanQueryBuilder, Occur, Query, TermQuery};
 
@@ -132,13 +132,13 @@ impl<'a> QueryStringParser<'a> {
 
     /// Analyze a term using the configured analyzer.
     /// Returns the analyzed tokens or the original term if no analyzer is set.
-    /// If the analyzer is a PerFieldAnalyzerWrapper and a field is provided,
+    /// If the analyzer is a PerFieldAnalyzer and a field is provided,
     /// uses the field-specific analyzer.
     fn analyze_term(&self, field: Option<&str>, term: &str) -> Result<Vec<String>> {
         if let Some(analyzer) = self.analyzer {
             let token_stream = if let Some(field_name) = field {
-                // Try to downcast to PerFieldAnalyzerWrapper
-                if let Some(per_field) = analyzer.as_any().downcast_ref::<PerFieldAnalyzerWrapper>() {
+                // Try to downcast to PerFieldAnalyzer
+                if let Some(per_field) = analyzer.as_any().downcast_ref::<PerFieldAnalyzer>() {
                     per_field.analyze_field(field_name, term)?
                 } else {
                     analyzer.analyze(term)?

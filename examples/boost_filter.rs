@@ -76,7 +76,7 @@ fn main() -> Result<()> {
     demonstrate_boost_filter(&category_filter, tokens, "Content category weighting")?;
 
     println!("\n=== Filter Properties ===\n");
-    let filter = BoostFilter::new(3.14);
+    let filter = BoostFilter::new(2.5);
     println!("Filter name: {}", filter.name());
     println!("Boost factor: {:.2}", filter.boost());
 

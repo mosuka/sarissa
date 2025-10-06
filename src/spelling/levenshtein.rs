@@ -438,10 +438,7 @@ mod tests {
             let distance = levenshtein_distance(correct, typo);
             assert!(
                 distance <= 2,
-                "Distance too high for {} -> {}: {}",
-                correct,
-                typo,
-                distance
+                "Distance too high for {correct} -> {typo}: {distance}"
             );
 
             let damerau_distance = damerau_levenshtein_distance(correct, typo);

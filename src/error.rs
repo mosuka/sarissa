@@ -111,6 +111,11 @@ impl SarissaError {
         SarissaError::Query(msg.into())
     }
 
+    /// Create a new parse error.
+    pub fn parse<S: Into<String>>(msg: S) -> Self {
+        SarissaError::Query(msg.into()) // Parse errors are treated as query errors
+    }
+
     /// Create a new storage error.
     pub fn storage<S: Into<String>>(msg: S) -> Self {
         SarissaError::Storage(msg.into())

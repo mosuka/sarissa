@@ -563,8 +563,8 @@ mod tests {
         assert_eq!(files.len(), 5);
 
         // Check that files are sorted
-        for i in 0..5 {
-            assert_eq!(files[i], format!("file_{i}.txt"));
+        for (i, file) in files.iter().enumerate().take(5) {
+            assert_eq!(file, &format!("file_{i}.txt"));
         }
     }
 

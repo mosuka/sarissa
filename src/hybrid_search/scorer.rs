@@ -275,8 +275,8 @@ mod tests {
         // Should be in approximate [0, 1] range after transformation
         let keyword_1 = results.get(&1).unwrap().keyword_score.unwrap();
         let keyword_2 = results.get(&2).unwrap().keyword_score.unwrap();
-        assert!(keyword_1 >= 0.0 && keyword_1 <= 1.0);
-        assert!(keyword_2 >= 0.0 && keyword_2 <= 1.0);
+        assert!((0.0..=1.0).contains(&keyword_1));
+        assert!((0.0..=1.0).contains(&keyword_2));
     }
 
     #[test]

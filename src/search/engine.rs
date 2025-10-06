@@ -82,26 +82,6 @@ impl SearchEngine {
         Ok(())
     }
 
-    /// Add an analyzer with a given name.
-    ///
-    /// This allows configuring custom analyzers for the index.
-    /// The analyzer name can then be used in per-field analyzer configuration.
-    pub fn add_analyzer(&mut self, name: &str, analyzer: Box<dyn crate::analysis::Analyzer>) -> Result<()> {
-        let mut writer = self.index.writer()?;
-        writer.add_analyzer(name, analyzer);
-        Ok(())
-    }
-
-    /// Configure a field to use a specific analyzer by name.
-    ///
-    /// This sets up per-field analyzer configuration, similar to Lucene's
-    /// PerFieldAnalyzerWrapper pattern.
-    pub fn set_field_analyzer(&mut self, field: &str, analyzer_name: &str) -> Result<()> {
-        let mut writer = self.index.writer()?;
-        writer.set_field_analyzer(field, analyzer_name);
-        Ok(())
-    }
-
     /// Delete documents matching the given term.
     pub fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
         let mut writer = self.index.writer()?;
@@ -303,7 +283,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let request = SearchRequest::new(query);
@@ -344,7 +324,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let count = engine.count(query).unwrap();
@@ -406,7 +386,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let request = SearchRequest::new(query)
@@ -457,7 +437,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Search specific field
         use crate::query::QueryParser;
@@ -490,7 +470,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Test complex query parsing
         use crate::query::QueryParser;

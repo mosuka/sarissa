@@ -98,7 +98,7 @@ fn main() -> Result<()> {
     println!("  Contains 'rust': {}", stop_filter.is_stop_word("rust"));
 
     println!("\nBoostFilter properties:");
-    let boost_filter = BoostFilter::new(3.14);
+    let boost_filter = BoostFilter::new(2.5);
     println!("  Boost factor: {}", boost_filter.boost());
 
     println!("\nLimitFilter properties:");

@@ -12,7 +12,7 @@ mod standard;
 pub use analyzer::Analyzer;
 pub use keyword::KeywordAnalyzer;
 pub use noop::NoOpAnalyzer;
-pub use per_field::PerFieldAnalyzerWrapper;
+pub use per_field::PerFieldAnalyzer;
 pub use pipeline::PipelineAnalyzer;
 pub use simple::SimpleAnalyzer;
 pub use standard::StandardAnalyzer;
