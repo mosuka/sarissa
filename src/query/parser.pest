@@ -1,0 +1,76 @@
+// Query Grammar for Pest Parser
+// This grammar supports the full query syntax
+
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+
+// Main entry point
+query = { SOI ~ boolean_query ~ EOI }
+
+// Boolean query with AND/OR operators (space-separated clauses default to implicit boolean)
+boolean_query = { clause ~ (boolean_op ~ clause | clause)* }
+
+clause = { required_clause | prohibited_clause | sub_clause }
+
+required_clause = { "+" ~ sub_clause }
+prohibited_clause = { "-" ~ sub_clause }
+
+sub_clause = { grouped_query | field_query | term_query }
+
+grouped_query = { "(" ~ boolean_query ~ ")" ~ boost? }
+
+boolean_op = { ^"AND" | ^"OR" }
+
+// Field-specific queries
+field_query = { field ~ ":" ~ field_value }
+
+field_value = { range_query | phrase_query | fuzzy_term | wildcard_term | simple_term }
+
+// Range queries: [100 TO 500] or {A TO Z}
+range_query = { range_inclusive | range_exclusive }
+range_inclusive = { "[" ~ range_value ~ ^"TO" ~ range_value ~ "]" }
+range_exclusive = { "{" ~ range_value ~ ^"TO" ~ range_value ~ "}" }
+range_value = { "*" | quoted_string | unquoted_value }
+unquoted_value = @{ (!WHITESPACE ~ !"TO" ~ !"]" ~ !"}" ~ ANY)+ }
+
+// Phrase queries: "hello world" or "hello world"~10
+phrase_query = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
+phrase_content = @{ (!"\"" ~ ANY)* }
+proximity = { "~" ~ number }
+
+// Fuzzy queries: term~2
+fuzzy_term = { term ~ "~" ~ fuzziness? ~ boost? }
+fuzziness = { number }
+
+// Wildcard queries: te?t or test*
+wildcard_term = { wildcard_pattern ~ boost? }
+wildcard_pattern = @{
+    (ASCII_ALPHANUMERIC | "_")* ~ wildcard_char ~ (ASCII_ALPHANUMERIC | "_" | wildcard_char)*
+}
+wildcard_char = { "?" | "*" }
+
+// Simple term with optional boost
+simple_term = { term ~ boost? }
+
+// Term query (standalone, no field)
+term_query = { field_value }
+
+// Boost: ^4 or ^0.5
+boost = { "^" ~ boost_value }
+boost_value = @{ number ~ ("." ~ number)? }
+
+// Field name
+field = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ".")* }
+
+// Term (word)
+term = @{ escaped_char+ | unescaped_term }
+unescaped_term = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+escaped_char = @{ "\\" ~ special_char | normal_char }
+special_char = { "+" | "-" | "!" | "(" | ")" | "{" | "}" | "[" | "]" | "^" | "\"" | "~" | "*" | "?" | ":" | "\\" | "/" }
+normal_char = @{ ASCII_ALPHANUMERIC | "_" | "-" }
+
+// Quoted string
+quoted_string = { "\"" ~ quoted_content ~ "\"" }
+quoted_content = @{ (!"\"" ~ ANY)* }
+
+// Number
+number = @{ ASCII_DIGIT+ }
