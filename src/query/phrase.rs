@@ -282,8 +282,15 @@ impl PhraseScorer {
         let df = phrase_doc_count;
 
         // Modified IDF calculation for phrases (typically more selective)
+        // Ensure the calculation never produces NaN by clamping values
         let base_idf = ((n - df + 0.5) / (df + 0.5)).ln();
         let epsilon = 0.1;
+
+        // Check for NaN and clamp to valid range
+        if base_idf.is_nan() || base_idf.is_infinite() {
+            return epsilon * 1.2;
+        }
+
         (base_idf + epsilon).max(epsilon) * 1.2 // Boost phrase IDF
     }
 
@@ -293,12 +300,23 @@ impl PhraseScorer {
             return 0.0;
         }
 
-        let avg_len = self.avg_field_length as f32;
-        let norm_factor = 1.0 - self.b + self.b * (field_length / avg_len);
+        let avg_len = self.avg_field_length.max(1.0) as f32; // Ensure avg_len is at least 1
+        let field_len = field_length.max(1.0); // Ensure field_length is at least 1
+        let norm_factor = 1.0 - self.b + self.b * (field_len / avg_len);
+
+        // Ensure norm_factor is never zero or negative
+        let norm_factor = norm_factor.max(0.1);
 
         // Phrase TF calculation - phrases are more valuable than individual terms
         let enhanced_phrase_freq = phrase_freq * 1.5; // Boost phrase frequency
-        (enhanced_phrase_freq * (self.k1 + 1.0)) / (enhanced_phrase_freq + self.k1 * norm_factor)
+        let tf = (enhanced_phrase_freq * (self.k1 + 1.0)) / (enhanced_phrase_freq + self.k1 * norm_factor);
+
+        // Check for NaN and return safe value
+        if tf.is_nan() || tf.is_infinite() {
+            return 1.0;
+        }
+
+        tf
     }
 }
 
@@ -319,7 +337,15 @@ impl Scorer for PhraseScorer {
         let field_length = self.avg_field_length as f32; // Simplified - would be per-document in full implementation
         let tf = self.phrase_tf(phrase_freq, field_length);
 
-        self.boost * idf * tf
+        let score = self.boost * idf * tf;
+
+        // Final check: ensure score is never NaN
+        if score.is_nan() || score.is_infinite() {
+            // Return a reasonable default score for phrase matches
+            return self.boost * 1.0;
+        }
+
+        score
     }
 
     fn boost(&self) -> f32 {
