@@ -6,8 +6,7 @@ use std::sync::{Arc, Mutex};
 use crate::document::{Document, FieldValue};
 use crate::error::Result;
 use crate::full_text::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
-use crate::query::{Query, SearchHit, SearchResults};
-use crate::full_text_search::SearchRequest;
+use crate::query::{Query, SearchHit};
 
 /// Mock index reader that stores documents in memory (schema-less mode).
 #[derive(Clone)]
@@ -36,6 +35,7 @@ impl MockIndexReader {
     }
 
     /// Simple keyword search implementation.
+    #[allow(dead_code)]
     fn search_documents(&self, field: &str, term: &str) -> Vec<SearchHit> {
         let docs = self.documents.lock().unwrap();
         let mut results = Vec::new();
@@ -136,6 +136,7 @@ impl std::fmt::Debug for MockIndexReader {
 
 /// Mock searcher implementation.
 pub struct MockSearcher {
+    #[allow(dead_code)]
     reader: Arc<MockIndexReader>,
 }
 
@@ -192,6 +193,7 @@ impl MockSearcher {
 // }
 
 /// Extract field and term from a query (simplified for testing).
+#[allow(dead_code)]
 fn extract_term_query(_query: &dyn Query) -> (String, String) {
     // This is a simplified implementation for testing
     // For now, we'll return a hardcoded field and term that matches our test data

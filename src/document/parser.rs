@@ -252,7 +252,7 @@ mod tests {
 
         assert_eq!(analyzed.doc_id, 1);
         // title should be tokenized
-        assert!(analyzed.field_terms.get("title").unwrap().len() >= 1);
+        assert!(!analyzed.field_terms.get("title").unwrap().is_empty());
         // id should be one token (KeywordAnalyzer)
         assert_eq!(analyzed.field_terms.get("id").unwrap().len(), 1);
         assert_eq!(analyzed.field_terms.get("id").unwrap()[0].term, "BOOK-001"); // KeywordAnalyzer preserves case

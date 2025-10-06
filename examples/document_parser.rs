@@ -33,7 +33,7 @@ fn main() -> Result<()> {
 
     // Step 2: Create temporary directory and search engine
     let temp_dir = TempDir::new().unwrap();
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Get storage for creating custom writer
     let storage = engine.storage().clone();
@@ -69,7 +69,7 @@ fn main() -> Result<()> {
 
     // Analyze documents explicitly and add to index
     for (doc_id, doc) in docs.into_iter().enumerate() {
-        println!("Analyzing document {}:", doc_id);
+        println!("Analyzing document {doc_id}:");
 
         // Use DocumentParser to convert Document → AnalyzedDocument
         let analyzed_doc = doc_parser.parse(doc, doc_id as u64)?;
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
 
     // Search for "programming" in category field (KeywordAnalyzer)
     let query_str = "category:programming";
-    println!("Query: {}", query_str);
+    println!("Query: {query_str}");
 
     use sarissa::query::QueryParser;
     let parser = QueryParser::new();
@@ -113,12 +113,12 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document {
             if let Some(title) = doc.get_field("title") {
                 if let Some(title_text) = title.as_text() {
-                    println!("     Title: {}", title_text);
+                    println!("     Title: {title_text}");
                 }
             }
             if let Some(id) = doc.get_field("id") {
                 if let Some(id_text) = id.as_text() {
-                    println!("     ID: {}", id_text);
+                    println!("     ID: {id_text}");
                 }
             }
         }

@@ -100,9 +100,9 @@ impl QueryParser {
     pub fn parse_field(&self, field: &str, query_str: &str) -> Result<Box<dyn Query>> {
         // Handle phrase queries specially (preserve quotes)
         let full_query = if query_str.contains(' ') && !query_str.starts_with('"') {
-            format!("{}:\"{}\"", field, query_str)
+            format!("{field}:\"{query_str}\"")
         } else {
-            format!("{}:{}", field, query_str)
+            format!("{field}:{query_str}")
         };
         self.parse(&full_query)
     }
@@ -110,18 +110,15 @@ impl QueryParser {
     /// Parses a query string into a Query object.
     pub fn parse(&self, query_str: &str) -> Result<Box<dyn Query>> {
         let pairs = QueryStringParser::parse(Rule::query, query_str)
-            .map_err(|e| SarissaError::parse(format!("Parse error: {}", e)))?;
+            .map_err(|e| SarissaError::parse(format!("Parse error: {e}")))?;
 
         for pair in pairs {
-            match pair.as_rule() {
-                Rule::query => {
-                    for inner_pair in pair.into_inner() {
-                        if inner_pair.as_rule() == Rule::boolean_query {
-                            return self.parse_boolean_query(inner_pair);
-                        }
+            if pair.as_rule() == Rule::query {
+                for inner_pair in pair.into_inner() {
+                    if inner_pair.as_rule() == Rule::boolean_query {
+                        return self.parse_boolean_query(inner_pair);
                     }
                 }
-                _ => {}
             }
         }
 
@@ -129,7 +126,7 @@ impl QueryParser {
     }
 
     fn parse_boolean_query(&self, pair: pest::iterators::Pair<Rule>) -> Result<Box<dyn Query>> {
-        let mut current_occur = self.default_occur.clone();
+        let mut current_occur = self.default_occur;
         let mut terms: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
         for inner_pair in pair.into_inner() {
@@ -143,7 +140,7 @@ impl QueryParser {
                     };
                 }
                 Rule::clause => {
-                    let (occur, query) = self.parse_clause(inner_pair, current_occur.clone())?;
+                    let (occur, query) = self.parse_clause(inner_pair, current_occur)?;
                     terms.push((occur, query));
                 }
                 _ => {}
@@ -599,75 +596,74 @@ impl QueryParserBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::StandardAnalyzer;
 
     #[test]
     fn test_simple_term() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("hello").unwrap();
-        assert!(format!("{:?}", query).contains("TermQuery"));
+        assert!(format!("{query:?}").contains("TermQuery"));
     }
 
     #[test]
     fn test_field_query() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("title:hello").unwrap();
-        assert!(format!("{:?}", query).contains("TermQuery"));
+        assert!(format!("{query:?}").contains("TermQuery"));
     }
 
     #[test]
     fn test_boolean_query() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("hello AND world").unwrap();
-        assert!(format!("{:?}", query).contains("BooleanQuery"));
+        assert!(format!("{query:?}").contains("BooleanQuery"));
     }
 
     #[test]
     fn test_phrase_query() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("\"hello world\"").unwrap();
-        assert!(format!("{:?}", query).contains("PhraseQuery"));
+        assert!(format!("{query:?}").contains("PhraseQuery"));
     }
 
     #[test]
     fn test_fuzzy_query() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("hello~2").unwrap();
-        assert!(format!("{:?}", query).contains("FuzzyQuery"));
+        assert!(format!("{query:?}").contains("FuzzyQuery"));
     }
 
     #[test]
     fn test_wildcard_query() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("hel*").unwrap();
-        assert!(format!("{:?}", query).contains("WildcardQuery"));
+        assert!(format!("{query:?}").contains("WildcardQuery"));
     }
 
     #[test]
     fn test_required_clause() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("+hello world").unwrap();
-        assert!(format!("{:?}", query).contains("BooleanQuery"));
+        assert!(format!("{query:?}").contains("BooleanQuery"));
     }
 
     #[test]
     fn test_prohibited_clause() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("hello -world").unwrap();
-        assert!(format!("{:?}", query).contains("BooleanQuery"));
+        assert!(format!("{query:?}").contains("BooleanQuery"));
     }
 
     #[test]
     fn test_grouped_query() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("(hello OR world) AND test").unwrap();
-        assert!(format!("{:?}", query).contains("BooleanQuery"));
+        assert!(format!("{query:?}").contains("BooleanQuery"));
     }
 
     #[test]
     fn test_proximity_search() {
         let parser = QueryParser::new().with_default_field("content");
         let query = parser.parse("\"hello world\"~10").unwrap();
-        assert!(format!("{:?}", query).contains("PhraseQuery"));
+        assert!(format!("{query:?}").contains("PhraseQuery"));
     }
 }

@@ -192,13 +192,13 @@ impl SearchEngine {
     /// Search with the given request.
     pub fn search(&self, request: SearchRequest) -> Result<SearchResults> {
         let searcher = self.get_searcher()?;
-        Searcher::search(&*searcher, request)
+        Searcher::search(&searcher, request)
     }
 
     /// Count documents matching the query.
     pub fn count(&self, query: Box<dyn Query>) -> Result<u64> {
         let searcher = self.get_searcher()?;
-        Searcher::count(&*searcher, query)
+        Searcher::count(&searcher, query)
     }
 }
 

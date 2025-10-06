@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::query::{Query, SearchResults};
+use crate::query::SearchResults;
 use crate::full_text_search::{SearchEngine, SearchRequest};
 use crate::spelling::{CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector};
 

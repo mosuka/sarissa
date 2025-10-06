@@ -112,10 +112,8 @@ fn main() -> Result<()> {
                     println!("      Title: {title}");
                 }
             }
-            if let Some(field_value) = doc.get_field("price") {
-                if let sarissa::document::FieldValue::Float(price) = field_value {
-                    println!("      Price: ${price:.2}");
-                }
+            if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
+                println!("      Price: ${price:.2}");
             }
         }
     }
@@ -140,10 +138,8 @@ fn main() -> Result<()> {
                     println!("      Title: {title}");
                 }
             }
-            if let Some(field_value) = doc.get_field("rating") {
-                if let sarissa::document::FieldValue::Float(rating) = field_value {
-                    println!("      Rating: {rating:.1}");
-                }
+            if let Some(sarissa::document::FieldValue::Float(rating)) = doc.get_field("rating") {
+                println!("      Rating: {rating:.1}");
             }
         }
     }
@@ -168,10 +164,8 @@ fn main() -> Result<()> {
                     println!("      Title: {title}");
                 }
             }
-            if let Some(field_value) = doc.get_field("year") {
-                if let sarissa::document::FieldValue::Integer(year) = field_value {
-                    println!("      Year: {year}");
-                }
+            if let Some(sarissa::document::FieldValue::Integer(year)) = doc.get_field("year") {
+                println!("      Year: {year}");
             }
         }
     }
@@ -196,10 +190,8 @@ fn main() -> Result<()> {
                     println!("      Title: {title}");
                 }
             }
-            if let Some(field_value) = doc.get_field("pages") {
-                if let sarissa::document::FieldValue::Integer(pages) = field_value {
-                    println!("      Pages: {pages}");
-                }
+            if let Some(sarissa::document::FieldValue::Integer(pages)) = doc.get_field("pages") {
+                println!("      Pages: {pages}");
             }
         }
     }
@@ -224,10 +216,8 @@ fn main() -> Result<()> {
                     println!("      Title: {title}");
                 }
             }
-            if let Some(field_value) = doc.get_field("year") {
-                if let sarissa::document::FieldValue::Integer(year) = field_value {
-                    println!("      Year: {year}");
-                }
+            if let Some(sarissa::document::FieldValue::Integer(year)) = doc.get_field("year") {
+                println!("      Year: {year}");
             }
         }
     }
@@ -252,10 +242,8 @@ fn main() -> Result<()> {
                     println!("      Title: {title}");
                 }
             }
-            if let Some(field_value) = doc.get_field("price") {
-                if let sarissa::document::FieldValue::Float(price) = field_value {
-                    println!("      Price: ${price:.2}");
-                }
+            if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
+                println!("      Price: ${price:.2}");
             }
         }
     }
@@ -280,10 +268,8 @@ fn main() -> Result<()> {
                     println!("      Title: {title}");
                 }
             }
-            if let Some(field_value) = doc.get_field("pages") {
-                if let sarissa::document::FieldValue::Integer(pages) = field_value {
-                    println!("      Pages: {pages}");
-                }
+            if let Some(sarissa::document::FieldValue::Integer(pages)) = doc.get_field("pages") {
+                println!("      Pages: {pages}");
             }
         }
     }

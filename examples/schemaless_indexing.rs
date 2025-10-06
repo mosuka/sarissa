@@ -24,8 +24,10 @@ fn main() -> sarissa::error::Result<()> {
 
     // Create storage and writer configuration
     let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-    let mut config = AdvancedWriterConfig::default();
-    config.analyzer = Arc::new(per_field_analyzer);
+    let config = AdvancedWriterConfig {
+        analyzer: Arc::new(per_field_analyzer),
+        ..Default::default()
+    };
 
     // Create writer in schema-less mode (no schema required!)
     let mut writer = AdvancedIndexWriter::new(storage, config)?;

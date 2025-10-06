@@ -17,7 +17,7 @@ fn main() -> sarissa::error::Result<()> {
 
     // Example 1: Various inputs all produce empty results
     println!("1. Testing various inputs:");
-    let test_inputs = vec![
+    let test_inputs = [
         "Simple text",
         "Complex text with numbers 123 and symbols!@#",
         "UPPERCASE lowercase MixedCase",

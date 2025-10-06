@@ -155,16 +155,16 @@ fn parse_and_show(parser: &QueryParser, queries: Vec<(&str, &str)>) {
         print!("  {:50} ", format!("\"{}\"", query_str));
         match parser.parse(query_str) {
             Ok(query) => {
-                let debug_str = format!("{:?}", query);
+                let debug_str = format!("{query:?}");
                 let query_type = get_query_type(&debug_str);
-                print!("✓ {} ", query_type);
+                print!("✓ {query_type} ");
                 if query.boost() != 1.0 {
                     print!("(boost: {}) ", query.boost());
                 }
-                println!("← {}", description);
+                println!("← {description}");
             }
             Err(e) => {
-                println!("✗ Error: {}", e);
+                println!("✗ Error: {e}");
             }
         }
     }
@@ -199,7 +199,7 @@ fn demo_search(engine: &mut SearchEngine, parser: &QueryParser) -> Result<()> {
 }
 
 fn execute_search(engine: &mut SearchEngine, parser: &QueryParser, query_str: &str) -> Result<()> {
-    println!("Query: {}", query_str);
+    println!("Query: {query_str}");
 
     let query = parser.parse(query_str)?;
     println!("Parsed: {}", query.description());
@@ -213,7 +213,7 @@ fn execute_search(engine: &mut SearchEngine, parser: &QueryParser, query_str: &s
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title") {
                 if let Some(title) = field_value.as_text() {
-                    print!("- {}", title);
+                    print!("- {title}");
                 }
             }
             if let Some(field_value) = doc.get_field("year") {
@@ -270,8 +270,8 @@ fn demo_nested_queries(parser: &QueryParser) {
     ];
 
     for (query_str, description) in nested_queries {
-        println!("\n  Query: {}", query_str);
-        println!("  Description: {}", description);
+        println!("\n  Query: {query_str}");
+        println!("  Description: {description}");
 
         match parser.parse(query_str) {
             Ok(query) => {
@@ -281,14 +281,14 @@ fn demo_nested_queries(parser: &QueryParser) {
                 if desc.len() > 100 {
                     println!("    Structure: {}...", &desc[..97]);
                 } else {
-                    println!("    Structure: {}", desc);
+                    println!("    Structure: {desc}");
                 }
                 if query.boost() != 1.0 {
                     println!("    Boost: {}", query.boost());
                 }
             }
             Err(e) => {
-                println!("  ✗ Parse error: {}", e);
+                println!("  ✗ Parse error: {e}");
             }
         }
     }

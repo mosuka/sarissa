@@ -284,9 +284,11 @@ async fn main() -> Result<()> {
     ];
 
     for (name, strategy) in normalization_strategies {
-        let mut config = HybridSearchConfig::default();
-        config.normalization = strategy;
-        config.max_results = 3;
+        let config = HybridSearchConfig {
+            normalization: strategy,
+            max_results: 3,
+            ..Default::default()
+        };
 
         let _test_engine = HybridSearchEngine::new(config)?;
         println!("   {name} normalization:");
