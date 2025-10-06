@@ -522,7 +522,8 @@ impl RangeScorer {
     /// Calculate selectivity-based IDF for the range.
     fn range_idf(&self) -> f32 {
         if self.matching_docs == 0 || self.total_docs == 0 {
-            return 0.0;
+            // Return a default IDF for ranges with no matches
+            return 1.0;
         }
 
         let n = self.total_docs as f32;
@@ -530,6 +531,13 @@ impl RangeScorer {
 
         // Base IDF calculation
         let base_idf = ((n - df + 0.5) / (df + 0.5)).ln();
+
+        // Check for invalid values
+        let base_idf = if base_idf.is_nan() || base_idf.is_infinite() {
+            1.0
+        } else {
+            base_idf
+        };
 
         // Apply range selectivity bonus - narrower ranges get higher scores
         let selectivity_multiplier = if self.range_width.is_finite() && self.range_width > 0.0 {
@@ -575,10 +583,25 @@ impl RangeScorer {
 impl Scorer for RangeScorer {
     fn score(&self, _doc_id: u64, value: f32) -> f32 {
         let idf = self.range_idf();
-        let proximity = self.proximity_score(value as f64);
+
+        // If value is provided (non-zero), use it for proximity calculation
+        // Otherwise use a default score
+        let proximity = if value != 0.0 {
+            self.proximity_score(value as f64)
+        } else {
+            // Default proximity score when no value is provided
+            1.5
+        };
 
         // Final score combines IDF with proximity bonus
-        self.boost * idf * proximity
+        let score = self.boost * idf * proximity;
+
+        // Ensure score is never NaN or infinite
+        if score.is_nan() || score.is_infinite() {
+            return self.boost * idf * 1.5; // Return reasonable default
+        }
+
+        score
     }
 
     fn boost(&self) -> f32 {
