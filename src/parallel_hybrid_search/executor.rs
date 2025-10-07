@@ -16,7 +16,7 @@ use super::types::{
 
 use crate::error::{Result, SarissaError};
 use crate::full_text::reader::IndexReader;
-use crate::query::{Query, SearchHit, SearchResults};
+use crate::query::{Query, SearchResults};
 use crate::vector::Vector;
 
 /// Executor for parallel hybrid search operations.
@@ -110,7 +110,7 @@ impl ParallelHybridSearchExecutor {
 
         // Merge results
         let merge_start = Instant::now();
-        let merged_results = self
+        let (merged_results, ranking_time) = self
             .merger
             .merge(keyword_results, vector_results, document_store);
         let merge_time = merge_start.elapsed().as_secs_f64() * 1000.0;
@@ -118,6 +118,7 @@ impl ParallelHybridSearchExecutor {
         // Update time breakdown
         let mut final_breakdown = time_breakdown;
         final_breakdown.merge_ms = merge_time;
+        final_breakdown.ranking_ms = ranking_time;
 
         let total_time = start_time.elapsed().as_secs_f64() * 1000.0;
 
@@ -284,89 +285,33 @@ impl ParallelHybridSearchExecutor {
 
     /// Execute keyword search on an index.
     fn execute_keyword_search(
-        _query: &dyn Query,
+        query: &dyn Query,
         reader: &Arc<dyn IndexReader>,
         config: &ParallelHybridSearchConfig,
-        index_id: &str,
+        _index_id: &str,
     ) -> Result<SearchResults> {
-        // For now, skip the complex downcast and use fallback approach
-        // This will be improved in a future iteration
-        let _ = reader; // Suppress unused warning
+        use crate::full_text_search::{SearchConfig, SearchRequest, Searcher};
 
-        // Fallback: Create index-specific mock results
-        let mut hits = Vec::new();
+        // Create a searcher with the index reader using from_arc
+        let searcher = Searcher::from_arc(reader.clone());
 
-        // Generate different results based on index ID
-        match index_id {
-            "index_0" => {
-                // Rust documents from index 0
-                hits.push(SearchHit {
-                    doc_id: 1,
-                    score: 0.95,
-                    document: None,
-                });
-                hits.push(SearchHit {
-                    doc_id: 4,
-                    score: 0.85,
-                    document: None,
-                });
-            }
-            "index_1" => {
-                // Python documents from index 1
-                hits.push(SearchHit {
-                    doc_id: 2,
-                    score: 0.87,
-                    document: None,
-                });
-                hits.push(SearchHit {
-                    doc_id: 5,
-                    score: 0.77,
-                    document: None,
-                });
-            }
-            "index_2" => {
-                // JavaScript documents from index 2
-                hits.push(SearchHit {
-                    doc_id: 3,
-                    score: 0.76,
-                    document: None,
-                });
-                hits.push(SearchHit {
-                    doc_id: 6,
-                    score: 0.66,
-                    document: None,
-                });
-            }
-            "test_index" => {
-                // Test index for merge strategy testing
-                hits.push(SearchHit {
-                    doc_id: 1,
-                    score: 0.95,
-                    document: None,
-                });
-                hits.push(SearchHit {
-                    doc_id: 2,
-                    score: 0.87,
-                    document: None,
-                });
-            }
-            _ => {
-                // Default case - return empty results
-            }
-        }
+        // Create search configuration
+        let search_config = SearchConfig {
+            max_docs: config.max_keyword_results_per_index,
+            min_score: config.min_keyword_score,
+            load_documents: false, // Don't load documents for performance
+            timeout_ms: Some(config.index_timeout.as_millis() as u64),
+            parallel: false, // Already running in parallel at the executor level
+        };
 
-        // Apply limits and thresholds
-        hits.retain(|hit| hit.score >= config.min_keyword_score);
-        hits.truncate(config.max_keyword_results_per_index);
+        // Create search request
+        let request = SearchRequest {
+            query: query.clone_box(),
+            config: search_config,
+        };
 
-        let total_hits = hits.len() as u64;
-        let max_score = hits.first().map(|h| h.score).unwrap_or(0.0);
-
-        Ok(SearchResults {
-            hits,
-            total_hits,
-            max_score,
-        })
+        // Execute the search
+        searcher.search(request)
     }
 
     /// Execute vector search on an index.
@@ -375,12 +320,70 @@ impl ParallelHybridSearchExecutor {
         reader: &Arc<dyn crate::vector::reader::VectorIndexReader>,
         config: &ParallelHybridSearchConfig,
     ) -> Result<crate::vector::types::VectorSearchResults> {
-        // In a real implementation, this would use the actual VectorSearcher
-        // For now, return a placeholder result
-        let _ = (query_vector, reader, config);
-        Err(SarissaError::NotImplemented(
-            "Vector search not implemented in this example".to_string(),
-        ))
+        use crate::vector::types::{VectorSearchResult, VectorSearchResults};
+        use std::time::Instant;
+
+        let start_time = Instant::now();
+
+        // Get all vector IDs from the index
+        let vector_ids = reader.vector_ids()?;
+        if vector_ids.is_empty() {
+            return Ok(VectorSearchResults {
+                results: Vec::new(),
+                candidates_examined: 0,
+                search_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+                query_metadata: std::collections::HashMap::new(),
+            });
+        }
+
+        // Get distance metric (no Result wrapping)
+        let metric = reader.distance_metric();
+
+        // Calculate similarities for all vectors
+        let mut scored_results: Vec<(u64, f32, f32)> = Vec::new();
+
+        for doc_id in vector_ids {
+            if let Some(vector) = reader.get_vector(doc_id)? {
+                // Calculate distance and similarity
+                let distance = metric.distance(&query_vector.data, &vector.data)?;
+                let similarity = metric.similarity(&query_vector.data, &vector.data)?;
+
+                // Apply minimum similarity threshold
+                if similarity >= config.min_vector_similarity {
+                    scored_results.push((doc_id, similarity, distance));
+                }
+            }
+        }
+
+        // Sort by similarity (descending)
+        scored_results.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Limit to max results per index
+        scored_results.truncate(config.max_vector_results_per_index);
+
+        // Convert to VectorSearchResult
+        let results: Vec<VectorSearchResult> = scored_results
+            .into_iter()
+            .map(|(doc_id, similarity, distance)| VectorSearchResult {
+                doc_id,
+                similarity,
+                distance,
+                vector: None, // Don't include vectors in results for efficiency
+                metadata: std::collections::HashMap::new(),
+            })
+            .collect();
+
+        let candidates_examined = reader.vector_count();
+        let search_time_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+
+        Ok(VectorSearchResults {
+            results,
+            candidates_examined,
+            search_time_ms,
+            query_metadata: std::collections::HashMap::new(),
+        })
     }
 
     /// Create a map of index handles for efficient lookup.
