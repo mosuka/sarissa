@@ -39,21 +39,15 @@ pub struct HybridIndexHandle {
 struct IndexLoadStats {
     /// Number of active searches.
     active_searches: usize,
-    /// Total searches completed.
-    total_searches: u64,
     /// Average search time in milliseconds.
     avg_search_time_ms: f64,
-    /// Last update timestamp.
-    last_updated: Instant,
 }
 
 impl Default for IndexLoadStats {
     fn default() -> Self {
         Self {
             active_searches: 0,
-            total_searches: 0,
             avg_search_time_ms: 0.0,
-            last_updated: Instant::now(),
         }
     }
 }
