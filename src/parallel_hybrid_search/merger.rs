@@ -20,12 +20,15 @@ impl ParallelHybridResultMerger {
     }
 
     /// Merge keyword and vector search results.
+    /// Returns the merged results and the ranking time in milliseconds.
     pub fn merge(
         &self,
         keyword_results: Vec<(String, Vec<SearchHit>)>,
         vector_results: Vec<(String, Vec<VectorSearchResult>)>,
         document_store: &HashMap<u64, HashMap<String, String>>,
-    ) -> Vec<ParallelHybridSearchResult> {
+    ) -> (Vec<ParallelHybridSearchResult>, f64) {
+        use std::time::Instant;
+        let ranking_start = Instant::now();
         // Create maps for efficient lookup
         let mut keyword_map: HashMap<u64, (String, f32, usize)> = HashMap::new();
         let mut vector_map: HashMap<u64, (String, f32, usize)> = HashMap::new();
@@ -117,7 +120,8 @@ impl ParallelHybridResultMerger {
         // Limit results
         merged_results.truncate(self.config.max_final_results);
 
-        merged_results
+        let ranking_time_ms = ranking_start.elapsed().as_secs_f64() * 1000.0;
+        (merged_results, ranking_time_ms)
     }
 
     /// Calculate combined score based on merge strategy.
