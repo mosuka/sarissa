@@ -28,8 +28,6 @@ use serde::{Deserialize, Serialize};
 pub struct MLConfig {
     /// Enable machine learning features.
     pub enabled: bool,
-    /// Directory to store trained models.
-    pub models_directory: String,
     /// Learning to rank configuration.
     pub ranking: RankingConfig,
     /// Query expansion configuration.
@@ -46,7 +44,6 @@ impl Default for MLConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            models_directory: "./models".to_string(),
             ranking: RankingConfig::default(),
             query_expansion: QueryExpansionConfig::default(),
             recommendation: RecommendationConfig::default(),
@@ -170,7 +167,6 @@ mod tests {
     fn test_ml_config_default() {
         let config = MLConfig::default();
         assert!(config.enabled);
-        assert_eq!(config.models_directory, "./models");
     }
 
     #[test]
