@@ -142,7 +142,7 @@ impl LearningToRank {
     pub fn new(config: RankingConfig) -> Result<Self> {
         let feature_extractor = Arc::new(FeatureExtractor::new());
 
-        let mut model: Box<dyn RankingModel> = match config.model_type {
+        let model: Box<dyn RankingModel> = match config.model_type {
             ModelType::GBDT => Box::new(GBDTRanker::with_params(
                 config.model_params.learning_rate,
                 config.model_params.max_iterations,
@@ -163,16 +163,12 @@ impl LearningToRank {
             }
         };
 
-        // Create demo training data and train the model
-        let demo_training_data = Self::create_demo_training_data();
-        model.train(&demo_training_data)?;
-
         Ok(Self {
             config,
             feature_extractor,
             model: Arc::new(RwLock::new(model)),
             feedback_buffer: Arc::new(RwLock::new(VecDeque::new())),
-            training_data: Arc::new(RwLock::new(demo_training_data)),
+            training_data: Arc::new(RwLock::new(Vec::new())),
             last_retrain: Arc::new(RwLock::new(chrono::Utc::now())),
             metrics: Arc::new(RwLock::new(RankingMetrics::default())),
         })
@@ -530,320 +526,6 @@ impl LearningToRank {
             FeedbackType::Bounce => -0.5,
         }
     }
-
-    /// Create demo training data for model initialization.
-    fn create_demo_training_data() -> Vec<LabeledExample<QueryDocumentFeatures, f64>> {
-        use crate::ml::features::{PositionFeatures, QueryDocumentFeatures};
-        use std::collections::HashMap;
-
-        vec![
-            // High relevance example - "Machine Learning with Python"
-            LabeledExample {
-                query_id: "q1".to_string(),
-                document_id: "doc1".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 15.8,
-                    tf_idf_score: 18.2,
-                    edit_distance: 0.05,
-                    query_term_coverage: 0.95,
-                    exact_match_count: 4,
-                    partial_match_count: 1,
-                    vector_similarity: 0.95,
-                    semantic_distance: 0.05,
-                    document_length: 250,
-                    query_length: 3,
-                    term_frequency_variance: 0.25,
-                    inverse_document_frequency_sum: 16.8,
-                    title_match_score: 0.9,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.35,
-                    document_age_days: 15,
-                    document_popularity: 0.9,
-                    query_frequency: 85,
-                    time_of_day: 0.7,
-                    day_of_week: 2,
-                    user_context_score: 0.85,
-                },
-                label: 4.5, // Very high relevance
-                weight: Some(1.0),
-            },
-            // Medium relevance example - "Deep Learning Fundamentals"
-            LabeledExample {
-                query_id: "q2".to_string(),
-                document_id: "doc2".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 12.4,
-                    tf_idf_score: 14.6,
-                    edit_distance: 0.15,
-                    query_term_coverage: 0.7,
-                    exact_match_count: 2,
-                    partial_match_count: 2,
-                    vector_similarity: 0.75,
-                    semantic_distance: 0.25,
-                    document_length: 200,
-                    query_length: 3,
-                    term_frequency_variance: 0.18,
-                    inverse_document_frequency_sum: 12.8,
-                    title_match_score: 0.6,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.22,
-                    document_age_days: 30,
-                    document_popularity: 0.7,
-                    query_frequency: 55,
-                    time_of_day: 0.6,
-                    day_of_week: 3,
-                    user_context_score: 0.7,
-                },
-                label: 3.5, // Good relevance
-                weight: Some(1.0),
-            },
-            // Low relevance example - "Web Development with JavaScript"
-            LabeledExample {
-                query_id: "q3".to_string(),
-                document_id: "doc3".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 4.2,
-                    tf_idf_score: 3.8,
-                    edit_distance: 0.6,
-                    query_term_coverage: 0.3,
-                    exact_match_count: 0,
-                    partial_match_count: 1,
-                    vector_similarity: 0.35,
-                    semantic_distance: 0.65,
-                    document_length: 180,
-                    query_length: 3,
-                    term_frequency_variance: 0.12,
-                    inverse_document_frequency_sum: 7.4,
-                    title_match_score: 0.1,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.08,
-                    document_age_days: 60,
-                    document_popularity: 0.4,
-                    query_frequency: 25,
-                    time_of_day: 0.4,
-                    day_of_week: 1,
-                    user_context_score: 0.3,
-                },
-                label: 1.5, // Low relevance for ML+Python query
-                weight: Some(1.0),
-            },
-            LabeledExample {
-                query_id: "q2".to_string(),
-                document_id: "doc4".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 1.8,
-                    tf_idf_score: 1.5,
-                    edit_distance: 0.5,
-                    query_term_coverage: 0.5,
-                    exact_match_count: 1,
-                    partial_match_count: 1,
-                    vector_similarity: 0.45,
-                    semantic_distance: 0.55,
-                    document_length: 120,
-                    query_length: 4,
-                    term_frequency_variance: 0.1,
-                    inverse_document_frequency_sum: 6.8,
-                    title_match_score: 0.3,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.05,
-                    document_age_days: 120,
-                    document_popularity: 0.2,
-                    query_frequency: 8,
-                    time_of_day: 0.3,
-                    day_of_week: 5,
-                    user_context_score: 0.2,
-                },
-                label: 1.5, // Low-medium relevance
-                weight: Some(1.0),
-            },
-            // Low relevance examples
-            LabeledExample {
-                query_id: "q3".to_string(),
-                document_id: "doc5".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 1.2,
-                    tf_idf_score: 1.0,
-                    edit_distance: 0.7,
-                    query_term_coverage: 0.3,
-                    exact_match_count: 0,
-                    partial_match_count: 1,
-                    vector_similarity: 0.25,
-                    semantic_distance: 0.75,
-                    document_length: 80,
-                    query_length: 5,
-                    term_frequency_variance: 0.05,
-                    inverse_document_frequency_sum: 4.2,
-                    title_match_score: 0.1,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.02,
-                    document_age_days: 200,
-                    document_popularity: 0.1,
-                    query_frequency: 3,
-                    time_of_day: 0.2,
-                    day_of_week: 6,
-                    user_context_score: 0.1,
-                },
-                label: 0.5, // Low relevance
-                weight: Some(1.0),
-            },
-            LabeledExample {
-                query_id: "q3".to_string(),
-                document_id: "doc6".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 0.8,
-                    tf_idf_score: 0.6,
-                    edit_distance: 0.9,
-                    query_term_coverage: 0.2,
-                    exact_match_count: 0,
-                    partial_match_count: 0,
-                    vector_similarity: 0.15,
-                    semantic_distance: 0.85,
-                    document_length: 60,
-                    query_length: 5,
-                    term_frequency_variance: 0.03,
-                    inverse_document_frequency_sum: 2.8,
-                    title_match_score: 0.05,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.01,
-                    document_age_days: 300,
-                    document_popularity: 0.05,
-                    query_frequency: 1,
-                    time_of_day: 0.1,
-                    day_of_week: 0,
-                    user_context_score: 0.05,
-                },
-                label: 0.0, // No relevance
-                weight: Some(1.0),
-            },
-            // Additional diverse examples
-            LabeledExample {
-                query_id: "q4".to_string(),
-                document_id: "doc7".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 2.5,
-                    tf_idf_score: 2.2,
-                    edit_distance: 0.3,
-                    query_term_coverage: 0.7,
-                    exact_match_count: 2,
-                    partial_match_count: 1,
-                    vector_similarity: 0.65,
-                    semantic_distance: 0.35,
-                    document_length: 170,
-                    query_length: 3,
-                    term_frequency_variance: 0.16,
-                    inverse_document_frequency_sum: 9.5,
-                    title_match_score: 0.5,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.12,
-                    document_age_days: 60,
-                    document_popularity: 0.4,
-                    query_frequency: 20,
-                    time_of_day: 0.7,
-                    day_of_week: 4,
-                    user_context_score: 0.5,
-                },
-                label: 2.5, // Good relevance
-                weight: Some(1.0),
-            },
-            LabeledExample {
-                query_id: "q4".to_string(),
-                document_id: "doc8".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 1.5,
-                    tf_idf_score: 1.3,
-                    edit_distance: 0.6,
-                    query_term_coverage: 0.4,
-                    exact_match_count: 1,
-                    partial_match_count: 0,
-                    vector_similarity: 0.35,
-                    semantic_distance: 0.65,
-                    document_length: 100,
-                    query_length: 3,
-                    term_frequency_variance: 0.08,
-                    inverse_document_frequency_sum: 5.5,
-                    title_match_score: 0.2,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.04,
-                    document_age_days: 150,
-                    document_popularity: 0.15,
-                    query_frequency: 6,
-                    time_of_day: 0.3,
-                    day_of_week: 1,
-                    user_context_score: 0.25,
-                },
-                label: 1.0, // Low relevance
-                weight: Some(1.0),
-            },
-            LabeledExample {
-                query_id: "q5".to_string(),
-                document_id: "doc9".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 3.5,
-                    tf_idf_score: 3.1,
-                    edit_distance: 0.05,
-                    query_term_coverage: 0.95,
-                    exact_match_count: 4,
-                    partial_match_count: 0,
-                    vector_similarity: 0.9,
-                    semantic_distance: 0.1,
-                    document_length: 250,
-                    query_length: 4,
-                    term_frequency_variance: 0.25,
-                    inverse_document_frequency_sum: 15.2,
-                    title_match_score: 0.9,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.35,
-                    document_age_days: 15,
-                    document_popularity: 0.9,
-                    query_frequency: 60,
-                    time_of_day: 0.8,
-                    day_of_week: 2,
-                    user_context_score: 0.8,
-                },
-                label: 4.5, // Very high relevance
-                weight: Some(1.0),
-            },
-            LabeledExample {
-                query_id: "q5".to_string(),
-                document_id: "doc10".to_string(),
-                features: QueryDocumentFeatures {
-                    bm25_score: 0.5,
-                    tf_idf_score: 0.3,
-                    edit_distance: 1.0,
-                    query_term_coverage: 0.1,
-                    exact_match_count: 0,
-                    partial_match_count: 0,
-                    vector_similarity: 0.05,
-                    semantic_distance: 0.95,
-                    document_length: 40,
-                    query_length: 4,
-                    term_frequency_variance: 0.01,
-                    inverse_document_frequency_sum: 1.5,
-                    title_match_score: 0.0,
-                    field_match_scores: HashMap::new(),
-                    position_features: PositionFeatures::default(),
-                    click_through_rate: 0.005,
-                    document_age_days: 400,
-                    document_popularity: 0.02,
-                    query_frequency: 0,
-                    time_of_day: 0.05,
-                    day_of_week: 6,
-                    user_context_score: 0.02,
-                },
-                label: 0.0, // No relevance
-                weight: Some(1.0),
-            },
-        ]
-    }
 }
 
 /// Context for re-ranking operations.
@@ -876,7 +558,8 @@ mod tests {
         let config = RankingConfig::default();
         let ltr = LearningToRank::new(config).unwrap();
 
-        assert!(ltr.is_ready()); // Now trained with demo data
+        // Model is not trained by default (no demo data)
+        assert!(!ltr.is_ready());
 
         let metrics = ltr.get_metrics();
         assert_eq!(metrics.total_queries, 0);

@@ -4,6 +4,8 @@
 //! with learning-to-rank and query expansion features.
 
 use sarissa::full_text::index::IndexConfig;
+use sarissa::ml::features::QueryDocumentFeatures;
+use sarissa::ml::models::LabeledExample;
 use sarissa::ml::query_expansion::{QueryExpansion, QueryExpansionConfig};
 use sarissa::ml::ranking::{LearningToRank, ModelType, RankingConfig};
 use sarissa::ml::{
@@ -171,6 +173,10 @@ async fn main() -> Result<()> {
 
     // Initialize LTR system
     let ltr_system = LearningToRank::new(ml_config.ranking.clone())?;
+
+    // Train with simple demo data
+    let demo_training_data = create_simple_training_data();
+    ltr_system.train(demo_training_data)?;
 
     // Simulate user feedback
     let feedback_signals = vec![
@@ -365,6 +371,120 @@ async fn main() -> Result<()> {
 
     println!("\n=== Example Complete ===");
     Ok(())
+}
+
+/// Create simple training data for demonstration.
+fn create_simple_training_data() -> Vec<LabeledExample<QueryDocumentFeatures, f64>> {
+    use sarissa::ml::features::{PositionFeatures, QueryDocumentFeatures};
+    use std::collections::HashMap;
+
+    let examples = vec![
+        // High relevance example
+        LabeledExample {
+            query_id: "q1".to_string(),
+            document_id: "doc1".to_string(),
+            features: QueryDocumentFeatures {
+                bm25_score: 15.0,
+                tf_idf_score: 18.0,
+                edit_distance: 0.05,
+                query_term_coverage: 0.95,
+                exact_match_count: 4,
+                partial_match_count: 1,
+                vector_similarity: 0.95,
+                semantic_distance: 0.05,
+                document_length: 250,
+                query_length: 3,
+                term_frequency_variance: 0.25,
+                inverse_document_frequency_sum: 16.0,
+                title_match_score: 0.9,
+                field_match_scores: HashMap::new(),
+                position_features: PositionFeatures::default(),
+                click_through_rate: 0.35,
+                document_age_days: 15,
+                document_popularity: 0.9,
+                query_frequency: 85,
+                time_of_day: 0.7,
+                day_of_week: 2,
+                user_context_score: 0.85,
+            },
+            label: 4.5,
+            weight: Some(1.0),
+        },
+        // Medium relevance example
+        LabeledExample {
+            query_id: "q2".to_string(),
+            document_id: "doc2".to_string(),
+            features: QueryDocumentFeatures {
+                bm25_score: 12.0,
+                tf_idf_score: 14.0,
+                edit_distance: 0.15,
+                query_term_coverage: 0.7,
+                exact_match_count: 2,
+                partial_match_count: 2,
+                vector_similarity: 0.75,
+                semantic_distance: 0.25,
+                document_length: 200,
+                query_length: 3,
+                term_frequency_variance: 0.18,
+                inverse_document_frequency_sum: 12.0,
+                title_match_score: 0.6,
+                field_match_scores: HashMap::new(),
+                position_features: PositionFeatures::default(),
+                click_through_rate: 0.22,
+                document_age_days: 30,
+                document_popularity: 0.7,
+                query_frequency: 55,
+                time_of_day: 0.6,
+                day_of_week: 3,
+                user_context_score: 0.7,
+            },
+            label: 3.5,
+            weight: Some(1.0),
+        },
+        // Low relevance example
+        LabeledExample {
+            query_id: "q3".to_string(),
+            document_id: "doc3".to_string(),
+            features: QueryDocumentFeatures {
+                bm25_score: 4.0,
+                tf_idf_score: 3.5,
+                edit_distance: 0.6,
+                query_term_coverage: 0.3,
+                exact_match_count: 0,
+                partial_match_count: 1,
+                vector_similarity: 0.35,
+                semantic_distance: 0.65,
+                document_length: 180,
+                query_length: 3,
+                term_frequency_variance: 0.12,
+                inverse_document_frequency_sum: 7.0,
+                title_match_score: 0.1,
+                field_match_scores: HashMap::new(),
+                position_features: PositionFeatures::default(),
+                click_through_rate: 0.08,
+                document_age_days: 60,
+                document_popularity: 0.4,
+                query_frequency: 25,
+                time_of_day: 0.4,
+                day_of_week: 1,
+                user_context_score: 0.3,
+            },
+            label: 1.5,
+            weight: Some(1.0),
+        },
+    ];
+
+    // Duplicate examples with slight variations to meet minimum requirement (10 samples)
+    let mut all_examples = examples.clone();
+    for i in 0..7 {
+        let mut example = examples[i % 3].clone();
+        example.query_id = format!("q{}", i + 4);
+        example.document_id = format!("doc{}", i + 4);
+        example.label = example.label * (0.9 + (i as f64 * 0.02));
+        all_examples.push(example);
+    }
+
+    all_examples
 }
 
 #[cfg(test)]
