@@ -32,7 +32,6 @@ async fn main() -> Result<()> {
     // Configure ML features
     let ml_config = MLConfig {
         enabled: true,
-        models_directory: temp_dir.path().join("models").to_str().unwrap().to_string(),
         ranking: RankingConfig {
             enabled: true,
             model_type: ModelType::GBDT,
