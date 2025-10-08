@@ -110,9 +110,9 @@ impl ParallelHybridSearchExecutor {
 
         // Merge results
         let merge_start = Instant::now();
-        let (merged_results, ranking_time) = self
-            .merger
-            .merge(keyword_results, vector_results, document_store);
+        let (merged_results, ranking_time) =
+            self.merger
+                .merge(keyword_results, vector_results, document_store);
         let merge_time = merge_start.elapsed().as_secs_f64() * 1000.0;
 
         // Update time breakdown
@@ -356,9 +356,7 @@ impl ParallelHybridSearchExecutor {
         }
 
         // Sort by similarity (descending)
-        scored_results.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Limit to max results per index
         scored_results.truncate(config.max_vector_results_per_index);

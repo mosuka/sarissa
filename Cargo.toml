@@ -36,6 +36,7 @@ smartcore = "0.4.4"
 thiserror = "2.0.17"
 tokio = { version = "1.47.1", features = ["full"] }
 unicode-segmentation = "1.12.0"
+unicode-normalization = "0.1.24"
 uuid = { version = "1.18.1", features = ["v4"] }
 wide = "0.8.0"
 

@@ -159,12 +159,11 @@ async fn main() -> Result<()> {
 
     println!("\nSearch results with query expansion:");
     for (i, hit) in results.hits.iter().enumerate() {
-        if let Some(doc) = &hit.document {
-            if let Some(title_field) = doc.get_field("title") {
-                if let Some(title) = title_field.as_text() {
-                    println!("  {}. {} (score: {:.4})", i + 1, title, hit.score);
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title_field) = doc.get_field("title")
+            && let Some(title) = title_field.as_text()
+        {
+            println!("  {}. {} (score: {:.4})", i + 1, title, hit.score);
         }
     }
 
@@ -228,12 +227,11 @@ async fn main() -> Result<()> {
 
     println!("\nOriginal search results:");
     for (i, hit) in search_results.hits.iter().take(3).enumerate() {
-        if let Some(doc) = &hit.document {
-            if let Some(title_field) = doc.get_field("title") {
-                if let Some(title) = title_field.as_text() {
-                    println!("  {}. {} (score: {:.4})", i + 1, title, hit.score);
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title_field) = doc.get_field("title")
+            && let Some(title) = title_field.as_text()
+        {
+            println!("  {}. {} (score: {:.4})", i + 1, title, hit.score);
         }
     }
 
@@ -264,12 +262,11 @@ async fn main() -> Result<()> {
 
     println!("Re-ranked results:");
     for (i, hit) in reranked_results.hits.iter().take(3).enumerate() {
-        if let Some(doc) = &hit.document {
-            if let Some(title_field) = doc.get_field("title") {
-                if let Some(title) = title_field.as_text() {
-                    println!("  {}. {} (score: {:.4})", i + 1, title, hit.score);
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title_field) = doc.get_field("title")
+            && let Some(title) = title_field.as_text()
+        {
+            println!("  {}. {} (score: {:.4})", i + 1, title, hit.score);
         }
     }
 
@@ -479,7 +476,7 @@ fn create_simple_training_data() -> Vec<LabeledExample<QueryDocumentFeatures, f6
         let mut example = examples[i % 3].clone();
         example.query_id = format!("q{}", i + 4);
         example.document_id = format!("doc{}", i + 4);
-        example.label = example.label * (0.9 + (i as f64 * 0.02));
+        example.label *= 0.9 + (i as f64 * 0.02);
         all_examples.push(example);
     }
 

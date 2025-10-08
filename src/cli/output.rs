@@ -128,55 +128,55 @@ fn output_human<T: Serialize>(message: &str, result: &T, args: &SarissaArgs) -> 
 
 /// Output search results in human format.
 fn output_search_results_human(value: &serde_json::Value, _args: &SarissaArgs) -> Result<()> {
-    if let Some(obj) = value.as_object() {
-        if let Some(hits) = obj.get("hits").and_then(|h| h.as_array()) {
-            println!("Search Results:");
-            println!("═══════════════");
+    if let Some(obj) = value.as_object()
+        && let Some(hits) = obj.get("hits").and_then(|h| h.as_array())
+    {
+        println!("Search Results:");
+        println!("═══════════════");
 
-            for (i, hit) in hits.iter().enumerate() {
-                println!();
-                println!(
-                    "Result {}: (Score: {:.3})",
-                    i + 1,
-                    hit.get("score").and_then(|s| s.as_f64()).unwrap_or(0.0)
-                );
-                println!("─────────────");
+        for (i, hit) in hits.iter().enumerate() {
+            println!();
+            println!(
+                "Result {}: (Score: {:.3})",
+                i + 1,
+                hit.get("score").and_then(|s| s.as_f64()).unwrap_or(0.0)
+            );
+            println!("─────────────");
 
-                if let Some(fields) = hit.get("fields").and_then(|f| f.as_object()) {
-                    for (field_name, field_value) in fields {
-                        if let Some(text) = field_value.as_str() {
-                            println!("{field_name}: {text}");
-                        }
+            if let Some(fields) = hit.get("fields").and_then(|f| f.as_object()) {
+                for (field_name, field_value) in fields {
+                    if let Some(text) = field_value.as_str() {
+                        println!("{field_name}: {text}");
                     }
                 }
             }
+        }
 
+        println!();
+
+        if let Some(total) = obj.get("total_hits").and_then(|t| t.as_u64()) {
+            println!("Total hits: {total}");
+        }
+
+        if let Some(duration) = obj.get("duration_ms").and_then(|d| d.as_u64()) {
+            println!("Search time: {duration}ms");
+        }
+
+        // Show facets if available
+        if let Some(facets) = obj.get("facets").and_then(|f| f.as_object()) {
             println!();
-
-            if let Some(total) = obj.get("total_hits").and_then(|t| t.as_u64()) {
-                println!("Total hits: {total}");
-            }
-
-            if let Some(duration) = obj.get("duration_ms").and_then(|d| d.as_u64()) {
-                println!("Search time: {duration}ms");
-            }
-
-            // Show facets if available
-            if let Some(facets) = obj.get("facets").and_then(|f| f.as_object()) {
-                println!();
-                println!("Facets:");
-                println!("───────");
-                for (field_name, facet_values) in facets {
-                    println!("{field_name}:");
-                    if let Some(values) = facet_values.as_array() {
-                        for value in values {
-                            if let Some(arr) = value.as_array() {
-                                if arr.len() >= 2 {
-                                    let label = arr[0].as_str().unwrap_or("unknown");
-                                    let count = arr[1].as_u64().unwrap_or(0);
-                                    println!("  {label} ({count})");
-                                }
-                            }
+            println!("Facets:");
+            println!("───────");
+            for (field_name, facet_values) in facets {
+                println!("{field_name}:");
+                if let Some(values) = facet_values.as_array() {
+                    for value in values {
+                        if let Some(arr) = value.as_array()
+                            && arr.len() >= 2
+                        {
+                            let label = arr[0].as_str().unwrap_or("unknown");
+                            let count = arr[1].as_u64().unwrap_or(0);
+                            println!("  {label} ({count})");
                         }
                     }
                 }

@@ -457,17 +457,17 @@ impl NumericRangeQuery {
         let total_docs = reader.max_doc();
 
         for doc_id in 0..total_docs {
-            if let Ok(Some(doc)) = reader.document(doc_id) {
-                if let Some(field_value) = doc.get_field(&self.field) {
-                    let numeric_value = match field_value {
-                        crate::document::FieldValue::Float(f) => *f,
-                        crate::document::FieldValue::Integer(i) => *i as f64,
-                        _ => continue, // Not a numeric field
-                    };
+            if let Ok(Some(doc)) = reader.document(doc_id)
+                && let Some(field_value) = doc.get_field(&self.field)
+            {
+                let numeric_value = match field_value {
+                    crate::document::FieldValue::Float(f) => *f,
+                    crate::document::FieldValue::Integer(i) => *i as f64,
+                    _ => continue, // Not a numeric field
+                };
 
-                    if self.contains_numeric(numeric_value) {
-                        count += 1;
-                    }
+                if self.contains_numeric(numeric_value) {
+                    count += 1;
                 }
             }
         }
@@ -643,21 +643,21 @@ impl Query for NumericRangeQuery {
         let max_doc = reader.max_doc();
 
         for doc_id in 0..max_doc {
-            if let Ok(Some(doc)) = reader.document(doc_id) {
-                if let Some(field_value) = doc.get_field(&self.field) {
-                    let numeric_value = match field_value {
-                        crate::document::FieldValue::Float(f) => Some(*f),
-                        crate::document::FieldValue::Integer(i) => Some(*i as f64),
-                        // WORKAROUND: Parse text values as numbers (needed because stored docs lose type info)
-                        crate::document::FieldValue::Text(s) => s.parse::<f64>().ok(),
-                        _ => None,
-                    };
+            if let Ok(Some(doc)) = reader.document(doc_id)
+                && let Some(field_value) = doc.get_field(&self.field)
+            {
+                let numeric_value = match field_value {
+                    crate::document::FieldValue::Float(f) => Some(*f),
+                    crate::document::FieldValue::Integer(i) => Some(*i as f64),
+                    // WORKAROUND: Parse text values as numbers (needed because stored docs lose type info)
+                    crate::document::FieldValue::Text(s) => s.parse::<f64>().ok(),
+                    _ => None,
+                };
 
-                    if let Some(numeric_value) = numeric_value {
-                        if self.contains_numeric(numeric_value) {
-                            matching_docs.push(doc_id);
-                        }
-                    }
+                if let Some(numeric_value) = numeric_value
+                    && self.contains_numeric(numeric_value)
+                {
+                    matching_docs.push(doc_id);
                 }
             }
         }

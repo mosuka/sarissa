@@ -38,10 +38,10 @@ fn create_index(args: CreateIndexArgs, cli_args: &SarissaArgs) -> Result<()> {
     }
 
     // Create parent directories if requested
-    if args.create_dirs {
-        if let Some(parent) = args.index_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+    if args.create_dirs
+        && let Some(parent) = args.index_path.parent()
+    {
+        fs::create_dir_all(parent)?;
     }
 
     // Check if index already exists
@@ -220,32 +220,32 @@ fn search_index(args: SearchArgs, cli_args: &SarissaArgs) -> Result<()> {
     };
 
     // Add spell correction information to output
-    if let Some(correction) = correction_info {
-        if cli_args.verbosity() > 0 {
-            if used_correction {
-                println!("Used corrected query: {}", correction.query());
-            } else if correction.has_suggestions() {
-                println!("Spelling suggestions available for query terms:");
-                for (word, suggestions) in &correction.word_suggestions {
-                    if let Some(best) = suggestions.first() {
-                        println!(
-                            "  '{}' -> '{}' (confidence: {:.2})",
-                            word, best.word, best.score
-                        );
-                    }
+    if let Some(correction) = correction_info
+        && cli_args.verbosity() > 0
+    {
+        if used_correction {
+            println!("Used corrected query: {}", correction.query());
+        } else if correction.has_suggestions() {
+            println!("Spelling suggestions available for query terms:");
+            for (word, suggestions) in &correction.word_suggestions {
+                if let Some(best) = suggestions.first() {
+                    println!(
+                        "  '{}' -> '{}' (confidence: {:.2})",
+                        word, best.word, best.score
+                    );
                 }
             }
         }
     }
 
     // Show "Did you mean?" suggestion
-    if let Some(suggestion) = did_you_mean {
-        if cli_args.verbosity() > 0 {
-            println!(
-                "{}",
-                SpellSearchUtils::format_did_you_mean(&args.query, &suggestion)
-            );
-        }
+    if let Some(suggestion) = did_you_mean
+        && cli_args.verbosity() > 0
+    {
+        println!(
+            "{}",
+            SpellSearchUtils::format_did_you_mean(&args.query, &suggestion)
+        );
     }
 
     output_result("Search completed", &results, cli_args)?;

@@ -107,10 +107,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
@@ -133,10 +133,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Float(rating)) = doc.get_field("rating") {
                 println!("      Rating: {rating:.1}");
@@ -159,10 +159,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Integer(year)) = doc.get_field("year") {
                 println!("      Year: {year}");
@@ -185,10 +185,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Integer(pages)) = doc.get_field("pages") {
                 println!("      Pages: {pages}");
@@ -211,10 +211,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Integer(year)) = doc.get_field("year") {
                 println!("      Year: {year}");
@@ -237,10 +237,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
@@ -263,10 +263,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Integer(pages)) = doc.get_field("pages") {
                 println!("      Pages: {pages}");

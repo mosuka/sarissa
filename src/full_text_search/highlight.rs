@@ -589,10 +589,10 @@ impl SimpleHighlighter {
         // Find the first occurrence of any term
         let mut first_match_pos = None;
         for term in terms {
-            if let Some(pos) = text.to_lowercase().find(&term.to_lowercase()) {
-                if first_match_pos.is_none() || pos < first_match_pos.unwrap() {
-                    first_match_pos = Some(pos);
-                }
+            if let Some(pos) = text.to_lowercase().find(&term.to_lowercase())
+                && (first_match_pos.is_none() || pos < first_match_pos.unwrap())
+            {
+                first_match_pos = Some(pos);
             }
         }
 

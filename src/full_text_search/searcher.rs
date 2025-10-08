@@ -52,11 +52,10 @@ impl Searcher {
         parallel: bool,
     ) -> Result<C> {
         // For BooleanQuery with multiple clauses, try to execute sub-queries in parallel
-        if parallel {
-            if let Some(boolean_query) = query.as_any().downcast_ref::<crate::query::BooleanQuery>()
-            {
-                return self.search_boolean_query_parallel(boolean_query, collector);
-            }
+        if parallel
+            && let Some(boolean_query) = query.as_any().downcast_ref::<crate::query::BooleanQuery>()
+        {
+            return self.search_boolean_query_parallel(boolean_query, collector);
         }
 
         // Default single-threaded execution

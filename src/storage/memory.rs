@@ -417,10 +417,10 @@ impl LockManager for MemoryLockManager {
         match self.acquire_lock(name) {
             Ok(lock) => Ok(Some(lock)),
             Err(e) => {
-                if let SarissaError::Storage(ref msg) = e {
-                    if msg.contains("Failed to acquire lock") {
-                        return Ok(None);
-                    }
+                if let SarissaError::Storage(ref msg) = e
+                    && msg.contains("Failed to acquire lock")
+                {
+                    return Ok(None);
                 }
                 Err(e)
             }

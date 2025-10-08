@@ -67,16 +67,16 @@ impl ParallelHybridResultMerger {
                 let keyword_score = keyword_info.map(|(_, score, _)| *score);
                 let vector_similarity = vector_info.map(|(_, sim, _)| *sim);
 
-                if let Some(score) = keyword_score {
-                    if score < self.config.min_keyword_score {
-                        return None;
-                    }
+                if let Some(score) = keyword_score
+                    && score < self.config.min_keyword_score
+                {
+                    return None;
                 }
 
-                if let Some(sim) = vector_similarity {
-                    if sim < self.config.min_vector_similarity {
-                        return None;
-                    }
+                if let Some(sim) = vector_similarity
+                    && sim < self.config.min_vector_similarity
+                {
+                    return None;
                 }
 
                 // Calculate combined score based on strategy

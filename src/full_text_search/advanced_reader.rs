@@ -211,12 +211,12 @@ impl crate::full_text::reader::PostingIterator for AdvancedPostingIterator {
         self.started = true;
 
         // Use block optimization if available
-        if let Some(block_idx) = self.find_block(target_doc_id) {
-            if let Some(blocks) = &self.block_cache {
-                let block = &blocks[block_idx];
-                self.position = block.start_position;
-                self.current_block = block_idx;
-            }
+        if let Some(block_idx) = self.find_block(target_doc_id)
+            && let Some(blocks) = &self.block_cache
+        {
+            let block = &blocks[block_idx];
+            self.position = block.start_position;
+            self.current_block = block_idx;
         }
 
         // Linear search within the current range
@@ -457,27 +457,27 @@ impl SegmentReader {
             let default_analyzer = crate::analysis::StandardAnalyzer::new()?;
 
             for (doc_id, doc) in documents.iter() {
-                if let Some(field_value) = doc.get_field(field) {
-                    if let Some(text) = field_value.as_text() {
-                        // Use default analyzer (analyzers are configured at writer level)
-                        let token_stream = default_analyzer.analyze(text)?;
-                        let tokens: Vec<crate::analysis::Token> = token_stream.collect();
+                if let Some(field_value) = doc.get_field(field)
+                    && let Some(text) = field_value.as_text()
+                {
+                    // Use default analyzer (analyzers are configured at writer level)
+                    let token_stream = default_analyzer.analyze(text)?;
+                    let tokens: Vec<crate::analysis::Token> = token_stream.collect();
 
-                        let mut positions = Vec::new();
-                        for token in tokens.iter() {
-                            if token.text == term {
-                                positions.push(token.position as u32);
-                            }
+                    let mut positions = Vec::new();
+                    for token in tokens.iter() {
+                        if token.text == term {
+                            positions.push(token.position as u32);
                         }
+                    }
 
-                        if !positions.is_empty() {
-                            postings.push(crate::full_text::Posting {
-                                doc_id: *doc_id,
-                                frequency: positions.len() as u32,
-                                positions: Some(positions),
-                                weight: 1.0,
-                            });
-                        }
+                    if !positions.is_empty() {
+                        postings.push(crate::full_text::Posting {
+                            doc_id: *doc_id,
+                            frequency: positions.len() as u32,
+                            positions: Some(positions),
+                            weight: 1.0,
+                        });
                     }
                 }
             }

@@ -68,10 +68,10 @@ impl MergeStrategy for ScoreBasedMerger {
                 // Add hits to heap
                 for hit in search_results.hits {
                     // Apply min score filter if specified
-                    if let Some(min) = min_score {
-                        if hit.score < min {
-                            continue;
-                        }
+                    if let Some(min) = min_score
+                        && hit.score < min
+                    {
+                        continue;
                     }
 
                     // Wrap hit for heap ordering
@@ -166,10 +166,10 @@ impl MergeStrategy for WeightedMerger {
                     }
 
                     // Apply min score filter
-                    if let Some(min) = min_score {
-                        if hit.score < min {
-                            continue;
-                        }
+                    if let Some(min) = min_score
+                        && hit.score < min
+                    {
+                        continue;
                     }
 
                     let scored_hit = ScoredHit { hit };
@@ -262,12 +262,11 @@ impl MergeStrategy for RoundRobinMerger {
                     }
 
                     // Apply score filter
-                    if self.use_score_threshold {
-                        if let Some(min) = min_score {
-                            if hit.score < min {
-                                continue;
-                            }
-                        }
+                    if self.use_score_threshold
+                        && let Some(min) = min_score
+                        && hit.score < min
+                    {
+                        continue;
                     }
 
                     // Skip duplicates

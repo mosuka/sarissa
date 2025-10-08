@@ -13,12 +13,14 @@ pub trait Tokenizer: Send + Sync {
 }
 
 // Individual tokenizer modules
+pub mod ngram;
 pub mod regex;
 pub mod unicode_word;
 pub mod whitespace;
 pub mod whole;
 
 // Re-export all tokenizers for convenient access
+pub use ngram::NgramTokenizer;
 pub use regex::RegexTokenizer;
 pub use unicode_word::UnicodeWordTokenizer;
 pub use whitespace::WhitespaceTokenizer;

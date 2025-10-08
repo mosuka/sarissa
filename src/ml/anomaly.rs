@@ -98,41 +98,37 @@ impl AnomalyDetection {
         let timestamp = chrono::Utc::now();
 
         // Detect search pattern anomalies
-        if self.config.enable_pattern_detection {
-            if let Some(pattern_anomaly) =
+        if self.config.enable_pattern_detection
+            && let Some(pattern_anomaly) =
                 self.pattern_detector.detect_anomaly(query, &timestamp)?
-            {
-                anomalies.push(pattern_anomaly);
-            }
+        {
+            anomalies.push(pattern_anomaly);
         }
 
         // Detect result quality anomalies
-        if self.config.enable_quality_detection {
-            if let Some(quality_anomaly) = self
+        if self.config.enable_quality_detection
+            && let Some(quality_anomaly) = self
                 .quality_detector
                 .detect_anomaly(query, results, &timestamp)?
-            {
-                anomalies.push(quality_anomaly);
-            }
+        {
+            anomalies.push(quality_anomaly);
         }
 
         // Detect performance anomalies
-        if self.config.enable_performance_detection {
-            if let Some(perf_anomaly) = self
+        if self.config.enable_performance_detection
+            && let Some(perf_anomaly) = self
                 .performance_detector
                 .detect_anomaly(response_time_ms, &timestamp)?
-            {
-                anomalies.push(perf_anomaly);
-            }
+        {
+            anomalies.push(perf_anomaly);
         }
 
         // Detect user behavior anomalies
-        if self.config.enable_behavior_detection {
-            if let Some(behavior_anomaly) =
+        if self.config.enable_behavior_detection
+            && let Some(behavior_anomaly) =
                 self.behavior_detector.detect_anomaly(context, &timestamp)?
-            {
-                anomalies.push(behavior_anomaly);
-            }
+        {
+            anomalies.push(behavior_anomaly);
         }
 
         // Store anomalies in history

@@ -110,10 +110,10 @@ impl SpellingDictionary {
 
             if parts.len() >= 2 {
                 let word = parts[0];
-                if let Ok(frequency) = parts[1].parse::<u32>() {
-                    if word.chars().all(|c| c.is_alphabetic()) {
-                        dictionary.add_word(word.to_string(), frequency);
-                    }
+                if let Ok(frequency) = parts[1].parse::<u32>()
+                    && word.chars().all(|c| c.is_alphabetic())
+                {
+                    dictionary.add_word(word.to_string(), frequency);
                 }
             }
         }

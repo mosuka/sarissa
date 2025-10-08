@@ -57,11 +57,13 @@ async fn main() -> Result<()> {
     // Demonstrate integration with QueryExpansion
     println!("\n=== Integration with Query Expansion ===");
 
-    let mut config = QueryExpansionConfig::default();
-    config.use_ml_classifier = true;
-    config.ml_training_data_path = Some(training_data_path.to_string());
-    config.enable_synonyms = true;
-    config.enable_semantic = false;
+    let config = QueryExpansionConfig {
+        use_ml_classifier: true,
+        ml_training_data_path: Some(training_data_path.to_string()),
+        enable_synonyms: true,
+        enable_semantic: false,
+        ..Default::default()
+    };
 
     let query_expander = QueryExpansion::new(config)?;
 

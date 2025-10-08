@@ -12,17 +12,25 @@ use std::sync::Arc;
 /// a different analyzer for each field, with a default analyzer for fields not
 /// explicitly configured.
 ///
+/// # Memory Efficiency
+///
+/// When using the same analyzer for multiple fields, reuse a single instance
+/// with `Arc::clone` to save memory. This is especially important for analyzers
+/// with large dictionaries (e.g., Lindera for Japanese).
+///
 /// # Example
 ///
 /// ```
-/// use sarissa::analysis::{PerFieldAnalyzer, StandardAnalyzer, KeywordAnalyzer};
+/// use sarissa::analysis::{Analyzer, PerFieldAnalyzer, StandardAnalyzer, KeywordAnalyzer};
 /// use std::sync::Arc;
 ///
+/// // Reuse analyzer instances to save memory
+/// let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
 /// let mut analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
-/// analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
-/// analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
+/// analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+/// analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
 /// // "title" and "body" will use StandardAnalyzer
-/// // "id" and "category" will use KeywordAnalyzer
+/// // "id" and "category" will use the same KeywordAnalyzer instance
 /// ```
 #[derive(Clone)]
 pub struct PerFieldAnalyzer {

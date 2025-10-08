@@ -353,10 +353,10 @@ impl SpellSearchUtils {
             let mut result = original.to_string();
 
             for (original_word, suggestions) in &correction.word_suggestions {
-                if let Some(best_suggestion) = suggestions.first() {
-                    if best_suggestion.score > 0.6 {
-                        result = result.replace(original_word, &best_suggestion.word);
-                    }
+                if let Some(best_suggestion) = suggestions.first()
+                    && best_suggestion.score > 0.6
+                {
+                    result = result.replace(original_word, &best_suggestion.word);
                 }
             }
 

@@ -655,7 +655,6 @@ impl CoOccurrenceModel {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

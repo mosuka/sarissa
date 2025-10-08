@@ -163,22 +163,22 @@ impl VectorIndexOptimizer {
     /// Validate optimization constraints.
     #[allow(dead_code)]
     fn validate_constraints(&self, report: &OptimizationReport) -> Result<()> {
-        if let Some(memory_target) = self.memory_target {
-            if report.final_memory_bytes > memory_target {
-                return Err(SarissaError::InvalidOperation(format!(
-                    "Final memory usage {} exceeds target {}",
-                    report.final_memory_bytes, memory_target
-                )));
-            }
+        if let Some(memory_target) = self.memory_target
+            && report.final_memory_bytes > memory_target
+        {
+            return Err(SarissaError::InvalidOperation(format!(
+                "Final memory usage {} exceeds target {}",
+                report.final_memory_bytes, memory_target
+            )));
         }
 
-        if let Some(ref target) = self.performance_target {
-            if report.final_memory_bytes > target.target_memory_bytes {
-                return Err(SarissaError::InvalidOperation(format!(
-                    "Memory target {} not achieved, actual: {}",
-                    target.target_memory_bytes, report.final_memory_bytes
-                )));
-            }
+        if let Some(ref target) = self.performance_target
+            && report.final_memory_bytes > target.target_memory_bytes
+        {
+            return Err(SarissaError::InvalidOperation(format!(
+                "Memory target {} not achieved, actual: {}",
+                target.target_memory_bytes, report.final_memory_bytes
+            )));
         }
 
         Ok(())

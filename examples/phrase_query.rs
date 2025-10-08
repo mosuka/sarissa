@@ -70,12 +70,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -100,12 +99,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -123,12 +121,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -149,12 +146,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -180,12 +176,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -211,12 +206,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 

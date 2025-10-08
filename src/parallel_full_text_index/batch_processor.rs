@@ -189,10 +189,10 @@ impl BatchProcessor {
         }
 
         for partition_index in partitions_to_remove {
-            if let Some(batch) = self.active_batches.remove(&partition_index) {
-                if !batch.is_empty() {
-                    ready_batches.push(batch);
-                }
+            if let Some(batch) = self.active_batches.remove(&partition_index)
+                && !batch.is_empty()
+            {
+                ready_batches.push(batch);
             }
         }
 
@@ -241,20 +241,20 @@ impl BatchProcessor {
                     errors.push(e);
 
                     // Check if we should stop on too many errors
-                    if let Some(max_errors) = options.max_errors {
-                        if errors.len() >= max_errors {
-                            break;
-                        }
+                    if let Some(max_errors) = options.max_errors
+                        && errors.len() >= max_errors
+                    {
+                        break;
                     }
                 }
             }
         }
 
         // Force commit if requested
-        if options.force_commit {
-            if let Err(e) = writer_handle.commit() {
-                errors.push(e);
-            }
+        if options.force_commit
+            && let Err(e) = writer_handle.commit()
+        {
+            errors.push(e);
         }
 
         let processing_time = start_time.elapsed();

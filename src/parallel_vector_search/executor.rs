@@ -326,11 +326,11 @@ impl ParallelVectorSearchExecutor {
         };
 
         // Update cache if successful
-        if let Ok(ref results) = search_result {
-            if self.config.enable_result_caching {
-                let cache_key = self.compute_cache_key(&task.query, &task.config);
-                self.update_cache(cache_key, results.clone());
-            }
+        if let Ok(ref results) = search_result
+            && self.config.enable_result_caching
+        {
+            let cache_key = self.compute_cache_key(&task.query, &task.config);
+            self.update_cache(cache_key, results.clone());
         }
 
         SearchTaskResult {

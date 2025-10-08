@@ -238,17 +238,16 @@ fn execute_search(engine: &mut SearchEngine, parser: &QueryParser, query_str: &s
     for (i, hit) in results.hits.iter().enumerate() {
         print!("  {}. Score: {:.4} ", i + 1, hit.score);
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    print!("- {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                print!("- {title}");
             }
-            if let Some(field_value) = doc.get_field("year") {
-                if let Some(year) = field_value.as_numeric() {
-                    if let Ok(year_num) = year.parse::<f64>() {
-                        print!(" ({})", year_num as i32);
-                    }
-                }
+            if let Some(field_value) = doc.get_field("year")
+                && let Some(year) = field_value.as_numeric()
+                && let Ok(year_num) = year.parse::<f64>()
+            {
+                print!(" ({})", year_num as i32);
             }
         }
         println!();

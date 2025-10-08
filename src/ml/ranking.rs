@@ -278,10 +278,7 @@ impl LearningToRank {
 
         // Sort by combined score
         // Handle NaN values by treating them as equal (ordering doesn't matter for NaN)
-        scored_results.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scored_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Update metrics
         {

@@ -172,10 +172,11 @@ impl EmbeddingEngine {
         let mut seen_terms = std::collections::HashSet::new();
 
         for token in tokens {
-            if let Some(&vocab_index) = self.vocabulary.get(token) {
-                if seen_terms.insert(token.clone()) && vocab_index < vector_data.len() {
-                    vector_data[vocab_index] = 1.0;
-                }
+            if let Some(&vocab_index) = self.vocabulary.get(token)
+                && seen_terms.insert(token.clone())
+                && vocab_index < vector_data.len()
+            {
+                vector_data[vocab_index] = 1.0;
             }
         }
 
@@ -198,10 +199,10 @@ impl EmbeddingEngine {
         let total_ngrams = ngram_counts.len() as f32;
 
         for (ngram, count) in ngram_counts {
-            if let Some(&vocab_index) = self.vocabulary.get(&ngram) {
-                if vocab_index < vector_data.len() {
-                    vector_data[vocab_index] = count as f32 / total_ngrams;
-                }
+            if let Some(&vocab_index) = self.vocabulary.get(&ngram)
+                && vocab_index < vector_data.len()
+            {
+                vector_data[vocab_index] = count as f32 / total_ngrams;
             }
         }
 

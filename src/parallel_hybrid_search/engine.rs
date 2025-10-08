@@ -337,16 +337,15 @@ impl ParallelHybridSearchEngine {
                     .into_iter()
                     .map(|handle| {
                         let stats = load_stats.get(&handle.id).cloned().unwrap_or_default();
-                        let load_score = stats.active_searches as f64
-                            + (stats.avg_search_time_ms / 1000.0); // Normalize to seconds
+                        let load_score =
+                            stats.active_searches as f64 + (stats.avg_search_time_ms / 1000.0); // Normalize to seconds
                         (handle, load_score)
                     })
                     .collect();
 
                 // Sort by load score (ascending - less loaded first)
-                scored_indices.sort_by(|a, b| {
-                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                scored_indices
+                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 let selected = scored_indices
                     .into_iter()
@@ -376,9 +375,8 @@ impl ParallelHybridSearchEngine {
                     .collect();
 
                 // Sort by score (descending - higher score first)
-                scored_indices.sort_by(|a, b| {
-                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                scored_indices
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 let selected = scored_indices
                     .into_iter()
@@ -501,9 +499,11 @@ mod tests {
         use super::LoadBalancingStrategy;
 
         // Test RoundRobin
-        let mut config = ParallelHybridSearchConfig::default();
-        config.load_balancing_strategy = LoadBalancingStrategy::RoundRobin;
-        config.max_concurrent_indices = 2;
+        let config = ParallelHybridSearchConfig {
+            load_balancing_strategy: LoadBalancingStrategy::RoundRobin,
+            max_concurrent_indices: 2,
+            ..Default::default()
+        };
         let engine = ParallelHybridSearchEngine::new(config).unwrap();
 
         // Add multiple indices
@@ -556,8 +556,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_result_caching() {
-        let mut config = ParallelHybridSearchConfig::default();
-        config.enable_result_caching = true;
+        let config = ParallelHybridSearchConfig {
+            enable_result_caching: true,
+            ..Default::default()
+        };
         let engine = ParallelHybridSearchEngine::new(config).unwrap();
 
         let reader = create_test_keyword_reader();
@@ -575,7 +577,10 @@ mod tests {
         let results2 = engine.search("test query", query2).await.unwrap();
 
         // Results should be identical
-        assert_eq!(results1.total_keyword_matches, results2.total_keyword_matches);
+        assert_eq!(
+            results1.total_keyword_matches,
+            results2.total_keyword_matches
+        );
         assert_eq!(results1.indices_searched, results2.indices_searched);
 
         // Cache stats should show hits
@@ -596,9 +601,18 @@ mod tests {
 
         // Prepare multiple queries
         let queries = vec![
-            ("query1", Box::new(TermQuery::new("content", "rust")) as Box<dyn Query>),
-            ("query2", Box::new(TermQuery::new("content", "python")) as Box<dyn Query>),
-            ("query3", Box::new(TermQuery::new("content", "java")) as Box<dyn Query>),
+            (
+                "query1",
+                Box::new(TermQuery::new("content", "rust")) as Box<dyn Query>,
+            ),
+            (
+                "query2",
+                Box::new(TermQuery::new("content", "python")) as Box<dyn Query>,
+            ),
+            (
+                "query3",
+                Box::new(TermQuery::new("content", "java")) as Box<dyn Query>,
+            ),
         ];
 
         let results = engine.batch_search(queries).await.unwrap();
@@ -613,9 +627,11 @@ mod tests {
     async fn test_index_aware_load_balancing() {
         use super::LoadBalancingStrategy;
 
-        let mut config = ParallelHybridSearchConfig::default();
-        config.load_balancing_strategy = LoadBalancingStrategy::IndexAware;
-        config.max_concurrent_indices = 2;
+        let config = ParallelHybridSearchConfig {
+            load_balancing_strategy: LoadBalancingStrategy::IndexAware,
+            max_concurrent_indices: 2,
+            ..Default::default()
+        };
         let engine = ParallelHybridSearchEngine::new(config).unwrap();
 
         // Add indices with different weights

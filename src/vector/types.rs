@@ -188,16 +188,16 @@ pub mod utils {
             ));
         }
 
-        if let Some(expected_dim) = expected_dimension {
-            if vector.data.len() != expected_dim {
-                return Err(crate::error::SarissaError::InvalidOperation(
-                    VectorValidationError::DimensionMismatch {
-                        expected: expected_dim,
-                        actual: vector.data.len(),
-                    }
-                    .to_string(),
-                ));
-            }
+        if let Some(expected_dim) = expected_dimension
+            && vector.data.len() != expected_dim
+        {
+            return Err(crate::error::SarissaError::InvalidOperation(
+                VectorValidationError::DimensionMismatch {
+                    expected: expected_dim,
+                    actual: vector.data.len(),
+                }
+                .to_string(),
+            ));
         }
 
         if !vector.is_valid() {

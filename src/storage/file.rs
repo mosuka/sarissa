@@ -151,10 +151,10 @@ impl Storage for FileStorage {
             let entry = entry.map_err(|e| StorageError::IoError(e.to_string()))?;
             let path = entry.path();
 
-            if path.is_file() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    files.push(name.to_string());
-                }
+            if path.is_file()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            {
+                files.push(name.to_string());
             }
         }
 
@@ -432,10 +432,10 @@ impl LockManager for FileLockManager {
         match self.acquire_lock(name) {
             Ok(lock) => Ok(Some(lock)),
             Err(e) => {
-                if let SarissaError::Storage(ref msg) = e {
-                    if msg.contains("Failed to acquire lock") {
-                        return Ok(None);
-                    }
+                if let SarissaError::Storage(ref msg) = e
+                    && msg.contains("Failed to acquire lock")
+                {
+                    return Ok(None);
                 }
                 Err(e)
             }

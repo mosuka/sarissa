@@ -104,93 +104,88 @@ impl FuzzyQuery {
         //           self.term, query_term_lower, self.field, self.max_edits);
 
         for doc_id in 0..doc_count {
-            if let Ok(Some(document)) = reader.document(doc_id) {
-                if let Some(field_value) = document.get_field(&self.field) {
-                    if let Some(text) = field_value.as_text() {
-                        // Debug: print document content
-                        // eprintln!("  Doc {}: field '{}' = '{}'", doc_id, self.field, text);
+            if let Ok(Some(document)) = reader.document(doc_id)
+                && let Some(field_value) = document.get_field(&self.field)
+                && let Some(text) = field_value.as_text()
+            {
+                // Debug: print document content
+                // eprintln!("  Doc {}: field '{}' = '{}'", doc_id, self.field, text);
 
-                        // Simple tokenization - split by whitespace and punctuation
-                        let words: Vec<(String, String)> = text
-                            .split_whitespace()
-                            .flat_map(|word| {
-                                // Split by hyphens first, then clean each part
-                                word.split('-')
-                                    .flat_map(|part| {
-                                        // Remove punctuation but keep original case
-                                        let clean_word = part
-                                            .chars()
-                                            .filter(|c| c.is_alphabetic())
-                                            .collect::<String>();
-                                        if clean_word.len() >= 2 {
-                                            Some((clean_word.clone(), clean_word.to_lowercase()))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .collect();
-
-                        for (original_word, lowercase_word) in words {
-                            // Skip if we've already processed this term
-                            if terms_found.contains(&lowercase_word) {
-                                continue;
-                            }
-
-                            // Check if word respects prefix constraint (use lowercase for comparison)
-                            if !self.respects_prefix(&lowercase_word) {
-                                continue;
-                            }
-
-                            // Calculate edit distance using lowercase
-                            let edit_distance = if self.transpositions {
-                                damerau_levenshtein_distance(&query_term_lower, &lowercase_word)
-                                    as u32
-                            } else {
-                                levenshtein_distance(&query_term_lower, &lowercase_word) as u32
-                            };
-
-                            // Check if within allowed edit distance
-                            if edit_distance <= self.max_edits {
-                                // eprintln!("    Found match: '{}' (original: '{}') distance={}, max_edits={}",
-                                //           lowercase_word, original_word, edit_distance, self.max_edits);
-                                terms_found.insert(lowercase_word.clone());
-
-                                // Try both original case and lowercase when querying the index
-                                let mut doc_freq = 1; // Fallback frequency
-                                let mut search_term = lowercase_word.clone();
-
-                                // First try lowercase
-                                if let Ok(Some(term_info)) =
-                                    reader.term_info(&self.field, &lowercase_word)
-                                {
-                                    doc_freq = term_info.doc_freq as u32;
-                                    // eprintln!("      term_info found for '{}': doc_freq={}", lowercase_word, doc_freq);
-                                } else if let Ok(Some(term_info)) =
-                                    reader.term_info(&self.field, &original_word)
-                                {
-                                    // Then try original case
-                                    doc_freq = term_info.doc_freq as u32;
-                                    search_term = original_word.clone();
-                                    // eprintln!("      term_info found for '{}': doc_freq={}", original_word, doc_freq);
+                // Simple tokenization - split by whitespace and punctuation
+                let words: Vec<(String, String)> = text
+                    .split_whitespace()
+                    .flat_map(|word| {
+                        // Split by hyphens first, then clean each part
+                        word.split('-')
+                            .flat_map(|part| {
+                                // Remove punctuation but keep original case
+                                let clean_word = part
+                                    .chars()
+                                    .filter(|c| c.is_alphabetic())
+                                    .collect::<String>();
+                                if clean_word.len() >= 2 {
+                                    Some((clean_word.clone(), clean_word.to_lowercase()))
                                 } else {
-                                    // eprintln!("      No term_info found for '{}' or '{}'", lowercase_word, original_word);
+                                    None
                                 }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
 
-                                let similarity_score = self.calculate_similarity_score_advanced(
-                                    edit_distance,
-                                    &lowercase_word,
-                                );
+                for (original_word, lowercase_word) in words {
+                    // Skip if we've already processed this term
+                    if terms_found.contains(&lowercase_word) {
+                        continue;
+                    }
 
-                                matches.push(FuzzyMatch {
-                                    term: search_term, // Use the version that was found in the index
-                                    edit_distance,
-                                    doc_frequency: doc_freq,
-                                    similarity_score,
-                                });
-                            }
+                    // Check if word respects prefix constraint (use lowercase for comparison)
+                    if !self.respects_prefix(&lowercase_word) {
+                        continue;
+                    }
+
+                    // Calculate edit distance using lowercase
+                    let edit_distance = if self.transpositions {
+                        damerau_levenshtein_distance(&query_term_lower, &lowercase_word) as u32
+                    } else {
+                        levenshtein_distance(&query_term_lower, &lowercase_word) as u32
+                    };
+
+                    // Check if within allowed edit distance
+                    if edit_distance <= self.max_edits {
+                        // eprintln!("    Found match: '{}' (original: '{}') distance={}, max_edits={}",
+                        //           lowercase_word, original_word, edit_distance, self.max_edits);
+                        terms_found.insert(lowercase_word.clone());
+
+                        // Try both original case and lowercase when querying the index
+                        let mut doc_freq = 1; // Fallback frequency
+                        let mut search_term = lowercase_word.clone();
+
+                        // First try lowercase
+                        if let Ok(Some(term_info)) = reader.term_info(&self.field, &lowercase_word)
+                        {
+                            doc_freq = term_info.doc_freq as u32;
+                            // eprintln!("      term_info found for '{}': doc_freq={}", lowercase_word, doc_freq);
+                        } else if let Ok(Some(term_info)) =
+                            reader.term_info(&self.field, &original_word)
+                        {
+                            // Then try original case
+                            doc_freq = term_info.doc_freq as u32;
+                            search_term = original_word.clone();
+                            // eprintln!("      term_info found for '{}': doc_freq={}", original_word, doc_freq);
+                        } else {
+                            // eprintln!("      No term_info found for '{}' or '{}'", lowercase_word, original_word);
                         }
+
+                        let similarity_score = self
+                            .calculate_similarity_score_advanced(edit_distance, &lowercase_word);
+
+                        matches.push(FuzzyMatch {
+                            term: search_term, // Use the version that was found in the index
+                            edit_distance,
+                            doc_frequency: doc_freq,
+                            similarity_score,
+                        });
                     }
                 }
             }
