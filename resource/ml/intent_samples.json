@@ -1,0 +1,302 @@
+[
+  {
+    "query": "what is machine learning",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "how to install python",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "why does rust compile slowly",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "when was javascript created",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "who invented linux",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "explain neural networks",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "definition of algorithm",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "understanding recursion",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "learn about databases",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "difference between sql and nosql",
+    "intent": "Informational",
+    "language": "en"
+  },
+  {
+    "query": "github homepage",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "google login page",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "stackoverflow website",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "official rust documentation",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "amazon site",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "twitter login",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "facebook homepage",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "youtube main page",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "netflix website",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "official python site",
+    "intent": "Navigational",
+    "language": "en"
+  },
+  {
+    "query": "buy laptop online",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "download vscode",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "purchase books",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "install docker",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "get free trial",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "order pizza delivery",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "subscribe to newsletter",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "price comparison laptop",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "reserve restaurant table",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "book flight tickets",
+    "intent": "Transactional",
+    "language": "en"
+  },
+  {
+    "query": "機械学習とは",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "Pythonのインストール方法",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "Rustのコンパイルが遅い理由",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "JavaScriptはいつ作られた",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "Linuxの開発者は誰",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "ニューラルネットワークの説明",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "アルゴリズムの定義",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "再帰処理について",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "データベースの学習",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "SQLとNoSQLの違い",
+    "intent": "Informational",
+    "language": "ja"
+  },
+  {
+    "query": "GitHubホームページ",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "Googleログインページ",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "StackOverflowのサイト",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "Rust公式ドキュメント",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "Amazonサイト",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "Twitterログイン",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "Facebookホームページ",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "YouTubeメインページ",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "Netflixウェブサイト",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "Python公式サイト",
+    "intent": "Navigational",
+    "language": "ja"
+  },
+  {
+    "query": "ノートパソコンを購入",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "VSCodeをダウンロード",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "本を買う",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "Dockerをインストール",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "無料トライアルを取得",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "ピザを注文",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "メールマガジンに登録",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "ラップトップの価格比較",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "レストランを予約",
+    "intent": "Transactional",
+    "language": "ja"
+  },
+  {
+    "query": "航空券を予約",
+    "intent": "Transactional",
+    "language": "ja"
+  }
+]

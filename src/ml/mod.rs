@@ -5,6 +5,7 @@
 
 pub mod anomaly;
 pub mod features;
+pub mod intent_classifier;
 pub mod models;
 pub mod optimization;
 pub mod query_expansion;
@@ -13,6 +14,7 @@ pub mod recommendation;
 
 pub use anomaly::*;
 pub use features::*;
+pub use intent_classifier::*;
 pub use models::*;
 pub use optimization::*;
 pub use query_expansion::*;
@@ -62,7 +64,7 @@ pub struct MLContext {
     pub search_history: Vec<SearchHistoryItem>,
     /// User preferences.
     pub user_preferences: HashMap<String, f64>,
-    /// Current timestamp.
+    /// Timestamp when this context was created (used for time decay calculations in recommendations).
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
