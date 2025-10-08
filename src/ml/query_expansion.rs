@@ -12,7 +12,7 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::ml::{MLContext, SearchHistoryItem};
+use crate::ml::MLContext;
 
 /// Configuration for query expansion system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +37,10 @@ pub struct QueryExpansionConfig {
     pub synonym_dict_path: Option<String>,
     /// Path to word embeddings.
     pub embeddings_path: Option<String>,
+    /// Use ML-based intent classification instead of keyword-based.
+    pub use_ml_classifier: bool,
+    /// Path to ML training data (JSON file with IntentSample array).
+    pub ml_training_data_path: Option<String>,
 }
 
 impl Default for QueryExpansionConfig {
@@ -52,6 +56,8 @@ impl Default for QueryExpansionConfig {
             expansion_term_weight: 0.5,
             synonym_dict_path: None,
             embeddings_path: None,
+            use_ml_classifier: false,
+            ml_training_data_path: None,
         }
     }
 }
@@ -66,8 +72,8 @@ pub struct QueryExpansion {
     embeddings: WordEmbeddings,
     /// Statistical co-occurrence model.
     cooccurrence_model: CoOccurrenceModel,
-    /// Query intent classifier.
-    intent_classifier: IntentClassifier,
+    /// Intent classifier (either keyword-based or ML-based).
+    intent_classifier: crate::ml::intent_classifier::IntentClassifier,
 }
 
 impl QueryExpansion {
@@ -85,12 +91,87 @@ impl QueryExpansion {
             WordEmbeddings::new()
         };
 
+        // Initialize intent classifier (ML-based or keyword-based)
+        let intent_classifier = if config.use_ml_classifier {
+            if let Some(ref path) = config.ml_training_data_path {
+                let samples =
+                    crate::ml::intent_classifier::IntentClassifier::load_training_data(path)?;
+                crate::ml::intent_classifier::IntentClassifier::new_ml(samples)?
+            } else {
+                let informational = std::collections::HashSet::from([
+                    "what".to_string(),
+                    "how".to_string(),
+                    "why".to_string(),
+                    "when".to_string(),
+                    "where".to_string(),
+                    "who".to_string(),
+                    "definition".to_string(),
+                    "explain".to_string(),
+                ]);
+                let navigational = std::collections::HashSet::from([
+                    "homepage".to_string(),
+                    "website".to_string(),
+                    "site".to_string(),
+                    "login".to_string(),
+                    "official".to_string(),
+                ]);
+                let transactional = std::collections::HashSet::from([
+                    "buy".to_string(),
+                    "purchase".to_string(),
+                    "order".to_string(),
+                    "download".to_string(),
+                    "install".to_string(),
+                    "get".to_string(),
+                    "free".to_string(),
+                    "price".to_string(),
+                ]);
+                crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
+                    informational,
+                    navigational,
+                    transactional,
+                )
+            }
+        } else {
+            let informational = std::collections::HashSet::from([
+                "what".to_string(),
+                "how".to_string(),
+                "why".to_string(),
+                "when".to_string(),
+                "where".to_string(),
+                "who".to_string(),
+                "definition".to_string(),
+                "explain".to_string(),
+            ]);
+            let navigational = std::collections::HashSet::from([
+                "homepage".to_string(),
+                "website".to_string(),
+                "site".to_string(),
+                "login".to_string(),
+                "official".to_string(),
+            ]);
+            let transactional = std::collections::HashSet::from([
+                "buy".to_string(),
+                "purchase".to_string(),
+                "order".to_string(),
+                "download".to_string(),
+                "install".to_string(),
+                "get".to_string(),
+                "free".to_string(),
+                "price".to_string(),
+            ]);
+            crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
+                informational,
+                navigational,
+                transactional,
+            )
+        };
+
         Ok(Self {
             config,
             synonym_dict,
             embeddings,
             cooccurrence_model: CoOccurrenceModel::new(),
-            intent_classifier: IntentClassifier::new(),
+            intent_classifier,
         })
     }
 
@@ -108,8 +189,8 @@ impl QueryExpansion {
         let original_terms = self.tokenize_query(original_query);
         let mut expansions = HashSet::new();
 
-        // Classify query intent first
-        let intent = self.intent_classifier.classify(&original_terms)?;
+        // Classify query intent
+        let intent = self.intent_classifier.predict(original_query)?;
 
         // Apply different expansion strategies based on intent
         match intent {
@@ -172,14 +253,10 @@ impl QueryExpansion {
         &mut self,
         original_query: &str,
         clicked_documents: &[String],
-        search_history: &[SearchHistoryItem],
     ) -> Result<()> {
         // Update co-occurrence model with successful query-document pairs
         self.cooccurrence_model
             .update_with_clicks(original_query, clicked_documents)?;
-
-        // Update intent classifier with search patterns
-        self.intent_classifier.update_with_history(search_history)?;
 
         Ok(())
     }
@@ -578,103 +655,6 @@ impl CoOccurrenceModel {
     }
 }
 
-/// Query intent classifier.
-#[derive(Debug)]
-pub struct IntentClassifier {
-    /// Keywords that indicate informational intent.
-    informational_keywords: HashSet<String>,
-    /// Keywords that indicate navigational intent.
-    navigational_keywords: HashSet<String>,
-    /// Keywords that indicate transactional intent.
-    transactional_keywords: HashSet<String>,
-}
-
-impl Default for IntentClassifier {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl IntentClassifier {
-    pub fn new() -> Self {
-        let mut informational = HashSet::new();
-        informational.extend(vec![
-            "what".to_string(),
-            "how".to_string(),
-            "why".to_string(),
-            "when".to_string(),
-            "where".to_string(),
-            "who".to_string(),
-            "definition".to_string(),
-            "explain".to_string(),
-        ]);
-
-        let mut navigational = HashSet::new();
-        navigational.extend(vec![
-            "homepage".to_string(),
-            "website".to_string(),
-            "site".to_string(),
-            "login".to_string(),
-            "official".to_string(),
-        ]);
-
-        let mut transactional = HashSet::new();
-        transactional.extend(vec![
-            "buy".to_string(),
-            "purchase".to_string(),
-            "order".to_string(),
-            "download".to_string(),
-            "install".to_string(),
-            "get".to_string(),
-            "free".to_string(),
-            "price".to_string(),
-        ]);
-
-        Self {
-            informational_keywords: informational,
-            navigational_keywords: navigational,
-            transactional_keywords: transactional,
-        }
-    }
-
-    pub fn classify(&self, query_terms: &[String]) -> Result<QueryIntent> {
-        let mut informational_score = 0;
-        let mut navigational_score = 0;
-        let mut transactional_score = 0;
-
-        for term in query_terms {
-            if self.informational_keywords.contains(term) {
-                informational_score += 1;
-            }
-            if self.navigational_keywords.contains(term) {
-                navigational_score += 1;
-            }
-            if self.transactional_keywords.contains(term) {
-                transactional_score += 1;
-            }
-        }
-
-        let max_score = informational_score
-            .max(navigational_score)
-            .max(transactional_score);
-
-        if max_score == 0 {
-            Ok(QueryIntent::Unknown)
-        } else if max_score == informational_score {
-            Ok(QueryIntent::Informational)
-        } else if max_score == navigational_score {
-            Ok(QueryIntent::Navigational)
-        } else {
-            Ok(QueryIntent::Transactional)
-        }
-    }
-
-    pub fn update_with_history(&mut self, _history: &[SearchHistoryItem]) -> Result<()> {
-        // Learn from search patterns to improve intent classification
-        // This would analyze successful queries and their outcomes
-        Ok(())
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -697,22 +677,46 @@ mod tests {
 
     #[test]
     fn test_intent_classification() {
-        let classifier = IntentClassifier::new();
+        let informational = std::collections::HashSet::from([
+            "what".to_string(),
+            "how".to_string(),
+            "why".to_string(),
+            "when".to_string(),
+            "where".to_string(),
+            "who".to_string(),
+            "definition".to_string(),
+            "explain".to_string(),
+        ]);
+        let navigational = std::collections::HashSet::from([
+            "homepage".to_string(),
+            "website".to_string(),
+            "site".to_string(),
+            "login".to_string(),
+            "official".to_string(),
+        ]);
+        let transactional = std::collections::HashSet::from([
+            "buy".to_string(),
+            "purchase".to_string(),
+            "order".to_string(),
+            "download".to_string(),
+            "install".to_string(),
+            "get".to_string(),
+            "free".to_string(),
+            "price".to_string(),
+        ]);
+        let classifier = crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
+            informational,
+            navigational,
+            transactional,
+        );
 
-        let info_query = vec!["what".to_string(), "is".to_string(), "rust".to_string()];
-        let intent = classifier.classify(&info_query).unwrap();
+        let intent = classifier.predict("what is rust").unwrap();
         assert_eq!(intent, QueryIntent::Informational);
 
-        let nav_query = vec![
-            "rust".to_string(),
-            "official".to_string(),
-            "website".to_string(),
-        ];
-        let intent = classifier.classify(&nav_query).unwrap();
+        let intent = classifier.predict("rust official website").unwrap();
         assert_eq!(intent, QueryIntent::Navigational);
 
-        let trans_query = vec!["buy".to_string(), "rust".to_string(), "book".to_string()];
-        let intent = classifier.classify(&trans_query).unwrap();
+        let intent = classifier.predict("buy rust book").unwrap();
         assert_eq!(intent, QueryIntent::Transactional);
     }
 
