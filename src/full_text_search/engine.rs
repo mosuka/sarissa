@@ -128,7 +128,7 @@ impl SearchEngine {
     }
 
     /// Get or create a searcher for this engine.
-    fn get_searcher(&self) -> Result<std::cell::Ref<Searcher>> {
+    fn get_searcher(&'_ self) -> Result<std::cell::Ref<'_, Searcher>> {
         {
             let mut searcher_ref = self.searcher.borrow_mut();
             if searcher_ref.is_none() {
@@ -165,28 +165,6 @@ impl SearchEngine {
         self.index.is_closed()
     }
 }
-
-// impl Search for SearchEngine {
-//     fn search(&self, request: SearchRequest) -> Result<SearchResults> {
-//         let searcher = self.get_searcher()?;
-//         let results = Search::search(&*searcher, request.clone())?;
-
-//         // Note: Post-processing is no longer needed as BKD Tree handles numeric filtering
-//         // The apply_numeric_range_filtering method is kept for backward compatibility
-//         // but is not used when BKD Trees are available
-
-//         Ok(results)
-//     }
-
-//     fn count(&self, query: Box<dyn Query>) -> Result<u64> {
-//         let searcher = self.get_searcher()?;
-//         let count = Search::count(&*searcher, query.clone_box())?;
-
-//         // Note: Post-processing is no longer needed as BKD Tree handles numeric filtering
-
-//         Ok(count)
-//     }
-// }
 
 impl SearchEngine {
     /// Search with the given request.
