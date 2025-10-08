@@ -149,7 +149,7 @@ impl PostingList {
     }
 
     /// Get an iterator over the postings.
-    pub fn iter(&self) -> std::slice::Iter<Posting> {
+    pub fn iter(&'_ self) -> std::slice::Iter<'_, Posting> {
         self.postings.iter()
     }
 
