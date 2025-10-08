@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
+use sarissa::analysis::{Analyzer, KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
 use sarissa::document::{Document, DocumentParser};
 use sarissa::error::Result;
 use sarissa::full_text::index::IndexConfig;
@@ -25,9 +25,12 @@ fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");
 
     // Step 1: Create per-field analyzer wrapper
-    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new()?));
-    per_field_analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
-    per_field_analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
+    // Note: Reuse analyzer instances with Arc::clone to save memory
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+    per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
 
     let analyzer = Arc::new(per_field_analyzer);
 
@@ -111,15 +114,15 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         println!("  {}. Doc {} (score: {:.4})", i + 1, hit.doc_id, hit.score);
         if let Some(doc) = &hit.document {
-            if let Some(title) = doc.get_field("title") {
-                if let Some(title_text) = title.as_text() {
-                    println!("     Title: {title_text}");
-                }
+            if let Some(title) = doc.get_field("title")
+                && let Some(title_text) = title.as_text()
+            {
+                println!("     Title: {title_text}");
             }
-            if let Some(id) = doc.get_field("id") {
-                if let Some(id_text) = id.as_text() {
-                    println!("     ID: {id_text}");
-                }
+            if let Some(id) = doc.get_field("id")
+                && let Some(id_text) = id.as_text()
+            {
+                println!("     ID: {id_text}");
             }
         }
     }

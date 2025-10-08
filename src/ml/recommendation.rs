@@ -105,12 +105,11 @@ impl RecommendationSystem {
             .cloned();
 
         // Generate collaborative filtering recommendations
-        if self.config.enable_collaborative {
-            if let Some(collab_recs) =
+        if self.config.enable_collaborative
+            && let Some(collab_recs) =
                 self.collaborative_recommendations(&user_id, candidate_documents, search_context)?
-            {
-                recommendations.extend(collab_recs);
-            }
+        {
+            recommendations.extend(collab_recs);
         }
 
         // Generate content-based recommendations
@@ -190,14 +189,13 @@ impl RecommendationSystem {
         candidates: &[String],
         context: &MLContext,
     ) -> Result<Option<Vec<Recommendation>>> {
-        if let Some(uid) = user_id {
-            if self.interaction_matrix.get_user_interaction_count(uid)
+        if let Some(uid) = user_id
+            && self.interaction_matrix.get_user_interaction_count(uid)
                 >= self.config.min_user_interactions
-            {
-                return Ok(Some(self.generate_collaborative_recommendations(
-                    uid, candidates, context,
-                )?));
-            }
+        {
+            return Ok(Some(self.generate_collaborative_recommendations(
+                uid, candidates, context,
+            )?));
         }
 
         // Fall back to popularity-based recommendations for new users
@@ -454,11 +452,11 @@ impl RecommendationSystem {
         // Extract text from all fields
         let mut all_text = String::new();
         for field_name in document.field_names() {
-            if let Some(field_value) = document.get_field(field_name) {
-                if let Some(text) = field_value.as_text() {
-                    all_text.push_str(text);
-                    all_text.push(' ');
-                }
+            if let Some(field_value) = document.get_field(field_name)
+                && let Some(text) = field_value.as_text()
+            {
+                all_text.push_str(text);
+                all_text.push(' ');
             }
         }
 

@@ -107,12 +107,12 @@ impl VectorSearchEngine {
             None
         };
 
-        if let Some(ref key) = cache_key {
-            if let Some(cached_results) = self.search_cache.get(key) {
-                let result = cached_results.clone();
-                self.update_cache_stats(true);
-                return Ok(result);
-            }
+        if let Some(ref key) = cache_key
+            && let Some(cached_results) = self.search_cache.get(key)
+        {
+            let result = cached_results.clone();
+            self.update_cache_stats(true);
+            return Ok(result);
         }
 
         // Perform the actual search

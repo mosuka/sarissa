@@ -349,10 +349,10 @@ async fn main() -> Result<()> {
         let results = test_engine.search("programming languages", query).await?;
 
         println!("\nStrategy {:?}: Found {} results", strategy, results.len());
-        if let Some(top) = results.top_result() {
-            if let Some(explanation) = &top.explanation {
-                println!("  Scoring method: {}", explanation.method);
-            }
+        if let Some(top) = results.top_result()
+            && let Some(explanation) = &top.explanation
+        {
+            println!("  Scoring method: {}", explanation.method);
         }
     }
 

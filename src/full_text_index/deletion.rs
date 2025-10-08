@@ -295,10 +295,10 @@ impl DeletionLog {
 
             // Read all entries to find max sequence
             while !reader.is_eof() {
-                if let Ok(json) = reader.read_string() {
-                    if let Ok(entry) = serde_json::from_str::<DeletionLogEntry>(&json) {
-                        max_sequence = max_sequence.max(entry.sequence);
-                    }
+                if let Ok(json) = reader.read_string()
+                    && let Ok(entry) = serde_json::from_str::<DeletionLogEntry>(&json)
+                {
+                    max_sequence = max_sequence.max(entry.sequence);
                 }
                 // Skip newline
                 let _ = reader.read_u8();

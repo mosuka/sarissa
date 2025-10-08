@@ -128,12 +128,12 @@ impl Collector for TopDocsCollector {
             self.hits.push(scored_doc);
         } else {
             // Check if this score is better than the worst score
-            if let Some(worst) = self.hits.peek() {
-                if score > worst.score {
-                    // Replace the worst document
-                    self.hits.pop();
-                    self.hits.push(scored_doc);
-                }
+            if let Some(worst) = self.hits.peek()
+                && score > worst.score
+            {
+                // Replace the worst document
+                self.hits.pop();
+                self.hits.push(scored_doc);
             }
         }
 

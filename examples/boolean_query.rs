@@ -104,12 +104,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -129,12 +128,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -154,12 +152,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -189,10 +186,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
@@ -222,12 +219,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -252,12 +248,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -282,10 +277,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
@@ -315,10 +310,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Float(rating)) = doc.get_field("rating") {
                 println!("      Rating: {rating:.1}");
@@ -368,10 +363,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
@@ -423,10 +418,10 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
             if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");

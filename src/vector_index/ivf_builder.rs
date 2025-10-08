@@ -225,11 +225,10 @@ impl IvfIndexBuilder {
                 .config
                 .distance_metric
                 .distance(&vector.data, &centroid.data)
+                && distance < best_distance
             {
-                if distance < best_distance {
-                    best_distance = distance;
-                    best_cluster = i;
-                }
+                best_distance = distance;
+                best_cluster = i;
             }
         }
 

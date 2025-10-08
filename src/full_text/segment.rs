@@ -115,28 +115,28 @@ impl SegmentManager {
     /// Load segment metadata from storage.
     pub fn load(&mut self) -> Result<()> {
         // Try to load segments.json
-        if self.storage.file_exists("segments.json") {
-            if let Ok(mut input) = self.storage.open_input("segments.json") {
-                let mut data = Vec::new();
-                if input.read_to_end(&mut data).is_ok() {
-                    let segments_data: HashMap<String, Segment> = serde_json::from_slice(&data)
-                        .map_err(|e| {
-                            crate::error::SarissaError::storage(format!(
-                                "Failed to parse segments metadata: {e}"
-                            ))
-                        })?;
+        if self.storage.file_exists("segments.json")
+            && let Ok(mut input) = self.storage.open_input("segments.json")
+        {
+            let mut data = Vec::new();
+            if input.read_to_end(&mut data).is_ok() {
+                let segments_data: HashMap<String, Segment> = serde_json::from_slice(&data)
+                    .map_err(|e| {
+                        crate::error::SarissaError::storage(format!(
+                            "Failed to parse segments metadata: {e}"
+                        ))
+                    })?;
 
-                    self.segments = segments_data;
+                self.segments = segments_data;
 
-                    // Update next generation number
-                    self.next_generation = self
-                        .segments
-                        .values()
-                        .map(|s| s.generation)
-                        .max()
-                        .unwrap_or(0)
-                        + 1;
-                }
+                // Update next generation number
+                self.next_generation = self
+                    .segments
+                    .values()
+                    .map(|s| s.generation)
+                    .max()
+                    .unwrap_or(0)
+                    + 1;
             }
         }
 

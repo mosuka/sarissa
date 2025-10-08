@@ -102,10 +102,10 @@ in_stock:true
 
     println!("Found {} results:", results.total_hits);
     for hit in results.hits.iter() {
-        if let Some(doc) = &hit.document {
-            if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
-                println!("  - {title}");
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
+        {
+            println!("  - {title}");
         }
     }
 
@@ -116,10 +116,10 @@ in_stock:true
 
     println!("Found {} results:", results.total_hits);
     for hit in results.hits.iter() {
-        if let Some(doc) = &hit.document {
-            if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
-                println!("  - {title}");
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
+        {
+            println!("  - {title}");
         }
     }
 

@@ -153,19 +153,19 @@ impl ScoreNormalizer {
 
         // Apply keyword ranks
         for result in results.values_mut() {
-            if let Some(score) = result.keyword_score {
-                if let Some(&rank) = keyword_ranks.get(&((score * 1000000.0) as i32)) {
-                    result.keyword_score = Some(rank);
-                }
+            if let Some(score) = result.keyword_score
+                && let Some(&rank) = keyword_ranks.get(&((score * 1000000.0) as i32))
+            {
+                result.keyword_score = Some(rank);
             }
         }
 
         // Apply vector ranks
         for result in results.values_mut() {
-            if let Some(similarity) = result.vector_similarity {
-                if let Some(&rank) = vector_ranks.get(&((similarity * 1000000.0) as i32)) {
-                    result.vector_similarity = Some(rank);
-                }
+            if let Some(similarity) = result.vector_similarity
+                && let Some(&rank) = vector_ranks.get(&((similarity * 1000000.0) as i32))
+            {
+                result.vector_similarity = Some(rank);
             }
         }
 

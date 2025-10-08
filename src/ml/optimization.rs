@@ -97,17 +97,17 @@ impl AutoOptimization {
         }
 
         // Parameter optimization recommendations
-        if self.config.enable_parameter_optimization {
-            if let Some(param_rec) = self.parameter_optimizer.get_recommendations()? {
-                recommendations.push(param_rec);
-            }
+        if self.config.enable_parameter_optimization
+            && let Some(param_rec) = self.parameter_optimizer.get_recommendations()?
+        {
+            recommendations.push(param_rec);
         }
 
         // Algorithm selection recommendations
-        if self.config.enable_algorithm_selection {
-            if let Some(algo_rec) = self.algorithm_selector.get_recommendations()? {
-                recommendations.push(algo_rec);
-            }
+        if self.config.enable_algorithm_selection
+            && let Some(algo_rec) = self.algorithm_selector.get_recommendations()?
+        {
+            recommendations.push(algo_rec);
         }
 
         // A/B test recommendations
@@ -406,28 +406,28 @@ impl AlgorithmSelector {
 
     fn get_recommendations(&mut self) -> Result<Option<OptimizationRecommendation>> {
         // Analyze algorithm performance and suggest better alternatives
-        if let Some(best_algo) = self.find_best_algorithm()? {
-            if best_algo != self.current_algorithms.primary_algorithm {
-                return Ok(Some(OptimizationRecommendation {
-                    optimization_type: OptimizationType::AlgorithmSelection,
-                    recommendation: format!("Switch to {best_algo} algorithm"),
-                    expected_improvement: 0.08,
-                    confidence: 0.8,
-                    parameters: Some(HashMap::from([("algorithm".to_string(), best_algo)])),
-                    timestamp: chrono::Utc::now(),
-                }));
-            }
+        if let Some(best_algo) = self.find_best_algorithm()?
+            && best_algo != self.current_algorithms.primary_algorithm
+        {
+            return Ok(Some(OptimizationRecommendation {
+                optimization_type: OptimizationType::AlgorithmSelection,
+                recommendation: format!("Switch to {best_algo} algorithm"),
+                expected_improvement: 0.08,
+                confidence: 0.8,
+                parameters: Some(HashMap::from([("algorithm".to_string(), best_algo)])),
+                timestamp: chrono::Utc::now(),
+            }));
         }
 
         Ok(None)
     }
 
     fn apply_optimization(&mut self, recommendation: &OptimizationRecommendation) -> Result<()> {
-        if let Some(params) = &recommendation.parameters {
-            if let Some(algorithm) = params.get("algorithm") {
-                self.current_algorithms.primary_algorithm = algorithm.clone();
-                self.optimization_count += 1;
-            }
+        if let Some(params) = &recommendation.parameters
+            && let Some(algorithm) = params.get("algorithm")
+        {
+            self.current_algorithms.primary_algorithm = algorithm.clone();
+            self.optimization_count += 1;
         }
         Ok(())
     }
@@ -512,22 +512,22 @@ impl ABTester {
         let mut completed_test_ids = Vec::new();
 
         for (test_id, test) in &self.active_tests {
-            if test.is_completed(&self.config) {
-                if let Some(winner) = test.get_winner(&self.config)? {
-                    recommendations.push(OptimizationRecommendation {
-                        optimization_type: OptimizationType::ABTest,
-                        recommendation: format!(
-                            "A/B test '{}' completed. Winner: {}",
-                            test_id, winner.variant_name
-                        ),
-                        expected_improvement: winner.improvement,
-                        confidence: winner.confidence,
-                        parameters: winner.parameters.clone(),
-                        timestamp: chrono::Utc::now(),
-                    });
+            if test.is_completed(&self.config)
+                && let Some(winner) = test.get_winner(&self.config)?
+            {
+                recommendations.push(OptimizationRecommendation {
+                    optimization_type: OptimizationType::ABTest,
+                    recommendation: format!(
+                        "A/B test '{}' completed. Winner: {}",
+                        test_id, winner.variant_name
+                    ),
+                    expected_improvement: winner.improvement,
+                    confidence: winner.confidence,
+                    parameters: winner.parameters.clone(),
+                    timestamp: chrono::Utc::now(),
+                });
 
-                    completed_test_ids.push(test_id.clone());
-                }
+                completed_test_ids.push(test_id.clone());
             }
         }
 

@@ -1,6 +1,6 @@
 //! Field-specific search example - demonstrates searching within specific fields.
 
-use sarissa::analysis::{KeywordAnalyzer, StandardAnalyzer};
+use sarissa::analysis::{Analyzer, KeywordAnalyzer, StandardAnalyzer};
 use sarissa::full_text::index::IndexConfig;
 use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use sarissa::prelude::*;
@@ -89,9 +89,12 @@ fn main() -> Result<()> {
         // Configure field-specific analyzers using PerFieldAnalyzer (Lucene-style)
         // - category and id use KeywordAnalyzer (entire field as one token)
         // - other fields use StandardAnalyzer (default) for tokenized search
-        let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new()?));
-        per_field_analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
-        per_field_analyzer.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
+        // Note: Reuse analyzer instances with Arc::clone to save memory
+        let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+        let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+        let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+        per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
+        per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
 
         let config = AdvancedWriterConfig {
             analyzer: Arc::new(per_field_analyzer),
@@ -141,15 +144,15 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
-            if let Some(field_value) = doc.get_field("category") {
-                if let Some(category) = field_value.as_text() {
-                    println!("      Category: {category}");
-                }
+            if let Some(field_value) = doc.get_field("category")
+                && let Some(category) = field_value.as_text()
+            {
+                println!("      Category: {category}");
             }
             if let Some(sarissa::document::FieldValue::Integer(year)) = doc.get_field("year") {
                 println!("      Year: {year}");
@@ -186,20 +189,20 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
-            if let Some(field_value) = doc.get_field("author") {
-                if let Some(author) = field_value.as_text() {
-                    println!("      Author: {author}");
-                }
+            if let Some(field_value) = doc.get_field("author")
+                && let Some(author) = field_value.as_text()
+            {
+                println!("      Author: {author}");
             }
-            if let Some(field_value) = doc.get_field("tags") {
-                if let Some(tags) = field_value.as_text() {
-                    println!("      Tags: {tags}");
-                }
+            if let Some(field_value) = doc.get_field("tags")
+                && let Some(tags) = field_value.as_text()
+            {
+                println!("      Tags: {tags}");
             }
         }
     }
@@ -276,20 +279,20 @@ fn main() -> Result<()> {
             hit.doc_id
         );
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("      Title: {title}");
             }
-            if let Some(field_value) = doc.get_field("author") {
-                if let Some(author) = field_value.as_text() {
-                    println!("      Author: {author}");
-                }
+            if let Some(field_value) = doc.get_field("author")
+                && let Some(author) = field_value.as_text()
+            {
+                println!("      Author: {author}");
             }
-            if let Some(field_value) = doc.get_field("category") {
-                if let Some(category) = field_value.as_text() {
-                    println!("      Category: {category}");
-                }
+            if let Some(field_value) = doc.get_field("category")
+                && let Some(category) = field_value.as_text()
+            {
+                println!("      Category: {category}");
             }
         }
     }

@@ -166,17 +166,16 @@ impl Query for WildcardQuery {
 
         // Iterate through all documents and find matches
         for doc_id in 0..reader.doc_count() {
-            if let Ok(Some(doc)) = reader.document(doc_id) {
-                if let Some(field_value) = doc.get_field(&self.field) {
-                    if let Some(text) = field_value.as_text() {
-                        // Schema-less: token-based matching for all text fields
-                        let tokens: Vec<&str> = text.split_whitespace().collect();
-                        let matches = tokens.iter().any(|token| self.regex.is_match(token));
+            if let Ok(Some(doc)) = reader.document(doc_id)
+                && let Some(field_value) = doc.get_field(&self.field)
+                && let Some(text) = field_value.as_text()
+            {
+                // Schema-less: token-based matching for all text fields
+                let tokens: Vec<&str> = text.split_whitespace().collect();
+                let matches = tokens.iter().any(|token| self.regex.is_match(token));
 
-                        if matches {
-                            matching_doc_ids.push(doc_id);
-                        }
-                    }
+                if matches {
+                    matching_doc_ids.push(doc_id);
                 }
             }
         }
@@ -200,25 +199,24 @@ impl Query for WildcardQuery {
         // Schema-less: treat all fields as text fields for wildcard matching
         // Count actual matches and collect field statistics
         for doc_id in 0..total_docs {
-            if let Ok(Some(doc)) = reader.document(doc_id) {
-                if let Some(field_value) = doc.get_field(&self.field) {
-                    if let Some(text) = field_value.as_text() {
-                        // Token-based matching with count
-                        let tokens: Vec<&str> = text.split_whitespace().collect();
-                        let match_count = tokens
-                            .iter()
-                            .filter(|token| self.regex.is_match(token))
-                            .count();
-                        let matches = match_count > 0;
-                        let field_len = tokens.len();
+            if let Ok(Some(doc)) = reader.document(doc_id)
+                && let Some(field_value) = doc.get_field(&self.field)
+                && let Some(text) = field_value.as_text()
+            {
+                // Token-based matching with count
+                let tokens: Vec<&str> = text.split_whitespace().collect();
+                let match_count = tokens
+                    .iter()
+                    .filter(|token| self.regex.is_match(token))
+                    .count();
+                let matches = match_count > 0;
+                let field_len = tokens.len();
 
-                        if matches {
-                            actual_doc_freq += 1;
-                            total_term_freq += match_count as u64;
-                        }
-                        field_lengths.push(field_len);
-                    }
+                if matches {
+                    actual_doc_freq += 1;
+                    total_term_freq += match_count as u64;
                 }
+                field_lengths.push(field_len);
             }
         }
 

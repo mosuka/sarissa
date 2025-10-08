@@ -217,10 +217,10 @@ impl SpanNearQuery {
     ) {
         if clause_index >= all_clause_spans.len() {
             // We have spans for all clauses, check if they satisfy proximity
-            if self.spans_satisfy_proximity(&current_spans) {
-                if let Some(combined_span) = self.combine_spans(&current_spans) {
-                    result_spans.push(combined_span);
-                }
+            if self.spans_satisfy_proximity(&current_spans)
+                && let Some(combined_span) = self.combine_spans(&current_spans)
+            {
+                result_spans.push(combined_span);
             }
             return;
         }

@@ -107,12 +107,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("filename") {
-                if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {filename}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("filename")
+            && let Some(filename) = field_value.as_text()
+        {
+            println!("      Filename: {filename}");
         }
     }
 
@@ -130,12 +129,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("filename") {
-                if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {filename}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("filename")
+            && let Some(filename) = field_value.as_text()
+        {
+            println!("      Filename: {filename}");
         }
     }
 
@@ -153,12 +151,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("filename") {
-                if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {filename}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("filename")
+            && let Some(filename) = field_value.as_text()
+        {
+            println!("      Filename: {filename}");
         }
     }
 
@@ -176,12 +173,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("extension") {
-                if let Some(ext) = field_value.as_text() {
-                    println!("      Extension: {ext}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("extension")
+            && let Some(ext) = field_value.as_text()
+        {
+            println!("      Extension: {ext}");
         }
     }
 
@@ -199,12 +195,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("category") {
-                if let Some(category) = field_value.as_text() {
-                    println!("      Category: {category}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("category")
+            && let Some(category) = field_value.as_text()
+        {
+            println!("      Category: {category}");
         }
     }
 
@@ -222,12 +217,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("filename") {
-                if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {filename}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("filename")
+            && let Some(filename) = field_value.as_text()
+        {
+            println!("      Filename: {filename}");
         }
     }
 
@@ -245,12 +239,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
 
@@ -268,12 +261,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("extension") {
-                if let Some(ext) = field_value.as_text() {
-                    println!("      Extension: {ext}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("extension")
+            && let Some(ext) = field_value.as_text()
+        {
+            println!("      Extension: {ext}");
         }
     }
 
@@ -291,12 +283,11 @@ fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("filename") {
-                if let Some(filename) = field_value.as_text() {
-                    println!("      Filename: {filename}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("filename")
+            && let Some(filename) = field_value.as_text()
+        {
+            println!("      Filename: {filename}");
         }
     }
 

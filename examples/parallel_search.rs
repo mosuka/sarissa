@@ -332,21 +332,19 @@ fn main() -> Result<()> {
     println!("Max score: {:.4}", results.max_score);
 
     for (i, hit) in results.hits.iter().enumerate() {
-        if let Some(doc) = &hit.document {
-            if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
-                if let Some(id) = doc.get_field("id").and_then(|f| f.as_text()) {
-                    if let Some(category) = doc.get_field("category").and_then(|f| f.as_text()) {
-                        println!(
-                            "  {}. {} [{}:{}] (score: {:.4})",
-                            i + 1,
-                            title,
-                            id,
-                            category,
-                            hit.score
-                        );
-                    }
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
+            && let Some(id) = doc.get_field("id").and_then(|f| f.as_text())
+            && let Some(category) = doc.get_field("category").and_then(|f| f.as_text())
+        {
+            println!(
+                "  {}. {} [{}:{}] (score: {:.4})",
+                i + 1,
+                title,
+                id,
+                category,
+                hit.score
+            );
         }
     }
 
@@ -365,24 +363,22 @@ fn main() -> Result<()> {
     println!("Total hits: {}", results.total_hits);
 
     for (i, hit) in results.hits.iter().enumerate() {
-        if let Some(doc) = &hit.document {
-            if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
-                if let Some(price) = doc.get_field("price").and_then(|f| match f {
-                    sarissa::document::FieldValue::Float(v) => Some(*v),
-                    _ => None,
-                }) {
-                    if let Some(category) = doc.get_field("category").and_then(|f| f.as_text()) {
-                        println!(
-                            "  {}. {} [{}] - ${:.2} (weighted score: {:.4})",
-                            i + 1,
-                            title,
-                            category,
-                            price,
-                            hit.score
-                        );
-                    }
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
+            && let Some(price) = doc.get_field("price").and_then(|f| match f {
+                sarissa::document::FieldValue::Float(v) => Some(*v),
+                _ => None,
+            })
+            && let Some(category) = doc.get_field("category").and_then(|f| f.as_text())
+        {
+            println!(
+                "  {}. {} [{}] - ${:.2} (weighted score: {:.4})",
+                i + 1,
+                title,
+                category,
+                price,
+                hit.score
+            );
         }
     }
 
@@ -403,18 +399,17 @@ fn main() -> Result<()> {
     println!("Total hits: {}", results.total_hits);
 
     for (i, hit) in results.hits.iter().enumerate() {
-        if let Some(doc) = &hit.document {
-            if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
-                if let Some(author) = doc.get_field("author").and_then(|f| f.as_text()) {
-                    println!(
-                        "  {}. {} by {} (score: {:.4})",
-                        i + 1,
-                        title,
-                        author,
-                        hit.score
-                    );
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
+            && let Some(author) = doc.get_field("author").and_then(|f| f.as_text())
+        {
+            println!(
+                "  {}. {} by {} (score: {:.4})",
+                i + 1,
+                title,
+                author,
+                hit.score
+            );
         }
     }
 
@@ -432,18 +427,17 @@ fn main() -> Result<()> {
     println!("Total hits: {}", results.total_hits);
 
     for (i, hit) in results.hits.iter().enumerate() {
-        if let Some(doc) = &hit.document {
-            if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
-                if let Some(category) = doc.get_field("category").and_then(|f| f.as_text()) {
-                    println!(
-                        "  {}. {} [{}] (score: {:.4})",
-                        i + 1,
-                        title,
-                        category,
-                        hit.score
-                    );
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
+            && let Some(category) = doc.get_field("category").and_then(|f| f.as_text())
+        {
+            println!(
+                "  {}. {} [{}] (score: {:.4})",
+                i + 1,
+                title,
+                category,
+                hit.score
+            );
         }
     }
 

@@ -121,25 +121,25 @@ async fn main() -> Result<()> {
         let mut fields = HashMap::new();
 
         // Extract text fields from document
-        if let Some(title_field) = doc.get_field("title") {
-            if let Some(title) = title_field.as_text() {
-                fields.insert("title".to_string(), title.to_string());
-            }
+        if let Some(title_field) = doc.get_field("title")
+            && let Some(title) = title_field.as_text()
+        {
+            fields.insert("title".to_string(), title.to_string());
         }
-        if let Some(body_field) = doc.get_field("body") {
-            if let Some(body) = body_field.as_text() {
-                fields.insert("body".to_string(), body.to_string());
-            }
+        if let Some(body_field) = doc.get_field("body")
+            && let Some(body) = body_field.as_text()
+        {
+            fields.insert("body".to_string(), body.to_string());
         }
-        if let Some(author_field) = doc.get_field("author") {
-            if let Some(author) = author_field.as_text() {
-                fields.insert("author".to_string(), author.to_string());
-            }
+        if let Some(author_field) = doc.get_field("author")
+            && let Some(author) = author_field.as_text()
+        {
+            fields.insert("author".to_string(), author.to_string());
         }
-        if let Some(category_field) = doc.get_field("category") {
-            if let Some(category) = category_field.as_text() {
-                fields.insert("category".to_string(), category.to_string());
-            }
+        if let Some(category_field) = doc.get_field("category")
+            && let Some(category) = category_field.as_text()
+        {
+            fields.insert("category".to_string(), category.to_string());
         }
 
         hybrid_engine.add_document(doc_id as u64, fields).await?;
@@ -186,10 +186,10 @@ async fn main() -> Result<()> {
         } else {
             println!("      Vector Similarity: None");
         }
-        if let Some(document) = &result.document {
-            if let Some(title) = document.get("title") {
-                println!("      Title: {title}");
-            }
+        if let Some(document) = &result.document
+            && let Some(title) = document.get("title")
+        {
+            println!("      Title: {title}");
         }
         println!();
     }
@@ -226,10 +226,10 @@ async fn main() -> Result<()> {
         } else {
             println!("      Vector Similarity: None");
         }
-        if let Some(document) = &result.document {
-            if let Some(title) = document.get("title") {
-                println!("      Title: {title}");
-            }
+        if let Some(document) = &result.document
+            && let Some(title) = document.get("title")
+        {
+            println!("      Title: {title}");
         }
     }
     println!();
@@ -330,12 +330,11 @@ async fn main() -> Result<()> {
             hit.score,
             hit.doc_id
         );
-        if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("      Title: {title}");
-                }
-            }
+        if let Some(doc) = &hit.document
+            && let Some(field_value) = doc.get_field("title")
+            && let Some(title) = field_value.as_text()
+        {
+            println!("      Title: {title}");
         }
     }
     println!();

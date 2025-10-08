@@ -233,10 +233,9 @@ impl Storage for MmapStorage {
                 .file_type()
                 .map_err(|e| SarissaError::storage(format!("Failed to get file type: {e}")))?
                 .is_file()
+                && let Some(name) = entry.file_name().to_str()
             {
-                if let Some(name) = entry.file_name().to_str() {
-                    files.push(name.to_string());
-                }
+                files.push(name.to_string());
             }
         }
 
