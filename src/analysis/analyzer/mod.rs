@@ -3,6 +3,7 @@
 #[allow(clippy::module_inception)]
 mod analyzer;
 mod keyword;
+mod language;
 mod noop;
 mod per_field;
 mod pipeline;
