@@ -1,12 +1,27 @@
 //! Stop filter implementation.
 
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use super::Filter;
 
 use crate::analysis::token::{Token, TokenStream};
 use crate::error::Result;
+
+/// Default English stop words list.
+pub const DEFAULT_ENGLISH_STOP_WORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it",
+    "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these",
+    "they", "this", "to", "was", "will", "with",
+];
+
+/// Default English stop words as a HashSet.
+pub static DEFAULT_ENGLISH_STOP_WORDS_SET: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    DEFAULT_ENGLISH_STOP_WORDS
+        .iter()
+        .map(|&s| s.to_string())
+        .collect()
+});
 
 /// A filter that removes stop words from the token stream.
 #[derive(Clone, Debug)]
@@ -20,7 +35,7 @@ pub struct StopFilter {
 impl StopFilter {
     /// Create a new stop filter with the default English stop words.
     pub fn new() -> Self {
-        Self::with_stop_words(default_english_stop_words())
+        Self::with_stop_words(DEFAULT_ENGLISH_STOP_WORDS_SET.clone())
     }
 
     /// Create a new stop filter with custom stop words.
@@ -93,21 +108,6 @@ impl Filter for StopFilter {
     fn name(&self) -> &'static str {
         "stop"
     }
-}
-
-/// Default English stop words.
-fn default_english_stop_words() -> HashSet<String> {
-    let words = [
-        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is",
-        "it", "its", "of", "on", "that", "the", "to", "was", "were", "will", "with", "the", "this",
-        "but", "they", "have", "had", "what", "said", "each", "which", "their", "time", "will",
-        "about", "if", "up", "out", "many", "then", "them", "these", "so", "some", "her", "would",
-        "make", "like", "into", "him", "two", "more", "go", "no", "way", "could", "my", "than",
-        "first", "been", "call", "who", "oil", "sit", "now", "find", "down", "day", "did", "get",
-        "come", "made", "may", "part",
-    ];
-
-    words.iter().map(|&s| s.to_string()).collect()
 }
 
 #[cfg(test)]
