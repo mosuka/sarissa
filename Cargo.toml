@@ -22,6 +22,11 @@ crossbeam-channel = "0.5.15"
 crossbeam-deque = "0.8.6"
 futures = "0.3.31"
 lazy_static = "1.5.0"
+lindera = { version = "1.3.2", features = [
+    "embedded-unidic",
+    "embedded-ko-dic",
+    "embedded-cc-cedict",
+] }
 memmap2 = "0.9.8"
 num_cpus = "1.17.0"
 parking_lot = "0.12.5"
@@ -38,7 +43,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 unicode-segmentation = "1.12.0"
 unicode-normalization = "0.1.24"
 uuid = { version = "1.18.1", features = ["v4"] }
-wide = "0.8.0"
+wide = "0.8.1"
 
 [[bench]]
 name = "bench"

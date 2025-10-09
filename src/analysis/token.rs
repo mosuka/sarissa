@@ -16,10 +16,10 @@ pub struct Token {
     /// The position of the token in the original token stream (0-based)
     pub position: usize,
 
-    /// The character offset where this token starts in the original text
+    /// The byte offset where this token starts in the original text
     pub start_offset: usize,
 
-    /// The character offset where this token ends in the original text
+    /// The byte offset where this token ends in the original text
     pub end_offset: usize,
 
     /// Boost factor for this token (default: 1.0)
