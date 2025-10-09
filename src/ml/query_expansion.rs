@@ -11,6 +11,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::analyzer::language::EnglishAnalyzer;
 use crate::error::Result;
 use crate::ml::MLContext;
 
@@ -94,9 +95,12 @@ impl QueryExpansion {
         // Initialize intent classifier (ML-based or keyword-based)
         let intent_classifier = if config.use_ml_classifier {
             if let Some(ref path) = config.ml_training_data_path {
+                use crate::analysis::analyzer::language::EnglishAnalyzer;
+
                 let samples =
                     crate::ml::intent_classifier::IntentClassifier::load_training_data(path)?;
-                crate::ml::intent_classifier::IntentClassifier::new_ml(samples)?
+                let analyzer = std::sync::Arc::new(EnglishAnalyzer::new()?);
+                crate::ml::intent_classifier::IntentClassifier::new_ml_based(samples, analyzer)?
             } else {
                 let informational = std::collections::HashSet::from([
                     "what".to_string(),
@@ -125,10 +129,12 @@ impl QueryExpansion {
                     "free".to_string(),
                     "price".to_string(),
                 ]);
+                let analyzer = std::sync::Arc::new(EnglishAnalyzer::new()?);
                 crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
                     informational,
                     navigational,
                     transactional,
+                    analyzer,
                 )
             }
         } else {
@@ -159,10 +165,12 @@ impl QueryExpansion {
                 "free".to_string(),
                 "price".to_string(),
             ]);
+            let analyzer = std::sync::Arc::new(EnglishAnalyzer::new()?);
             crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
                 informational,
                 navigational,
                 transactional,
+                analyzer,
             )
         };
 
@@ -703,10 +711,12 @@ mod tests {
             "free".to_string(),
             "price".to_string(),
         ]);
+        let analyzer = std::sync::Arc::new(EnglishAnalyzer::new().unwrap());
         let classifier = crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
             informational,
             navigational,
             transactional,
+            analyzer,
         );
 
         let intent = classifier.predict("what is rust").unwrap();

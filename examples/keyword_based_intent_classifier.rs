@@ -3,9 +3,13 @@
 //! This example demonstrates how to use the keyword-based intent classifier
 //! for query understanding in multilingual contexts (English and Japanese).
 
-use anyhow::Result;
-use sarissa::ml::intent_classifier::IntentClassifier;
 use std::collections::HashSet;
+use std::sync::Arc;
+
+use anyhow::Result;
+
+use sarissa::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
+use sarissa::ml::intent_classifier::IntentClassifier;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -46,8 +50,13 @@ async fn main() -> Result<()> {
         "price".to_string(),
     ]);
 
-    let classifier_en =
-        IntentClassifier::new_keyword_based(informational_en, navigational_en, transactional_en);
+    let analyzer_en = Arc::new(EnglishAnalyzer::new()?);
+    let classifier_en = IntentClassifier::new_keyword_based(
+        informational_en,
+        navigational_en,
+        transactional_en,
+        analyzer_en,
+    );
     println!("English classifier created!");
 
     // Test queries in English
@@ -101,8 +110,13 @@ async fn main() -> Result<()> {
         "価格".to_string(),
     ]);
 
-    let classifier_ja =
-        IntentClassifier::new_keyword_based(informational_ja, navigational_ja, transactional_ja);
+    let analyzer_ja = Arc::new(JapaneseAnalyzer::new()?);
+    let classifier_ja = IntentClassifier::new_keyword_based(
+        informational_ja,
+        navigational_ja,
+        transactional_ja,
+        analyzer_ja,
+    );
     println!("Japanese classifier created!");
 
     // Test queries in Japanese

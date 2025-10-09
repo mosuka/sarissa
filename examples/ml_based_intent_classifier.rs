@@ -4,10 +4,12 @@
 //! for query understanding in multilingual contexts (English and Japanese).
 
 use anyhow::Result;
+use sarissa::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
 use sarissa::ml::MLContext;
 use sarissa::ml::intent_classifier::IntentClassifier;
 use sarissa::ml::query_expansion::{QueryExpansion, QueryExpansionConfig};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,9 +21,21 @@ async fn main() -> Result<()> {
     let samples = IntentClassifier::load_training_data(training_data_path)?;
     println!("Loaded {} training samples", samples.len());
 
+    // Determine language from samples (use first sample's language)
+    let language = samples.first().map(|s| s.language.as_str()).unwrap_or("en");
+
+    // Create appropriate analyzer based on language
+    let analyzer: Arc<dyn sarissa::analysis::analyzer::Analyzer> = if language == "ja" {
+        Arc::new(JapaneseAnalyzer::new()?)
+    } else {
+        Arc::new(EnglishAnalyzer::new()?)
+    };
+
+    println!("Using {} analyzer for training", language);
+
     // Train the ML classifier
     println!("\nTraining ML intent classifier...");
-    let classifier = IntentClassifier::new_ml(samples)?;
+    let classifier = IntentClassifier::new_ml_based(samples, analyzer)?;
     println!("Training completed!");
 
     // Test queries in English
