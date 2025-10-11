@@ -3,6 +3,7 @@
 //! This example demonstrates how to use the ML module to enhance search quality
 //! with learning-to-rank and query expansion features.
 
+use sarissa::analysis::StandardAnalyzer;
 use sarissa::full_text::index::IndexConfig;
 use sarissa::ml::features::QueryDocumentFeatures;
 use sarissa::ml::models::LabeledExample;
@@ -16,6 +17,7 @@ use sarissa::query::{BooleanQuery, TermQuery};
 
 use sarissa::full_text_search::{SearchEngine, SearchRequest};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 #[tokio::main]
@@ -130,7 +132,8 @@ async fn main() -> Result<()> {
     println!("\n=== Query Expansion Example ===");
 
     // Initialize query expander
-    let query_expander = QueryExpansion::new(ml_config.query_expansion.clone())?;
+    let analyzer = Arc::new(StandardAnalyzer::new()?);
+    let query_expander = QueryExpansion::new(ml_config.query_expansion.clone(), analyzer)?;
 
     // Note: In a real implementation, synonyms would be loaded from a dictionary file
     // For this example, we'll proceed without adding synonyms manually
@@ -139,10 +142,10 @@ async fn main() -> Result<()> {
     let original_query = "ML python";
     println!("Original query: '{original_query}'");
 
-    let expanded_query = query_expander.expand_query(original_query, &ml_context)?;
+    let expanded_query = query_expander.expand_query(original_query, "body", &ml_context)?;
     println!("Expanded query intent: {:?}", expanded_query.intent);
     println!("Expansion confidence: {:.2}", expanded_query.confidence);
-    println!("Expanded terms: {:?}", expanded_query.expanded_terms);
+    println!("Expanded queries: {} expansions", expanded_query.expanded_queries.len());
 
     // Search with different terms to show diversity
     let search_terms = vec!["machine", "learning", "python", "artificial"];
