@@ -14,8 +14,6 @@ pub struct IntentSample {
     pub query: String,
     /// Intent label.
     pub intent: String,
-    /// Language code (e.g., "en", "ja").
-    pub language: String,
 }
 
 /// TF-IDF vectorizer for text feature extraction.
@@ -231,6 +229,7 @@ impl IntentClassifier {
     }
 
     /// Load training data from JSON file.
+    /// The language parameter specifies the language code (e.g., "en", "ja").
     pub fn load_training_data(path: &str) -> Result<Vec<IntentSample>> {
         let content = std::fs::read_to_string(path)?;
         let samples: Vec<IntentSample> = serde_json::from_str(&content)?;
@@ -364,79 +363,64 @@ mod tests {
             IntentSample {
                 query: "what is rust".to_string(),
                 intent: "Informational".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "how to learn programming".to_string(),
                 intent: "Informational".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "what is machine learning".to_string(),
                 intent: "Informational".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "why use docker".to_string(),
                 intent: "Informational".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "explain neural networks".to_string(),
                 intent: "Informational".to_string(),
-                language: "en".to_string(),
             },
             // Navigational samples
             IntentSample {
                 query: "github homepage".to_string(),
                 intent: "Navigational".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "google login".to_string(),
                 intent: "Navigational".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "facebook homepage".to_string(),
                 intent: "Navigational".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "twitter site".to_string(),
                 intent: "Navigational".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "youtube website".to_string(),
                 intent: "Navigational".to_string(),
-                language: "en".to_string(),
             },
             // Transactional samples
             IntentSample {
                 query: "buy laptop".to_string(),
                 intent: "Transactional".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "download software".to_string(),
                 intent: "Transactional".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "purchase book".to_string(),
                 intent: "Transactional".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "order pizza".to_string(),
                 intent: "Transactional".to_string(),
-                language: "en".to_string(),
             },
             IntentSample {
                 query: "install application".to_string(),
                 intent: "Transactional".to_string(),
-                language: "en".to_string(),
             },
         ];
 
@@ -462,79 +446,64 @@ mod tests {
             IntentSample {
                 query: "人工知能とは何ですか".to_string(),
                 intent: "Informational".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "機械学習について教えて".to_string(),
                 intent: "Informational".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "プログラミングの学習方法".to_string(),
                 intent: "Informational".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "Rustとは何か".to_string(),
                 intent: "Informational".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "深層学習の仕組み".to_string(),
                 intent: "Informational".to_string(),
-                language: "ja".to_string(),
             },
             // Navigational samples
             IntentSample {
                 query: "Googleのホームページ".to_string(),
                 intent: "Navigational".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "GitHubサイト".to_string(),
                 intent: "Navigational".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "Amazonのページ".to_string(),
                 intent: "Navigational".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "Twitterログイン".to_string(),
                 intent: "Navigational".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "Yahooトップページ".to_string(),
                 intent: "Navigational".to_string(),
-                language: "ja".to_string(),
             },
             // Transactional samples
             IntentSample {
                 query: "ノートパソコンを購入".to_string(),
                 intent: "Transactional".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "ソフトウェアをダウンロード".to_string(),
                 intent: "Transactional".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "本を注文する".to_string(),
                 intent: "Transactional".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "ピザを注文".to_string(),
                 intent: "Transactional".to_string(),
-                language: "ja".to_string(),
             },
             IntentSample {
                 query: "アプリをインストール".to_string(),
                 intent: "Transactional".to_string(),
-                language: "ja".to_string(),
             },
         ];
 

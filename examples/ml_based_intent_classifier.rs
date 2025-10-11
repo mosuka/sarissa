@@ -3,40 +3,25 @@
 //! This example demonstrates how to use the ML-based intent classifier
 //! for query understanding in multilingual contexts (English and Japanese).
 
-use anyhow::Result;
-use sarissa::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
-use sarissa::ml::MLContext;
-use sarissa::ml::intent_classifier::IntentClassifier;
-use sarissa::ml::query_expansion::{QueryExpansion, QueryExpansionConfig};
-use std::collections::HashMap;
 use std::sync::Arc;
+
+use anyhow::Result;
+
+use sarissa::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
+use sarissa::ml::intent_classifier::IntentClassifier;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("=== ML-based Intent Classification Example ===\n");
 
-    // Load training data from JSON file
-    println!("Loading training data from resource/ml/intent_samples.json...");
-    let training_data_path = "resource/ml/intent_samples.json";
-    let samples = IntentClassifier::load_training_data(training_data_path)?;
-    println!("Loaded {} training samples", samples.len());
-
-    // Determine language from samples (use first sample's language)
-    let language = samples.first().map(|s| s.language.as_str()).unwrap_or("en");
-
-    // Create appropriate analyzer based on language
-    let analyzer: Arc<dyn sarissa::analysis::analyzer::Analyzer> = if language == "ja" {
-        Arc::new(JapaneseAnalyzer::new()?)
-    } else {
-        Arc::new(EnglishAnalyzer::new()?)
-    };
-
-    println!("Using {} analyzer for training", language);
-
-    // Train the ML classifier
-    println!("\nTraining ML intent classifier...");
-    let classifier = IntentClassifier::new_ml_based(samples, analyzer)?;
-    println!("Training completed!");
+    // Create English classifier
+    println!("Creating English intent classifier...");
+    let en_training_data_path = "resource/ml/intent_samples_en.json";
+    let en_analyzer = Arc::new(EnglishAnalyzer::new()?);
+    let en_samples = IntentClassifier::load_training_data(en_training_data_path)?;
+    println!("Loaded {} English training samples", en_samples.len());
+    let en_classifier = IntentClassifier::new_ml_based(en_samples, en_analyzer.clone())?;
+    println!("English classifier created!");
 
     // Test queries in English
     println!("\n=== English Query Intent Classification ===");
@@ -49,9 +34,18 @@ async fn main() -> Result<()> {
     ];
 
     for query in en_queries {
-        let intent = classifier.predict(query)?;
+        let intent = en_classifier.predict(query)?;
         println!("Query: \"{}\" => Intent: {:?}", query, intent);
     }
+
+    // Create Japanese classifier
+    println!("\nCreating Japanese intent classifier...");
+    let ja_training_data_path = "resource/ml/intent_samples_ja.json";
+    let ja_analyzer = Arc::new(JapaneseAnalyzer::new()?);
+    let ja_samples = IntentClassifier::load_training_data(ja_training_data_path)?;
+    println!("Loaded {} Japanese training samples", ja_samples.len());
+    let ja_classifier = IntentClassifier::new_ml_based(ja_samples, ja_analyzer.clone())?;
+    println!("Japanese classifier created!");
 
     // Test queries in Japanese
     println!("\n=== Japanese Query Intent Classification ===");
@@ -64,41 +58,8 @@ async fn main() -> Result<()> {
     ];
 
     for query in ja_queries {
-        let intent = classifier.predict(query)?;
+        let intent = ja_classifier.predict(query)?;
         println!("Query: \"{}\" => Intent: {:?}", query, intent);
-    }
-
-    // Demonstrate integration with QueryExpansion
-    println!("\n=== Integration with Query Expansion ===");
-
-    let config = QueryExpansionConfig {
-        use_ml_classifier: true,
-        ml_training_data_path: Some(training_data_path.to_string()),
-        enable_synonyms: true,
-        enable_semantic: false,
-        ..Default::default()
-    };
-
-    let query_expander = QueryExpansion::new(config)?;
-
-    let ml_context = MLContext {
-        user_session: None,
-        search_history: Vec::new(),
-        user_preferences: HashMap::new(),
-        timestamp: chrono::Utc::now(),
-    };
-
-    let test_queries = vec!["what is kubernetes", "GitHubのログイン", "download vscode"];
-
-    for query in test_queries {
-        let expanded = query_expander.expand_query(query, &ml_context)?;
-        println!("\nQuery: \"{}\"", query);
-        println!("  Intent: {:?}", expanded.intent);
-        println!("  Confidence: {:.2}", expanded.confidence);
-        println!("  Original terms: {:?}", expanded.original_terms);
-        if !expanded.expanded_terms.is_empty() {
-            println!("  Expanded terms: {:?}", expanded.expanded_terms);
-        }
     }
 
     println!("\n=== Example Complete ===");

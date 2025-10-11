@@ -24,7 +24,7 @@ impl LinderaTokenizer {
             .map_err(|e| SarissaError::analysis(format!("Failed to load dictionary: {}", e)))?;
         let metadata = &dict.metadata;
         let user_dict = match user_dict_uri {
-            Some(uri) => Some(load_user_dictionary(&uri, metadata).map_err(|e| {
+            Some(uri) => Some(load_user_dictionary(uri, metadata).map_err(|e| {
                 SarissaError::analysis(format!("Failed to load user dictionary: {}", e))
             })?),
             None => None,
