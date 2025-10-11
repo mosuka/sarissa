@@ -43,6 +43,7 @@ async fn main() -> Result<()> {
         query_expansion: QueryExpansionConfig {
             enabled: true,
             max_expansions: 5,
+            synonym_dict_path: Some("resource/ml/synonyms.json".to_string()),
             enable_synonyms: true,
             enable_semantic: true,
             ..Default::default()
