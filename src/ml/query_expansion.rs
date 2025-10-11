@@ -86,11 +86,7 @@ pub struct QueryExpansion {
 impl QueryExpansion {
     /// Create a new query expansion system.
     pub fn new(config: QueryExpansionConfig, analyzer: Arc<dyn Analyzer>) -> Result<Self> {
-        let synonym_dict = if let Some(ref path) = config.synonym_dict_path {
-            SynonymDictionary::load_from_file(path)?
-        } else {
-            SynonymDictionary::new()
-        };
+        let synonym_dict = SynonymDictionary::new(config.synonym_dict_path.as_deref())?;
 
         let embeddings = if let Some(ref path) = config.embeddings_path {
             WordEmbeddings::load_from_file(path)?
@@ -494,100 +490,56 @@ pub enum QueryIntent {
 }
 
 /// Synonym dictionary for term expansion.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SynonymDictionary {
     synonyms: HashMap<String, Vec<String>>,
 }
 
 impl Default for SynonymDictionary {
     fn default() -> Self {
-        Self::new()
+        Self::new(None).unwrap()
     }
 }
 
 impl SynonymDictionary {
-    pub fn new() -> Self {
-        let mut dict = Self {
-            synonyms: HashMap::new(),
-        };
-
-        // デフォルトの同義語を追加（小文字で統一）
-        dict.add_synonym_group(vec![
-            "ml".to_string(),
-            "machine learning".to_string(),
-            "machine-learning".to_string(),
-            "machinelearning".to_string(),
-        ]);
-
-        dict.add_synonym_group(vec![
-            "ai".to_string(),
-            "artificial intelligence".to_string(),
-            "artificial-intelligence".to_string(),
-            "artificialintelligence".to_string(),
-        ]);
-
-        dict.add_synonym_group(vec![
-            "programming".to_string(),
-            "coding".to_string(),
-            "development".to_string(),
-            "software engineering".to_string(),
-        ]);
-
-        dict.add_synonym_group(vec![
-            "python".to_string(),
-            "Python".to_string(),
-            "py".to_string(),
-        ]);
-
-        dict.add_synonym_group(vec![
-            "algorithm".to_string(),
-            "algorithms".to_string(),
-            "algo".to_string(),
-        ]);
-
-        dict.add_synonym_group(vec![
-            "data".to_string(),
-            "dataset".to_string(),
-            "data science".to_string(),
-            "data-science".to_string(),
-        ]);
-
-        // Japanese synonyms (tokenized forms)
-        dict.add_synonym_group(vec!["機械".to_string(), "マシン".to_string()]);
-
-        dict.add_synonym_group(vec![
-            "学習".to_string(),
-            "勉強".to_string(),
-            "習得".to_string(),
-            "ラーニング".to_string(),
-        ]);
-
-        dict.add_synonym_group(vec!["人工".to_string(), "artificial".to_string()]);
-
-        dict.add_synonym_group(vec![
-            "知能".to_string(),
-            "intelligence".to_string(),
-            "ai".to_string(),
-        ]);
-
-        dict.add_synonym_group(vec![
-            "プログラミング".to_string(),
-            "コーディング".to_string(),
-            "開発".to_string(),
-        ]);
-
-        dict.add_synonym_group(vec![
-            "購入".to_string(),
-            "買う".to_string(),
-            "注文".to_string(),
-        ]);
-
-        dict
+    /// Create a new synonym dictionary.
+    /// If `path` is provided, loads synonyms from the specified JSON file.
+    /// If `path` is `None`, creates an empty dictionary.
+    pub fn new(path: Option<&str>) -> Result<Self> {
+        match path {
+            Some(file_path) => Self::load_from_file(file_path),
+            None => Ok(Self {
+                synonyms: HashMap::new(),
+            }),
+        }
     }
 
-    pub fn load_from_file(_path: &str) -> Result<Self> {
-        // Placeholder implementation
-        Ok(Self::new())
+    /// Load synonym dictionary from a JSON file.
+    /// The JSON file should contain an array of synonym groups, where each group
+    /// is an array of terms that are synonyms of each other.
+    ///
+    /// Example format:
+    /// ```json
+    /// [
+    ///   ["ml", "machine learning", "machine-learning"],
+    ///   ["ai", "artificial intelligence"]
+    /// ]
+    /// ```
+    pub fn load_from_file(path: &str) -> Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| crate::error::SarissaError::storage(format!("Failed to read synonym dictionary file '{}': {}", path, e)))?;
+
+        let synonym_groups: Vec<Vec<String>> = serde_json::from_str(&content)
+            .map_err(|e| crate::error::SarissaError::parse(format!("Failed to parse synonym dictionary JSON from '{}': {}", path, e)))?;
+
+        let mut dict = Self::new(None)?;
+        for group in synonym_groups {
+            if !group.is_empty() {
+                dict.add_synonym_group(group);
+            }
+        }
+
+        Ok(dict)
     }
 
     pub fn get_synonyms(&self, term: &str) -> Option<&Vec<String>> {
@@ -757,7 +709,7 @@ mod tests {
 
     #[test]
     fn test_synonym_dictionary() {
-        let mut dict = SynonymDictionary::new();
+        let mut dict = SynonymDictionary::new(None).unwrap();
         dict.add_synonym_group(vec![
             "big".to_string(),
             "large".to_string(),
@@ -768,6 +720,34 @@ mod tests {
         assert!(synonyms.contains(&"large".to_string()));
         assert!(synonyms.contains(&"huge".to_string()));
         assert!(!synonyms.contains(&"big".to_string()));
+    }
+
+    #[test]
+    fn test_synonym_dictionary_load_from_file() {
+        let dict = SynonymDictionary::load_from_file("resource/ml/synonyms.json").unwrap();
+
+        // Test English synonyms
+        let ml_synonyms = dict.get_synonyms("ml");
+        assert!(ml_synonyms.is_some());
+        let ml_synonyms = ml_synonyms.unwrap();
+        assert!(ml_synonyms.contains(&"machine learning".to_string()));
+        assert!(ml_synonyms.contains(&"machine-learning".to_string()));
+
+        // Test Japanese synonyms
+        let learning_synonyms = dict.get_synonyms("学習");
+        assert!(learning_synonyms.is_some());
+        let learning_synonyms = learning_synonyms.unwrap();
+        assert!(learning_synonyms.contains(&"勉強".to_string()));
+        assert!(learning_synonyms.contains(&"習得".to_string()));
+    }
+
+    #[test]
+    fn test_synonym_dictionary_with_path() {
+        let dict = SynonymDictionary::new(Some("resource/ml/synonyms.json")).unwrap();
+
+        // Verify that synonyms are loaded from file
+        assert!(dict.get_synonyms("ml").is_some());
+        assert!(dict.get_synonyms("ai").is_some());
     }
 
     #[test]

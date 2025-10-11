@@ -21,6 +21,7 @@ async fn main() -> Result<()> {
         use_ml_classifier: true,
         ml_training_data_path: Some("resource/ml/intent_samples_en.json".to_string()),
         ml_training_language: Some("en".to_string()),
+        synonym_dict_path: Some("resource/ml/synonyms.json".to_string()),
         enable_synonyms: true,
         enable_semantic: false,
         ..Default::default()
@@ -35,6 +36,7 @@ async fn main() -> Result<()> {
         use_ml_classifier: true,
         ml_training_data_path: Some("resource/ml/intent_samples_ja.json".to_string()),
         ml_training_language: Some("ja".to_string()),
+        synonym_dict_path: Some("resource/ml/synonyms.json".to_string()),
         enable_synonyms: true,
         enable_semantic: false,
         ..Default::default()
