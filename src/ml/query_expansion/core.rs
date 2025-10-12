@@ -16,7 +16,7 @@ use super::types::{ExpandedQuery, ExpandedQueryClause};
 /// Combines multiple expansion strategies and manages the expansion pipeline.
 pub struct QueryExpansion {
     pub(super) expanders: Vec<Box<dyn QueryExpander>>,
-    pub(super) intent_classifier: crate::ml::intent_classifier::IntentClassifier,
+    pub(super) intent_classifier: Box<dyn crate::ml::intent_classifier::IntentClassifier>,
     pub(super) analyzer: Arc<dyn Analyzer>,
     pub(super) max_expansions: usize,
     pub(super) original_term_weight: f64,
@@ -28,7 +28,7 @@ impl QueryExpansion {
     /// This constructor is typically not called directly. Use `QueryExpansionBuilder` instead.
     pub fn new(
         expanders: Vec<Box<dyn QueryExpander>>,
-        intent_classifier: crate::ml::intent_classifier::IntentClassifier,
+        intent_classifier: Box<dyn crate::ml::intent_classifier::IntentClassifier>,
         analyzer: Arc<dyn Analyzer>,
         max_expansions: usize,
         original_term_weight: f64,

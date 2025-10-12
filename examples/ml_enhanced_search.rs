@@ -138,7 +138,10 @@ async fn main() -> Result<()> {
     let expanded_query = query_expander.expand_query(original_query, "body", &ml_context)?;
     println!("Expanded query intent: {:?}", expanded_query.intent);
     println!("Expansion confidence: {:.2}", expanded_query.confidence);
-    println!("Expanded queries: {} expansions", expanded_query.expanded_queries.len());
+    println!(
+        "Expanded queries: {} expansions",
+        expanded_query.expanded_queries.len()
+    );
 
     // Search with different terms to show diversity
     let search_terms = vec!["machine", "learning", "python", "artificial"];

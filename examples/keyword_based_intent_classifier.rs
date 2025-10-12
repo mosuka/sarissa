@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use sarissa::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
-use sarissa::ml::intent_classifier::IntentClassifier;
+use sarissa::ml::intent_classifier::{self, IntentClassifier};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
     ]);
 
     let analyzer_en = Arc::new(EnglishAnalyzer::new()?);
-    let classifier_en = IntentClassifier::new_keyword_based(
+    let classifier_en = intent_classifier::new_keyword_based(
         informational_en,
         navigational_en,
         transactional_en,
@@ -111,7 +111,7 @@ async fn main() -> Result<()> {
     ]);
 
     let analyzer_ja = Arc::new(JapaneseAnalyzer::new()?);
-    let classifier_ja = IntentClassifier::new_keyword_based(
+    let classifier_ja = intent_classifier::new_keyword_based(
         informational_ja,
         navigational_ja,
         transactional_ja,

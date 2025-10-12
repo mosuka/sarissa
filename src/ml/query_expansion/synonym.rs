@@ -123,7 +123,8 @@ impl QueryExpander for SynonymQueryExpander {
         for term in tokens {
             if let Some(synonyms) = self.dictionary.get_synonyms(term) {
                 for synonym in synonyms {
-                    let mut query = Box::new(TermQuery::new(field, synonym.clone())) as Box<dyn Query>;
+                    let mut query =
+                        Box::new(TermQuery::new(field, synonym.clone())) as Box<dyn Query>;
                     let confidence = 0.8;
                     query.set_boost((confidence * self.weight) as f32);
 

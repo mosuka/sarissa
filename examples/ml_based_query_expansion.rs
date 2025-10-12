@@ -45,10 +45,10 @@ async fn main() -> Result<()> {
     // Test English queries (using terms that have synonyms in the default dictionary)
     println!("\n=== English Query Expansion ===");
     let en_test_queries = vec![
-        "what is ml",                   // "ml" has synonyms: "machine learning", etc.
-        "learn ai algorithms",          // "ai" and "algorithm" have synonyms
-        "python programming tutorial",  // "programming" has synonyms: "coding", "development"
-        "data science introduction",    // "data" has synonyms: "dataset", "data science"
+        "what is ml",                  // "ml" has synonyms: "machine learning", etc.
+        "learn ai algorithms",         // "ai" and "algorithm" have synonyms
+        "python programming tutorial", // "programming" has synonyms: "coding", "development"
+        "data science introduction",   // "data" has synonyms: "dataset", "data science"
         "download vscode",
     ];
 
@@ -57,7 +57,10 @@ async fn main() -> Result<()> {
         println!("\nQuery: \"{}\"", query);
         println!("  Intent: {:?}", expanded.intent);
         println!("  Confidence: {:.2}", expanded.confidence);
-        println!("  Original query: {}", expanded.original_query.description());
+        println!(
+            "  Original query: {}",
+            expanded.original_query.description()
+        );
         if !expanded.expanded_queries.is_empty() {
             println!("  Expanded queries:");
             for exp in &expanded.expanded_queries {
@@ -70,7 +73,10 @@ async fn main() -> Result<()> {
                 );
             }
         }
-        println!("  Combined boolean query: {}", expanded.to_boolean_query().description());
+        println!(
+            "  Combined boolean query: {}",
+            expanded.to_boolean_query().description()
+        );
     }
 
     // Test Japanese queries (using terms that have synonyms)
@@ -88,7 +94,10 @@ async fn main() -> Result<()> {
         println!("\nQuery: \"{}\"", query);
         println!("  Intent: {:?}", expanded.intent);
         println!("  Confidence: {:.2}", expanded.confidence);
-        println!("  Original query: {}", expanded.original_query.description());
+        println!(
+            "  Original query: {}",
+            expanded.original_query.description()
+        );
         if !expanded.expanded_queries.is_empty() {
             println!("  Expanded queries:");
             for exp in &expanded.expanded_queries {
@@ -101,7 +110,10 @@ async fn main() -> Result<()> {
                 );
             }
         }
-        println!("  Combined boolean query: {}", expanded.to_boolean_query().description());
+        println!(
+            "  Combined boolean query: {}",
+            expanded.to_boolean_query().description()
+        );
     }
 
     println!("\n=== Example Complete ===");

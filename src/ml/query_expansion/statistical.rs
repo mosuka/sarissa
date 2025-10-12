@@ -89,9 +89,12 @@ impl QueryExpander for StatisticalQueryExpander {
         let mut expansions = Vec::new();
 
         for term in tokens {
-            if let Some(cooccurring_terms) = self.cooccurrence_model.get_cooccurring_terms(term, context) {
+            if let Some(cooccurring_terms) =
+                self.cooccurrence_model.get_cooccurring_terms(term, context)
+            {
                 for (coterm, score) in cooccurring_terms {
-                    let mut query = Box::new(TermQuery::new(field, coterm.clone())) as Box<dyn Query>;
+                    let mut query =
+                        Box::new(TermQuery::new(field, coterm.clone())) as Box<dyn Query>;
                     query.set_boost((score * self.weight) as f32);
 
                     expansions.push(ExpandedQueryClause {
