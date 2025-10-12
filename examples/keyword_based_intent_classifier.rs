@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use sarissa::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
-use sarissa::ml::intent_classifier::{self, IntentClassifier};
+use sarissa::ml::intent_classifier;
 
 #[tokio::main]
 async fn main() -> Result<()> {
