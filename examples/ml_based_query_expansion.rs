@@ -6,7 +6,7 @@
 use anyhow::Result;
 use sarissa::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
 use sarissa::ml::MLContext;
-use sarissa::ml::query_expansion::{QueryExpansion, QueryExpansionConfig};
+use sarissa::ml::query_expansion::QueryExpansion;
 use sarissa::query::Query;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,34 +15,24 @@ use std::sync::Arc;
 async fn main() -> Result<()> {
     println!("=== ML-based Query Expansion Example ===\n");
 
-    // Create English query expander
+    // Create English query expander using Builder API
     println!("Creating English query expander...");
-    let en_config = QueryExpansionConfig {
-        use_ml_classifier: true,
-        ml_training_data_path: Some("resource/ml/intent_samples_en.json".to_string()),
-        ml_training_language: Some("en".to_string()),
-        synonym_dict_path: Some("resource/ml/synonyms.json".to_string()),
-        enable_synonyms: true,
-        enable_semantic: false,
-        ..Default::default()
-    };
     let en_analyzer = Arc::new(EnglishAnalyzer::new()?);
-    let en_query_expander = QueryExpansion::new(en_config, en_analyzer)?;
+    let en_query_expander = QueryExpansion::builder(en_analyzer)
+        .with_synonyms(Some("resource/ml/synonyms.json"), 0.8)?
+        .with_ml_classifier("resource/ml/intent_samples_en.json")
+        .max_expansions(5)
+        .build()?;
     println!("English query expander created!");
 
-    // Create Japanese query expander
+    // Create Japanese query expander using Builder API
     println!("\nCreating Japanese query expander...");
-    let ja_config = QueryExpansionConfig {
-        use_ml_classifier: true,
-        ml_training_data_path: Some("resource/ml/intent_samples_ja.json".to_string()),
-        ml_training_language: Some("ja".to_string()),
-        synonym_dict_path: Some("resource/ml/synonyms.json".to_string()),
-        enable_synonyms: true,
-        enable_semantic: false,
-        ..Default::default()
-    };
     let ja_analyzer = Arc::new(JapaneseAnalyzer::new()?);
-    let ja_query_expander = QueryExpansion::new(ja_config, ja_analyzer)?;
+    let ja_query_expander = QueryExpansion::builder(ja_analyzer)
+        .with_synonyms(Some("resource/ml/synonyms.json"), 0.8)?
+        .with_ml_classifier("resource/ml/intent_samples_ja.json")
+        .max_expansions(5)
+        .build()?;
     println!("Japanese query expander created!");
 
     let ml_context = MLContext {

@@ -32,8 +32,6 @@ pub struct MLConfig {
     pub enabled: bool,
     /// Learning to rank configuration.
     pub ranking: RankingConfig,
-    /// Query expansion configuration.
-    pub query_expansion: QueryExpansionConfig,
     /// Recommendation system configuration.
     pub recommendation: RecommendationConfig,
     /// Anomaly detection configuration.
@@ -47,7 +45,6 @@ impl Default for MLConfig {
         Self {
             enabled: true,
             ranking: RankingConfig::default(),
-            query_expansion: QueryExpansionConfig::default(),
             recommendation: RecommendationConfig::default(),
             anomaly_detection: AnomalyDetectionConfig::default(),
             auto_optimization: AutoOptimizationConfig::default(),

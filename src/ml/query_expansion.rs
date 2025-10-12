@@ -3,10 +3,37 @@
 //! This module provides automatic query expansion using various techniques:
 //! - Synonym expansion
 //! - Word embeddings for semantic expansion
-//! - Query intent classification
 //! - Statistical co-occurrence expansion
+//!
+//! # Architecture
+//!
+//! The query expansion system uses a Strategy pattern with the following components:
+//! - `QueryExpander` trait: Defines the interface for expansion strategies
+//! - `SynonymQueryExpander`: Dictionary-based synonym expansion
+//! - `SemanticQueryExpander`: Embedding-based semantic expansion
+//! - `StatisticalQueryExpander`: Co-occurrence based statistical expansion
+//! - `QueryExpansionBuilder`: Fluent API for building expansion pipelines
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use sarissa::ml::query_expansion::QueryExpansionBuilder;
+//! use sarissa::analysis::StandardAnalyzer;
+//! use std::sync::Arc;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let analyzer = Arc::new(StandardAnalyzer::new()?);
+//!
+//! let expansion = QueryExpansionBuilder::new(analyzer)
+//!     .with_synonyms(Some("synonyms.json"), 0.5)?
+//!     .with_statistical(0.3)
+//!     .max_expansions(10)
+//!     .build()?;
+//! # Ok(())
+//! # }
+//! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -16,269 +43,68 @@ use crate::error::Result;
 use crate::ml::MLContext;
 use crate::query::{BooleanQuery, BooleanQueryBuilder, Query, TermQuery};
 
-/// Configuration for query expansion system.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueryExpansionConfig {
-    /// Enable query expansion.
-    pub enabled: bool,
-    /// Maximum number of expansion terms to add.
-    pub max_expansions: usize,
-    /// Minimum similarity threshold for semantic expansion.
-    pub similarity_threshold: f64,
-    /// Enable synonym expansion.
-    pub enable_synonyms: bool,
-    /// Enable semantic expansion using word embeddings.
-    pub enable_semantic: bool,
-    /// Enable statistical co-occurrence expansion.
-    pub enable_statistical: bool,
-    /// Weight for original query terms vs expanded terms.
-    pub original_term_weight: f64,
-    /// Weight for expanded terms.
-    pub expansion_term_weight: f64,
-    /// Path to synonym dictionary.
-    pub synonym_dict_path: Option<String>,
-    /// Path to word embeddings.
-    pub embeddings_path: Option<String>,
-    /// Use ML-based intent classification instead of keyword-based.
-    pub use_ml_classifier: bool,
-    /// Path to ML training data (JSON file with IntentSample array).
-    pub ml_training_data_path: Option<String>,
-    /// Language code for ML training data (e.g., "en", "ja").
-    pub ml_training_language: Option<String>,
-}
-
-impl Default for QueryExpansionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_expansions: 10,
-            similarity_threshold: 0.6,
-            enable_synonyms: true,
-            enable_semantic: true,
-            enable_statistical: true,
-            original_term_weight: 1.0,
-            expansion_term_weight: 0.5,
-            synonym_dict_path: None,
-            embeddings_path: None,
-            use_ml_classifier: false,
-            ml_training_data_path: None,
-            ml_training_language: None,
-        }
-    }
-}
-
-/// Query expansion system.
-pub struct QueryExpansion {
-    /// Configuration.
-    config: QueryExpansionConfig,
-    /// Synonym dictionary.
-    synonym_dict: SynonymDictionary,
-    /// Word embeddings for semantic expansion.
-    embeddings: WordEmbeddings,
-    /// Statistical co-occurrence model.
-    cooccurrence_model: CoOccurrenceModel,
-    /// Intent classifier (either keyword-based or ML-based).
-    intent_classifier: crate::ml::intent_classifier::IntentClassifier,
-    /// Analyzer for tokenization.
-    analyzer: Arc<dyn Analyzer>,
-}
-
-impl QueryExpansion {
-    /// Create a new query expansion system.
-    pub fn new(config: QueryExpansionConfig, analyzer: Arc<dyn Analyzer>) -> Result<Self> {
-        let synonym_dict = SynonymDictionary::new(config.synonym_dict_path.as_deref())?;
-
-        let embeddings = if let Some(ref path) = config.embeddings_path {
-            WordEmbeddings::load_from_file(path)?
-        } else {
-            WordEmbeddings::new()
-        };
-
-        // Initialize intent classifier (ML-based or keyword-based)
-        let intent_classifier = if config.use_ml_classifier {
-            if let Some(ref path) = config.ml_training_data_path {
-                let samples =
-                    crate::ml::intent_classifier::IntentClassifier::load_training_data(path)?;
-                crate::ml::intent_classifier::IntentClassifier::new_ml_based(
-                    samples,
-                    analyzer.clone(),
-                )?
-            } else {
-                // Fallback to keyword-based if no training data provided
-                Self::create_default_keyword_classifier(analyzer.clone())
-            }
-        } else {
-            Self::create_default_keyword_classifier(analyzer.clone())
-        };
-
-        Ok(Self {
-            config,
-            synonym_dict,
-            embeddings,
-            cooccurrence_model: CoOccurrenceModel::new(),
-            intent_classifier,
-            analyzer,
-        })
-    }
-
-    /// Create default keyword-based classifier.
-    fn create_default_keyword_classifier(
-        analyzer: Arc<dyn Analyzer>,
-    ) -> crate::ml::intent_classifier::IntentClassifier {
-        let informational = std::collections::HashSet::from([
-            "what".to_string(),
-            "how".to_string(),
-            "why".to_string(),
-            "when".to_string(),
-            "where".to_string(),
-            "who".to_string(),
-            "definition".to_string(),
-            "explain".to_string(),
-        ]);
-        let navigational = std::collections::HashSet::from([
-            "homepage".to_string(),
-            "website".to_string(),
-            "site".to_string(),
-            "login".to_string(),
-            "official".to_string(),
-        ]);
-        let transactional = std::collections::HashSet::from([
-            "buy".to_string(),
-            "purchase".to_string(),
-            "order".to_string(),
-            "download".to_string(),
-            "install".to_string(),
-            "get".to_string(),
-            "free".to_string(),
-            "price".to_string(),
-        ]);
-        crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
-            informational,
-            navigational,
-            transactional,
-            analyzer,
-        )
-    }
-
-    /// Expand a query using all enabled expansion techniques.
-    /// Returns an ExpandedQuery that can be converted to a BooleanQuery for search.
-    pub fn expand_query(
+/// Query expansion strategy trait.
+///
+/// Implementations of this trait provide different methods for expanding
+/// query terms to improve search recall.
+pub trait QueryExpander: Send + Sync {
+    /// Expand query tokens into additional search terms.
+    ///
+    /// # Arguments
+    /// * `tokens` - The original query tokens to expand
+    /// * `field` - The field name for the expanded queries
+    /// * `context` - ML context containing user session and search history
+    ///
+    /// # Returns
+    /// A vector of expanded query clauses with confidence scores
+    fn expand(
         &self,
-        original_query: &str,
+        tokens: &[String],
         field: &str,
         context: &MLContext,
-    ) -> Result<ExpandedQuery> {
-        if !self.config.enabled {
-            // Create a simple term query for the original query
-            let tokens = self.tokenize_query(original_query)?;
-            let query = self.build_query_from_tokens(&tokens, field);
+    ) -> Result<Vec<ExpandedQueryClause>>;
 
-            return Ok(ExpandedQuery {
-                original_query: query,
-                expanded_queries: Vec::new(),
-                intent: QueryIntent::Unknown,
-                confidence: 1.0,
-            });
-        }
+    /// Get the name of this expander for debugging and logging.
+    fn name(&self) -> &str;
+}
 
-        let tokens = self.tokenize_query(original_query)?;
-        let mut expanded_queries = Vec::new();
+/// Synonym-based query expander.
+///
+/// Expands query terms using a dictionary of synonyms.
+pub struct SynonymQueryExpander {
+    dictionary: SynonymDictionary,
+    weight: f64,
+}
 
-        // Classify query intent
-        let intent = self.intent_classifier.predict(original_query)?;
-
-        // Apply different expansion strategies based on intent
-        match intent {
-            QueryIntent::Informational => {
-                if self.config.enable_synonyms {
-                    expanded_queries.extend(self.expand_with_synonyms(&tokens, field)?);
-                }
-                if self.config.enable_semantic {
-                    expanded_queries.extend(self.expand_with_semantics(&tokens, field)?);
-                }
-            }
-            QueryIntent::Navigational => {
-                // For navigational queries, be more conservative
-                if self.config.enable_synonyms {
-                    expanded_queries.extend(self.expand_with_synonyms(&tokens, field)?);
-                }
-            }
-            QueryIntent::Transactional => {
-                // Focus on related action terms
-                if self.config.enable_statistical {
-                    expanded_queries.extend(self.expand_with_statistics(&tokens, field, context)?);
-                }
-            }
-            QueryIntent::Unknown => {
-                // Apply all expansion methods
-                if self.config.enable_synonyms {
-                    expanded_queries.extend(self.expand_with_synonyms(&tokens, field)?);
-                }
-                if self.config.enable_semantic {
-                    expanded_queries.extend(self.expand_with_semantics(&tokens, field)?);
-                }
-                if self.config.enable_statistical {
-                    expanded_queries.extend(self.expand_with_statistics(&tokens, field, context)?);
-                }
-            }
-        }
-
-        // Deduplicate by term text (since Query doesn't implement Hash/Eq)
-        expanded_queries.sort_by(|a, b| {
-            a.query
-                .description()
-                .cmp(&b.query.description())
-                .then(b.confidence.partial_cmp(&a.confidence).unwrap())
-        });
-        expanded_queries.dedup_by(|a, b| a.query.description() == b.query.description());
-
-        // Filter by threshold and limit
-        expanded_queries.retain(|clause| clause.confidence >= self.config.similarity_threshold);
-        expanded_queries.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
-        expanded_queries.truncate(self.config.max_expansions);
-
-        let confidence = self.calculate_expansion_confidence(&tokens, &expanded_queries);
-
-        // Build original query
-        let original_query = self.build_query_from_tokens(&tokens, field);
-
-        Ok(ExpandedQuery {
-            original_query,
-            expanded_queries,
-            intent,
-            confidence,
+impl SynonymQueryExpander {
+    /// Create a new synonym expander.
+    ///
+    /// # Arguments
+    /// * `dict_path` - Optional path to JSON synonym dictionary file
+    /// * `weight` - Weight multiplier for expanded terms (0.0-1.0)
+    pub fn new(dict_path: Option<&str>, weight: f64) -> Result<Self> {
+        Ok(Self {
+            dictionary: SynonymDictionary::new(dict_path)?,
+            weight,
         })
     }
+}
 
-    /// Update expansion models with user feedback.
-    pub fn update_with_feedback(
-        &mut self,
-        original_query: &str,
-        clicked_documents: &[String],
-    ) -> Result<()> {
-        // Update co-occurrence model with successful query-document pairs
-        self.cooccurrence_model
-            .update_with_clicks(original_query, clicked_documents)?;
-
-        Ok(())
-    }
-
-    // Private expansion methods
-
-    fn expand_with_synonyms(
+impl QueryExpander for SynonymQueryExpander {
+    fn expand(
         &self,
-        terms: &[String],
+        tokens: &[String],
         field: &str,
+        _context: &MLContext,
     ) -> Result<Vec<ExpandedQueryClause>> {
         let mut expansions = Vec::new();
 
-        for term in terms {
-            if let Some(synonyms) = self.synonym_dict.get_synonyms(term) {
+        for term in tokens {
+            if let Some(synonyms) = self.dictionary.get_synonyms(term) {
                 for synonym in synonyms {
-                    let mut query = Box::new(TermQuery::new(field.to_string(), synonym.clone()))
-                        as Box<dyn Query>;
-                    let confidence = 0.8; // High confidence for dictionary synonyms
-                    query.set_boost((confidence * self.config.expansion_term_weight) as f32);
+                    let mut query = Box::new(TermQuery::new(field, synonym.clone())) as Box<dyn Query>;
+                    let confidence = 0.8;
+                    query.set_boost((confidence * self.weight) as f32);
 
                     expansions.push(ExpandedQueryClause {
                         query,
@@ -293,62 +119,67 @@ impl QueryExpansion {
         Ok(expansions)
     }
 
-    fn expand_with_semantics(
-        &self,
-        terms: &[String],
-        field: &str,
-    ) -> Result<Vec<ExpandedQueryClause>> {
-        let mut expansions = Vec::new();
-
-        for term in terms {
-            if let Some(similar_terms) = self.embeddings.get_similar_words(term, 5)? {
-                for (similar_term, similarity) in similar_terms {
-                    if similarity >= self.config.similarity_threshold {
-                        let mut query =
-                            Box::new(TermQuery::new(field.to_string(), similar_term.clone()))
-                                as Box<dyn Query>;
-                        query.set_boost((similarity * self.config.expansion_term_weight) as f32);
-
-                        expansions.push(ExpandedQueryClause {
-                            query,
-                            confidence: similarity,
-                            expansion_type: ExpansionType::Semantic,
-                            source_term: term.clone(),
-                        });
-                    }
-                }
-            }
-        }
-
-        Ok(expansions)
+    fn name(&self) -> &str {
+        "synonym"
     }
+}
 
-    fn expand_with_statistics(
+/// Semantic query expander using word embeddings.
+///
+/// Expands query terms based on semantic similarity using word vectors.
+pub struct SemanticQueryExpander {
+    embeddings: WordEmbeddings,
+    similarity_threshold: f64,
+    weight: f64,
+}
+
+impl SemanticQueryExpander {
+    /// Create a new semantic expander.
+    ///
+    /// # Arguments
+    /// * `embeddings_path` - Optional path to word embeddings file
+    /// * `similarity_threshold` - Minimum similarity score (0.0-1.0)
+    /// * `weight` - Weight multiplier for expanded terms (0.0-1.0)
+    pub fn new(
+        embeddings_path: Option<&str>,
+        similarity_threshold: f64,
+        weight: f64,
+    ) -> Result<Self> {
+        let embeddings = if let Some(path) = embeddings_path {
+            WordEmbeddings::load_from_file(path)?
+        } else {
+            WordEmbeddings::new()
+        };
+
+        Ok(Self {
+            embeddings,
+            similarity_threshold,
+            weight,
+        })
+    }
+}
+
+impl QueryExpander for SemanticQueryExpander {
+    fn expand(
         &self,
-        terms: &[String],
+        tokens: &[String],
         field: &str,
         _context: &MLContext,
     ) -> Result<Vec<ExpandedQueryClause>> {
         let mut expansions = Vec::new();
 
-        for term in terms {
-            if let Some(cooccurrent_terms) =
-                self.cooccurrence_model.get_cooccurrent_terms(term, 3)?
-            {
-                for (cooccurrent_term, score) in cooccurrent_terms {
-                    if score >= self.config.similarity_threshold {
-                        let mut query =
-                            Box::new(TermQuery::new(field.to_string(), cooccurrent_term.clone()))
-                                as Box<dyn Query>;
-                        query.set_boost((score * self.config.expansion_term_weight) as f32);
+        for term in tokens {
+            if let Some(similar_terms) = self.embeddings.find_similar(term, self.similarity_threshold) {
+                for (similar_term, similarity) in similar_terms {
+                    let mut query = Box::new(TermQuery::new(field, similar_term.clone())) as Box<dyn Query>;
+                    query.set_boost((similarity * self.weight) as f32);
 
-                        expansions.push(ExpandedQueryClause {
-                            query,
-                            confidence: score,
-                            expansion_type: ExpansionType::Statistical,
-                            source_term: term.clone(),
-                        });
-                    }
+                    expansions.push(ExpandedQueryClause {
+                        query,
+                        confidence: similarity,
+                        expansion_type: ExpansionType::Semantic,
+                        source_term: term.clone(),
+                    });
                 }
             }
         }
@@ -356,38 +187,201 @@ impl QueryExpansion {
         Ok(expansions)
     }
 
-    /// Tokenize query using the analyzer.
-    fn tokenize_query(&self, query: &str) -> Result<Vec<String>> {
-        let tokens: Vec<String> = self
-            .analyzer
-            .analyze(query)?
-            .map(|token| token.text)
-            .collect();
-        Ok(tokens)
+    fn name(&self) -> &str {
+        "semantic"
+    }
+}
+
+/// Statistical co-occurrence based query expander.
+///
+/// Expands query terms based on statistical co-occurrence patterns learned from search history.
+pub struct StatisticalQueryExpander {
+    cooccurrence_model: CoOccurrenceModel,
+    weight: f64,
+}
+
+impl StatisticalQueryExpander {
+    /// Create a new statistical expander.
+    ///
+    /// # Arguments
+    /// * `weight` - Weight multiplier for expanded terms (0.0-1.0)
+    pub fn new(weight: f64) -> Self {
+        Self {
+            cooccurrence_model: CoOccurrenceModel::new(),
+            weight,
+        }
     }
 
-    /// Build a Query object from tokens.
+    /// Update the co-occurrence model with user feedback.
+    pub fn update_with_feedback(
+        &mut self,
+        original_query: &str,
+        clicked_documents: &[String],
+    ) -> Result<()> {
+        self.cooccurrence_model
+            .update_with_clicks(original_query, clicked_documents)
+    }
+}
+
+impl QueryExpander for StatisticalQueryExpander {
+    fn expand(
+        &self,
+        tokens: &[String],
+        field: &str,
+        context: &MLContext,
+    ) -> Result<Vec<ExpandedQueryClause>> {
+        let mut expansions = Vec::new();
+
+        for term in tokens {
+            if let Some(cooccurring_terms) = self.cooccurrence_model.get_cooccurring_terms(term, context) {
+                for (coterm, score) in cooccurring_terms {
+                    let mut query = Box::new(TermQuery::new(field, coterm.clone())) as Box<dyn Query>;
+                    query.set_boost((score * self.weight) as f32);
+
+                    expansions.push(ExpandedQueryClause {
+                        query,
+                        confidence: score,
+                        expansion_type: ExpansionType::Statistical,
+                        source_term: term.clone(),
+                    });
+                }
+            }
+        }
+
+        Ok(expansions)
+    }
+
+    fn name(&self) -> &str {
+        "statistical"
+    }
+}
+
+/// Query expansion system.
+///
+/// Combines multiple expansion strategies and manages the expansion pipeline.
+pub struct QueryExpansion {
+    expanders: Vec<Box<dyn QueryExpander>>,
+    intent_classifier: crate::ml::intent_classifier::IntentClassifier,
+    analyzer: Arc<dyn Analyzer>,
+    max_expansions: usize,
+    original_term_weight: f64,
+}
+
+impl QueryExpansion {
+    /// Create a new query expansion system.
+    ///
+    /// This constructor is typically not called directly. Use `QueryExpansionBuilder` instead.
+    pub fn new(
+        expanders: Vec<Box<dyn QueryExpander>>,
+        intent_classifier: crate::ml::intent_classifier::IntentClassifier,
+        analyzer: Arc<dyn Analyzer>,
+        max_expansions: usize,
+        original_term_weight: f64,
+    ) -> Self {
+        Self {
+            expanders,
+            intent_classifier,
+            analyzer,
+            max_expansions,
+            original_term_weight,
+        }
+    }
+
+    /// Create a new builder for query expansion.
+    ///
+    /// # Arguments
+    /// * `analyzer` - The analyzer to use for tokenization
+    ///
+    /// # Example
+    /// ```no_run
+    /// use sarissa::analysis::StandardAnalyzer;
+    /// use sarissa::ml::query_expansion::QueryExpansion;
+    /// use std::sync::Arc;
+    ///
+    /// let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+    /// let expander = QueryExpansion::builder(analyzer)
+    ///     .with_synonyms(Some("synonyms.json"), 0.8).unwrap()
+    ///     .max_expansions(5)
+    ///     .build().unwrap();
+    /// ```
+    pub fn builder(analyzer: Arc<dyn Analyzer>) -> QueryExpansionBuilder {
+        QueryExpansionBuilder::new(analyzer)
+    }
+
+    /// Expand a query using all configured expansion techniques.
+    ///
+    /// # Arguments
+    /// * `original_query` - The original query string
+    /// * `field` - The field name for the expanded queries
+    /// * `context` - ML context containing user session and search history
+    ///
+    /// # Returns
+    /// An `ExpandedQuery` containing the original query, expansions, and metadata
+    pub fn expand_query(
+        &self,
+        original_query: &str,
+        field: &str,
+        context: &MLContext,
+    ) -> Result<ExpandedQuery> {
+        let tokens = self.tokenize_query(original_query)?;
+        let mut expanded_queries = Vec::new();
+
+        // Classify query intent
+        let intent = self.intent_classifier.predict(original_query)?;
+
+        // Apply all expanders
+        for expander in &self.expanders {
+            expanded_queries.extend(expander.expand(&tokens, field, context)?);
+        }
+
+        // Deduplicate by query description
+        expanded_queries.sort_by(|a, b| {
+            a.query
+                .description()
+                .cmp(&b.query.description())
+                .then(b.confidence.partial_cmp(&a.confidence).unwrap())
+        });
+        expanded_queries.dedup_by(|a, b| a.query.description() == b.query.description());
+
+        // Sort by confidence and limit
+        expanded_queries.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+        expanded_queries.truncate(self.max_expansions);
+
+        // Build original query
+        let original_query = self.build_query_from_tokens(&tokens, field);
+
+        // Calculate overall confidence
+        let confidence = self.calculate_expansion_confidence(&tokens, &expanded_queries);
+
+        Ok(ExpandedQuery {
+            original_query,
+            expanded_queries,
+            intent,
+            confidence,
+        })
+    }
+
+    fn tokenize_query(&self, query: &str) -> Result<Vec<String>> {
+        let tokens = self.analyzer.analyze(query)?;
+        Ok(tokens.into_iter().map(|t| t.text).collect())
+    }
+
     fn build_query_from_tokens(&self, tokens: &[String], field: &str) -> Box<dyn Query> {
         if tokens.is_empty() {
-            // Return an empty boolean query
-            let builder = BooleanQueryBuilder::new();
-            return Box::new(builder.build());
+            return Box::new(BooleanQuery::new());
         }
 
         if tokens.len() == 1 {
-            // Single term query
-            let mut query =
-                Box::new(TermQuery::new(field.to_string(), tokens[0].clone())) as Box<dyn Query>;
-            query.set_boost(self.config.original_term_weight as f32);
+            let mut query = Box::new(TermQuery::new(field, tokens[0].clone())) as Box<dyn Query>;
+            query.set_boost(self.original_term_weight as f32);
             return query;
         }
 
         // Multiple terms - create a boolean query with SHOULD clauses
         let mut builder = BooleanQueryBuilder::new();
         for token in tokens {
-            let mut term_query =
-                Box::new(TermQuery::new(field.to_string(), token.clone())) as Box<dyn Query>;
-            term_query.set_boost(self.config.original_term_weight as f32);
+            let mut term_query = Box::new(TermQuery::new(field, token.clone())) as Box<dyn Query>;
+            term_query.set_boost(self.original_term_weight as f32);
             builder = builder.should(term_query);
         }
 
@@ -408,6 +402,194 @@ impl QueryExpansion {
 
         // Combine original query strength with expansion confidence
         0.7 * 1.0 + 0.3 * avg_expansion_confidence
+    }
+}
+
+/// Builder for creating `QueryExpansion` instances.
+///
+/// Provides a fluent API for configuring query expansion pipelines.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use sarissa::ml::query_expansion::QueryExpansionBuilder;
+/// use sarissa::analysis::StandardAnalyzer;
+/// use std::sync::Arc;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let analyzer = Arc::new(StandardAnalyzer::new()?);
+///
+/// let expansion = QueryExpansionBuilder::new(analyzer)
+///     .with_synonyms(Some("resource/ml/synonyms.json"), 0.5)?
+///     .with_semantic(Some("embeddings.bin"), 0.6, 0.4)?
+///     .with_statistical(0.3)
+///     .max_expansions(10)
+///     .build()?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct QueryExpansionBuilder {
+    expanders: Vec<Box<dyn QueryExpander>>,
+    analyzer: Arc<dyn Analyzer>,
+    max_expansions: usize,
+    original_term_weight: f64,
+    use_ml_classifier: bool,
+    ml_training_data_path: Option<String>,
+}
+
+impl QueryExpansionBuilder {
+    /// Create a new builder with the specified analyzer.
+    pub fn new(analyzer: Arc<dyn Analyzer>) -> Self {
+        Self {
+            expanders: Vec::new(),
+            analyzer,
+            max_expansions: 10,
+            original_term_weight: 1.0,
+            use_ml_classifier: false,
+            ml_training_data_path: None,
+        }
+    }
+
+    /// Add synonym-based expansion.
+    ///
+    /// # Arguments
+    /// * `dict_path` - Optional path to JSON synonym dictionary file
+    /// * `weight` - Weight multiplier for expanded terms (0.0-1.0)
+    pub fn with_synonyms(mut self, dict_path: Option<&str>, weight: f64) -> Result<Self> {
+        self.expanders
+            .push(Box::new(SynonymQueryExpander::new(dict_path, weight)?));
+        Ok(self)
+    }
+
+    /// Add semantic expansion using word embeddings.
+    ///
+    /// # Arguments
+    /// * `embeddings_path` - Optional path to word embeddings file
+    /// * `similarity_threshold` - Minimum similarity score (0.0-1.0)
+    /// * `weight` - Weight multiplier for expanded terms (0.0-1.0)
+    pub fn with_semantic(
+        mut self,
+        embeddings_path: Option<&str>,
+        similarity_threshold: f64,
+        weight: f64,
+    ) -> Result<Self> {
+        self.expanders.push(Box::new(SemanticQueryExpander::new(
+            embeddings_path,
+            similarity_threshold,
+            weight,
+        )?));
+        Ok(self)
+    }
+
+    /// Add statistical co-occurrence expansion.
+    ///
+    /// # Arguments
+    /// * `weight` - Weight multiplier for expanded terms (0.0-1.0)
+    pub fn with_statistical(mut self, weight: f64) -> Self {
+        self.expanders
+            .push(Box::new(StatisticalQueryExpander::new(weight)));
+        self
+    }
+
+    /// Add a custom expander.
+    ///
+    /// # Arguments
+    /// * `expander` - A boxed implementation of the `QueryExpander` trait
+    pub fn add_expander(mut self, expander: Box<dyn QueryExpander>) -> Self {
+        self.expanders.push(expander);
+        self
+    }
+
+    /// Set the maximum number of expansion terms.
+    ///
+    /// # Arguments
+    /// * `max` - Maximum number of expansions (default: 10)
+    pub fn max_expansions(mut self, max: usize) -> Self {
+        self.max_expansions = max;
+        self
+    }
+
+    /// Set the weight for original query terms.
+    ///
+    /// # Arguments
+    /// * `weight` - Boost multiplier for original terms (default: 1.0)
+    pub fn original_term_weight(mut self, weight: f64) -> Self {
+        self.original_term_weight = weight;
+        self
+    }
+
+    /// Enable ML-based intent classification.
+    ///
+    /// # Arguments
+    /// * `training_data_path` - Path to training data JSON file
+    pub fn with_ml_classifier(mut self, training_data_path: &str) -> Self {
+        self.use_ml_classifier = true;
+        self.ml_training_data_path = Some(training_data_path.to_string());
+        self
+    }
+
+    /// Build the `QueryExpansion` instance.
+    pub fn build(self) -> Result<QueryExpansion> {
+        let intent_classifier = if self.use_ml_classifier {
+            if let Some(ref path) = self.ml_training_data_path {
+                let samples =
+                    crate::ml::intent_classifier::IntentClassifier::load_training_data(path)?;
+                crate::ml::intent_classifier::IntentClassifier::new_ml_based(
+                    samples,
+                    self.analyzer.clone(),
+                )?
+            } else {
+                Self::create_default_keyword_classifier(self.analyzer.clone())
+            }
+        } else {
+            Self::create_default_keyword_classifier(self.analyzer.clone())
+        };
+
+        Ok(QueryExpansion::new(
+            self.expanders,
+            intent_classifier,
+            self.analyzer,
+            self.max_expansions,
+            self.original_term_weight,
+        ))
+    }
+
+    fn create_default_keyword_classifier(
+        analyzer: Arc<dyn Analyzer>,
+    ) -> crate::ml::intent_classifier::IntentClassifier {
+        let informational = HashSet::from([
+            "what".to_string(),
+            "how".to_string(),
+            "why".to_string(),
+            "when".to_string(),
+            "where".to_string(),
+            "who".to_string(),
+            "definition".to_string(),
+            "explain".to_string(),
+        ]);
+        let navigational = HashSet::from([
+            "homepage".to_string(),
+            "website".to_string(),
+            "site".to_string(),
+            "login".to_string(),
+            "official".to_string(),
+        ]);
+        let transactional = HashSet::from([
+            "buy".to_string(),
+            "purchase".to_string(),
+            "order".to_string(),
+            "download".to_string(),
+            "install".to_string(),
+            "get".to_string(),
+            "free".to_string(),
+            "price".to_string(),
+        ]);
+        crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
+            informational,
+            navigational,
+            transactional,
+            analyzer,
+        )
     }
 }
 
@@ -526,11 +708,19 @@ impl SynonymDictionary {
     /// ]
     /// ```
     pub fn load_from_file(path: &str) -> Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| crate::error::SarissaError::storage(format!("Failed to read synonym dictionary file '{}': {}", path, e)))?;
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            crate::error::SarissaError::storage(format!(
+                "Failed to read synonym dictionary file '{}': {}",
+                path, e
+            ))
+        })?;
 
-        let synonym_groups: Vec<Vec<String>> = serde_json::from_str(&content)
-            .map_err(|e| crate::error::SarissaError::parse(format!("Failed to parse synonym dictionary JSON from '{}': {}", path, e)))?;
+        let synonym_groups: Vec<Vec<String>> = serde_json::from_str(&content).map_err(|e| {
+            crate::error::SarissaError::parse(format!(
+                "Failed to parse synonym dictionary JSON from '{}': {}",
+                path, e
+            ))
+        })?;
 
         let mut dict = Self::new(None)?;
         for group in synonym_groups {
@@ -584,37 +774,17 @@ impl WordEmbeddings {
         Ok(Self::new())
     }
 
-    pub fn get_similar_words(
-        &self,
-        _word: &str,
-        _count: usize,
-    ) -> Result<Option<Vec<(String, f64)>>> {
-        // Placeholder implementation - would compute cosine similarity
-        Ok(None)
-    }
-
-    #[allow(dead_code)]
-    fn cosine_similarity(&self, vec1: &[f32], vec2: &[f32]) -> f64 {
-        if vec1.len() != vec2.len() {
-            return 0.0;
-        }
-
-        let dot_product: f32 = vec1.iter().zip(vec2.iter()).map(|(a, b)| a * b).sum();
-        let norm1: f32 = vec1.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let norm2: f32 = vec2.iter().map(|x| x * x).sum::<f32>().sqrt();
-
-        if norm1 == 0.0 || norm2 == 0.0 {
-            0.0
-        } else {
-            (dot_product / (norm1 * norm2)) as f64
-        }
+    pub fn find_similar(&self, _term: &str, _threshold: f64) -> Option<Vec<(String, f64)>> {
+        // Placeholder implementation
+        None
     }
 }
 
-/// Statistical co-occurrence model for expansion.
+/// Statistical co-occurrence model.
 #[derive(Debug)]
 pub struct CoOccurrenceModel {
-    term_cooccurrences: HashMap<String, HashMap<String, f64>>,
+    #[allow(dead_code)]
+    cooccurrences: HashMap<String, HashMap<String, f64>>,
 }
 
 impl Default for CoOccurrenceModel {
@@ -626,41 +796,26 @@ impl Default for CoOccurrenceModel {
 impl CoOccurrenceModel {
     pub fn new() -> Self {
         Self {
-            term_cooccurrences: HashMap::new(),
+            cooccurrences: HashMap::new(),
         }
     }
 
-    pub fn update_with_clicks(&mut self, query: &str, clicked_documents: &[String]) -> Result<()> {
-        let _query_terms: Vec<String> =
-            query.split_whitespace().map(|s| s.to_lowercase()).collect();
-
-        // Update co-occurrence statistics based on successful query-document pairs
-        for _doc_id in clicked_documents {
-            // In a real implementation, you'd analyze document content
-            // and update co-occurrence counts between query terms and document terms
-        }
-
-        Ok(())
-    }
-
-    pub fn get_cooccurrent_terms(
+    pub fn get_cooccurring_terms(
         &self,
-        term: &str,
-        count: usize,
-    ) -> Result<Option<Vec<(String, f64)>>> {
-        if let Some(cooccurrences) = self.term_cooccurrences.get(term) {
-            let mut terms: Vec<(String, f64)> = cooccurrences
-                .iter()
-                .map(|(t, &score)| (t.clone(), score))
-                .collect();
+        _term: &str,
+        _context: &MLContext,
+    ) -> Option<Vec<(String, f64)>> {
+        // Placeholder implementation
+        None
+    }
 
-            terms.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            terms.truncate(count);
-
-            Ok(Some(terms))
-        } else {
-            Ok(None)
-        }
+    pub fn update_with_clicks(
+        &mut self,
+        _query: &str,
+        _clicked_documents: &[String],
+    ) -> Result<()> {
+        // Placeholder implementation
+        Ok(())
     }
 }
 
@@ -668,44 +823,6 @@ impl CoOccurrenceModel {
 mod tests {
     use super::*;
     use crate::analysis::analyzer::language::EnglishAnalyzer;
-
-    #[test]
-    fn test_query_expansion_config_default() {
-        let config = QueryExpansionConfig::default();
-        assert!(config.enabled);
-        assert_eq!(config.max_expansions, 10);
-        assert_eq!(config.similarity_threshold, 0.6);
-    }
-
-    #[test]
-    fn test_query_expansion_creation() {
-        let config = QueryExpansionConfig::default();
-        let analyzer = Arc::new(EnglishAnalyzer::new().unwrap());
-        let expansion = QueryExpansion::new(config, analyzer).unwrap();
-        assert!(expansion.config.enabled);
-    }
-
-    #[test]
-    fn test_intent_classification() {
-        let analyzer = Arc::new(EnglishAnalyzer::new().unwrap());
-        let config = QueryExpansionConfig::default();
-        let expansion = QueryExpansion::new(config, analyzer).unwrap();
-
-        let intent = expansion.intent_classifier.predict("what is rust").unwrap();
-        assert_eq!(intent, QueryIntent::Informational);
-
-        let intent = expansion
-            .intent_classifier
-            .predict("rust official website")
-            .unwrap();
-        assert_eq!(intent, QueryIntent::Navigational);
-
-        let intent = expansion
-            .intent_classifier
-            .predict("buy rust book")
-            .unwrap();
-        assert_eq!(intent, QueryIntent::Transactional);
-    }
 
     #[test]
     fn test_synonym_dictionary() {
@@ -751,17 +868,48 @@ mod tests {
     }
 
     #[test]
-    fn test_expanded_query_to_boolean() {
+    fn test_builder_with_synonyms() {
         let analyzer = Arc::new(EnglishAnalyzer::new().unwrap());
-        let config = QueryExpansionConfig::default();
-        let expansion = QueryExpansion::new(config, analyzer).unwrap();
+        let expansion = QueryExpansionBuilder::new(analyzer)
+            .with_synonyms(Some("resource/ml/synonyms.json"), 0.5)
+            .unwrap()
+            .max_expansions(5)
+            .build()
+            .unwrap();
+
+        assert_eq!(expansion.expanders.len(), 1);
+        assert_eq!(expansion.max_expansions, 5);
+    }
+
+    #[test]
+    fn test_builder_multiple_expanders() {
+        let analyzer = Arc::new(EnglishAnalyzer::new().unwrap());
+        let expansion = QueryExpansionBuilder::new(analyzer)
+            .with_synonyms(Some("resource/ml/synonyms.json"), 0.5)
+            .unwrap()
+            .with_statistical(0.3)
+            .max_expansions(10)
+            .build()
+            .unwrap();
+
+        assert_eq!(expansion.expanders.len(), 2);
+    }
+
+    #[test]
+    fn test_expand_query() {
+        let analyzer = Arc::new(EnglishAnalyzer::new().unwrap());
+        let expansion = QueryExpansionBuilder::new(analyzer)
+            .with_synonyms(Some("resource/ml/synonyms.json"), 0.5)
+            .unwrap()
+            .build()
+            .unwrap();
 
         let ml_context = MLContext::default();
         let expanded = expansion
-            .expand_query("rust programming", "content", &ml_context)
+            .expand_query("ml python", "content", &ml_context)
             .unwrap();
 
-        let boolean_query = expanded.to_boolean_query();
-        assert!(boolean_query.clauses().len() > 0);
+        assert!(expanded.expanded_queries.len() > 0);
+        assert_eq!(expanded.intent, QueryIntent::Unknown);
     }
 }

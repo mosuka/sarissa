@@ -7,7 +7,7 @@ use sarissa::analysis::StandardAnalyzer;
 use sarissa::full_text::index::IndexConfig;
 use sarissa::ml::features::QueryDocumentFeatures;
 use sarissa::ml::models::LabeledExample;
-use sarissa::ml::query_expansion::{QueryExpansion, QueryExpansionConfig};
+use sarissa::ml::query_expansion::QueryExpansion;
 use sarissa::ml::ranking::{LearningToRank, ModelType, RankingConfig};
 use sarissa::ml::{
     FeedbackSignal, FeedbackType, MLConfig, MLContext, SearchHistoryItem, UserSession,
@@ -38,14 +38,6 @@ async fn main() -> Result<()> {
             enabled: true,
             model_type: ModelType::GBDT,
             online_learning: true,
-            ..Default::default()
-        },
-        query_expansion: QueryExpansionConfig {
-            enabled: true,
-            max_expansions: 5,
-            synonym_dict_path: Some("resource/ml/synonyms.json".to_string()),
-            enable_synonyms: true,
-            enable_semantic: true,
             ..Default::default()
         },
         ..Default::default()
@@ -132,12 +124,12 @@ async fn main() -> Result<()> {
 
     println!("\n=== Query Expansion Example ===");
 
-    // Initialize query expander
+    // Initialize query expander using Builder API
     let analyzer = Arc::new(StandardAnalyzer::new()?);
-    let query_expander = QueryExpansion::new(ml_config.query_expansion.clone(), analyzer)?;
-
-    // Note: In a real implementation, synonyms would be loaded from a dictionary file
-    // For this example, we'll proceed without adding synonyms manually
+    let query_expander = QueryExpansion::builder(analyzer)
+        .with_synonyms(Some("resource/ml/synonyms.json"), 0.8)?
+        .max_expansions(5)
+        .build()?;
 
     // Expand a query
     let original_query = "ML python";
