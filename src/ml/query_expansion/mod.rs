@@ -35,7 +35,7 @@
 
 mod builder;
 mod core;
-mod r#trait;
+mod expander;
 mod types;
 
 // Expander implementations
@@ -46,7 +46,7 @@ mod synonym;
 // Public exports
 pub use builder::QueryExpansionBuilder;
 pub use core::QueryExpansion;
-pub use r#trait::QueryExpander;
+pub use expander::QueryExpander;
 pub use semantic::{SemanticQueryExpander, WordEmbeddings};
 pub use statistical::{CoOccurrenceModel, StatisticalQueryExpander};
 pub use synonym::{SynonymDictionary, SynonymQueryExpander};

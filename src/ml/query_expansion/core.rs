@@ -8,7 +8,7 @@ use crate::ml::MLContext;
 use crate::query::{BooleanQuery, BooleanQueryBuilder, Query, TermQuery};
 
 use super::builder::QueryExpansionBuilder;
-use super::r#trait::QueryExpander;
+use super::expander::QueryExpander;
 use super::types::{ExpandedQuery, ExpandedQueryClause};
 
 /// Query expansion system.

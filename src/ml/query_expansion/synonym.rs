@@ -8,7 +8,7 @@ use crate::error::Result;
 use crate::ml::MLContext;
 use crate::query::{Query, TermQuery};
 
-use super::r#trait::QueryExpander;
+use super::expander::QueryExpander;
 use super::types::{ExpandedQueryClause, ExpansionType};
 
 /// Synonym dictionary for term expansion.

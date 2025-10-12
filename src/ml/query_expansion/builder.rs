@@ -7,7 +7,7 @@ use crate::analysis::analyzer::Analyzer;
 use crate::error::Result;
 
 use super::core::QueryExpansion;
-use super::r#trait::QueryExpander;
+use super::expander::QueryExpander;
 use super::semantic::SemanticQueryExpander;
 use super::statistical::StatisticalQueryExpander;
 use super::synonym::SynonymQueryExpander;

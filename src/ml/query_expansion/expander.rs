@@ -1,4 +1,4 @@
-//! Query expander trait definition.
+//! Query expander trait and interface definitions.
 
 use crate::error::Result;
 use crate::ml::MLContext;
