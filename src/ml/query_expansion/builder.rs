@@ -139,12 +139,8 @@ impl QueryExpansionBuilder {
     pub fn build(self) -> Result<QueryExpansion> {
         let intent_classifier = if self.use_ml_classifier {
             if let Some(ref path) = self.ml_training_data_path {
-                let samples =
-                    crate::ml::intent_classifier::IntentClassifier::load_training_data(path)?;
-                crate::ml::intent_classifier::IntentClassifier::new_ml_based(
-                    samples,
-                    self.analyzer.clone(),
-                )?
+                let samples = crate::ml::intent_classifier::load_training_data(path)?;
+                crate::ml::intent_classifier::new_ml_based(samples, self.analyzer.clone())?
             } else {
                 Self::create_default_keyword_classifier(self.analyzer.clone())
             }
@@ -163,7 +159,7 @@ impl QueryExpansionBuilder {
 
     fn create_default_keyword_classifier(
         analyzer: Arc<dyn Analyzer>,
-    ) -> crate::ml::intent_classifier::IntentClassifier {
+    ) -> Box<dyn crate::ml::intent_classifier::IntentClassifier> {
         let informational = HashSet::from([
             "what".to_string(),
             "how".to_string(),
@@ -191,7 +187,7 @@ impl QueryExpansionBuilder {
             "free".to_string(),
             "price".to_string(),
         ]);
-        crate::ml::intent_classifier::IntentClassifier::new_keyword_based(
+        crate::ml::intent_classifier::new_keyword_based(
             informational,
             navigational,
             transactional,

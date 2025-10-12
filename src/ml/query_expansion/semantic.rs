@@ -85,9 +85,13 @@ impl QueryExpander for SemanticQueryExpander {
         let mut expansions = Vec::new();
 
         for term in tokens {
-            if let Some(similar_terms) = self.embeddings.find_similar(term, self.similarity_threshold) {
+            if let Some(similar_terms) = self
+                .embeddings
+                .find_similar(term, self.similarity_threshold)
+            {
                 for (similar_term, similarity) in similar_terms {
-                    let mut query = Box::new(TermQuery::new(field, similar_term.clone())) as Box<dyn Query>;
+                    let mut query =
+                        Box::new(TermQuery::new(field, similar_term.clone())) as Box<dyn Query>;
                     query.set_boost((similarity * self.weight) as f32);
 
                     expansions.push(ExpandedQueryClause {
