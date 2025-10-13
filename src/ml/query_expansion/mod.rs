@@ -49,5 +49,7 @@ pub use core::QueryExpansion;
 pub use expander::QueryExpander;
 pub use semantic::{SemanticQueryExpander, WordEmbeddings};
 pub use statistical::{CoOccurrenceModel, StatisticalQueryExpander};
-pub use synonym::{SynonymDictionary, SynonymQueryExpander};
+pub use synonym::SynonymQueryExpander;
+// SynonymDictionary is now in analysis::token_filter::SynonymDictionary
+pub use crate::analysis::token_filter::SynonymDictionary;
 pub use types::{ExpandedQuery, ExpandedQueryClause, ExpansionType, QueryIntent};

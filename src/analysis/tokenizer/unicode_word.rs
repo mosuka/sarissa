@@ -4,7 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::Tokenizer;
 
-use crate::analysis::token::{Token, TokenStream};
+use crate::analysis::token::{Token, TokenStream, TokenType};
 use crate::error::Result;
 
 /// A tokenizer that splits text on Unicode word boundaries.
@@ -15,6 +15,65 @@ impl UnicodeWordTokenizer {
     /// Create a new Unicode word tokenizer.
     pub fn new() -> Self {
         UnicodeWordTokenizer
+    }
+
+    /// Detect token type based on the content.
+    fn detect_token_type(word: &str) -> TokenType {
+        if word.is_empty() {
+            return TokenType::Other;
+        }
+
+        // Check if all characters are numeric
+        if word.chars().all(|c| c.is_numeric()) {
+            return TokenType::Num;
+        }
+
+        // Check if it's Hiragana
+        if word.chars().all(|c| matches!(c, '\u{3040}'..='\u{309F}')) {
+            return TokenType::Hiragana;
+        }
+
+        // Check if it's Katakana
+        if word.chars().all(|c| matches!(c, '\u{30A0}'..='\u{30FF}')) {
+            return TokenType::Katakana;
+        }
+
+        // Check if it's Hangul
+        if word
+            .chars()
+            .any(|c| matches!(c, '\u{AC00}'..='\u{D7AF}' | '\u{1100}'..='\u{11FF}'))
+        {
+            return TokenType::Hangul;
+        }
+
+        // Check if it contains CJK characters
+        if word.chars().any(|c| {
+            matches!(c,
+                '\u{4E00}'..='\u{9FFF}' |  // CJK Unified Ideographs
+                '\u{3400}'..='\u{4DBF}' |  // CJK Extension A
+                '\u{20000}'..='\u{2A6DF}' | // CJK Extension B
+                '\u{2A700}'..='\u{2B73F}' | // CJK Extension C
+                '\u{2B740}'..='\u{2B81F}' | // CJK Extension D
+                '\u{2B820}'..='\u{2CEAF}'   // CJK Extension E
+            )
+        }) {
+            return TokenType::Cjk;
+        }
+
+        // Check if it's alphanumeric (ASCII)
+        if word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return TokenType::Alphanum;
+        }
+
+        // Check if it's punctuation
+        if word.chars().all(|c| c.is_ascii_punctuation()) {
+            return TokenType::Punctuation;
+        }
+
+        TokenType::Other
     }
 }
 
@@ -29,12 +88,11 @@ impl Tokenizer for UnicodeWordTokenizer {
                     // Find the actual position in the original text
                     let start_offset = text.find(word).unwrap_or(0);
                     let end_offset = start_offset + word.len();
-                    Some(Token::with_offsets(
-                        word,
-                        position,
-                        start_offset,
-                        end_offset,
-                    ))
+                    let token_type = Self::detect_token_type(word);
+                    Some(
+                        Token::with_offsets(word, position, start_offset, end_offset)
+                            .with_token_type(token_type),
+                    )
                 } else {
                     None
                 }

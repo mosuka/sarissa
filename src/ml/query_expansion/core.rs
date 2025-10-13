@@ -208,7 +208,7 @@ mod tests {
             .expand_query("ml python", "content", &ml_context)
             .unwrap();
 
-        assert!(expanded.expanded_queries.len() > 0);
+        assert!(!expanded.expanded_queries.is_empty());
         assert_eq!(expanded.intent, QueryIntent::Unknown);
     }
 }
