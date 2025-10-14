@@ -1,14 +1,14 @@
 [
-  ["ml", "machine learning", "machine-learning", "machinelearning"],
-  ["ai", "artificial intelligence", "artificial-intelligence", "artificialintelligence"],
+  ["ml", "machine learning", "machine-learning"],
+  ["ai", "artificial intelligence", "artificial-intelligence"],
   ["programming", "coding", "development", "software engineering"],
   ["python", "Python", "py"],
   ["algorithm", "algorithms", "algo"],
   ["data", "dataset", "data science", "data-science"],
-  ["機械", "マシン"],
-  ["学習", "勉強", "習得", "ラーニング"],
-  ["人工", "artificial"],
-  ["知能", "intelligence", "ai"],
+  ["機械学習", "マシンラーニング"],
+  ["学習", "勉強", "習得"],
+  ["人工知能", "artificial intelligence", "ai"],
   ["プログラミング", "コーディング", "開発"],
-  ["購入", "買う", "注文"]
+  ["購入", "買う", "注文"],
+  ["本", "書籍", "注文"]
 ]

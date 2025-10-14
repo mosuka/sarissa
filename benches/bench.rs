@@ -345,13 +345,92 @@ fn bench_scalability(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark synonym dictionary operations.
+fn bench_synonym_dictionary(c: &mut Criterion) {
+    use sarissa::analysis::token_filter::synonym_graph::SynonymDictionary;
+
+    let mut group = c.benchmark_group("synonym_dictionary");
+
+    // Create dictionary with varying sizes
+    let small_dict = create_test_dictionary(100);
+    let medium_dict = create_test_dictionary(1000);
+    let large_dict = create_test_dictionary(10000);
+
+    // Benchmark single lookup
+    group.bench_function("lookup_small_100", |b| {
+        b.iter(|| {
+            let result = small_dict.get_synonyms(black_box("term_50"));
+            black_box(result)
+        })
+    });
+
+    group.bench_function("lookup_medium_1k", |b| {
+        b.iter(|| {
+            let result = medium_dict.get_synonyms(black_box("term_500"));
+            black_box(result)
+        })
+    });
+
+    group.bench_function("lookup_large_10k", |b| {
+        b.iter(|| {
+            let result = large_dict.get_synonyms(black_box("term_5000"));
+            black_box(result)
+        })
+    });
+
+    // Benchmark batch lookups
+    group.throughput(Throughput::Elements(100));
+    group.bench_function("batch_lookup_100", |b| {
+        b.iter(|| {
+            for i in 0..100 {
+                let term = format!("term_{}", i);
+                let result = large_dict.get_synonyms(black_box(&term));
+                black_box(result);
+            }
+        })
+    });
+
+    // Benchmark dictionary creation
+    group.bench_function("build_dict_1k", |b| {
+        b.iter(|| {
+            let dict = create_test_dictionary(1000);
+            black_box(dict)
+        })
+    });
+
+    group.finish();
+}
+
+/// Create a test dictionary with specified number of synonym groups.
+fn create_test_dictionary(
+    num_groups: usize,
+) -> sarissa::analysis::token_filter::synonym_graph::SynonymDictionary {
+    use sarissa::analysis::token_filter::synonym_graph::SynonymDictionary;
+
+    let mut groups = Vec::new();
+    for i in 0..num_groups {
+        groups.push(vec![
+            format!("term_{}", i),
+            format!("synonym_a_{}", i),
+            format!("synonym_b_{}", i),
+        ]);
+    }
+
+    let mut dict = SynonymDictionary::new(None).unwrap();
+    for group in groups {
+        dict.add_synonym_group(group);
+    }
+    dict
+}
+
 // Group all benchmarks - core benchmarks for faster execution
 criterion_group!(
     benches,
     bench_text_analysis,
     bench_vector_search,
     bench_parallel_operations,
-    bench_memory_operations
+    bench_memory_operations,
+    bench_synonym_dictionary
 );
 
 // Separate group for slower benchmarks

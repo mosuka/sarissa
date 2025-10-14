@@ -5,7 +5,7 @@ use lindera::dictionary::{load_dictionary, load_user_dictionary};
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 
-use crate::analysis::token::{Token, TokenStream};
+use crate::analysis::token::{Token, TokenStream, TokenType};
 use crate::error::{Result, SarissaError};
 
 use super::Tokenizer;
@@ -33,6 +33,65 @@ impl LinderaTokenizer {
 
         Ok(Self { inner })
     }
+
+    /// Detect token type based on the content.
+    fn detect_token_type(text: &str) -> TokenType {
+        if text.is_empty() {
+            return TokenType::Other;
+        }
+
+        // Check if all characters are numeric
+        if text.chars().all(|c| c.is_numeric()) {
+            return TokenType::Num;
+        }
+
+        // Check if it's Hiragana
+        if text.chars().all(|c| matches!(c, '\u{3040}'..='\u{309F}')) {
+            return TokenType::Hiragana;
+        }
+
+        // Check if it's Katakana
+        if text.chars().all(|c| matches!(c, '\u{30A0}'..='\u{30FF}')) {
+            return TokenType::Katakana;
+        }
+
+        // Check if it's Hangul
+        if text
+            .chars()
+            .any(|c| matches!(c, '\u{AC00}'..='\u{D7AF}' | '\u{1100}'..='\u{11FF}'))
+        {
+            return TokenType::Hangul;
+        }
+
+        // Check if it contains CJK characters
+        if text.chars().any(|c| {
+            matches!(c,
+                '\u{4E00}'..='\u{9FFF}' |  // CJK Unified Ideographs
+                '\u{3400}'..='\u{4DBF}' |  // CJK Extension A
+                '\u{20000}'..='\u{2A6DF}' | // CJK Extension B
+                '\u{2A700}'..='\u{2B73F}' | // CJK Extension C
+                '\u{2B740}'..='\u{2B81F}' | // CJK Extension D
+                '\u{2B820}'..='\u{2CEAF}'   // CJK Extension E
+            )
+        }) {
+            return TokenType::Cjk;
+        }
+
+        // Check if it's alphanumeric (ASCII)
+        if text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return TokenType::Alphanum;
+        }
+
+        // Check if it's punctuation
+        if text.chars().all(|c| c.is_ascii_punctuation()) {
+            return TokenType::Punctuation;
+        }
+
+        TokenType::Other
+    }
 }
 
 impl Tokenizer for LinderaTokenizer {
@@ -44,12 +103,16 @@ impl Tokenizer for LinderaTokenizer {
             .segment(Cow::Borrowed(text))
             .map_err(|e| SarissaError::analysis(format!("Failed to segment text: {}", e)))?
         {
-            tokens.push(Token::with_offsets(
-                token.surface,
-                token.position,
-                token.byte_start,
-                token.byte_end,
-            ));
+            let token_type = Self::detect_token_type(&token.surface);
+            tokens.push(
+                Token::with_offsets(
+                    token.surface,
+                    token.position,
+                    token.byte_start,
+                    token.byte_end,
+                )
+                .with_token_type(token_type),
+            );
         }
 
         Ok(Box::new(tokens.into_iter()))
