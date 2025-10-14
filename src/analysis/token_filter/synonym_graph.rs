@@ -408,7 +408,8 @@ impl SynonymGraphFilter {
                     } else {
                         1
                     };
-                    token.position_length = 1;
+                    // First token spans the entire synonym phrase length
+                    token.position_length = if i == 0 { syn_tokens.len() } else { 1 };
                     token.start_offset = match_start_offset;
                     token.end_offset = match_end_offset;
                     token = token.with_token_type(TokenType::Synonym);
