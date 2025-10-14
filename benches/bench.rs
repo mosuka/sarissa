@@ -347,8 +347,6 @@ fn bench_scalability(c: &mut Criterion) {
 
 /// Benchmark synonym dictionary operations.
 fn bench_synonym_dictionary(c: &mut Criterion) {
-    use sarissa::analysis::token_filter::synonym_graph::SynonymDictionary;
-
     let mut group = c.benchmark_group("synonym_dictionary");
 
     // Create dictionary with varying sizes

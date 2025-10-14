@@ -1005,4 +1005,176 @@ mod tests {
         let has_synonym = result.iter().any(|t| t.text == "beginner");
         assert!(!has_synonym, "CJK tokens with space should NOT match");
     }
+
+    #[test]
+    fn test_single_to_multi_word_synonym_position_length() {
+        use crate::analysis::tokenizer::WhitespaceTokenizer;
+
+        // Test Case 1: Single word → Multi-word synonym expansion
+        let mut dict = SynonymDictionary::new(None).unwrap();
+        dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);
+        dict.add_synonym_group(vec![
+            "ai".to_string(),
+            "artificial intelligence".to_string(),
+        ]);
+
+        let tokenizer = Box::new(WhitespaceTokenizer);
+        let filter = SynonymGraphFilter::with_tokenizer(dict, tokenizer, true);
+
+        let tokens = vec![
+            Token::new("ml", 0),
+            Token::new("and", 1),
+            Token::new("ai", 2),
+            Token::new("tutorial", 3),
+        ];
+
+        let result = filter
+            .filter(Box::new(tokens.into_iter()))
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        // Verify "machine" token (first token of multi-word synonym)
+        let machine_token = result.iter().find(|t| t.text == "machine");
+        assert!(machine_token.is_some(), "Expected 'machine' token");
+        let machine = machine_token.unwrap();
+        assert_eq!(machine.position, 0);
+        assert_eq!(machine.position_increment, 0);
+        assert_eq!(
+            machine.position_length, 2,
+            "First token of multi-word synonym should have pos_len=2"
+        );
+
+        // Verify "learning" token (second token of multi-word synonym)
+        let learning_token = result.iter().find(|t| t.text == "learning");
+        assert!(learning_token.is_some(), "Expected 'learning' token");
+        let learning = learning_token.unwrap();
+        assert_eq!(learning.position, 1);
+        assert_eq!(learning.position_increment, 1);
+        assert_eq!(learning.position_length, 1);
+
+        // Verify "artificial" token (first token of multi-word synonym)
+        let artificial_token = result.iter().find(|t| t.text == "artificial");
+        assert!(artificial_token.is_some(), "Expected 'artificial' token");
+        let artificial = artificial_token.unwrap();
+        assert_eq!(artificial.position, 2);
+        assert_eq!(artificial.position_increment, 0);
+        assert_eq!(
+            artificial.position_length, 2,
+            "First token of multi-word synonym should have pos_len=2"
+        );
+
+        // Verify "intelligence" token (second token of multi-word synonym)
+        let intelligence_token = result.iter().find(|t| t.text == "intelligence");
+        assert!(intelligence_token.is_some(), "Expected 'intelligence' token");
+        let intelligence = intelligence_token.unwrap();
+        assert_eq!(intelligence.position, 3);
+        assert_eq!(intelligence.position_increment, 1);
+        assert_eq!(intelligence.position_length, 1);
+    }
+
+    #[test]
+    fn test_multi_to_single_word_synonym_position_length() {
+        use crate::analysis::tokenizer::WhitespaceTokenizer;
+
+        // Test Case 2: Multi-word → Single word synonym expansion
+        let mut dict = SynonymDictionary::new(None).unwrap();
+        dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);
+
+        let tokenizer = Box::new(WhitespaceTokenizer);
+        let filter = SynonymGraphFilter::with_tokenizer(dict, tokenizer, true);
+
+        let tokens = vec![
+            Token::new("machine", 0),
+            Token::new("learning", 1),
+            Token::new("tutorial", 2),
+        ];
+
+        let result = filter
+            .filter(Box::new(tokens.into_iter()))
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        // Verify "ml" token (single-word synonym for multi-word phrase)
+        let ml_token = result.iter().find(|t| t.text == "ml");
+        assert!(ml_token.is_some(), "Expected 'ml' token");
+        let ml = ml_token.unwrap();
+        assert_eq!(ml.position, 0);
+        assert_eq!(ml.position_increment, 0);
+        assert_eq!(
+            ml.position_length, 2,
+            "Single-word synonym for multi-word phrase should have pos_len=2"
+        );
+
+        // Verify original tokens are kept
+        let machine_token = result.iter().find(|t| t.text == "machine");
+        assert!(machine_token.is_some(), "Expected original 'machine' token");
+
+        let learning_token = result.iter().find(|t| t.text == "learning");
+        assert!(learning_token.is_some(), "Expected original 'learning' token");
+    }
+
+    #[test]
+    fn test_japanese_synonym_expansion_with_lindera() {
+        use crate::analysis::tokenizer::LinderaTokenizer;
+
+        // Test Japanese synonym expansion with LinderaTokenizer
+        let mut dict = SynonymDictionary::new(None).unwrap();
+        dict.add_synonym_group(vec!["ml".to_string(), "機械学習".to_string()]);
+        dict.add_synonym_group(vec!["ai".to_string(), "人工知能".to_string()]);
+
+        let lindera_tokenizer =
+            LinderaTokenizer::new("normal", "embedded://unidic", None).unwrap();
+        let tokenizer = Box::new(lindera_tokenizer);
+        let filter = SynonymGraphFilter::with_tokenizer(dict, tokenizer, true);
+
+        // Case 1: English → Japanese
+        let en_tokens = vec![
+            Token::new("ml", 0),
+            Token::new("and", 1),
+            Token::new("ai", 2),
+        ];
+
+        let result = filter
+            .filter(Box::new(en_tokens.into_iter()))
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        // Verify "機械" token (first token of Japanese multi-word synonym)
+        let kikai_token = result.iter().find(|t| t.text == "機械");
+        assert!(kikai_token.is_some(), "Expected '機械' token");
+        let kikai = kikai_token.unwrap();
+        assert_eq!(kikai.position, 0);
+        assert_eq!(kikai.position_increment, 0);
+        assert_eq!(
+            kikai.position_length, 2,
+            "First token of Japanese multi-word synonym should have pos_len=2"
+        );
+
+        // Verify "学習" token (second token of Japanese multi-word synonym)
+        let gakushu_token = result.iter().find(|t| t.text == "学習");
+        assert!(gakushu_token.is_some(), "Expected '学習' token");
+        let gakushu = gakushu_token.unwrap();
+        assert_eq!(gakushu.position, 1);
+        assert_eq!(gakushu.position_increment, 1);
+        assert_eq!(gakushu.position_length, 1);
+
+        // Verify "人工" token (first token of Japanese multi-word synonym)
+        let jinko_token = result.iter().find(|t| t.text == "人工");
+        assert!(jinko_token.is_some(), "Expected '人工' token");
+        let jinko = jinko_token.unwrap();
+        assert_eq!(jinko.position, 2);
+        assert_eq!(jinko.position_increment, 0);
+        assert_eq!(
+            jinko.position_length, 2,
+            "First token of Japanese multi-word synonym should have pos_len=2"
+        );
+
+        // Verify "知能" token (second token of Japanese multi-word synonym)
+        let chino_token = result.iter().find(|t| t.text == "知能");
+        assert!(chino_token.is_some(), "Expected '知能' token");
+        let chino = chino_token.unwrap();
+        assert_eq!(chino.position, 3);
+        assert_eq!(chino.position_increment, 1);
+        assert_eq!(chino.position_length, 1);
+    }
 }
