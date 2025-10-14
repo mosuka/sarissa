@@ -48,4 +48,4 @@ pub use core::{load_training_data, new_keyword_based, new_ml_based};
 pub use keyword_classifier::KeywordBasedIntentClassifier;
 pub use ml_classifier::MLBasedIntentClassifier;
 pub use tfidf::TfIdfVectorizer;
-pub use types::IntentSample;
+pub use types::{IntentSample, QueryIntent};

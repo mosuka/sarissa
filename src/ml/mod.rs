@@ -1,14 +1,24 @@
 //! Machine Learning integration for Sarissa search engine.
 //!
 //! This module provides machine learning capabilities to enhance search quality
-//! through learning-to-rank, query expansion, recommendations, and anomaly detection.
+//! through learning-to-rank, recommendations, and anomaly detection.
+//!
+//! # Note on Query Expansion
+//!
+//! Query expansion functionality has been moved to the analysis layer for better
+//! integration with the token processing pipeline:
+//!
+//! - **Synonym expansion**: Use `SynonymGraphFilter` with `with_boost()`
+//! - **Semantic expansion**: Future feature, should be implemented as a separate service layer
+//! - **Statistical expansion**: Future feature, should be implemented as part of personalization
+//!
+//! See `SynonymGraphFilter` documentation for synonym-based query expansion.
 
 pub mod anomaly;
 pub mod features;
 pub mod intent_classifier;
 pub mod models;
 pub mod optimization;
-pub mod query_expansion;
 pub mod ranking;
 pub mod recommendation;
 
@@ -17,7 +27,6 @@ pub use features::*;
 pub use intent_classifier::*;
 pub use models::*;
 pub use optimization::*;
-pub use query_expansion::*;
 pub use ranking::*;
 pub use recommendation::*;
 
