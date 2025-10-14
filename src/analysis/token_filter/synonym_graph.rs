@@ -3,228 +3,22 @@
 //! This filter applies synonyms from a dictionary to an incoming token stream,
 //! producing a correct graph output similar to Lucene's SynonymGraphFilter.
 
-use std::sync::Arc;
-
-use fst::{Map, MapBuilder, Streamer};
-
-use crate::analysis::token::{Token, TokenStream, TokenType};
+use crate::analysis::synonym::SynonymGraphBuilder;
+use crate::analysis::token::{Token, TokenStream};
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
 
 use super::Filter;
 
-/// Synonym dictionary for token expansion.
-///
-/// Maps terms to their synonyms using FST (Finite State Transducer) for memory efficiency.
-/// FST provides dramatic memory savings (10-100x) for large dictionaries (100k+ entries)
-/// while maintaining fast lookup performance.
-#[derive(Debug, Clone)]
-pub struct SynonymDictionary {
-    /// FST map: term -> index into synonym_lists
-    fst_map: Arc<Map<Arc<[u8]>>>,
-    /// Actual synonym lists indexed by FST values
-    synonym_lists: Arc<Vec<Vec<String>>>,
-    /// Maximum number of tokens to look ahead for multi-word synonym matching
-    max_phrase_length: usize,
-}
-
-impl Default for SynonymDictionary {
-    fn default() -> Self {
-        Self::new(None).unwrap()
-    }
-}
-
-impl SynonymDictionary {
-    /// Create a new synonym dictionary.
-    ///
-    /// If `path` is provided, loads synonyms from the specified JSON file.
-    /// If `path` is `None`, creates an empty dictionary.
-    pub fn new(path: Option<&str>) -> Result<Self> {
-        match path {
-            Some(file_path) => Self::load_from_file(file_path),
-            None => {
-                // Create empty FST
-                let builder = MapBuilder::memory();
-                let fst_bytes = builder.into_inner().unwrap();
-                let fst_map = Map::new(Arc::from(fst_bytes)).unwrap();
-
-                Ok(Self {
-                    fst_map: Arc::new(fst_map),
-                    synonym_lists: Arc::new(Vec::new()),
-                    max_phrase_length: 1,
-                })
-            }
-        }
-    }
-
-    /// Load synonym dictionary from a JSON file.
-    ///
-    /// The JSON file should contain an array of synonym groups, where each group
-    /// is an array of terms that are synonyms of each other.
-    ///
-    /// Example format:
-    /// ```json
-    /// [
-    ///   ["ml", "machine learning", "machine-learning"],
-    ///   ["ai", "artificial intelligence"]
-    /// ]
-    /// ```
-    pub fn load_from_file(path: &str) -> Result<Self> {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            crate::error::SarissaError::storage(format!(
-                "Failed to read synonym dictionary file '{}': {}",
-                path, e
-            ))
-        })?;
-
-        let synonym_groups: Vec<Vec<String>> = serde_json::from_str(&content).map_err(|e| {
-            crate::error::SarissaError::parse(format!(
-                "Failed to parse synonym dictionary JSON from '{}': {}",
-                path, e
-            ))
-        })?;
-
-        Self::from_synonym_groups(synonym_groups)
-    }
-
-    /// Build a synonym dictionary from synonym groups.
-    fn from_synonym_groups(synonym_groups: Vec<Vec<String>>) -> Result<Self> {
-        use std::collections::HashMap;
-
-        // First, build all synonym mappings
-        let mut term_to_synonyms: HashMap<String, Vec<String>> = HashMap::new();
-        let mut max_phrase_length = 1;
-
-        for group in synonym_groups {
-            if group.is_empty() {
-                continue;
-            }
-
-            // Calculate max phrase length for this group
-            let max_words = group
-                .iter()
-                .map(|t| {
-                    let word_count = t.split_whitespace().count();
-                    if word_count == 1 {
-                        let has_ascii = t.chars().any(|c| c.is_ascii_alphanumeric());
-                        let char_count = t.chars().count();
-                        if !has_ascii && char_count > 3 {
-                            char_count.div_ceil(2)
-                        } else {
-                            1
-                        }
-                    } else {
-                        word_count
-                    }
-                })
-                .max()
-                .unwrap_or(1);
-            max_phrase_length = max_phrase_length.max(max_words);
-
-            // Create bidirectional mappings
-            for (i, term) in group.iter().enumerate() {
-                let mut synonyms = Vec::new();
-                for (j, other_term) in group.iter().enumerate() {
-                    if i != j {
-                        synonyms.push(other_term.clone());
-                    }
-                }
-                term_to_synonyms.insert(term.clone(), synonyms);
-            }
-        }
-
-        // Build FST from sorted keys
-        let mut synonym_lists = Vec::new();
-        let mut sorted_terms: Vec<_> = term_to_synonyms.keys().cloned().collect();
-        sorted_terms.sort();
-
-        let mut builder = MapBuilder::memory();
-        for term in sorted_terms {
-            let synonyms = term_to_synonyms.remove(&term).unwrap();
-            let index = synonym_lists.len() as u64;
-            synonym_lists.push(synonyms);
-            builder.insert(term.as_bytes(), index).map_err(|e| {
-                crate::error::SarissaError::parse(format!("FST build error: {}", e))
-            })?;
-        }
-
-        let fst_bytes = builder
-            .into_inner()
-            .map_err(|e| crate::error::SarissaError::parse(format!("FST finalize error: {}", e)))?;
-        let fst_map = Map::new(Arc::from(fst_bytes))
-            .map_err(|e| crate::error::SarissaError::parse(format!("FST creation error: {}", e)))?;
-
-        Ok(Self {
-            fst_map: Arc::new(fst_map),
-            synonym_lists: Arc::new(synonym_lists),
-            max_phrase_length,
-        })
-    }
-
-    /// Get synonyms for a given term or phrase.
-    pub fn get_synonyms(&self, term: &str) -> Option<&Vec<String>> {
-        let index = self.fst_map.get(term.as_bytes())? as usize;
-        self.synonym_lists.get(index)
-    }
-
-    /// Add a synonym group where all terms are synonyms of each other.
-    ///
-    /// Note: This method rebuilds the entire FST, so it's inefficient for adding
-    /// many groups one at a time. Prefer using `from_synonym_groups` or `load_from_file`
-    /// for bulk loading.
-    ///
-    /// For example, adding `["big", "large", "huge"]` will create:
-    /// - "big" -> ["large", "huge"]
-    /// - "large" -> ["big", "huge"]
-    /// - "huge" -> ["big", "large"]
-    pub fn add_synonym_group(&mut self, terms: Vec<String>) {
-        // Extract existing mappings from FST
-        let mut all_groups = Vec::new();
-        let mut processed_terms = std::collections::HashSet::new();
-
-        // Collect existing synonym groups using FST streamer
-        let mut stream = self.fst_map.stream();
-        while let Some((key, value)) = stream.next() {
-            let term = String::from_utf8_lossy(key).to_string();
-            if processed_terms.contains(&term) {
-                continue;
-            }
-
-            let index = value as usize;
-            if let Some(synonyms) = self.synonym_lists.get(index) {
-                let mut group = vec![term.clone()];
-                group.extend(synonyms.clone());
-                processed_terms.insert(term);
-                for syn in synonyms {
-                    processed_terms.insert(syn.clone());
-                }
-                all_groups.push(group);
-            }
-        }
-
-        // Add new group
-        all_groups.push(terms);
-
-        // Rebuild FST
-        *self = Self::from_synonym_groups(all_groups).unwrap();
-    }
-
-    /// Get the maximum phrase length in the dictionary.
-    pub fn max_phrase_length(&self) -> usize {
-        self.max_phrase_length
-    }
-}
+// Re-export for backward compatibility
+pub use crate::analysis::synonym::SynonymDictionary;
 
 /// Synonym graph filter that applies synonyms while maintaining correct token graph structure.
 ///
 /// This filter produces a token graph with proper `position_increment` and `position_length`
 /// attributes, enabling correct phrase query matching with multi-word synonyms.
 pub struct SynonymGraphFilter {
-    dictionary: SynonymDictionary,
-    /// Whether to keep the original tokens when synonyms are found
-    keep_original: bool,
-    /// Optional tokenizer for tokenizing multi-word synonyms
-    tokenizer: Option<Box<dyn Tokenizer>>,
+    builder: SynonymGraphBuilder,
 }
 
 impl SynonymGraphFilter {
@@ -234,11 +28,8 @@ impl SynonymGraphFilter {
     /// * `dictionary` - The synonym dictionary to use
     /// * `keep_original` - If true, keep original tokens alongside synonyms
     pub fn new(dictionary: SynonymDictionary, keep_original: bool) -> Self {
-        Self {
-            dictionary,
-            keep_original,
-            tokenizer: None,
-        }
+        let builder = SynonymGraphBuilder::new(dictionary, keep_original);
+        Self { builder }
     }
 
     /// Create a new synonym graph filter with a tokenizer.
@@ -255,11 +46,8 @@ impl SynonymGraphFilter {
         tokenizer: Box<dyn Tokenizer>,
         keep_original: bool,
     ) -> Self {
-        Self {
-            dictionary,
-            keep_original,
-            tokenizer: Some(tokenizer),
-        }
+        let builder = SynonymGraphBuilder::with_tokenizer(dictionary, tokenizer, keep_original);
+        Self { builder }
     }
 
     /// Create a synonym graph filter from a dictionary file.
@@ -278,6 +66,30 @@ impl SynonymGraphFilter {
         Ok(Self::with_tokenizer(dictionary, tokenizer, keep_original))
     }
 
+    /// Set the boost multiplier for synonym tokens.
+    ///
+    /// This allows you to adjust the weight of synonym matches relative to original terms.
+    /// For example, a boost of 0.8 means synonyms will have 80% of the weight of exact matches.
+    ///
+    /// # Arguments
+    /// * `boost` - Boost multiplier for synonyms (typically 0.5-1.0)
+    ///
+    /// # Example
+    /// ```
+    /// use sarissa::analysis::token_filter::SynonymGraphFilter;
+    /// use sarissa::analysis::synonym::SynonymDictionary;
+    ///
+    /// let mut dict = SynonymDictionary::new(None).unwrap();
+    /// dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);
+    ///
+    /// let filter = SynonymGraphFilter::new(dict, true)
+    ///     .with_boost(0.8); // Synonyms get 80% weight
+    /// ```
+    pub fn with_boost(mut self, boost: f32) -> Self {
+        self.builder = self.builder.with_boost(boost);
+        self
+    }
+
     /// Try to match a synonym starting at the given position in the token buffer.
     ///
     /// Returns (matched_phrase, matched_length, synonyms) if a match is found.
@@ -286,63 +98,7 @@ impl SynonymGraphFilter {
         tokens: &[Token],
         start: usize,
     ) -> Option<(String, usize, Vec<String>)> {
-        let max_len = (tokens.len() - start).min(self.dictionary.max_phrase_length());
-
-        // Try longest match first (greedy matching)
-        for len in (1..=max_len).rev() {
-            // Check byte offset continuity for multi-token phrases
-            // Rules:
-            // 1. If all tokens are ALPHANUM: skip continuity check (allow space-separated phrases)
-            // 2. If any token is CJK or other: check byte offset continuity (compound words only)
-            if len > 1 {
-                // Check if all tokens are ALPHANUM type
-                let all_alphanum = tokens[start..start + len].iter().all(|t| {
-                    matches!(
-                        t.metadata.as_ref().and_then(|m| m.token_type),
-                        Some(TokenType::Alphanum) | Some(TokenType::Num)
-                    )
-                });
-
-                // If not all ALPHANUM, check byte offset continuity
-                if !all_alphanum {
-                    let mut is_continuous = true;
-                    for i in 0..len - 1 {
-                        let current = &tokens[start + i];
-                        let next = &tokens[start + i + 1];
-                        if current.end_offset != next.start_offset {
-                            is_continuous = false;
-                            break;
-                        }
-                    }
-                    // Skip this length if tokens are not continuous
-                    if !is_continuous {
-                        continue;
-                    }
-                }
-            }
-
-            let token_texts: Vec<&str> = tokens[start..start + len]
-                .iter()
-                .map(|t| t.text.as_str())
-                .collect();
-
-            // Try with space separator first (for English, etc.)
-            let phrase_with_space = token_texts.join(" ");
-            if let Some(synonyms) = self.dictionary.get_synonyms(&phrase_with_space) {
-                return Some((phrase_with_space, len, synonyms.clone()));
-            }
-
-            // Try without space separator (for Japanese, Chinese, etc.)
-            // Only do this for multi-token phrases
-            if len > 1 {
-                let phrase_no_space = token_texts.join("");
-                if let Some(synonyms) = self.dictionary.get_synonyms(&phrase_no_space) {
-                    return Some((phrase_no_space, len, synonyms.clone()));
-                }
-            }
-        }
-
-        None
+        self.builder.try_match_synonym(tokens, start)
     }
 
     /// Build graph tokens from matched synonyms.
@@ -353,73 +109,8 @@ impl SynonymGraphFilter {
         match_length: usize,
         synonyms: &[String],
     ) -> Vec<Token> {
-        let mut result = Vec::new();
-        let match_start_offset = original_tokens[match_start].start_offset;
-        let match_end_offset = original_tokens[match_start + match_length - 1].end_offset;
-
-        // Add original tokens if keep_original is true
-        if self.keep_original {
-            for (i, original) in original_tokens[match_start..match_start + match_length]
-                .iter()
-                .enumerate()
-            {
-                let mut token = original.clone();
-                token.position_increment = if i == 0 { 1 } else { 0 };
-                token.position_length = 1;
-                result.push(token);
-            }
-        }
-
-        // Add synonym tokens
-        for synonym in synonyms {
-            // Tokenize the synonym using the tokenizer if available
-            let syn_tokens = if let Some(tokenizer) = &self.tokenizer {
-                // Use tokenizer to split synonym (e.g., "機械学習" → ["機械", "学習"])
-                match tokenizer.tokenize(synonym) {
-                    Ok(tokens) => tokens.map(|t| t.text).collect::<Vec<_>>(),
-                    Err(_) => {
-                        // Fallback to whitespace splitting on error
-                        synonym.split_whitespace().map(|s| s.to_string()).collect()
-                    }
-                }
-            } else {
-                // Default: split by whitespace
-                synonym.split_whitespace().map(|s| s.to_string()).collect()
-            };
-
-            if syn_tokens.len() == 1 {
-                // Single-word synonym
-                let mut token = Token::new(&syn_tokens[0], original_tokens[match_start].position);
-                token.position_increment = if self.keep_original { 0 } else { 1 };
-                token.position_length = match_length; // Spans the original phrase length
-                token.start_offset = match_start_offset;
-                token.end_offset = match_end_offset;
-
-                // Mark as synonym in metadata
-                token = token.with_token_type(TokenType::Synonym);
-
-                result.push(token);
-            } else {
-                // Multi-word synonym
-                for (i, syn_word) in syn_tokens.iter().enumerate() {
-                    let mut token = Token::new(syn_word, original_tokens[match_start].position + i);
-                    token.position_increment = if i == 0 {
-                        if self.keep_original { 0 } else { 1 }
-                    } else {
-                        1
-                    };
-                    // First token spans the entire synonym phrase length
-                    token.position_length = if i == 0 { syn_tokens.len() } else { 1 };
-                    token.start_offset = match_start_offset;
-                    token.end_offset = match_end_offset;
-                    token = token.with_token_type(TokenType::Synonym);
-
-                    result.push(token);
-                }
-            }
-        }
-
-        result
+        self.builder
+            .build_graph_tokens(original_tokens, match_start, match_length, synonyms)
     }
 }
 
@@ -861,7 +552,7 @@ mod tests {
     #[test]
     fn test_mixed_alphanum_cjk_continuous() {
         // Test mixed ALPHANUM + CJK tokens that are continuous
-        use crate::analysis::token::{Token, TokenMetadata};
+        use crate::analysis::token::{Token, TokenMetadata, TokenType};
 
         let mut dict = SynonymDictionary::new(None).unwrap();
         dict.add_synonym_group(vec![
@@ -920,7 +611,7 @@ mod tests {
     #[test]
     fn test_mixed_alphanum_cjk_non_continuous() {
         // Test mixed ALPHANUM + CJK tokens that are NOT continuous
-        use crate::analysis::token::{Token, TokenMetadata};
+        use crate::analysis::token::{Token, TokenMetadata, TokenType};
 
         let mut dict = SynonymDictionary::new(None).unwrap();
         dict.add_synonym_group(vec!["machine 学習".to_string(), "test synonym".to_string()]);
@@ -966,7 +657,7 @@ mod tests {
     #[test]
     fn test_cjk_non_continuous() {
         // Test CJK tokens that are NOT continuous (space between)
-        use crate::analysis::token::{Token, TokenMetadata};
+        use crate::analysis::token::{Token, TokenMetadata, TokenType};
 
         let mut dict = SynonymDictionary::new(None).unwrap();
         dict.add_synonym_group(vec!["入門 本".to_string(), "beginner book".to_string()]);
@@ -1065,7 +756,10 @@ mod tests {
 
         // Verify "intelligence" token (second token of multi-word synonym)
         let intelligence_token = result.iter().find(|t| t.text == "intelligence");
-        assert!(intelligence_token.is_some(), "Expected 'intelligence' token");
+        assert!(
+            intelligence_token.is_some(),
+            "Expected 'intelligence' token"
+        );
         let intelligence = intelligence_token.unwrap();
         assert_eq!(intelligence.position, 3);
         assert_eq!(intelligence.position_increment, 1);
@@ -1110,7 +804,10 @@ mod tests {
         assert!(machine_token.is_some(), "Expected original 'machine' token");
 
         let learning_token = result.iter().find(|t| t.text == "learning");
-        assert!(learning_token.is_some(), "Expected original 'learning' token");
+        assert!(
+            learning_token.is_some(),
+            "Expected original 'learning' token"
+        );
     }
 
     #[test]
@@ -1122,8 +819,7 @@ mod tests {
         dict.add_synonym_group(vec!["ml".to_string(), "機械学習".to_string()]);
         dict.add_synonym_group(vec!["ai".to_string(), "人工知能".to_string()]);
 
-        let lindera_tokenizer =
-            LinderaTokenizer::new("normal", "embedded://unidic", None).unwrap();
+        let lindera_tokenizer = LinderaTokenizer::new("normal", "embedded://unidic", None).unwrap();
         let tokenizer = Box::new(lindera_tokenizer);
         let filter = SynonymGraphFilter::with_tokenizer(dict, tokenizer, true);
 
@@ -1176,5 +872,43 @@ mod tests {
         assert_eq!(chino.position, 3);
         assert_eq!(chino.position_increment, 1);
         assert_eq!(chino.position_length, 1);
+    }
+
+    #[test]
+    fn test_synonym_graph_filter_with_boost() {
+        let mut dict = SynonymDictionary::new(None).unwrap();
+        dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);
+        dict.add_synonym_group(vec![
+            "ai".to_string(),
+            "artificial intelligence".to_string(),
+        ]);
+
+        let filter = SynonymGraphFilter::new(dict, true).with_boost(0.8);
+
+        let tokens = vec![Token::new("ml", 0), Token::new("tutorial", 1)];
+
+        let result: Vec<Token> = filter
+            .filter(Box::new(tokens.into_iter()))
+            .unwrap()
+            .collect();
+
+        // Should have: ml, machine, learning, tutorial
+        assert!(result.len() >= 4);
+
+        // Original token should have boost = 1.0
+        let ml_token = result.iter().find(|t| t.text == "ml");
+        assert!(ml_token.is_some());
+        assert_eq!(ml_token.unwrap().boost, 1.0);
+
+        // Synonym tokens should have boost applied
+        let machine_token = result.iter().find(|t| t.text == "machine");
+        assert!(machine_token.is_some());
+        // First token of multi-word synonym: 0.9 * 0.8 = 0.72
+        assert!((machine_token.unwrap().boost - 0.72).abs() < 0.001);
+
+        let learning_token = result.iter().find(|t| t.text == "learning");
+        assert!(learning_token.is_some());
+        // Second token: 0.8 * 0.8 = 0.64
+        assert!((learning_token.unwrap().boost - 0.64).abs() < 0.001);
     }
 }

@@ -10,3 +10,16 @@ pub struct IntentSample {
     /// Intent label.
     pub intent: String,
 }
+
+/// Query intent classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QueryIntent {
+    /// Informational query (seeking knowledge).
+    Informational,
+    /// Navigational query (seeking specific resource).
+    Navigational,
+    /// Transactional query (seeking to perform action).
+    Transactional,
+    /// Unknown intent.
+    Unknown,
+}

@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use super::types::QueryIntent;
 use crate::analysis::analyzer::Analyzer;
-use crate::ml::query_expansion::QueryIntent;
 
 use super::classifier::IntentClassifier;
 use super::tfidf::TfIdfVectorizer;
