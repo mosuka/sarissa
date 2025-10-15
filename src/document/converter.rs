@@ -5,7 +5,7 @@
 
 use crate::analysis::Analyzer;
 use crate::document::{Document, FieldValue};
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use std::sync::Arc;
 
 /// A trait for converting various formats into Document objects.
@@ -16,7 +16,7 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```
-/// use sarissa::document::{DocumentConverter, FieldValueDocumentConverter};
+/// use sage::document::{DocumentConverter, FieldValueDocumentConverter};
 ///
 /// let converter = FieldValueDocumentConverter::new();
 /// let doc = converter.convert("title:Rust Programming\nbody:Search engine tutorial").unwrap();
@@ -120,7 +120,7 @@ impl DocumentConverter for FieldValueDocumentConverter {
                 let field_value = self.infer_field_value(value);
                 doc.add_field(field, field_value);
             } else {
-                return Err(SarissaError::parse(format!(
+                return Err(SageError::parse(format!(
                     "Invalid line format (expected field:value): {line}"
                 )));
             }
@@ -202,7 +202,7 @@ impl DocumentConverter for JsonDocumentConverter {
         use serde_json::Value;
 
         let value: Value = serde_json::from_str(input)
-            .map_err(|e| SarissaError::parse(format!("Failed to parse JSON: {e}")))?;
+            .map_err(|e| SageError::parse(format!("Failed to parse JSON: {e}")))?;
 
         let mut doc = Document::new();
 

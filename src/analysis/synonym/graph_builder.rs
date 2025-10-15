@@ -60,7 +60,7 @@ impl SynonymGraphBuilder {
     ///
     /// # Example
     /// ```
-    /// use sarissa::analysis::synonym::{SynonymDictionary, SynonymGraphBuilder};
+    /// use sage::analysis::synonym::{SynonymDictionary, SynonymGraphBuilder};
     ///
     /// let mut dict = SynonymDictionary::new(None).unwrap();
     /// dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);

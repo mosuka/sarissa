@@ -14,12 +14,12 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use sarissa::analysis::{Analyzer, KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
-use sarissa::document::{Document, DocumentParser};
-use sarissa::error::Result;
-use sarissa::full_text::index::IndexConfig;
-use sarissa::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sarissa::full_text_search::{SearchEngine, SearchRequest};
+use sage::analysis::{Analyzer, KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
+use sage::document::{Document, DocumentParser};
+use sage::error::Result;
+use sage::full_text::index::IndexConfig;
+use sage::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::full_text_search::{SearchEngine, SearchRequest};
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");
@@ -103,7 +103,7 @@ fn main() -> Result<()> {
     let query_str = "category:programming";
     println!("Query: {query_str}");
 
-    use sarissa::query::QueryParser;
+    use sage::query::QueryParser;
     let parser = QueryParser::new();
     let query = parser.parse(query_str)?;
 

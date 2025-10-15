@@ -1,4 +1,4 @@
-//! # Sarissa
+//! # Sage
 //!
 //! A fast, featureful full-text search library for Rust, inspired by Whoosh.
 //!
@@ -39,7 +39,7 @@ pub mod prelude {
     // Core types
     pub use crate::analysis::{Analyzer, StandardAnalyzer};
     pub use crate::document::{Document, FieldValue};
-    pub use crate::error::{Result, SarissaError};
+    pub use crate::error::{Result, SageError};
     pub use crate::full_text::{Index, IndexReader};
     pub use crate::full_text_index::{AdvancedIndexWriter, IndexWriter};
     pub use crate::full_text_search::{SearchConfig, SearchEngine, SearchRequest};

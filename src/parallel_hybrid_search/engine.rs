@@ -11,7 +11,7 @@ use super::executor::ParallelHybridSearchExecutor;
 use super::types::{CacheStats, ParallelHybridSearchResults, SearchTimeBreakdown};
 
 use crate::embeding::EmbeddingEngine;
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
 use crate::query::Query;
 use crate::vector::reader::VectorIndexReader;
@@ -134,7 +134,7 @@ impl ParallelHybridSearchEngine {
         let mut indices = self.indices.write().await;
         indices
             .remove(id)
-            .ok_or_else(|| SarissaError::internal(format!("Index '{id}' not found")))?;
+            .ok_or_else(|| SageError::internal(format!("Index '{id}' not found")))?;
         Ok(())
     }
 

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector::Vector;
 
 /// Configuration for embedding generation.
@@ -103,7 +103,7 @@ impl EmbeddingEngine {
     /// Generate an embedding for a text document.
     pub fn embed(&self, text: &str) -> Result<Vector> {
         if !self.is_trained {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Embedding engine must be trained before use".to_string(),
             ));
         }

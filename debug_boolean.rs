@@ -1,11 +1,11 @@
-use sarissa::index::index::IndexConfig;
-use sarissa::prelude::*;
-use sarissa::query::TermQuery;
-use sarissa::schema::{IdField, TextField};
-use sarissa::search::{SearchEngine, SearchRequest};
+use sage::index::index::IndexConfig;
+use sage::prelude::*;
+use sage::query::TermQuery;
+use sage::schema::{IdField, TextField};
+use sage::search::{SearchEngine, SearchRequest};
 use tempfile::TempDir;
 
-fn main() -> sarissa::error::Result<()> {
+fn main() -> sage::error::Result<()> {
     let temp_dir = TempDir::new().unwrap();
     
     let mut schema = Schema::new();

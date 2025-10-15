@@ -6,7 +6,7 @@ use std::time::Duration;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::document::Document;
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text_index::IndexWriter;
 use crate::parallel_full_text_index::batch_processor::{BatchProcessingResult, BatchProcessor};
 use crate::parallel_full_text_index::config::{
@@ -35,7 +35,7 @@ pub struct ParallelIndexingResult {
     pub execution_time: Duration,
 
     /// Any errors encountered during indexing.
-    pub errors: Vec<SarissaError>,
+    pub errors: Vec<SageError>,
 }
 
 /// Main engine for parallel document indexing across multiple partitions.
@@ -65,7 +65,7 @@ impl ParallelIndexEngine {
             .num_threads(thread_pool_size)
             .thread_name(|i| format!("parallel-index-{i}"))
             .build()
-            .map_err(|e| SarissaError::internal(format!("Failed to create thread pool: {e}")))?;
+            .map_err(|e| SageError::internal(format!("Failed to create thread pool: {e}")))?;
 
         Ok(Self {
             config,
@@ -129,12 +129,12 @@ impl ParallelIndexEngine {
         let partitioner = self
             .partitioner
             .as_ref()
-            .ok_or_else(|| SarissaError::invalid_argument("No partitioner configured"))?;
+            .ok_or_else(|| SageError::invalid_argument("No partitioner configured"))?;
 
         // Get active writers
         let writers = self.writer_manager.get_active_writers()?;
         if writers.is_empty() {
-            return Err(SarissaError::invalid_argument(
+            return Err(SageError::invalid_argument(
                 "No active writers available",
             ));
         }
@@ -167,7 +167,7 @@ impl ParallelIndexEngine {
         let mut errors = Vec::new();
         for result in &results {
             for error in &result.errors {
-                errors.push(SarissaError::other(error.to_string()));
+                errors.push(SageError::other(error.to_string()));
             }
         }
 
@@ -243,7 +243,7 @@ impl ParallelIndexEngine {
         if let Some(timeout) = options.timeout {
             let start = std::time::Instant::now();
             if start.elapsed() > timeout {
-                return Err(SarissaError::timeout("Indexing operation timed out"));
+                return Err(SageError::timeout("Indexing operation timed out"));
             }
         }
 
@@ -268,7 +268,7 @@ impl ParallelIndexEngine {
                 writer_map.values().next().cloned()
             })
             .ok_or_else(|| {
-                SarissaError::not_found(format!("No writer found for partition {partition_index}"))
+                SageError::not_found(format!("No writer found for partition {partition_index}"))
             })
     }
 

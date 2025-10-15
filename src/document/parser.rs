@@ -21,8 +21,8 @@ use crate::full_text_index::advanced_writer::{AnalyzedDocument, AnalyzedTerm};
 /// # Example
 ///
 /// ```
-/// use sarissa::document::{Document, DocumentParser};
-/// use sarissa::analysis::{PerFieldAnalyzer, StandardAnalyzer, KeywordAnalyzer};
+/// use sage::document::{Document, DocumentParser};
+/// use sage::analysis::{PerFieldAnalyzer, StandardAnalyzer, KeywordAnalyzer};
 /// use std::sync::Arc;
 ///
 /// let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));

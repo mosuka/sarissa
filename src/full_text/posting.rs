@@ -5,7 +5,7 @@
 
 use ahash::AHashMap;
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::storage::{StorageInput, StorageOutput, StructReader, StructWriter};
 
 /// A single posting in a posting list.
@@ -452,12 +452,12 @@ impl InvertedIndex {
         // Read header
         let magic = reader.read_u32()?;
         if magic != 0x494E5658 {
-            return Err(SarissaError::index("Invalid inverted index file format"));
+            return Err(SageError::index("Invalid inverted index file format"));
         }
 
         let version = reader.read_u32()?;
         if version != 1 {
-            return Err(SarissaError::index(format!(
+            return Err(SageError::index(format!(
                 "Unsupported index version: {version}"
             )));
         }

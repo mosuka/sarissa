@@ -6,7 +6,7 @@
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::storage::{Storage, StorageInput, StorageOutput, StructReader, StructWriter};
 use ahash::AHashMap;
 use bit_vec::BitVec;
@@ -88,7 +88,7 @@ impl DeletionBitmap {
     /// Mark a document as deleted.
     pub fn delete_document(&mut self, doc_id: u64) -> Result<bool> {
         if doc_id >= self.total_docs {
-            return Err(SarissaError::index(format!(
+            return Err(SageError::index(format!(
                 "Document ID {doc_id} out of range for segment {}",
                 self.segment_id
             )));
@@ -179,12 +179,12 @@ impl DeletionBitmap {
         // Read header
         let magic = reader.read_u32()?;
         if magic != 0x44454C42 {
-            return Err(SarissaError::index("Invalid deletion bitmap format"));
+            return Err(SageError::index("Invalid deletion bitmap format"));
         }
 
         let version = reader.read_u32()?;
         if version != 1 {
-            return Err(SarissaError::index(format!(
+            return Err(SageError::index(format!(
                 "Unsupported bitmap version: {version}"
             )));
         }
@@ -483,7 +483,7 @@ impl DeletionManager {
             if let Some(bitmap) = bitmaps.get_mut(segment_id) {
                 bitmap.delete_document(doc_id)?
             } else {
-                return Err(SarissaError::index(format!(
+                return Err(SageError::index(format!(
                     "Segment {segment_id} not found in deletion manager"
                 )));
             }
@@ -520,7 +520,7 @@ impl DeletionManager {
                         }
                     }
                 } else {
-                    return Err(SarissaError::index(format!(
+                    return Err(SageError::index(format!(
                         "Segment {segment_id} not found in deletion manager"
                     )));
                 }

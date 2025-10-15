@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use ahash::AHashMap;
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::storage::{StorageInput, StorageOutput, StructReader, StructWriter};
 
 /// Information about a term in the dictionary.
@@ -151,14 +151,14 @@ impl SortedTermDictionary {
         let magic = reader.read_u32()?;
         if magic != 0x53544443 {
             // "STDC"
-            return Err(SarissaError::index(
+            return Err(SageError::index(
                 "Invalid sorted dictionary magic number",
             ));
         }
 
         let version = reader.read_u32()?;
         if version != 1 {
-            return Err(SarissaError::index(format!(
+            return Err(SageError::index(format!(
                 "Unsupported sorted dictionary version: {version}"
             )));
         }
@@ -287,13 +287,13 @@ impl HashTermDictionary {
         let magic = reader.read_u32()?;
         if magic != 0x48544443 {
             // "HTDC"
-            return Err(SarissaError::index("Invalid hash dictionary magic number"));
+            return Err(SageError::index("Invalid hash dictionary magic number"));
         }
 
         // Read version
         let version = reader.read_u32()?;
         if version != 1 {
-            return Err(SarissaError::index(format!(
+            return Err(SageError::index(format!(
                 "Unsupported hash dictionary version: {version}"
             )));
         }

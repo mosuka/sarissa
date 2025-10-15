@@ -1,11 +1,11 @@
 //! Example of parallel hybrid search combining keyword and vector search.
 
-use sarissa::document::{Document, FieldValue};
-use sarissa::error::Result;
-use sarissa::parallel_hybrid_search::{
+use sage::document::{Document, FieldValue};
+use sage::error::Result;
+use sage::parallel_hybrid_search::{
     MergeStrategy, MockIndexReader, ParallelHybridSearchConfig, ParallelHybridSearchEngine,
 };
-use sarissa::query::TermQuery;
+use sage::query::TermQuery;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
         engine
             .add_index(
                 format!("index_{i}"),
-                reader as Arc<dyn sarissa::full_text::reader::IndexReader>,
+                reader as Arc<dyn sage::full_text::reader::IndexReader>,
                 None, // No vector reader for this example
                 1.0,  // Equal weight for all indices
             )
@@ -252,15 +252,15 @@ async fn main() -> Result<()> {
     let queries = vec![
         (
             "rust programming",
-            Box::new(TermQuery::new("content", "rust")) as Box<dyn sarissa::query::Query>,
+            Box::new(TermQuery::new("content", "rust")) as Box<dyn sage::query::Query>,
         ),
         (
             "python machine learning",
-            Box::new(TermQuery::new("content", "python")) as Box<dyn sarissa::query::Query>,
+            Box::new(TermQuery::new("content", "python")) as Box<dyn sage::query::Query>,
         ),
         (
             "javascript web",
-            Box::new(TermQuery::new("content", "javascript")) as Box<dyn sarissa::query::Query>,
+            Box::new(TermQuery::new("content", "javascript")) as Box<dyn sage::query::Query>,
         ),
     ];
 
@@ -322,7 +322,7 @@ async fn main() -> Result<()> {
         test_engine
             .add_index(
                 "test_index".to_string(),
-                mock_reader as Arc<dyn sarissa::full_text::reader::IndexReader>,
+                mock_reader as Arc<dyn sage::full_text::reader::IndexReader>,
                 None,
                 1.0,
             )

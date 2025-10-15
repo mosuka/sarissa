@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
 
 /// Metadata associated with an index.
@@ -136,10 +136,10 @@ impl IndexManager {
         let mut indices = self
             .indices
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire write lock on indices"))?;
+            .map_err(|_| SageError::internal("Failed to acquire write lock on indices"))?;
 
         if indices.contains_key(&id) {
-            return Err(SarissaError::invalid_argument(format!(
+            return Err(SageError::invalid_argument(format!(
                 "Index with ID '{id}' already exists"
             )));
         }
@@ -150,7 +150,7 @@ impl IndexManager {
         let mut total = self
             .total_weight
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire write lock on total weight"))?;
+            .map_err(|_| SageError::internal("Failed to acquire write lock on total weight"))?;
         *total += weight;
 
         Ok(())
@@ -161,17 +161,17 @@ impl IndexManager {
         let mut indices = self
             .indices
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire write lock on indices"))?;
+            .map_err(|_| SageError::internal("Failed to acquire write lock on indices"))?;
 
         let handle = indices
             .remove(id)
-            .ok_or_else(|| SarissaError::not_found(format!("Index with ID '{id}' not found")))?;
+            .ok_or_else(|| SageError::not_found(format!("Index with ID '{id}' not found")))?;
 
         // Update total weight
         let mut total = self
             .total_weight
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire write lock on total weight"))?;
+            .map_err(|_| SageError::internal("Failed to acquire write lock on total weight"))?;
         *total -= handle.weight;
 
         Ok(handle)
@@ -182,12 +182,12 @@ impl IndexManager {
         let indices = self
             .indices
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire read lock on indices"))?;
+            .map_err(|_| SageError::internal("Failed to acquire read lock on indices"))?;
 
         indices
             .get(id)
             .cloned()
-            .ok_or_else(|| SarissaError::not_found(format!("Index with ID '{id}' not found")))
+            .ok_or_else(|| SageError::not_found(format!("Index with ID '{id}' not found")))
     }
 
     /// Get all active indices.
@@ -195,7 +195,7 @@ impl IndexManager {
         let indices = self
             .indices
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire read lock on indices"))?;
+            .map_err(|_| SageError::internal("Failed to acquire read lock on indices"))?;
 
         Ok(indices
             .values()
@@ -209,7 +209,7 @@ impl IndexManager {
         let indices = self
             .indices
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire read lock on indices"))?;
+            .map_err(|_| SageError::internal("Failed to acquire read lock on indices"))?;
 
         Ok(indices.values().cloned().collect())
     }
@@ -219,11 +219,11 @@ impl IndexManager {
         let mut indices = self
             .indices
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire write lock on indices"))?;
+            .map_err(|_| SageError::internal("Failed to acquire write lock on indices"))?;
 
         let handle = indices
             .get_mut(id)
-            .ok_or_else(|| SarissaError::not_found(format!("Index with ID '{id}' not found")))?;
+            .ok_or_else(|| SageError::not_found(format!("Index with ID '{id}' not found")))?;
 
         let old_weight = handle.weight;
         handle.weight = weight;
@@ -232,7 +232,7 @@ impl IndexManager {
         let mut total = self
             .total_weight
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire write lock on total weight"))?;
+            .map_err(|_| SageError::internal("Failed to acquire write lock on total weight"))?;
         *total = *total - old_weight + weight;
 
         Ok(())
@@ -243,11 +243,11 @@ impl IndexManager {
         let mut indices = self
             .indices
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire write lock on indices"))?;
+            .map_err(|_| SageError::internal("Failed to acquire write lock on indices"))?;
 
         let handle = indices
             .get_mut(id)
-            .ok_or_else(|| SarissaError::not_found(format!("Index with ID '{id}' not found")))?;
+            .ok_or_else(|| SageError::not_found(format!("Index with ID '{id}' not found")))?;
 
         handle.is_active = active;
         Ok(())
@@ -258,7 +258,7 @@ impl IndexManager {
         let total = self
             .total_weight
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire read lock on total weight"))?;
+            .map_err(|_| SageError::internal("Failed to acquire read lock on total weight"))?;
 
         Ok(*total)
     }
@@ -268,7 +268,7 @@ impl IndexManager {
         let indices = self
             .indices
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire read lock on indices"))?;
+            .map_err(|_| SageError::internal("Failed to acquire read lock on indices"))?;
 
         Ok(indices.len())
     }

@@ -1,6 +1,6 @@
 //! HNSW (Hierarchical Navigable Small World) index builder for approximate search.
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector::Vector;
 use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilder};
 
@@ -62,7 +62,7 @@ impl HnswIndexBuilder {
 
         for (doc_id, vector) in vectors {
             if vector.dimension() != self.config.dimension {
-                return Err(SarissaError::InvalidOperation(format!(
+                return Err(SageError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
                     doc_id,
                     vector.dimension(),
@@ -71,7 +71,7 @@ impl HnswIndexBuilder {
             }
 
             if !vector.is_valid() {
-                return Err(SarissaError::InvalidOperation(format!(
+                return Err(SageError::InvalidOperation(format!(
                     "Vector {doc_id} contains invalid values (NaN or infinity)"
                 )));
             }
@@ -125,7 +125,7 @@ impl HnswIndexBuilder {
         if let Some(limit) = self.config.memory_limit {
             let current_usage = self.estimated_memory_usage();
             if current_usage > limit {
-                return Err(SarissaError::ResourceExhausted(format!(
+                return Err(SageError::ResourceExhausted(format!(
                     "Memory usage {current_usage} bytes exceeds limit {limit} bytes"
                 )));
             }
@@ -147,7 +147,7 @@ impl HnswIndexBuilder {
 impl VectorIndexBuilder for HnswIndexBuilder {
     fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
             ));
         }
@@ -164,7 +164,7 @@ impl VectorIndexBuilder for HnswIndexBuilder {
 
     fn add_vectors(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
             ));
         }
@@ -231,7 +231,7 @@ impl VectorIndexBuilder for HnswIndexBuilder {
 
     fn optimize(&mut self) -> Result<()> {
         if !self.is_finalized {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Index must be finalized before optimization".to_string(),
             ));
         }

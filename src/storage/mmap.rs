@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use memmap2::{Mmap, MmapOptions};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::storage::{Storage, StorageConfig, StorageInput, StorageOutput};
 
 /// Memory-mapped storage backend that uses mmap for efficient file access.
@@ -43,7 +43,7 @@ impl MmapStorage {
         // Create directory if it doesn't exist
         if !base_path.exists() {
             std::fs::create_dir_all(&base_path)
-                .map_err(|e| SarissaError::storage(format!("Failed to create directory: {e}")))?;
+                .map_err(|e| SageError::storage(format!("Failed to create directory: {e}")))?;
         }
 
         Ok(MmapStorage {
@@ -77,12 +77,12 @@ impl MmapStorage {
 
         // Create new memory map
         let file = File::open(&file_path)
-            .map_err(|e| SarissaError::storage(format!("Failed to open file {name}: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to open file {name}: {e}")))?;
 
         let mmap = unsafe {
             MmapOptions::new()
                 .map(&file)
-                .map_err(|e| SarissaError::storage(format!("Failed to mmap file {name}: {e}")))?
+                .map_err(|e| SageError::storage(format!("Failed to mmap file {name}: {e}")))?
         };
 
         let mmap_arc = Arc::new(mmap);
@@ -105,7 +105,7 @@ impl MmapStorage {
 
         if let Some(cached_meta) = metadata_cache.get(name) {
             let current_meta = std::fs::metadata(path)
-                .map_err(|e| SarissaError::storage(format!("Failed to get metadata: {e}")))?;
+                .map_err(|e| SageError::storage(format!("Failed to get metadata: {e}")))?;
 
             let current_size = current_meta.len();
             let current_modified = current_meta
@@ -124,7 +124,7 @@ impl MmapStorage {
     /// Update metadata cache for a file.
     fn update_metadata_cache(&self, name: &str, path: &Path) -> Result<()> {
         let metadata = std::fs::metadata(path)
-            .map_err(|e| SarissaError::storage(format!("Failed to get metadata: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to get metadata: {e}")))?;
 
         let size = metadata.len();
         let modified = metadata
@@ -170,7 +170,7 @@ impl Storage for MmapStorage {
             .create(true)
             .truncate(true)
             .open(&file_path)
-            .map_err(|e| SarissaError::storage(format!("Failed to create file {name}: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to create file {name}: {e}")))?;
 
         Ok(Box::new(MmapOutput::new(
             file,
@@ -190,7 +190,7 @@ impl Storage for MmapStorage {
             .append(true)
             .open(&file_path)
             .map_err(|e| {
-                SarissaError::storage(format!("Failed to create append file {name}: {e}"))
+                SageError::storage(format!("Failed to create append file {name}: {e}"))
             })?;
 
         Ok(Box::new(MmapOutput::new(
@@ -212,7 +212,7 @@ impl Storage for MmapStorage {
 
         if file_path.exists() {
             std::fs::remove_file(&file_path)
-                .map_err(|e| SarissaError::storage(format!("Failed to delete file {name}: {e}")))?;
+                .map_err(|e| SageError::storage(format!("Failed to delete file {name}: {e}")))?;
         }
 
         Ok(())
@@ -222,16 +222,16 @@ impl Storage for MmapStorage {
         let mut files = Vec::new();
 
         let entries = std::fs::read_dir(&self.base_path)
-            .map_err(|e| SarissaError::storage(format!("Failed to read directory: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to read directory: {e}")))?;
 
         for entry in entries {
             let entry = entry.map_err(|e| {
-                SarissaError::storage(format!("Failed to read directory entry: {e}"))
+                SageError::storage(format!("Failed to read directory entry: {e}"))
             })?;
 
             if entry
                 .file_type()
-                .map_err(|e| SarissaError::storage(format!("Failed to get file type: {e}")))?
+                .map_err(|e| SageError::storage(format!("Failed to get file type: {e}")))?
                 .is_file()
                 && let Some(name) = entry.file_name().to_str()
             {
@@ -245,14 +245,14 @@ impl Storage for MmapStorage {
     fn file_size(&self, name: &str) -> Result<u64> {
         let file_path = self.get_file_path(name);
         let metadata = std::fs::metadata(&file_path)
-            .map_err(|e| SarissaError::storage(format!("Failed to get file size: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to get file size: {e}")))?;
         Ok(metadata.len())
     }
 
     fn metadata(&self, name: &str) -> Result<crate::storage::FileMetadata> {
         let file_path = self.get_file_path(name);
         let metadata = std::fs::metadata(&file_path)
-            .map_err(|e| SarissaError::storage(format!("Failed to get file metadata: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to get file metadata: {e}")))?;
 
         let modified = metadata
             .modified()
@@ -285,7 +285,7 @@ impl Storage for MmapStorage {
         self.invalidate_cache(new_name);
 
         std::fs::rename(&old_path, &new_path)
-            .map_err(|e| SarissaError::storage(format!("Failed to rename file: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to rename file: {e}")))?;
 
         Ok(())
     }
@@ -418,10 +418,10 @@ impl Seek for MmapOutput {
 impl StorageOutput for MmapOutput {
     fn flush_and_sync(&mut self) -> Result<()> {
         self.flush()
-            .map_err(|e| SarissaError::storage(format!("Failed to flush: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to flush: {e}")))?;
         self.file
             .sync_all()
-            .map_err(|e| SarissaError::storage(format!("Failed to sync: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to sync: {e}")))?;
         Ok(())
     }
 

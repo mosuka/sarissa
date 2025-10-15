@@ -1,4 +1,4 @@
-//! Command Line Interface for Sarissa search engine.
+//! Command Line Interface for Sage search engine.
 
 pub mod args;
 pub mod commands;

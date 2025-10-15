@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::query::{Query, SearchResults};
 
 /// A search task to be executed on a specific index.
@@ -104,7 +104,7 @@ pub struct TaskResult {
     pub results: Option<SearchResults>,
 
     /// Error if the task failed.
-    pub error: Option<SarissaError>,
+    pub error: Option<SageError>,
 
     /// Execution time for this task.
     pub execution_time: Duration,
@@ -139,7 +139,7 @@ impl TaskResult {
     pub fn failure(
         task_id: String,
         index_id: String,
-        error: SarissaError,
+        error: SageError,
         execution_time: Duration,
     ) -> Self {
         Self {
@@ -159,7 +159,7 @@ impl TaskResult {
             task_id,
             index_id,
             results: None,
-            error: Some(SarissaError::timeout("Search task timed out")),
+            error: Some(SageError::timeout("Search task timed out")),
             execution_time,
             timed_out: true,
             metrics: TaskMetrics::default(),
@@ -252,7 +252,7 @@ impl TaskHandle {
         self.status
             .read()
             .map(|s| *s)
-            .map_err(|_| SarissaError::internal("Failed to read task status"))
+            .map_err(|_| SageError::internal("Failed to read task status"))
     }
 
     /// Set the status.
@@ -260,7 +260,7 @@ impl TaskHandle {
         self.status
             .write()
             .map(|mut s| *s = status)
-            .map_err(|_| SarissaError::internal("Failed to write task status"))
+            .map_err(|_| SageError::internal("Failed to write task status"))
     }
 
     /// Mark the task as started.
@@ -269,7 +269,7 @@ impl TaskHandle {
         self.start_time
             .write()
             .map(|mut t| *t = Some(Instant::now()))
-            .map_err(|_| SarissaError::internal("Failed to set start time"))
+            .map_err(|_| SageError::internal("Failed to set start time"))
     }
 
     /// Cancel the task.
@@ -288,7 +288,7 @@ impl TaskHandle {
         self.start_time
             .read()
             .map(|t| t.map(|start| start.elapsed()))
-            .map_err(|_| SarissaError::internal("Failed to read start time"))
+            .map_err(|_| SageError::internal("Failed to read start time"))
     }
 }
 
@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(success.hit_count(), 0);
 
         // Test failure result
-        let error = SarissaError::internal("Test error");
+        let error = SageError::internal("Test error");
         let failure = TaskResult::failure(
             task_id.clone(),
             index_id.clone(),

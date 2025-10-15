@@ -1,10 +1,10 @@
 //! BooleanQuery example - demonstrates complex boolean logic with AND, OR, NOT operations.
 
-use sarissa::full_text::index::IndexConfig;
-use sarissa::full_text_search::SearchEngine;
-use sarissa::full_text_search::SearchRequest;
-use sarissa::prelude::*;
-use sarissa::query::{BooleanQuery, NumericRangeQuery, PhraseQuery, TermQuery};
+use sage::full_text::index::IndexConfig;
+use sage::full_text_search::SearchEngine;
+use sage::full_text_search::SearchRequest;
+use sage::prelude::*;
+use sage::query::{BooleanQuery, NumericRangeQuery, PhraseQuery, TermQuery};
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -191,10 +191,10 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
             }
-            if let Some(sarissa::document::FieldValue::Float(rating)) = doc.get_field("rating") {
+            if let Some(sage::document::FieldValue::Float(rating)) = doc.get_field("rating") {
                 println!("      Rating: {rating:.1}");
             }
         }
@@ -282,7 +282,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
             }
         }
@@ -315,7 +315,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sarissa::document::FieldValue::Float(rating)) = doc.get_field("rating") {
+            if let Some(sage::document::FieldValue::Float(rating)) = doc.get_field("rating") {
                 println!("      Rating: {rating:.1}");
             }
         }
@@ -368,10 +368,10 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
             }
-            if let Some(sarissa::document::FieldValue::Float(rating)) = doc.get_field("rating") {
+            if let Some(sage::document::FieldValue::Float(rating)) = doc.get_field("rating") {
                 println!("      Rating: {rating:.1}");
             }
         }
@@ -423,7 +423,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sarissa::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
                 println!("      Price: ${price:.2}");
             }
         }

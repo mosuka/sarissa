@@ -76,8 +76,8 @@ impl SynonymGraphFilter {
     ///
     /// # Example
     /// ```
-    /// use sarissa::analysis::token_filter::SynonymGraphFilter;
-    /// use sarissa::analysis::synonym::SynonymDictionary;
+    /// use sage::analysis::token_filter::SynonymGraphFilter;
+    /// use sage::analysis::synonym::SynonymDictionary;
     ///
     /// let mut dict = SynonymDictionary::new(None).unwrap();
     /// dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);

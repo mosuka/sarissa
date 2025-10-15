@@ -1,4 +1,4 @@
-//! Machine Learning integration for Sarissa search engine.
+//! Machine Learning integration for Sage search engine.
 //!
 //! This module provides machine learning capabilities to enhance search quality
 //! through learning-to-rank, recommendations, and anomaly detection.

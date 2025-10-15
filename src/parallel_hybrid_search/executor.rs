@@ -14,7 +14,7 @@ use super::types::{
     SearchTimeBreakdown,
 };
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
 use crate::query::{Query, SearchResults};
 use crate::vector::Vector;
@@ -35,7 +35,7 @@ impl ParallelHybridSearchExecutor {
                 .num_threads(config.num_threads)
                 .build()
                 .map_err(|e| {
-                    SarissaError::InvalidOperation(format!("Failed to create thread pool: {e}"))
+                    SageError::InvalidOperation(format!("Failed to create thread pool: {e}"))
                 })?,
         );
 
@@ -196,9 +196,9 @@ impl ParallelHybridSearchExecutor {
 
         // Extract results
         let final_results = Arc::try_unwrap(results)
-            .map_err(|_| SarissaError::InvalidOperation("Failed to unwrap results".to_string()))?
+            .map_err(|_| SageError::InvalidOperation("Failed to unwrap results".to_string()))?
             .into_inner()
-            .map_err(|_| SarissaError::InvalidOperation("Failed to unlock results".to_string()))?;
+            .map_err(|_| SageError::InvalidOperation("Failed to unlock results".to_string()))?;
 
         let time_breakdown = SearchTimeBreakdown {
             keyword_search_ms: *keyword_time.lock().unwrap(),
@@ -230,7 +230,7 @@ impl ParallelHybridSearchExecutor {
                     keyword_results: None,
                     vector_results: None,
                     execution_time_ms: 0.0,
-                    error: Some(SarissaError::internal("Index not found")),
+                    error: Some(SageError::internal("Index not found")),
                 };
             }
         };

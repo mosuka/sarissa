@@ -66,14 +66,14 @@ impl SynonymDictionary {
     /// ```
     pub fn load_from_file(path: &str) -> Result<Self> {
         let content = std::fs::read_to_string(path).map_err(|e| {
-            crate::error::SarissaError::storage(format!(
+            crate::error::SageError::storage(format!(
                 "Failed to read synonym dictionary file '{}': {}",
                 path, e
             ))
         })?;
 
         let synonym_groups: Vec<Vec<String>> = serde_json::from_str(&content).map_err(|e| {
-            crate::error::SarissaError::parse(format!(
+            crate::error::SageError::parse(format!(
                 "Failed to parse synonym dictionary JSON from '{}': {}",
                 path, e
             ))
@@ -139,15 +139,15 @@ impl SynonymDictionary {
             let index = synonym_lists.len() as u64;
             synonym_lists.push(synonyms);
             builder.insert(term.as_bytes(), index).map_err(|e| {
-                crate::error::SarissaError::parse(format!("FST build error: {}", e))
+                crate::error::SageError::parse(format!("FST build error: {}", e))
             })?;
         }
 
         let fst_bytes = builder
             .into_inner()
-            .map_err(|e| crate::error::SarissaError::parse(format!("FST finalize error: {}", e)))?;
+            .map_err(|e| crate::error::SageError::parse(format!("FST finalize error: {}", e)))?;
         let fst_map = Map::new(Arc::from(fst_bytes))
-            .map_err(|e| crate::error::SarissaError::parse(format!("FST creation error: {}", e)))?;
+            .map_err(|e| crate::error::SageError::parse(format!("FST creation error: {}", e)))?;
 
         Ok(Self {
             fst_map: Arc::new(fst_map),

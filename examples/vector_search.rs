@@ -1,8 +1,8 @@
 //! Vector Similarity Search example - demonstrates the new vector API structure.
 
-use sarissa::prelude::*;
-use sarissa::vector::{DistanceMetric, Vector, types::VectorSearchConfig};
-use sarissa::vector_index::{VectorIndexBuildConfig, VectorIndexBuilderFactory, VectorIndexType};
+use sage::prelude::*;
+use sage::vector::{DistanceMetric, Vector, types::VectorSearchConfig};
+use sage::vector_index::{VectorIndexBuildConfig, VectorIndexBuilderFactory, VectorIndexType};
 
 fn main() -> Result<()> {
     println!("=== Vector Similarity Search Example - New API Structure ===\n");

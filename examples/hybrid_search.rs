@@ -1,11 +1,11 @@
 //! Hybrid Search example - demonstrates combining keyword and vector search.
 
-use sarissa::embeding::{EmbeddingConfig, EmbeddingMethod};
-use sarissa::full_text::index::IndexConfig;
-use sarissa::full_text_search::{SearchEngine, SearchRequest};
-use sarissa::hybrid_search::{HybridSearchConfig, HybridSearchEngine, ScoreNormalization};
-use sarissa::prelude::*;
-use sarissa::query::TermQuery;
+use sage::embeding::{EmbeddingConfig, EmbeddingMethod};
+use sage::full_text::index::IndexConfig;
+use sage::full_text_search::{SearchEngine, SearchRequest};
+use sage::hybrid_search::{HybridSearchConfig, HybridSearchEngine, ScoreNormalization};
+use sage::prelude::*;
+use sage::query::TermQuery;
 use std::collections::HashMap;
 use tempfile::TempDir;
 

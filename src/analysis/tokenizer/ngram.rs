@@ -3,7 +3,7 @@
 use super::Tokenizer;
 
 use crate::analysis::token::{Token, TokenStream};
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 
 /// A tokenizer that generates character n-grams.
 ///
@@ -16,7 +16,7 @@ use crate::error::{Result, SarissaError};
 /// # Examples
 ///
 /// ```
-/// use sarissa::analysis::tokenizer::{NgramTokenizer, Tokenizer};
+/// use sage::analysis::tokenizer::{NgramTokenizer, Tokenizer};
 ///
 /// // Bigram (n=2)
 /// let tokenizer = NgramTokenizer::new(2, 2).unwrap();
@@ -62,12 +62,12 @@ impl NgramTokenizer {
     /// - `max_gram` is less than `min_gram`
     pub fn new(min_gram: usize, max_gram: usize) -> Result<Self> {
         if min_gram == 0 {
-            return Err(SarissaError::analysis(
+            return Err(SageError::analysis(
                 "min_gram must be at least 1".to_string(),
             ));
         }
         if max_gram < min_gram {
-            return Err(SarissaError::analysis(format!(
+            return Err(SageError::analysis(format!(
                 "max_gram ({}) must be >= min_gram ({})",
                 max_gram, min_gram
             )));

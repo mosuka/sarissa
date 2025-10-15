@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::SegmentInfo;
 use crate::storage::{Storage, StorageInput, StructReader, StructWriter};
 
@@ -317,13 +317,13 @@ impl SegmentManager {
         let magic = reader.read_u32()?;
         if magic != 0x53454753 {
             // "SEGS"
-            return Err(SarissaError::index("Invalid segment manifest format"));
+            return Err(SageError::index("Invalid segment manifest format"));
         }
 
         // Read version
         let version = reader.read_u32()?;
         if version != 1 {
-            return Err(SarissaError::index(format!(
+            return Err(SageError::index(format!(
                 "Unsupported manifest version: {version}"
             )));
         }

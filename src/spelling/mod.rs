@@ -1,4 +1,4 @@
-//! Spelling correction and suggestion system for Sarissa.
+//! Spelling correction and suggestion system for Sage.
 //!
 //! This module provides functionality for correcting typos in user queries,
 //! generating spelling suggestions, and implementing "Did you mean?" features.

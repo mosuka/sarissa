@@ -176,7 +176,7 @@ pub struct HybridSearchTaskResult {
     pub execution_time_ms: f64,
 
     /// Error if the task failed.
-    pub error: Option<crate::error::SarissaError>,
+    pub error: Option<crate::error::SageError>,
 }
 
 impl ParallelHybridSearchResults {

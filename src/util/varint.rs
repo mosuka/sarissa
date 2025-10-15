@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 
 use byteorder::ReadBytesExt;
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 
 /// Encode a u32 value using variable-length encoding.
 ///
@@ -45,7 +45,7 @@ pub fn decode_u32(bytes: &[u8]) -> Result<(u32, usize)> {
         bytes_read += 1;
 
         if shift >= 32 {
-            return Err(SarissaError::other("VarInt overflow"));
+            return Err(SageError::other("VarInt overflow"));
         }
 
         result |= ((byte & 0x7F) as u32) << shift;
@@ -57,7 +57,7 @@ pub fn decode_u32(bytes: &[u8]) -> Result<(u32, usize)> {
         shift += 7;
     }
 
-    Err(SarissaError::other("Incomplete VarInt"))
+    Err(SageError::other("Incomplete VarInt"))
 }
 
 /// Encode a u64 value using variable-length encoding.
@@ -93,7 +93,7 @@ pub fn decode_u64(bytes: &[u8]) -> Result<(u64, usize)> {
         bytes_read += 1;
 
         if shift >= 64 {
-            return Err(SarissaError::other("VarInt overflow"));
+            return Err(SageError::other("VarInt overflow"));
         }
 
         result |= ((byte & 0x7F) as u64) << shift;
@@ -105,7 +105,7 @@ pub fn decode_u64(bytes: &[u8]) -> Result<(u64, usize)> {
         shift += 7;
     }
 
-    Err(SarissaError::other("Incomplete VarInt"))
+    Err(SageError::other("Incomplete VarInt"))
 }
 
 /// Write a variable-length encoded u32 to a writer.
@@ -124,7 +124,7 @@ pub fn read_u32<R: Read>(reader: &mut R) -> Result<u32> {
         let byte = reader.read_u8()?;
 
         if shift >= 32 {
-            return Err(SarissaError::other("VarInt overflow"));
+            return Err(SageError::other("VarInt overflow"));
         }
 
         result |= ((byte & 0x7F) as u32) << shift;
@@ -153,7 +153,7 @@ pub fn read_u64<R: Read>(reader: &mut R) -> Result<u64> {
         let byte = reader.read_u8()?;
 
         if shift >= 64 {
-            return Err(SarissaError::other("VarInt overflow"));
+            return Err(SageError::other("VarInt overflow"));
         }
 
         result |= ((byte & 0x7F) as u64) << shift;

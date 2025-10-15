@@ -15,8 +15,8 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use sarissa::ml::intent_classifier::{self, IntentSample};
-//! use sarissa::analysis::StandardAnalyzer;
+//! use sage::ml::intent_classifier::{self, IntentSample};
+//! use sage::analysis::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {

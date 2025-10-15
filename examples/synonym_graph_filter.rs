@@ -6,9 +6,9 @@
 //! - Use boost to adjust synonym weights
 //! - Observe how tokens are expanded with synonyms
 
-use sarissa::analysis::token_filter::{Filter, SynonymDictionary, SynonymGraphFilter};
-use sarissa::analysis::tokenizer::{Tokenizer, WhitespaceTokenizer};
-use sarissa::error::Result;
+use sage::analysis::token_filter::{Filter, SynonymDictionary, SynonymGraphFilter};
+use sage::analysis::tokenizer::{Tokenizer, WhitespaceTokenizer};
+use sage::error::Result;
 
 fn main() -> Result<()> {
     println!("=== SynonymGraphFilter Usage Example ===\n");
