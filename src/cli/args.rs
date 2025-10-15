@@ -1,18 +1,18 @@
-//! Command line argument parsing for Sarissa CLI using clap.
+//! Command line argument parsing for Sage CLI using clap.
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
-/// Sarissa - A fast, featureful full-text search engine
+/// Sage - A fast, featureful full-text search engine
 #[derive(Parser, Debug, Clone)]
-#[command(name = "sarissa")]
+#[command(name = "sage")]
 #[command(about = "A fast, featureful full-text search engine for Rust")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(author = "Sarissa Contributors")]
+#[command(author = "Sage Contributors")]
 #[command(long_about = None)]
-pub struct SarissaArgs {
+pub struct SageArgs {
     /// Verbosity level (0=quiet, 1=normal, 2=verbose, 3=debug)
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
@@ -34,7 +34,7 @@ pub struct SarissaArgs {
     pub command: Command,
 }
 
-impl SarissaArgs {
+impl SageArgs {
     /// Get the effective verbosity level
     pub fn verbosity(&self) -> u8 {
         if self.quiet {
@@ -363,8 +363,8 @@ mod tests {
 
     #[test]
     fn test_basic_search_command() {
-        let args = SarissaArgs::try_parse_from([
-            "sarissa",
+        let args = SageArgs::try_parse_from([
+            "sage",
             "search",
             "/path/to/index",
             "test query",
@@ -386,8 +386,8 @@ mod tests {
 
     #[test]
     fn test_create_index_command() {
-        let args = SarissaArgs::try_parse_from([
-            "sarissa",
+        let args = SageArgs::try_parse_from([
+            "sage",
             "create-index",
             "/path/to/index",
             "--schema-file",
@@ -407,8 +407,8 @@ mod tests {
 
     #[test]
     fn test_benchmark_command() {
-        let args = SarissaArgs::try_parse_from([
-            "sarissa",
+        let args = SageArgs::try_parse_from([
+            "sage",
             "benchmark",
             "/path/to/index",
             "--iterations",
@@ -433,32 +433,32 @@ mod tests {
     #[test]
     fn test_verbosity_levels() {
         // Default verbosity
-        let args = SarissaArgs::try_parse_from(["sarissa", "list"]).unwrap();
+        let args = SageArgs::try_parse_from(["sage", "list"]).unwrap();
         assert_eq!(args.verbosity(), 1);
 
         // Verbose flag
-        let args = SarissaArgs::try_parse_from(["sarissa", "-v", "list"]).unwrap();
+        let args = SageArgs::try_parse_from(["sage", "-v", "list"]).unwrap();
         assert_eq!(args.verbosity(), 1);
 
         // Multiple verbose flags
-        let args = SarissaArgs::try_parse_from(["sarissa", "-vv", "list"]).unwrap();
+        let args = SageArgs::try_parse_from(["sage", "-vv", "list"]).unwrap();
         assert_eq!(args.verbosity(), 2);
 
         // Quiet flag
-        let args = SarissaArgs::try_parse_from(["sarissa", "--quiet", "list"]).unwrap();
+        let args = SageArgs::try_parse_from(["sage", "--quiet", "list"]).unwrap();
         assert_eq!(args.verbosity(), 0);
     }
 
     #[test]
     fn test_output_format() {
-        let args = SarissaArgs::try_parse_from(["sarissa", "--format", "json", "list"]).unwrap();
+        let args = SageArgs::try_parse_from(["sage", "--format", "json", "list"]).unwrap();
         assert!(matches!(args.output_format, OutputFormat::Json));
     }
 
     #[test]
     fn test_search_modes() {
-        let args = SarissaArgs::try_parse_from([
-            "sarissa",
+        let args = SageArgs::try_parse_from([
+            "sage",
             "search",
             "/path/to/index",
             "query",
@@ -477,8 +477,8 @@ mod tests {
     #[test]
     fn test_spell_correction_flags() {
         // Spell correction enabled
-        let args = SarissaArgs::try_parse_from([
-            "sarissa",
+        let args = SageArgs::try_parse_from([
+            "sage",
             "search",
             "/path/to/index",
             "query",
@@ -491,8 +491,8 @@ mod tests {
         }
 
         // Spell correction disabled
-        let args = SarissaArgs::try_parse_from([
-            "sarissa",
+        let args = SageArgs::try_parse_from([
+            "sage",
             "search",
             "/path/to/index",
             "query",

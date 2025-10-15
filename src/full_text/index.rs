@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
 use crate::full_text_index::IndexWriter;
 
@@ -192,7 +192,7 @@ impl FileIndex {
     pub fn open(storage: Arc<dyn Storage>, config: IndexConfig) -> Result<Self> {
         // Check if index exists
         if !storage.file_exists("metadata.json") {
-            return Err(SarissaError::index("Index does not exist"));
+            return Err(SageError::index("Index does not exist"));
         }
 
         // Read metadata
@@ -235,7 +235,7 @@ impl FileIndex {
     /// Write metadata to storage.
     fn write_metadata(&self) -> Result<()> {
         let metadata_json = serde_json::to_string_pretty(&self.metadata)
-            .map_err(|e| SarissaError::index(format!("Failed to serialize metadata: {e}")))?;
+            .map_err(|e| SageError::index(format!("Failed to serialize metadata: {e}")))?;
 
         let mut output = self.storage.create_output("metadata.json")?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
@@ -253,7 +253,7 @@ impl FileIndex {
         std::io::Read::read_to_string(&mut input, &mut metadata_json)?;
 
         let metadata: IndexMetadata = serde_json::from_str(&metadata_json)
-            .map_err(|e| SarissaError::index(format!("Failed to deserialize metadata: {e}")))?;
+            .map_err(|e| SageError::index(format!("Failed to deserialize metadata: {e}")))?;
 
         Ok(metadata)
     }
@@ -278,7 +278,7 @@ impl FileIndex {
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            Err(SarissaError::index("Index is closed"))
+            Err(SageError::index("Index is closed"))
         } else {
             Ok(())
         }
@@ -297,7 +297,7 @@ impl FileIndex {
                 std::io::Read::read_to_end(&mut input, &mut data)?;
 
                 let segment_info: SegmentInfo = serde_json::from_slice(&data).map_err(|e| {
-                    SarissaError::index(format!("Failed to parse segment metadata: {e}"))
+                    SageError::index(format!("Failed to parse segment metadata: {e}"))
                 })?;
 
                 segments.push(segment_info);

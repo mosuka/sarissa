@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
 use crate::full_text_search::SearchRequest;
 use crate::parallel_full_text_search::config::{ParallelSearchConfig, SearchOptions};
@@ -41,7 +41,7 @@ impl ParallelSearchEngine {
             .num_threads(thread_pool_size)
             .thread_name(|i| format!("parallel-search-{i}"))
             .build()
-            .map_err(|e| SarissaError::internal(format!("Failed to create thread pool: {e}")))?;
+            .map_err(|e| SageError::internal(format!("Failed to create thread pool: {e}")))?;
 
         Ok(Self {
             config,
@@ -97,7 +97,7 @@ impl ParallelSearchEngine {
         let successful_results = results.iter().filter(|r| r.is_success()).count();
 
         if successful_results == 0 && !self.config.allow_partial_results {
-            return Err(SarissaError::internal("All search tasks failed"));
+            return Err(SageError::internal("All search tasks failed"));
         }
 
         // Create merger based on strategy
@@ -246,7 +246,7 @@ impl ParallelSearchEngine {
 
         // Execute search with cancellation check
         let search_result = if handle.is_cancelled() {
-            Err(SarissaError::cancelled("Task was cancelled"))
+            Err(SageError::cancelled("Task was cancelled"))
         } else {
             searcher.search(request)
         };

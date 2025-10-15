@@ -2,7 +2,7 @@
 
 use std::io::{Read, Seek, Write};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 
 /// File metadata information.
 #[derive(Debug, Clone)]
@@ -224,9 +224,9 @@ impl std::fmt::Display for StorageError {
 
 impl std::error::Error for StorageError {}
 
-impl From<StorageError> for SarissaError {
+impl From<StorageError> for SageError {
     fn from(err: StorageError) -> Self {
-        SarissaError::storage(err.to_string())
+        SageError::storage(err.to_string())
     }
 }
 

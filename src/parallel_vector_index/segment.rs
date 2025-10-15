@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector::{DistanceMetric, Vector};
 use crate::vector_index::{VectorIndexBuilder, VectorIndexType};
 
@@ -89,7 +89,7 @@ impl VectorIndexSegment {
         // This is a placeholder implementation
         // In a real implementation, we would extract vectors from the built index
         // For now, we'll return an error indicating this needs to be implemented
-        Err(SarissaError::NotImplemented(
+        Err(SageError::NotImplemented(
             "Vector extraction from segments not yet implemented".to_string(),
         ))
     }
@@ -98,7 +98,7 @@ impl VectorIndexSegment {
     pub fn search(&self, _query: &Vector, _top_k: usize) -> Result<Vec<(u64, f32)>> {
         // This is a placeholder for segment-level search
         // In a real implementation, we would use the built index to perform search
-        Err(SarissaError::NotImplemented(
+        Err(SageError::NotImplemented(
             "Segment-level search not yet implemented".to_string(),
         ))
     }

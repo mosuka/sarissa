@@ -12,7 +12,7 @@ use super::{
     LoadBalancingStrategy, ParallelSearchStats, ParallelVectorSearchConfig, VectorResultMerger,
 };
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector::Vector;
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
 use crate::vector_search::{AdvancedSearchConfig, VectorSearchEngine};
@@ -64,7 +64,7 @@ impl ParallelVectorSearchExecutor {
                 .num_threads(config.num_threads)
                 .build()
                 .map_err(|e| {
-                    SarissaError::InvalidOperation(format!("Failed to create thread pool: {e}"))
+                    SageError::InvalidOperation(format!("Failed to create thread pool: {e}"))
                 })?,
         );
 
@@ -173,7 +173,7 @@ impl ParallelVectorSearchExecutor {
             .enumerate()
             .map(|(i, opt_result)| {
                 opt_result.ok_or_else(|| {
-                    SarissaError::InvalidOperation(format!("Search failed for query {i}"))
+                    SageError::InvalidOperation(format!("Search failed for query {i}"))
                 })
             })
             .collect();
@@ -275,11 +275,11 @@ impl ParallelVectorSearchExecutor {
         // Extract results from Arc<Mutex<Vec<_>>>
         let results = Arc::try_unwrap(results_arc)
             .map_err(|_| {
-                SarissaError::InvalidOperation("Failed to unwrap results Arc".to_string())
+                SageError::InvalidOperation("Failed to unwrap results Arc".to_string())
             })?
             .into_inner()
             .map_err(|_| {
-                SarissaError::InvalidOperation("Failed to unwrap results Mutex".to_string())
+                SageError::InvalidOperation("Failed to unwrap results Mutex".to_string())
             })?;
 
         Ok(results)

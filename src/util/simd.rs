@@ -1,4 +1,4 @@
-//! SIMD optimization utilities for Sarissa.
+//! SIMD optimization utilities for Sage.
 
 pub mod simd_wide;
 

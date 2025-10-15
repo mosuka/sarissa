@@ -5,7 +5,7 @@ use std::collections::BinaryHeap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector::types::{VectorSearchResult, VectorSearchResults};
 
 /// Strategy for merging search results from multiple sources.
@@ -151,7 +151,7 @@ impl VectorResultMerger {
         target_size: usize,
     ) -> Result<VectorSearchResults> {
         if results.len() != weights.len() {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Number of results and weights must match".to_string(),
             ));
         }

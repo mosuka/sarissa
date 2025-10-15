@@ -1,14 +1,14 @@
-//! Criterion benchmarks for Sarissa search engine.
+//! Criterion benchmarks for Sage search engine.
 //!
 //! This module contains comprehensive benchmarks for all major components
-//! of the Sarissa search engine, including:
+//! of the Sage search engine, including:
 //! - Text analysis and tokenization
 //! - Vector similarity search (HNSW)
 //! - Spell correction
 //! - Parallel operations
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use sarissa::{
+use sage::{
     analysis::{Analyzer, StandardAnalyzer},
     spelling::SpellingCorrector,
     vector::{DistanceMetric, Vector},
@@ -128,7 +128,7 @@ fn bench_vector_search(c: &mut Criterion) {
     group.bench_function("hnsw_index_construction", |b| {
         b.iter_with_setup(
             || {
-                use sarissa::vector_index::VectorIndexBuildConfig;
+                use sage::vector_index::VectorIndexBuildConfig;
                 HnswIndexBuilder::new(VectorIndexBuildConfig {
                     dimension,
                     ..Default::default()
@@ -321,7 +321,7 @@ fn bench_scalability(c: &mut Criterion) {
 
                 b.iter_with_setup(
                     || {
-                        use sarissa::vector_index::VectorIndexBuildConfig;
+                        use sage::vector_index::VectorIndexBuildConfig;
                         HnswIndexBuilder::new(VectorIndexBuildConfig {
                             dimension: 128,
                             ..Default::default()
@@ -402,8 +402,8 @@ fn bench_synonym_dictionary(c: &mut Criterion) {
 /// Create a test dictionary with specified number of synonym groups.
 fn create_test_dictionary(
     num_groups: usize,
-) -> sarissa::analysis::token_filter::synonym_graph::SynonymDictionary {
-    use sarissa::analysis::token_filter::synonym_graph::SynonymDictionary;
+) -> sage::analysis::token_filter::synonym_graph::SynonymDictionary {
+    use sage::analysis::token_filter::synonym_graph::SynonymDictionary;
 
     let mut groups = Vec::new();
     for i in 0..num_groups {

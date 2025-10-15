@@ -11,7 +11,7 @@ use ahash::AHashMap;
 
 use crate::analysis::Analyzer;
 use crate::document::{Document, FieldValue};
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::dictionary::HybridTermDictionary;
 use crate::full_text::{SegmentInfo, TermInfo};
 use crate::storage::{Storage, StructReader};
@@ -303,7 +303,7 @@ impl SegmentReader {
         if let Ok(input) = self.storage.open_input(&dict_file) {
             let mut reader = StructReader::new(input)?;
             let dictionary = HybridTermDictionary::read_from_storage(&mut reader).map_err(|e| {
-                SarissaError::index(format!(
+                SageError::index(format!(
                     "Failed to read term dictionary from {dict_file}: {e}"
                 ))
             })?;
@@ -323,7 +323,7 @@ impl SegmentReader {
             std::io::Read::read_to_string(&mut input, &mut json_data)?;
 
             let docs: Vec<Document> = serde_json::from_str(&json_data)
-                .map_err(|e| SarissaError::index(format!("Failed to parse JSON documents: {e}")))?;
+                .map_err(|e| SageError::index(format!("Failed to parse JSON documents: {e}")))?;
 
             let mut documents = BTreeMap::new();
             for (idx, doc) in docs.into_iter().enumerate() {
@@ -654,7 +654,7 @@ impl AdvancedIndexReader {
     /// Check if the reader is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed.load(Ordering::Acquire) {
-            Err(SarissaError::index("Reader is closed"))
+            Err(SageError::index("Reader is closed"))
         } else {
             Ok(())
         }

@@ -1,10 +1,10 @@
 [package]
-name = "sarissa"
+name = "sage"
 version = "0.1.0"
 edition = "2024"
 description = "A fast, featureful full-text search library for Rust"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/mosuka/sarissa"
+repository = "https://github.com/mosuka/sage"
 
 
 [dependencies]

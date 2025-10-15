@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use ahash::AHashSet;
 
 use crate::document::Document;
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::dictionary::TermDictionaryBuilder;
 use crate::full_text::reader::IndexReader;
 use crate::full_text::{InvertedIndex, SegmentInfo, TermInfo};
@@ -139,7 +139,7 @@ impl MergeEngine {
             .collect();
 
         if segments_to_merge.is_empty() {
-            return Err(SarissaError::index("No segments found to merge"));
+            return Err(SageError::index("No segments found to merge"));
         }
 
         // Create new segment ID
@@ -485,7 +485,7 @@ impl MergeEngine {
 
         // Check document count matches
         if reader.doc_count() != segment.segment_info.doc_count {
-            return Err(SarissaError::index("Document count mismatch after merge"));
+            return Err(SageError::index("Document count mismatch after merge"));
         }
 
         // TODO: Add more verification checks

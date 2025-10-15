@@ -79,13 +79,13 @@ pub mod utils {
     /// Validate search configuration.
     pub fn validate_search_config(config: &VectorSearchConfig) -> Result<()> {
         if config.top_k == 0 {
-            return Err(crate::error::SarissaError::InvalidOperation(
+            return Err(crate::error::SageError::InvalidOperation(
                 "top_k must be greater than 0".to_string(),
             ));
         }
 
         if config.min_similarity < 0.0 || config.min_similarity > 1.0 {
-            return Err(crate::error::SarissaError::InvalidOperation(
+            return Err(crate::error::SageError::InvalidOperation(
                 "min_similarity must be between 0.0 and 1.0".to_string(),
             ));
         }

@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use ahash::AHasher;
 
 use crate::document::Document;
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 
 /// Trait for partitioning documents across multiple indices.
 pub trait DocumentPartitioner: Send + Sync {
@@ -36,7 +36,7 @@ pub trait DocumentPartitioner: Send + Sync {
     /// Validate that the partitioner is properly configured.
     fn validate(&self) -> Result<()> {
         if self.partition_count() == 0 {
-            return Err(SarissaError::invalid_argument(
+            return Err(SageError::invalid_argument(
                 "Partition count cannot be zero",
             ));
         }
@@ -98,7 +98,7 @@ impl HashPartitioner {
 impl DocumentPartitioner for HashPartitioner {
     fn partition(&self, doc: &Document) -> Result<usize> {
         let field_value = doc.get_field(&self.field_name).ok_or_else(|| {
-            SarissaError::field(format!("Field '{}' not found in document", self.field_name))
+            SageError::field(format!("Field '{}' not found in document", self.field_name))
         })?;
 
         let value_str = format!("{field_value:?}");
@@ -135,7 +135,7 @@ impl RangePartitioner {
     /// Create a new range partitioner with integer boundaries.
     pub fn new(field_name: String, boundaries: Vec<i64>) -> Result<Self> {
         if boundaries.is_empty() {
-            return Err(SarissaError::invalid_argument(
+            return Err(SageError::invalid_argument(
                 "Range boundaries cannot be empty",
             ));
         }
@@ -156,7 +156,7 @@ impl RangePartitioner {
         for date_str in date_ranges {
             let timestamp = chrono::DateTime::parse_from_rfc3339(date_str)
                 .map_err(|e| {
-                    SarissaError::invalid_argument(format!("Invalid date format '{date_str}': {e}"))
+                    SageError::invalid_argument(format!("Invalid date format '{date_str}': {e}"))
                 })?
                 .timestamp();
             boundaries.push(timestamp);
@@ -185,17 +185,17 @@ impl RangePartitioner {
 impl DocumentPartitioner for RangePartitioner {
     fn partition(&self, doc: &Document) -> Result<usize> {
         let field_value = doc.get_field(&self.field_name).ok_or_else(|| {
-            SarissaError::field(format!("Field '{}' not found in document", self.field_name))
+            SageError::field(format!("Field '{}' not found in document", self.field_name))
         })?;
 
         // Try to convert field value to i64
         let numeric_value = match field_value {
             crate::document::FieldValue::Integer(i) => *i,
             crate::document::FieldValue::Text(s) => s.parse::<i64>().map_err(|_| {
-                SarissaError::field(format!("Cannot convert field value '{s}' to integer"))
+                SageError::field(format!("Cannot convert field value '{s}' to integer"))
             })?,
             _ => {
-                return Err(SarissaError::field(format!(
+                return Err(SageError::field(format!(
                     "Field '{}' is not numeric or text",
                     self.field_name
                 )));
@@ -248,7 +248,7 @@ impl ValuePartitioner {
     /// Add a value mapping.
     pub fn add_mapping(mut self, value: String, partition: usize) -> Result<Self> {
         if partition >= self.partition_count {
-            return Err(SarissaError::invalid_argument(format!(
+            return Err(SageError::invalid_argument(format!(
                 "Partition index {} is out of range (max: {})",
                 partition,
                 self.partition_count - 1
@@ -262,7 +262,7 @@ impl ValuePartitioner {
     /// Set the default partition for unmapped values.
     pub fn with_default_partition(mut self, partition: usize) -> Result<Self> {
         if partition >= self.partition_count {
-            return Err(SarissaError::invalid_argument(format!(
+            return Err(SageError::invalid_argument(format!(
                 "Default partition index {} is out of range (max: {})",
                 partition,
                 self.partition_count - 1
@@ -280,7 +280,7 @@ impl ValuePartitioner {
         default_partition: Option<usize>,
     ) -> Result<Self> {
         if mapping.is_empty() {
-            return Err(SarissaError::invalid_argument(
+            return Err(SageError::invalid_argument(
                 "Value mapping cannot be empty",
             ));
         }
@@ -309,7 +309,7 @@ impl ValuePartitioner {
 impl DocumentPartitioner for ValuePartitioner {
     fn partition(&self, doc: &Document) -> Result<usize> {
         let field_value = doc.get_field(&self.field_name).ok_or_else(|| {
-            SarissaError::field(format!("Field '{}' not found in document", self.field_name))
+            SageError::field(format!("Field '{}' not found in document", self.field_name))
         })?;
 
         // Extract the actual string value from FieldValue
@@ -329,7 +329,7 @@ impl DocumentPartitioner for ValuePartitioner {
         } else if let Some(default) = self.default_partition {
             Ok(default)
         } else {
-            Err(SarissaError::field(format!(
+            Err(SageError::field(format!(
                 "No mapping found for value '{value_str}' and no default partition configured"
             )))
         }

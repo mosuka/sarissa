@@ -9,7 +9,7 @@ use super::{
     IndexTask, ParallelIndexExecutor, ParallelIndexStats, ParallelVectorIndexConfig, SegmentMerger,
     VectorIndexSegment,
 };
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector::Vector;
 use crate::vector_index::VectorIndexBuilder;
 
@@ -32,7 +32,7 @@ impl ParallelVectorIndexBuilder {
                 .num_threads(config.num_threads)
                 .build()
                 .map_err(|e| {
-                    SarissaError::InvalidOperation(format!("Failed to create thread pool: {e}"))
+                    SageError::InvalidOperation(format!("Failed to create thread pool: {e}"))
                 })?,
         );
 
@@ -63,7 +63,7 @@ impl ParallelVectorIndexBuilder {
     /// Build index from vectors in parallel segments.
     pub fn build_parallel(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
             ));
         }
@@ -107,7 +107,7 @@ impl ParallelVectorIndexBuilder {
     /// Add vectors incrementally.
     pub fn add_vectors_parallel(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
             ));
         }

@@ -154,29 +154,29 @@ impl ParallelHybridSearchConfig {
 
     /// Validate the configuration.
     pub fn validate(&self) -> crate::error::Result<()> {
-        use crate::error::SarissaError;
+        use crate::error::SageError;
 
         if self.num_threads == 0 {
-            return Err(SarissaError::invalid_config(
+            return Err(SageError::invalid_config(
                 "Number of threads must be greater than 0".to_string(),
             ));
         }
 
         if self.keyword_weight < 0.0 || self.keyword_weight > 1.0 {
-            return Err(SarissaError::invalid_config(
+            return Err(SageError::invalid_config(
                 "Keyword weight must be between 0.0 and 1.0".to_string(),
             ));
         }
 
         if self.vector_weight < 0.0 || self.vector_weight > 1.0 {
-            return Err(SarissaError::invalid_config(
+            return Err(SageError::invalid_config(
                 "Vector weight must be between 0.0 and 1.0".to_string(),
             ));
         }
 
         let total_weight = self.keyword_weight + self.vector_weight;
         if (total_weight - 1.0).abs() > 0.001 {
-            return Err(SarissaError::invalid_config(format!(
+            return Err(SageError::invalid_config(format!(
                 "Keyword and vector weights must sum to 1.0, got {total_weight}"
             )));
         }

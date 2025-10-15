@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector::Vector;
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
@@ -67,7 +67,7 @@ impl VectorSearchEngine {
                     self.hnsw_searcher = Some(HnswSearcher::new(reader.clone())?);
                 }
                 _ => {
-                    return Err(SarissaError::InvalidOperation(format!(
+                    return Err(SageError::InvalidOperation(format!(
                         "Unsupported index type: {}",
                         metadata.index_type
                     )));
@@ -238,7 +238,7 @@ impl VectorSearchEngine {
         } else if let Some(ref searcher) = self.flat_searcher {
             searcher.search(query, config)
         } else {
-            Err(SarissaError::InvalidOperation(
+            Err(SageError::InvalidOperation(
                 "No searcher available - index not loaded".to_string(),
             ))
         }
@@ -254,7 +254,7 @@ impl VectorSearchEngine {
         if let Some(ref searcher) = self.flat_searcher {
             searcher.search(query, config)
         } else {
-            Err(SarissaError::InvalidOperation(
+            Err(SageError::InvalidOperation(
                 "Flat searcher not available for exact search".to_string(),
             ))
         }
@@ -379,7 +379,7 @@ impl VectorSearchEngine {
     /// Create a hybrid search engine that combines keyword and vector search.
     pub fn create_hybrid_engine(&self) -> Result<crate::vector_search::HybridSearchEngine> {
         // TODO: Implement hybrid engine creation
-        Err(SarissaError::NotImplemented(
+        Err(SageError::NotImplemented(
             "Hybrid search engine not implemented".to_string(),
         ))
     }

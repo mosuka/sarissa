@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```
-/// use sarissa::analysis::{Analyzer, PerFieldAnalyzer, StandardAnalyzer, KeywordAnalyzer};
+/// use sage::analysis::{Analyzer, PerFieldAnalyzer, StandardAnalyzer, KeywordAnalyzer};
 /// use std::sync::Arc;
 ///
 /// // Reuse analyzer instances to save memory

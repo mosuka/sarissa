@@ -1,4 +1,4 @@
-//! Command implementations for Sarissa CLI.
+//! Command implementations for Sage CLI.
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::cli::args::*;
 use crate::cli::output::*;
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::query::*;
 
 // Removed: use crate::document::field::TextField;
@@ -18,7 +18,7 @@ use crate::full_text_search::spell_corrected::*;
 use crate::spelling::*;
 
 /// Execute a CLI command.
-pub fn execute_command(args: SarissaArgs) -> Result<()> {
+pub fn execute_command(args: SageArgs) -> Result<()> {
     match &args.command {
         Command::CreateIndex(create_args) => create_index(create_args.clone(), &args),
         Command::AddDocument(add_args) => add_document(add_args.clone(), &args),
@@ -32,7 +32,7 @@ pub fn execute_command(args: SarissaArgs) -> Result<()> {
 }
 
 /// Create a new index.
-fn create_index(args: CreateIndexArgs, cli_args: &SarissaArgs) -> Result<()> {
+fn create_index(args: CreateIndexArgs, cli_args: &SageArgs) -> Result<()> {
     if cli_args.verbosity() > 0 {
         println!("Creating index at: {}", args.index_path.display());
     }
@@ -46,7 +46,7 @@ fn create_index(args: CreateIndexArgs, cli_args: &SarissaArgs) -> Result<()> {
 
     // Check if index already exists
     if args.index_path.exists() && !args.force {
-        return Err(SarissaError::InvalidOperation(
+        return Err(SageError::InvalidOperation(
             "Index directory already exists. Use --force to overwrite.".to_string(),
         ));
     }
@@ -70,7 +70,7 @@ fn create_index(args: CreateIndexArgs, cli_args: &SarissaArgs) -> Result<()> {
 }
 
 /// Add documents to an index.
-fn add_document(args: AddDocumentArgs, cli_args: &SarissaArgs) -> Result<()> {
+fn add_document(args: AddDocumentArgs, cli_args: &SageArgs) -> Result<()> {
     if cli_args.verbosity() > 0 {
         println!("Adding documents from: {}", args.document_file.display());
         println!("To index: {}", args.index_path.display());
@@ -125,7 +125,7 @@ fn add_document(args: AddDocumentArgs, cli_args: &SarissaArgs) -> Result<()> {
 }
 
 /// Search the index.
-fn search_index(args: SearchArgs, cli_args: &SarissaArgs) -> Result<()> {
+fn search_index(args: SearchArgs, cli_args: &SageArgs) -> Result<()> {
     if cli_args.verbosity() > 1 {
         println!("Searching index: {}", args.index_path.display());
         println!("Query: {}", args.query);
@@ -254,7 +254,7 @@ fn search_index(args: SearchArgs, cli_args: &SarissaArgs) -> Result<()> {
 }
 
 /// Optimize an index.
-fn optimize_index(args: OptimizeArgs, cli_args: &SarissaArgs) -> Result<()> {
+fn optimize_index(args: OptimizeArgs, cli_args: &SageArgs) -> Result<()> {
     if cli_args.verbosity() > 0 {
         println!("Optimizing index: {}", args.index_path.display());
     }
@@ -280,7 +280,7 @@ fn optimize_index(args: OptimizeArgs, cli_args: &SarissaArgs) -> Result<()> {
 }
 
 /// Show index statistics.
-fn show_stats(args: StatsArgs, cli_args: &SarissaArgs) -> Result<()> {
+fn show_stats(args: StatsArgs, cli_args: &SageArgs) -> Result<()> {
     if cli_args.verbosity() > 1 {
         println!("Gathering statistics for: {}", args.index_path.display());
     }
@@ -304,7 +304,7 @@ fn show_stats(args: StatsArgs, cli_args: &SarissaArgs) -> Result<()> {
 }
 
 /// Run benchmarks.
-fn run_benchmark(args: BenchmarkArgs, cli_args: &SarissaArgs) -> Result<()> {
+fn run_benchmark(args: BenchmarkArgs, cli_args: &SageArgs) -> Result<()> {
     if cli_args.verbosity() > 0 {
         println!("Running benchmark on: {}", args.index_path.display());
         println!("Mode: {:?}", args.mode);
@@ -411,7 +411,7 @@ fn run_indexing_benchmark(args: &BenchmarkArgs) -> Result<BenchmarkResults> {
 fn save_benchmark_results(
     results: &BenchmarkResults,
     file_path: &Path,
-    cli_args: &SarissaArgs,
+    cli_args: &SageArgs,
 ) -> Result<()> {
     let mut file = File::create(file_path)?;
 
@@ -493,14 +493,14 @@ fn create_mock_field_stats() -> HashMap<String, FieldStats> {
 }
 
 /// Validate index integrity.
-fn validate_index(args: ValidateArgs, cli_args: &SarissaArgs) -> Result<()> {
+fn validate_index(args: ValidateArgs, cli_args: &SageArgs) -> Result<()> {
     if cli_args.verbosity() > 0 {
         println!("Validating index at: {}", args.index_path.display());
     }
 
     // Check if index exists
     if !args.index_path.exists() {
-        return Err(SarissaError::InvalidOperation(
+        return Err(SageError::InvalidOperation(
             "Index directory does not exist".to_string(),
         ));
     }
@@ -522,7 +522,7 @@ fn validate_index(args: ValidateArgs, cli_args: &SarissaArgs) -> Result<()> {
             // TODO: Implement fixing logic
         } else {
             println!("Found {issues_found} issues. Use --fix to attempt repairs.");
-            return Err(SarissaError::InvalidOperation(format!(
+            return Err(SageError::InvalidOperation(format!(
                 "Index validation failed with {issues_found} issues"
             )));
         }
@@ -542,13 +542,13 @@ fn validate_index(args: ValidateArgs, cli_args: &SarissaArgs) -> Result<()> {
 }
 
 /// List indices in a directory.
-fn list_indices(args: ListArgs, cli_args: &SarissaArgs) -> Result<()> {
+fn list_indices(args: ListArgs, cli_args: &SageArgs) -> Result<()> {
     if cli_args.verbosity() > 1 {
         println!("Searching for indices in: {}", args.directory.display());
     }
 
     if !args.directory.exists() {
-        return Err(SarissaError::InvalidOperation(
+        return Err(SageError::InvalidOperation(
             "Directory does not exist".to_string(),
         ));
     }

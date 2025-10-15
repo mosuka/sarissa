@@ -122,7 +122,7 @@ impl SegmentManager {
             if input.read_to_end(&mut data).is_ok() {
                 let segments_data: HashMap<String, Segment> = serde_json::from_slice(&data)
                     .map_err(|e| {
-                        crate::error::SarissaError::storage(format!(
+                        crate::error::SageError::storage(format!(
                             "Failed to parse segments metadata: {e}"
                         ))
                     })?;
@@ -146,7 +146,7 @@ impl SegmentManager {
     /// Save segment metadata to storage.
     pub fn save(&self) -> Result<()> {
         let data = serde_json::to_vec_pretty(&self.segments).map_err(|e| {
-            crate::error::SarissaError::storage(format!(
+            crate::error::SageError::storage(format!(
                 "Failed to serialize segments metadata: {e}"
             ))
         })?;

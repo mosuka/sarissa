@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
 use crate::full_text_search::SearchRequest;
 use crate::query::{Collector, CountCollector, Query, SearchHit, SearchResults, TopDocsCollector};
@@ -202,7 +202,7 @@ impl Searcher {
 
         // Check if we exceeded timeout
         if start_time.elapsed() > timeout {
-            return Err(SarissaError::index("Search timeout exceeded"));
+            return Err(SageError::index("Search timeout exceeded"));
         }
 
         // Get results

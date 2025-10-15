@@ -10,7 +10,7 @@ use ahash::AHashMap;
 
 use crate::analysis::{Analyzer, Token};
 use crate::document::Document;
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::full_text::{InvertedIndex, Posting};
 use crate::storage::{Storage, StructWriter};
@@ -192,10 +192,10 @@ impl AdvancedIndexWriter {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use sarissa::document::{Document, DocumentParser};
-    /// use sarissa::analysis::{PerFieldAnalyzer, StandardAnalyzer};
-    /// use sarissa::full_text_index::{AdvancedIndexWriter, advanced_writer::AdvancedWriterConfig};
-    /// use sarissa::storage::{MemoryStorage, StorageConfig};
+    /// use sage::document::{Document, DocumentParser};
+    /// use sage::analysis::{PerFieldAnalyzer, StandardAnalyzer};
+    /// use sage::full_text_index::{AdvancedIndexWriter, advanced_writer::AdvancedWriterConfig};
+    /// use sage::storage::{MemoryStorage, StorageConfig};
     /// use std::sync::Arc;
     ///
     /// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
@@ -514,7 +514,7 @@ impl AdvancedIndexWriter {
         let json_file = format!("{segment_name}.json");
         let mut output = self.storage.create_output(&json_file)?;
         let segment_data = serde_json::to_string_pretty(&documents)
-            .map_err(|e| SarissaError::index(format!("Failed to serialize segment: {e}")))?;
+            .map_err(|e| SageError::index(format!("Failed to serialize segment: {e}")))?;
         std::io::Write::write_all(&mut output, segment_data.as_bytes())?;
         output.close()?;
 
@@ -537,7 +537,7 @@ impl AdvancedIndexWriter {
         // Write as JSON for compatibility with FileIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
         let json_data = serde_json::to_string_pretty(&segment_info).map_err(|e| {
-            SarissaError::index(format!("Failed to serialize segment metadata: {e}"))
+            SageError::index(format!("Failed to serialize segment metadata: {e}"))
         })?;
 
         let mut output = self.storage.create_output(&meta_file)?;
@@ -610,7 +610,7 @@ impl AdvancedIndexWriter {
     /// Check if the writer is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            Err(SarissaError::index("Writer is closed"))
+            Err(SageError::index("Writer is closed"))
         } else {
             Ok(())
         }

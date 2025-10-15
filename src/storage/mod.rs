@@ -1,4 +1,4 @@
-//! Storage abstraction layer for Sarissa.
+//! Storage abstraction layer for Sage.
 //!
 //! This module provides a pluggable storage system similar to Whoosh's storage architecture.
 //! It supports different storage backends like file system, memory, and potentially remote storage.

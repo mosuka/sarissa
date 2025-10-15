@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{SegmentMetadata, VectorIndexSegment};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector::Vector;
 use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
 
@@ -71,7 +71,7 @@ impl SegmentMerger {
         segments: Vec<VectorIndexSegment>,
     ) -> Result<VectorIndexSegment> {
         if segments.is_empty() {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Cannot merge empty segments".to_string(),
             ));
         }
@@ -107,7 +107,7 @@ impl SegmentMerger {
         config: VectorIndexBuildConfig,
     ) -> Result<VectorIndexSegment> {
         if segments.is_empty() {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "Cannot merge empty segments".to_string(),
             ));
         }
@@ -189,7 +189,7 @@ impl SegmentMerger {
         segments: &[VectorIndexSegment],
     ) -> Result<VectorIndexBuildConfig> {
         if segments.is_empty() {
-            return Err(SarissaError::InvalidOperation(
+            return Err(SageError::InvalidOperation(
                 "No segments to merge".to_string(),
             ));
         }
@@ -201,12 +201,12 @@ impl SegmentMerger {
         for segment in segments {
             let metadata = segment.metadata();
             if metadata.dimension != first_metadata.dimension {
-                return Err(SarissaError::InvalidOperation(
+                return Err(SageError::InvalidOperation(
                     "Cannot merge segments with different dimensions".to_string(),
                 ));
             }
             if metadata.distance_metric != first_metadata.distance_metric {
-                return Err(SarissaError::InvalidOperation(
+                return Err(SageError::InvalidOperation(
                     "Cannot merge segments with different distance metrics".to_string(),
                 ));
             }

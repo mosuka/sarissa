@@ -1,4 +1,4 @@
-//! Text analysis module for Sarissa.
+//! Text analysis module for Sage.
 //!
 //! This module provides the core text analysis functionality including tokenization,
 //! filtering, and analysis pipelines. It's inspired by Whoosh's analysis system.

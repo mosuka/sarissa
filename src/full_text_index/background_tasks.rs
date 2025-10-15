@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text_index::deletion::DeletionManager;
 use crate::full_text_index::merge_engine::MergeEngine;
 use crate::full_text_index::merge_policy::MergePolicy;
@@ -314,7 +314,7 @@ impl BackgroundScheduler {
     /// Start the background scheduler.
     pub fn start(&self) -> Result<()> {
         if self.running.load(Ordering::Acquire) {
-            return Err(SarissaError::index("Background scheduler already running"));
+            return Err(SageError::index("Background scheduler already running"));
         }
 
         self.running.store(true, Ordering::Release);
@@ -349,7 +349,7 @@ impl BackgroundScheduler {
     /// Submit a task for background execution.
     pub fn submit_task(&self, task: BackgroundTask) -> Result<()> {
         if !self.running.load(Ordering::Acquire) {
-            return Err(SarissaError::index("Background scheduler not running"));
+            return Err(SageError::index("Background scheduler not running"));
         }
 
         // Update statistics
@@ -362,7 +362,7 @@ impl BackgroundScheduler {
         // Send task to queue
         self.task_sender
             .send(task)
-            .map_err(|_| SarissaError::index("Failed to submit task to queue"))?;
+            .map_err(|_| SageError::index("Failed to submit task to queue"))?;
 
         Ok(())
     }

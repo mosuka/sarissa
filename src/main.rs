@@ -1,4 +1,4 @@
-//! Sarissa CLI binary.
+//! Sage CLI binary.
 
 use std::io::Write;
 use std::process;
@@ -7,12 +7,12 @@ use clap::Parser;
 use env_logger::Builder;
 use log::LevelFilter;
 
-use sarissa::cli::args::*;
-use sarissa::cli::commands::*;
+use sage::cli::args::*;
+use sage::cli::commands::*;
 
 fn main() {
     // Parse command line arguments using clap
-    let args = SarissaArgs::parse();
+    let args = SageArgs::parse();
 
     // Set up logging/verbosity based on args if needed
     let log_level = match args.verbosity() {

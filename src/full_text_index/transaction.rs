@@ -1,4 +1,4 @@
-//! Transaction management for atomic operations in Sarissa.
+//! Transaction management for atomic operations in Sage.
 //!
 //! This module provides transaction boundaries and atomic commit/rollback
 //! functionality to ensure data consistency during index operations.
@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use uuid::Uuid;
 
 use crate::document::Document;
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text_index::deletion::{DeletionManager, GlobalDeletionState};
 use crate::full_text_index::merge_engine::MergeEngine;
 use crate::full_text_index::segment_manager::SegmentManager;
@@ -111,7 +111,7 @@ impl Transaction {
     /// Add an operation to this transaction.
     pub fn add_operation(&mut self, operation: TransactionOperation) -> Result<()> {
         if self.state != TransactionState::Active {
-            return Err(SarissaError::index(
+            return Err(SageError::index(
                 "Cannot add operations to inactive transaction",
             ));
         }
@@ -122,7 +122,7 @@ impl Transaction {
     /// Mark transaction as preparing for commit.
     pub fn prepare(&mut self) -> Result<()> {
         if self.state != TransactionState::Active {
-            return Err(SarissaError::index("Cannot prepare inactive transaction"));
+            return Err(SageError::index("Cannot prepare inactive transaction"));
         }
         self.state = TransactionState::Preparing;
         Ok(())
@@ -131,7 +131,7 @@ impl Transaction {
     /// Mark transaction as committed.
     pub fn commit(&mut self) -> Result<()> {
         if self.state != TransactionState::Preparing {
-            return Err(SarissaError::index("Cannot commit unprepared transaction"));
+            return Err(SageError::index("Cannot commit unprepared transaction"));
         }
         self.state = TransactionState::Committed;
         Ok(())
@@ -140,7 +140,7 @@ impl Transaction {
     /// Mark transaction as aborted.
     pub fn abort(&mut self) -> Result<()> {
         if self.state == TransactionState::Committed {
-            return Err(SarissaError::index("Cannot abort committed transaction"));
+            return Err(SageError::index("Cannot abort committed transaction"));
         }
         self.state = TransactionState::Aborted;
         Ok(())

@@ -5,20 +5,20 @@
 //! 2. Perform concurrent searches across the indices with various merge strategies
 //! 3. Demonstrate performance metrics and optimization techniques
 
-use sarissa::full_text_index::AdvancedIndexWriter;
-use sarissa::full_text_index::AdvancedWriterConfig;
-use sarissa::full_text_search::AdvancedIndexReader;
-use sarissa::full_text_search::advanced_reader::AdvancedReaderConfig;
-use sarissa::parallel_full_text_index::{
+use sage::full_text_index::AdvancedIndexWriter;
+use sage::full_text_index::AdvancedWriterConfig;
+use sage::full_text_search::AdvancedIndexReader;
+use sage::full_text_search::advanced_reader::AdvancedReaderConfig;
+use sage::parallel_full_text_index::{
     HashPartitioner, ParallelIndexConfig, ParallelIndexEngine, PartitionConfig,
     config::IndexingOptions,
 };
-use sarissa::parallel_full_text_search::{
+use sage::parallel_full_text_search::{
     MergeStrategyType, ParallelSearchConfig, ParallelSearchEngine, config::SearchOptions,
 };
-use sarissa::prelude::*;
-use sarissa::query::{PhraseQuery, TermQuery};
-use sarissa::storage::{MemoryStorage, StorageConfig};
+use sage::prelude::*;
+use sage::query::{PhraseQuery, TermQuery};
+use sage::storage::{MemoryStorage, StorageConfig};
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -66,11 +66,11 @@ fn main() -> Result<()> {
     parallel_engine.set_partitioner(Box::new(hash_partitioner))?;
 
     // Storage for later search operations
-    let mut storages: Vec<Arc<dyn sarissa::storage::Storage>> = Vec::new();
+    let mut storages: Vec<Arc<dyn sage::storage::Storage>> = Vec::new();
 
     // Add writers for each partition
     for i in 0..4 {
-        let storage: Arc<dyn sarissa::storage::Storage> =
+        let storage: Arc<dyn sage::storage::Storage> =
             Arc::new(MemoryStorage::new(StorageConfig::default()));
         storages.push(Arc::clone(&storage));
 
@@ -267,9 +267,9 @@ fn main() -> Result<()> {
                 let mut input = storage.open_input(&file)?;
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
-                let segment_info: sarissa::full_text::SegmentInfo = serde_json::from_slice(&data)
+                let segment_info: sage::full_text::SegmentInfo = serde_json::from_slice(&data)
                     .map_err(|e| {
-                    sarissa::error::SarissaError::index(format!(
+                    sage::error::SageError::index(format!(
                         "Failed to parse segment metadata: {e}"
                     ))
                 })?;
@@ -366,7 +366,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document
             && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
             && let Some(price) = doc.get_field("price").and_then(|f| match f {
-                sarissa::document::FieldValue::Float(v) => Some(*v),
+                sage::document::FieldValue::Float(v) => Some(*v),
                 _ => None,
             })
             && let Some(category) = doc.get_field("category").and_then(|f| f.as_text())

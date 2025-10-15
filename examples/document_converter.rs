@@ -5,10 +5,10 @@
 
 use tempfile::TempDir;
 
-use sarissa::document::{DocumentConverter, FieldValueDocumentConverter, JsonDocumentConverter};
-use sarissa::full_text::index::IndexConfig;
-use sarissa::full_text_search::{SearchEngine, SearchRequest};
-use sarissa::prelude::*;
+use sage::document::{DocumentConverter, FieldValueDocumentConverter, JsonDocumentConverter};
+use sage::full_text::index::IndexConfig;
+use sage::full_text_search::{SearchEngine, SearchRequest};
+use sage::prelude::*;
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");
@@ -57,7 +57,7 @@ in_stock:true
 
     let doc3_text = r#"
 id:SOFT-003
-title:Sarissa Search Engine
+title:Sage Search Engine
 category:software
 description:Fast and flexible full-text search engine in Rust
 price:0.0
@@ -96,7 +96,7 @@ in_stock:true
 
     // Search by category (using KeywordAnalyzer - exact match)
     println!("Search: category:electronics");
-    let query_parser = sarissa::query::QueryParser::new();
+    let query_parser = sage::query::QueryParser::new();
     let query = query_parser.parse_field("category", "electronics")?;
     let results = engine.search(SearchRequest::new(query).load_documents(true))?;
 

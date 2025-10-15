@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::args::{OutputFormat, SarissaArgs};
+use crate::cli::args::{OutputFormat, SageArgs};
 use crate::error::Result;
 use crate::query::Hit;
 
@@ -89,7 +89,7 @@ pub struct IndexingBenchmarkResults {
 }
 
 /// Output a result in the specified format.
-pub fn output_result<T: Serialize>(message: &str, result: &T, args: &SarissaArgs) -> Result<()> {
+pub fn output_result<T: Serialize>(message: &str, result: &T, args: &SageArgs) -> Result<()> {
     match args.output_format {
         OutputFormat::Human => output_human(message, result, args),
         OutputFormat::Json => output_json(result, args),
@@ -100,7 +100,7 @@ pub fn output_result<T: Serialize>(message: &str, result: &T, args: &SarissaArgs
 }
 
 /// Output in human-readable format.
-fn output_human<T: Serialize>(message: &str, result: &T, args: &SarissaArgs) -> Result<()> {
+fn output_human<T: Serialize>(message: &str, result: &T, args: &SageArgs) -> Result<()> {
     if args.verbosity() > 0 {
         println!("{message}");
         println!();
@@ -127,7 +127,7 @@ fn output_human<T: Serialize>(message: &str, result: &T, args: &SarissaArgs) -> 
 }
 
 /// Output search results in human format.
-fn output_search_results_human(value: &serde_json::Value, _args: &SarissaArgs) -> Result<()> {
+fn output_search_results_human(value: &serde_json::Value, _args: &SageArgs) -> Result<()> {
     if let Some(obj) = value.as_object()
         && let Some(hits) = obj.get("hits").and_then(|h| h.as_array())
     {
@@ -187,7 +187,7 @@ fn output_search_results_human(value: &serde_json::Value, _args: &SarissaArgs) -
 }
 
 /// Output index statistics in human format.
-fn output_index_stats_human(value: &serde_json::Value, _args: &SarissaArgs) -> Result<()> {
+fn output_index_stats_human(value: &serde_json::Value, _args: &SageArgs) -> Result<()> {
     if let Some(obj) = value.as_object() {
         println!("Index Statistics:");
         println!("════════════════");
@@ -241,7 +241,7 @@ fn output_index_stats_human(value: &serde_json::Value, _args: &SarissaArgs) -> R
 }
 
 /// Output benchmark results in human format.
-fn output_benchmark_results_human(value: &serde_json::Value, _args: &SarissaArgs) -> Result<()> {
+fn output_benchmark_results_human(value: &serde_json::Value, _args: &SageArgs) -> Result<()> {
     if let Some(obj) = value.as_object() {
         println!("Benchmark Results:");
         println!("═════════════════");
@@ -320,7 +320,7 @@ fn output_benchmark_results_human(value: &serde_json::Value, _args: &SarissaArgs
 }
 
 /// Output generic data in human format.
-fn output_generic_human(value: &serde_json::Value, _args: &SarissaArgs) -> Result<()> {
+fn output_generic_human(value: &serde_json::Value, _args: &SageArgs) -> Result<()> {
     match value {
         serde_json::Value::Object(obj) => {
             for (key, val) in obj {
@@ -337,7 +337,7 @@ fn output_generic_human(value: &serde_json::Value, _args: &SarissaArgs) -> Resul
 }
 
 /// Output in JSON format.
-fn output_json<T: Serialize>(result: &T, args: &SarissaArgs) -> Result<()> {
+fn output_json<T: Serialize>(result: &T, args: &SageArgs) -> Result<()> {
     let json = if args.pretty {
         serde_json::to_string_pretty(result)?
     } else {
@@ -349,7 +349,7 @@ fn output_json<T: Serialize>(result: &T, args: &SarissaArgs) -> Result<()> {
 }
 
 /// Output in CSV format.
-fn output_csv<T: Serialize>(result: &T, _args: &SarissaArgs) -> Result<()> {
+fn output_csv<T: Serialize>(result: &T, _args: &SageArgs) -> Result<()> {
     // For CSV output, we'll convert to JSON first and then try to flatten
     let value = serde_json::to_value(result)?;
 
@@ -393,13 +393,13 @@ fn output_csv<T: Serialize>(result: &T, _args: &SarissaArgs) -> Result<()> {
 }
 
 /// Output in table format.
-fn output_table<T: Serialize>(message: &str, result: &T, args: &SarissaArgs) -> Result<()> {
+fn output_table<T: Serialize>(message: &str, result: &T, args: &SageArgs) -> Result<()> {
     // For simplicity, table format will be similar to human format but with better alignment
     output_human(message, result, args)
 }
 
 /// Output in YAML format.
-fn output_yaml<T: Serialize>(result: &T, _args: &SarissaArgs) -> Result<()> {
+fn output_yaml<T: Serialize>(result: &T, _args: &SageArgs) -> Result<()> {
     // Convert to JSON value first, then format as simple YAML
     let value = serde_json::to_value(result)?;
     print_yaml_value(&value, 0);

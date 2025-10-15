@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::document::Document;
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::parallel_full_text_index::config::IndexingOptions;
 use crate::parallel_full_text_index::partitioner::DocumentPartitioner;
 use crate::parallel_full_text_index::writer_manager::IndexWriterHandle;
@@ -117,7 +117,7 @@ pub struct BatchProcessingResult {
     pub processing_time: Duration,
 
     /// Any errors encountered during processing.
-    pub errors: Vec<SarissaError>,
+    pub errors: Vec<SageError>,
 }
 
 /// Batch processor for managing document batches and processing them efficiently.
@@ -154,7 +154,7 @@ impl BatchProcessor {
     /// Returns true if a batch is ready for processing.
     pub fn add_document(&mut self, partition_index: usize, document: Document) -> Result<bool> {
         if partition_index >= self.partition_count {
-            return Err(SarissaError::invalid_argument(format!(
+            return Err(SageError::invalid_argument(format!(
                 "Partition index {} is out of range (max: {})",
                 partition_index,
                 self.partition_count - 1
@@ -277,14 +277,14 @@ impl BatchProcessor {
     fn validate_documents(
         &self,
         documents: Vec<Document>,
-        errors: &mut Vec<SarissaError>,
+        errors: &mut Vec<SageError>,
     ) -> Vec<Document> {
         let mut valid_documents = Vec::new();
 
         for doc in documents {
             // Basic validation - check if document has any fields
             if doc.fields().is_empty() {
-                errors.push(SarissaError::field("Document has no fields".to_string()));
+                errors.push(SageError::field("Document has no fields".to_string()));
                 continue;
             }
 

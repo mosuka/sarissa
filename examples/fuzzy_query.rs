@@ -1,10 +1,10 @@
 //! FuzzyQuery example - demonstrates approximate string matching with edit distance.
 
-use sarissa::full_text::index::IndexConfig;
-use sarissa::full_text_search::SearchEngine;
-use sarissa::full_text_search::SearchRequest;
-use sarissa::prelude::*;
-use sarissa::query::FuzzyQuery;
+use sage::full_text::index::IndexConfig;
+use sage::full_text_search::SearchEngine;
+use sage::full_text_search::SearchRequest;
+use sage::prelude::*;
+use sage::query::FuzzyQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

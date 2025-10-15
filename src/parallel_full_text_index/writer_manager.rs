@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::full_text_index::IndexWriter;
 use crate::parallel_full_text_index::config::PartitionConfig;
 
@@ -104,7 +104,7 @@ impl IndexWriterHandle {
         self.stats
             .read()
             .map(|s| s.clone())
-            .map_err(|_| SarissaError::internal("Failed to read partition stats"))
+            .map_err(|_| SageError::internal("Failed to read partition stats"))
     }
 
     /// Check if this writer is active.
@@ -112,7 +112,7 @@ impl IndexWriterHandle {
         self.is_active
             .read()
             .map(|a| *a)
-            .map_err(|_| SarissaError::internal("Failed to read active status"))
+            .map_err(|_| SageError::internal("Failed to read active status"))
     }
 
     /// Set the active status.
@@ -120,7 +120,7 @@ impl IndexWriterHandle {
         self.is_active
             .write()
             .map(|mut a| *a = active)
-            .map_err(|_| SarissaError::internal("Failed to set active status"))
+            .map_err(|_| SageError::internal("Failed to set active status"))
     }
 
     /// Execute an indexing operation.
@@ -130,7 +130,7 @@ impl IndexWriterHandle {
         // Update last operation timestamp
         self.last_operation
             .write()
-            .map_err(|_| SarissaError::internal("Failed to update last operation time"))?
+            .map_err(|_| SageError::internal("Failed to update last operation time"))?
             .replace(start);
 
         let doc_count = documents.len() as u64;
@@ -138,7 +138,7 @@ impl IndexWriterHandle {
             let mut writer = self
                 .writer
                 .lock()
-                .map_err(|_| SarissaError::internal("Failed to acquire writer lock"))?;
+                .map_err(|_| SageError::internal("Failed to acquire writer lock"))?;
 
             // Index documents one by one
             let mut success = true;
@@ -152,7 +152,7 @@ impl IndexWriterHandle {
             if success {
                 Ok(())
             } else {
-                Err(SarissaError::index("Failed to index some documents"))
+                Err(SageError::index("Failed to index some documents"))
             }
         };
 
@@ -161,7 +161,7 @@ impl IndexWriterHandle {
         // Update statistics
         self.stats
             .write()
-            .map_err(|_| SarissaError::internal("Failed to update stats"))?
+            .map_err(|_| SageError::internal("Failed to update stats"))?
             .update_indexing(doc_count, elapsed_ms, result.is_ok());
 
         result
@@ -172,14 +172,14 @@ impl IndexWriterHandle {
         let mut writer = self
             .writer
             .lock()
-            .map_err(|_| SarissaError::internal("Failed to acquire writer lock"))?;
+            .map_err(|_| SageError::internal("Failed to acquire writer lock"))?;
 
         writer.commit()?;
 
         // Update statistics
         self.stats
             .write()
-            .map_err(|_| SarissaError::internal("Failed to update stats"))?
+            .map_err(|_| SageError::internal("Failed to update stats"))?
             .record_commit();
 
         Ok(())
@@ -190,7 +190,7 @@ impl IndexWriterHandle {
         self.last_operation
             .read()
             .map(|t| *t)
-            .map_err(|_| SarissaError::internal("Failed to read last operation time"))
+            .map_err(|_| SageError::internal("Failed to read last operation time"))
     }
 }
 
@@ -215,10 +215,10 @@ impl WriterManager {
         let mut writers = self
             .writers
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire writers lock"))?;
+            .map_err(|_| SageError::internal("Failed to acquire writers lock"))?;
 
         if writers.contains_key(&partition_id) {
-            return Err(SarissaError::invalid_argument(format!(
+            return Err(SageError::invalid_argument(format!(
                 "Writer with partition ID '{partition_id}' already exists"
             )));
         }
@@ -232,10 +232,10 @@ impl WriterManager {
         let mut writers = self
             .writers
             .write()
-            .map_err(|_| SarissaError::internal("Failed to acquire writers lock"))?;
+            .map_err(|_| SageError::internal("Failed to acquire writers lock"))?;
 
         writers.remove(partition_id).ok_or_else(|| {
-            SarissaError::not_found(format!(
+            SageError::not_found(format!(
                 "Writer with partition ID '{partition_id}' not found"
             ))
         })
@@ -246,7 +246,7 @@ impl WriterManager {
         let writers = self
             .writers
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire readers lock"))?;
+            .map_err(|_| SageError::internal("Failed to acquire readers lock"))?;
 
         Ok(writers.get(partition_id).cloned())
     }
@@ -256,7 +256,7 @@ impl WriterManager {
         let writers = self
             .writers
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire readers lock"))?;
+            .map_err(|_| SageError::internal("Failed to acquire readers lock"))?;
 
         let mut active_writers = Vec::new();
         for writer in writers.values() {
@@ -273,7 +273,7 @@ impl WriterManager {
         let writers = self
             .writers
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire readers lock"))?;
+            .map_err(|_| SageError::internal("Failed to acquire readers lock"))?;
 
         Ok(writers.values().cloned().collect())
     }
@@ -283,7 +283,7 @@ impl WriterManager {
         let writers = self
             .writers
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire readers lock"))?;
+            .map_err(|_| SageError::internal("Failed to acquire readers lock"))?;
 
         Ok(writers.len())
     }
@@ -293,7 +293,7 @@ impl WriterManager {
         let writers = self
             .writers
             .read()
-            .map_err(|_| SarissaError::internal("Failed to acquire readers lock"))?;
+            .map_err(|_| SageError::internal("Failed to acquire readers lock"))?;
 
         let mut count = 0;
         for writer in writers.values() {

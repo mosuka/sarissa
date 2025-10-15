@@ -1,7 +1,7 @@
-# Sarissa
+# Sage
 
-[![Crates.io](https://img.shields.io/crates/v/sarissa.svg)](https://crates.io/crates/sarissa)
-[![Documentation](https://docs.rs/sarissa/badge.svg)](https://docs.rs/sarissa)
+[![Crates.io](https://img.shields.io/crates/v/sage.svg)](https://crates.io/crates/sage)
+[![Documentation](https://docs.rs/sage/badge.svg)](https://docs.rs/sage)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A fast, featureful full-text search library for Rust, inspired by the [Lucene](https://github.com/apache/lucene) and Lucene alternatives.
@@ -22,17 +22,17 @@ A fast, featureful full-text search library for Rust, inspired by the [Lucene](h
 
 ## 🚀 Quick Start
 
-Add Sarissa to your `Cargo.toml`:
+Add Sage to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sarissa = "0.1"
+sage = "0.1"
 ```
 
 ### Basic Usage
 
 ```rust
-use sarissa::prelude::*;
+use sage::prelude::*;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -81,7 +81,7 @@ fn main() -> Result<()> {
 
 ## 🏗️ Architecture
 
-Sarissa is built with a modular architecture:
+Sage is built with a modular architecture:
 
 ### Core Components
 
@@ -143,29 +143,29 @@ GeoQuery::within_radius("location".to_string(), 40.7128, -74.0060, 10.0) // NYC,
 
 ## 🔧 CLI Usage
 
-Sarissa includes a powerful command-line interface:
+Sage includes a powerful command-line interface:
 
 ```bash
 # Create an index
-sarissa create-index --path ./my_index --schema schema.json
+sage create-index --path ./my_index --schema schema.json
 
 # Add documents from JSONL file
-sarissa add-document --index ./my_index --file documents.jsonl --batch-size 1000
+sage add-document --index ./my_index --file documents.jsonl --batch-size 1000
 
 # Search the index
-sarissa search --index ./my_index --query "rust programming" --limit 10 --format json
+sage search --index ./my_index --query "rust programming" --limit 10 --format json
 
 # Show index statistics
-sarissa stats --index ./my_index
+sage stats --index ./my_index
 
 # Optimize the index
-sarissa optimize --index ./my_index
+sage optimize --index ./my_index
 
 # Run benchmarks
-sarissa benchmark --index ./my_index --queries queries.txt --threads 4
+sage benchmark --index ./my_index --queries queries.txt --threads 4
 
 # Validate index integrity
-sarissa validate --index ./my_index --fix
+sage validate --index ./my_index --fix
 ```
 
 ## 🎯 Advanced Features
@@ -173,7 +173,7 @@ sarissa validate --index ./my_index --fix
 ### Vector Search
 
 ```rust
-use sarissa::vector::*;
+use sage::vector::*;
 
 // Add vector field to schema
 schema.add_field("embedding", Box::new(VectorField::new(768).indexed(true)))?;
@@ -199,7 +199,7 @@ let results = engine.search(&query, 10)?;
 ### Faceted Search
 
 ```rust
-use sarissa::search::facet::*;
+use sage::search::facet::*;
 
 // Configure faceted search
 let mut search_request = SearchRequest::new(query)
@@ -224,7 +224,7 @@ for facet in results.facets {
 ### Spell Correction
 
 ```rust
-use sarissa::spelling::*;
+use sage::spelling::*;
 
 // Create spell corrector
 let corrector = SpellCorrector::new()
@@ -240,7 +240,7 @@ if let Some(suggestion) = corrector.suggest("progamming")? {
 ### Custom Analysis Pipeline
 
 ```rust
-use sarissa::analysis::*;
+use sage::analysis::*;
 
 // Create custom analyzer
 let analyzer = Analyzer::new()
@@ -258,7 +258,7 @@ let field = TextField::new()
 
 ## 📊 Performance
 
-Sarissa is designed for high performance:
+Sage is designed for high performance:
 
 - **SIMD Acceleration** - Uses wide instruction sets for vector operations
 - **Memory-Mapped I/O** - Efficient file access with minimal memory overhead
@@ -280,8 +280,8 @@ On a modern machine with SSD storage:
 ### Building from Source
 
 ```bash
-git clone https://github.com/mosuka/sarissa.git
-cd sarissa
+git clone https://github.com/mosuka/sage.git
+cd sage
 cargo build --release
 ```
 
@@ -306,8 +306,8 @@ cargo fmt --check
 
 ## 📚 Documentation
 
-- [API Documentation](https://docs.rs/sarissa)
-- [User Guide](https://github.com/mosuka/sarissa/wiki)
+- [API Documentation](https://docs.rs/sage)
+- [User Guide](https://github.com/mosuka/sage/wiki)
 - [Examples](./examples/)
 
 ## 🤝 Contributing
@@ -336,9 +336,9 @@ at your option.
 ## 📧 Contact
 
 - **Author**: [mosuka](https://github.com/mosuka)
-- **Repository**: <https://github.com/mosuka/sarissa>
-- **Issues**: <https://github.com/mosuka/sarissa/issues>
+- **Repository**: <https://github.com/mosuka/sage>
+- **Issues**: <https://github.com/mosuka/sage/issues>
 
 ---
 
-*Sarissa - Fast, featureful full-text search for Rust* 🦀
+*Sage - Fast, featureful full-text search for Rust* 🦀

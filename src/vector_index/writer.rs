@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::vector_index::VectorIndexBuilder;
 
 /// Configuration for vector index writer.
@@ -65,7 +65,7 @@ impl VectorIndexWriter {
         // Create output directory if it doesn't exist
         if let Some(parent) = self.output_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                SarissaError::other(format!("Failed to create output directory: {e}"))
+                SageError::other(format!("Failed to create output directory: {e}"))
             })?;
         }
 
@@ -75,18 +75,18 @@ impl VectorIndexWriter {
             .create(true)
             .truncate(true)
             .open(&self.output_path)
-            .map_err(|e| SarissaError::other(format!("Failed to open output file: {e}")))?;
+            .map_err(|e| SageError::other(format!("Failed to open output file: {e}")))?;
 
         #[cfg(unix)]
         if let Some(permissions) = self.config.file_permissions {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = file
                 .metadata()
-                .map_err(|e| SarissaError::other(format!("Failed to get file metadata: {e}")))?
+                .map_err(|e| SageError::other(format!("Failed to get file metadata: {e}")))?
                 .permissions();
             perms.set_mode(permissions);
             file.set_permissions(perms)
-                .map_err(|e| SarissaError::other(format!("Failed to set file permissions: {e}")))?;
+                .map_err(|e| SageError::other(format!("Failed to set file permissions: {e}")))?;
         }
 
         let mut writer = BufWriter::with_capacity(self.config.buffer_size, file);
@@ -109,13 +109,13 @@ impl VectorIndexWriter {
         if let Some(ref mut writer) = self.writer {
             writer
                 .flush()
-                .map_err(|e| SarissaError::other(format!("Failed to flush writer: {e}")))?;
+                .map_err(|e| SageError::other(format!("Failed to flush writer: {e}")))?;
 
             if self.config.sync {
                 writer
                     .get_ref()
                     .sync_all()
-                    .map_err(|e| SarissaError::other(format!("Failed to sync to disk: {e}")))?;
+                    .map_err(|e| SageError::other(format!("Failed to sync to disk: {e}")))?;
             }
         }
         Ok(())
@@ -128,7 +128,7 @@ impl VectorIndexWriter {
         builder: &dyn VectorIndexBuilder,
     ) -> Result<()> {
         let header = IndexHeader {
-            magic: b"VSRX".to_vec(), // Vector Sarissa indeX
+            magic: b"VSRX".to_vec(), // Vector Sage indeX
             version: 1,
             dimension: self.get_dimension(builder),
             vector_count: self.get_vector_count(builder),
@@ -139,16 +139,16 @@ impl VectorIndexWriter {
 
         let header_bytes =
             bincode::encode_to_vec(&header, bincode::config::standard()).map_err(|e| {
-                SarissaError::SerializationError(format!("Failed to serialize header: {e}"))
+                SageError::SerializationError(format!("Failed to serialize header: {e}"))
             })?;
 
         writer
             .write_all(&(header_bytes.len() as u32).to_le_bytes())
-            .map_err(|e| SarissaError::other(format!("Failed to write header length: {e}")))?;
+            .map_err(|e| SageError::other(format!("Failed to write header length: {e}")))?;
 
         writer
             .write_all(&header_bytes)
-            .map_err(|e| SarissaError::other(format!("Failed to write header: {e}")))?;
+            .map_err(|e| SageError::other(format!("Failed to write header: {e}")))?;
 
         Ok(())
     }
@@ -165,18 +165,18 @@ impl VectorIndexWriter {
 
         writer
             .write_all(&(placeholder_data.len() as u64).to_le_bytes())
-            .map_err(|e| SarissaError::other(format!("Failed to write data length: {e}")))?;
+            .map_err(|e| SageError::other(format!("Failed to write data length: {e}")))?;
 
         if self.config.compress {
             // Here we would compress the data before writing
             // For now, just write as-is
             writer
                 .write_all(placeholder_data)
-                .map_err(|e| SarissaError::other(format!("Failed to write index data: {e}")))?;
+                .map_err(|e| SageError::other(format!("Failed to write index data: {e}")))?;
         } else {
             writer
                 .write_all(placeholder_data)
-                .map_err(|e| SarissaError::other(format!("Failed to write index data: {e}")))?;
+                .map_err(|e| SageError::other(format!("Failed to write index data: {e}")))?;
         }
 
         Ok(())
@@ -199,16 +199,16 @@ impl VectorIndexWriter {
 
         let footer_bytes =
             bincode::encode_to_vec(&footer, bincode::config::standard()).map_err(|e| {
-                SarissaError::SerializationError(format!("Failed to serialize footer: {e}"))
+                SageError::SerializationError(format!("Failed to serialize footer: {e}"))
             })?;
 
         writer
             .write_all(&(footer_bytes.len() as u32).to_le_bytes())
-            .map_err(|e| SarissaError::other(format!("Failed to write footer length: {e}")))?;
+            .map_err(|e| SageError::other(format!("Failed to write footer length: {e}")))?;
 
         writer
             .write_all(&footer_bytes)
-            .map_err(|e| SarissaError::other(format!("Failed to write footer: {e}")))?;
+            .map_err(|e| SageError::other(format!("Failed to write footer: {e}")))?;
 
         Ok(())
     }

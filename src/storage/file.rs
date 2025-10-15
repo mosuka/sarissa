@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use crate::error::{Result, SarissaError};
+use crate::error::{Result, SageError};
 use crate::storage::traits::{
     LockManager, Storage, StorageConfig, StorageError, StorageInput, StorageLock, StorageOutput,
 };
@@ -33,12 +33,12 @@ impl FileStorage {
         // Create directory if it doesn't exist
         if !directory.exists() {
             std::fs::create_dir_all(&directory)
-                .map_err(|e| SarissaError::storage(format!("Failed to create directory: {e}")))?;
+                .map_err(|e| SageError::storage(format!("Failed to create directory: {e}")))?;
         }
 
         // Verify it's a directory
         if !directory.is_dir() {
-            return Err(SarissaError::storage(format!(
+            return Err(SageError::storage(format!(
                 "Path is not a directory: {}",
                 directory.display()
             )));
@@ -272,7 +272,7 @@ impl FileInput {
     fn new(file: File, buffer_size: usize) -> Result<Self> {
         let metadata = file
             .metadata()
-            .map_err(|e| SarissaError::storage(format!("Failed to get file metadata: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to get file metadata: {e}")))?;
 
         let size = metadata.len();
         let reader = BufReader::with_capacity(buffer_size, file);
@@ -301,7 +301,7 @@ impl StorageInput for FileInput {
     fn clone_input(&self) -> Result<Box<dyn StorageInput>> {
         // For file inputs, we can't easily clone the underlying file
         // This would require reopening the file, which we'll implement later
-        Err(SarissaError::storage("Clone not supported for file inputs"))
+        Err(SageError::storage("Clone not supported for file inputs"))
     }
 
     fn close(&mut self) -> Result<()> {
@@ -360,12 +360,12 @@ impl StorageOutput for FileOutput {
     fn flush_and_sync(&mut self) -> Result<()> {
         self.writer
             .flush()
-            .map_err(|e| SarissaError::storage(format!("Failed to flush: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to flush: {e}")))?;
 
         self.writer
             .get_ref()
             .sync_all()
-            .map_err(|e| SarissaError::storage(format!("Failed to sync: {e}")))?;
+            .map_err(|e| SageError::storage(format!("Failed to sync: {e}")))?;
 
         Ok(())
     }
@@ -432,7 +432,7 @@ impl LockManager for FileLockManager {
         match self.acquire_lock(name) {
             Ok(lock) => Ok(Some(lock)),
             Err(e) => {
-                if let SarissaError::Storage(ref msg) = e
+                if let SageError::Storage(ref msg) = e
                     && msg.contains("Failed to acquire lock")
                 {
                     return Ok(None);
@@ -482,7 +482,7 @@ impl FileLock {
     fn release(&mut self) -> Result<()> {
         if !self.released {
             std::fs::remove_file(&self.path)
-                .map_err(|e| SarissaError::storage(format!("Failed to release lock: {e}")))?;
+                .map_err(|e| SageError::storage(format!("Failed to release lock: {e}")))?;
             self.released = true;
         }
         Ok(())

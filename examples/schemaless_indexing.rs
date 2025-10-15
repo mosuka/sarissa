@@ -1,16 +1,16 @@
 //! Example demonstrating schema-less indexing (Lucene-style)
 //!
-//! This example shows how to use Sarissa without predefined schemas,
+//! This example shows how to use Sage without predefined schemas,
 //! allowing maximum flexibility in document structure.
 //! Analyzers are configured at the writer level using PerFieldAnalyzer.
 
-use sarissa::analysis::{KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
-use sarissa::document::{Document, FieldValue};
-use sarissa::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sarissa::storage::{MemoryStorage, StorageConfig};
+use sage::analysis::{KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
+use sage::document::{Document, FieldValue};
+use sage::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::storage::{MemoryStorage, StorageConfig};
 use std::sync::Arc;
 
-fn main() -> sarissa::error::Result<()> {
+fn main() -> sage::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");
 
     // Configure per-field analyzers using PerFieldAnalyzer (Lucene-style)
