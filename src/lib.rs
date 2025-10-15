@@ -12,7 +12,6 @@
 //! - BM25 scoring
 
 pub mod analysis;
-pub mod cli;
 pub mod document;
 pub mod embeding;
 pub mod error;

@@ -17,7 +17,6 @@ A fast, featureful full-text search library for Rust, inspired by the [Lucene](h
 - **Spell Correction** - Built-in spell checking and query suggestion system
 - **Faceted Search** - Multi-dimensional search with facet aggregation
 - **Real-time Search** - Near real-time search with background index optimization
-- **CLI Interface** - Command-line tool for index management and search operations
 - **SIMD Acceleration** - Optimized vector operations for improved performance
 
 ## 🚀 Quick Start
@@ -139,33 +138,6 @@ WildcardQuery::new("filename".to_string(), "*.pdf".to_string())
 
 // Geographic query
 GeoQuery::within_radius("location".to_string(), 40.7128, -74.0060, 10.0) // NYC, 10km radius
-```
-
-## 🔧 CLI Usage
-
-Sage includes a powerful command-line interface:
-
-```bash
-# Create an index
-sage create-index --path ./my_index --schema schema.json
-
-# Add documents from JSONL file
-sage add-document --index ./my_index --file documents.jsonl --batch-size 1000
-
-# Search the index
-sage search --index ./my_index --query "rust programming" --limit 10 --format json
-
-# Show index statistics
-sage stats --index ./my_index
-
-# Optimize the index
-sage optimize --index ./my_index
-
-# Run benchmarks
-sage benchmark --index ./my_index --queries queries.txt --threads 4
-
-# Validate index integrity
-sage validate --index ./my_index --fix
 ```
 
 ## 🎯 Advanced Features
