@@ -344,7 +344,8 @@ mod tests {
 
     #[test]
     fn test_integration_with_synonym_graph_filter() {
-        use crate::analysis::token_filter::{SynonymDictionary, SynonymGraphFilter};
+        use crate::analysis::synonym::dictionary::SynonymDictionary;
+        use crate::analysis::token_filter::synonym_graph::SynonymGraphFilter;
 
         // Create synonym dictionary
         let mut dict = SynonymDictionary::new(None).unwrap();

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::embeding::EmbeddingConfig;
+use crate::embeding::engine::EmbeddingConfig;
 use crate::vector::types::VectorSearchConfig;
 
 /// Configuration for hybrid search combining keyword and vector search.

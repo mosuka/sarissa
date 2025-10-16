@@ -1,6 +1,6 @@
 //! No-op analyzer that performs no analysis.
 
-use crate::analysis::analyzer::Analyzer;
+use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::token::TokenStream;
 use crate::error::Result;
 

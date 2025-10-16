@@ -4,7 +4,7 @@
 //! implementations must follow. The primary implementation is `AdvancedIndexWriter`
 //! in the `advanced_writer` module.
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::Result;
 use crate::full_text_index::advanced_writer::AnalyzedDocument;
 
@@ -16,9 +16,11 @@ use crate::full_text_index::advanced_writer::AnalyzedDocument;
 /// # Example
 ///
 /// ```rust,no_run
-/// use sage::full_text_index::{AdvancedIndexWriter, advanced_writer::AdvancedWriterConfig};
+/// use sage::full_text_index::advanced_writer::AdvancedIndexWriter;
+/// use sage::full_text_index::advanced_writer::AdvancedWriterConfig;
 /// use sage::full_text_index::writer::IndexWriter;
-/// use sage::storage::{MemoryStorage, StorageConfig};
+/// use sage::storage::memory::MemoryStorage;
+/// use sage::storage::traits::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));

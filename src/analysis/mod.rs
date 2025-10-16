@@ -8,10 +8,3 @@ pub mod synonym;
 pub mod token;
 pub mod token_filter;
 pub mod tokenizer;
-
-// Re-export commonly used types
-pub use analyzer::*;
-pub use synonym::*;
-pub use token::*;
-pub use token_filter::*;
-pub use tokenizer::*;

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::analysis::analyzer::Analyzer;
+use crate::analysis::analyzer::analyzer::Analyzer;
 
 /// TF-IDF vectorizer for text feature extraction.
 pub struct TfIdfVectorizer {
@@ -117,7 +117,7 @@ impl TfIdfVectorizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::analyzer::language::EnglishAnalyzer;
+    use crate::analysis::analyzer::language::english::EnglishAnalyzer;
 
     #[test]
     fn test_tfidf_vectorizer() {

@@ -5,10 +5,13 @@
 
 use tempfile::TempDir;
 
-use sage::document::{DocumentConverter, FieldValueDocumentConverter, JsonDocumentConverter};
+use sage::document::converter::{
+    DocumentConverter, FieldValueDocumentConverter, JsonDocumentConverter,
+};
+use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::{SearchEngine, SearchRequest};
-use sage::prelude::*;
+use sage::full_text_search::SearchRequest;
+use sage::full_text_search::engine::SearchEngine;
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");
@@ -96,7 +99,7 @@ in_stock:true
 
     // Search by category (using KeywordAnalyzer - exact match)
     println!("Search: category:electronics");
-    let query_parser = sage::query::QueryParser::new();
+    let query_parser = sage::query::parser::QueryParser::new();
     let query = query_parser.parse_field("category", "electronics")?;
     let results = engine.search(SearchRequest::new(query).load_documents(true))?;
 

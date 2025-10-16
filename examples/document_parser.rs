@@ -14,12 +14,17 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use sage::analysis::{Analyzer, KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
-use sage::document::{Document, DocumentParser};
+use sage::analysis::analyzer::analyzer::Analyzer;
+use sage::analysis::analyzer::keyword::KeywordAnalyzer;
+use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
+use sage::analysis::analyzer::standard::StandardAnalyzer;
+use sage::document::document::Document;
+use sage::document::parser::DocumentParser;
 use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sage::full_text_search::{SearchEngine, SearchRequest};
+use sage::full_text_index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::full_text_search::SearchRequest;
+use sage::full_text_search::engine::SearchEngine;
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");
@@ -103,7 +108,7 @@ fn main() -> Result<()> {
     let query_str = "category:programming";
     println!("Query: {query_str}");
 
-    use sage::query::QueryParser;
+    use sage::query::parser::QueryParser;
     let parser = QueryParser::new();
     let query = parser.parse(query_str)?;
 

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::parallel_full_text_index::config::IndexingOptions;
 use crate::parallel_full_text_index::partitioner::DocumentPartitioner;
@@ -384,7 +384,7 @@ pub fn partition_documents_into_batches(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::FieldValue;
+    use crate::document::field_value::FieldValue;
     use crate::parallel_full_text_index::partitioner::HashPartitioner;
 
     fn create_test_document(id: &str) -> Document {

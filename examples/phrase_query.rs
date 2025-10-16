@@ -1,10 +1,11 @@
 //! PhraseQuery example - demonstrates phrase search for exact word sequences.
 
+use sage::document::document::Document;
+use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::SearchEngine;
 use sage::full_text_search::SearchRequest;
-use sage::prelude::*;
-use sage::query::PhraseQuery;
+use sage::full_text_search::engine::SearchEngine;
+use sage::query::phrase::PhraseQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

@@ -9,12 +9,15 @@ use std::sync::{Arc, RwLock};
 
 use ahash::AHashMap;
 
-use crate::analysis::Analyzer;
-use crate::document::{Document, FieldValue};
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::document::document::Document;
+use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::full_text::dictionary::HybridTermDictionary;
-use crate::full_text::{SegmentInfo, TermInfo};
-use crate::storage::{Storage, StructReader};
+use crate::full_text::dictionary::TermInfo;
+use crate::full_text::index::SegmentInfo;
+use crate::storage::structured::StructReader;
+use crate::storage::traits::Storage;
 
 /// Advanced index reader configuration.
 #[derive(Debug, Clone)]
@@ -53,7 +56,7 @@ impl Default for AdvancedReaderConfig {
 #[derive(Debug)]
 pub struct AdvancedPostingIterator {
     /// The posting data.
-    postings: Vec<crate::full_text::Posting>,
+    postings: Vec<crate::full_text::posting::Posting>,
 
     /// Current position in the posting list.
     position: usize,
@@ -86,7 +89,7 @@ pub struct PostingBlock {
 
 impl AdvancedPostingIterator {
     /// Create a new advanced posting iterator.
-    pub fn new(postings: Vec<crate::full_text::Posting>) -> Self {
+    pub fn new(postings: Vec<crate::full_text::posting::Posting>) -> Self {
         AdvancedPostingIterator {
             postings,
             position: 0,
@@ -97,7 +100,10 @@ impl AdvancedPostingIterator {
     }
 
     /// Create posting iterator with block optimization.
-    pub fn with_blocks(postings: Vec<crate::full_text::Posting>, block_size: usize) -> Self {
+    pub fn with_blocks(
+        postings: Vec<crate::full_text::posting::Posting>,
+        block_size: usize,
+    ) -> Self {
         let blocks = Self::create_blocks(&postings, block_size);
         AdvancedPostingIterator {
             postings,
@@ -110,7 +116,7 @@ impl AdvancedPostingIterator {
 
     /// Create posting blocks for efficient skip-to operations.
     fn create_blocks(
-        postings: &[crate::full_text::Posting],
+        postings: &[crate::full_text::posting::Posting],
         block_size: usize,
     ) -> Vec<PostingBlock> {
         let mut blocks = Vec::new();
@@ -427,7 +433,7 @@ impl SegmentReader {
             }
 
             // Decode the posting list
-            use crate::full_text::PostingList;
+            use crate::full_text::posting::PostingList;
             let posting_list = PostingList::decode(&mut reader)?;
 
             Ok(Some(Box::new(AdvancedPostingIterator::with_blocks(
@@ -454,7 +460,7 @@ impl SegmentReader {
         let docs = self.stored_documents.read().unwrap();
         if let Some(documents) = docs.as_ref() {
             let mut postings = Vec::new();
-            let default_analyzer = crate::analysis::StandardAnalyzer::new()?;
+            let default_analyzer = crate::analysis::analyzer::standard::StandardAnalyzer::new()?;
 
             for (doc_id, doc) in documents.iter() {
                 if let Some(field_value) = doc.get_field(field)
@@ -462,7 +468,7 @@ impl SegmentReader {
                 {
                     // Use default analyzer (analyzers are configured at writer level)
                     let token_stream = default_analyzer.analyze(text)?;
-                    let tokens: Vec<crate::analysis::Token> = token_stream.collect();
+                    let tokens: Vec<crate::analysis::token::Token> = token_stream.collect();
 
                     let mut positions = Vec::new();
                     for token in tokens.iter() {
@@ -472,7 +478,7 @@ impl SegmentReader {
                     }
 
                     if !positions.is_empty() {
-                        postings.push(crate::full_text::Posting {
+                        postings.push(crate::full_text::posting::Posting {
                             doc_id: *doc_id,
                             frequency: positions.len() as u32,
                             positions: Some(positions),
@@ -508,7 +514,7 @@ pub struct CacheManager {
 
     /// Posting list cache.
     #[allow(dead_code)]
-    posting_cache: RwLock<AHashMap<String, Arc<Vec<crate::full_text::Posting>>>>,
+    posting_cache: RwLock<AHashMap<String, Arc<Vec<crate::full_text::posting::Posting>>>>,
 
     /// Current memory usage.
     memory_usage: AtomicUsize,
@@ -848,31 +854,31 @@ mod tests {
     #[test]
     fn test_advanced_posting_iterator() {
         let postings = vec![
-            crate::full_text::Posting {
+            crate::full_text::posting::Posting {
                 doc_id: 1,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::full_text::Posting {
+            crate::full_text::posting::Posting {
                 doc_id: 3,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::full_text::Posting {
+            crate::full_text::posting::Posting {
                 doc_id: 5,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::full_text::Posting {
+            crate::full_text::posting::Posting {
                 doc_id: 7,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::full_text::Posting {
+            crate::full_text::posting::Posting {
                 doc_id: 9,
                 frequency: 1,
                 positions: Some(vec![0]),

@@ -6,9 +6,11 @@ use std::ops::Range;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{Analyzer, StandardAnalyzer, Token};
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::standard::StandardAnalyzer;
+use crate::analysis::token::Token;
 use crate::error::Result;
-use crate::query::Query;
+use crate::query::query::Query;
 
 /// Configuration for text highlighting.
 #[derive(Debug, Clone)]
@@ -626,7 +628,7 @@ impl SimpleHighlighter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::TermQuery;
+    use crate::query::term::TermQuery;
 
     #[test]
     fn test_highlight_config() {

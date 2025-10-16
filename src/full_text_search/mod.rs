@@ -17,26 +17,9 @@ pub mod searcher;
 pub mod similarity;
 pub mod spell_corrected;
 
-// Re-export commonly used types
-pub use advanced_reader::AdvancedIndexReader;
-pub use engine::SearchEngine;
-pub use facet::*;
-pub use highlight::*;
-pub use result_processor::*;
-pub use scoring::*;
-pub use searcher::Searcher;
-pub use similarity::*;
-pub use spell_corrected::*;
-
-// Re-export search functionality from query module
-pub use crate::query::{FuzzyConfig, FuzzyMatch, FuzzyQuery};
-pub use crate::query::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoMatch, GeoPoint};
-pub use crate::query::{
-    MoreLikeThisQuery, SimilarityAlgorithm, SimilarityConfig, SimilarityResult,
-};
-
 use crate::error::Result;
-use crate::query::{Query, SearchResults};
+use crate::query::SearchResults;
+use crate::query::query::Query;
 
 /// Configuration for search operations.
 #[derive(Debug, Clone)]
@@ -123,14 +106,14 @@ impl SearchRequest {
     }
 
     /// Execute the search request.
-    pub fn search(self, engine: &mut SearchEngine) -> Result<SearchResults> {
+    pub fn search(self, engine: &mut engine::SearchEngine) -> Result<SearchResults> {
         engine.search(self)
     }
 }
 
 // Implement Searchable trait for SearchEngine to support hybrid search
-impl crate::hybrid_search::Searchable for SearchEngine {
+impl crate::hybrid_search::engine::Searchable for engine::SearchEngine {
     fn search(&self, request: SearchRequest) -> Result<SearchResults> {
-        SearchEngine::search(self, request)
+        engine::SearchEngine::search(self, request)
     }
 }

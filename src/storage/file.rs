@@ -177,7 +177,7 @@ impl Storage for FileStorage {
         Ok(metadata.len())
     }
 
-    fn metadata(&self, name: &str) -> Result<crate::storage::FileMetadata> {
+    fn metadata(&self, name: &str) -> Result<crate::storage::traits::FileMetadata> {
         self.check_closed()?;
 
         let path = self.file_path(name);
@@ -203,7 +203,7 @@ impl Storage for FileStorage {
             .unwrap_or_default()
             .as_secs();
 
-        Ok(crate::storage::FileMetadata {
+        Ok(crate::storage::traits::FileMetadata {
             size: metadata.len(),
             modified,
             created,

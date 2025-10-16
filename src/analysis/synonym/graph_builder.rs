@@ -60,7 +60,8 @@ impl SynonymGraphBuilder {
     ///
     /// # Example
     /// ```
-    /// use sage::analysis::synonym::{SynonymDictionary, SynonymGraphBuilder};
+    /// use sage::analysis::synonym::dictionary::SynonymDictionary;
+    /// use sage::analysis::synonym::graph_builder::SynonymGraphBuilder;
     ///
     /// let mut dict = SynonymDictionary::new(None).unwrap();
     /// dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);
@@ -264,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_build_graph_tokens_multi_word_synonym() {
-        use crate::analysis::tokenizer::WhitespaceTokenizer;
+        use crate::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 
         let mut dict = SynonymDictionary::new(None).unwrap();
         dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);
@@ -332,7 +333,7 @@ mod tests {
 
     #[test]
     fn test_boost_multi_word_synonym() {
-        use crate::analysis::tokenizer::WhitespaceTokenizer;
+        use crate::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 
         let mut dict = SynonymDictionary::new(None).unwrap();
         dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);

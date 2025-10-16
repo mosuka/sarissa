@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::error::{Result, SageError};
-use crate::storage::{StorageInput, StorageOutput};
+use crate::storage::traits::{StorageInput, StorageOutput};
 use crate::util::varint::{decode_u64, encode_u64};
 
 /// A structured file writer for binary data.
@@ -496,7 +496,8 @@ impl<R: StorageInput> BlockReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{MemoryStorage, Storage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::{Storage, StorageConfig};
     use std::sync::Arc;
 
     #[test]

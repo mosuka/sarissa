@@ -151,7 +151,7 @@ pub struct HybridSearchTask {
     pub query_text: String,
 
     /// Keyword query.
-    pub keyword_query: Box<dyn crate::query::Query>,
+    pub keyword_query: Box<dyn crate::query::query::Query>,
 
     /// Query vector (if available).
     pub query_vector: Option<crate::vector::Vector>,

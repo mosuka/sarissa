@@ -5,8 +5,8 @@ use std::fmt::Debug;
 
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher};
+use crate::query::query::Query;
 use crate::query::scorer::{BM25Scorer, Scorer};
 
 /// A matcher that finds documents containing phrase matches.

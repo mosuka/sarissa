@@ -6,9 +6,9 @@ use crate::error::Result;
 use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 use crate::parallel_full_text_search::config::{ParallelSearchConfig, SearchOptions};
 use crate::parallel_full_text_search::engine::ParallelSearchEngine;
-use crate::query::TermQuery;
-
-use crate::storage::{MemoryStorage, StorageConfig};
+use crate::query::term::TermQuery;
+use crate::storage::memory::MemoryStorage;
+use crate::storage::traits::StorageConfig;
 
 /// Example function demonstrating parallel search usage.
 pub fn example_parallel_search() -> Result<()> {

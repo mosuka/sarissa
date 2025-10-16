@@ -12,9 +12,3 @@ pub mod engine;
 pub mod metrics;
 pub mod partitioner;
 pub mod writer_manager;
-
-pub use config::{ParallelIndexConfig, PartitionConfig};
-pub use engine::ParallelIndexEngine;
-pub use metrics::{IndexingMetrics, IndexingMetricsCollector};
-pub use partitioner::{DocumentPartitioner, HashPartitioner, RangePartitioner, ValuePartitioner};
-pub use writer_manager::{IndexWriterHandle, WriterManager};

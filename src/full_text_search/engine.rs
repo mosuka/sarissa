@@ -4,13 +4,15 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::Result;
-use crate::full_text::Index;
+use crate::full_text::index::Index;
 use crate::full_text::index::{FileIndex, IndexConfig};
-use crate::full_text_search::{SearchRequest, Searcher};
-use crate::query::{Query, SearchResults};
-use crate::storage::Storage;
+use crate::full_text_search::SearchRequest;
+use crate::full_text_search::searcher::Searcher;
+use crate::query::SearchResults;
+use crate::query::query::Query;
+use crate::storage::traits::Storage;
 
 /// A high-level search engine that provides both indexing and searching capabilities.
 #[derive(Debug)]
@@ -150,7 +152,7 @@ impl SearchEngine {
     }
 
     /// Get index statistics.
-    pub fn stats(&self) -> Result<crate::full_text::IndexStats> {
+    pub fn stats(&self) -> Result<crate::full_text::index::IndexStats> {
         self.index.stats()
     }
 
@@ -183,7 +185,7 @@ impl SearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::TermQuery;
+    use crate::query::term::TermQuery;
 
     use tempfile::TempDir;
 
@@ -397,7 +399,7 @@ mod tests {
         engine.commit().unwrap();
 
         // Search with QueryParser (Lucene style)
-        use crate::query::QueryParser;
+        use crate::query::parser::QueryParser;
         let parser = QueryParser::with_standard_analyzer()
             .unwrap()
             .with_default_field("title");
@@ -420,7 +422,7 @@ mod tests {
         let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Search specific field
-        use crate::query::QueryParser;
+        use crate::query::parser::QueryParser;
         let parser = QueryParser::new();
         let query = parser.parse_field("title", "hello world").unwrap();
         let results = engine.search(SearchRequest::new(query)).unwrap();
@@ -437,7 +439,7 @@ mod tests {
 
         let _engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
-        use crate::query::QueryParser;
+        use crate::query::parser::QueryParser;
         let parser = QueryParser::new();
         assert!(parser.default_field().is_none());
 
@@ -453,7 +455,7 @@ mod tests {
         let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Test complex query parsing
-        use crate::query::QueryParser;
+        use crate::query::parser::QueryParser;
         let parser = QueryParser::new().with_default_field("title");
         let query = parser.parse("title:hello AND body:world").unwrap();
         let results = engine.search(SearchRequest::new(query)).unwrap();

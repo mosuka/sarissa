@@ -4,11 +4,11 @@ use std::fmt::Debug;
 
 use chrono::{DateTime, Utc};
 
-use crate::document::NumericType;
+use crate::document::field_value::NumericType;
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::query::Query;
 use crate::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
+use crate::query::query::Query;
 use crate::query::scorer::{BM25Scorer, Scorer};
 
 /// Bound type for range queries.
@@ -461,8 +461,8 @@ impl NumericRangeQuery {
                 && let Some(field_value) = doc.get_field(&self.field)
             {
                 let numeric_value = match field_value {
-                    crate::document::FieldValue::Float(f) => *f,
-                    crate::document::FieldValue::Integer(i) => *i as f64,
+                    crate::document::field_value::FieldValue::Float(f) => *f,
+                    crate::document::field_value::FieldValue::Integer(i) => *i as f64,
                     _ => continue, // Not a numeric field
                 };
 
@@ -647,10 +647,10 @@ impl Query for NumericRangeQuery {
                 && let Some(field_value) = doc.get_field(&self.field)
             {
                 let numeric_value = match field_value {
-                    crate::document::FieldValue::Float(f) => Some(*f),
-                    crate::document::FieldValue::Integer(i) => Some(*i as f64),
+                    crate::document::field_value::FieldValue::Float(f) => Some(*f),
+                    crate::document::field_value::FieldValue::Integer(i) => Some(*i as f64),
                     // WORKAROUND: Parse text values as numbers (needed because stored docs lose type info)
-                    crate::document::FieldValue::Text(s) => s.parse::<f64>().ok(),
+                    crate::document::field_value::FieldValue::Text(s) => s.parse::<f64>().ok(),
                     _ => None,
                 };
 
@@ -853,8 +853,8 @@ impl NumericRangeFilterMatcher {
                 if let Some(field_value) = doc.get_field(&self.query.field) {
                     // Check if it's a numeric field and extract the value
                     let numeric_value = match field_value {
-                        crate::document::FieldValue::Float(f) => *f,
-                        crate::document::FieldValue::Integer(i) => *i as f64,
+                        crate::document::field_value::FieldValue::Float(f) => *f,
+                        crate::document::field_value::FieldValue::Integer(i) => *i as f64,
                         _ => return false, // Not a numeric field
                     };
 
@@ -1424,7 +1424,7 @@ mod tests {
         fn document(
             &self,
             _doc_id: u64,
-        ) -> crate::error::Result<Option<crate::document::Document>> {
+        ) -> crate::error::Result<Option<crate::document::document::Document>> {
             Ok(None)
         }
         fn term_info(

@@ -15,7 +15,8 @@ use crate::parallel_full_text_search::metrics::{SearchMetricsCollector, Timer};
 use crate::parallel_full_text_search::search_task::{
     SearchTask, TaskHandle, TaskResult, TaskStatus,
 };
-use crate::query::{Query, SearchResults};
+use crate::query::SearchResults;
+use crate::query::query::Query;
 
 /// Parallel search engine for executing queries across multiple indices.
 pub struct ParallelSearchEngine {
@@ -232,7 +233,7 @@ impl ParallelSearchEngine {
 
         // Create searcher for this index
         let searcher =
-            crate::full_text_search::Searcher::from_arc(Arc::clone(&index_handle.reader));
+            crate::full_text_search::searcher::Searcher::from_arc(Arc::clone(&index_handle.reader));
 
         // Create search request
         let mut request = SearchRequest::new(task.query)
@@ -279,9 +280,9 @@ impl ParallelSearchEngine {
 mod tests {
     use super::*;
     use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
-    use crate::query::TermQuery;
-
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::query::term::TermQuery;
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     fn create_test_reader() -> Box<dyn IndexReader> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));

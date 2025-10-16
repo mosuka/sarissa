@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::FieldValue;
+use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
 use crate::full_text_search::facet::{FacetCollector, FacetResults};
 use crate::full_text_search::highlight::{HighlightConfig, Highlighter};
-use crate::query::{Query, QueryResult};
+use crate::query::QueryResult;
+use crate::query::query::Query;
 
 /// Configuration for result processing.
 #[derive(Debug, Clone, Serialize, Deserialize)]

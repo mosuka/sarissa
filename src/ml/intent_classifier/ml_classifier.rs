@@ -5,12 +5,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use super::types::QueryIntent;
-use crate::analysis::analyzer::Analyzer;
-
-use super::classifier::IntentClassifier;
-use super::tfidf::TfIdfVectorizer;
-use super::types::IntentSample;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::ml::intent_classifier::classifier::IntentClassifier;
+use crate::ml::intent_classifier::tfidf::TfIdfVectorizer;
+use crate::ml::intent_classifier::types::{IntentSample, QueryIntent};
 
 /// Machine learning-based intent classifier.
 #[derive(Debug)]
@@ -119,7 +117,8 @@ impl IntentClassifier for MLBasedIntentClassifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
+    use crate::analysis::analyzer::language::english::EnglishAnalyzer;
+    use crate::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 
     #[test]
     fn test_ml_intent_classifier() {

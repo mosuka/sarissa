@@ -8,7 +8,9 @@ use rayon::prelude::*;
 use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
 use crate::full_text_search::SearchRequest;
-use crate::query::{Collector, CountCollector, Query, SearchHit, SearchResults, TopDocsCollector};
+use crate::query::collector::{Collector, CountCollector, TopDocsCollector};
+use crate::query::query::Query;
+use crate::query::{SearchHit, SearchResults};
 
 /// A searcher that executes queries against an index reader.
 #[derive(Debug)]
@@ -53,7 +55,9 @@ impl Searcher {
     ) -> Result<C> {
         // For BooleanQuery with multiple clauses, try to execute sub-queries in parallel
         if parallel
-            && let Some(boolean_query) = query.as_any().downcast_ref::<crate::query::BooleanQuery>()
+            && let Some(boolean_query) = query
+                .as_any()
+                .downcast_ref::<crate::query::boolean::BooleanQuery>()
         {
             return self.search_boolean_query_parallel(boolean_query, collector);
         }
@@ -97,7 +101,7 @@ impl Searcher {
     /// Execute a BooleanQuery with parallel sub-query execution.
     fn search_boolean_query_parallel<C: Collector>(
         &self,
-        boolean_query: &crate::query::BooleanQuery,
+        boolean_query: &crate::query::boolean::BooleanQuery,
         collector: C,
     ) -> Result<C> {
         let clauses = boolean_query.clauses();
@@ -291,9 +295,10 @@ impl Searcher {
 mod tests {
     use super::*;
     use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
-    use crate::query::{BooleanQuery, BooleanQueryBuilder, TermQuery};
-
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::query::boolean::{BooleanQuery, BooleanQueryBuilder};
+    use crate::query::term::TermQuery;
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
     use std::sync::Arc;
 
     #[allow(dead_code)]

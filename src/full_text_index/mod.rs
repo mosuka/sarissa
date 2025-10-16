@@ -17,17 +17,3 @@ pub mod optimize;
 pub mod segment_manager;
 pub mod transaction;
 pub mod writer;
-
-// Re-export commonly used types
-pub use advanced_writer::{
-    AdvancedIndexWriter, AdvancedWriterConfig, AnalyzedDocument, AnalyzedTerm,
-};
-pub use background_tasks::BackgroundTask;
-pub use deletion::DeletionManager;
-pub use merge_engine::MergeEngine;
-pub use merge_policy::MergePolicy;
-pub use optimization::IndexOptimizer;
-pub use optimize::{OptimizationRecommendation, OptimizationResult};
-pub use segment_manager::{ManagedSegmentInfo, SegmentManager};
-pub use transaction::Transaction;
-pub use writer::IndexWriter;

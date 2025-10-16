@@ -9,10 +9,11 @@ use super::config::HybridSearchConfig;
 use super::merger::ResultMerger;
 use super::stats::HybridSearchStats;
 use super::types::HybridSearchResults;
-use crate::embeding::EmbeddingEngine;
+use crate::embeding::engine::EmbeddingEngine;
 use crate::error::Result;
 use crate::full_text_search::SearchRequest;
-use crate::query::{Query, SearchResults};
+use crate::query::SearchResults;
+use crate::query::query::Query;
 use crate::vector::types::{VectorSearchResult, VectorSearchResults};
 use crate::vector::{DistanceMetric, Vector};
 
@@ -243,7 +244,8 @@ impl HybridSearchEngine {
 mod tests {
     use super::*;
     use crate::full_text_search::SearchRequest;
-    use crate::query::{SearchHit, SearchResults, TermQuery};
+    use crate::query::term::TermQuery;
+    use crate::query::{SearchHit, SearchResults};
 
     struct MockSearch {
         results: Vec<SearchHit>,

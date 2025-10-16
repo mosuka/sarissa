@@ -7,7 +7,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
-use crate::full_text_index::IndexWriter;
+use crate::full_text_index::writer::IndexWriter;
 use crate::parallel_full_text_index::config::PartitionConfig;
 
 /// Statistics for a specific index partition.
@@ -124,7 +124,10 @@ impl IndexWriterHandle {
     }
 
     /// Execute an indexing operation.
-    pub fn index_documents(&self, documents: Vec<crate::document::Document>) -> Result<()> {
+    pub fn index_documents(
+        &self,
+        documents: Vec<crate::document::document::Document>,
+    ) -> Result<()> {
         let start = Instant::now();
 
         // Update last operation timestamp
@@ -365,9 +368,10 @@ impl Clone for IndexWriterHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text_index::AdvancedIndexWriter;
+    use crate::full_text_index::advanced_writer::AdvancedIndexWriter;
 
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     fn create_test_writer() -> Box<dyn IndexWriter> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));

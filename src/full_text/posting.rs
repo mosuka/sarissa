@@ -6,7 +6,8 @@
 use ahash::AHashMap;
 
 use crate::error::{Result, SageError};
-use crate::storage::{StorageInput, StorageOutput, StructReader, StructWriter};
+use crate::storage::structured::{StructReader, StructWriter};
+use crate::storage::traits::{StorageInput, StorageOutput};
 
 /// A single posting in a posting list.
 #[derive(Debug, Clone, PartialEq)]
@@ -533,7 +534,8 @@ impl InvertedIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{MemoryStorage, Storage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::{Storage, StorageConfig};
     use std::sync::Arc;
 
     #[test]

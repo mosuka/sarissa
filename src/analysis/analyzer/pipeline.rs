@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::analysis::analyzer::Analyzer;
+use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::token::TokenStream;
 use crate::analysis::token_filter::Filter;
 use crate::analysis::tokenizer::Tokenizer;
@@ -93,8 +93,9 @@ impl std::fmt::Debug for PipelineAnalyzer {
 mod tests {
     use super::*;
     use crate::analysis::token::Token;
-    use crate::analysis::token_filter::{LowercaseFilter, StopFilter};
-    use crate::analysis::tokenizer::RegexTokenizer;
+    use crate::analysis::token_filter::lowercase::LowercaseFilter;
+    use crate::analysis::token_filter::stop::StopFilter;
+    use crate::analysis::tokenizer::regex::RegexTokenizer;
 
     #[test]
     fn test_pipeline_analyzer() {

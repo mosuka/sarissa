@@ -359,11 +359,6 @@ pub fn vector_multiply_simd(a: &[f32], b: &[f32]) -> Vec<f32> {
     result
 }
 
-/// Re-export for backward compatibility.
-pub mod numeric_wide {
-    pub use super::*;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

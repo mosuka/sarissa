@@ -3,8 +3,9 @@
 //! This module provides a DocumentConverter trait and various implementations
 //! that can convert different formats into Document objects.
 
-use crate::analysis::Analyzer;
-use crate::document::{Document, FieldValue};
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::document::document::Document;
+use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use std::sync::Arc;
 
@@ -16,7 +17,8 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```
-/// use sage::document::{DocumentConverter, FieldValueDocumentConverter};
+/// use sage::document::converter::DocumentConverter;
+/// use sage::document::converter::FieldValueDocumentConverter;
 ///
 /// let converter = FieldValueDocumentConverter::new();
 /// let doc = converter.convert("title:Rust Programming\nbody:Search engine tutorial").unwrap();

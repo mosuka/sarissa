@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use super::types::QueryIntent;
+use crate::ml::intent_classifier::types::QueryIntent;
 
 /// Intent classifier trait.
 ///

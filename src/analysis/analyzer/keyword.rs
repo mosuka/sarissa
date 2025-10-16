@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use crate::analysis::analyzer::{Analyzer, SimpleAnalyzer};
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::simple::SimpleAnalyzer;
 use crate::analysis::token::TokenStream;
-use crate::analysis::tokenizer::WholeTokenizer;
+use crate::analysis::tokenizer::whole::WholeTokenizer;
 use crate::error::Result;
 
 /// A keyword analyzer that treats the entire input as a single token.

@@ -1,10 +1,11 @@
 //! GeoQuery example - demonstrates geographic location-based searches.
 
+use sage::document::document::Document;
+use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::SearchEngine;
 use sage::full_text_search::SearchRequest;
-use sage::prelude::*;
-use sage::query::GeoQuery;
+use sage::full_text_search::engine::SearchEngine;
+use sage::query::geo::GeoQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

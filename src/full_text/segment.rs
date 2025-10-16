@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::storage::Storage;
+use crate::storage::traits::Storage;
 
 /// Segment metadata and management.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,9 +146,7 @@ impl SegmentManager {
     /// Save segment metadata to storage.
     pub fn save(&self) -> Result<()> {
         let data = serde_json::to_vec_pretty(&self.segments).map_err(|e| {
-            crate::error::SageError::storage(format!(
-                "Failed to serialize segments metadata: {e}"
-            ))
+            crate::error::SageError::storage(format!("Failed to serialize segments metadata: {e}"))
         })?;
 
         if let Ok(mut output) = self.storage.create_output("segments.json") {
@@ -357,7 +355,8 @@ impl MergeOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     #[test]
     fn test_segment_creation() {

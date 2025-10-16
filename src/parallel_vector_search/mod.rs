@@ -9,9 +9,6 @@
 pub mod executor;
 pub mod merger;
 
-pub use executor::{ParallelVectorSearchExecutor, SearchTask, SearchTaskResult};
-pub use merger::{MergeStrategy as SearchMergeStrategy, ResultMergeStats, VectorResultMerger};
-
 use std::sync::Arc;
 
 use rayon::ThreadPool;
@@ -19,6 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::vector_search::VectorSearchEngineConfig;
+
+use crate::parallel_vector_search::executor::ParallelVectorSearchExecutor;
+use crate::parallel_vector_search::merger::MergeStrategy as SearchMergeStrategy;
 
 /// Configuration for parallel vector search operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]

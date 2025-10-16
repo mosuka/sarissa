@@ -139,7 +139,7 @@ impl Storage for MemoryStorage {
         Ok(data.len() as u64)
     }
 
-    fn metadata(&self, name: &str) -> Result<crate::storage::FileMetadata> {
+    fn metadata(&self, name: &str) -> Result<crate::storage::traits::FileMetadata> {
         self.check_closed()?;
 
         let files = self.files.lock().unwrap();
@@ -149,7 +149,7 @@ impl Storage for MemoryStorage {
                 .unwrap_or_default()
                 .as_secs();
 
-            Ok(crate::storage::FileMetadata {
+            Ok(crate::storage::traits::FileMetadata {
                 size: data.len() as u64,
                 modified: now,
                 created: now,

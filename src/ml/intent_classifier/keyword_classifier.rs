@@ -5,10 +5,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use super::types::QueryIntent;
-use crate::analysis::analyzer::Analyzer;
-
-use super::classifier::IntentClassifier;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::ml::intent_classifier::classifier::IntentClassifier;
+use crate::ml::intent_classifier::types::QueryIntent;
 
 /// Keyword-based intent classifier.
 ///

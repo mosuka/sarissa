@@ -4,12 +4,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::analysis::analyzer::Analyzer;
-
-use super::classifier::IntentClassifier;
-use super::keyword_classifier::KeywordBasedIntentClassifier;
-use super::ml_classifier::MLBasedIntentClassifier;
-use super::types::IntentSample;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::ml::intent_classifier::classifier::IntentClassifier;
+use crate::ml::intent_classifier::keyword_classifier::KeywordBasedIntentClassifier;
+use crate::ml::intent_classifier::ml_classifier::MLBasedIntentClassifier;
+use crate::ml::intent_classifier::types::IntentSample;
 
 /// Load training data from JSON file.
 pub fn load_training_data(path: &str) -> Result<Vec<IntentSample>> {

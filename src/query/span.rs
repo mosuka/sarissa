@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::query::{Matcher, Query, Scorer};
+use crate::query::matcher::Matcher;
+use crate::query::query::Query;
+use crate::query::scorer::Scorer;
 
 /// A span represents a term occurrence with position information.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

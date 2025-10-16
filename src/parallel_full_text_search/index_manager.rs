@@ -289,8 +289,8 @@ impl Default for IndexManager {
 mod tests {
     use super::*;
     use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
-
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     fn create_test_reader() -> Arc<dyn IndexReader> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));

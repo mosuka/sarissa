@@ -7,9 +7,3 @@ pub mod corrector;
 pub mod dictionary;
 pub mod levenshtein;
 pub mod suggest;
-
-// Re-export commonly used types
-pub use corrector::*;
-pub use dictionary::*;
-pub use levenshtein::*;
-pub use suggest::*;

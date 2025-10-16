@@ -6,9 +6,6 @@
 pub mod reader;
 pub mod types;
 
-pub use reader::{ValidationReport, VectorIndexMetadata, VectorIndexReader, VectorIterator};
-pub use types::*;
-
 use std::collections::HashMap;
 
 use rayon::prelude::*;

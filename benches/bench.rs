@@ -8,12 +8,12 @@
 //! - Parallel operations
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use sage::{
-    analysis::{Analyzer, StandardAnalyzer},
-    spelling::SpellingCorrector,
-    vector::{DistanceMetric, Vector},
-    vector_index::{VectorIndexBuilder, hnsw_builder::HnswIndexBuilder},
-};
+use sage::analysis::analyzer::analyzer::Analyzer;
+use sage::analysis::analyzer::standard::StandardAnalyzer;
+use sage::spelling::corrector::SpellingCorrector;
+use sage::vector::{DistanceMetric, Vector};
+use sage::vector_index::hnsw_builder::HnswIndexBuilder;
+use sage::vector_index::{VectorIndexBuildConfig, VectorIndexBuilder};
 use std::hint::black_box;
 
 /// Generate test documents for benchmarking.
@@ -128,7 +128,6 @@ fn bench_vector_search(c: &mut Criterion) {
     group.bench_function("hnsw_index_construction", |b| {
         b.iter_with_setup(
             || {
-                use sage::vector_index::VectorIndexBuildConfig;
                 HnswIndexBuilder::new(VectorIndexBuildConfig {
                     dimension,
                     ..Default::default()
@@ -321,7 +320,6 @@ fn bench_scalability(c: &mut Criterion) {
 
                 b.iter_with_setup(
                     || {
-                        use sage::vector_index::VectorIndexBuildConfig;
                         HnswIndexBuilder::new(VectorIndexBuildConfig {
                             dimension: 128,
                             ..Default::default()
@@ -400,10 +398,8 @@ fn bench_synonym_dictionary(c: &mut Criterion) {
 }
 
 /// Create a test dictionary with specified number of synonym groups.
-fn create_test_dictionary(
-    num_groups: usize,
-) -> sage::analysis::token_filter::synonym_graph::SynonymDictionary {
-    use sage::analysis::token_filter::synonym_graph::SynonymDictionary;
+fn create_test_dictionary(num_groups: usize) -> sage::analysis::synonym::SynonymDictionary {
+    use sage::analysis::synonym::SynonymDictionary;
 
     let mut groups = Vec::new();
     for i in 0..num_groups {

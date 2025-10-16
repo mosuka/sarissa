@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::Result;
 use crate::ml::{FeedbackSignal, MLContext, SearchHistoryItem, UserSession};
 

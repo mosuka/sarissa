@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::query::{Matcher, Query, Scorer};
+use crate::query::matcher::Matcher;
+use crate::query::query::Query;
+use crate::query::scorer::Scorer;
 
 /// A geographical point with latitude and longitude.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

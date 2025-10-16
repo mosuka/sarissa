@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use sage::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
-use sage::ml::intent_classifier;
+use sage::analysis::analyzer::language::english::EnglishAnalyzer;
+use sage::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+use sage::ml::intent_classifier::core;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,9 +19,9 @@ async fn main() -> Result<()> {
     println!("Creating English intent classifier...");
     let en_training_data_path = "resource/ml/intent_samples_en.json";
     let en_analyzer = Arc::new(EnglishAnalyzer::new()?);
-    let en_samples = intent_classifier::load_training_data(en_training_data_path)?;
+    let en_samples = core::load_training_data(en_training_data_path)?;
     println!("Loaded {} English training samples", en_samples.len());
-    let en_classifier = intent_classifier::new_ml_based(en_samples, en_analyzer.clone())?;
+    let en_classifier = core::new_ml_based(en_samples, en_analyzer.clone())?;
     println!("English classifier created!");
 
     // Test queries in English
@@ -42,9 +43,9 @@ async fn main() -> Result<()> {
     println!("\nCreating Japanese intent classifier...");
     let ja_training_data_path = "resource/ml/intent_samples_ja.json";
     let ja_analyzer = Arc::new(JapaneseAnalyzer::new()?);
-    let ja_samples = intent_classifier::load_training_data(ja_training_data_path)?;
+    let ja_samples = core::load_training_data(ja_training_data_path)?;
     println!("Loaded {} Japanese training samples", ja_samples.len());
-    let ja_classifier = intent_classifier::new_ml_based(ja_samples, ja_analyzer.clone())?;
+    let ja_classifier = core::new_ml_based(ja_samples, ja_analyzer.clone())?;
     println!("Japanese classifier created!");
 
     // Test queries in Japanese

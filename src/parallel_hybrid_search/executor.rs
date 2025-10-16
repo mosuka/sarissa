@@ -16,7 +16,8 @@ use super::types::{
 
 use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
-use crate::query::{Query, SearchResults};
+use crate::query::SearchResults;
+use crate::query::query::Query;
 use crate::vector::Vector;
 
 /// Executor for parallel hybrid search operations.
@@ -290,7 +291,8 @@ impl ParallelHybridSearchExecutor {
         config: &ParallelHybridSearchConfig,
         _index_id: &str,
     ) -> Result<SearchResults> {
-        use crate::full_text_search::{SearchConfig, SearchRequest, Searcher};
+        use crate::full_text_search::searcher::Searcher;
+        use crate::full_text_search::{SearchConfig, SearchRequest};
 
         // Create a searcher with the index reader using from_arc
         let searcher = Searcher::from_arc(reader.clone());
