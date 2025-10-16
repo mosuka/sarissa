@@ -8,6 +8,3 @@
 pub mod dictionary;
 pub mod graph_builder;
 pub mod graph_traverser;
-
-// Re-export for public access
-pub use dictionary::SynonymDictionary;

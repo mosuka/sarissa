@@ -6,7 +6,7 @@
 //! - Use boost to adjust synonym weights
 //! - Observe how tokens are expanded with synonyms
 
-use sage::analysis::synonym::SynonymDictionary;
+use sage::analysis::synonym::dictionary::SynonymDictionary;
 use sage::analysis::token_filter::Filter;
 use sage::analysis::token_filter::synonym_graph::SynonymGraphFilter;
 use sage::analysis::tokenizer::Tokenizer;
