@@ -22,16 +22,3 @@ pub mod stem;
 pub mod stop;
 pub mod strip;
 pub mod synonym_graph;
-
-// Re-export all filters for convenient access
-pub use boost::BoostFilter;
-pub use flatten_graph::FlattenGraphFilter;
-pub use limit::LimitFilter;
-pub use lowercase::LowercaseFilter;
-pub use remove_empty::RemoveEmptyFilter;
-pub use stem::{IdentityStemmer, PorterStemmer, SimpleStemmer, StemFilter, Stemmer};
-pub use stop::StopFilter;
-pub use strip::StripFilter;
-
-// Re-export synonym_graph module items
-pub use synonym_graph::{SynonymDictionary, SynonymGraphFilter};

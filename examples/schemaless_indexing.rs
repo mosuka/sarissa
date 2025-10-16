@@ -4,10 +4,14 @@
 //! allowing maximum flexibility in document structure.
 //! Analyzers are configured at the writer level using PerFieldAnalyzer.
 
-use sage::analysis::{KeywordAnalyzer, PerFieldAnalyzer, StandardAnalyzer};
-use sage::document::{Document, FieldValue};
-use sage::full_text_index::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sage::storage::{MemoryStorage, StorageConfig};
+use sage::analysis::analyzer::keyword::KeywordAnalyzer;
+use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
+use sage::analysis::analyzer::standard::StandardAnalyzer;
+use sage::document::document::Document;
+use sage::document::field_value::FieldValue;
+use sage::full_text_index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::storage::memory::MemoryStorage;
+use sage::storage::traits::StorageConfig;
 use std::sync::Arc;
 
 fn main() -> sage::error::Result<()> {

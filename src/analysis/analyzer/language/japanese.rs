@@ -2,11 +2,12 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use crate::analysis::LinderaTokenizer;
-use crate::analysis::analyzer::Analyzer;
-use crate::analysis::stop::DEFAULT_JAPANESE_STOP_WORDS_SET;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::pipeline::PipelineAnalyzer;
 use crate::analysis::token::TokenStream;
-use crate::analysis::{LowercaseFilter, PipelineAnalyzer, StopFilter};
+use crate::analysis::token_filter::lowercase::LowercaseFilter;
+use crate::analysis::token_filter::stop::{DEFAULT_JAPANESE_STOP_WORDS_SET, StopFilter};
+use crate::analysis::tokenizer::lindera::LinderaTokenizer;
 use crate::error::Result;
 
 pub struct JapaneseAnalyzer {

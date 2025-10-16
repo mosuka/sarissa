@@ -8,14 +8,17 @@ use std::time::SystemTime;
 
 use ahash::AHashSet;
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::full_text::dictionary::TermDictionaryBuilder;
+use crate::full_text::dictionary::TermInfo;
+use crate::full_text::index::SegmentInfo;
+use crate::full_text::posting::InvertedIndex;
 use crate::full_text::reader::IndexReader;
-use crate::full_text::{InvertedIndex, SegmentInfo, TermInfo};
 use crate::full_text_index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
-use crate::full_text_search::AdvancedIndexReader;
-use crate::storage::{Storage, StructWriter};
+use crate::full_text_search::advanced_reader::AdvancedIndexReader;
+use crate::storage::structured::StructWriter;
+use crate::storage::traits::Storage;
 
 /// Configuration for merge operations.
 #[derive(Debug, Clone)]
@@ -456,16 +459,18 @@ impl MergeEngine {
                 for (field_name, field_value) in document.fields() {
                     writer.write_string(field_name)?;
                     let field_str = match field_value {
-                        crate::document::FieldValue::Text(s) => s.clone(),
-                        crate::document::FieldValue::Integer(i) => i.to_string(),
-                        crate::document::FieldValue::Float(f) => f.to_string(),
-                        crate::document::FieldValue::Boolean(b) => b.to_string(),
-                        crate::document::FieldValue::Binary(_) => "[binary]".to_string(),
-                        crate::document::FieldValue::DateTime(dt) => dt.to_rfc3339(),
-                        crate::document::FieldValue::Geo(point) => {
+                        crate::document::field_value::FieldValue::Text(s) => s.clone(),
+                        crate::document::field_value::FieldValue::Integer(i) => i.to_string(),
+                        crate::document::field_value::FieldValue::Float(f) => f.to_string(),
+                        crate::document::field_value::FieldValue::Boolean(b) => b.to_string(),
+                        crate::document::field_value::FieldValue::Binary(_) => {
+                            "[binary]".to_string()
+                        }
+                        crate::document::field_value::FieldValue::DateTime(dt) => dt.to_rfc3339(),
+                        crate::document::field_value::FieldValue::Geo(point) => {
                             format!("{},{}", point.lat, point.lon)
                         }
-                        crate::document::FieldValue::Null => "null".to_string(),
+                        crate::document::field_value::FieldValue::Null => "null".to_string(),
                     };
                     writer.write_string(&field_str)?;
                 }
@@ -505,10 +510,11 @@ impl MergeEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text::SegmentInfo;
+    use crate::full_text::index::SegmentInfo;
     use crate::full_text_index::segment_manager::ManagedSegmentInfo;
 
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     #[allow(dead_code)]
     fn create_test_segment(id: &str, doc_count: u64) -> ManagedSegmentInfo {

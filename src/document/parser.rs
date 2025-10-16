@@ -7,8 +7,11 @@ use std::sync::Arc;
 
 use ahash::AHashMap;
 
-use crate::analysis::{Analyzer, PerFieldAnalyzer, Token};
-use crate::document::{Document, FieldValue};
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
+use crate::analysis::token::Token;
+use crate::document::document::Document;
+use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::full_text_index::advanced_writer::{AnalyzedDocument, AnalyzedTerm};
 
@@ -21,8 +24,11 @@ use crate::full_text_index::advanced_writer::{AnalyzedDocument, AnalyzedTerm};
 /// # Example
 ///
 /// ```
-/// use sage::document::{Document, DocumentParser};
-/// use sage::analysis::{PerFieldAnalyzer, StandardAnalyzer, KeywordAnalyzer};
+/// use sage::document::document::Document;
+/// use sage::document::parser::DocumentParser;
+/// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use sage::analysis::analyzer::standard::StandardAnalyzer;
+/// use sage::analysis::analyzer::keyword::KeywordAnalyzer;
 /// use std::sync::Arc;
 ///
 /// let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
@@ -215,7 +221,8 @@ impl DocumentParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::{KeywordAnalyzer, StandardAnalyzer};
+    use crate::analysis::analyzer::keyword::KeywordAnalyzer;
+    use crate::analysis::analyzer::standard::StandardAnalyzer;
 
     #[test]
     fn test_basic_parsing() {

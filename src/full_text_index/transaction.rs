@@ -9,12 +9,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ahash::AHashMap;
 use uuid::Uuid;
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::full_text_index::deletion::{DeletionManager, GlobalDeletionState};
 use crate::full_text_index::merge_engine::MergeEngine;
 use crate::full_text_index::segment_manager::SegmentManager;
-use crate::storage::Storage;
+use crate::storage::traits::Storage;
 
 /// Transaction isolation levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,7 +190,7 @@ impl TransactionManager {
     )]
     pub fn with_schema(
         storage: Arc<dyn Storage>,
-        schema: Arc<crate::document::FieldValue>,
+        schema: Arc<crate::document::field_value::FieldValue>,
     ) -> Self {
         let _ = schema; // Ignore schema parameter
         Self::new(storage)
@@ -446,8 +446,8 @@ pub trait AtomicOperations {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     #[test]
     fn test_transaction_creation() {
@@ -481,7 +481,7 @@ mod tests {
     fn test_transaction_operations() {
         let mut txn = Transaction::new(IsolationLevel::ReadCommitted);
 
-        let doc = crate::document::Document::builder()
+        let doc = crate::document::document::Document::builder()
             .add_text("title", "Test")
             .build();
 
@@ -495,7 +495,7 @@ mod tests {
 
         // Cannot add operation to inactive transaction
         txn.state = TransactionState::Committed;
-        let doc2 = crate::document::Document::builder()
+        let doc2 = crate::document::document::Document::builder()
             .add_text("title", "Test2")
             .build();
         let op2 = TransactionOperation::AddDocument {

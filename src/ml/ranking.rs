@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::Result;
 use crate::ml::features::{FeatureContext, FeatureExtractor, QueryDocumentFeatures};
 use crate::ml::models::{GBDTRanker, LabeledExample, RankingModel, TrainingStats};

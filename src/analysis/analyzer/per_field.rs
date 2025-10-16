@@ -1,7 +1,7 @@
 //! Per-field analyzer (Lucene-compatible).
 
-use crate::analysis::TokenStream;
-use crate::analysis::analyzer::Analyzer;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::token::TokenStream;
 use crate::error::Result;
 use ahash::AHashMap;
 use std::sync::Arc;
@@ -21,7 +21,10 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```
-/// use sage::analysis::{Analyzer, PerFieldAnalyzer, StandardAnalyzer, KeywordAnalyzer};
+/// use sage::analysis::analyzer::analyzer::Analyzer;
+/// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use sage::analysis::analyzer::standard::StandardAnalyzer;
+/// use sage::analysis::analyzer::keyword::KeywordAnalyzer;
 /// use std::sync::Arc;
 ///
 /// // Reuse analyzer instances to save memory
@@ -91,7 +94,8 @@ impl Analyzer for PerFieldAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::{KeywordAnalyzer, StandardAnalyzer};
+    use crate::analysis::analyzer::keyword::KeywordAnalyzer;
+    use crate::analysis::analyzer::standard::StandardAnalyzer;
 
     #[test]
     fn test_per_field_analyzer() {

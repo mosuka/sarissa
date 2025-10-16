@@ -8,14 +8,14 @@ use std::time::Instant;
 
 use rayon::ThreadPool;
 
-use super::{
-    LoadBalancingStrategy, ParallelSearchStats, ParallelVectorSearchConfig, VectorResultMerger,
-};
+use super::merger::VectorResultMerger;
+use super::{LoadBalancingStrategy, ParallelSearchStats, ParallelVectorSearchConfig};
 
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
-use crate::vector_search::{AdvancedSearchConfig, VectorSearchEngine};
+use crate::vector_search::AdvancedSearchConfig;
+use crate::vector_search::engine::VectorSearchEngine;
 
 /// Task for parallel vector search execution.
 #[derive(Debug, Clone)]
@@ -274,9 +274,7 @@ impl ParallelVectorSearchExecutor {
 
         // Extract results from Arc<Mutex<Vec<_>>>
         let results = Arc::try_unwrap(results_arc)
-            .map_err(|_| {
-                SageError::InvalidOperation("Failed to unwrap results Arc".to_string())
-            })?
+            .map_err(|_| SageError::InvalidOperation("Failed to unwrap results Arc".to_string()))?
             .into_inner()
             .map_err(|_| {
                 SageError::InvalidOperation("Failed to unwrap results Mutex".to_string())

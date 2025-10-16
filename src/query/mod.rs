@@ -16,40 +16,12 @@ pub mod span;
 pub mod term;
 pub mod wildcard;
 
-pub use self::advanced_query::{
-    AdvancedQuery, AdvancedQueryConfig, BooleanQueryBuilder as AdvancedBooleanQueryBuilder,
-    MultiFieldQuery, MultiFieldQueryType,
-};
-pub use self::boolean::{BooleanClause, BooleanQuery, BooleanQueryBuilder, Occur};
-pub use self::collector::{Collector, CountCollector, TopDocsCollector};
-pub use self::fuzzy::{FuzzyConfig, FuzzyMatch, FuzzyQuery};
-pub use self::geo::{
-    GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoMatch, GeoPoint, GeoQuery,
-};
-pub use self::matcher::Matcher;
-pub use self::parser::{QueryParser, QueryParserBuilder};
-pub use self::phrase::PhraseQuery;
-pub use self::query::Query;
-pub use self::range::{Bound, DateTimeRangeQuery, NumericRangeQuery, RangeQuery};
-pub use self::scorer::{BM25Scorer, Scorer};
-pub use self::span::{
-    Span, SpanContainingQuery, SpanNearQuery, SpanQuery, SpanQueryBuilder, SpanQueryWrapper,
-    SpanTermQuery, SpanWithinQuery,
-};
-pub use self::term::TermQuery;
-pub use self::wildcard::WildcardQuery;
-
-// Re-export similarity types for convenience
-pub use crate::full_text_search::similarity::{
-    MoreLikeThisQuery, SimilarityAlgorithm, SimilarityConfig, SimilarityResult,
-};
-
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
 #[allow(unused_imports)]
-use crate::document::Document;
+use crate::document::document::Document;
 
 /// A search hit containing a document and its score.
 #[derive(Debug, Clone, Serialize, Deserialize)]

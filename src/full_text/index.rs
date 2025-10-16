@@ -7,9 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
-use crate::full_text_index::IndexWriter;
-
-use crate::storage::Storage;
+use crate::full_text_index::writer::IndexWriter;
+use crate::storage::traits::Storage;
 
 /// Information about a segment in the index.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -208,7 +207,8 @@ impl FileIndex {
 
     /// Create an index in a directory (schema-less mode).
     pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: IndexConfig) -> Result<Self> {
-        use crate::storage::{FileStorage, StorageConfig};
+        use crate::storage::file::FileStorage;
+        use crate::storage::traits::StorageConfig;
 
         let storage_config = StorageConfig {
             use_mmap: config.use_mmap,
@@ -221,7 +221,8 @@ impl FileIndex {
 
     /// Open an index from a directory.
     pub fn open_dir<P: AsRef<Path>>(dir: P, config: IndexConfig) -> Result<Self> {
-        use crate::storage::{FileStorage, StorageConfig};
+        use crate::storage::file::FileStorage;
+        use crate::storage::traits::StorageConfig;
 
         let storage_config = StorageConfig {
             use_mmap: config.use_mmap,
@@ -315,7 +316,7 @@ impl Index for FileIndex {
     fn reader(&self) -> Result<Box<dyn IndexReader>> {
         self.check_closed()?;
 
-        use crate::full_text_search::{AdvancedIndexReader, advanced_reader::AdvancedReaderConfig};
+        use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 
         // Load segment information
         let segments = self.load_segments()?;
@@ -331,7 +332,7 @@ impl Index for FileIndex {
     fn writer(&self) -> Result<Box<dyn IndexWriter>> {
         self.check_closed()?;
 
-        use crate::full_text_index::{AdvancedIndexWriter, advanced_writer::AdvancedWriterConfig};
+        use crate::full_text_index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 
         let writer =
             AdvancedIndexWriter::new(self.storage.clone(), AdvancedWriterConfig::default())?;
@@ -386,7 +387,8 @@ impl FileIndex {
 
     /// Delete an index from the given directory.
     pub fn delete_in_dir<P: AsRef<Path>>(dir: P) -> Result<()> {
-        use crate::storage::{FileStorage, StorageConfig};
+        use crate::storage::file::FileStorage;
+        use crate::storage::traits::StorageConfig;
 
         let storage = FileStorage::new(dir, StorageConfig::default())?;
 
@@ -408,8 +410,8 @@ impl FileIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
     use std::sync::Arc;
 
     #[allow(dead_code)]

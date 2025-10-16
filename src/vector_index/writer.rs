@@ -64,9 +64,8 @@ impl VectorIndexWriter {
     pub fn write_index(&mut self, builder: &dyn VectorIndexBuilder) -> Result<()> {
         // Create output directory if it doesn't exist
         if let Some(parent) = self.output_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                SageError::other(format!("Failed to create output directory: {e}"))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| SageError::other(format!("Failed to create output directory: {e}")))?;
         }
 
         // Open file for writing

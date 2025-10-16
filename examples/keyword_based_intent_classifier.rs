@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use sage::analysis::analyzer::language::{EnglishAnalyzer, JapaneseAnalyzer};
-use sage::ml::intent_classifier;
+use sage::analysis::analyzer::language::english::EnglishAnalyzer;
+use sage::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+use sage::ml::intent_classifier::core;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -51,7 +52,7 @@ async fn main() -> Result<()> {
     ]);
 
     let analyzer_en = Arc::new(EnglishAnalyzer::new()?);
-    let classifier_en = intent_classifier::new_keyword_based(
+    let classifier_en = core::new_keyword_based(
         informational_en,
         navigational_en,
         transactional_en,
@@ -111,7 +112,7 @@ async fn main() -> Result<()> {
     ]);
 
     let analyzer_ja = Arc::new(JapaneseAnalyzer::new()?);
-    let classifier_ja = intent_classifier::new_keyword_based(
+    let classifier_ja = core::new_keyword_based(
         informational_ja,
         navigational_ja,
         transactional_ja,

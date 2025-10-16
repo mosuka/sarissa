@@ -3,15 +3,13 @@
 //! This filter applies synonyms from a dictionary to an incoming token stream,
 //! producing a correct graph output similar to Lucene's SynonymGraphFilter.
 
-use crate::analysis::synonym::SynonymGraphBuilder;
+use crate::analysis::synonym::dictionary::SynonymDictionary;
+use crate::analysis::synonym::graph_builder::SynonymGraphBuilder;
 use crate::analysis::token::{Token, TokenStream};
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
 
 use super::Filter;
-
-// Re-export for backward compatibility
-pub use crate::analysis::synonym::SynonymDictionary;
 
 /// Synonym graph filter that applies synonyms while maintaining correct token graph structure.
 ///
@@ -76,8 +74,8 @@ impl SynonymGraphFilter {
     ///
     /// # Example
     /// ```
-    /// use sage::analysis::token_filter::SynonymGraphFilter;
-    /// use sage::analysis::synonym::SynonymDictionary;
+    /// use sage::analysis::token_filter::synonym_graph::SynonymGraphFilter;
+    /// use sage::analysis::synonym::dictionary::SynonymDictionary;
     ///
     /// let mut dict = SynonymDictionary::new(None).unwrap();
     /// dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);
@@ -255,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_synonym_graph_filter_with_tokenizer() {
-        use crate::analysis::tokenizer::WhitespaceTokenizer;
+        use crate::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 
         // Create a simple synonym dictionary
         let mut dict = SynonymDictionary::new(None).unwrap();
@@ -699,7 +697,7 @@ mod tests {
 
     #[test]
     fn test_single_to_multi_word_synonym_position_length() {
-        use crate::analysis::tokenizer::WhitespaceTokenizer;
+        use crate::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 
         // Test Case 1: Single word → Multi-word synonym expansion
         let mut dict = SynonymDictionary::new(None).unwrap();
@@ -768,7 +766,7 @@ mod tests {
 
     #[test]
     fn test_multi_to_single_word_synonym_position_length() {
-        use crate::analysis::tokenizer::WhitespaceTokenizer;
+        use crate::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 
         // Test Case 2: Multi-word → Single word synonym expansion
         let mut dict = SynonymDictionary::new(None).unwrap();
@@ -812,7 +810,7 @@ mod tests {
 
     #[test]
     fn test_japanese_synonym_expansion_with_lindera() {
-        use crate::analysis::tokenizer::LinderaTokenizer;
+        use crate::analysis::tokenizer::lindera::LinderaTokenizer;
 
         // Test Japanese synonym expansion with LinderaTokenizer
         let mut dict = SynonymDictionary::new(None).unwrap();

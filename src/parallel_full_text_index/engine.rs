@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::{Result, SageError};
-use crate::full_text_index::IndexWriter;
+use crate::full_text_index::writer::IndexWriter;
 use crate::parallel_full_text_index::batch_processor::{BatchProcessingResult, BatchProcessor};
 use crate::parallel_full_text_index::config::{
     IndexingOptions, ParallelIndexConfig, PartitionConfig,
@@ -134,9 +134,7 @@ impl ParallelIndexEngine {
         // Get active writers
         let writers = self.writer_manager.get_active_writers()?;
         if writers.is_empty() {
-            return Err(SageError::invalid_argument(
-                "No active writers available",
-            ));
+            return Err(SageError::invalid_argument("No active writers available"));
         }
 
         // Partition documents
@@ -369,10 +367,11 @@ impl ParallelIndexEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::FieldValue;
-    use crate::full_text_index::AdvancedIndexWriter;
+    use crate::document::field_value::FieldValue;
+    use crate::full_text_index::advanced_writer::AdvancedIndexWriter;
     use crate::parallel_full_text_index::partitioner::HashPartitioner;
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     fn create_test_writer() -> Box<dyn IndexWriter> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));

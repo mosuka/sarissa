@@ -1,11 +1,13 @@
 //! Example of parallel hybrid search combining keyword and vector search.
 
-use sage::document::{Document, FieldValue};
+use sage::document::document::Document;
+use sage::document::field_value::FieldValue;
 use sage::error::Result;
-use sage::parallel_hybrid_search::{
-    MergeStrategy, MockIndexReader, ParallelHybridSearchConfig, ParallelHybridSearchEngine,
-};
-use sage::query::TermQuery;
+use sage::parallel_hybrid_search::config::MergeStrategy;
+use sage::parallel_hybrid_search::config::ParallelHybridSearchConfig;
+use sage::parallel_hybrid_search::engine::ParallelHybridSearchEngine;
+use sage::parallel_hybrid_search::mock_index::MockIndexReader;
+use sage::query::term::TermQuery;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -252,15 +254,15 @@ async fn main() -> Result<()> {
     let queries = vec![
         (
             "rust programming",
-            Box::new(TermQuery::new("content", "rust")) as Box<dyn sage::query::Query>,
+            Box::new(TermQuery::new("content", "rust")) as Box<dyn sage::query::query::Query>,
         ),
         (
             "python machine learning",
-            Box::new(TermQuery::new("content", "python")) as Box<dyn sage::query::Query>,
+            Box::new(TermQuery::new("content", "python")) as Box<dyn sage::query::query::Query>,
         ),
         (
             "javascript web",
-            Box::new(TermQuery::new("content", "javascript")) as Box<dyn sage::query::Query>,
+            Box::new(TermQuery::new("content", "javascript")) as Box<dyn sage::query::query::Query>,
         ),
     ];
 

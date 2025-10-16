@@ -1,10 +1,11 @@
 //! FuzzyQuery example - demonstrates approximate string matching with edit distance.
 
+use sage::document::document::Document;
+use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::SearchEngine;
 use sage::full_text_search::SearchRequest;
-use sage::prelude::*;
-use sage::query::FuzzyQuery;
+use sage::full_text_search::engine::SearchEngine;
+use sage::query::fuzzy::FuzzyQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {

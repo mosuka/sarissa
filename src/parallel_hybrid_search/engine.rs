@@ -10,10 +10,10 @@ use super::config::{LoadBalancingStrategy, ParallelHybridSearchConfig};
 use super::executor::ParallelHybridSearchExecutor;
 use super::types::{CacheStats, ParallelHybridSearchResults, SearchTimeBreakdown};
 
-use crate::embeding::EmbeddingEngine;
+use crate::embeding::engine::EmbeddingEngine;
 use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
-use crate::query::Query;
+use crate::query::query::Query;
 use crate::vector::reader::VectorIndexReader;
 
 /// Index handle containing both keyword and vector readers.
@@ -434,9 +434,9 @@ impl Clone for HybridIndexHandle {
 mod tests {
     use super::*;
     use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
-    use crate::query::TermQuery;
-
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::query::term::TermQuery;
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     fn create_test_keyword_reader() -> Arc<dyn IndexReader> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));

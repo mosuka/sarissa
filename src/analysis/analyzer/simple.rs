@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::analysis::analyzer::Analyzer;
+use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::token::TokenStream;
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
@@ -51,7 +51,7 @@ impl std::fmt::Debug for SimpleAnalyzer {
 mod tests {
     use super::*;
     use crate::analysis::token::Token;
-    use crate::analysis::tokenizer::RegexTokenizer;
+    use crate::analysis::tokenizer::regex::RegexTokenizer;
 
     #[test]
     fn test_simple_analyzer() {

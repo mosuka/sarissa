@@ -11,7 +11,7 @@ use crate::full_text_index::deletion::DeletionManager;
 use crate::full_text_index::merge_engine::{MergeConfig, MergeEngine, MergeResult};
 use crate::full_text_index::segment_manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
 
-use crate::storage::Storage;
+use crate::storage::traits::Storage;
 
 /// Optimization strategy types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -534,8 +534,8 @@ mod tests {
     use super::*;
     use crate::full_text_index::deletion::DeletionConfig;
     use crate::full_text_index::segment_manager::SegmentManagerConfig;
-
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     #[allow(dead_code)]
     #[test]

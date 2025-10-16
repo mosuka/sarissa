@@ -138,9 +138,9 @@ impl SynonymDictionary {
             let synonyms = term_to_synonyms.remove(&term).unwrap();
             let index = synonym_lists.len() as u64;
             synonym_lists.push(synonyms);
-            builder.insert(term.as_bytes(), index).map_err(|e| {
-                crate::error::SageError::parse(format!("FST build error: {}", e))
-            })?;
+            builder
+                .insert(term.as_bytes(), index)
+                .map_err(|e| crate::error::SageError::parse(format!("FST build error: {}", e)))?;
         }
 
         let fst_bytes = builder

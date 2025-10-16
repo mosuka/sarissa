@@ -1,10 +1,11 @@
 //! RangeQuery example - demonstrates range search for numeric and date values.
 
+use sage::document::document::Document;
+use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::SearchEngine;
 use sage::full_text_search::SearchRequest;
-use sage::prelude::*;
-use sage::query::NumericRangeQuery;
+use sage::full_text_search::engine::SearchEngine;
+use sage::query::range::NumericRangeQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -112,7 +113,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::field_value::FieldValue::Float(price)) =
+                doc.get_field("price")
+            {
                 println!("      Price: ${price:.2}");
             }
         }
@@ -138,7 +141,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Float(rating)) = doc.get_field("rating") {
+            if let Some(sage::document::field_value::FieldValue::Float(rating)) =
+                doc.get_field("rating")
+            {
                 println!("      Rating: {rating:.1}");
             }
         }
@@ -164,7 +169,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Integer(year)) = doc.get_field("year") {
+            if let Some(sage::document::field_value::FieldValue::Integer(year)) =
+                doc.get_field("year")
+            {
                 println!("      Year: {year}");
             }
         }
@@ -190,7 +197,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Integer(pages)) = doc.get_field("pages") {
+            if let Some(sage::document::field_value::FieldValue::Integer(pages)) =
+                doc.get_field("pages")
+            {
                 println!("      Pages: {pages}");
             }
         }
@@ -216,7 +225,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Integer(year)) = doc.get_field("year") {
+            if let Some(sage::document::field_value::FieldValue::Integer(year)) =
+                doc.get_field("year")
+            {
                 println!("      Year: {year}");
             }
         }
@@ -242,7 +253,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::field_value::FieldValue::Float(price)) =
+                doc.get_field("price")
+            {
                 println!("      Price: ${price:.2}");
             }
         }
@@ -268,7 +281,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Integer(pages)) = doc.get_field("pages") {
+            if let Some(sage::document::field_value::FieldValue::Integer(pages)) =
+                doc.get_field("pages")
+            {
                 println!("      Pages: {pages}");
             }
         }

@@ -11,8 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
-use crate::full_text::SegmentInfo;
-use crate::storage::{Storage, StorageInput, StructReader, StructWriter};
+use crate::full_text::index::SegmentInfo;
+use crate::storage::structured::{StructReader, StructWriter};
+use crate::storage::traits::{Storage, StorageInput};
 
 /// Configuration for segment management.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1105,7 +1106,8 @@ impl SegmentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     #[allow(dead_code)]
     fn create_test_segment_info(segment_id: &str, doc_count: u64) -> SegmentInfo {

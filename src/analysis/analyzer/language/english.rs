@@ -2,9 +2,12 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use crate::analysis::analyzer::Analyzer;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::pipeline::PipelineAnalyzer;
 use crate::analysis::token::TokenStream;
-use crate::analysis::{LowercaseFilter, PipelineAnalyzer, RegexTokenizer, StopFilter};
+use crate::analysis::token_filter::lowercase::LowercaseFilter;
+use crate::analysis::token_filter::stop::StopFilter;
+use crate::analysis::tokenizer::regex::RegexTokenizer;
 use crate::error::Result;
 
 pub struct EnglishAnalyzer {

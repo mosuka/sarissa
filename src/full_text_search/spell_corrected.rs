@@ -3,9 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::full_text_search::{SearchEngine, SearchRequest};
+use crate::full_text_search::SearchRequest;
+use crate::full_text_search::engine::SearchEngine;
 use crate::query::SearchResults;
-use crate::spelling::{CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector};
+use crate::spelling::corrector::{
+    CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector,
+};
 
 /// Search results with spelling correction information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,7 +152,7 @@ impl SpellCorrectedSearchEngine {
     ) -> Result<SpellCorrectedSearchResults> {
         if !self.config.enabled {
             // Spell correction disabled, perform normal search
-            use crate::query::QueryParser;
+            use crate::query::parser::QueryParser;
             let parser = QueryParser::new().with_default_field(default_field);
             let query = parser.parse(query_str)?;
             let results = self.engine.search(SearchRequest::new(query))?;
@@ -161,7 +164,7 @@ impl SpellCorrectedSearchEngine {
         let correction = self.corrector.correct(query_str);
 
         // Try original query first
-        use crate::query::QueryParser;
+        use crate::query::parser::QueryParser;
         let parser = QueryParser::new().with_default_field(default_field);
         let query = parser.parse(query_str)?;
         let original_results = self.engine.search(SearchRequest::new(query))?;
@@ -201,7 +204,7 @@ impl SpellCorrectedSearchEngine {
     ) -> Result<SpellCorrectedSearchResults> {
         if !self.config.enabled {
             // Spell correction disabled, perform normal search
-            use crate::query::QueryParser;
+            use crate::query::parser::QueryParser;
             let parser = QueryParser::new();
             let query = parser.parse_field(field, query_str)?;
             let results = self.engine.search(SearchRequest::new(query))?;
@@ -213,7 +216,7 @@ impl SpellCorrectedSearchEngine {
         let correction = self.corrector.correct(query_str);
 
         // Try original query first
-        use crate::query::QueryParser;
+        use crate::query::parser::QueryParser;
         let parser = QueryParser::new();
         let query = parser.parse_field(field, query_str)?;
         let original_results = self.engine.search(SearchRequest::new(query))?;
@@ -251,7 +254,7 @@ impl SpellCorrectedSearchEngine {
     }
 
     /// Get spelling suggestions for a word.
-    pub fn suggest_word(&self, word: &str) -> Vec<crate::spelling::Suggestion> {
+    pub fn suggest_word(&self, word: &str) -> Vec<crate::spelling::suggest::Suggestion> {
         self.corrector.suggest_word(word)
     }
 
@@ -263,7 +266,7 @@ impl SpellCorrectedSearchEngine {
     }
 
     /// Get statistics about the spelling corrector.
-    pub fn corrector_stats(&self) -> crate::spelling::CorrectorStats {
+    pub fn corrector_stats(&self) -> crate::spelling::corrector::CorrectorStats {
         self.corrector.stats()
     }
 

@@ -6,7 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::query::{BooleanQuery, Matcher, Occur, Query, QueryResult, Scorer};
+use crate::query::QueryResult;
+use crate::query::boolean::{BooleanQuery, Occur};
+use crate::query::matcher::Matcher;
+use crate::query::query::Query;
+use crate::query::scorer::Scorer;
 
 /// Configuration for advanced query execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -461,7 +465,7 @@ impl Query for MultiFieldQuery {
                 // Add each field as a should clause
                 for field in self.fields.keys() {
                     let term_query =
-                        crate::query::TermQuery::new(field.clone(), self.query_text.clone());
+                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
                     boolean_builder =
                         boolean_builder.add_clause(Box::new(term_query), Occur::Should);
                 }
@@ -470,7 +474,7 @@ impl Query for MultiFieldQuery {
                 // All fields should match
                 for field in self.fields.keys() {
                     let term_query =
-                        crate::query::TermQuery::new(field.clone(), self.query_text.clone());
+                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
                     boolean_builder = boolean_builder.add_clause(Box::new(term_query), Occur::Must);
                 }
             }
@@ -479,7 +483,7 @@ impl Query for MultiFieldQuery {
                 let mut combined_query = BooleanQuery::new();
                 for field in self.fields.keys() {
                     let term_query =
-                        crate::query::TermQuery::new(field.clone(), self.query_text.clone());
+                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
                     combined_query.add_should(Box::new(term_query));
                 }
                 return combined_query.matcher(reader);
@@ -497,7 +501,7 @@ impl Query for MultiFieldQuery {
             MultiFieldQueryType::BestFields | MultiFieldQueryType::Boolean => {
                 for field in self.fields.keys() {
                     let term_query =
-                        crate::query::TermQuery::new(field.clone(), self.query_text.clone());
+                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
                     boolean_builder =
                         boolean_builder.add_clause(Box::new(term_query), Occur::Should);
                 }
@@ -505,7 +509,7 @@ impl Query for MultiFieldQuery {
             MultiFieldQueryType::MostFields => {
                 for field in self.fields.keys() {
                     let term_query =
-                        crate::query::TermQuery::new(field.clone(), self.query_text.clone());
+                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
                     boolean_builder = boolean_builder.add_clause(Box::new(term_query), Occur::Must);
                 }
             }
@@ -513,7 +517,7 @@ impl Query for MultiFieldQuery {
                 let mut combined_query = BooleanQuery::new();
                 for field in self.fields.keys() {
                     let term_query =
-                        crate::query::TermQuery::new(field.clone(), self.query_text.clone());
+                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
                     combined_query.add_should(Box::new(term_query));
                 }
                 return combined_query.scorer(reader);
@@ -560,7 +564,7 @@ impl Query for MultiFieldQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::TermQuery;
+    use crate::query::term::TermQuery;
 
     #[allow(dead_code)]
     #[test]

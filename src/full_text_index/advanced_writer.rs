@@ -8,12 +8,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ahash::AHashMap;
 
-use crate::analysis::{Analyzer, Token};
-use crate::document::Document;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::token::Token;
+use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::full_text::dictionary::{TermDictionaryBuilder, TermInfo};
-use crate::full_text::{InvertedIndex, Posting};
-use crate::storage::{Storage, StructWriter};
+use crate::full_text::posting::{InvertedIndex, Posting};
+use crate::storage::structured::StructWriter;
+use crate::storage::traits::Storage;
 
 /// Advanced index writer configuration.
 #[derive(Clone)]
@@ -58,7 +60,9 @@ impl Default for AdvancedWriterConfig {
             segment_prefix: "segment".to_string(),
             store_term_positions: true,
             optimize_segments: false,
-            analyzer: Arc::new(crate::analysis::StandardAnalyzer::new().unwrap()),
+            analyzer: Arc::new(
+                crate::analysis::analyzer::standard::StandardAnalyzer::new().unwrap(),
+            ),
         }
     }
 }
@@ -192,10 +196,14 @@ impl AdvancedIndexWriter {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use sage::document::{Document, DocumentParser};
-    /// use sage::analysis::{PerFieldAnalyzer, StandardAnalyzer};
-    /// use sage::full_text_index::{AdvancedIndexWriter, advanced_writer::AdvancedWriterConfig};
-    /// use sage::storage::{MemoryStorage, StorageConfig};
+    /// use sage::document::document::Document;
+    /// use sage::document::parser::DocumentParser;
+    /// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
+    /// use sage::analysis::analyzer::standard::StandardAnalyzer;
+    /// use sage::full_text_index::advanced_writer::AdvancedIndexWriter;
+    /// use sage::full_text_index::advanced_writer::AdvancedWriterConfig;
+    /// use sage::storage::memory::MemoryStorage;
+    /// use sage::storage::traits::StorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
@@ -247,12 +255,12 @@ impl AdvancedIndexWriter {
 
         // Process each field in the document (schema-less mode)
         for (field_name, field_value) in doc.fields() {
-            use crate::document::FieldValue;
+            use crate::document::field_value::FieldValue;
 
             match field_value {
                 FieldValue::Text(text) => {
                     // Use analyzer from config (can be PerFieldAnalyzer for field-specific analysis)
-                    use crate::analysis::PerFieldAnalyzer;
+                    use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 
                     let tokens = if let Some(per_field) = self
                         .config
@@ -498,7 +506,7 @@ impl AdvancedIndexWriter {
 
     /// Write documents as JSON for compatibility with BasicIndexReader.
     fn write_json_documents(&self, segment_name: &str) -> Result<()> {
-        use crate::document::FieldValue;
+        use crate::document::field_value::FieldValue;
 
         // Convert analyzed documents back to Document format
         let mut documents = Vec::new();
@@ -523,7 +531,7 @@ impl AdvancedIndexWriter {
 
     /// Write segment metadata.
     fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
-        use crate::full_text::SegmentInfo;
+        use crate::full_text::index::SegmentInfo;
 
         // Create SegmentInfo
         let segment_info = SegmentInfo {
@@ -536,9 +544,8 @@ impl AdvancedIndexWriter {
 
         // Write as JSON for compatibility with FileIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
-        let json_data = serde_json::to_string_pretty(&segment_info).map_err(|e| {
-            SageError::index(format!("Failed to serialize segment metadata: {e}"))
-        })?;
+        let json_data = serde_json::to_string_pretty(&segment_info)
+            .map_err(|e| SageError::index(format!("Failed to serialize segment metadata: {e}")))?;
 
         let mut output = self.storage.create_output(&meta_file)?;
         std::io::Write::write_all(&mut output, json_data.as_bytes())?;
@@ -689,8 +696,8 @@ impl crate::full_text_index::writer::IndexWriter for AdvancedIndexWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
     use std::sync::Arc;
 
     #[allow(dead_code)]

@@ -4,6 +4,3 @@
 //! for use in vector search and machine learning applications.
 
 pub mod engine;
-
-// Re-export commonly used types
-pub use engine::{EmbeddingConfig, EmbeddingEngine, EmbeddingMethod};

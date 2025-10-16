@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::full_text::segment::{MergeOperation, Segment, SegmentManager};
-use crate::storage::Storage;
+use crate::storage::traits::Storage;
 
 /// Index optimizer for maintenance operations.
 #[derive(Debug)]
@@ -428,7 +428,8 @@ struct MergeResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{MemoryStorage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::StorageConfig;
 
     #[test]
     fn test_optimization_config() {

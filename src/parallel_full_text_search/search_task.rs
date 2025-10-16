@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::error::{Result, SageError};
-use crate::query::{Query, SearchResults};
+use crate::query::SearchResults;
+use crate::query::query::Query;
 
 /// A search task to be executed on a specific index.
 #[derive(Debug)]
@@ -295,7 +296,7 @@ impl TaskHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::TermQuery;
+    use crate::query::term::TermQuery;
 
     #[test]
     fn test_search_task_creation() {

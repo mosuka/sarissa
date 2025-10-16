@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::query::{Matcher, Query, Scorer};
+use crate::query::matcher::Matcher;
+use crate::query::query::Query;
+use crate::query::scorer::Scorer;
 use crate::spelling::levenshtein::{
     TypoPatterns, damerau_levenshtein_distance, levenshtein_distance,
 };
@@ -839,8 +841,8 @@ mod tests {
     #[test]
     fn test_fuzzy_matcher() {
         use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
-
-        use crate::storage::{MemoryStorage, StorageConfig};
+        use crate::storage::memory::MemoryStorage;
+        use crate::storage::traits::StorageConfig;
         use std::sync::Arc;
 
         // Create a test schema and reader

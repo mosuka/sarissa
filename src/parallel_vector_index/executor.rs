@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use rayon::ThreadPool;
 
-use super::{SegmentMetadata, VectorIndexSegment};
+use super::segment::{SegmentMetadata, VectorIndexSegment};
 
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
@@ -64,9 +64,7 @@ impl ParallelIndexExecutor {
 
         // Extract results from Arc<Mutex<Vec<_>>>
         let results = Arc::try_unwrap(results_arc)
-            .map_err(|_| {
-                SageError::InvalidOperation("Failed to unwrap results Arc".to_string())
-            })?
+            .map_err(|_| SageError::InvalidOperation("Failed to unwrap results Arc".to_string()))?
             .into_inner()
             .map_err(|_| {
                 SageError::InvalidOperation("Failed to unwrap results Mutex".to_string())

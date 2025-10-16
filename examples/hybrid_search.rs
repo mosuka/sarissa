@@ -1,11 +1,15 @@
 //! Hybrid Search example - demonstrates combining keyword and vector search.
 
-use sage::embeding::{EmbeddingConfig, EmbeddingMethod};
+use sage::document::document::Document;
+use sage::embeding::engine::{EmbeddingConfig, EmbeddingMethod};
+use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::{SearchEngine, SearchRequest};
-use sage::hybrid_search::{HybridSearchConfig, HybridSearchEngine, ScoreNormalization};
-use sage::prelude::*;
-use sage::query::TermQuery;
+use sage::full_text_search::SearchRequest;
+use sage::full_text_search::engine::SearchEngine;
+use sage::hybrid_search::config::HybridSearchConfig;
+use sage::hybrid_search::config::ScoreNormalization;
+use sage::hybrid_search::engine::HybridSearchEngine;
+use sage::query::term::TermQuery;
 use std::collections::HashMap;
 use tempfile::TempDir;
 

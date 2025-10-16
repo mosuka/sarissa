@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use memmap2::{Mmap, MmapOptions};
 
 use crate::error::{Result, SageError};
-use crate::storage::{Storage, StorageConfig, StorageInput, StorageOutput};
+use crate::storage::traits::{Storage, StorageConfig, StorageInput, StorageOutput};
 
 /// Memory-mapped storage backend that uses mmap for efficient file access.
 #[derive(Debug)]
@@ -189,9 +189,7 @@ impl Storage for MmapStorage {
             .create(true)
             .append(true)
             .open(&file_path)
-            .map_err(|e| {
-                SageError::storage(format!("Failed to create append file {name}: {e}"))
-            })?;
+            .map_err(|e| SageError::storage(format!("Failed to create append file {name}: {e}")))?;
 
         Ok(Box::new(MmapOutput::new(
             file,
@@ -225,9 +223,8 @@ impl Storage for MmapStorage {
             .map_err(|e| SageError::storage(format!("Failed to read directory: {e}")))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| {
-                SageError::storage(format!("Failed to read directory entry: {e}"))
-            })?;
+            let entry = entry
+                .map_err(|e| SageError::storage(format!("Failed to read directory entry: {e}")))?;
 
             if entry
                 .file_type()
@@ -249,7 +246,7 @@ impl Storage for MmapStorage {
         Ok(metadata.len())
     }
 
-    fn metadata(&self, name: &str) -> Result<crate::storage::FileMetadata> {
+    fn metadata(&self, name: &str) -> Result<crate::storage::traits::FileMetadata> {
         let file_path = self.get_file_path(name);
         let metadata = std::fs::metadata(&file_path)
             .map_err(|e| SageError::storage(format!("Failed to get file metadata: {e}")))?;
@@ -268,7 +265,7 @@ impl Storage for MmapStorage {
             .unwrap_or_default()
             .as_secs();
 
-        Ok(crate::storage::FileMetadata {
+        Ok(crate::storage::traits::FileMetadata {
             size: metadata.len(),
             modified,
             created,
@@ -553,7 +550,7 @@ impl Storage for AdvancedMmapStorage {
         self.base_storage.file_size(name)
     }
 
-    fn metadata(&self, name: &str) -> Result<crate::storage::FileMetadata> {
+    fn metadata(&self, name: &str) -> Result<crate::storage::traits::FileMetadata> {
         self.base_storage.metadata(name)
     }
 

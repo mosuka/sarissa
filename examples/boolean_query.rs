@@ -1,10 +1,14 @@
 //! BooleanQuery example - demonstrates complex boolean logic with AND, OR, NOT operations.
 
+use sage::document::document::Document;
+use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::SearchEngine;
 use sage::full_text_search::SearchRequest;
-use sage::prelude::*;
-use sage::query::{BooleanQuery, NumericRangeQuery, PhraseQuery, TermQuery};
+use sage::full_text_search::engine::SearchEngine;
+use sage::query::boolean::BooleanQuery;
+use sage::query::phrase::PhraseQuery;
+use sage::query::range::NumericRangeQuery;
+use sage::query::term::TermQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -191,10 +195,14 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::field_value::FieldValue::Float(price)) =
+                doc.get_field("price")
+            {
                 println!("      Price: ${price:.2}");
             }
-            if let Some(sage::document::FieldValue::Float(rating)) = doc.get_field("rating") {
+            if let Some(sage::document::field_value::FieldValue::Float(rating)) =
+                doc.get_field("rating")
+            {
                 println!("      Rating: {rating:.1}");
             }
         }
@@ -282,7 +290,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::field_value::FieldValue::Float(price)) =
+                doc.get_field("price")
+            {
                 println!("      Price: ${price:.2}");
             }
         }
@@ -315,7 +325,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Float(rating)) = doc.get_field("rating") {
+            if let Some(sage::document::field_value::FieldValue::Float(rating)) =
+                doc.get_field("rating")
+            {
                 println!("      Rating: {rating:.1}");
             }
         }
@@ -368,10 +380,14 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::field_value::FieldValue::Float(price)) =
+                doc.get_field("price")
+            {
                 println!("      Price: ${price:.2}");
             }
-            if let Some(sage::document::FieldValue::Float(rating)) = doc.get_field("rating") {
+            if let Some(sage::document::field_value::FieldValue::Float(rating)) =
+                doc.get_field("rating")
+            {
                 println!("      Rating: {rating:.1}");
             }
         }
@@ -423,7 +439,9 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::FieldValue::Float(price)) = doc.get_field("price") {
+            if let Some(sage::document::field_value::FieldValue::Float(price)) =
+                doc.get_field("price")
+            {
                 println!("      Price: ${price:.2}");
             }
         }

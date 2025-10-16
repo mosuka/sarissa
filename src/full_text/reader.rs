@@ -1,6 +1,6 @@
 //! Index reader for searching and retrieving documents.
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::Result;
 use crate::full_text::bkd_tree::SimpleBKDTree;
 

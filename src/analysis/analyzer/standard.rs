@@ -2,10 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::analysis::analyzer::{Analyzer, PipelineAnalyzer};
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::pipeline::PipelineAnalyzer;
 use crate::analysis::token::TokenStream;
-use crate::analysis::token_filter::{LowercaseFilter, StopFilter};
-use crate::analysis::tokenizer::RegexTokenizer;
+use crate::analysis::token_filter::lowercase::LowercaseFilter;
+use crate::analysis::token_filter::stop::StopFilter;
+use crate::analysis::tokenizer::regex::RegexTokenizer;
 use crate::error::Result;
 
 /// A standard analyzer that provides good defaults for most use cases.

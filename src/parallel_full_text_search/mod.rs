@@ -13,10 +13,3 @@ pub mod index_manager;
 pub mod merger;
 pub mod metrics;
 pub mod search_task;
-
-pub use config::{MergeStrategyType, ParallelSearchConfig};
-pub use engine::ParallelSearchEngine;
-pub use index_manager::{IndexHandle, IndexManager};
-pub use merger::{MergeStrategy, ScoreBasedMerger, WeightedMerger};
-pub use metrics::{SearchMetrics, SearchMetricsCollector};
-pub use search_task::{SearchTask, TaskResult};

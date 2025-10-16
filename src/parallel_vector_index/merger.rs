@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{SegmentMetadata, VectorIndexSegment};
+use super::segment::{SegmentMetadata, VectorIndexSegment};
 
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
@@ -218,7 +218,7 @@ impl SegmentMerger {
             distance_metric: first_metadata.distance_metric,
             normalize_vectors: true,
             use_quantization: false,
-            quantization_method: crate::vector_index::QuantizationMethod::None,
+            quantization_method: crate::vector_index::quantization::QuantizationMethod::None,
             parallel_build: true,
             memory_limit: None,
         })

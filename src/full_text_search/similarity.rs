@@ -5,11 +5,14 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{Analyzer, StandardAnalyzer};
-use crate::document::FieldValue;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::standard::StandardAnalyzer;
+use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::query::{Matcher, Query, Scorer};
+use crate::query::matcher::Matcher;
+use crate::query::query::Query;
+use crate::query::scorer::Scorer;
 
 /// Configuration for similarity search.
 #[derive(Debug, Clone)]
@@ -1114,7 +1117,7 @@ mod tests {
         fn is_deleted(&self, _doc_id: u64) -> bool {
             false
         }
-        fn document(&self, _doc_id: u64) -> Result<Option<crate::document::Document>> {
+        fn document(&self, _doc_id: u64) -> Result<Option<crate::document::document::Document>> {
             Ok(None)
         }
         fn term_info(

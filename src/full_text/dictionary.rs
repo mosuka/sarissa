@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use ahash::AHashMap;
 
 use crate::error::{Result, SageError};
-use crate::storage::{StorageInput, StorageOutput, StructReader, StructWriter};
+use crate::storage::structured::{StructReader, StructWriter};
+use crate::storage::traits::{StorageInput, StorageOutput};
 
 /// Information about a term in the dictionary.
 #[derive(Debug, Clone, PartialEq)]
@@ -151,9 +152,7 @@ impl SortedTermDictionary {
         let magic = reader.read_u32()?;
         if magic != 0x53544443 {
             // "STDC"
-            return Err(SageError::index(
-                "Invalid sorted dictionary magic number",
-            ));
+            return Err(SageError::index("Invalid sorted dictionary magic number"));
         }
 
         let version = reader.read_u32()?;
@@ -554,7 +553,8 @@ impl HashTermDictionary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{MemoryStorage, Storage, StorageConfig};
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::traits::{Storage, StorageConfig};
     use std::sync::Arc;
 
     fn create_test_term_info(offset: u64) -> TermInfo {

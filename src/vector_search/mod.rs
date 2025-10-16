@@ -14,14 +14,6 @@ pub mod ranking;
 pub mod searcher;
 pub mod similarity;
 
-pub use engine::VectorSearchEngine;
-pub use flat_searcher::FlatVectorSearcher;
-pub use hnsw_searcher::HnswSearcher;
-pub use hybrid::{HybridSearchConfig, HybridSearchEngine, HybridSearchResult};
-pub use ranking::{RankingConfig, RankingMethod, VectorRanker};
-pub use searcher::VectorSearcherConfig;
-pub use similarity::{AdvancedSimilarityMetric, SimilarityAggregator};
-
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -69,7 +61,7 @@ pub struct AdvancedSearchConfig {
     /// Search strategy to use.
     pub search_strategy: SearchStrategy,
     /// Reranking configuration.
-    pub reranking: Option<RankingConfig>,
+    pub reranking: Option<ranking::RankingConfig>,
     /// Post-processing filters.
     pub filters: Vec<SearchFilter>,
     /// Search result explanation.

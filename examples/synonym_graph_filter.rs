@@ -6,8 +6,11 @@
 //! - Use boost to adjust synonym weights
 //! - Observe how tokens are expanded with synonyms
 
-use sage::analysis::token_filter::{Filter, SynonymDictionary, SynonymGraphFilter};
-use sage::analysis::tokenizer::{Tokenizer, WhitespaceTokenizer};
+use sage::analysis::synonym::SynonymDictionary;
+use sage::analysis::token_filter::Filter;
+use sage::analysis::token_filter::synonym_graph::SynonymGraphFilter;
+use sage::analysis::tokenizer::Tokenizer;
+use sage::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 use sage::error::Result;
 
 fn main() -> Result<()> {

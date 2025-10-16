@@ -5,10 +5,10 @@ use std::time::Instant;
 
 use rayon::ThreadPool;
 
-use super::{
-    IndexTask, ParallelIndexExecutor, ParallelIndexStats, ParallelVectorIndexConfig, SegmentMerger,
-    VectorIndexSegment,
-};
+use super::executor::{IndexTask, ParallelIndexExecutor};
+use super::merger::SegmentMerger;
+use super::segment::VectorIndexSegment;
+use super::{ParallelIndexStats, ParallelVectorIndexConfig};
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
 use crate::vector_index::VectorIndexBuilder;

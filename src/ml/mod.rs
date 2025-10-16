@@ -22,17 +22,14 @@ pub mod optimization;
 pub mod ranking;
 pub mod recommendation;
 
-pub use anomaly::*;
-pub use features::*;
-pub use intent_classifier::*;
-pub use models::*;
-pub use optimization::*;
-pub use ranking::*;
-pub use recommendation::*;
-
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+
+use crate::ml::anomaly::AnomalyDetectionConfig;
+use crate::ml::optimization::AutoOptimizationConfig;
+use crate::ml::ranking::RankingConfig;
+use crate::ml::recommendation::RecommendationConfig;
 
 /// Configuration for machine learning features.
 #[derive(Debug, Clone, Serialize, Deserialize)]

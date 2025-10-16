@@ -17,13 +17,18 @@ use std::sync::Arc;
 use pest::Parser;
 use pest_derive::Parser;
 
-use crate::analysis::{Analyzer, PerFieldAnalyzer, StandardAnalyzer};
-use crate::document::NumericType;
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
+use crate::analysis::analyzer::standard::StandardAnalyzer;
+use crate::document::field_value::NumericType;
 use crate::error::{Result, SageError};
-use crate::query::{
-    BooleanClause, BooleanQuery, FuzzyQuery, NumericRangeQuery, Occur, PhraseQuery, Query,
-    TermQuery, WildcardQuery,
-};
+use crate::query::boolean::{BooleanClause, BooleanQuery, Occur};
+use crate::query::fuzzy::FuzzyQuery;
+use crate::query::phrase::PhraseQuery;
+use crate::query::query::Query;
+use crate::query::range::NumericRangeQuery;
+use crate::query::term::TermQuery;
+use crate::query::wildcard::WildcardQuery;
 
 #[derive(Parser)]
 #[grammar = "query/parser.pest"]
@@ -243,8 +248,8 @@ impl QueryParser {
                     field = Some(inner_pair.as_str().to_string());
                 }
                 Rule::field_value => {
-                    let field_name = field
-                        .ok_or_else(|| SageError::parse("Missing field name".to_string()))?;
+                    let field_name =
+                        field.ok_or_else(|| SageError::parse("Missing field name".to_string()))?;
                     return self.parse_field_value(inner_pair, Some(&field_name));
                 }
                 _ => {}

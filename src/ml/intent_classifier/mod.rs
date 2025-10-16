@@ -15,8 +15,9 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use sage::ml::intent_classifier::{self, IntentSample};
-//! use sage::analysis::StandardAnalyzer;
+//! use sage::ml::intent_classifier::types::IntentSample;
+//! use sage::ml::intent_classifier::core::new_ml_based;
+//! use sage::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,24 +29,16 @@
 //! ];
 //!
 //! let analyzer = Arc::new(StandardAnalyzer::new()?);
-//! let classifier = intent_classifier::new_ml_based(samples, analyzer)?;
+//! let classifier = new_ml_based(samples, analyzer)?;
 //!
 //! let intent = classifier.predict("how to learn programming")?;
 //! # Ok(())
 //! # }
 //! ```
 
-mod classifier;
-mod core;
-mod keyword_classifier;
-mod ml_classifier;
-mod tfidf;
-mod types;
-
-// Public exports
-pub use classifier::IntentClassifier;
-pub use core::{load_training_data, new_keyword_based, new_ml_based};
-pub use keyword_classifier::KeywordBasedIntentClassifier;
-pub use ml_classifier::MLBasedIntentClassifier;
-pub use tfidf::TfIdfVectorizer;
-pub use types::{IntentSample, QueryIntent};
+pub mod classifier;
+pub mod core;
+pub mod keyword_classifier;
+pub mod ml_classifier;
+pub mod tfidf;
+pub mod types;

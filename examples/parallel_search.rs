@@ -5,20 +5,23 @@
 //! 2. Perform concurrent searches across the indices with various merge strategies
 //! 3. Demonstrate performance metrics and optimization techniques
 
-use sage::full_text_index::AdvancedIndexWriter;
-use sage::full_text_index::AdvancedWriterConfig;
-use sage::full_text_search::AdvancedIndexReader;
-use sage::full_text_search::advanced_reader::AdvancedReaderConfig;
-use sage::parallel_full_text_index::{
-    HashPartitioner, ParallelIndexConfig, ParallelIndexEngine, PartitionConfig,
-    config::IndexingOptions,
+use sage::document::document::Document;
+use sage::error::Result;
+use sage::full_text_index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+use sage::parallel_full_text_index::config::{
+    IndexingOptions, ParallelIndexConfig, PartitionConfig,
 };
-use sage::parallel_full_text_search::{
-    MergeStrategyType, ParallelSearchConfig, ParallelSearchEngine, config::SearchOptions,
+use sage::parallel_full_text_index::engine::ParallelIndexEngine;
+use sage::parallel_full_text_index::partitioner::HashPartitioner;
+use sage::parallel_full_text_search::config::{
+    MergeStrategyType, ParallelSearchConfig, SearchOptions,
 };
-use sage::prelude::*;
-use sage::query::{PhraseQuery, TermQuery};
-use sage::storage::{MemoryStorage, StorageConfig};
+use sage::parallel_full_text_search::engine::ParallelSearchEngine;
+use sage::query::phrase::PhraseQuery;
+use sage::query::term::TermQuery;
+use sage::storage::memory::MemoryStorage;
+use sage::storage::traits::StorageConfig;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -66,11 +69,11 @@ fn main() -> Result<()> {
     parallel_engine.set_partitioner(Box::new(hash_partitioner))?;
 
     // Storage for later search operations
-    let mut storages: Vec<Arc<dyn sage::storage::Storage>> = Vec::new();
+    let mut storages: Vec<Arc<dyn sage::storage::traits::Storage>> = Vec::new();
 
     // Add writers for each partition
     for i in 0..4 {
-        let storage: Arc<dyn sage::storage::Storage> =
+        let storage: Arc<dyn sage::storage::traits::Storage> =
             Arc::new(MemoryStorage::new(StorageConfig::default()));
         storages.push(Arc::clone(&storage));
 
@@ -267,12 +270,12 @@ fn main() -> Result<()> {
                 let mut input = storage.open_input(&file)?;
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
-                let segment_info: sage::full_text::SegmentInfo = serde_json::from_slice(&data)
-                    .map_err(|e| {
-                    sage::error::SageError::index(format!(
-                        "Failed to parse segment metadata: {e}"
-                    ))
-                })?;
+                let segment_info: sage::full_text::index::SegmentInfo =
+                    serde_json::from_slice(&data).map_err(|e| {
+                        sage::error::SageError::index(format!(
+                            "Failed to parse segment metadata: {e}"
+                        ))
+                    })?;
                 segments.push(segment_info);
             }
         }
@@ -366,7 +369,7 @@ fn main() -> Result<()> {
         if let Some(doc) = &hit.document
             && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
             && let Some(price) = doc.get_field("price").and_then(|f| match f {
-                sage::document::FieldValue::Float(v) => Some(*v),
+                sage::document::field_value::FieldValue::Float(v) => Some(*v),
                 _ => None,
             })
             && let Some(category) = doc.get_field("category").and_then(|f| f.as_text())

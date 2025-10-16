@@ -313,7 +313,7 @@ impl VectorSearchEngine {
         &self,
         _results: &mut VectorSearchResults,
         _query: &Vector,
-        _config: &crate::vector_search::RankingConfig,
+        _config: &crate::vector_search::ranking::RankingConfig,
     ) -> Result<()> {
         // TODO: Implement reranking logic
         Ok(())
@@ -377,7 +377,7 @@ impl VectorSearchEngine {
     }
 
     /// Create a hybrid search engine that combines keyword and vector search.
-    pub fn create_hybrid_engine(&self) -> Result<crate::vector_search::HybridSearchEngine> {
+    pub fn create_hybrid_engine(&self) -> Result<crate::hybrid_search::engine::HybridSearchEngine> {
         // TODO: Implement hybrid engine creation
         Err(SageError::NotImplemented(
             "Hybrid search engine not implemented".to_string(),

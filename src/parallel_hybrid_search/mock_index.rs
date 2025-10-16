@@ -3,10 +3,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::document::{Document, FieldValue};
+use crate::document::document::Document;
+use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::full_text::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
-use crate::query::{Query, SearchHit};
+use crate::query::SearchHit;
+use crate::query::query::Query;
 
 /// Mock index reader that stores documents in memory (schema-less mode).
 #[derive(Clone)]

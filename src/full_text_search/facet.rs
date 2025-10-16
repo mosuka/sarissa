@@ -5,10 +5,11 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::FieldValue;
+use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::query::{Hit, Query};
+use crate::query::Hit;
+use crate::query::query::Query;
 
 /// Represents a facet field and its hierarchical structure.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

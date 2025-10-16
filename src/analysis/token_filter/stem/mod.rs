@@ -19,10 +19,8 @@ pub mod identity;
 pub mod porter;
 pub mod simple;
 
-// Re-export stemmers
-pub use identity::IdentityStemmer;
-pub use porter::PorterStemmer;
-pub use simple::SimpleStemmer;
+use porter::PorterStemmer;
+use simple::SimpleStemmer;
 
 /// Filter that applies stemming to tokens.
 pub struct StemFilter {

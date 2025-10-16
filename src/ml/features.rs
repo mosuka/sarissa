@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::Result;
 
 /// Features extracted from query-document pairs for ranking.

@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 
 use ahash::AHasher;
 
-use crate::document::Document;
+use crate::document::document::Document;
 use crate::error::{Result, SageError};
 
 /// Trait for partitioning documents across multiple indices.
@@ -190,10 +190,12 @@ impl DocumentPartitioner for RangePartitioner {
 
         // Try to convert field value to i64
         let numeric_value = match field_value {
-            crate::document::FieldValue::Integer(i) => *i,
-            crate::document::FieldValue::Text(s) => s.parse::<i64>().map_err(|_| {
-                SageError::field(format!("Cannot convert field value '{s}' to integer"))
-            })?,
+            crate::document::field_value::FieldValue::Integer(i) => *i,
+            crate::document::field_value::FieldValue::Text(s) => {
+                s.parse::<i64>().map_err(|_| {
+                    SageError::field(format!("Cannot convert field value '{s}' to integer"))
+                })?
+            }
             _ => {
                 return Err(SageError::field(format!(
                     "Field '{}' is not numeric or text",
@@ -280,9 +282,7 @@ impl ValuePartitioner {
         default_partition: Option<usize>,
     ) -> Result<Self> {
         if mapping.is_empty() {
-            return Err(SageError::invalid_argument(
-                "Value mapping cannot be empty",
-            ));
+            return Err(SageError::invalid_argument("Value mapping cannot be empty"));
         }
 
         let max_partition = mapping.values().max().copied().unwrap_or(0);
@@ -314,14 +314,16 @@ impl DocumentPartitioner for ValuePartitioner {
 
         // Extract the actual string value from FieldValue
         let value_str = match field_value {
-            crate::document::FieldValue::Text(s) => s.clone(),
-            crate::document::FieldValue::Integer(i) => i.to_string(),
-            crate::document::FieldValue::Float(f) => f.to_string(),
-            crate::document::FieldValue::Boolean(b) => b.to_string(),
-            crate::document::FieldValue::Binary(b) => format!("{b:?}"),
-            crate::document::FieldValue::DateTime(dt) => dt.to_rfc3339(),
-            crate::document::FieldValue::Geo(point) => format!("{},{}", point.lat, point.lon),
-            crate::document::FieldValue::Null => "null".to_string(),
+            crate::document::field_value::FieldValue::Text(s) => s.clone(),
+            crate::document::field_value::FieldValue::Integer(i) => i.to_string(),
+            crate::document::field_value::FieldValue::Float(f) => f.to_string(),
+            crate::document::field_value::FieldValue::Boolean(b) => b.to_string(),
+            crate::document::field_value::FieldValue::Binary(b) => format!("{b:?}"),
+            crate::document::field_value::FieldValue::DateTime(dt) => dt.to_rfc3339(),
+            crate::document::field_value::FieldValue::Geo(point) => {
+                format!("{},{}", point.lat, point.lon)
+            }
+            crate::document::field_value::FieldValue::Null => "null".to_string(),
         };
 
         if let Some(&partition) = self.value_mapping.get(&value_str) {
@@ -390,7 +392,8 @@ impl DocumentPartitioner for RoundRobinPartitioner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{Document, FieldValue};
+    use crate::document::document::Document;
+    use crate::document::field_value::FieldValue;
 
     fn create_test_document(field_name: &str, value: FieldValue) -> Document {
         let mut doc = Document::new();
