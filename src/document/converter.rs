@@ -6,6 +6,7 @@
 use crate::document::document::Document;
 use crate::error::Result;
 
+pub mod csv;
 pub mod field_value;
 pub mod json;
 
