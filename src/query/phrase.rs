@@ -322,7 +322,7 @@ impl PhraseScorer {
 }
 
 impl Scorer for PhraseScorer {
-    fn score(&self, doc_id: u64, _term_freq: f32) -> f32 {
+    fn score(&self, doc_id: u64, _term_freq: f32, _field_length: Option<f32>) -> f32 {
         // Use phrase frequency instead of term frequency
         let phrase_freq = self
             .phrase_doc_freq
@@ -508,6 +508,10 @@ impl Query for PhraseQuery {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn field(&self) -> Option<&str> {
+        Some(&self.field)
     }
 }
 

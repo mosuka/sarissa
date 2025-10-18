@@ -680,7 +680,7 @@ impl FuzzyScorer {
 }
 
 impl Scorer for FuzzyScorer {
-    fn score(&self, doc_id: u64, _term_freq: f32) -> f32 {
+    fn score(&self, doc_id: u64, _term_freq: f32, _field_length: Option<f32>) -> f32 {
         self.doc_scores.get(&(doc_id as u32)).unwrap_or(&0.0) * self.boost
     }
 
@@ -894,8 +894,8 @@ mod tests {
         let scorer = FuzzyScorer::new(matches, 2.0);
 
         // Document score should be similarity * boost
-        assert_eq!(scorer.score(1, 1.0), 1.0 * 2.0);
-        assert_eq!(scorer.score(999, 1.0), 0.0); // Non-existent document
+        assert_eq!(scorer.score(1, 1.0, None), 1.0 * 2.0);
+        assert_eq!(scorer.score(999, 1.0, None), 0.0); // Non-existent document
         assert_eq!(scorer.max_score(), 1.0 * 2.0);
         assert_eq!(scorer.name(), "FuzzyScorer");
     }

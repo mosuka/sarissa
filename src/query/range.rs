@@ -581,7 +581,7 @@ impl RangeScorer {
 }
 
 impl Scorer for RangeScorer {
-    fn score(&self, _doc_id: u64, value: f32) -> f32 {
+    fn score(&self, _doc_id: u64, value: f32, _field_length: Option<f32>) -> f32 {
         let idf = self.range_idf();
 
         // If value is provided (non-zero), use it for proximity calculation
@@ -1453,6 +1453,9 @@ mod tests {
         }
         fn is_closed(&self) -> bool {
             false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 }

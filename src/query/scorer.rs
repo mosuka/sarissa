@@ -7,7 +7,12 @@ use crate::util::simd;
 /// Trait for document scorers.
 pub trait Scorer: Send + Debug {
     /// Calculate the score for a document.
-    fn score(&self, doc_id: u64, term_freq: f32) -> f32;
+    ///
+    /// # Arguments
+    /// * `doc_id` - Document ID
+    /// * `term_freq` - Term frequency in the document
+    /// * `field_length` - Length of the field (number of tokens). If None, uses average field length.
+    fn score(&self, doc_id: u64, term_freq: f32, field_length: Option<f32>) -> f32;
 
     /// Get the boost factor for this scorer.
     fn boost(&self) -> f32;
@@ -116,7 +121,15 @@ impl BM25Scorer {
         }
 
         let avg_len = self.avg_field_length as f32;
-        let norm_factor = 1.0 - self.b + self.b * (field_length / avg_len);
+
+        // Handle zero average length case
+        let norm_factor = if avg_len == 0.0 {
+            // When avg is unknown but we have individual field lengths,
+            // disable length normalization (set factor to 1.0)
+            1.0
+        } else {
+            1.0 - self.b + self.b * (field_length / avg_len)
+        };
 
         // TF = (tf * (k1 + 1)) / (tf + k1 * norm_factor)
         (term_freq * (self.k1 + 1.0)) / (term_freq + self.k1 * norm_factor)
@@ -144,7 +157,7 @@ impl BM25Scorer {
 }
 
 impl Scorer for BM25Scorer {
-    fn score(&self, _doc_id: u64, term_freq: f32) -> f32 {
+    fn score(&self, _doc_id: u64, term_freq: f32, field_length: Option<f32>) -> f32 {
         if self.doc_freq == 0 || self.total_docs == 0 || term_freq == 0.0 {
             return 0.0;
         }
@@ -152,10 +165,9 @@ impl Scorer for BM25Scorer {
         // Standard BM25 formula: score = boost × IDF × TF
         let idf = self.idf();
 
-        // Use average field length for TF calculation
-        // In a real implementation, actual field length should be passed
-        let field_length = self.avg_field_length as f32;
-        let tf = self.tf(term_freq, field_length);
+        // Use provided field length, or fall back to average
+        let field_len = field_length.unwrap_or(self.avg_field_length as f32);
+        let tf = self.tf(term_freq, field_len);
 
         self.boost * idf * tf
     }
@@ -293,7 +305,7 @@ impl ConstantScorer {
 }
 
 impl Scorer for ConstantScorer {
-    fn score(&self, _doc_id: u64, _term_freq: f32) -> f32 {
+    fn score(&self, _doc_id: u64, _term_freq: f32, _field_length: Option<f32>) -> f32 {
         self.score * self.boost
     }
 
@@ -368,24 +380,24 @@ mod tests {
     fn test_bm25_scorer_score() {
         let scorer = BM25Scorer::new(10, 100, 50, 10.0, 1000, 1.0);
 
-        let score1 = scorer.score(0, 1.0);
-        let score2 = scorer.score(0, 2.0);
+        let score1 = scorer.score(0, 1.0, None);
+        let score2 = scorer.score(0, 2.0, None);
 
         // Higher term frequency should give higher score
         assert!(score2 > score1);
 
         // Zero term frequency should give zero score
-        assert_eq!(scorer.score(0, 0.0), 0.0);
+        assert_eq!(scorer.score(0, 0.0, None), 0.0);
     }
 
     #[test]
     fn test_bm25_scorer_boost() {
         let mut scorer = BM25Scorer::new(10, 100, 50, 10.0, 1000, 1.0);
 
-        let original_score = scorer.score(0, 1.0);
+        let original_score = scorer.score(0, 1.0, None);
 
         scorer.set_boost(2.0);
-        let boosted_score = scorer.score(0, 1.0);
+        let boosted_score = scorer.score(0, 1.0, None);
 
         assert_eq!(scorer.boost(), 2.0);
         assert_eq!(boosted_score, original_score * 2.0);
@@ -396,7 +408,7 @@ mod tests {
         let scorer = BM25Scorer::new(10, 100, 50, 10.0, 1000, 1.0);
 
         let max_score = scorer.max_score();
-        let actual_score = scorer.score(0, 1.0);
+        let actual_score = scorer.score(0, 1.0, None);
 
         // Max score should be >= actual score
         assert!(max_score >= actual_score);
@@ -411,9 +423,9 @@ mod tests {
         assert_eq!(scorer.name(), "Constant");
 
         // Should return the same score for any input
-        assert_eq!(scorer.score(0, 1.0), 5.0);
-        assert_eq!(scorer.score(100, 10.0), 5.0);
-        assert_eq!(scorer.score(0, 0.0), 5.0);
+        assert_eq!(scorer.score(0, 1.0, None), 5.0);
+        assert_eq!(scorer.score(100, 10.0, None), 5.0);
+        assert_eq!(scorer.score(0, 0.0, None), 5.0);
     }
 
     #[test]
@@ -424,7 +436,7 @@ mod tests {
         assert_eq!(scorer.boost(), 2.0);
 
         // Should return score * boost
-        assert_eq!(scorer.score(0, 1.0), 10.0);
+        assert_eq!(scorer.score(0, 1.0, None), 10.0);
         assert_eq!(scorer.max_score(), 10.0);
     }
 
@@ -434,11 +446,11 @@ mod tests {
 
         scorer.set_score_value(3.0);
         assert_eq!(scorer.score_value(), 3.0);
-        assert_eq!(scorer.score(0, 1.0), 3.0);
+        assert_eq!(scorer.score(0, 1.0, None), 3.0);
 
         scorer.set_boost(2.0);
         assert_eq!(scorer.boost(), 2.0);
-        assert_eq!(scorer.score(0, 1.0), 6.0);
+        assert_eq!(scorer.score(0, 1.0, None), 6.0);
     }
 
     #[test]

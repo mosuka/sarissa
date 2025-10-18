@@ -890,7 +890,7 @@ impl MoreLikeThisScorer {
 }
 
 impl Scorer for MoreLikeThisScorer {
-    fn score(&self, doc_id: u64, _term_freq: f32) -> f32 {
+    fn score(&self, doc_id: u64, _term_freq: f32, _field_length: Option<f32>) -> f32 {
         self.similarity_scores.get(&(doc_id as u32)).unwrap_or(&0.0) * self.boost
     }
 
@@ -1069,10 +1069,10 @@ mod tests {
         let mut scorer = MoreLikeThisScorer::new(results);
         scorer.set_boost(2.0);
 
-        assert_eq!(scorer.score(1, 1.0), 0.9 * 2.0);
-        assert_eq!(scorer.score(2, 1.0), 0.8 * 2.0);
-        assert_eq!(scorer.score(3, 1.0), 0.7 * 2.0);
-        assert_eq!(scorer.score(999, 1.0), 0.0); // Non-existent document
+        assert_eq!(scorer.score(1, 1.0, None), 0.9 * 2.0);
+        assert_eq!(scorer.score(2, 1.0, None), 0.8 * 2.0);
+        assert_eq!(scorer.score(3, 1.0, None), 0.7 * 2.0);
+        assert_eq!(scorer.score(999, 1.0, None), 0.0); // Non-existent document
 
         assert_eq!(scorer.max_score(), 0.9 * 2.0);
     }
@@ -1145,6 +1145,9 @@ mod tests {
         }
         fn close(&mut self) -> Result<()> {
             Ok(())
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 }

@@ -36,4 +36,10 @@ pub trait Query: Send + Sync + Debug {
 
     /// Get this query as Any for downcasting.
     fn as_any(&self) -> &dyn Any;
+
+    /// Get the field name this query searches in, if applicable.
+    /// Returns None for queries that don't target a specific field (e.g., BooleanQuery).
+    fn field(&self) -> Option<&str> {
+        None
+    }
 }

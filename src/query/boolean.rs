@@ -168,7 +168,7 @@ impl Query for BooleanQuery {
         let must_not_clauses = self.clauses_by_occur(Occur::MustNot);
 
         // Handle MUST and MUST_NOT clauses
-        if !must_clauses.is_empty() || !must_not_clauses.is_empty() {
+        if !must_clauses.is_empty() || (!must_not_clauses.is_empty() && should_clauses.is_empty()) {
             // Create positive matcher from MUST clauses
             let positive_matcher = if !must_clauses.is_empty() {
                 if must_clauses.len() == 1 {
@@ -187,7 +187,7 @@ impl Query for BooleanQuery {
                     Box::new(ConjunctionMatcher::new(matchers))
                 }
             } else {
-                // No MUST clauses, but we have MUST_NOT clauses
+                // No MUST clauses, but we have MUST_NOT clauses and no SHOULD clauses
                 // Match all documents and exclude the ones matching MUST_NOT
                 Box::new(AllMatcher::new(reader.max_doc()))
             };
@@ -235,21 +235,46 @@ impl Query for BooleanQuery {
                 Ok(positive_matcher)
             }
         } else if !should_clauses.is_empty() {
-            // Only SHOULD clauses - create disjunction matcher (OR operation)
-            let mut matchers = Vec::new();
+            // SHOULD clauses (possibly with MUST_NOT)
+            let mut should_matchers = Vec::new();
             for clause in &should_clauses {
                 let matcher = clause.query.matcher(reader)?;
                 if !matcher.is_exhausted() {
-                    matchers.push(matcher);
+                    should_matchers.push(matcher);
                 }
             }
 
-            if matchers.is_empty() {
-                Ok(Box::new(EmptyMatcher::new()))
-            } else if matchers.len() == 1 {
-                Ok(matchers.into_iter().next().unwrap())
+            if should_matchers.is_empty() {
+                return Ok(Box::new(EmptyMatcher::new()));
+            }
+
+            let positive_matcher = if should_matchers.len() == 1 {
+                should_matchers.into_iter().next().unwrap()
             } else {
-                Ok(Box::new(DisjunctionMatcher::new(matchers)))
+                Box::new(DisjunctionMatcher::new(should_matchers))
+            };
+
+            // Handle MUST_NOT clauses with SHOULD
+            if !must_not_clauses.is_empty() {
+                let mut negative_matchers = Vec::new();
+                for clause in &must_not_clauses {
+                    let matcher = clause.query.matcher(reader)?;
+                    if !matcher.is_exhausted() {
+                        negative_matchers.push(matcher);
+                    }
+                }
+
+                if !negative_matchers.is_empty() {
+                    // Combine SHOULD (positive) with MUST_NOT (negative)
+                    Ok(Box::new(ConjunctionNotMatcher::new(
+                        positive_matcher,
+                        negative_matchers,
+                    )))
+                } else {
+                    Ok(positive_matcher)
+                }
+            } else {
+                Ok(positive_matcher)
             }
         } else {
             Ok(Box::new(EmptyMatcher::new()))
@@ -527,7 +552,7 @@ mod tests {
 
         let scorer = query.scorer(&reader).unwrap();
         // Should create a scorer without error
-        assert!(scorer.score(0, 1.0) >= 0.0);
+        assert!(scorer.score(0, 1.0, None) >= 0.0);
     }
 
     #[test]

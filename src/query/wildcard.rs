@@ -357,7 +357,7 @@ impl WildcardScorer {
 }
 
 impl crate::query::scorer::Scorer for WildcardScorer {
-    fn score(&self, _doc_id: u64, term_freq: f32) -> f32 {
+    fn score(&self, _doc_id: u64, term_freq: f32, _field_length: Option<f32>) -> f32 {
         if self.doc_freq == 0 || self.total_docs == 0 {
             return 0.0;
         }
