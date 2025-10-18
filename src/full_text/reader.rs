@@ -63,6 +63,9 @@ pub trait IndexReader: Send + Sync + std::fmt::Debug {
             }),
         }
     }
+
+    /// Get this reader as Any for downcasting.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Information about a term in the index.

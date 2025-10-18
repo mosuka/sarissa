@@ -79,7 +79,23 @@ impl Searcher {
 
             // Calculate score for this document
             let term_freq = matcher.term_freq() as f32;
-            let score = scorer.score(doc_id, term_freq);
+
+            // Retrieve actual field length if query targets a specific field
+            let field_length = if let Some(field_name) = query.field() {
+                if let Some(advanced_reader) = self
+                    .reader
+                    .as_any()
+                    .downcast_ref::<crate::full_text_search::advanced_reader::AdvancedIndexReader>()
+                {
+                    advanced_reader.field_length(doc_id, field_name).ok().flatten().map(|len| len as f32)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let score = scorer.score(doc_id, term_freq, field_length);
 
             // Collect the result
             collector.collect(doc_id, score)?;

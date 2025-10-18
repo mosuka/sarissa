@@ -95,7 +95,7 @@ impl DocumentParser {
                     let analyzed_terms = self.tokens_to_analyzed_terms(token_vec);
 
                     field_terms.insert(field_name.clone(), analyzed_terms);
-                    stored_fields.insert(field_name.clone(), text.to_string());
+                    stored_fields.insert(field_name.clone(), FieldValue::Text(text.to_string()));
                 }
                 FieldValue::Integer(num) => {
                     // Convert integer to text for indexing
@@ -109,7 +109,7 @@ impl DocumentParser {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::Integer(*num));
                 }
                 FieldValue::Float(num) => {
                     // Convert float to text for indexing
@@ -123,7 +123,7 @@ impl DocumentParser {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::Float(*num));
                 }
                 FieldValue::Boolean(b) => {
                     // Convert boolean to text
@@ -137,11 +137,11 @@ impl DocumentParser {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::Boolean(*b));
                 }
                 FieldValue::Binary(_) => {
                     // Binary fields are not indexed, only stored
-                    // Skip for now
+                    stored_fields.insert(field_name.clone(), field_value.clone());
                 }
                 FieldValue::DateTime(dt) => {
                     // Convert datetime to RFC3339 string
@@ -155,7 +155,7 @@ impl DocumentParser {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::DateTime(*dt));
                 }
                 FieldValue::Geo(point) => {
                     // Convert geo point to string representation
@@ -169,19 +169,26 @@ impl DocumentParser {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::Geo(*point));
                 }
                 FieldValue::Null => {
-                    // Null fields are not indexed
-                    // Skip for now
+                    // Null fields are not indexed, only stored
+                    stored_fields.insert(field_name.clone(), FieldValue::Null);
                 }
             }
+        }
+
+        // Calculate field lengths (number of tokens per field)
+        let mut field_lengths = AHashMap::new();
+        for (field_name, terms) in &field_terms {
+            field_lengths.insert(field_name.clone(), terms.len() as u32);
         }
 
         Ok(AnalyzedDocument {
             doc_id,
             field_terms,
             stored_fields,
+            field_lengths,
         })
     }
 

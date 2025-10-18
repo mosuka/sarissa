@@ -255,6 +255,12 @@ pub struct SegmentReader {
     /// Cached stored documents.
     stored_documents: RwLock<Option<BTreeMap<u64, Document>>>,
 
+    /// Cached field lengths: doc_id -> (field_name -> length).
+    field_lengths: RwLock<Option<BTreeMap<u64, AHashMap<String, u32>>>>,
+
+    /// Cached field statistics: field_name -> FieldStats.
+    field_stats: RwLock<Option<AHashMap<String, crate::full_text::reader::FieldStats>>>,
+
     /// Whether the segment is loaded.
     loaded: AtomicBool,
 }
@@ -267,6 +273,8 @@ impl SegmentReader {
             storage,
             term_dictionary: RwLock::new(None),
             stored_documents: RwLock::new(None),
+            field_lengths: RwLock::new(None),
+            field_stats: RwLock::new(None),
             loaded: AtomicBool::new(false),
         };
 
@@ -341,7 +349,7 @@ impl SegmentReader {
             return Ok(());
         }
 
-        // Fallback to binary format
+        // Fallback to binary format with type information
         let docs_file = format!("{}.docs", self.info.segment_id);
         if let Ok(input) = self.storage.open_input(&docs_file) {
             let mut reader = StructReader::new(input)?;
@@ -355,8 +363,65 @@ impl SegmentReader {
 
                 for _ in 0..field_count {
                     let field_name = reader.read_string()?;
-                    let field_value = reader.read_string()?;
-                    doc.add_field(field_name, FieldValue::Text(field_value));
+
+                    // Read type tag
+                    let type_tag = reader.read_u8()?;
+
+                    // Read value based on type tag
+                    let field_value = match type_tag {
+                        0 => {
+                            // Text
+                            let text = reader.read_string()?;
+                            FieldValue::Text(text)
+                        }
+                        1 => {
+                            // Integer
+                            let num = reader.read_u64()? as i64; // Read as u64, convert to i64 preserving bit pattern
+                            FieldValue::Integer(num)
+                        }
+                        2 => {
+                            // Float
+                            let num = reader.read_f64()?;
+                            FieldValue::Float(num)
+                        }
+                        3 => {
+                            // Boolean
+                            let b = reader.read_u8()? != 0;
+                            FieldValue::Boolean(b)
+                        }
+                        4 => {
+                            // Binary
+                            let bytes = reader.read_bytes()?;
+                            FieldValue::Binary(bytes)
+                        }
+                        5 => {
+                            // DateTime
+                            let dt_str = reader.read_string()?;
+                            let dt = chrono::DateTime::parse_from_rfc3339(&dt_str)
+                                .map_err(|e| {
+                                    SageError::index(format!("Failed to parse DateTime: {e}"))
+                                })?
+                                .with_timezone(&chrono::Utc);
+                            FieldValue::DateTime(dt)
+                        }
+                        6 => {
+                            // Geo
+                            let lat = reader.read_f64()?;
+                            let lon = reader.read_f64()?;
+                            FieldValue::Geo(crate::query::geo::GeoPoint { lat, lon })
+                        }
+                        7 => {
+                            // Null
+                            FieldValue::Null
+                        }
+                        _ => {
+                            return Err(SageError::index(format!(
+                                "Unknown field type tag: {type_tag}"
+                            )))
+                        }
+                    };
+
+                    doc.add_field(field_name, field_value);
                 }
 
                 documents.insert(doc_id, doc);
@@ -366,6 +431,113 @@ impl SegmentReader {
         }
 
         Ok(())
+    }
+
+    /// Load field lengths from the segment.
+    fn load_field_lengths(&self) -> Result<()> {
+        let lens_file = format!("{}.lens", self.info.segment_id);
+
+        // Check if file exists (for backward compatibility with old indexes)
+        if !self.storage.file_exists(&lens_file) {
+            // Old index without field lengths - initialize empty
+            *self.field_lengths.write().unwrap() = Some(BTreeMap::new());
+            return Ok(());
+        }
+
+        let lens_input = self.storage.open_input(&lens_file)?;
+        let mut lens_reader = StructReader::new(lens_input)?;
+
+        let doc_count = lens_reader.read_varint()? as usize;
+        let mut all_field_lengths = BTreeMap::new();
+
+        for _ in 0..doc_count {
+            let doc_id = lens_reader.read_u64()?;
+            let field_count = lens_reader.read_varint()? as usize;
+
+            let mut field_lens = AHashMap::new();
+            for _ in 0..field_count {
+                let field_name = lens_reader.read_string()?;
+                let length = lens_reader.read_u32()?;
+                field_lens.insert(field_name, length);
+            }
+
+            all_field_lengths.insert(doc_id, field_lens);
+        }
+
+        *self.field_lengths.write().unwrap() = Some(all_field_lengths);
+        Ok(())
+    }
+
+    /// Load field statistics from the segment.
+    fn load_field_stats(&self) -> Result<()> {
+        let fstats_file = format!("{}.fstats", self.info.segment_id);
+
+        // Check if file exists (for backward compatibility with old indexes)
+        if !self.storage.file_exists(&fstats_file) {
+            // Old index without field stats - initialize empty
+            *self.field_stats.write().unwrap() = Some(AHashMap::new());
+            return Ok(());
+        }
+
+        let fstats_input = self.storage.open_input(&fstats_file)?;
+        let mut fstats_reader = StructReader::new(fstats_input)?;
+
+        let field_count = fstats_reader.read_varint()? as usize;
+        let mut all_field_stats = AHashMap::new();
+
+        for _ in 0..field_count {
+            let field_name = fstats_reader.read_string()?;
+            let doc_count = fstats_reader.read_u64()?;
+            let avg_length = fstats_reader.read_f64()?;
+            let min_length = fstats_reader.read_u64()?;
+            let max_length = fstats_reader.read_u64()?;
+
+            all_field_stats.insert(
+                field_name.clone(),
+                crate::full_text::reader::FieldStats {
+                    field: field_name,
+                    unique_terms: 0, // Not stored, not needed for BM25
+                    total_terms: 0,  // Not stored, not needed for BM25
+                    doc_count,
+                    avg_length,
+                    min_length,
+                    max_length,
+                },
+            );
+        }
+
+        *self.field_stats.write().unwrap() = Some(all_field_stats);
+        Ok(())
+    }
+
+    /// Get field statistics for a specific field.
+    pub fn field_stats(&self, field: &str) -> Result<Option<crate::full_text::reader::FieldStats>> {
+        // Ensure field stats are loaded
+        if self.field_stats.read().unwrap().is_none() {
+            self.load_field_stats()?;
+        }
+
+        let field_stats = self.field_stats.read().unwrap();
+        if let Some(ref stats_map) = *field_stats {
+            return Ok(stats_map.get(field).cloned());
+        }
+        Ok(None)
+    }
+
+    /// Get field length for a specific document and field.
+    pub fn field_length(&self, local_doc_id: u64, field: &str) -> Result<Option<u32>> {
+        // Ensure field lengths are loaded
+        if self.field_lengths.read().unwrap().is_none() {
+            self.load_field_lengths()?;
+        }
+
+        let field_lengths = self.field_lengths.read().unwrap();
+        if let Some(ref lengths_map) = *field_lengths {
+            if let Some(doc_lengths) = lengths_map.get(&local_doc_id) {
+                return Ok(doc_lengths.get(field).copied());
+            }
+        }
+        Ok(None)
     }
 
     /// Get a document by ID from this segment.
@@ -665,6 +837,29 @@ impl AdvancedIndexReader {
             Ok(())
         }
     }
+
+    /// Get the field length for a specific document and field.
+    pub fn field_length(&self, doc_id: u64, field: &str) -> Result<Option<u32>> {
+        self.check_closed()?;
+
+        // Find the segment containing this document
+        for segment_reader in &self.segment_readers {
+            let reader = segment_reader.read().unwrap();
+            let segment_info = &reader.info;
+
+            // Check if this doc_id belongs to this segment
+            let segment_start = segment_info.doc_offset;
+            let segment_end = segment_start + segment_info.doc_count;
+
+            if doc_id >= segment_start && doc_id < segment_end {
+                // Convert to segment-local doc_id
+                let local_doc_id = doc_id - segment_start;
+                return reader.field_length(local_doc_id, field);
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 impl crate::full_text::reader::IndexReader for AdvancedIndexReader {
@@ -796,31 +991,34 @@ impl crate::full_text::reader::IndexReader for AdvancedIndexReader {
     fn field_stats(&self, field: &str) -> Result<Option<crate::full_text::reader::FieldStats>> {
         self.check_closed()?;
 
-        let total_unique_terms = 0;
-        let total_terms = 0;
-        let mut total_doc_count = 0;
-        let min_length = u64::MAX;
-        let max_length = 0;
+        let mut total_doc_count = 0u64;
+        let mut total_length_sum = 0u64; // Sum of (avg_length * doc_count) for weighted average
+        let mut min_length = u64::MAX;
+        let mut max_length = 0u64;
         let mut found = false;
 
         // Aggregate statistics from all segments
         for segment_reader in &self.segment_readers {
             let reader = segment_reader.read().unwrap();
 
-            // For now, we don't have field-specific statistics
-            // This would require additional metadata storage
-            total_doc_count += reader.doc_count();
-            found = true;
+            // Get field stats from this segment
+            if let Some(segment_stats) = reader.field_stats(field)? {
+                total_doc_count += segment_stats.doc_count;
+                total_length_sum += (segment_stats.avg_length * segment_stats.doc_count as f64) as u64;
+                min_length = min_length.min(segment_stats.min_length);
+                max_length = max_length.max(segment_stats.max_length);
+                found = true;
+            }
         }
 
         if found {
             Ok(Some(crate::full_text::reader::FieldStats {
                 field: field.to_string(),
-                unique_terms: total_unique_terms,
-                total_terms,
+                unique_terms: 0, // Not aggregated
+                total_terms: 0,  // Not aggregated
                 doc_count: total_doc_count,
                 avg_length: if total_doc_count > 0 {
-                    total_terms as f64 / total_doc_count as f64
+                    total_length_sum as f64 / total_doc_count as f64
                 } else {
                     0.0
                 },
@@ -843,6 +1041,10 @@ impl crate::full_text::reader::IndexReader for AdvancedIndexReader {
 
     fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

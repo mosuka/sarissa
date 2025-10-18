@@ -698,7 +698,7 @@ impl GroupedSearchEngine {
         // Note: This is a simplified implementation
         for doc_id in 0..100u32 {
             // Placeholder iteration
-            let score = scorer.score(doc_id as u64, 1.0);
+            let score = scorer.score(doc_id as u64, 1.0, None);
             if score > 0.0 {
                 // Get group key for this document
                 let group_key = self.get_document_group_key(doc_id, reader)?;

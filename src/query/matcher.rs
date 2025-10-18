@@ -377,6 +377,16 @@ impl Matcher for DisjunctionMatcher {
         self.cost
     }
 
+    fn term_freq(&self) -> u64 {
+        let mut total_freq = 0;
+        for entry in self.heap.iter() {
+            if entry.matcher.doc_id() == self.current_doc {
+                total_freq += entry.matcher.term_freq();
+            }
+        }
+        total_freq
+    }
+
     fn is_exhausted(&self) -> bool {
         self.exhausted
     }
@@ -652,6 +662,10 @@ impl Matcher for ConjunctionNotMatcher {
 
     fn cost(&self) -> u64 {
         self.cost
+    }
+
+    fn term_freq(&self) -> u64 {
+        self.positive.term_freq()
     }
 
     fn is_exhausted(&self) -> bool {

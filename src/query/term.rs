@@ -131,6 +131,10 @@ impl Query for TermQuery {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn field(&self) -> Option<&str> {
+        Some(&self.field)
+    }
 }
 
 #[cfg(test)]
@@ -184,7 +188,7 @@ mod tests {
         // Should create a scorer even for non-existent terms
         let scorer = query.scorer(&reader).unwrap();
         // The scorer should handle missing terms gracefully
-        assert!(scorer.score(0, 1.0) >= 0.0);
+        assert!(scorer.score(0, 1.0, None) >= 0.0);
     }
 
     #[test]

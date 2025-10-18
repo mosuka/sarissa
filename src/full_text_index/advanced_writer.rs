@@ -11,6 +11,7 @@ use ahash::AHashMap;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::token::Token;
 use crate::document::document::Document;
+use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::full_text::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::full_text::posting::{InvertedIndex, Posting};
@@ -77,8 +78,10 @@ pub struct AnalyzedDocument {
     pub doc_id: u64,
     /// Field name to analyzed terms mapping.
     pub field_terms: AHashMap<String, Vec<AnalyzedTerm>>,
-    /// Stored field values.
-    pub stored_fields: AHashMap<String, String>,
+    /// Stored field values with original types preserved.
+    pub stored_fields: AHashMap<String, FieldValue>,
+    /// Field name to field length (number of tokens) mapping.
+    pub field_lengths: AHashMap<String, u32>,
 }
 
 /// An analyzed term with position and metadata.
@@ -276,7 +279,7 @@ impl AdvancedIndexWriter {
                     let analyzed_terms = self.tokens_to_analyzed_terms(token_vec);
 
                     field_terms.insert(field_name.clone(), analyzed_terms);
-                    stored_fields.insert(field_name.clone(), text.to_string());
+                    stored_fields.insert(field_name.clone(), FieldValue::Text(text.to_string()));
                 }
                 FieldValue::Integer(num) => {
                     // Convert integer to text for indexing
@@ -290,7 +293,7 @@ impl AdvancedIndexWriter {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::Integer(*num));
                 }
                 FieldValue::Float(num) => {
                     // Convert float to text for indexing
@@ -304,7 +307,7 @@ impl AdvancedIndexWriter {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::Float(*num));
                 }
                 FieldValue::Boolean(boolean) => {
                     // Convert boolean to text
@@ -318,7 +321,7 @@ impl AdvancedIndexWriter {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::Boolean(*boolean));
                 }
                 FieldValue::DateTime(dt) => {
                     // Handle DateTime field
@@ -332,18 +335,26 @@ impl AdvancedIndexWriter {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), text);
+                    stored_fields.insert(field_name.clone(), FieldValue::DateTime(*dt));
                 }
-                _ => {
-                    // For other types (Binary, Geo, Null), skip indexing
+                FieldValue::Binary(_) | FieldValue::Geo(_) | FieldValue::Null => {
+                    // For Binary, Geo, and Null types, only store but don't index
+                    stored_fields.insert(field_name.clone(), field_value.clone());
                 }
             }
+        }
+
+        // Calculate field lengths (number of tokens per field)
+        let mut field_lengths = AHashMap::new();
+        for (field_name, terms) in &field_terms {
+            field_lengths.insert(field_name.clone(), terms.len() as u32);
         }
 
         Ok(AnalyzedDocument {
             doc_id,
             field_terms,
             stored_fields,
+            field_lengths,
         })
     }
 
@@ -417,6 +428,12 @@ impl AdvancedIndexWriter {
         // Write stored documents
         self.write_stored_documents(&segment_name)?;
 
+        // Write field lengths
+        self.write_field_lengths(&segment_name)?;
+
+        // Write field statistics
+        self.write_field_stats(&segment_name)?;
+
         // Write segment metadata
         self.write_segment_metadata(&segment_name)?;
 
@@ -480,7 +497,7 @@ impl AdvancedIndexWriter {
         Ok(())
     }
 
-    /// Write stored documents to storage.
+    /// Write stored documents to storage with type information preserved.
     fn write_stored_documents(&self, segment_name: &str) -> Result<()> {
         let stored_file = format!("{segment_name}.docs");
         let stored_output = self.storage.create_output(&stored_file)?;
@@ -496,7 +513,43 @@ impl AdvancedIndexWriter {
 
             for (field_name, field_value) in &doc.stored_fields {
                 stored_writer.write_string(field_name)?;
-                stored_writer.write_string(field_value)?;
+
+                // Write type tag and value
+                match field_value {
+                    FieldValue::Text(text) => {
+                        stored_writer.write_u8(0)?; // Type tag for Text
+                        stored_writer.write_string(text)?;
+                    }
+                    FieldValue::Integer(num) => {
+                        stored_writer.write_u8(1)?; // Type tag for Integer
+                        stored_writer.write_u64(*num as u64)?; // Store as u64, preserving bit pattern
+                    }
+                    FieldValue::Float(num) => {
+                        stored_writer.write_u8(2)?; // Type tag for Float
+                        stored_writer.write_f64(*num)?;
+                    }
+                    FieldValue::Boolean(b) => {
+                        stored_writer.write_u8(3)?; // Type tag for Boolean
+                        stored_writer.write_u8(if *b { 1 } else { 0 })?;
+                    }
+                    FieldValue::Binary(bytes) => {
+                        stored_writer.write_u8(4)?; // Type tag for Binary
+                        stored_writer.write_varint(bytes.len() as u64)?;
+                        stored_writer.write_bytes(bytes)?;
+                    }
+                    FieldValue::DateTime(dt) => {
+                        stored_writer.write_u8(5)?; // Type tag for DateTime
+                        stored_writer.write_string(&dt.to_rfc3339())?;
+                    }
+                    FieldValue::Geo(geo) => {
+                        stored_writer.write_u8(6)?; // Type tag for Geo
+                        stored_writer.write_f64(geo.lat)?;
+                        stored_writer.write_f64(geo.lon)?;
+                    }
+                    FieldValue::Null => {
+                        stored_writer.write_u8(7)?; // Type tag for Null
+                    }
+                }
             }
         }
 
@@ -504,16 +557,90 @@ impl AdvancedIndexWriter {
         Ok(())
     }
 
+    /// Calculate field statistics from buffered documents.
+    fn calculate_field_stats(&self) -> AHashMap<String, (u64, f64, u64, u64)> {
+        // field_name -> (doc_count, total_length, min_length, max_length)
+        let mut field_stats: AHashMap<String, (u64, u64, u64, u64)> = AHashMap::new();
+
+        for doc in &self.buffered_docs {
+            for (field_name, &length) in &doc.field_lengths {
+                let stats = field_stats.entry(field_name.clone()).or_insert((0, 0, u64::MAX, 0));
+                stats.0 += 1; // doc_count
+                stats.1 += length as u64; // total_length
+                stats.2 = stats.2.min(length as u64); // min_length
+                stats.3 = stats.3.max(length as u64); // max_length
+            }
+        }
+
+        // Convert to (doc_count, avg_length, min_length, max_length)
+        field_stats
+            .into_iter()
+            .map(|(field, (doc_count, total_length, min_length, max_length))| {
+                let avg_length = if doc_count > 0 {
+                    total_length as f64 / doc_count as f64
+                } else {
+                    0.0
+                };
+                (field, (doc_count, avg_length, min_length, max_length))
+            })
+            .collect()
+    }
+
+    /// Write field lengths to storage.
+    fn write_field_lengths(&self, segment_name: &str) -> Result<()> {
+        let lens_file = format!("{segment_name}.lens");
+        let lens_output = self.storage.create_output(&lens_file)?;
+        let mut lens_writer = StructWriter::new(lens_output);
+
+        // Write document count
+        lens_writer.write_varint(self.buffered_docs.len() as u64)?;
+
+        // Write field lengths for each document
+        for doc in &self.buffered_docs {
+            lens_writer.write_u64(doc.doc_id)?;
+            lens_writer.write_varint(doc.field_lengths.len() as u64)?;
+
+            for (field_name, length) in &doc.field_lengths {
+                lens_writer.write_string(field_name)?;
+                lens_writer.write_u32(*length)?;
+            }
+        }
+
+        lens_writer.close()?;
+        Ok(())
+    }
+
+    /// Write field statistics to storage.
+    fn write_field_stats(&self, segment_name: &str) -> Result<()> {
+        let fstats_file = format!("{segment_name}.fstats");
+        let fstats_output = self.storage.create_output(&fstats_file)?;
+        let mut fstats_writer = StructWriter::new(fstats_output);
+
+        let field_stats = self.calculate_field_stats();
+
+        // Write number of fields
+        fstats_writer.write_varint(field_stats.len() as u64)?;
+
+        for (field_name, (doc_count, avg_length, min_length, max_length)) in field_stats {
+            fstats_writer.write_string(&field_name)?;
+            fstats_writer.write_u64(doc_count)?;
+            fstats_writer.write_f64(avg_length)?;
+            fstats_writer.write_u64(min_length)?;
+            fstats_writer.write_u64(max_length)?;
+        }
+
+        fstats_writer.close()?;
+        Ok(())
+    }
+
     /// Write documents as JSON for compatibility with BasicIndexReader.
     fn write_json_documents(&self, segment_name: &str) -> Result<()> {
-        use crate::document::field_value::FieldValue;
-
-        // Convert analyzed documents back to Document format
+        // Convert analyzed documents back to Document format with preserved types
         let mut documents = Vec::new();
         for analyzed_doc in &self.buffered_docs {
             let mut doc = Document::new();
             for (field_name, field_value) in &analyzed_doc.stored_fields {
-                doc.add_field(field_name, FieldValue::Text(field_value.clone()));
+                doc.add_field(field_name, field_value.clone());
             }
             documents.push(doc);
         }

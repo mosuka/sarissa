@@ -126,6 +126,10 @@ impl IndexReader for MockIndexReader {
     fn is_closed(&self) -> bool {
         false
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl std::fmt::Debug for MockIndexReader {

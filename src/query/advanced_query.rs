@@ -190,7 +190,7 @@ impl AdvancedQuery {
             let doc_id = matcher.doc_id() as u32;
 
             // Calculate score with field boosts
-            let mut score = scorer.score(doc_id as u64, 1.0); // Use default term frequency
+            let mut score = scorer.score(doc_id as u64, 1.0, None); // Use default term frequency
             score = self.apply_field_boosts(doc_id, score, reader)?;
             score *= self.boost;
 
