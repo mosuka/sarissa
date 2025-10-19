@@ -529,12 +529,14 @@ impl RangeScorer {
         let n = self.total_docs as f32;
         let df = self.matching_docs as f32;
 
-        // Base IDF calculation
+        // Base IDF calculation using BM25 formula
         let base_idf = ((n - df + 0.5) / (df + 0.5)).ln();
 
-        // Check for invalid values
-        let base_idf = if base_idf.is_nan() || base_idf.is_infinite() {
-            1.0
+        // Check for invalid values and ensure non-negative
+        let base_idf = if base_idf.is_nan() || base_idf.is_infinite() || base_idf < 0.0 {
+            // When most documents match (negative IDF), use a small positive value
+            // This maintains relative ranking while avoiding negative scores
+            0.5
         } else {
             base_idf
         };
@@ -547,8 +549,9 @@ impl RangeScorer {
             1.0_f32 // No bonus for unbounded ranges
         };
 
-        let epsilon = 0.1_f32;
-        (base_idf + epsilon).max(epsilon) * selectivity_multiplier
+        // Ensure minimum meaningful score
+        let min_score = 0.5_f32;
+        (base_idf * selectivity_multiplier).max(min_score)
     }
 
     /// Calculate proximity-based score for a numeric value.

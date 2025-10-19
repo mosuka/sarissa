@@ -170,7 +170,7 @@ impl Query for BooleanQuery {
         // Handle MUST and MUST_NOT clauses
         if !must_clauses.is_empty() || (!must_not_clauses.is_empty() && should_clauses.is_empty()) {
             // Create positive matcher from MUST clauses
-            let positive_matcher = if !must_clauses.is_empty() {
+            let mut positive_matcher = if !must_clauses.is_empty() {
                 if must_clauses.len() == 1 {
                     // Single MUST clause
                     must_clauses[0].query.matcher(reader)?
@@ -191,6 +191,35 @@ impl Query for BooleanQuery {
                 // Match all documents and exclude the ones matching MUST_NOT
                 Box::new(AllMatcher::new(reader.max_doc()))
             };
+
+            // If minimum_should_match is set and we have SHOULD clauses, combine them with MUST
+            if self.minimum_should_match > 0 && !should_clauses.is_empty() {
+                let mut should_matchers = Vec::new();
+                for clause in &should_clauses {
+                    let matcher = clause.query.matcher(reader)?;
+                    if !matcher.is_exhausted() {
+                        should_matchers.push(matcher);
+                    }
+                }
+
+                if !should_matchers.is_empty() {
+                    let should_matcher = if should_matchers.len() == 1 {
+                        should_matchers.into_iter().next().unwrap()
+                    } else {
+                        Box::new(DisjunctionMatcher::new(should_matchers))
+                    };
+
+                    // Combine MUST and SHOULD with ConjunctionMatcher
+                    positive_matcher = Box::new(ConjunctionMatcher::new(vec![
+                        positive_matcher,
+                        should_matcher,
+                    ]));
+                } else if !must_clauses.is_empty() {
+                    // SHOULD clauses are exhausted but minimum_should_match requires them
+                    // This means no documents can match
+                    return Ok(Box::new(EmptyMatcher::new()));
+                }
+            }
 
             // Handle MUST_NOT clauses
             if !must_not_clauses.is_empty() {
