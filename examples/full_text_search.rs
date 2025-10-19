@@ -1,25 +1,33 @@
 //! Full-text search example - demonstrates comprehensive full-text search capabilities.
 //!
-//! This example showcases the core full-text search features including:
-//! - Creating and configuring a search index
-//! - Adding documents with multiple fields
-//! - Performing various types of text searches
-//! - Retrieving and displaying search results
-//! - Counting matching documents
+//! This example showcases all query types available in Sage including:
+//! - TermQuery: Simple term searches
+//! - PhraseQuery: Exact phrase matching
+//! - BooleanQuery: Complex boolean combinations (AND, OR, NOT)
+//! - NumericRangeQuery: Range queries on numeric fields
+//! - FuzzyQuery: Approximate string matching with edit distance
+//! - WildcardQuery: Pattern matching with * and ?
+//! - GeoDistanceQuery: Geographic proximity searches
+//! - GeoBoundingBoxQuery: Geographic bounding box searches
 
 use sage::document::document::Document;
+use sage::document::field_value::FieldValue;
 use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::engine::SearchEngine;
 use sage::full_text_search::SearchRequest;
+use sage::full_text_search::engine::SearchEngine;
 use sage::query::boolean::BooleanQuery;
+use sage::query::fuzzy::FuzzyQuery;
+use sage::query::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint};
 use sage::query::phrase::PhraseQuery;
 use sage::query::range::NumericRangeQuery;
 use sage::query::term::TermQuery;
+use sage::query::wildcard::WildcardQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
-    println!("=== Full-Text Search Example ===\n");
+    println!("=== Comprehensive Full-Text Search Example ===\n");
+    println!("This example demonstrates ALL query types available in Sage\n");
 
     // Step 1: Create a search index
     println!("Step 1: Creating search index...");
@@ -28,9 +36,10 @@ fn main() -> Result<()> {
 
     let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
-    // Step 2: Prepare and index documents
-    println!("Step 2: Indexing documents...");
+    // Step 2: Prepare and index comprehensive test documents
+    println!("Step 2: Indexing comprehensive test documents...");
     let documents = vec![
+        // Documents for basic text search
         Document::builder()
             .add_text("id", "doc001")
             .add_text("title", "Introduction to Rust Programming")
@@ -44,6 +53,8 @@ fn main() -> Result<()> {
             .add_text("category", "programming")
             .add_text("tags", "rust systems-programming memory-safety")
             .add_integer("year", 2023)
+            .add_integer("rating", 5)
+            .add_geo("location", 35.6762, 139.6503) // Tokyo
             .build(),
         Document::builder()
             .add_text("id", "doc002")
@@ -58,6 +69,8 @@ fn main() -> Result<()> {
             .add_text("category", "web-development")
             .add_text("tags", "rust web actix rocket")
             .add_integer("year", 2023)
+            .add_integer("rating", 4)
+            .add_geo("location", 37.7749, -122.4194) // San Francisco
             .build(),
         Document::builder()
             .add_text("id", "doc003")
@@ -72,20 +85,25 @@ fn main() -> Result<()> {
             .add_text("category", "data-science")
             .add_text("tags", "python data-science machine-learning")
             .add_integer("year", 2022)
+            .add_integer("rating", 5)
+            .add_geo("location", 51.5074, -0.1278) // London
             .build(),
+        // Documents with typos for fuzzy search
         Document::builder()
             .add_text("id", "doc004")
-            .add_text("title", "Building Microservices with Rust")
+            .add_text("title", "Building Microservices with Rast") // Typo: Rast instead of Rust
             .add_text(
                 "body",
                 "Microservices architecture has revolutionized how we build distributed systems. \
-                 Rust's lightweight runtime and excellent performance make it a great choice for \
+                 Rast's lightweight runtime and excellent performance make it a great choice for \
                  building scalable microservices.",
             )
             .add_text("author", "David Brown")
             .add_text("category", "architecture")
-            .add_text("tags", "rust microservices distributed-systems")
+            .add_text("tags", "rast microservices distributed-systems")
             .add_integer("year", 2024)
+            .add_integer("rating", 4)
+            .add_geo("location", 40.7128, -74.0060) // New York
             .build(),
         Document::builder()
             .add_text("id", "doc005")
@@ -100,21 +118,26 @@ fn main() -> Result<()> {
             .add_text("category", "web-development")
             .add_text("tags", "javascript typescript web frontend")
             .add_integer("year", 2023)
+            .add_integer("rating", 4)
+            .add_geo("location", 48.8566, 2.3522) // Paris
             .build(),
         Document::builder()
             .add_text("id", "doc006")
-            .add_text("title", "Machine Learning with Python")
+            .add_text("title", "Machine Learning with Pyhton") // Typo: Pyhton instead of Python
             .add_text(
                 "body",
                 "Deep learning and neural networks are transforming artificial intelligence. \
-                 Python frameworks like TensorFlow and PyTorch enable developers to build \
+                 Pyhton frameworks like TensorFlow and PyTorch enable developers to build \
                  sophisticated machine learning models.",
             )
             .add_text("author", "Frank Miller")
             .add_text("category", "data-science")
-            .add_text("tags", "python machine-learning deep-learning ai")
+            .add_text("tags", "pyhton machine-learning deep-learning ai")
             .add_integer("year", 2024)
+            .add_integer("rating", 5)
+            .add_geo("location", 52.5200, 13.4050) // Berlin
             .build(),
+        // Documents for wildcard search
         Document::builder()
             .add_text("id", "doc007")
             .add_text("title", "Concurrent Programming in Rust")
@@ -128,6 +151,8 @@ fn main() -> Result<()> {
             .add_text("category", "programming")
             .add_text("tags", "rust concurrency async parallel")
             .add_integer("year", 2024)
+            .add_integer("rating", 5)
+            .add_geo("location", 34.0522, -118.2437) // Los Angeles
             .build(),
         Document::builder()
             .add_text("id", "doc008")
@@ -142,133 +167,314 @@ fn main() -> Result<()> {
             .add_text("category", "database")
             .add_text("tags", "database sql nosql design")
             .add_integer("year", 2023)
+            .add_integer("rating", 4)
+            .add_geo("location", 35.6762, 139.6503) // Tokyo
+            .build(),
+        // Additional documents for geographic queries
+        Document::builder()
+            .add_text("id", "doc009")
+            .add_text("title", "Cloud Architecture Patterns")
+            .add_text(
+                "body",
+                "Cloud-native architectures require different design patterns. \
+                 Learn about scalability, resilience, and cost optimization in cloud environments.",
+            )
+            .add_text("author", "Isabel Martinez")
+            .add_text("category", "cloud")
+            .add_text("tags", "cloud architecture scalability")
+            .add_integer("year", 2024)
+            .add_integer("rating", 5)
+            .add_geo("location", 35.6895, 139.6917) // Tokyo (nearby)
+            .build(),
+        Document::builder()
+            .add_text("id", "doc010")
+            .add_text("title", "DevOps Best Practices")
+            .add_text(
+                "body",
+                "DevOps combines development and operations for faster delivery. \
+                 CI/CD pipelines, infrastructure as code, and monitoring are key practices.",
+            )
+            .add_text("author", "Jack Anderson")
+            .add_text("category", "devops")
+            .add_text("tags", "devops cicd automation")
+            .add_integer("year", 2023)
+            .add_integer("rating", 4)
+            .add_geo("location", 37.5665, 126.9780) // Seoul
             .build(),
     ];
 
     println!("  Indexed {} documents\n", documents.len());
     engine.add_documents(documents)?;
 
-    // Step 3: Perform various full-text searches
-    println!("Step 3: Performing full-text searches...\n");
+    // Step 3: Demonstrate all query types
+    println!("Step 3: Demonstrating ALL query types...\n");
+    println!("{}", "=".repeat(80));
 
-    // Example 1: Simple term search
-    // Note: Using lowercase because StandardAnalyzer normalizes text to lowercase
-    println!("Example 1: Search for 'rust' in title field");
+    // 1. TermQuery - Simple term search
+    println!("\n[1] TermQuery - Simple term search");
+    println!("{}", "-".repeat(80));
+    println!("Description: Searches for exact term matches in a specific field");
+    println!("\nExample: Search for 'rust' in title field");
     let query = TermQuery::new("title", "rust");
+    println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
+    println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
-    // Example 2: Full-text search in body field
-    println!("\nExample 2: Search for 'programming' in body field");
-    let query = TermQuery::new("body", "programming");
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
-    display_results(&results);
-
-    // Example 3: Phrase search
-    println!("\nExample 3: Search for phrase 'machine learning'");
+    // 2. PhraseQuery - Exact phrase matching
+    println!("\n[2] PhraseQuery - Exact phrase matching");
+    println!("{}", "-".repeat(80));
+    println!("Description: Searches for exact phrase (words in specific order)");
+    println!("\nExample: Search for phrase 'machine learning' in body");
     let query = PhraseQuery::new("body", vec!["machine".to_string(), "learning".to_string()]);
+    println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
+    println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
-    // Example 4: Boolean query (AND condition)
-    println!("\nExample 4: Boolean query - documents with both 'rust' AND 'programming'");
+    // 3. BooleanQuery - AND condition
+    println!("\n[3] BooleanQuery (AND) - Boolean combination with AND");
+    println!("{}", "-".repeat(80));
+    println!("Description: Combines multiple queries with boolean logic (AND)");
+    println!("\nExample: Documents with both 'rust' AND 'programming'");
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("body", "rust")));
     query.add_must(Box::new(TermQuery::new("body", "programming")));
+    println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
+    println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
-    // Example 5: Boolean query (OR condition)
-    println!("\nExample 5: Boolean query - documents with 'python' OR 'javascript'");
+    // 4. BooleanQuery - OR condition
+    println!("\n[4] BooleanQuery (OR) - Boolean combination with OR");
+    println!("{}", "-".repeat(80));
+    println!("Description: Combines multiple queries with boolean logic (OR)");
+    println!("\nExample: Documents with 'python' OR 'javascript'");
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(TermQuery::new("body", "python")));
     query.add_should(Box::new(TermQuery::new("body", "javascript")));
+    println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
+    println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
-    // Example 6: Search by category
-    println!("\nExample 6: Filter by category 'web' (from 'web-development')");
-    let query = TermQuery::new("category", "web");
+    // 5. BooleanQuery - NOT condition
+    println!("\n[5] BooleanQuery (NOT) - Boolean combination with NOT");
+    println!("{}", "-".repeat(80));
+    println!("Description: Combines queries with exclusion logic");
+    println!("\nExample: Documents with 'web' OR 'database' but NOT 'python'");
+    let mut query = BooleanQuery::new();
+    query.add_should(Box::new(TermQuery::new("body", "web")));
+    query.add_should(Box::new(TermQuery::new("body", "database")));
+    query.add_must_not(Box::new(TermQuery::new("body", "python")));
+    println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
+    println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
-    // Example 7: Search by author
-    println!("\nExample 7: Search for documents by author 'alice johnson'");
-    let query = TermQuery::new("author", "alice");
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
-    display_results(&results);
-
-    // Example 8: Search in tags
-    println!("\nExample 8: Search for 'science' tag (from 'data-science')");
-    let query = TermQuery::new("tags", "science");
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
-    let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
-    display_results(&results);
-
-    // Example 9: Range query by year
-    println!("\nExample 9: Search for documents from 2023 and later");
+    // 6. NumericRangeQuery - Range query on integers
+    println!("\n[6] NumericRangeQuery - Range query on numeric fields");
+    println!("{}", "-".repeat(80));
+    println!("Description: Searches for documents with numeric values in a range");
+    println!("\nExample: Documents from year 2023 and later");
     let query = NumericRangeQuery::i64_range("year", Some(2023), None);
+    println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-
-    println!("  Found {} matching documents:", results.total_hits);
+    println!("\nResults: Found {} matching documents", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
-            print!("  {}. ", i + 1);
-            if let Some(sage::document::field_value::FieldValue::Text(title)) =
-                doc.get_field("title")
-            {
+            print!("  {}. Score: {:.4} - ", i + 1, hit.score);
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
                 print!("Title: {}", title);
             }
-            if let Some(sage::document::field_value::FieldValue::Integer(year)) =
-                doc.get_field("year")
-            {
+            if let Some(FieldValue::Integer(year)) = doc.get_field("year") {
                 print!(" (Year: {})", year);
             }
             println!();
         }
     }
 
-    // Example 10: Count matching documents
-    println!("\nExample 10: Count all documents containing 'rust'");
-    let query = TermQuery::new("body", "rust");
-    let count = engine.count(Box::new(query))?;
-    println!("  Total count: {} documents\n", count);
-
-    // Example 11: Complex boolean query
-    println!("\nExample 11: Complex query - 'web' OR 'database', but NOT 'python'");
-    let mut query = BooleanQuery::new();
-    query.add_should(Box::new(TermQuery::new("body", "web")));
-    query.add_should(Box::new(TermQuery::new("body", "database")));
-    query.add_must_not(Box::new(TermQuery::new("body", "python")));
+    // 7. NumericRangeQuery - Rating range
+    println!("\n[7] NumericRangeQuery - Rating range query");
+    println!("{}", "-".repeat(80));
+    println!("Description: Find documents with rating between 4 and 5");
+    println!("\nExample: Documents with rating >= 4 and <= 5");
+    let query = NumericRangeQuery::i64_range("rating", Some(4), Some(5));
+    println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents", results.total_hits);
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            print!("  {}. Score: {:.4} - ", i + 1, hit.score);
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+                print!("Title: {}", title);
+            }
+            if let Some(FieldValue::Integer(rating)) = doc.get_field("rating") {
+                print!(" (Rating: {})", rating);
+            }
+            println!();
+        }
+    }
 
-    println!("  Found {} matching documents:", results.total_hits);
+    // 8. FuzzyQuery - Approximate string matching
+    println!("\n[8] FuzzyQuery - Approximate string matching (typo tolerance)");
+    println!("{}", "-".repeat(80));
+    println!("Description: Finds terms similar to the query (handles typos)");
+    println!("\nExample: Search for 'rust' (will also match 'rast' with 1 edit distance)");
+    let query = FuzzyQuery::new("tags", "rust").max_edits(2);
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents (including typos)", results.total_hits);
     display_results(&results);
+
+    // 9. FuzzyQuery - Another example with different term
+    println!("\n[9] FuzzyQuery - Search for 'python' (will match 'pyhton')");
+    println!("{}", "-".repeat(80));
+    println!("Description: Demonstrates fuzzy matching with different term");
+    println!("\nExample: Fuzzy search for 'python' in tags");
+    let query = FuzzyQuery::new("tags", "python").max_edits(2);
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents", results.total_hits);
+    display_results(&results);
+
+    // 10. WildcardQuery - Pattern matching with *
+    println!("\n[10] WildcardQuery - Pattern matching with wildcards");
+    println!("{}", "-".repeat(80));
+    println!("Description: Matches patterns using * (any chars) and ? (one char)");
+    println!("\nExample: Search for tags starting with 'web' (web*)");
+    let query = WildcardQuery::new("tags", "web*")?;
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents", results.total_hits);
+    display_results(&results);
+
+    // 11. WildcardQuery - Pattern matching with ?
+    println!("\n[11] WildcardQuery - Single character wildcard");
+    println!("{}", "-".repeat(80));
+    println!("Description: Using ? to match exactly one character");
+    println!("\nExample: Search for 'ru?t' (matches 'rust')");
+    let query = WildcardQuery::new("tags", "ru?t")?;
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents", results.total_hits);
+    display_results(&results);
+
+    // 12. GeoDistanceQuery - Geographic proximity search
+    println!("\n[12] GeoDistanceQuery - Geographic proximity search");
+    println!("{}", "-".repeat(80));
+    println!("Description: Finds documents within a certain distance from a point");
+    println!("\nExample: Documents within 50km of Tokyo (35.6762, 139.6503)");
+    let tokyo = GeoPoint::new(35.6762, 139.6503)?;
+    let query = GeoDistanceQuery::new("location", tokyo, 50.0); // 50km radius
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents within 50km", results.total_hits);
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            print!("  {}. Score: {:.4} - ", i + 1, hit.score);
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+                print!("Title: {}", title);
+            }
+            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                let distance = tokyo.distance_to(&GeoPoint::new(geo.lat, geo.lon)?);
+                print!(" (Distance: {:.2}km)", distance);
+            }
+            println!();
+        }
+    }
+
+    // 13. GeoDistanceQuery - Larger radius
+    println!("\n[13] GeoDistanceQuery - Larger search radius");
+    println!("{}", "-".repeat(80));
+    println!("Description: Geographic search with larger radius");
+    println!("\nExample: Documents within 2000km of Tokyo");
+    let query = GeoDistanceQuery::new("location", tokyo, 2000.0); // 2000km radius
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents within 2000km", results.total_hits);
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            print!("  {}. Score: {:.4} - ", i + 1, hit.score);
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+                print!("Title: {}", title);
+            }
+            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                let distance = tokyo.distance_to(&GeoPoint::new(geo.lat, geo.lon)?);
+                print!(" (Distance: {:.2}km)", distance);
+            }
+            println!();
+        }
+    }
+
+    // 14. GeoBoundingBoxQuery - Rectangular geographic search
+    println!("\n[14] GeoBoundingBoxQuery - Rectangular geographic area search");
+    println!("{}", "-".repeat(80));
+    println!("Description: Finds documents within a rectangular bounding box");
+    println!("\nExample: Documents in Europe (approx bounding box)");
+    let top_left = GeoPoint::new(60.0, -10.0)?;  // North-West corner
+    let bottom_right = GeoPoint::new(35.0, 40.0)?; // South-East corner
+    let bbox = GeoBoundingBox::new(top_left, bottom_right)?;
+    let query = GeoBoundingBoxQuery::new("location", bbox);
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents in Europe", results.total_hits);
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            print!("  {}. Score: {:.4} - ", i + 1, hit.score);
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+                print!("Title: {}", title);
+            }
+            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                print!(" (Location: {:.2}, {:.2})", geo.lat, geo.lon);
+            }
+            println!();
+        }
+    }
+
+    // 15. Complex combined query
+    println!("\n[15] Complex Combined Query - Multiple query types together");
+    println!("{}", "-".repeat(80));
+    println!("Description: Combines multiple query types with boolean logic");
+    println!("\nExample: (fuzzy 'rust' OR 'python') AND year >= 2023 AND rating >= 4");
+    let mut query = BooleanQuery::new();
+    query.add_should(Box::new(FuzzyQuery::new("tags", "rust").max_edits(2)));
+    query.add_should(Box::new(FuzzyQuery::new("tags", "python").max_edits(2)));
+    query.add_must(Box::new(NumericRangeQuery::i64_range("year", Some(2023), None)));
+    query.add_must(Box::new(NumericRangeQuery::i64_range("rating", Some(4), None)));
+    let query = query.with_minimum_should_match(1); // At least one of the should clauses must match
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let results = engine.search(request)?;
+    println!("\nResults: Found {} matching documents", results.total_hits);
+    display_results(&results);
+
+    // Summary
+    println!("\n{}", "=".repeat(80));
+    println!("\n=== Summary of Query Types ===");
+    println!("✓ TermQuery: Exact term matching");
+    println!("✓ PhraseQuery: Exact phrase matching");
+    println!("✓ BooleanQuery: AND/OR/NOT combinations");
+    println!("✓ NumericRangeQuery: Numeric range searches");
+    println!("✓ FuzzyQuery: Approximate matching (typo tolerance)");
+    println!("✓ WildcardQuery: Pattern matching with * and ?");
+    println!("✓ GeoDistanceQuery: Geographic proximity search");
+    println!("✓ GeoBoundingBoxQuery: Geographic bounding box search");
+    println!("\nAll query types demonstrated successfully!");
 
     // Clean up
     engine.close()?;

@@ -420,6 +420,22 @@ impl Query for GeoDistanceQuery {
 }
 
 /// A geographical bounding box query.
+///
+/// This query matches documents with coordinates within a rectangular bounding box
+/// defined by top-left and bottom-right corners.
+///
+/// # Scoring Behavior
+///
+/// Documents within the bounding box are scored based on their distance from the
+/// bounding box center. Documents closer to the center receive higher scores.
+/// This allows for relevance ranking even when all results are within the box.
+///
+/// - Score range: 0.0 to 1.0
+/// - Documents at the center: score ≈ 1.0
+/// - Documents at the edges: score decreases based on distance from center
+///
+/// If you need all documents within the box to have equal scores, consider using
+/// a constant score wrapper or filtering approach instead.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeoBoundingBoxQuery {
     /// Field containing geographical coordinates
