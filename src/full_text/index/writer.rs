@@ -6,7 +6,7 @@
 
 use crate::document::document::Document;
 use crate::error::Result;
-use crate::full_text_index::advanced_writer::AnalyzedDocument;
+use crate::full_text::index::advanced_writer::AnalyzedDocument;
 
 /// Trait for index writers.
 ///
@@ -16,9 +16,9 @@ use crate::full_text_index::advanced_writer::AnalyzedDocument;
 /// # Example
 ///
 /// ```rust,no_run
-/// use sage::full_text_index::advanced_writer::AdvancedIndexWriter;
-/// use sage::full_text_index::advanced_writer::AdvancedWriterConfig;
-/// use sage::full_text_index::writer::IndexWriter;
+/// use sage::full_text::index::advanced_writer::AdvancedIndexWriter;
+/// use sage::full_text::index::advanced_writer::AdvancedWriterConfig;
+/// use sage::full_text::index::writer::IndexWriter;
 /// use sage::storage::memory::MemoryStorage;
 /// use sage::storage::traits::StorageConfig;
 /// use std::sync::Arc;

@@ -212,8 +212,8 @@ impl AdvancedIndexWriter {
     /// use sage::document::parser::DocumentParser;
     /// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
     /// use sage::analysis::analyzer::standard::StandardAnalyzer;
-    /// use sage::full_text_index::advanced_writer::AdvancedIndexWriter;
-    /// use sage::full_text_index::advanced_writer::AdvancedWriterConfig;
+    /// use sage::full_text::index::advanced_writer::AdvancedIndexWriter;
+    /// use sage::full_text::index::advanced_writer::AdvancedWriterConfig;
     /// use sage::storage::memory::MemoryStorage;
     /// use sage::storage::traits::StorageConfig;
     /// use std::sync::Arc;
@@ -828,7 +828,7 @@ impl Drop for AdvancedIndexWriter {
 }
 
 // Implement IndexWriter trait for compatibility with existing code
-impl crate::full_text_index::writer::IndexWriter for AdvancedIndexWriter {
+impl crate::full_text::index::writer::IndexWriter for AdvancedIndexWriter {
     fn add_document(&mut self, doc: Document) -> Result<()> {
         AdvancedIndexWriter::add_document(self, doc)
     }

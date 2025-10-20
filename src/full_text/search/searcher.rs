@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
-use crate::full_text_search::{SearchRequest, SortField, SortOrder};
+use crate::full_text::search::{SearchRequest, SortField, SortOrder};
 use crate::query::collector::{Collector, CountCollector, TopDocsCollector};
 use crate::query::query::Query;
 use crate::query::{SearchHit, SearchResults};
@@ -87,7 +87,7 @@ impl Searcher {
                 if let Some(advanced_reader) = self
                     .reader
                     .as_any()
-                    .downcast_ref::<crate::full_text_search::advanced_reader::AdvancedIndexReader>()
+                    .downcast_ref::<crate::full_text::search::advanced_reader::AdvancedIndexReader>()
                 {
                     advanced_reader.field_length(doc_id, field_name).ok().flatten().map(|len| len as f32)
                 } else {
@@ -478,7 +478,7 @@ impl Searcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::full_text::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
     use crate::query::boolean::{BooleanQuery, BooleanQueryBuilder};
     use crate::query::term::TermQuery;
     use crate::storage::memory::MemoryStorage;

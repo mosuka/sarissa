@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::full_text_index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
+use crate::full_text::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 
 /// Trait for defining merge policies.
 pub trait MergePolicy: Send + Sync + std::fmt::Debug {
@@ -401,7 +401,7 @@ impl MergePolicy for NoMergePolicy {
 mod tests {
     use super::*;
     use crate::full_text::index::SegmentInfo;
-    use crate::full_text_index::segment_manager::ManagedSegmentInfo;
+    use crate::full_text::index::segment_manager::ManagedSegmentInfo;
 
     #[allow(dead_code)]
     fn create_test_segment(

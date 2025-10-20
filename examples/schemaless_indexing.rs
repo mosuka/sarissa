@@ -9,7 +9,7 @@ use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::document::document::Document;
 use sage::document::field_value::FieldValue;
-use sage::full_text_index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::full_text::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 use sage::storage::memory::MemoryStorage;
 use sage::storage::traits::StorageConfig;
 use std::sync::Arc;

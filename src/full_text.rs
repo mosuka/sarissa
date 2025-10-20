@@ -1,14 +1,17 @@
 //! Core full-text types and interfaces.
 //!
 //! This module provides the fundamental data structures and interfaces
-//! for full-text search. It does not contain implementation logic for
-//! writing or searching - those are in `full_text_index` and `full_text_search`.
+//! for full-text search, including index writing and searching capabilities.
 
+// Core data structures
 pub mod bkd_tree;
 pub mod dictionary;
 pub mod doc_values;
-#[allow(clippy::module_inception)]
-pub mod index;
+pub mod inverted_index;
 pub mod posting;
 pub mod reader;
 pub mod segment;
+
+// Sub-modules
+pub mod index;
+pub mod search;

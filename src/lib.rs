@@ -16,8 +16,6 @@ pub mod document;
 pub mod embeding;
 pub mod error;
 pub mod full_text;
-pub mod full_text_index;
-pub mod full_text_search;
 pub mod hybrid_search;
 pub mod ml;
 pub mod parallel_full_text_index;
