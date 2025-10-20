@@ -13,9 +13,9 @@ use super::{LoadBalancingStrategy, ParallelSearchStats, ParallelVectorSearchConf
 
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
+use crate::vector::search::AdvancedSearchConfig;
+use crate::vector::search::engine::VectorSearchEngine;
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
-use crate::vector_search::AdvancedSearchConfig;
-use crate::vector_search::engine::VectorSearchEngine;
 
 /// Task for parallel vector search execution.
 #[derive(Debug, Clone)]

@@ -6,6 +6,10 @@
 pub mod reader;
 pub mod types;
 
+// Sub-modules
+pub mod index; // Vector indexing
+pub mod search; // Vector search
+
 use std::collections::HashMap;
 
 use rayon::prelude::*;

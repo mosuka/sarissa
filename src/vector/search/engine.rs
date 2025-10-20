@@ -6,13 +6,13 @@ use std::time::Instant;
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
 use crate::vector::reader::VectorIndexReader;
-use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
-use crate::vector_search::flat_searcher::FlatVectorSearcher;
-use crate::vector_search::hnsw_searcher::HnswSearcher;
-use crate::vector_search::{
+use crate::vector::search::flat_searcher::FlatVectorSearcher;
+use crate::vector::search::hnsw_searcher::HnswSearcher;
+use crate::vector::search::{
     AdvancedSearchConfig, ExplainedSearchResults, SearchExplanation, SearchStats, SearchStrategy,
     SearchTimeBreakdown, VectorSearcher,
 };
+use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
 
 /// Main vector search engine that coordinates different search strategies.
 pub struct VectorSearchEngine {
@@ -302,7 +302,7 @@ impl VectorSearchEngine {
     fn apply_filters(
         &self,
         _results: &mut VectorSearchResults,
-        _filters: &[crate::vector_search::SearchFilter],
+        _filters: &[crate::vector::search::SearchFilter],
     ) -> Result<()> {
         // TODO: Implement filtering logic
         Ok(())
@@ -313,7 +313,7 @@ impl VectorSearchEngine {
         &self,
         _results: &mut VectorSearchResults,
         _query: &Vector,
-        _config: &crate::vector_search::ranking::RankingConfig,
+        _config: &crate::vector::search::ranking::RankingConfig,
     ) -> Result<()> {
         // TODO: Implement reranking logic
         Ok(())

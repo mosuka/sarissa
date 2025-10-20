@@ -5,8 +5,8 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
+use crate::vector::index::{VectorIndexBuilder, VectorIndexType};
 use crate::vector::{DistanceMetric, Vector};
-use crate::vector_index::{VectorIndexBuilder, VectorIndexType};
 
 /// Metadata for a vector index segment.
 #[derive(Debug, Clone, Serialize, Deserialize)]

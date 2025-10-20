@@ -4,7 +4,7 @@ use rayon::prelude::*;
 
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
-use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilder};
+use crate::vector::index::{VectorIndexBuildConfig, VectorIndexBuilder};
 
 /// Builder for IVF vector indexes (memory-efficient search).
 pub struct IvfIndexBuilder {
