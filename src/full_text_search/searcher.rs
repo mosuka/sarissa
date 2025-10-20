@@ -1,13 +1,15 @@
 //! Searcher implementation for executing queries against an index.
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 
+use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
-use crate::full_text_search::SearchRequest;
+use crate::full_text_search::{SearchRequest, SortField, SortOrder};
 use crate::query::collector::{Collector, CountCollector, TopDocsCollector};
 use crate::query::query::Query;
 use crate::query::{SearchHit, SearchResults};
@@ -212,22 +214,50 @@ impl Searcher {
     ) -> Result<SearchResults> {
         let start_time = Instant::now();
 
-        // Create collector
-        let collector =
-            TopDocsCollector::with_min_score(request.config.max_docs, request.config.min_score);
+        // Create collector based on sort type
+        let (mut hits, total_hits) = match &request.config.sort_by {
+            SortField::Field { name, order } => {
+                // Use TopFieldCollector for field-based sorting (Lucene-style)
+                use crate::query::collector::TopFieldCollector;
 
-        // Execute search
-        let result_collector =
-            self.search_with_collector_parallel(request.query, collector, request.config.parallel)?;
+                let ascending = matches!(order, SortOrder::Asc);
+                let collector = TopFieldCollector::with_min_score(
+                    request.config.max_docs,
+                    request.config.min_score,
+                    name.clone(),
+                    ascending,
+                    self.reader.as_ref(),
+                );
+
+                let result_collector = self.search_with_collector_parallel(
+                    request.query,
+                    collector,
+                    request.config.parallel,
+                )?;
+
+                (result_collector.results(), result_collector.total_hits())
+            }
+            SortField::Score => {
+                // Use TopDocsCollector for score-based sorting
+                let collector = TopDocsCollector::with_min_score(
+                    request.config.max_docs,
+                    request.config.min_score,
+                );
+
+                let result_collector = self.search_with_collector_parallel(
+                    request.query,
+                    collector,
+                    request.config.parallel,
+                )?;
+
+                (result_collector.results(), result_collector.total_hits())
+            }
+        };
 
         // Check if we exceeded timeout
         if start_time.elapsed() > timeout {
             return Err(SageError::index("Search timeout exceeded"));
         }
-
-        // Get results
-        let mut hits = result_collector.results();
-        let total_hits = result_collector.total_hits();
 
         // Load documents if requested
         if request.config.load_documents {
@@ -237,6 +267,8 @@ impl Searcher {
                 self.load_documents(&mut hits)?;
             }
         }
+
+        // No need to sort - already sorted during collection
 
         // Calculate max score
         let max_score = hits.iter().map(|hit| hit.score).fold(0.0f32, f32::max);
@@ -264,31 +296,167 @@ impl Searcher {
             let timeout = Duration::from_millis(timeout_ms);
             self.search_with_timeout(request, timeout)
         } else {
-            // Execute search without timeout
-            let collector =
-                TopDocsCollector::with_min_score(request.config.max_docs, request.config.min_score);
-            let result_collector = self.search_with_collector_parallel(
-                request.query,
-                collector,
-                request.config.parallel,
-            )?;
+            // Check if we should use field-based sorting during collection
+            match &request.config.sort_by {
+                SortField::Field { name, order } => {
+                    // Use TopFieldCollector for field-based sorting (Lucene-style)
+                    use crate::query::collector::TopFieldCollector;
 
-            let mut hits = result_collector.results();
-            let total_hits = result_collector.total_hits();
+                    let ascending = matches!(order, SortOrder::Asc);
+                    let collector = TopFieldCollector::with_min_score(
+                        request.config.max_docs,
+                        request.config.min_score,
+                        name.clone(),
+                        ascending,
+                        self.reader.as_ref(),
+                    );
 
-            // Load documents if requested
-            if request.config.load_documents {
-                self.load_documents(&mut hits)?;
+                    let result_collector = self.search_with_collector_parallel(
+                        request.query,
+                        collector,
+                        request.config.parallel,
+                    )?;
+
+                    let mut hits = result_collector.results();
+                    let total_hits = result_collector.total_hits();
+
+                    // Load documents if requested
+                    if request.config.load_documents {
+                        self.load_documents(&mut hits)?;
+                    }
+
+                    // No need to sort - already sorted by TopFieldCollector during collection
+
+                    // Calculate max score
+                    let max_score = hits.iter().map(|hit| hit.score).fold(0.0f32, f32::max);
+
+                    Ok(SearchResults {
+                        hits,
+                        total_hits,
+                        max_score,
+                    })
+                }
+                SortField::Score => {
+                    // Use TopDocsCollector for score-based sorting
+                    let collector = TopDocsCollector::with_min_score(
+                        request.config.max_docs,
+                        request.config.min_score,
+                    );
+                    let result_collector = self.search_with_collector_parallel(
+                        request.query,
+                        collector,
+                        request.config.parallel,
+                    )?;
+
+                    let mut hits = result_collector.results();
+                    let total_hits = result_collector.total_hits();
+
+                    // Load documents if requested
+                    if request.config.load_documents {
+                        self.load_documents(&mut hits)?;
+                    }
+
+                    // No need to sort - already sorted by score in TopDocsCollector
+
+                    // Calculate max score
+                    let max_score = hits.iter().map(|hit| hit.score).fold(0.0f32, f32::max);
+
+                    Ok(SearchResults {
+                        hits,
+                        total_hits,
+                        max_score,
+                    })
+                }
             }
+        }
+    }
 
-            // Calculate max score
-            let max_score = hits.iter().map(|hit| hit.score).fold(0.0f32, f32::max);
+    /// Sort search hits according to the specified sort field.
+    /// This is the old post-collection sorting approach, kept for compatibility.
+    #[allow(dead_code)]
+    fn sort_hits(&self, hits: &mut [SearchHit], sort_by: &SortField) -> Result<()> {
+        match sort_by {
+            SortField::Score => {
+                // Default behavior: already sorted by score from collector
+                // Re-sort to ensure descending order
+                hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+            }
+            SortField::Field { name, order } => {
+                // Sort by field value
+                hits.sort_by(|a, b| {
+                    let cmp = self.compare_field_values(a, b, name);
+                    match order {
+                        SortOrder::Asc => cmp,
+                        SortOrder::Desc => cmp.reverse(),
+                    }
+                });
+            }
+        }
+        Ok(())
+    }
 
-            Ok(SearchResults {
-                hits,
-                total_hits,
-                max_score,
-            })
+    /// Compare two search hits by a specific field value.
+    #[allow(dead_code)]
+    fn compare_field_values(&self, a: &SearchHit, b: &SearchHit, field_name: &str) -> Ordering {
+        let val_a = a
+            .document
+            .as_ref()
+            .and_then(|doc| doc.get_field(field_name));
+        let val_b = b
+            .document
+            .as_ref()
+            .and_then(|doc| doc.get_field(field_name));
+
+        match (val_a, val_b) {
+            (Some(a_val), Some(b_val)) => self.compare_values(a_val, b_val),
+            (Some(_), None) => Ordering::Less, // Documents with value come first
+            (None, Some(_)) => Ordering::Greater, // Documents without value come last
+            (None, None) => Ordering::Equal,
+        }
+    }
+
+    /// Compare two field values.
+    #[allow(dead_code)]
+    fn compare_values(&self, a: &FieldValue, b: &FieldValue) -> Ordering {
+        use FieldValue::*;
+
+        match (a, b) {
+            // Same type comparisons
+            (Text(a_str), Text(b_str)) => a_str.cmp(b_str),
+            (Integer(a_int), Integer(b_int)) => a_int.cmp(b_int),
+            (Float(a_float), Float(b_float)) => {
+                a_float.partial_cmp(b_float).unwrap_or(Ordering::Equal)
+            }
+            (Boolean(a_bool), Boolean(b_bool)) => a_bool.cmp(b_bool),
+            (Geo(a_geo), Geo(b_geo)) => {
+                // Compare by latitude first, then longitude
+                match a_geo.lat.partial_cmp(&b_geo.lat) {
+                    Some(Ordering::Equal) | None => {
+                        a_geo.lon.partial_cmp(&b_geo.lon).unwrap_or(Ordering::Equal)
+                    }
+                    Some(ord) => ord,
+                }
+            }
+            (DateTime(a_dt), DateTime(b_dt)) => a_dt.cmp(b_dt),
+            (Binary(a_bin), Binary(b_bin)) => a_bin.cmp(b_bin),
+            (Null, Null) => Ordering::Equal,
+
+            // For different types, use a consistent ordering based on type precedence
+            // Text < Integer < Float < Boolean < Geo < DateTime < Binary < Null
+            (Text(_), _) => Ordering::Less,
+            (_, Text(_)) => Ordering::Greater,
+            (Integer(_), _) => Ordering::Less,
+            (_, Integer(_)) => Ordering::Greater,
+            (Float(_), _) => Ordering::Less,
+            (_, Float(_)) => Ordering::Greater,
+            (Boolean(_), _) => Ordering::Less,
+            (_, Boolean(_)) => Ordering::Greater,
+            (Geo(_), _) => Ordering::Less,
+            (_, Geo(_)) => Ordering::Greater,
+            (DateTime(_), _) => Ordering::Less,
+            (_, DateTime(_)) => Ordering::Greater,
+            (Binary(_), _) => Ordering::Less,
+            (_, Binary(_)) => Ordering::Greater,
         }
     }
 

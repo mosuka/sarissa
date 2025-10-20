@@ -6,6 +6,7 @@
 
 pub mod bkd_tree;
 pub mod dictionary;
+pub mod doc_values;
 #[allow(clippy::module_inception)]
 pub mod index;
 pub mod posting;

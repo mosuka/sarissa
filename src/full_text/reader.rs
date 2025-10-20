@@ -1,6 +1,7 @@
 //! Index reader for searching and retrieving documents.
 
 use crate::document::document::Document;
+use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::full_text::bkd_tree::SimpleBKDTree;
 
@@ -66,6 +67,21 @@ pub trait IndexReader: Send + Sync + std::fmt::Debug {
 
     /// Get this reader as Any for downcasting.
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Get a DocValues field value for a document.
+    /// Returns None if DocValues are not available for this field or document.
+    fn get_doc_value(&self, field: &str, doc_id: u64) -> Result<Option<FieldValue>> {
+        // Default implementation returns None (no DocValues support)
+        let _ = (field, doc_id);
+        Ok(None)
+    }
+
+    /// Check if DocValues are available for a field.
+    fn has_doc_values(&self, field: &str) -> bool {
+        // Default implementation returns false
+        let _ = field;
+        false
+    }
 }
 
 /// Information about a term in the index.

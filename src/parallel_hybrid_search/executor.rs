@@ -304,6 +304,7 @@ impl ParallelHybridSearchExecutor {
             load_documents: false, // Don't load documents for performance
             timeout_ms: Some(config.index_timeout.as_millis() as u64),
             parallel: false, // Already running in parallel at the executor level
+            sort_by: crate::full_text_search::SortField::default(),
         };
 
         // Create search request
