@@ -12,9 +12,9 @@
 
 use sage::document::document::Document;
 use sage::error::Result;
-use sage::full_text::index::IndexConfig;
-use sage::full_text::search::SearchRequest;
-use sage::full_text::search::engine::SearchEngine;
+use sage::lexical::index::IndexConfig;
+use sage::lexical::search::SearchRequest;
+use sage::lexical::search::engine::SearchEngine;
 use sage::query::parser::QueryParser;
 use tempfile::TempDir;
 

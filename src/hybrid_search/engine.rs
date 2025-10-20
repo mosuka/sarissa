@@ -11,7 +11,7 @@ use super::stats::HybridSearchStats;
 use super::types::HybridSearchResults;
 use crate::embeding::engine::EmbeddingEngine;
 use crate::error::Result;
-use crate::full_text::search::SearchRequest;
+use crate::lexical::search::SearchRequest;
 use crate::query::SearchResults;
 use crate::query::query::Query;
 use crate::vector::types::{VectorSearchResult, VectorSearchResults};
@@ -243,7 +243,7 @@ impl HybridSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text::search::SearchRequest;
+    use crate::lexical::search::SearchRequest;
     use crate::query::term::TermQuery;
     use crate::query::{SearchHit, SearchResults};
 

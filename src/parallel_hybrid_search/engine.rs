@@ -12,7 +12,7 @@ use super::types::{CacheStats, ParallelHybridSearchResults, SearchTimeBreakdown}
 
 use crate::embeding::engine::EmbeddingEngine;
 use crate::error::{Result, SageError};
-use crate::full_text::reader::IndexReader;
+use crate::lexical::reader::IndexReader;
 use crate::query::query::Query;
 use crate::vector::reader::VectorIndexReader;
 
@@ -433,7 +433,7 @@ impl Clone for HybridIndexHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
     use crate::query::term::TermQuery;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;

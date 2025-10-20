@@ -9,9 +9,9 @@ use sage::document::converter::{
     DocumentConverter, field_value::FieldValueDocumentConverter, json::JsonDocumentConverter,
 };
 use sage::error::Result;
-use sage::full_text::index::IndexConfig;
-use sage::full_text::search::SearchRequest;
-use sage::full_text::search::engine::SearchEngine;
+use sage::lexical::index::IndexConfig;
+use sage::lexical::search::SearchRequest;
+use sage::lexical::search::engine::SearchEngine;
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");

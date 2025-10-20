@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::full_text::reader::IndexReader;
+use crate::lexical::reader::IndexReader;
 use crate::query::matcher::Matcher;
 use crate::query::query::Query;
 use crate::query::scorer::Scorer;

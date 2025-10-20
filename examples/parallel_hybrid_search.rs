@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
         engine
             .add_index(
                 format!("index_{i}"),
-                reader as Arc<dyn sage::full_text::reader::IndexReader>,
+                reader as Arc<dyn sage::lexical::reader::IndexReader>,
                 None, // No vector reader for this example
                 1.0,  // Equal weight for all indices
             )
@@ -324,7 +324,7 @@ async fn main() -> Result<()> {
         test_engine
             .add_index(
                 "test_index".to_string(),
-                mock_reader as Arc<dyn sage::full_text::reader::IndexReader>,
+                mock_reader as Arc<dyn sage::lexical::reader::IndexReader>,
                 None,
                 1.0,
             )

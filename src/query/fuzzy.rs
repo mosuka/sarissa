@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::full_text::reader::IndexReader;
+use crate::lexical::reader::IndexReader;
 use crate::query::matcher::Matcher;
 use crate::query::query::Query;
 use crate::query::scorer::Scorer;
@@ -840,7 +840,7 @@ mod tests {
 
     #[test]
     fn test_fuzzy_matcher() {
-        use crate::full_text::search::advanced_reader::{
+        use crate::lexical::search::advanced_reader::{
             AdvancedIndexReader, AdvancedReaderConfig,
         };
         use crate::storage::memory::MemoryStorage;
