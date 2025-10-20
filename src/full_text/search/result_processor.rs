@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::full_text::reader::IndexReader;
-use crate::full_text_search::facet::{FacetCollector, FacetResults};
-use crate::full_text_search::highlight::{HighlightConfig, Highlighter};
+use crate::full_text::search::facet::{FacetCollector, FacetResults};
+use crate::full_text::search::highlight::{HighlightConfig, Highlighter};
 use crate::query::QueryResult;
 use crate::query::query::Query;
 
@@ -238,7 +238,7 @@ impl ResultProcessor {
         };
 
         let facet_collector = if config.enable_faceting {
-            let facet_config = crate::full_text_search::facet::FacetConfig::default(); // Use default config
+            let facet_config = crate::full_text::search::facet::FacetConfig::default(); // Use default config
             Some(FacetCollector::new(
                 facet_config,
                 config.facet_fields.clone(),

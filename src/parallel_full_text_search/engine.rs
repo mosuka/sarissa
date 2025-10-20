@@ -7,7 +7,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::error::{Result, SageError};
 use crate::full_text::reader::IndexReader;
-use crate::full_text_search::SearchRequest;
+use crate::full_text::search::SearchRequest;
 use crate::parallel_full_text_search::config::{ParallelSearchConfig, SearchOptions};
 use crate::parallel_full_text_search::index_manager::{IndexHandle, IndexManager};
 use crate::parallel_full_text_search::merger::MergerFactory;
@@ -232,8 +232,9 @@ impl ParallelSearchEngine {
         };
 
         // Create searcher for this index
-        let searcher =
-            crate::full_text_search::searcher::Searcher::from_arc(Arc::clone(&index_handle.reader));
+        let searcher = crate::full_text::search::searcher::Searcher::from_arc(Arc::clone(
+            &index_handle.reader,
+        ));
 
         // Create search request
         let mut request = SearchRequest::new(task.query)
@@ -279,7 +280,7 @@ impl ParallelSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::full_text::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
     use crate::query::term::TermQuery;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;

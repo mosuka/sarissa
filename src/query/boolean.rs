@@ -488,7 +488,7 @@ impl Default for BooleanQueryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::full_text::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
     use crate::query::term::TermQuery;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;

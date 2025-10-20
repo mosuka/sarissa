@@ -7,7 +7,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
-use crate::full_text_index::writer::IndexWriter;
+use crate::full_text::index::writer::IndexWriter;
 use crate::parallel_full_text_index::config::PartitionConfig;
 
 /// Statistics for a specific index partition.
@@ -368,7 +368,7 @@ impl Clone for IndexWriterHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text_index::advanced_writer::AdvancedIndexWriter;
+    use crate::full_text::index::advanced_writer::AdvancedIndexWriter;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;
@@ -378,7 +378,7 @@ mod tests {
         Box::new(
             AdvancedIndexWriter::new(
                 storage,
-                crate::full_text_index::advanced_writer::AdvancedWriterConfig::default(),
+                crate::full_text::index::advanced_writer::AdvancedWriterConfig::default(),
             )
             .unwrap(),
         )

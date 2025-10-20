@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{Result, SageError};
-use crate::full_text_index::deletion::DeletionManager;
-use crate::full_text_index::merge_engine::{MergeConfig, MergeEngine, MergeResult};
-use crate::full_text_index::segment_manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
+use crate::full_text::index::deletion::DeletionManager;
+use crate::full_text::index::merge_engine::{MergeConfig, MergeEngine, MergeResult};
+use crate::full_text::index::segment_manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
 
 use crate::storage::traits::Storage;
 
@@ -381,7 +381,7 @@ impl IndexOptimizer {
 
         let estimated_size = segments.iter().map(|s| s.size_bytes).sum();
 
-        let merge_candidate = crate::full_text_index::segment_manager::MergeCandidate {
+        let merge_candidate = crate::full_text::index::segment_manager::MergeCandidate {
             segments: segment_ids.clone(),
             priority: 1.0,
             strategy,
@@ -532,8 +532,8 @@ pub enum RecommendationPriority {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::full_text_index::deletion::DeletionConfig;
-    use crate::full_text_index::segment_manager::SegmentManagerConfig;
+    use crate::full_text::index::deletion::DeletionConfig;
+    use crate::full_text::index::segment_manager::SegmentManagerConfig;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;
 

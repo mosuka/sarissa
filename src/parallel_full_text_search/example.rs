@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+use crate::full_text::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 use crate::parallel_full_text_search::config::{ParallelSearchConfig, SearchOptions};
 use crate::parallel_full_text_search::engine::ParallelSearchEngine;
 use crate::query::term::TermQuery;

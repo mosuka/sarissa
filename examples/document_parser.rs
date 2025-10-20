@@ -22,9 +22,9 @@ use sage::document::document::Document;
 use sage::document::parser::DocumentParser;
 use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sage::full_text_search::SearchRequest;
-use sage::full_text_search::engine::SearchEngine;
+use sage::full_text::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::full_text::search::SearchRequest;
+use sage::full_text::search::engine::SearchEngine;
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");

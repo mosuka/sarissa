@@ -11,9 +11,9 @@ use uuid::Uuid;
 
 use crate::document::document::Document;
 use crate::error::{Result, SageError};
-use crate::full_text_index::deletion::{DeletionManager, GlobalDeletionState};
-use crate::full_text_index::merge_engine::MergeEngine;
-use crate::full_text_index::segment_manager::SegmentManager;
+use crate::full_text::index::deletion::{DeletionManager, GlobalDeletionState};
+use crate::full_text::index::merge_engine::MergeEngine;
+use crate::full_text::index::segment_manager::SegmentManager;
 use crate::storage::traits::Storage;
 
 /// Transaction isolation levels.
@@ -59,7 +59,7 @@ pub enum TransactionOperation {
     /// Merge segments.
     MergeSegments {
         segment_ids: Vec<String>,
-        strategy: crate::full_text_index::segment_manager::MergeStrategy,
+        strategy: crate::full_text::index::segment_manager::MergeStrategy,
     },
 }
 

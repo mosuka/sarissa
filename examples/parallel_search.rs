@@ -7,8 +7,8 @@
 
 use sage::document::document::Document;
 use sage::error::Result;
-use sage::full_text_index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sage::full_text_search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+use sage::full_text::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::full_text::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 use sage::parallel_full_text_index::config::{
     IndexingOptions, ParallelIndexConfig, PartitionConfig,
 };

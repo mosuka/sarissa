@@ -13,10 +13,10 @@ use crate::error::{Result, SageError};
 use crate::full_text::dictionary::TermDictionaryBuilder;
 use crate::full_text::dictionary::TermInfo;
 use crate::full_text::index::SegmentInfo;
+use crate::full_text::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::full_text::posting::InvertedIndex;
 use crate::full_text::reader::IndexReader;
-use crate::full_text_index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
-use crate::full_text_search::advanced_reader::AdvancedIndexReader;
+use crate::full_text::search::advanced_reader::AdvancedIndexReader;
 use crate::storage::structured::StructWriter;
 use crate::storage::traits::Storage;
 
@@ -373,7 +373,7 @@ impl MergeEngine {
         let segments = vec![segment_info.clone()];
 
         // Use default config for reader
-        let config = crate::full_text_search::advanced_reader::AdvancedReaderConfig::default();
+        let config = crate::full_text::search::advanced_reader::AdvancedReaderConfig::default();
 
         let reader = AdvancedIndexReader::new(segments, self.storage.clone(), config)?;
         Ok(Box::new(reader) as Box<dyn IndexReader>)
@@ -511,7 +511,7 @@ impl MergeEngine {
 mod tests {
     use super::*;
     use crate::full_text::index::SegmentInfo;
-    use crate::full_text_index::segment_manager::ManagedSegmentInfo;
+    use crate::full_text::index::segment_manager::ManagedSegmentInfo;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;

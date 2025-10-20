@@ -6,8 +6,8 @@ use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::document::document::Document;
 use sage::error::Result;
 use sage::full_text::index::IndexConfig;
-use sage::full_text_search::SearchRequest;
-use sage::full_text_search::engine::SearchEngine;
+use sage::full_text::search::SearchRequest;
+use sage::full_text::search::engine::SearchEngine;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -86,7 +86,7 @@ fn main() -> Result<()> {
     // analyzer configuration across writer() calls yet
     {
         use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
-        use sage::full_text_index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+        use sage::full_text::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 
         let storage = engine.storage().clone();
 
