@@ -11,7 +11,7 @@ use super::segment::VectorIndexSegment;
 use super::{ParallelIndexStats, ParallelVectorIndexConfig};
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
-use crate::vector_index::VectorIndexBuilder;
+use crate::vector::index::VectorIndexBuilder;
 
 /// Parallel vector index builder for high-performance construction.
 pub struct ParallelVectorIndexBuilder {

@@ -1,9 +1,9 @@
 //! Vector Similarity Search example - demonstrates the new vector API structure.
 
 use sage::error::Result;
+use sage::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory, VectorIndexType};
 use sage::vector::types::VectorSearchConfig;
 use sage::vector::{DistanceMetric, Vector};
-use sage::vector_index::{VectorIndexBuildConfig, VectorIndexBuilderFactory, VectorIndexType};
 
 fn main() -> Result<()> {
     println!("=== Vector Similarity Search Example - New API Structure ===\n");

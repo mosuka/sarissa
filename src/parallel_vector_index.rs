@@ -17,7 +17,7 @@ use rayon::ThreadPool;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector_index::VectorIndexBuildConfig;
+use crate::vector::index::VectorIndexBuildConfig;
 
 use crate::parallel_vector_index::builder::ParallelVectorIndexBuilder;
 use crate::parallel_vector_index::merger::MergeStrategy;

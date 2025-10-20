@@ -8,7 +8,7 @@ use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
-use crate::vector_index::VectorIndexBuilder;
+use crate::vector::index::VectorIndexBuilder;
 
 /// Configuration for vector index writer.
 #[derive(Debug, Clone, Serialize, Deserialize)]

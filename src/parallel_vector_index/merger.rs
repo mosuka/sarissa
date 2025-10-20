@@ -8,7 +8,7 @@ use super::segment::{SegmentMetadata, VectorIndexSegment};
 
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
-use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
+use crate::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
 
 /// Strategy for merging vector index segments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,7 +218,7 @@ impl SegmentMerger {
             distance_metric: first_metadata.distance_metric,
             normalize_vectors: true,
             use_quantization: false,
-            quantization_method: crate::vector_index::quantization::QuantizationMethod::None,
+            quantization_method: crate::vector::index::quantization::QuantizationMethod::None,
             parallel_build: true,
             memory_limit: None,
         })

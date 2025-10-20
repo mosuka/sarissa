@@ -9,7 +9,7 @@ use super::segment::{SegmentMetadata, VectorIndexSegment};
 
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
-use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
+use crate::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
 
 /// Task for parallel vector index construction.
 #[derive(Debug, Clone)]

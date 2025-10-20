@@ -15,7 +15,7 @@ use rayon::ThreadPool;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector_search::VectorSearchEngineConfig;
+use crate::vector::search::VectorSearchEngineConfig;
 
 use crate::parallel_vector_search::executor::ParallelVectorSearchExecutor;
 use crate::parallel_vector_search::merger::MergeStrategy as SearchMergeStrategy;

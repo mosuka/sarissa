@@ -1,7 +1,7 @@
 //! Vector index optimization utilities.
 
 use crate::error::{Result, SageError};
-use crate::vector_index::VectorIndexBuilder;
+use crate::vector::index::VectorIndexBuilder;
 
 /// Optimizer for vector indexes after construction.
 pub struct VectorIndexOptimizer {

@@ -28,8 +28,6 @@ pub mod spelling;
 pub mod storage;
 pub mod util;
 pub mod vector;
-pub mod vector_index;
-pub mod vector_search;
 
 pub mod prelude {}
 

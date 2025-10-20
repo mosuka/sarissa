@@ -2,7 +2,7 @@
 
 use crate::error::{Result, SageError};
 use crate::vector::Vector;
-use crate::vector_index::{VectorIndexBuildConfig, VectorIndexBuilder};
+use crate::vector::index::{VectorIndexBuildConfig, VectorIndexBuilder};
 
 /// Builder for HNSW vector indexes (approximate search).
 pub struct HnswIndexBuilder {
