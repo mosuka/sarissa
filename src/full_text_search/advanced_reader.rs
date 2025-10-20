@@ -15,6 +15,7 @@ use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::full_text::dictionary::HybridTermDictionary;
 use crate::full_text::dictionary::TermInfo;
+use crate::full_text::doc_values::DocValuesReader;
 use crate::full_text::index::SegmentInfo;
 use crate::storage::structured::StructReader;
 use crate::storage::traits::Storage;
@@ -261,6 +262,9 @@ pub struct SegmentReader {
     /// Cached field statistics: field_name -> FieldStats.
     field_stats: RwLock<Option<AHashMap<String, crate::full_text::reader::FieldStats>>>,
 
+    /// DocValues reader for this segment.
+    doc_values: RwLock<Option<Arc<DocValuesReader>>>,
+
     /// Whether the segment is loaded.
     loaded: AtomicBool,
 }
@@ -275,6 +279,7 @@ impl SegmentReader {
             stored_documents: RwLock::new(None),
             field_lengths: RwLock::new(None),
             field_stats: RwLock::new(None),
+            doc_values: RwLock::new(None),
             loaded: AtomicBool::new(false),
         };
 
@@ -305,6 +310,9 @@ impl SegmentReader {
 
         // Load stored documents
         self.load_stored_documents()?;
+
+        // Load DocValues
+        self.load_doc_values()?;
 
         self.loaded.store(true, Ordering::Release);
         Ok(())
@@ -417,7 +425,7 @@ impl SegmentReader {
                         _ => {
                             return Err(SageError::index(format!(
                                 "Unknown field type tag: {type_tag}"
-                            )))
+                            )));
                         }
                     };
 
@@ -431,6 +439,54 @@ impl SegmentReader {
         }
 
         Ok(())
+    }
+
+    /// Load DocValues for this segment.
+    fn load_doc_values(&self) -> Result<()> {
+        // Load DocValues file (required for field sorting)
+        let reader = DocValuesReader::load(self.storage.clone(), &self.info.segment_id)?;
+
+        let mut doc_values = self.doc_values.write().unwrap();
+        *doc_values = Some(Arc::new(reader));
+
+        Ok(())
+    }
+
+    /// Get a DocValues field value for a document.
+    fn get_doc_value(&self, field: &str, doc_id: u64) -> Result<Option<FieldValue>> {
+        // Ensure DocValues are loaded (lazy loading)
+        if !self.loaded.load(Ordering::Acquire) {
+            // Try to load if not loaded yet (this is safe for read-only operations after load)
+            self.ensure_loaded()?;
+        }
+
+        let doc_values = self.doc_values.read().unwrap();
+        if let Some(reader) = doc_values.as_ref() {
+            Ok(reader.get_value(field, doc_id).cloned())
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Ensure the segment is loaded (for lazy loading support)
+    fn ensure_loaded(&self) -> Result<()> {
+        if !self.loaded.load(Ordering::Acquire) {
+            // Load DocValues only (other data loaded on-demand)
+            self.load_doc_values()?;
+            // Note: We don't set loaded=true here to avoid race conditions
+            // Full load should be done via load() method
+        }
+        Ok(())
+    }
+
+    /// Check if DocValues are available for a field.
+    fn has_doc_values(&self, field: &str) -> bool {
+        let doc_values = self.doc_values.read().unwrap();
+        if let Some(reader) = doc_values.as_ref() {
+            reader.has_field(field)
+        } else {
+            false
+        }
     }
 
     /// Load field lengths from the segment.
@@ -532,10 +588,10 @@ impl SegmentReader {
         }
 
         let field_lengths = self.field_lengths.read().unwrap();
-        if let Some(ref lengths_map) = *field_lengths {
-            if let Some(doc_lengths) = lengths_map.get(&local_doc_id) {
-                return Ok(doc_lengths.get(field).copied());
-            }
+        if let Some(ref lengths_map) = *field_lengths
+            && let Some(doc_lengths) = lengths_map.get(&local_doc_id)
+        {
+            return Ok(doc_lengths.get(field).copied());
         }
         Ok(None)
     }
@@ -1004,7 +1060,8 @@ impl crate::full_text::reader::IndexReader for AdvancedIndexReader {
             // Get field stats from this segment
             if let Some(segment_stats) = reader.field_stats(field)? {
                 total_doc_count += segment_stats.doc_count;
-                total_length_sum += (segment_stats.avg_length * segment_stats.doc_count as f64) as u64;
+                total_length_sum +=
+                    (segment_stats.avg_length * segment_stats.doc_count as f64) as u64;
                 min_length = min_length.min(segment_stats.min_length);
                 max_length = max_length.max(segment_stats.max_length);
                 found = true;
@@ -1045,6 +1102,32 @@ impl crate::full_text::reader::IndexReader for AdvancedIndexReader {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn get_doc_value(&self, field: &str, doc_id: u64) -> Result<Option<FieldValue>> {
+        // Find which segment contains this doc_id and convert to segment-local doc_id
+        let mut offset = 0u64;
+        for segment_lock in &self.segment_readers {
+            let segment = segment_lock.read().unwrap();
+            let segment_doc_count = segment.info.doc_count;
+
+            if doc_id < offset + segment_doc_count {
+                // This segment contains the document
+                let local_doc_id = doc_id - offset;
+                return segment.get_doc_value(field, local_doc_id);
+            }
+
+            offset += segment_doc_count;
+        }
+        Ok(None)
+    }
+
+    fn has_doc_values(&self, field: &str) -> bool {
+        // Check if any segment has DocValues for this field
+        self.segment_readers.iter().any(|seg_lock| {
+            let seg = seg_lock.read().unwrap();
+            seg.has_doc_values(field)
+        })
     }
 }
 

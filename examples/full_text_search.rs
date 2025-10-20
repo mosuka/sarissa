@@ -9,6 +9,12 @@
 //! - WildcardQuery: Pattern matching with * and ?
 //! - GeoDistanceQuery: Geographic proximity searches
 //! - GeoBoundingBoxQuery: Geographic bounding box searches
+//!
+//! Field Sorting Features:
+//! - Sort by field values (ascending/descending)
+//! - DocValues: Column-oriented storage for efficient sorting
+//! - TopFieldCollector: Lucene-style collection-time sorting
+//! - Supports all field types: Text, Integer, Float, Boolean, DateTime, etc.
 
 use sage::document::document::Document;
 use sage::document::field_value::FieldValue;
@@ -332,7 +338,10 @@ fn main() -> Result<()> {
     println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-    println!("\nResults: Found {} matching documents (including typos)", results.total_hits);
+    println!(
+        "\nResults: Found {} matching documents (including typos)",
+        results.total_hits
+    );
     display_results(&results);
 
     // 9. FuzzyQuery - Another example with different term
@@ -381,7 +390,10 @@ fn main() -> Result<()> {
     println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-    println!("\nResults: Found {} matching documents within 50km", results.total_hits);
+    println!(
+        "\nResults: Found {} matching documents within 50km",
+        results.total_hits
+    );
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. Score: {:.4} - ", i + 1, hit.score);
@@ -405,7 +417,10 @@ fn main() -> Result<()> {
     println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-    println!("\nResults: Found {} matching documents within 2000km", results.total_hits);
+    println!(
+        "\nResults: Found {} matching documents within 2000km",
+        results.total_hits
+    );
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. Score: {:.4} - ", i + 1, hit.score);
@@ -425,14 +440,17 @@ fn main() -> Result<()> {
     println!("{}", "-".repeat(80));
     println!("Description: Finds documents within a rectangular bounding box");
     println!("\nExample: Documents in Europe (approx bounding box)");
-    let top_left = GeoPoint::new(60.0, -10.0)?;  // North-West corner
+    let top_left = GeoPoint::new(60.0, -10.0)?; // North-West corner
     let bottom_right = GeoPoint::new(35.0, 40.0)?; // South-East corner
     let bbox = GeoBoundingBox::new(top_left, bottom_right)?;
     let query = GeoBoundingBoxQuery::new("location", bbox);
     println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
-    println!("\nResults: Found {} matching documents in Europe", results.total_hits);
+    println!(
+        "\nResults: Found {} matching documents in Europe",
+        results.total_hits
+    );
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. Score: {:.4} - ", i + 1, hit.score);
@@ -454,14 +472,143 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(FuzzyQuery::new("tags", "rust").max_edits(2)));
     query.add_should(Box::new(FuzzyQuery::new("tags", "python").max_edits(2)));
-    query.add_must(Box::new(NumericRangeQuery::i64_range("year", Some(2023), None)));
-    query.add_must(Box::new(NumericRangeQuery::i64_range("rating", Some(4), None)));
+    query.add_must(Box::new(NumericRangeQuery::i64_range(
+        "year",
+        Some(2023),
+        None,
+    )));
+    query.add_must(Box::new(NumericRangeQuery::i64_range(
+        "rating",
+        Some(4),
+        None,
+    )));
     let query = query.with_minimum_should_match(1); // At least one of the should clauses must match
     println!("Query Debug Output:\n{:#?}", query);
     let request = SearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
+
+    // 16. Sorting by field values using DocValues
+    println!("\n[16] Field-Based Sorting - Sort by year (descending)");
+    println!("{}", "-".repeat(80));
+    println!("Description: Sort results by field values instead of score");
+    println!("             Uses DocValues (column-oriented storage) for efficient sorting");
+    println!("             Lucene-style: sorting happens during collection, not after");
+    println!("\nExample: Sort all documents by year (newest first)");
+    let query = TermQuery::new("category", "programming"); // Just to have a query
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query))
+        .load_documents(true)
+        .sort_by_field_desc("year")
+        .max_docs(20);
+    let results = engine.search(request)?;
+    println!(
+        "\nResults: Found {} matching documents (sorted by year desc)",
+        results.total_hits
+    );
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            print!("  {}. ", i + 1);
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+                print!("Title: {}", title);
+            }
+            if let Some(FieldValue::Integer(year)) = doc.get_field("year") {
+                print!(" (Year: {})", year);
+            }
+            println!();
+        }
+    }
+
+    // 17. Sorting by numeric fields
+    println!("\n[17] Field-Based Sorting - Sort by rating (ascending)");
+    println!("{}", "-".repeat(80));
+    println!("Description: Sort numeric field values using DocValues");
+    println!("             DocValues avoid loading full documents during sorting");
+    println!("\nExample: Sort documents by rating (lowest first)");
+    let query = NumericRangeQuery::i64_range("year", Some(2023), None);
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query))
+        .load_documents(true)
+        .sort_by_field_asc("rating")
+        .max_docs(20);
+    let results = engine.search(request)?;
+    println!(
+        "\nResults: Found {} matching documents (sorted by rating asc)",
+        results.total_hits
+    );
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            print!("  {}. ", i + 1);
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+                print!("Title: {}", title);
+            }
+            if let Some(FieldValue::Integer(rating)) = doc.get_field("rating") {
+                print!(" (Rating: {})", rating);
+            }
+            println!();
+        }
+    }
+
+    // 18. Sorting by text field (ascending)
+    println!("\n[18] Field-Based Sorting - Sort by author name (ascending)");
+    println!("{}", "-".repeat(80));
+    println!("Description: Sort text field values alphabetically in ascending order");
+    println!("             Uses DocValues for efficient column-oriented field access");
+    println!("\nExample: Sort documents by author name (A to Z)");
+    let query = NumericRangeQuery::i64_range("rating", Some(4), Some(5)); // Get all documents
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query))
+        .load_documents(true)
+        .sort_by_field_asc("author")
+        .max_docs(10);
+    let results = engine.search(request)?;
+    println!(
+        "\nResults: Found {} matching documents (sorted by author asc)",
+        results.total_hits
+    );
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            print!("  {}. ", i + 1);
+            if let Some(FieldValue::Text(author)) = doc.get_field("author") {
+                print!("Author: {}", author);
+            }
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+                print!(" - Title: {}", title);
+            }
+            println!();
+        }
+    }
+
+    // 19. Sorting by text field (descending)
+    println!("\n[19] Field-Based Sorting - Sort by author name (descending)");
+    println!("{}", "-".repeat(80));
+    println!("Description: Sort text field values alphabetically in descending order");
+    println!("             Uses DocValues for efficient column-oriented field access");
+    println!("\nExample: Sort documents by author name (Z to A)");
+    let query = NumericRangeQuery::i64_range("rating", Some(4), Some(5)); // Get all documents
+    println!("Query Debug Output:\n{:#?}", query);
+    let request = SearchRequest::new(Box::new(query))
+        .load_documents(true)
+        .sort_by_field_desc("author")
+        .max_docs(10);
+    let results = engine.search(request)?;
+    println!(
+        "\nResults: Found {} matching documents (sorted by author desc)",
+        results.total_hits
+    );
+    for (i, hit) in results.hits.iter().enumerate() {
+        if let Some(doc) = &hit.document {
+            print!("  {}. ", i + 1);
+            if let Some(FieldValue::Text(author)) = doc.get_field("author") {
+                print!("Author: {}", author);
+            }
+            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+                print!(" - Title: {}", title);
+            }
+            println!();
+        }
+    }
 
     // Summary
     println!("\n{}", "=".repeat(80));
@@ -474,7 +621,17 @@ fn main() -> Result<()> {
     println!("✓ WildcardQuery: Pattern matching with * and ?");
     println!("✓ GeoDistanceQuery: Geographic proximity search");
     println!("✓ GeoBoundingBoxQuery: Geographic bounding box search");
-    println!("\nAll query types demonstrated successfully!");
+    println!("\n=== Summary of Sorting Features ===");
+    println!("✓ Sort by score (default): Relevance-based ranking");
+    println!("✓ Sort by field (ascending): Lowest to highest values");
+    println!("✓ Sort by field (descending): Highest to lowest values");
+    println!("✓ Supports text, numeric, and other field types");
+    println!("\n=== DocValues Implementation ===");
+    println!("✓ Column-oriented storage for efficient field access");
+    println!("✓ Lucene-style: sorting happens during collection");
+    println!("✓ TopFieldCollector with BinaryHeap priority queue");
+    println!("✓ Required for field-based sorting operations");
+    println!("\nAll query types and sorting features demonstrated successfully!");
 
     // Clean up
     engine.close()?;
@@ -489,40 +646,40 @@ fn display_results(results: &sage::query::SearchResults) {
         println!("  {}. Score: {:.4}", i + 1, hit.score);
 
         if let Some(doc) = &hit.document {
-            if let Some(field_value) = doc.get_field("id") {
-                if let Some(id) = field_value.as_text() {
-                    println!("     ID: {}", id);
-                }
+            if let Some(field_value) = doc.get_field("id")
+                && let Some(id) = field_value.as_text()
+            {
+                println!("     ID: {}", id);
             }
 
-            if let Some(field_value) = doc.get_field("title") {
-                if let Some(title) = field_value.as_text() {
-                    println!("     Title: {}", title);
-                }
+            if let Some(field_value) = doc.get_field("title")
+                && let Some(title) = field_value.as_text()
+            {
+                println!("     Title: {}", title);
             }
 
-            if let Some(field_value) = doc.get_field("author") {
-                if let Some(author) = field_value.as_text() {
-                    println!("     Author: {}", author);
-                }
+            if let Some(field_value) = doc.get_field("author")
+                && let Some(author) = field_value.as_text()
+            {
+                println!("     Author: {}", author);
             }
 
-            if let Some(field_value) = doc.get_field("category") {
-                if let Some(category) = field_value.as_text() {
-                    println!("     Category: {}", category);
-                }
+            if let Some(field_value) = doc.get_field("category")
+                && let Some(category) = field_value.as_text()
+            {
+                println!("     Category: {}", category);
             }
 
-            if let Some(field_value) = doc.get_field("body") {
-                if let Some(body) = field_value.as_text() {
-                    // Display first 100 characters of body
-                    let preview = if body.len() > 100 {
-                        format!("{}...", &body[..100])
-                    } else {
-                        body.to_string()
-                    };
-                    println!("     Body: {}", preview);
-                }
+            if let Some(field_value) = doc.get_field("body")
+                && let Some(body) = field_value.as_text()
+            {
+                // Display first 100 characters of body
+                let preview = if body.len() > 100 {
+                    format!("{}...", &body[..100])
+                } else {
+                    body.to_string()
+                };
+                println!("     Body: {}", preview);
             }
         }
         println!();

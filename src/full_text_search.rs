@@ -21,6 +21,30 @@ use crate::error::Result;
 use crate::query::SearchResults;
 use crate::query::query::Query;
 
+/// Sort order for search results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortOrder {
+    /// Ascending order (lowest to highest).
+    Asc,
+    /// Descending order (highest to lowest).
+    Desc,
+}
+
+/// Field to sort search results by.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SortField {
+    /// Sort by relevance score (default).
+    #[default]
+    Score,
+    /// Sort by a document field value.
+    Field {
+        /// Field name to sort by.
+        name: String,
+        /// Sort order.
+        order: SortOrder,
+    },
+}
+
 /// Configuration for search operations.
 #[derive(Debug, Clone)]
 pub struct SearchConfig {
@@ -34,6 +58,8 @@ pub struct SearchConfig {
     pub timeout_ms: Option<u64>,
     /// Enable parallel search for better performance on multi-core systems.
     pub parallel: bool,
+    /// Sort results by field or score.
+    pub sort_by: SortField,
 }
 
 impl Default for SearchConfig {
@@ -44,6 +70,7 @@ impl Default for SearchConfig {
             load_documents: true,
             timeout_ms: None,
             parallel: false,
+            sort_by: SortField::default(),
         }
     }
 }
@@ -102,6 +129,30 @@ impl SearchRequest {
     /// Enable parallel search.
     pub fn parallel(mut self, parallel: bool) -> Self {
         self.config.parallel = parallel;
+        self
+    }
+
+    /// Sort results by a field in ascending order.
+    pub fn sort_by_field_asc(mut self, field: &str) -> Self {
+        self.config.sort_by = SortField::Field {
+            name: field.to_string(),
+            order: SortOrder::Asc,
+        };
+        self
+    }
+
+    /// Sort results by a field in descending order.
+    pub fn sort_by_field_desc(mut self, field: &str) -> Self {
+        self.config.sort_by = SortField::Field {
+            name: field.to_string(),
+            order: SortOrder::Desc,
+        };
+        self
+    }
+
+    /// Sort results by relevance score (default).
+    pub fn sort_by_score(mut self) -> Self {
+        self.config.sort_by = SortField::Score;
         self
     }
 

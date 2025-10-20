@@ -14,7 +14,9 @@ pub enum NumericType {
 }
 
 /// Represents a value for a field in a document.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Note: For bincode serialization, we wrap DateTime as timestamp internally.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FieldValue {
     /// Text value
     Text(String),

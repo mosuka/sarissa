@@ -398,7 +398,9 @@ fn bench_synonym_dictionary(c: &mut Criterion) {
 }
 
 /// Create a test dictionary with specified number of synonym groups.
-fn create_test_dictionary(num_groups: usize) -> sage::analysis::synonym::dictionary::SynonymDictionary {
+fn create_test_dictionary(
+    num_groups: usize,
+) -> sage::analysis::synonym::dictionary::SynonymDictionary {
     use sage::analysis::synonym::dictionary::SynonymDictionary;
 
     let mut groups = Vec::new();

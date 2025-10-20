@@ -6,9 +6,7 @@
 use tempfile::TempDir;
 
 use sage::document::converter::{
-    DocumentConverter,
-    field_value::FieldValueDocumentConverter,
-    json::JsonDocumentConverter,
+    DocumentConverter, field_value::FieldValueDocumentConverter, json::JsonDocumentConverter,
 };
 use sage::error::Result;
 use sage::full_text::index::IndexConfig;

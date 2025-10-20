@@ -14,6 +14,7 @@ use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::full_text::dictionary::{TermDictionaryBuilder, TermInfo};
+use crate::full_text::doc_values::DocValuesWriter;
 use crate::full_text::posting::{InvertedIndex, Posting};
 use crate::storage::structured::StructWriter;
 use crate::storage::traits::Storage;
@@ -129,6 +130,9 @@ pub struct AdvancedIndexWriter {
     /// Buffered analyzed documents.
     buffered_docs: Vec<AnalyzedDocument>,
 
+    /// DocValues writer for the current segment.
+    doc_values_writer: DocValuesWriter,
+
     /// Document ID counter.
     next_doc_id: u64,
 
@@ -158,11 +162,16 @@ impl std::fmt::Debug for AdvancedIndexWriter {
 impl AdvancedIndexWriter {
     /// Create a new advanced index writer (schema-less mode).
     pub fn new(storage: Arc<dyn Storage>, config: AdvancedWriterConfig) -> Result<Self> {
+        // Create initial DocValuesWriter (will be reset per segment)
+        let initial_segment_name = format!("{}_{:06}", config.segment_prefix, 0);
+        let doc_values_writer = DocValuesWriter::new(storage.clone(), initial_segment_name);
+
         Ok(AdvancedIndexWriter {
             storage,
             config,
             inverted_index: InvertedIndex::new(),
             buffered_docs: Vec::new(),
+            doc_values_writer,
             next_doc_id: 0,
             current_segment: 0,
             closed: false,
@@ -231,6 +240,12 @@ impl AdvancedIndexWriter {
         // Update next_doc_id to ensure uniqueness
         if analyzed_doc.doc_id >= self.next_doc_id {
             self.next_doc_id = analyzed_doc.doc_id + 1;
+        }
+
+        // Add field values to DocValues
+        for (field_name, value) in &analyzed_doc.stored_fields {
+            self.doc_values_writer
+                .add_value(analyzed_doc.doc_id, field_name, value.clone());
         }
 
         // Add to inverted index
@@ -434,6 +449,9 @@ impl AdvancedIndexWriter {
         // Write field statistics
         self.write_field_stats(&segment_name)?;
 
+        // Write DocValues
+        self.write_doc_values(&segment_name)?;
+
         // Write segment metadata
         self.write_segment_metadata(&segment_name)?;
 
@@ -443,6 +461,15 @@ impl AdvancedIndexWriter {
         // Clear buffers
         self.buffered_docs.clear();
         self.inverted_index = InvertedIndex::new();
+
+        // Reset DocValuesWriter for next segment
+        let next_segment_name = format!(
+            "{}_{:06}",
+            self.config.segment_prefix,
+            self.current_segment + 1
+        );
+        self.doc_values_writer = DocValuesWriter::new(self.storage.clone(), next_segment_name);
+
         self.current_segment += 1;
         self.stats.segments_created += 1;
 
@@ -564,7 +591,9 @@ impl AdvancedIndexWriter {
 
         for doc in &self.buffered_docs {
             for (field_name, &length) in &doc.field_lengths {
-                let stats = field_stats.entry(field_name.clone()).or_insert((0, 0, u64::MAX, 0));
+                let stats = field_stats
+                    .entry(field_name.clone())
+                    .or_insert((0, 0, u64::MAX, 0));
                 stats.0 += 1; // doc_count
                 stats.1 += length as u64; // total_length
                 stats.2 = stats.2.min(length as u64); // min_length
@@ -575,14 +604,16 @@ impl AdvancedIndexWriter {
         // Convert to (doc_count, avg_length, min_length, max_length)
         field_stats
             .into_iter()
-            .map(|(field, (doc_count, total_length, min_length, max_length))| {
-                let avg_length = if doc_count > 0 {
-                    total_length as f64 / doc_count as f64
-                } else {
-                    0.0
-                };
-                (field, (doc_count, avg_length, min_length, max_length))
-            })
+            .map(
+                |(field, (doc_count, total_length, min_length, max_length))| {
+                    let avg_length = if doc_count > 0 {
+                        total_length as f64 / doc_count as f64
+                    } else {
+                        0.0
+                    };
+                    (field, (doc_count, avg_length, min_length, max_length))
+                },
+            )
             .collect()
     }
 
@@ -630,6 +661,21 @@ impl AdvancedIndexWriter {
         }
 
         fstats_writer.close()?;
+        Ok(())
+    }
+
+    /// Write DocValues to storage.
+    fn write_doc_values(&self, _segment_name: &str) -> Result<()> {
+        // DocValues are written using local filesystem approach
+        // since Storage trait doesn't directly support it yet.
+        // We'll write to a temporary location and then upload if needed.
+
+        // For now, write directly using the doc_values_writer's write method
+        self.doc_values_writer.write()?;
+
+        // If using remote storage, we would need to upload the .dv file here
+        // For filesystem-based storage, the file is already in the right place
+
         Ok(())
     }
 
