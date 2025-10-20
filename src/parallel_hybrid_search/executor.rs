@@ -15,7 +15,7 @@ use super::types::{
 };
 
 use crate::error::{Result, SageError};
-use crate::full_text::reader::IndexReader;
+use crate::lexical::reader::IndexReader;
 use crate::query::SearchResults;
 use crate::query::query::Query;
 use crate::vector::Vector;
@@ -291,8 +291,8 @@ impl ParallelHybridSearchExecutor {
         config: &ParallelHybridSearchConfig,
         _index_id: &str,
     ) -> Result<SearchResults> {
-        use crate::full_text::search::searcher::Searcher;
-        use crate::full_text::search::{SearchConfig, SearchRequest};
+        use crate::lexical::search::searcher::Searcher;
+        use crate::lexical::search::{SearchConfig, SearchRequest};
 
         // Create a searcher with the index reader using from_arc
         let searcher = Searcher::from_arc(reader.clone());
@@ -304,7 +304,7 @@ impl ParallelHybridSearchExecutor {
             load_documents: false, // Don't load documents for performance
             timeout_ms: Some(config.index_timeout.as_millis() as u64),
             parallel: false, // Already running in parallel at the executor level
-            sort_by: crate::full_text::search::SortField::default(),
+            sort_by: crate::lexical::search::SortField::default(),
         };
 
         // Create search request

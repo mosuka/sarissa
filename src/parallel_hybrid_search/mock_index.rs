@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
-use crate::full_text::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
+use crate::lexical::reader::{FieldStats, IndexReader, PostingIterator, ReaderTermInfo};
 use crate::query::SearchHit;
 use crate::query::query::Query;
 

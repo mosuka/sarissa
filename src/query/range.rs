@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 use crate::document::field_value::NumericType;
 use crate::error::Result;
-use crate::full_text::reader::IndexReader;
+use crate::lexical::reader::IndexReader;
 use crate::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
 use crate::query::query::Query;
 use crate::query::scorer::{BM25Scorer, Scorer};
@@ -1434,21 +1434,21 @@ mod tests {
             &self,
             _field: &str,
             _term: &str,
-        ) -> crate::error::Result<Option<crate::full_text::reader::ReaderTermInfo>> {
+        ) -> crate::error::Result<Option<crate::lexical::reader::ReaderTermInfo>> {
             Ok(None)
         }
         fn postings(
             &self,
             _field: &str,
             _term: &str,
-        ) -> crate::error::Result<Option<Box<dyn crate::full_text::reader::PostingIterator>>>
+        ) -> crate::error::Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>>
         {
             Ok(None)
         }
         fn field_stats(
             &self,
             _field: &str,
-        ) -> crate::error::Result<Option<crate::full_text::reader::FieldStats>> {
+        ) -> crate::error::Result<Option<crate::lexical::reader::FieldStats>> {
             Ok(None)
         }
         fn close(&mut self) -> crate::error::Result<()> {

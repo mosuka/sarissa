@@ -7,17 +7,17 @@
 
 use sage::document::document::Document;
 use sage::error::Result;
-use sage::full_text::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sage::full_text::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
-use sage::parallel_full_text_index::config::{
+use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+use sage::parallel_lexical_index::config::{
     IndexingOptions, ParallelIndexConfig, PartitionConfig,
 };
-use sage::parallel_full_text_index::engine::ParallelIndexEngine;
-use sage::parallel_full_text_index::partitioner::HashPartitioner;
-use sage::parallel_full_text_search::config::{
+use sage::parallel_lexical_index::engine::ParallelIndexEngine;
+use sage::parallel_lexical_index::partitioner::HashPartitioner;
+use sage::parallel_lexical_search::config::{
     MergeStrategyType, ParallelSearchConfig, SearchOptions,
 };
-use sage::parallel_full_text_search::engine::ParallelSearchEngine;
+use sage::parallel_lexical_search::engine::ParallelSearchEngine;
 use sage::query::phrase::PhraseQuery;
 use sage::query::term::TermQuery;
 use sage::storage::memory::MemoryStorage;
@@ -270,7 +270,7 @@ fn main() -> Result<()> {
                 let mut input = storage.open_input(&file)?;
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
-                let segment_info: sage::full_text::index::SegmentInfo =
+                let segment_info: sage::lexical::index::SegmentInfo =
                     serde_json::from_slice(&data).map_err(|e| {
                         sage::error::SageError::index(format!(
                             "Failed to parse segment metadata: {e}"

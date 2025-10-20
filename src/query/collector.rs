@@ -74,7 +74,7 @@ pub struct TopFieldCollector<'a> {
     /// Total number of documents processed.
     total_hits: u64,
     /// Reference to the index reader for accessing field values.
-    reader: &'a dyn crate::full_text::reader::IndexReader,
+    reader: &'a dyn crate::lexical::reader::IndexReader,
 }
 
 impl<'a> TopFieldCollector<'a> {
@@ -83,7 +83,7 @@ impl<'a> TopFieldCollector<'a> {
         max_docs: usize,
         field_name: String,
         ascending: bool,
-        reader: &'a dyn crate::full_text::reader::IndexReader,
+        reader: &'a dyn crate::lexical::reader::IndexReader,
     ) -> Self {
         TopFieldCollector {
             max_docs,
@@ -102,7 +102,7 @@ impl<'a> TopFieldCollector<'a> {
         min_score: f32,
         field_name: String,
         ascending: bool,
-        reader: &'a dyn crate::full_text::reader::IndexReader,
+        reader: &'a dyn crate::lexical::reader::IndexReader,
     ) -> Self {
         TopFieldCollector {
             max_docs,
