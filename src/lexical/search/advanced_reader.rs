@@ -101,10 +101,7 @@ impl AdvancedPostingIterator {
     }
 
     /// Create posting iterator with block optimization.
-    pub fn with_blocks(
-        postings: Vec<crate::lexical::posting::Posting>,
-        block_size: usize,
-    ) -> Self {
+    pub fn with_blocks(postings: Vec<crate::lexical::posting::Posting>, block_size: usize) -> Self {
         let blocks = Self::create_blocks(&postings, block_size);
         AdvancedPostingIterator {
             postings,

@@ -161,10 +161,3 @@ impl SearchRequest {
         engine.search(self)
     }
 }
-
-// Implement Searchable trait for SearchEngine to support hybrid search
-impl crate::hybrid_search::engine::Searchable for engine::SearchEngine {
-    fn search(&self, request: SearchRequest) -> Result<SearchResults> {
-        engine::SearchEngine::search(self, request)
-    }
-}

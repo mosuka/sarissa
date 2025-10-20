@@ -12,9 +12,7 @@ use crate::parallel_lexical_search::config::{ParallelSearchConfig, SearchOptions
 use crate::parallel_lexical_search::index_manager::{IndexHandle, IndexManager};
 use crate::parallel_lexical_search::merger::MergerFactory;
 use crate::parallel_lexical_search::metrics::{SearchMetricsCollector, Timer};
-use crate::parallel_lexical_search::search_task::{
-    SearchTask, TaskHandle, TaskResult, TaskStatus,
-};
+use crate::parallel_lexical_search::search_task::{SearchTask, TaskHandle, TaskResult, TaskStatus};
 use crate::query::SearchResults;
 use crate::query::query::Query;
 
@@ -232,9 +230,8 @@ impl ParallelSearchEngine {
         };
 
         // Create searcher for this index
-        let searcher = crate::lexical::search::searcher::Searcher::from_arc(Arc::clone(
-            &index_handle.reader,
-        ));
+        let searcher =
+            crate::lexical::search::searcher::Searcher::from_arc(Arc::clone(&index_handle.reader));
 
         // Create search request
         let mut request = SearchRequest::new(task.query)

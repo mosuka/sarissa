@@ -316,9 +316,7 @@ impl Index for FileIndex {
     fn reader(&self) -> Result<Box<dyn IndexReader>> {
         self.check_closed()?;
 
-        use crate::lexical::search::advanced_reader::{
-            AdvancedIndexReader, AdvancedReaderConfig,
-        };
+        use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
 
         // Load segment information
         let segments = self.load_segments()?;

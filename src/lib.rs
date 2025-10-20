@@ -13,12 +13,14 @@
 
 pub mod analysis;
 pub mod document;
-pub mod embeding;
+pub mod embedding;
 pub mod error;
-pub mod hybrid_search;
+// TODO: Update hybrid_search to use new TextEmbedder trait
+// pub mod hybrid_search;
 pub mod lexical;
 pub mod ml;
-pub mod parallel_hybrid_search;
+// TODO: Update parallel_hybrid_search to use new TextEmbedder trait
+// pub mod parallel_hybrid_search;
 pub mod parallel_lexical_index;
 pub mod parallel_lexical_search;
 pub mod parallel_vector_index;

@@ -10,7 +10,7 @@ use super::config::{LoadBalancingStrategy, ParallelHybridSearchConfig};
 use super::executor::ParallelHybridSearchExecutor;
 use super::types::{CacheStats, ParallelHybridSearchResults, SearchTimeBreakdown};
 
-use crate::embeding::engine::EmbeddingEngine;
+use crate::embedding::engine::EmbeddingEngine;
 use crate::error::{Result, SageError};
 use crate::lexical::reader::IndexReader;
 use crate::query::query::Query;
