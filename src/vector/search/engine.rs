@@ -376,14 +376,6 @@ impl VectorSearchEngine {
         &self.stats
     }
 
-    /// Create a hybrid search engine that combines keyword and vector search.
-    pub fn create_hybrid_engine(&self) -> Result<crate::hybrid_search::engine::HybridSearchEngine> {
-        // TODO: Implement hybrid engine creation
-        Err(SageError::NotImplemented(
-            "Hybrid search engine not implemented".to_string(),
-        ))
-    }
-
     /// Get the configuration.
     pub fn config(&self) -> &super::VectorSearchEngineConfig {
         &self.config

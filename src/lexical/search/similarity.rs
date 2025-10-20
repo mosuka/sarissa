@@ -1134,10 +1134,7 @@ mod tests {
         ) -> Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>> {
             Ok(None)
         }
-        fn field_stats(
-            &self,
-            _field: &str,
-        ) -> Result<Option<crate::lexical::reader::FieldStats>> {
+        fn field_stats(&self, _field: &str) -> Result<Option<crate::lexical::reader::FieldStats>> {
             Ok(None)
         }
         fn is_closed(&self) -> bool {

@@ -840,9 +840,7 @@ mod tests {
 
     #[test]
     fn test_fuzzy_matcher() {
-        use crate::lexical::search::advanced_reader::{
-            AdvancedIndexReader, AdvancedReaderConfig,
-        };
+        use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
         use crate::storage::memory::MemoryStorage;
         use crate::storage::traits::StorageConfig;
         use std::sync::Arc;

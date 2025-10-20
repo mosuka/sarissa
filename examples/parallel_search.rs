@@ -9,9 +9,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 use sage::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
-use sage::parallel_lexical_index::config::{
-    IndexingOptions, ParallelIndexConfig, PartitionConfig,
-};
+use sage::parallel_lexical_index::config::{IndexingOptions, ParallelIndexConfig, PartitionConfig};
 use sage::parallel_lexical_index::engine::ParallelIndexEngine;
 use sage::parallel_lexical_index::partitioner::HashPartitioner;
 use sage::parallel_lexical_search::config::{
@@ -270,8 +268,8 @@ fn main() -> Result<()> {
                 let mut input = storage.open_input(&file)?;
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
-                let segment_info: sage::lexical::index::SegmentInfo =
-                    serde_json::from_slice(&data).map_err(|e| {
+                let segment_info: sage::lexical::index::SegmentInfo = serde_json::from_slice(&data)
+                    .map_err(|e| {
                         sage::error::SageError::index(format!(
                             "Failed to parse segment metadata: {e}"
                         ))

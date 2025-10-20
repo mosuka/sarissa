@@ -9,7 +9,7 @@ use super::config::HybridSearchConfig;
 use super::merger::ResultMerger;
 use super::stats::HybridSearchStats;
 use super::types::HybridSearchResults;
-use crate::embeding::engine::EmbeddingEngine;
+use crate::embedding::engine::EmbeddingEngine;
 use crate::error::Result;
 use crate::lexical::search::SearchRequest;
 use crate::query::SearchResults;
