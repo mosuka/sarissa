@@ -218,43 +218,92 @@ let vector = embedder.embed("your text here").await?;
 
 ### Multimodal Search (Text + Images)
 
-Sage supports cross-modal search using CLIP models, enabling you to search images with text queries or find similar images.
+Sage supports cross-modal search using CLIP (Contrastive Language-Image Pre-Training) models, enabling semantic search across text and images. This allows you to:
+
+- **Text-to-Image Search**: Find images using natural language queries
+- **Image-to-Image Search**: Find visually similar images using an image query
+- **Semantic Understanding**: Search based on content meaning, not just keywords
+
+#### Setup
+
+Add the `embeddings-multimodal` feature to your `Cargo.toml`:
 
 ```toml
 [dependencies]
 sage = { version = "0.1", features = ["embeddings-multimodal"] }
 ```
 
-#### Text-to-Image Search
+#### Text-to-Image Search Example
 
 ```rust
 use sage::embedding::{CandleMultimodalEmbedder, TextEmbedder, ImageEmbedder};
+use sage::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
 
-// Initialize CLIP embedder
+// Initialize CLIP embedder (automatically downloads model from HuggingFace)
 let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 
-// Index images
-let mut index = VectorIndex::new(storage, embedder.dimension())?;
+// Create vector index with CLIP's embedding dimension (512)
+let config = VectorIndexBuildConfig {
+    dimension: embedder.dimension(), // 512 for CLIP ViT-Base-Patch32
+    distance_metric: DistanceMetric::Cosine,
+    index_type: VectorIndexType::HNSW,
+    ..Default::default()
+};
+let mut builder = VectorIndexBuilderFactory::create_builder(config)?;
+
+// Index your image collection
+let mut image_vectors = Vec::new();
 for (id, image_path) in image_paths.iter().enumerate() {
     let vector = embedder.embed_image(image_path).await?;
-    index.add_vector(id as u64, vector)?;
+    image_vectors.push((id as u64, vector));
 }
-index.build()?;
+builder.add_vectors(image_vectors)?;
+let index = builder.finalize()?;
 
-// Search images using text
-let query_vector = embedder.embed("a photo of a cat").await?;
-let results = searcher.search(&query_vector, 10)?;
+// Search images using natural language
+let query_vector = embedder.embed("a photo of a cat playing").await?;
+let results = index.search(&query_vector, 10)?;
 ```
 
-#### Image-to-Image Search
+#### Image-to-Image Search Example
 
 ```rust
-// Use an image as query to find similar images
-let query_vector = embedder.embed_image("query.jpg").await?;
-let similar_images = searcher.search(&query_vector, 5)?;
+// Find visually similar images using an image as query
+let query_image_vector = embedder.embed_image("query.jpg").await?;
+let similar_images = index.search(&query_image_vector, 5)?;
 ```
 
-See [examples/text_to_image_search.rs](examples/text_to_image_search.rs) and [examples/image_to_image_search.rs](examples/image_to_image_search.rs) for complete examples.
+#### How It Works
+
+1. **CLIP Model**: Uses OpenAI's CLIP model which maps both text and images into the same 512-dimensional vector space
+2. **Automatic Download**: Models are automatically downloaded from HuggingFace on first use
+3. **GPU Acceleration**: Automatically uses GPU if available (via Candle)
+4. **Shared Embedding Space**: Text and image embeddings can be directly compared using cosine similarity
+
+#### Supported Models
+
+Currently supports CLIP ViT-Base-Patch32 architecture:
+
+- Model: `openai/clip-vit-base-patch32`
+- Embedding Dimension: 512
+- Image Size: 224x224
+
+#### Complete Examples
+
+See working examples with detailed explanations:
+
+- [examples/text_to_image_search.rs](examples/text_to_image_search.rs) - Full text-to-image search implementation
+- [examples/image_to_image_search.rs](examples/image_to_image_search.rs) - Full image similarity search implementation
+
+Run the examples:
+
+```bash
+# Text-to-image search
+cargo run --example text_to_image_search --features embeddings-multimodal
+
+# Image-to-image search
+cargo run --example image_to_image_search --features embeddings-multimodal -- query.jpg
+```
 
 ### Faceted Search
 
