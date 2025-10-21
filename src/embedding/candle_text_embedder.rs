@@ -117,7 +117,9 @@ impl CandleTextEmbedder {
         let api = ApiBuilder::new()
             .with_cache_dir(cache_dir.into())
             .build()
-            .map_err(|e| SageError::InvalidOperation(format!("HF API initialization failed: {}", e)))?;
+            .map_err(|e| {
+                SageError::InvalidOperation(format!("HF API initialization failed: {}", e))
+            })?;
         let repo = api.model(model_name.to_string());
 
         // Load config
