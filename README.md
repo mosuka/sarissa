@@ -11,8 +11,9 @@ A fast, featureful full-text search library for Rust, inspired by the [Lucene](h
 - **Pure Rust Implementation** - Memory-safe and fast performance
 - **Flexible Text Analysis** - Configurable tokenization, stemming, and filtering pipeline
 - **Multiple Storage Backends** - File system, memory-mapped files, and in-memory storage
-- **Advanced Query Types** - Term, phrase, range, boolean, fuzzy, wildcard, and geographic queries  
+- **Advanced Query Types** - Term, phrase, range, boolean, fuzzy, wildcard, and geographic queries
 - **Vector Search** - HNSW-based approximate nearest neighbor search with multiple distance metrics
+- **Text Embeddings** - Built-in support for generating embeddings with Candle (local BERT models) and OpenAI
 - **BM25 Scoring** - Industry-standard relevance scoring with customizable parameters
 - **Spell Correction** - Built-in spell checking and query suggestion system
 - **Faceted Search** - Multi-dimensional search with facet aggregation
@@ -76,7 +77,7 @@ fn main() -> Result<()> {
     
     Ok(())
 }
-```F
+```
 
 ## 🏗️ Architecture
 
@@ -142,30 +143,76 @@ GeoQuery::within_radius("location".to_string(), 40.7128, -74.0060, 10.0) // NYC,
 
 ## 🎯 Advanced Features
 
-### Vector Search
+### Vector Search with Text Embeddings
+
+Sage supports semantic search using text embeddings. You can use local BERT models via Candle or OpenAI's API.
+
+#### Using Candle (Local BERT Models)
+
+```toml
+[dependencies]
+sage = { version = "0.1", features = ["embeddings-candle"] }
+```
 
 ```rust
+use sage::embedding::{CandleTextEmbedder, TextEmbedder};
 use sage::vector::*;
 
-// Add vector field to schema
-schema.add_field("embedding", Box::new(VectorField::new(768).indexed(true)))?;
+// Initialize embedder with a sentence-transformers model
+let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
 
-// Create HNSW index for approximate nearest neighbor search
-let mut config = IndexConfig::default();
-config.vector_config.index_type = VectorIndexType::HNSW;
-config.vector_config.distance_metric = DistanceMetric::Cosine;
+// Generate embeddings for documents
+let documents = vec![
+    "Rust is a systems programming language",
+    "Python is great for data science",
+    "Machine learning with neural networks",
+];
 
-let engine = SearchEngine::create_in_dir(path, schema, config)?;
+let vectors = embedder.embed_batch(&documents).await?;
 
-// Add documents with vectors
-let doc = Document::builder()
-    .add_text("title", "Document title")
-    .add_vector("embedding", vec![0.1, 0.2, 0.3, /* ... 768 dimensions */])
-    .build();
+// Build vector index
+let config = VectorIndexBuildConfig {
+    dimension: embedder.dimension(),
+    distance_metric: DistanceMetric::Cosine,
+    index_type: VectorIndexType::Flat,
+    normalize_vectors: true,
+    ..Default::default()
+};
 
-// Vector similarity search
-let query = VectorQuery::new("embedding".to_string(), query_vector, 10);
-let results = engine.search(&query, 10)?;
+let mut builder = VectorIndexBuilderFactory::create_builder(config)?;
+let doc_vectors: Vec<(u64, Vector)> = documents
+    .iter()
+    .enumerate()
+    .zip(vectors.iter())
+    .map(|((idx, _), vec)| (idx as u64, vec.clone()))
+    .collect();
+
+builder.add_vectors(doc_vectors)?;
+builder.finalize()?;
+
+// Search with query embedding
+let query_vector = embedder.embed("programming languages").await?;
+// Perform similarity search...
+```
+
+#### Using OpenAI Embeddings
+
+```toml
+[dependencies]
+sage = { version = "0.1", features = ["embeddings-openai"] }
+```
+
+```rust
+use sage::embedding::{OpenAIEmbedder, TextEmbedder};
+
+// Initialize with API key
+let embedder = OpenAIEmbedder::new(
+    "your-api-key",
+    "text-embedding-3-small"
+)?;
+
+// Generate embeddings
+let vector = embedder.embed("your text here").await?;
 ```
 
 ### Faceted Search
@@ -275,6 +322,75 @@ cargo bench
 cargo clippy
 cargo fmt --check
 ```
+
+## 📖 Examples
+
+Sage includes numerous examples demonstrating various features:
+
+### Lexical Search Examples
+
+- `term_query` - Basic term-based search
+- `phrase_query` - Multi-word phrase matching
+- `boolean_query` - Combining queries with AND/OR/NOT logic
+- `fuzzy_query` - Fuzzy string matching with edit distance
+- `wildcard_query` - Pattern matching with wildcards
+- `range_query` - Numeric and date range queries
+- `geo_query` - Geographic location-based search
+- `field_specific_search` - Search within specific fields
+- `lexical_search` - Full lexical search example
+- `query_parser` - Parsing user query strings
+
+### Vector Search Examples
+
+- `vector_search` - Semantic text search using CandleTextEmbedder
+- `embedding_with_candle` - Local BERT model embeddings
+- `embedding_with_openai` - OpenAI API embeddings
+- `dynamic_embedder_switching` - Switch between embedding providers
+
+### Advanced Features
+
+- `parallel_search` - Parallel search execution
+- `schemaless_indexing` - Dynamic schema management
+- `synonym_graph_filter` - Synonym expansion in queries
+- `keyword_based_intent_classifier` - Intent classification
+- `ml_based_intent_classifier` - ML-powered intent detection
+- `document_parser` - Parsing various document formats
+- `document_converter` - Converting between document formats
+
+Run any example with:
+
+```bash
+cargo run --example <example_name>
+
+# For embedding examples, use feature flags:
+cargo run --example vector_search --features embeddings-candle
+cargo run --example embedding_with_openai --features embeddings-openai
+```
+
+## 🔧 Feature Flags
+
+Sage uses feature flags to enable optional functionality:
+
+```toml
+[dependencies]
+# Default features only
+sage = "0.1"
+
+# With Candle embeddings (local BERT models)
+sage = { version = "0.1", features = ["embeddings-candle"] }
+
+# With OpenAI embeddings
+sage = { version = "0.1", features = ["embeddings-openai"] }
+
+# With all embedding features
+sage = { version = "0.1", features = ["embeddings-all"] }
+```
+
+Available features:
+
+- `embeddings-candle` - Local text embeddings using Candle and BERT models
+- `embeddings-openai` - OpenAI API-based text embeddings
+- `embeddings-all` - All embedding providers
 
 ## 📚 Documentation
 
