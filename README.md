@@ -14,6 +14,7 @@ A fast, featureful full-text search library for Rust, inspired by the [Lucene](h
 - **Advanced Query Types** - Term, phrase, range, boolean, fuzzy, wildcard, and geographic queries
 - **Vector Search** - HNSW-based approximate nearest neighbor search with multiple distance metrics
 - **Text Embeddings** - Built-in support for generating embeddings with Candle (local BERT models) and OpenAI
+- **Multimodal Search** - Cross-modal search with CLIP models for text-to-image and image-to-image similarity
 - **BM25 Scoring** - Industry-standard relevance scoring with customizable parameters
 - **Spell Correction** - Built-in spell checking and query suggestion system
 - **Faceted Search** - Multi-dimensional search with facet aggregation
@@ -214,6 +215,46 @@ let embedder = OpenAIEmbedder::new(
 // Generate embeddings
 let vector = embedder.embed("your text here").await?;
 ```
+
+### Multimodal Search (Text + Images)
+
+Sage supports cross-modal search using CLIP models, enabling you to search images with text queries or find similar images.
+
+```toml
+[dependencies]
+sage = { version = "0.1", features = ["embeddings-multimodal"] }
+```
+
+#### Text-to-Image Search
+
+```rust
+use sage::embedding::{CandleMultimodalEmbedder, TextEmbedder, ImageEmbedder};
+
+// Initialize CLIP embedder
+let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
+
+// Index images
+let mut index = VectorIndex::new(storage, embedder.dimension())?;
+for (id, image_path) in image_paths.iter().enumerate() {
+    let vector = embedder.embed_image(image_path).await?;
+    index.add_vector(id as u64, vector)?;
+}
+index.build()?;
+
+// Search images using text
+let query_vector = embedder.embed("a photo of a cat").await?;
+let results = searcher.search(&query_vector, 10)?;
+```
+
+#### Image-to-Image Search
+
+```rust
+// Use an image as query to find similar images
+let query_vector = embedder.embed_image("query.jpg").await?;
+let similar_images = searcher.search(&query_vector, 5)?;
+```
+
+See [examples/text_to_image_search.rs](examples/text_to_image_search.rs) and [examples/image_to_image_search.rs](examples/image_to_image_search.rs) for complete examples.
 
 ### Faceted Search
 

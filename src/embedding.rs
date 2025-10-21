@@ -134,3 +134,19 @@ pub use candle_text_embedder::CandleTextEmbedder;
 mod openai_text_embedder;
 #[cfg(feature = "embeddings-openai")]
 pub use openai_text_embedder::OpenAITextEmbedder;
+
+// Image and multimodal embeddings (requires embeddings-multimodal feature flag)
+#[cfg(feature = "embeddings-multimodal")]
+mod image_embedder;
+#[cfg(feature = "embeddings-multimodal")]
+pub use image_embedder::ImageEmbedder;
+
+#[cfg(feature = "embeddings-multimodal")]
+mod multimodal_embedder;
+#[cfg(feature = "embeddings-multimodal")]
+pub use multimodal_embedder::MultimodalEmbedder;
+
+#[cfg(feature = "embeddings-multimodal")]
+mod candle_multimodal_embedder;
+#[cfg(feature = "embeddings-multimodal")]
+pub use candle_multimodal_embedder::CandleMultimodalEmbedder;

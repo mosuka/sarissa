@@ -10,7 +10,7 @@ repository = "https://github.com/mosuka/sage"
 [dependencies]
 ahash = "0.8.12"
 anyhow = "1.0.100"
-async-trait = "0.1"
+async-trait = "0.1.89"
 bincode = "2.0.1"
 bit-vec = "0.8.0"
 byteorder = "1.5.0"
@@ -53,6 +53,7 @@ candle-transformers = { version = "0.9.1", optional = true }
 hf-hub = { version = "0.4.3", optional = true }
 tokenizers = { version = "0.22.1", optional = true }
 reqwest = { version = "0.12.24", features = ["json"], optional = true }
+image = { version = "0.25.8", optional = true }
 
 [features]
 default = []
@@ -63,8 +64,20 @@ embeddings-candle = [
     "hf-hub",
     "tokenizers",
 ]
+embeddings-multimodal = [
+    "candle-core",
+    "candle-nn",
+    "candle-transformers",
+    "hf-hub",
+    "tokenizers",
+    "image",
+]
 embeddings-openai = ["reqwest"]
-embeddings-all = ["embeddings-candle", "embeddings-openai"]
+embeddings-all = [
+    "embeddings-candle",
+    "embeddings-multimodal",
+    "embeddings-openai",
+]
 
 [[bench]]
 name = "bench"
