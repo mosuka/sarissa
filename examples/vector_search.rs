@@ -1,156 +1,185 @@
-//! Vector Similarity Search example - demonstrates the new vector API structure.
+//! Vector Search using CandleTextEmbedder
+//!
+//! This example demonstrates:
+//! - Using CandleTextEmbedder to generate text embeddings
+//! - Building a vector index with real semantic embeddings
+//! - Performing semantic similarity search on text documents
+//! - Comparing search results across different query types
+//!
+//! To run this example:
+//! ```bash
+//! cargo run --example vector_search --features embeddings-candle
+//! ```
 
+#[cfg(feature = "embeddings-candle")]
+use sage::embedding::{CandleTextEmbedder, TextEmbedder};
+#[cfg(feature = "embeddings-candle")]
 use sage::error::Result;
+#[cfg(feature = "embeddings-candle")]
+use sage::vector::DistanceMetric;
+#[cfg(feature = "embeddings-candle")]
 use sage::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory, VectorIndexType};
+#[cfg(feature = "embeddings-candle")]
 use sage::vector::types::VectorSearchConfig;
-use sage::vector::{DistanceMetric, Vector};
 
-fn main() -> Result<()> {
-    println!("=== Vector Similarity Search Example - New API Structure ===\n");
+#[cfg(feature = "embeddings-candle")]
+#[tokio::main]
+async fn main() -> Result<()> {
+    println!("=== Vector Search with CandleTextEmbedder ===\n");
 
-    // Create vector index configuration
+    // Step 1: Initialize the embedder
+    println!("Loading embedding model: sentence-transformers/all-MiniLM-L6-v2");
+    let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
+    let dimension = embedder.dimension();
+
+    println!("Model loaded successfully!");
+    println!("Model name: {}", embedder.name());
+    println!("Embedding dimension: {}\n", dimension);
+
+    // Step 2: Prepare sample documents
+    let documents = vec![
+        (
+            1,
+            "Rust is a systems programming language focused on safety and performance",
+        ),
+        (
+            2,
+            "Python is a high-level programming language known for its simplicity",
+        ),
+        (
+            3,
+            "Machine learning algorithms can recognize patterns in data",
+        ),
+        (
+            4,
+            "Deep neural networks are the foundation of modern AI systems",
+        ),
+        (5, "The Eiffel Tower is a famous landmark in Paris, France"),
+        (
+            6,
+            "Sushi is a traditional Japanese cuisine made with rice and fish",
+        ),
+        (
+            7,
+            "Quantum computing leverages quantum mechanics for computation",
+        ),
+        (
+            8,
+            "Climate change affects global weather patterns and ecosystems",
+        ),
+    ];
+
+    println!("=== Sample Documents ===");
+    for (id, text) in &documents {
+        println!("Doc {}: {}", id, text);
+    }
+    println!();
+
+    // Step 3: Generate embeddings for all documents
+    println!("Generating embeddings for {} documents...", documents.len());
+    let texts: Vec<&str> = documents.iter().map(|(_, text)| *text).collect();
+    let vectors = embedder.embed_batch(&texts).await?;
+    println!("Embeddings generated successfully!\n");
+
+    // Step 4: Create vector index configuration
     let vector_config = VectorIndexBuildConfig {
-        dimension: 4, // Small dimension for demo purposes
+        dimension,
         distance_metric: DistanceMetric::Cosine,
         index_type: VectorIndexType::Flat,
         normalize_vectors: true,
         ..Default::default()
     };
 
-    // Create vector index builder
+    // Step 5: Build the vector index
+    println!("Building vector index...");
     let mut vector_builder = VectorIndexBuilderFactory::create_builder(vector_config)?;
-    println!("Created Flat index with 4 dimensions using Cosine distance\n");
 
-    // Create sample vectors for demonstration
-    let sample_vectors = vec![
-        (1, Vector::new(vec![0.9, 0.1, 0.2, 0.1])), // Technology-focused
-        (2, Vector::new(vec![0.8, 0.2, 0.3, 0.1])), // Similar to technology
-        (3, Vector::new(vec![0.1, 0.9, 0.1, 0.2])), // Cooking-focused
-        (4, Vector::new(vec![0.2, 0.8, 0.2, 0.1])), // Similar to cooking
-        (5, Vector::new(vec![0.1, 0.1, 0.9, 0.2])), // Photography-focused
-        (6, Vector::new(vec![0.2, 0.2, 0.1, 0.9])), // Sports-focused
-    ];
+    // Add document vectors to the index
+    let doc_vectors: Vec<(u64, sage::vector::Vector)> = documents
+        .iter()
+        .zip(vectors.iter())
+        .map(|((id, _), vector)| (*id, vector.clone()))
+        .collect();
 
-    println!("=== Adding Vectors to Index ===");
-    for (doc_id, vector) in &sample_vectors {
-        println!("Added vector for document {}: {:?}", doc_id, vector.data);
-    }
-
-    // Add vectors to the builder
-    vector_builder.add_vectors(sample_vectors)?;
-
-    // Finalize the index
+    vector_builder.add_vectors(doc_vectors)?;
     vector_builder.finalize()?;
-    println!("\nIndex finalized successfully!");
+    vector_builder.optimize()?;
 
-    // Display progress and stats
+    println!("Vector index built successfully!");
     println!("Build progress: {:.1}%", vector_builder.progress() * 100.0);
     println!(
-        "Estimated memory usage: {} bytes",
+        "Estimated memory usage: {} bytes\n",
         vector_builder.estimated_memory_usage()
     );
 
-    // Optimize the index
-    vector_builder.optimize()?;
-    println!("Index optimized successfully!");
+    // Step 6: Perform semantic searches
+    println!("=== Semantic Search Examples ===\n");
 
-    // Demonstrate vector operations
-    println!("\n=== Vector Operations ===");
+    // Search 1: Programming language query
+    println!("--- Search 1: Programming Languages ---");
+    let query1 = "programming language features";
+    println!("Query: \"{}\"", query1);
 
-    // Create test query vectors
-    let tech_query = Vector::new(vec![0.85, 0.15, 0.25, 0.1]);
-    let _cooking_query = Vector::new(vec![0.15, 0.85, 0.15, 0.2]);
+    let query_vector1 = embedder.embed(query1).await?;
+    let results1 = perform_search(&documents, &vectors, &query_vector1, 3);
 
-    // Show distance calculations
-    let sample_doc = Vector::new(vec![0.9, 0.1, 0.2, 0.1]);
-
-    println!("Query vector: {:?}", tech_query.data);
-    println!("Sample document vector: {:?}", sample_doc.data);
-
-    let cosine_distance = DistanceMetric::Cosine.distance(&tech_query.data, &sample_doc.data)?;
-    let cosine_similarity =
-        DistanceMetric::Cosine.similarity(&tech_query.data, &sample_doc.data)?;
-
-    println!("Cosine distance: {cosine_distance:.4}");
-    println!("Cosine similarity: {cosine_similarity:.4}");
-
-    // Demonstrate different distance metrics
-    println!("\n=== Distance Metrics Comparison ===");
-    let metrics = vec![
-        DistanceMetric::Cosine,
-        DistanceMetric::Euclidean,
-        DistanceMetric::Manhattan,
-        DistanceMetric::DotProduct,
-    ];
-
-    for metric in metrics {
-        let distance = metric.distance(&tech_query.data, &sample_doc.data)?;
-        let similarity = metric.similarity(&tech_query.data, &sample_doc.data)?;
+    println!("Top 3 results:");
+    for (rank, (doc_id, text, similarity)) in results1.iter().enumerate() {
         println!(
-            "{}: distance={:.4}, similarity={:.4}",
-            metric.name(),
-            distance,
-            similarity
+            "  {}. Doc {} (similarity: {:.4}): {}",
+            rank + 1,
+            doc_id,
+            similarity,
+            text
         );
     }
+    println!();
 
-    // Demonstrate vector normalization
-    println!("\n=== Vector Normalization ===");
-    let mut test_vector = Vector::new(vec![3.0, 4.0, 0.0, 0.0]);
-    println!("Original vector: {:?}", test_vector.data);
-    println!("Original norm: {:.4}", test_vector.norm());
+    // Search 2: AI and machine learning query
+    println!("--- Search 2: Artificial Intelligence ---");
+    let query2 = "artificial intelligence and neural networks";
+    println!("Query: \"{}\"", query2);
 
-    test_vector.normalize();
-    println!("Normalized vector: {:?}", test_vector.data);
-    println!("Normalized norm: {:.4}", test_vector.norm());
+    let query_vector2 = embedder.embed(query2).await?;
+    let results2 = perform_search(&documents, &vectors, &query_vector2, 3);
 
-    // Demonstrate batch normalization
-    let mut batch_vectors = vec![
-        Vector::new(vec![1.0, 2.0, 3.0, 4.0]),
-        Vector::new(vec![5.0, 6.0, 7.0, 8.0]),
-        Vector::new(vec![0.5, 1.5, 2.5, 3.5]),
-    ];
-
-    println!("\n=== Batch Normalization ===");
-    println!("Before normalization:");
-    for (i, vector) in batch_vectors.iter().enumerate() {
+    println!("Top 3 results:");
+    for (rank, (doc_id, text, similarity)) in results2.iter().enumerate() {
         println!(
-            "  Vector {}: {:?} (norm: {:.4})",
-            i,
-            vector.data,
-            vector.norm()
+            "  {}. Doc {} (similarity: {:.4}): {}",
+            rank + 1,
+            doc_id,
+            similarity,
+            text
         );
     }
+    println!();
 
-    Vector::normalize_batch_parallel(&mut batch_vectors);
+    // Search 3: Food and culture query
+    println!("--- Search 3: Food and Culture ---");
+    let query3 = "traditional food and cuisine";
+    println!("Query: \"{}\"", query3);
 
-    println!("After parallel normalization:");
-    for (i, vector) in batch_vectors.iter().enumerate() {
+    let query_vector3 = embedder.embed(query3).await?;
+    let results3 = perform_search(&documents, &vectors, &query_vector3, 3);
+
+    println!("Top 3 results:");
+    for (rank, (doc_id, text, similarity)) in results3.iter().enumerate() {
         println!(
-            "  Vector {}: {:?} (norm: {:.4})",
-            i,
-            vector.data,
-            vector.norm()
+            "  {}. Doc {} (similarity: {:.4}): {}",
+            rank + 1,
+            doc_id,
+            similarity,
+            text
         );
     }
+    println!();
 
-    // Demonstrate parallel distance calculations
-    println!("\n=== Parallel Distance Calculations ===");
-    let query = vec![1.0, 0.0, 0.0, 0.0];
-    let vectors: Vec<&[f32]> = batch_vectors.iter().map(|v| v.data.as_slice()).collect();
-
-    let distances = DistanceMetric::Cosine.batch_distance_parallel(&query, &vectors)?;
-    let similarities = DistanceMetric::Cosine.batch_similarity_parallel(&query, &vectors)?;
-
-    println!("Query: {query:?}");
-    for (i, (dist, sim)) in distances.iter().zip(similarities.iter()).enumerate() {
-        println!("  Vector {i}: distance={dist:.4}, similarity={sim:.4}");
-    }
-
-    println!("\n=== Vector Search Configuration ===");
+    // Step 7: Demonstrate search configuration
+    println!("=== Vector Search Configuration ===");
     let search_config = VectorSearchConfig {
         top_k: 3,
-        min_similarity: 0.5,
+        min_similarity: 0.3,
         include_scores: true,
         include_vectors: false,
         timeout_ms: Some(1000),
@@ -163,5 +192,43 @@ fn main() -> Result<()> {
     println!("  Include vectors: {}", search_config.include_vectors);
     println!("  Timeout: {:?} ms", search_config.timeout_ms);
 
+    println!("\n=== Example completed successfully! ===");
     Ok(())
+}
+
+#[cfg(feature = "embeddings-candle")]
+fn perform_search(
+    documents: &[(u64, &str)],
+    vectors: &[sage::vector::Vector],
+    query_vector: &sage::vector::Vector,
+    top_k: usize,
+) -> Vec<(u64, String, f32)> {
+    let mut results: Vec<(u64, String, f32)> = documents
+        .iter()
+        .zip(vectors.iter())
+        .map(|((doc_id, text), vector)| {
+            // Calculate cosine similarity (vectors are normalized)
+            let similarity: f32 = query_vector
+                .data
+                .iter()
+                .zip(vector.data.iter())
+                .map(|(a, b)| a * b)
+                .sum();
+
+            (*doc_id, text.to_string(), similarity)
+        })
+        .collect();
+
+    // Sort by similarity (descending)
+    results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+
+    // Return top K results
+    results.into_iter().take(top_k).collect()
+}
+
+#[cfg(not(feature = "embeddings-candle"))]
+fn main() {
+    eprintln!("This example requires the 'embeddings-candle' feature.");
+    eprintln!("Please run with: cargo run --example vector_search --features embeddings-candle");
+    std::process::exit(1);
 }
