@@ -12,7 +12,7 @@ use candle_nn::VarBuilder;
 #[cfg(feature = "embeddings-candle")]
 use candle_transformers::models::bert::{BertModel, Config};
 #[cfg(feature = "embeddings-candle")]
-use hf_hub::{Repo, RepoType, api::sync::Api};
+use hf_hub::api::sync::ApiBuilder;
 #[cfg(feature = "embeddings-candle")]
 use tokenizers::Tokenizer;
 
@@ -109,15 +109,19 @@ impl CandleTextEmbedder {
         let device = Device::cuda_if_available(0)
             .map_err(|e| SageError::InvalidOperation(format!("Device setup failed: {}", e)))?;
 
-        // Download model from HuggingFace Hub
-        let repo = Repo::new(model_name.to_string(), RepoType::Model);
-        let api = Api::new().map_err(|e| {
-            SageError::InvalidOperation(format!("HF API initialization failed: {}", e))
-        })?;
-        let repo_files = api.repo(repo);
+        // Download model from HuggingFace Hub with proper cache directory
+        let cache_dir = std::env::var("HF_HOME")
+            .or_else(|_| std::env::var("HOME").map(|home| format!("{}/.cache/huggingface", home)))
+            .unwrap_or_else(|_| "/tmp/huggingface".to_string());
+
+        let api = ApiBuilder::new()
+            .with_cache_dir(cache_dir.into())
+            .build()
+            .map_err(|e| SageError::InvalidOperation(format!("HF API initialization failed: {}", e)))?;
+        let repo = api.model(model_name.to_string());
 
         // Load config
-        let config_filename = repo_files
+        let config_filename = repo
             .get("config.json")
             .map_err(|e| SageError::InvalidOperation(format!("Config download failed: {}", e)))?;
         let config_str = std::fs::read_to_string(config_filename)
@@ -126,7 +130,7 @@ impl CandleTextEmbedder {
             .map_err(|e| SageError::InvalidOperation(format!("Config parse failed: {}", e)))?;
 
         // Load weights
-        let weights_filename = repo_files
+        let weights_filename = repo
             .get("model.safetensors")
             .map_err(|e| SageError::InvalidOperation(format!("Weights download failed: {}", e)))?;
         let vb = unsafe {
@@ -140,7 +144,7 @@ impl CandleTextEmbedder {
             .map_err(|e| SageError::InvalidOperation(format!("Model load failed: {}", e)))?;
 
         // Load tokenizer
-        let tokenizer_filename = repo_files.get("tokenizer.json").map_err(|e| {
+        let tokenizer_filename = repo.get("tokenizer.json").map_err(|e| {
             SageError::InvalidOperation(format!("Tokenizer download failed: {}", e))
         })?;
         let tokenizer = Tokenizer::from_file(tokenizer_filename)
@@ -228,16 +232,20 @@ impl TextEmbedder for CandleTextEmbedder {
         let pooled = self.mean_pool(&embeddings, &attention_mask_tensor)?;
 
         // Normalize (L2 normalization)
+        // Calculate L2 norm: sqrt(sum(x^2))
         let norm = pooled
             .sqr()
             .map_err(|e| SageError::InvalidOperation(e.to_string()))?
-            .sum_keepdim(1)
+            .sum_all()
             .map_err(|e| SageError::InvalidOperation(e.to_string()))?
             .sqrt()
+            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .to_scalar::<f32>()
             .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
 
+        // Divide by norm to normalize
         let normalized = pooled
-            .div(&norm)
+            .affine((1.0 / norm) as f64, 0.0)
             .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
 
         // Convert to Vector
