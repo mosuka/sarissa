@@ -24,12 +24,10 @@ use sage::vector::{DistanceMetric, Vector};
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Calculate cosine similarity between two vectors
-fn cosine_similarity(a: &Vector, b: &Vector) -> f32 {
-    let dot_product: f32 = a.data.iter().zip(b.data.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.data.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.data.iter().map(|x| x * x).sum::<f32>().sqrt();
-    dot_product / (norm_a * norm_b)
+/// Calculate similarity between two L2-normalized vectors using dot product
+/// Since CLIP embeddings are already L2-normalized, dot product equals cosine similarity
+fn similarity(a: &Vector, b: &Vector) -> f32 {
+    a.data.iter().zip(b.data.iter()).map(|(x, y)| x * y).sum()
 }
 
 #[tokio::main]
@@ -140,27 +138,46 @@ async fn main() -> Result<()> {
     // Search for similar images
     println!("Searching for similar images...\n");
 
+    // Score threshold for filtering results
+    // CLIP similarities typically range from 0.2 to 0.35
+    // A threshold of 0.25 filters out weak matches
+    let score_threshold = 0.25;
+    let max_results = 10;
+
     // Perform manual similarity search
     let mut similarities: Vec<(u64, f32)> = doc_vectors
         .iter()
         .map(|(id, vec)| {
-            let similarity = cosine_similarity(&query_vector, vec);
-            (*id, similarity)
+            let sim = similarity(&query_vector, vec);
+            (*id, sim)
         })
         .collect();
 
     // Sort by similarity (descending)
     similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-    // Take top 5 results
-    let top_results: Vec<_> = similarities.iter().take(5).collect();
+    // Filter by threshold and limit to max_results
+    // Note: The query image itself will have similarity ~1.0 and should be first
+    let filtered_results: Vec<_> = similarities
+        .iter()
+        .filter(|(_, score)| *score >= score_threshold)
+        .take(max_results)
+        .collect();
 
-    println!("Top {} most similar images:", top_results.len());
-    for (i, (doc_id, similarity)) in top_results.iter().enumerate() {
-        if let Some(path) = image_metadata.get(doc_id) {
-            let filename = Path::new(path).file_name().unwrap().to_string_lossy();
-            println!("  {}. {} (similarity: {:.4})", i + 1, filename, similarity);
-            println!("     Path: {}", path);
+    if filtered_results.is_empty() {
+        println!("No results above threshold ({:.2})", score_threshold);
+    } else {
+        println!(
+            "Found {} similar images above threshold ({:.2}):",
+            filtered_results.len(),
+            score_threshold
+        );
+        for (i, (doc_id, sim_score)) in filtered_results.iter().enumerate() {
+            if let Some(path) = image_metadata.get(doc_id) {
+                let filename = Path::new(path).file_name().unwrap().to_string_lossy();
+                println!("  {}. {} (similarity: {:.4})", i + 1, filename, sim_score);
+                println!("     Path: {}", path);
+            }
         }
     }
 

@@ -22,12 +22,10 @@ use sage::vector::{DistanceMetric, Vector};
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Calculate cosine similarity between two vectors
-fn cosine_similarity(a: &Vector, b: &Vector) -> f32 {
-    let dot_product: f32 = a.data.iter().zip(b.data.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.data.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.data.iter().map(|x| x * x).sum::<f32>().sqrt();
-    dot_product / (norm_a * norm_b)
+/// Calculate similarity between two L2-normalized vectors using dot product
+/// Since CLIP embeddings are already L2-normalized, dot product equals cosine similarity
+fn similarity(a: &Vector, b: &Vector) -> f32 {
+    a.data.iter().zip(b.data.iter()).map(|(x, y)| x * y).sum()
 }
 
 #[tokio::main]
@@ -56,13 +54,13 @@ async fn main() -> Result<()> {
 
     // Index sample images
     println!("Indexing images...");
-    let image_dir = Path::new("images");
+    let image_dir = Path::new("resources/images");
 
     if !image_dir.exists() {
-        println!("Error: 'images/' directory not found.");
-        println!("Please create an 'images/' directory and add some image files.");
+        println!("Error: 'resources/images/' directory not found.");
+        println!("Please create a 'resources/images/' directory and add some image files.");
         println!("\nExample structure:");
-        println!("  images/");
+        println!("  resources/images/");
         println!("    cat1.jpg");
         println!("    cat2.jpg");
         println!("    dog1.jpg");
@@ -117,11 +115,17 @@ async fn main() -> Result<()> {
         "a photo of a cat",
         "a photo of a dog",
         "an animal sleeping",
-        "outdoor scene",
+        "an animal running",
         "close-up portrait",
     ];
 
     println!("\n=== Search Results ===\n");
+
+    // Score threshold for filtering results
+    // CLIP similarities typically range from 0.2 to 0.35
+    // A threshold of 0.25 filters out weak matches
+    let score_threshold = 0.25;
+    let max_results = 10;
 
     for query_text in queries {
         println!("Query: \"{}\"", query_text);
@@ -133,28 +137,45 @@ async fn main() -> Result<()> {
         let mut similarities: Vec<(u64, f32)> = doc_vectors
             .iter()
             .map(|(id, vec)| {
-                let similarity = cosine_similarity(&query_vector, vec);
-                (*id, similarity)
+                let sim = similarity(&query_vector, vec);
+                (*id, sim)
             })
             .collect();
 
         // Sort by similarity (descending)
         similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-        // Take top 3 results
-        let top_results: Vec<_> = similarities.iter().take(3).collect();
-
-        println!("  Top {} results:", top_results.len());
-        for (i, (doc_id, similarity)) in top_results.iter().enumerate() {
+        // Show all scores for debugging
+        println!("  All similarity scores:");
+        for (doc_id, score) in similarities.iter() {
             if let Some(path) = image_metadata.get(doc_id) {
                 let filename = Path::new(path).file_name().unwrap().to_string_lossy();
-                println!(
-                    "    {}. {} (similarity: {:.4})",
-                    i + 1,
-                    filename,
-                    similarity
-                );
-                println!("       Path: {}", path);
+                println!("    {} = {:.4}", filename, score);
+            }
+        }
+        println!();
+
+        // Filter by threshold and limit to max_results
+        let filtered_results: Vec<_> = similarities
+            .iter()
+            .filter(|(_, score)| *score >= score_threshold)
+            .take(max_results)
+            .collect();
+
+        if filtered_results.is_empty() {
+            println!("  No results above threshold ({:.2})", score_threshold);
+        } else {
+            println!(
+                "  Found {} results above threshold ({:.2}):",
+                filtered_results.len(),
+                score_threshold
+            );
+            for (i, (doc_id, sim_score)) in filtered_results.iter().enumerate() {
+                if let Some(path) = image_metadata.get(doc_id) {
+                    let filename = Path::new(path).file_name().unwrap().to_string_lossy();
+                    println!("    {}. {} (similarity: {:.4})", i + 1, filename, sim_score);
+                    println!("       Path: {}", path);
+                }
             }
         }
         println!();
