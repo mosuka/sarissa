@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
 
     // Create English classifier
     println!("Creating English intent classifier...");
-    let en_training_data_path = "resource/ml/intent_samples_en.json";
+    let en_training_data_path = "resources/ml/intent_samples_en.json";
     let en_analyzer = Arc::new(EnglishAnalyzer::new()?);
     let en_samples = core::load_training_data(en_training_data_path)?;
     println!("Loaded {} English training samples", en_samples.len());
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
 
     // Create Japanese classifier
     println!("\nCreating Japanese intent classifier...");
-    let ja_training_data_path = "resource/ml/intent_samples_ja.json";
+    let ja_training_data_path = "resources/ml/intent_samples_ja.json";
     let ja_analyzer = Arc::new(JapaneseAnalyzer::new()?);
     let ja_samples = core::load_training_data(ja_training_data_path)?;
     println!("Loaded {} Japanese training samples", ja_samples.len());

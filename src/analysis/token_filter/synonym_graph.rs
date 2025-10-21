@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_synonym_dictionary_load_from_file() {
-        let dict = SynonymDictionary::load_from_file("resource/ml/synonyms.json").unwrap();
+        let dict = SynonymDictionary::load_from_file("resources/ml/synonyms.json").unwrap();
 
         // Test English synonyms
         let ml_synonyms = dict.get_synonyms("ml");
