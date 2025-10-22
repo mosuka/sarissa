@@ -11,7 +11,7 @@ use crate::vector::Vector;
 use crate::vector::index::{VectorIndex, VectorIndexBuildConfig};
 use crate::vector::search::VectorSearcher;
 use crate::vector::search::flat_searcher::FlatVectorSearcher;
-use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
+use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
 
 /// A high-level unified vector engine that provides both indexing and searching capabilities.
 /// This is similar to the lexical SearchEngine but for vector search.
@@ -21,8 +21,7 @@ use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
 /// ```
 /// use sage::vector::engine::VectorEngine;
 /// use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
-/// use sage::vector::{Vector, DistanceMetric};
-/// use sage::vector::types::VectorSearchConfig;
+/// use sage::vector::{Vector, DistanceMetric, VectorSearchRequest};
 ///
 /// # fn main() -> sage::error::Result<()> {
 /// // Create engine
@@ -44,11 +43,8 @@ use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
 ///
 /// // Search
 /// let query_vector = Vector::new(vec![1.0, 0.1, 0.0]);
-/// let search_config = VectorSearchConfig {
-///     top_k: 2,
-///     ..Default::default()
-/// };
-/// let results = engine.search(&query_vector, &search_config)?;
+/// let request = VectorSearchRequest::new(query_vector).top_k(2);
+/// let results = engine.search(request)?;
 /// assert_eq!(results.results.len(), 2);
 /// # Ok(())
 /// # }
@@ -120,13 +116,9 @@ impl VectorEngine {
     }
 
     /// Search for similar vectors.
-    pub fn search(
-        &self,
-        query: &Vector,
-        config: &VectorSearchConfig,
-    ) -> Result<VectorSearchResults> {
+    pub fn search(&self, request: VectorSearchRequest) -> Result<VectorSearchResults> {
         let searcher = self.get_searcher()?;
-        searcher.search(query, config)
+        searcher.search(&request.query, &request.config)
     }
 
     /// Get build progress (0.0 to 1.0).
@@ -179,12 +171,9 @@ mod tests {
 
         // Search for similar vectors
         let query = Vector::new(vec![1.0, 0.1, 0.0]);
-        let config = VectorSearchConfig {
-            top_k: 2,
-            ..Default::default()
-        };
+        let request = VectorSearchRequest::new(query).top_k(2);
 
-        let results = engine.search(&query, &config)?;
+        let results = engine.search(request)?;
         assert_eq!(results.results.len(), 2);
 
         Ok(())

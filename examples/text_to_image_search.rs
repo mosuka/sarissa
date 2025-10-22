@@ -18,9 +18,9 @@
 use sage::embedding::{CandleMultimodalEmbedder, ImageEmbedder, TextEmbedder};
 use sage::error::Result;
 use sage::vector::DistanceMetric;
+use sage::vector::VectorSearchRequest;
 use sage::vector::engine::VectorEngine;
 use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
-use sage::vector::types::VectorSearchConfig;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -130,11 +130,8 @@ async fn main() -> Result<()> {
         let query_vector = embedder.embed(query_text).await?;
 
         // Perform search using VectorEngine
-        let search_config = VectorSearchConfig {
-            top_k: max_results,
-            ..Default::default()
-        };
-        let search_results = engine.search(&query_vector, &search_config)?;
+        let request = VectorSearchRequest::new(query_vector).top_k(max_results);
+        let search_results = engine.search(request)?;
 
         // Show all scores for debugging
         println!("  All similarity scores:");
