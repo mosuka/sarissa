@@ -15,6 +15,8 @@ use crate::vector::Vector;
 /// ## Using Candle embedder (requires `embeddings-candle` feature)
 ///
 /// ```no_run
+/// # #[cfg(feature = "embeddings-candle")]
+/// # {
 /// use sage::embedding::{TextEmbedder, CandleTextEmbedder};
 ///
 /// # async fn example() -> sage::error::Result<()> {
@@ -26,11 +28,14 @@ use crate::vector::Vector;
 /// println!("Dimension: {}", embedder.dimension());
 /// # Ok(())
 /// # }
+/// # }
 /// ```
 ///
 /// ## Using OpenAI embedder (requires `embeddings-openai` feature)
 ///
 /// ```no_run
+/// # #[cfg(feature = "embeddings-openai")]
+/// # {
 /// use sage::embedding::{TextEmbedder, OpenAITextEmbedder};
 ///
 /// # async fn example() -> sage::error::Result<()> {
@@ -41,6 +46,7 @@ use crate::vector::Vector;
 ///
 /// let vector = embedder.embed("Hello, world!").await?;
 /// # Ok(())
+/// # }
 /// # }
 /// ```
 ///

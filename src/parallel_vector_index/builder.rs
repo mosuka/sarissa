@@ -280,4 +280,11 @@ impl VectorIndexBuilder for ParallelVectorIndexBuilder {
     fn optimize(&mut self) -> Result<()> {
         self.optimize_segments()
     }
+
+    fn vectors(&self) -> &[(u64, Vector)] {
+        // ParallelVectorIndexBuilder stores vectors across segments
+        // For simplicity, return an empty slice for now
+        // TODO: Collect vectors from all segments
+        &[]
+    }
 }

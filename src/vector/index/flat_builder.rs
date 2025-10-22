@@ -225,4 +225,8 @@ impl VectorIndexBuilder for FlatVectorIndexBuilder {
 
         Ok(())
     }
+
+    fn vectors(&self) -> &[(u64, Vector)] {
+        &self.vectors
+    }
 }

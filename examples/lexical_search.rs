@@ -21,7 +21,7 @@ use sage::document::field_value::FieldValue;
 use sage::error::Result;
 use sage::lexical::index::IndexConfig;
 use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::SearchEngine;
+use sage::lexical::search::engine::LexicalEngine;
 use sage::query::boolean::BooleanQuery;
 use sage::query::fuzzy::FuzzyQuery;
 use sage::query::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint};
@@ -35,12 +35,12 @@ fn main() -> Result<()> {
     println!("=== Comprehensive Lexical Search Example ===\n");
     println!("This example demonstrates ALL query types available in Sage's lexical search\n");
 
-    // Step 1: Create a search index
-    println!("Step 1: Creating search index...");
+    // Step 1: Create a lexical search index
+    println!("Step 1: Creating lexical search index...");
     let temp_dir = TempDir::new().unwrap();
     println!("  Index location: {:?}\n", temp_dir.path());
 
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Step 2: Prepare and index comprehensive test documents
     println!("Step 2: Indexing comprehensive test documents...");

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::lexical::search::SearchRequest;
-use crate::lexical::search::engine::SearchEngine;
+use crate::lexical::search::engine::LexicalEngine;
 use crate::query::SearchResults;
 use crate::spelling::corrector::{
     CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector,
@@ -90,7 +90,7 @@ impl Default for SpellCorrectedSearchConfig {
 /// A search engine wrapper that provides spell correction capabilities.
 pub struct SpellCorrectedSearchEngine {
     /// The underlying search engine.
-    engine: SearchEngine,
+    engine: LexicalEngine,
     /// The spelling corrector.
     corrector: SpellingCorrector,
     /// Configuration for spell-corrected search.
@@ -101,7 +101,7 @@ pub struct SpellCorrectedSearchEngine {
 
 impl SpellCorrectedSearchEngine {
     /// Create a new spell-corrected search engine.
-    pub fn new(engine: SearchEngine) -> Self {
+    pub fn new(engine: LexicalEngine) -> Self {
         let corrector = SpellingCorrector::new();
         let config = SpellCorrectedSearchConfig::default();
         let did_you_mean = DidYouMean::new(SpellingCorrector::new());
@@ -115,7 +115,7 @@ impl SpellCorrectedSearchEngine {
     }
 
     /// Create a new spell-corrected search engine with custom configuration.
-    pub fn with_config(engine: SearchEngine, config: SpellCorrectedSearchConfig) -> Self {
+    pub fn with_config(engine: LexicalEngine, config: SpellCorrectedSearchConfig) -> Self {
         let mut corrector = SpellingCorrector::new();
         corrector.set_config(config.corrector_config.clone());
         let did_you_mean = DidYouMean::new(SpellingCorrector::new());
@@ -129,12 +129,12 @@ impl SpellCorrectedSearchEngine {
     }
 
     /// Get the underlying search engine.
-    pub fn engine(&self) -> &SearchEngine {
+    pub fn engine(&self) -> &LexicalEngine {
         &self.engine
     }
 
     /// Get mutable access to the underlying search engine.
-    pub fn engine_mut(&mut self) -> &mut SearchEngine {
+    pub fn engine_mut(&mut self) -> &mut LexicalEngine {
         &mut self.engine
     }
 
@@ -386,7 +386,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = crate::lexical::index::IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         assert!(spell_engine.config.enabled);
@@ -398,7 +398,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let engine_config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), engine_config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), engine_config).unwrap();
 
         let spell_config = SpellCorrectedSearchConfig {
             enabled: false,
@@ -421,7 +421,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let mut spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         // Test with a query that might have typos
@@ -439,7 +439,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         // Test with common words
@@ -497,7 +497,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         let stats = spell_engine.corrector_stats();

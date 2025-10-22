@@ -286,3 +286,158 @@ impl VectorIndexReader for IvfIndexReader {
         unimplemented!()
     }
 }
+
+/// In-memory vector index reader that holds vectors in memory.
+/// This is used for search after building an index.
+pub struct InMemoryVectorIndexReader {
+    vectors: Vec<(u64, Vector)>,
+    dimension: usize,
+    distance_metric: DistanceMetric,
+}
+
+impl InMemoryVectorIndexReader {
+    /// Create a new in-memory vector index reader.
+    pub fn new(
+        vectors: Vec<(u64, Vector)>,
+        dimension: usize,
+        distance_metric: DistanceMetric,
+    ) -> Result<Self> {
+        Ok(Self {
+            vectors,
+            dimension,
+            distance_metric,
+        })
+    }
+
+    /// Get all vectors.
+    pub fn all_vectors(&self) -> &[(u64, Vector)] {
+        &self.vectors
+    }
+}
+
+impl VectorIndexReader for InMemoryVectorIndexReader {
+    fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>> {
+        Ok(self
+            .vectors
+            .iter()
+            .find(|(id, _)| *id == doc_id)
+            .map(|(_, v)| v.clone()))
+    }
+
+    fn get_vectors(&self, doc_ids: &[u64]) -> Result<Vec<Option<Vector>>> {
+        Ok(doc_ids
+            .iter()
+            .map(|doc_id| self.get_vector(*doc_id).ok().flatten())
+            .collect())
+    }
+
+    fn vector_ids(&self) -> Result<Vec<u64>> {
+        Ok(self.vectors.iter().map(|(id, _)| *id).collect())
+    }
+
+    fn vector_count(&self) -> usize {
+        self.vectors.len()
+    }
+
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn distance_metric(&self) -> DistanceMetric {
+        self.distance_metric
+    }
+
+    fn stats(&self) -> VectorStats {
+        let memory_usage = self.vectors.len() * (8 + self.dimension * 4); // Rough estimate
+        VectorStats {
+            vector_count: self.vectors.len(),
+            dimension: self.dimension,
+            memory_usage,
+            build_time_ms: 0,
+        }
+    }
+
+    fn contains_vector(&self, doc_id: u64) -> bool {
+        self.vectors.iter().any(|(id, _)| *id == doc_id)
+    }
+
+    fn get_vector_range(&self, start_doc_id: u64, end_doc_id: u64) -> Result<Vec<(u64, Vector)>> {
+        Ok(self
+            .vectors
+            .iter()
+            .filter(|(id, _)| *id >= start_doc_id && *id <= end_doc_id)
+            .map(|(id, v)| (*id, v.clone()))
+            .collect())
+    }
+
+    fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
+        Ok(Box::new(InMemoryVectorIterator::new(self.vectors.clone())))
+    }
+
+    fn metadata(&self) -> Result<VectorIndexMetadata> {
+        Ok(VectorIndexMetadata {
+            index_type: "InMemory".to_string(),
+            created_at: chrono::Utc::now(),
+            modified_at: chrono::Utc::now(),
+            version: "1.0".to_string(),
+            build_config: serde_json::json!({}),
+            custom_metadata: std::collections::HashMap::new(),
+        })
+    }
+
+    fn validate(&self) -> Result<ValidationReport> {
+        let all_valid = self.vectors.iter().all(|(_, v)| v.is_valid());
+        Ok(ValidationReport {
+            is_valid: all_valid,
+            errors: vec![],
+            warnings: vec![],
+            repair_suggestions: vec![],
+        })
+    }
+}
+
+/// In-memory vector iterator.
+struct InMemoryVectorIterator {
+    vectors: Vec<(u64, Vector)>,
+    position: usize,
+}
+
+impl InMemoryVectorIterator {
+    fn new(vectors: Vec<(u64, Vector)>) -> Self {
+        Self {
+            vectors,
+            position: 0,
+        }
+    }
+}
+
+impl VectorIterator for InMemoryVectorIterator {
+    fn next(&mut self) -> Result<Option<(u64, Vector)>> {
+        if self.position < self.vectors.len() {
+            let result = self.vectors[self.position].clone();
+            self.position += 1;
+            Ok(Some(result))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn skip_to(&mut self, doc_id: u64) -> Result<bool> {
+        while self.position < self.vectors.len() {
+            if self.vectors[self.position].0 >= doc_id {
+                return Ok(true);
+            }
+            self.position += 1;
+        }
+        Ok(false)
+    }
+
+    fn position(&self) -> u64 {
+        self.position as u64
+    }
+
+    fn reset(&mut self) -> Result<()> {
+        self.position = 0;
+        Ok(())
+    }
+}

@@ -11,7 +11,7 @@ use sage::document::converter::{
 use sage::error::Result;
 use sage::lexical::index::IndexConfig;
 use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::SearchEngine;
+use sage::lexical::search::engine::LexicalEngine;
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");
@@ -21,7 +21,7 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}\n", temp_dir.path());
 
     // Create search engine first
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     println!("=== Example 1: Field:Value Format ===\n");
 
