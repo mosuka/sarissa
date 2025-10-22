@@ -259,13 +259,13 @@ mod tests {
         // Set some values
         dv.set(0, FieldValue::Integer(100));
         dv.set(1, FieldValue::Text("hello".to_string()));
-        dv.set(5, FieldValue::Float(3.14));
+        dv.set(5, FieldValue::Float(3.15));
 
         // Get values
         assert_eq!(dv.get(0), Some(&FieldValue::Integer(100)));
         assert_eq!(dv.get(1), Some(&FieldValue::Text("hello".to_string())));
         assert_eq!(dv.get(2), None);
-        assert_eq!(dv.get(5), Some(&FieldValue::Float(3.14)));
+        assert_eq!(dv.get(5), Some(&FieldValue::Float(3.15)));
     }
 
     #[test]

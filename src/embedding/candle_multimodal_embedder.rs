@@ -65,7 +65,7 @@ use crate::vector::Vector;
 /// let img2 = embedder.embed_image("dog.jpg").await?;
 ///
 /// // Text and images are in the same vector space
-/// println!("Dimension: {}", embedder.dimension());
+/// println!("Dimension: {}", ImageEmbedder::dimension(&embedder));
 /// # Ok(())
 /// # }
 /// ```
@@ -275,7 +275,7 @@ impl CandleMultimodalEmbedder {
             .map_err(|e| SageError::InvalidOperation(e.to_string()))?
             .reshape((1, 1, 3))
             .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
-        let std = Tensor::new(&[0.26862954f32, 0.26130258, 0.27577711], &self.device)
+        let std = Tensor::new(&[0.2686295_f32, 0.2613026, 0.2757771], &self.device)
             .map_err(|e| SageError::InvalidOperation(e.to_string()))?
             .reshape((1, 1, 3))
             .map_err(|e| SageError::InvalidOperation(e.to_string()))?;

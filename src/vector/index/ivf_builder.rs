@@ -463,4 +463,8 @@ impl VectorIndexBuilder for IvfIndexBuilder {
 
         Ok(())
     }
+
+    fn vectors(&self) -> &[(u64, Vector)] {
+        &self.vectors
+    }
 }

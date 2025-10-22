@@ -14,34 +14,34 @@ use crate::query::SearchResults;
 use crate::query::query::Query;
 use crate::storage::traits::Storage;
 
-/// A high-level search engine that provides both indexing and searching capabilities.
+/// A high-level lexical search engine that provides both indexing and searching capabilities.
 #[derive(Debug)]
-pub struct SearchEngine {
+pub struct LexicalEngine {
     /// The underlying index.
     index: FileIndex,
     /// The searcher for executing queries.
     searcher: RefCell<Option<Searcher>>,
 }
 
-impl SearchEngine {
-    /// Create a new search engine with the given index.
+impl LexicalEngine {
+    /// Create a new lexical search engine with the given index.
     pub fn new(index: FileIndex) -> Self {
-        SearchEngine {
+        LexicalEngine {
             index,
             searcher: RefCell::new(None),
         }
     }
 
-    /// Create a new search engine in the given directory (schema-less mode).
+    /// Create a new lexical search engine in the given directory (schema-less mode).
     pub fn create_in_dir<P: AsRef<Path>>(dir: P, index_config: IndexConfig) -> Result<Self> {
         let index = FileIndex::create_in_dir(dir, index_config)?;
-        Ok(SearchEngine::new(index))
+        Ok(LexicalEngine::new(index))
     }
 
-    /// Open an existing search engine from the given directory.
+    /// Open an existing lexical search engine from the given directory.
     pub fn open_dir<P: AsRef<Path>>(dir: P, index_config: IndexConfig) -> Result<Self> {
         let index = FileIndex::open_dir(dir, index_config)?;
-        Ok(SearchEngine::new(index))
+        Ok(LexicalEngine::new(index))
     }
 
     /// Get the storage backend.
@@ -168,7 +168,7 @@ impl SearchEngine {
     }
 }
 
-impl SearchEngine {
+impl LexicalEngine {
     /// Search with the given request.
     pub fn search(&self, request: SearchRequest) -> Result<SearchResults> {
         let searcher = self.get_searcher()?;
@@ -202,7 +202,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Schema-less mode: no schema() method available
         assert!(!engine.is_closed());
@@ -214,11 +214,11 @@ mod tests {
         let config = IndexConfig::default();
 
         // Create engine
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config.clone()).unwrap();
+        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config.clone()).unwrap();
         engine.close().unwrap();
 
         // Open engine
-        let engine = SearchEngine::open_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::open_dir(temp_dir.path(), config).unwrap();
 
         // Schema-less mode: no schema() method available
         assert!(!engine.is_closed());
@@ -229,7 +229,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let doc = create_test_document("Hello World", "This is a test document");
         engine.add_document(doc).unwrap();
@@ -246,7 +246,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let docs = vec![
             create_test_document("First Document", "Content of first document"),
@@ -265,7 +265,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let request = SearchRequest::new(query);
@@ -281,7 +281,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -306,7 +306,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let count = engine.count(query).unwrap();
@@ -320,7 +320,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Add a document
         let doc = create_test_document("Test Document", "Test content");
@@ -341,7 +341,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let stats = engine.stats().unwrap();
         // doc_count is usize, so >= 0 check is redundant
@@ -354,7 +354,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         assert!(!engine.is_closed());
 
@@ -368,7 +368,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let request = SearchRequest::new(query)
@@ -388,7 +388,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let mut engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Add some documents with lowercase titles for testing
         let docs = vec![
@@ -419,7 +419,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Search specific field
         use crate::query::parser::QueryParser;
@@ -437,7 +437,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let _engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let _engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         use crate::query::parser::QueryParser;
         let parser = QueryParser::new();
@@ -452,7 +452,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = IndexConfig::default();
 
-        let engine = SearchEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
 
         // Test complex query parsing
         use crate::query::parser::QueryParser;

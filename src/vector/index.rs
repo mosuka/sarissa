@@ -14,8 +14,9 @@ pub mod quantization;
 pub mod writer;
 
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, RwLock};
 
-use crate::error::Result;
+use crate::error::{Result, SageError};
 use crate::vector::{DistanceMetric, Vector};
 
 /// Configuration for vector index construction.
@@ -84,6 +85,10 @@ pub trait VectorIndexBuilder: Send + Sync {
 
     /// Optimize the built index.
     fn optimize(&mut self) -> Result<()>;
+
+    /// Get access to the stored vectors.
+    /// Returns a reference to the vectors stored in the builder.
+    fn vectors(&self) -> &[(u64, Vector)];
 }
 
 /// Factory for creating vector index builders.
@@ -99,5 +104,108 @@ impl VectorIndexBuilderFactory {
             VectorIndexType::HNSW => Ok(Box::new(hnsw_builder::HnswIndexBuilder::new(config)?)),
             VectorIndexType::IVF => Ok(Box::new(ivf_builder::IvfIndexBuilder::new(config)?)),
         }
+    }
+}
+
+/// In-memory vector index that manages the lifecycle of builders and readers.
+/// This is similar to FileIndex in the lexical module.
+pub struct VectorIndex {
+    config: VectorIndexBuildConfig,
+    builder: Arc<RwLock<Box<dyn VectorIndexBuilder>>>,
+    is_finalized: Arc<RwLock<bool>>,
+}
+
+impl VectorIndex {
+    /// Create a new in-memory vector index.
+    pub fn create(config: VectorIndexBuildConfig) -> Result<Self> {
+        let builder = VectorIndexBuilderFactory::create_builder(config.clone())?;
+        Ok(Self {
+            config,
+            builder: Arc::new(RwLock::new(builder)),
+            is_finalized: Arc::new(RwLock::new(false)),
+        })
+    }
+
+    /// Add vectors to the index.
+    pub fn add_vectors(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()> {
+        let finalized = *self.is_finalized.read().unwrap();
+        if finalized {
+            return Err(SageError::InvalidOperation(
+                "Cannot add vectors to finalized index".to_string(),
+            ));
+        }
+
+        let mut builder = self.builder.write().unwrap();
+        builder.add_vectors(vectors)?;
+        Ok(())
+    }
+
+    /// Finalize the index construction.
+    pub fn finalize(&mut self) -> Result<()> {
+        let mut builder = self.builder.write().unwrap();
+        builder.finalize()?;
+        *self.is_finalized.write().unwrap() = true;
+        Ok(())
+    }
+
+    /// Optimize the index.
+    pub fn optimize(&mut self) -> Result<()> {
+        let mut builder = self.builder.write().unwrap();
+        builder.optimize()?;
+        Ok(())
+    }
+
+    /// Get the configuration.
+    pub fn config(&self) -> &VectorIndexBuildConfig {
+        &self.config
+    }
+
+    /// Get build progress (0.0 to 1.0).
+    pub fn progress(&self) -> f32 {
+        let builder = self.builder.read().unwrap();
+        builder.progress()
+    }
+
+    /// Get estimated memory usage.
+    pub fn estimated_memory_usage(&self) -> usize {
+        let builder = self.builder.read().unwrap();
+        builder.estimated_memory_usage()
+    }
+
+    /// Check if the index is finalized.
+    pub fn is_finalized(&self) -> bool {
+        *self.is_finalized.read().unwrap()
+    }
+
+    /// Get a reader for this index.
+    /// This creates an in-memory reader that can access the built index data.
+    pub fn reader(&self) -> Result<crate::vector::reader::InMemoryVectorIndexReader> {
+        let finalized = *self.is_finalized.read().unwrap();
+        if !finalized {
+            return Err(SageError::InvalidOperation(
+                "Index must be finalized before creating a reader".to_string(),
+            ));
+        }
+
+        // Access the builder to get vector data
+        let builder = self.builder.read().unwrap();
+
+        // Extract vectors from the builder
+        let vectors = self.extract_vectors_from_builder(&**builder)?;
+
+        crate::vector::reader::InMemoryVectorIndexReader::new(
+            vectors,
+            self.config.dimension,
+            self.config.distance_metric,
+        )
+    }
+
+    /// Extract vectors from the builder (helper method).
+    fn extract_vectors_from_builder(
+        &self,
+        builder: &dyn VectorIndexBuilder,
+    ) -> Result<Vec<(u64, Vector)>> {
+        // Use the vectors() method from the trait
+        Ok(builder.vectors().to_vec())
     }
 }

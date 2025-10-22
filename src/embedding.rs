@@ -27,6 +27,8 @@
 //!
 //! Then use:
 //! ```no_run
+//! # #[cfg(feature = "embeddings-candle")]
+//! # {
 //! use sage::embedding::{TextEmbedder, CandleTextEmbedder};
 //!
 //! # async fn example() -> sage::error::Result<()> {
@@ -37,6 +39,7 @@
 //! let vector = embedder.embed("Hello, world!").await?;
 //! println!("Dimension: {}", embedder.dimension());
 //! # Ok(())
+//! # }
 //! # }
 //! ```
 //!
@@ -50,6 +53,8 @@
 //!
 //! Then use:
 //! ```no_run
+//! # #[cfg(feature = "embeddings-openai")]
+//! # {
 //! use sage::embedding::{TextEmbedder, OpenAITextEmbedder};
 //!
 //! # async fn example() -> sage::error::Result<()> {
@@ -60,6 +65,7 @@
 //!
 //! let vector = embedder.embed("Hello, world!").await?;
 //! # Ok(())
+//! # }
 //! # }
 //! ```
 //!

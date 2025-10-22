@@ -14,7 +14,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::index::IndexConfig;
 use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::SearchEngine;
+use sage::lexical::search::engine::LexicalEngine;
 use sage::query::parser::QueryParser;
 use tempfile::TempDir;
 
@@ -26,7 +26,7 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}\n", temp_dir.path());
 
     // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Add sample documents
     let documents = vec![
@@ -199,7 +199,7 @@ fn parse_and_show(parser: &QueryParser, queries: Vec<(&str, &str)>) {
     }
 }
 
-fn demo_search(engine: &mut SearchEngine, parser: &QueryParser) -> Result<()> {
+fn demo_search(engine: &mut LexicalEngine, parser: &QueryParser) -> Result<()> {
     println!("\n## 1. Simple OR Query");
     println!("{}", "-".repeat(80));
     execute_search(engine, parser, "Mockingbird OR Gatsby")?;
@@ -227,7 +227,7 @@ fn demo_search(engine: &mut SearchEngine, parser: &QueryParser) -> Result<()> {
     Ok(())
 }
 
-fn execute_search(engine: &mut SearchEngine, parser: &QueryParser, query_str: &str) -> Result<()> {
+fn execute_search(engine: &mut LexicalEngine, parser: &QueryParser, query_str: &str) -> Result<()> {
     println!("Query: {query_str}");
 
     let query = parser.parse(query_str)?;

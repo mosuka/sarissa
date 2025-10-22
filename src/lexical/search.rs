@@ -157,7 +157,7 @@ impl SearchRequest {
     }
 
     /// Execute the search request.
-    pub fn search(self, engine: &mut engine::SearchEngine) -> Result<SearchResults> {
+    pub fn search(self, engine: &mut engine::LexicalEngine) -> Result<SearchResults> {
         engine.search(self)
     }
 }

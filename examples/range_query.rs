@@ -4,7 +4,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::index::IndexConfig;
 use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::SearchEngine;
+use sage::lexical::search::engine::LexicalEngine;
 use sage::query::range::NumericRangeQuery;
 use tempfile::TempDir;
 
@@ -18,7 +18,7 @@ fn main() -> Result<()> {
     // Create a schema with numeric fields
 
     // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Add documents with various numeric values
     let documents = vec![

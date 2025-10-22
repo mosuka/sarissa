@@ -19,16 +19,12 @@
 
 use sage::embedding::{CandleMultimodalEmbedder, ImageEmbedder};
 use sage::error::Result;
-use sage::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory, VectorIndexType};
-use sage::vector::{DistanceMetric, Vector};
+use sage::vector::DistanceMetric;
+use sage::vector::engine::VectorEngine;
+use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
+use sage::vector::types::VectorSearchConfig;
 use std::collections::HashMap;
 use std::path::Path;
-
-/// Calculate similarity between two L2-normalized vectors using dot product
-/// Since CLIP embeddings are already L2-normalized, dot product equals cosine similarity
-fn similarity(a: &Vector, b: &Vector) -> f32 {
-    a.data.iter().zip(b.data.iter()).map(|(x, y)| x * y).sum()
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -60,8 +56,8 @@ async fn main() -> Result<()> {
         ImageEmbedder::dimension(&embedder)
     );
 
-    // Create vector index for images
-    println!("Creating vector index...");
+    // Create vector index configuration
+    println!("Creating vector index configuration...");
     let config = VectorIndexBuildConfig {
         dimension: ImageEmbedder::dimension(&embedder),
         distance_metric: DistanceMetric::Cosine,
@@ -69,7 +65,6 @@ async fn main() -> Result<()> {
         normalize_vectors: true,
         ..Default::default()
     };
-    let mut builder = VectorIndexBuilderFactory::create_builder(config)?;
 
     // Index sample images
     println!("Indexing image collection...");
@@ -95,22 +90,22 @@ async fn main() -> Result<()> {
         let entry = entry?;
         let path = entry.path();
 
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                let ext = ext.to_string_lossy().to_lowercase();
-                if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp") {
-                    let path_str = path.to_string_lossy();
-                    println!("  Indexing: {}", path_str);
+        if path.is_file()
+            && let Some(ext) = path.extension()
+        {
+            let ext = ext.to_string_lossy().to_lowercase();
+            if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp") {
+                let path_str = path.to_string_lossy();
+                println!("  Indexing: {}", path_str);
 
-                    // Generate image embedding
-                    let vector = embedder.embed_image(&path_str).await?;
+                // Generate image embedding
+                let vector = embedder.embed_image(&path_str).await?;
 
-                    // Store metadata
-                    image_metadata.insert(doc_id, path_str.to_string());
-                    doc_vectors.push((doc_id, vector));
+                // Store metadata
+                image_metadata.insert(doc_id, path_str.to_string());
+                doc_vectors.push((doc_id, vector));
 
-                    doc_id += 1;
-                }
+                doc_id += 1;
             }
         }
     }
@@ -122,10 +117,11 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Build the index
+    // Build the index using VectorEngine
     println!("Building HNSW index...");
-    builder.add_vectors(doc_vectors.clone())?;
-    builder.finalize()?;
+    let mut engine = VectorEngine::create(config)?;
+    engine.add_vectors(doc_vectors)?;
+    engine.finalize()?;
 
     println!("Index built successfully!\n");
 
@@ -144,24 +140,19 @@ async fn main() -> Result<()> {
     let score_threshold = 0.25;
     let max_results = 10;
 
-    // Perform manual similarity search
-    let mut similarities: Vec<(u64, f32)> = doc_vectors
-        .iter()
-        .map(|(id, vec)| {
-            let sim = similarity(&query_vector, vec);
-            (*id, sim)
-        })
-        .collect();
+    // Perform search using VectorEngine
+    let search_config = VectorSearchConfig {
+        top_k: max_results,
+        ..Default::default()
+    };
+    let search_results = engine.search(&query_vector, &search_config)?;
 
-    // Sort by similarity (descending)
-    similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-    // Filter by threshold and limit to max_results
+    // Filter by threshold
     // Note: The query image itself will have similarity ~1.0 and should be first
-    let filtered_results: Vec<_> = similarities
+    let filtered_results: Vec<_> = search_results
+        .results
         .iter()
-        .filter(|(_, score)| *score >= score_threshold)
-        .take(max_results)
+        .filter(|result| result.similarity >= score_threshold)
         .collect();
 
     if filtered_results.is_empty() {
@@ -172,10 +163,15 @@ async fn main() -> Result<()> {
             filtered_results.len(),
             score_threshold
         );
-        for (i, (doc_id, sim_score)) in filtered_results.iter().enumerate() {
-            if let Some(path) = image_metadata.get(doc_id) {
+        for (i, result) in filtered_results.iter().enumerate() {
+            if let Some(path) = image_metadata.get(&result.doc_id) {
                 let filename = Path::new(path).file_name().unwrap().to_string_lossy();
-                println!("  {}. {} (similarity: {:.4})", i + 1, filename, sim_score);
+                println!(
+                    "  {}. {} (similarity: {:.4})",
+                    i + 1,
+                    filename,
+                    result.similarity
+                );
                 println!("     Path: {}", path);
             }
         }

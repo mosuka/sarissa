@@ -15,15 +15,15 @@ use crate::vector::Vector;
 /// ## Using Candle CLIP embedder (requires `embeddings-multimodal` feature)
 ///
 /// ```no_run
-/// use sage::embedding::{ImageEmbedder, CandleImageEmbedder};
+/// use sage::embedding::{ImageEmbedder, CandleMultimodalEmbedder};
 ///
 /// # async fn example() -> sage::error::Result<()> {
-/// let embedder = CandleImageEmbedder::new(
+/// let embedder = CandleMultimodalEmbedder::new(
 ///     "openai/clip-vit-base-patch32"
 /// )?;
 ///
 /// let vector = embedder.embed_image("path/to/image.jpg").await?;
-/// println!("Dimension: {}", embedder.dimension());
+/// println!("Dimension: {}", ImageEmbedder::dimension(&embedder));
 /// # Ok(())
 /// # }
 /// ```

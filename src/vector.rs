@@ -3,6 +3,7 @@
 //! This module provides the core vector data structures and common types
 //! shared between vector indexing and search modules.
 
+pub mod engine; // Unified vector engine (indexing + search)
 pub mod reader;
 pub mod types;
 

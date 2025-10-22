@@ -24,7 +24,7 @@ use sage::error::Result;
 use sage::lexical::index::IndexConfig;
 use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::SearchEngine;
+use sage::lexical::search::engine::LexicalEngine;
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");
@@ -41,7 +41,7 @@ fn main() -> Result<()> {
 
     // Step 2: Create temporary directory and search engine
     let temp_dir = TempDir::new().unwrap();
-    let engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Get storage for creating custom writer
     let storage = engine.storage().clone();

@@ -7,7 +7,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::index::IndexConfig;
 use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::SearchEngine;
+use sage::lexical::search::engine::LexicalEngine;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}", temp_dir.path());
 
     // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
     // Prepare documents
     let documents = vec![

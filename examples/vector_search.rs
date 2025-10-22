@@ -18,7 +18,9 @@ use sage::error::Result;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
-use sage::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory, VectorIndexType};
+use sage::vector::engine::VectorEngine;
+#[cfg(feature = "embeddings-candle")]
+use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::types::VectorSearchConfig;
 
@@ -90,9 +92,9 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    // Step 5: Build the vector index
+    // Step 5: Build the vector index using VectorEngine
     println!("Building vector index...");
-    let mut vector_builder = VectorIndexBuilderFactory::create_builder(vector_config)?;
+    let mut engine = VectorEngine::create(vector_config)?;
 
     // Add document vectors to the index
     let doc_vectors: Vec<(u64, sage::vector::Vector)> = documents
@@ -101,15 +103,15 @@ async fn main() -> Result<()> {
         .map(|((id, _), vector)| (*id, vector.clone()))
         .collect();
 
-    vector_builder.add_vectors(doc_vectors)?;
-    vector_builder.finalize()?;
-    vector_builder.optimize()?;
+    engine.add_vectors(doc_vectors)?;
+    engine.finalize()?;
+    engine.optimize()?;
 
     println!("Vector index built successfully!");
-    println!("Build progress: {:.1}%", vector_builder.progress() * 100.0);
+    println!("Build progress: {:.1}%", engine.progress() * 100.0);
     println!(
         "Estimated memory usage: {} bytes\n",
-        vector_builder.estimated_memory_usage()
+        engine.estimated_memory_usage()
     );
 
     // Step 6: Perform semantic searches
@@ -121,17 +123,23 @@ async fn main() -> Result<()> {
     println!("Query: \"{}\"", query1);
 
     let query_vector1 = embedder.embed(query1).await?;
-    let results1 = perform_search(&documents, &vectors, &query_vector1, 3);
+    let search_config = VectorSearchConfig {
+        top_k: 3,
+        ..Default::default()
+    };
+    let results1 = engine.search(&query_vector1, &search_config)?;
 
     println!("Top 3 results:");
-    for (rank, (doc_id, text, similarity)) in results1.iter().enumerate() {
-        println!(
-            "  {}. Doc {} (similarity: {:.4}): {}",
-            rank + 1,
-            doc_id,
-            similarity,
-            text
-        );
+    for (rank, result) in results1.results.iter().enumerate() {
+        if let Some((text, _)) = documents.iter().find(|(id, _)| *id == result.doc_id) {
+            println!(
+                "  {}. Doc {} (score: {:.4}): {}",
+                rank + 1,
+                result.doc_id,
+                result.similarity,
+                text
+            );
+        }
     }
     println!();
 
@@ -141,17 +149,19 @@ async fn main() -> Result<()> {
     println!("Query: \"{}\"", query2);
 
     let query_vector2 = embedder.embed(query2).await?;
-    let results2 = perform_search(&documents, &vectors, &query_vector2, 3);
+    let results2 = engine.search(&query_vector2, &search_config)?;
 
     println!("Top 3 results:");
-    for (rank, (doc_id, text, similarity)) in results2.iter().enumerate() {
-        println!(
-            "  {}. Doc {} (similarity: {:.4}): {}",
-            rank + 1,
-            doc_id,
-            similarity,
-            text
-        );
+    for (rank, result) in results2.results.iter().enumerate() {
+        if let Some((text, _)) = documents.iter().find(|(id, _)| *id == result.doc_id) {
+            println!(
+                "  {}. Doc {} (score: {:.4}): {}",
+                rank + 1,
+                result.doc_id,
+                result.similarity,
+                text
+            );
+        }
     }
     println!();
 
@@ -161,17 +171,19 @@ async fn main() -> Result<()> {
     println!("Query: \"{}\"", query3);
 
     let query_vector3 = embedder.embed(query3).await?;
-    let results3 = perform_search(&documents, &vectors, &query_vector3, 3);
+    let results3 = engine.search(&query_vector3, &search_config)?;
 
     println!("Top 3 results:");
-    for (rank, (doc_id, text, similarity)) in results3.iter().enumerate() {
-        println!(
-            "  {}. Doc {} (similarity: {:.4}): {}",
-            rank + 1,
-            doc_id,
-            similarity,
-            text
-        );
+    for (rank, result) in results3.results.iter().enumerate() {
+        if let Some((text, _)) = documents.iter().find(|(id, _)| *id == result.doc_id) {
+            println!(
+                "  {}. Doc {} (score: {:.4}): {}",
+                rank + 1,
+                result.doc_id,
+                result.similarity,
+                text
+            );
+        }
     }
     println!();
 
@@ -194,36 +206,6 @@ async fn main() -> Result<()> {
 
     println!("\n=== Example completed successfully! ===");
     Ok(())
-}
-
-#[cfg(feature = "embeddings-candle")]
-fn perform_search(
-    documents: &[(u64, &str)],
-    vectors: &[sage::vector::Vector],
-    query_vector: &sage::vector::Vector,
-    top_k: usize,
-) -> Vec<(u64, String, f32)> {
-    let mut results: Vec<(u64, String, f32)> = documents
-        .iter()
-        .zip(vectors.iter())
-        .map(|((doc_id, text), vector)| {
-            // Calculate cosine similarity (vectors are normalized)
-            let similarity: f32 = query_vector
-                .data
-                .iter()
-                .zip(vector.data.iter())
-                .map(|(a, b)| a * b)
-                .sum();
-
-            (*doc_id, text.to_string(), similarity)
-        })
-        .collect();
-
-    // Sort by similarity (descending)
-    results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
-
-    // Return top K results
-    results.into_iter().take(top_k).collect()
 }
 
 #[cfg(not(feature = "embeddings-candle"))]

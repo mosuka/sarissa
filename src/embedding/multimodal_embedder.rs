@@ -20,16 +20,16 @@ use crate::embedding::{ImageEmbedder, TextEmbedder};
 /// ## Text-to-Image Search
 ///
 /// ```no_run
-/// use sage::embedding::{MultimodalEmbedder, CandleMultimodalEmbedder};
+/// use sage::embedding::{MultimodalEmbedder, TextEmbedder, ImageEmbedder, CandleMultimodalEmbedder};
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 ///
 /// // Embed text query
-/// let query_vector = embedder.embed("a cat sitting on a mat").await?;
+/// let query_vector = TextEmbedder::embed(&embedder, "a cat sitting on a mat").await?;
 ///
 /// // Embed image
-/// let image_vector = embedder.embed_image("cat.jpg").await?;
+/// let image_vector = ImageEmbedder::embed_image(&embedder, "cat.jpg").await?;
 ///
 /// // They're in the same vector space, so you can compare them
 /// # Ok(())
@@ -39,16 +39,16 @@ use crate::embedding::{ImageEmbedder, TextEmbedder};
 /// ## Image-to-Image Search
 ///
 /// ```no_run
-/// use sage::embedding::{MultimodalEmbedder, CandleMultimodalEmbedder};
+/// use sage::embedding::{MultimodalEmbedder, ImageEmbedder, CandleMultimodalEmbedder};
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 ///
 /// // Use an image as query
-/// let query_vector = embedder.embed_image("query.jpg").await?;
+/// let query_vector = ImageEmbedder::embed_image(&embedder, "query.jpg").await?;
 ///
 /// // Search against other images
-/// let similar_image = embedder.embed_image("similar.jpg").await?;
+/// let similar_image = ImageEmbedder::embed_image(&embedder, "similar.jpg").await?;
 /// # Ok(())
 /// # }
 /// ```
