@@ -3,6 +3,56 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::vector::Vector;
+
+/// Vector search request combining query vector and configuration.
+#[derive(Debug, Clone)]
+pub struct VectorSearchRequest {
+    /// The query vector.
+    pub query: Vector,
+    /// Search configuration.
+    pub config: VectorSearchConfig,
+}
+
+impl VectorSearchRequest {
+    /// Create a new vector search request.
+    pub fn new(query: Vector) -> Self {
+        VectorSearchRequest {
+            query,
+            config: VectorSearchConfig::default(),
+        }
+    }
+
+    /// Set the number of results to return.
+    pub fn top_k(mut self, top_k: usize) -> Self {
+        self.config.top_k = top_k;
+        self
+    }
+
+    /// Set minimum similarity threshold.
+    pub fn min_similarity(mut self, threshold: f32) -> Self {
+        self.config.min_similarity = threshold;
+        self
+    }
+
+    /// Set whether to include scores in results.
+    pub fn include_scores(mut self, include: bool) -> Self {
+        self.config.include_scores = include;
+        self
+    }
+
+    /// Set whether to include vectors in results.
+    pub fn include_vectors(mut self, include: bool) -> Self {
+        self.config.include_vectors = include;
+        self
+    }
+
+    /// Set search timeout in milliseconds.
+    pub fn timeout_ms(mut self, timeout: u64) -> Self {
+        self.config.timeout_ms = Some(timeout);
+        self
+    }
+}
 
 /// Configuration for vector search operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]

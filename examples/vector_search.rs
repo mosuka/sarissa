@@ -22,7 +22,7 @@ use sage::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
 #[cfg(feature = "embeddings-candle")]
-use sage::vector::types::VectorSearchConfig;
+use sage::vector::{Vector, VectorSearchRequest};
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
@@ -123,11 +123,8 @@ async fn main() -> Result<()> {
     println!("Query: \"{}\"", query1);
 
     let query_vector1 = embedder.embed(query1).await?;
-    let search_config = VectorSearchConfig {
-        top_k: 3,
-        ..Default::default()
-    };
-    let results1 = engine.search(&query_vector1, &search_config)?;
+    let request1 = VectorSearchRequest::new(query_vector1).top_k(3);
+    let results1 = engine.search(request1)?;
 
     println!("Top 3 results:");
     for (rank, result) in results1.results.iter().enumerate() {
@@ -149,7 +146,8 @@ async fn main() -> Result<()> {
     println!("Query: \"{}\"", query2);
 
     let query_vector2 = embedder.embed(query2).await?;
-    let results2 = engine.search(&query_vector2, &search_config)?;
+    let request2 = VectorSearchRequest::new(query_vector2).top_k(3);
+    let results2 = engine.search(request2)?;
 
     println!("Top 3 results:");
     for (rank, result) in results2.results.iter().enumerate() {
@@ -171,7 +169,8 @@ async fn main() -> Result<()> {
     println!("Query: \"{}\"", query3);
 
     let query_vector3 = embedder.embed(query3).await?;
-    let results3 = engine.search(&query_vector3, &search_config)?;
+    let request3 = VectorSearchRequest::new(query_vector3).top_k(3);
+    let results3 = engine.search(request3)?;
 
     println!("Top 3 results:");
     for (rank, result) in results3.results.iter().enumerate() {
@@ -187,22 +186,25 @@ async fn main() -> Result<()> {
     }
     println!();
 
-    // Step 7: Demonstrate search configuration
+    // Step 7: Demonstrate search configuration with builder pattern
     println!("=== Vector Search Configuration ===");
-    let search_config = VectorSearchConfig {
-        top_k: 3,
-        min_similarity: 0.3,
-        include_scores: true,
-        include_vectors: false,
-        timeout_ms: Some(1000),
-    };
+    let demo_query = Vector::new(vec![0.0; dimension]);
+    let search_request = VectorSearchRequest::new(demo_query)
+        .top_k(3)
+        .min_similarity(0.3)
+        .include_scores(true)
+        .include_vectors(false)
+        .timeout_ms(1000);
 
     println!("Search configuration:");
-    println!("  Top K: {}", search_config.top_k);
-    println!("  Min similarity: {}", search_config.min_similarity);
-    println!("  Include scores: {}", search_config.include_scores);
-    println!("  Include vectors: {}", search_config.include_vectors);
-    println!("  Timeout: {:?} ms", search_config.timeout_ms);
+    println!("  Top K: {}", search_request.config.top_k);
+    println!("  Min similarity: {}", search_request.config.min_similarity);
+    println!("  Include scores: {}", search_request.config.include_scores);
+    println!(
+        "  Include vectors: {}",
+        search_request.config.include_vectors
+    );
+    println!("  Timeout: {:?} ms", search_request.config.timeout_ms);
 
     println!("\n=== Example completed successfully! ===");
     Ok(())

@@ -20,9 +20,9 @@
 use sage::embedding::{CandleMultimodalEmbedder, ImageEmbedder};
 use sage::error::Result;
 use sage::vector::DistanceMetric;
+use sage::vector::VectorSearchRequest;
 use sage::vector::engine::VectorEngine;
 use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
-use sage::vector::types::VectorSearchConfig;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -68,13 +68,13 @@ async fn main() -> Result<()> {
 
     // Index sample images
     println!("Indexing image collection...");
-    let image_dir = Path::new("images");
+    let image_dir = Path::new("resources/images");
 
     if !image_dir.exists() {
-        println!("Error: 'images/' directory not found.");
-        println!("Please create an 'images/' directory and add some image files.");
+        println!("Error: 'resources/images/' directory not found.");
+        println!("Please create an 'resources/images/' directory and add some image files.");
         println!("\nExample structure:");
-        println!("  images/");
+        println!("  resources/images/");
         println!("    cat1.jpg");
         println!("    cat2.jpg");
         println!("    dog1.jpg");
@@ -113,7 +113,9 @@ async fn main() -> Result<()> {
     println!("\nIndexed {} images\n", doc_id);
 
     if doc_id == 0 {
-        println!("No images found to index. Please add image files to the 'images/' directory.");
+        println!(
+            "No images found to index. Please add image files to the 'resources/images/' directory."
+        );
         return Ok(());
     }
 
@@ -141,11 +143,8 @@ async fn main() -> Result<()> {
     let max_results = 10;
 
     // Perform search using VectorEngine
-    let search_config = VectorSearchConfig {
-        top_k: max_results,
-        ..Default::default()
-    };
-    let search_results = engine.search(&query_vector, &search_config)?;
+    let request = VectorSearchRequest::new(query_vector).top_k(max_results);
+    let search_results = engine.search(request)?;
 
     // Filter by threshold
     // Note: The query image itself will have similarity ~1.0 and should be first
