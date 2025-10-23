@@ -1,9 +1,10 @@
-//! Index reader for searching and retrieving documents.
+//! Index reader traits for searching and retrieving documents.
 
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::lexical::bkd_tree::SimpleBKDTree;
+use crate::lexical::types::{FieldStatistics, FieldStats, ReaderTermInfo};
 
 /// Trait for index readers.
 pub trait IndexReader: Send + Sync + std::fmt::Debug {
@@ -82,66 +83,6 @@ pub trait IndexReader: Send + Sync + std::fmt::Debug {
         let _ = field;
         false
     }
-}
-
-/// Information about a term in the index.
-#[derive(Debug, Clone)]
-pub struct ReaderTermInfo {
-    /// The field name.
-    pub field: String,
-
-    /// The term text.
-    pub term: String,
-
-    /// Number of documents containing this term.
-    pub doc_freq: u64,
-
-    /// Total number of occurrences of this term.
-    pub total_freq: u64,
-
-    /// Position of the term in the posting list.
-    pub posting_offset: u64,
-
-    /// Size of the posting list in bytes.
-    pub posting_size: u64,
-}
-
-/// Statistics about a field in the index.
-#[derive(Debug, Clone)]
-pub struct FieldStats {
-    /// The field name.
-    pub field: String,
-
-    /// Number of unique terms in this field.
-    pub unique_terms: u64,
-
-    /// Total number of term occurrences.
-    pub total_terms: u64,
-
-    /// Number of documents with this field.
-    pub doc_count: u64,
-
-    /// Average field length.
-    pub avg_length: f64,
-
-    /// Minimum field length.
-    pub min_length: u64,
-
-    /// Maximum field length.
-    pub max_length: u64,
-}
-
-/// Simplified field statistics for query scoring.
-#[derive(Debug, Clone)]
-pub struct FieldStatistics {
-    /// Average field length.
-    pub avg_field_length: f64,
-
-    /// Number of documents with this field.
-    pub doc_count: u64,
-
-    /// Total number of terms.
-    pub total_terms: u64,
 }
 
 /// Iterator over posting lists.

@@ -3,9 +3,8 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
-use super::Filter;
-
 use crate::analysis::token::{Token, TokenStream};
+use crate::analysis::token_filter::Filter;
 use crate::error::Result;
 
 /// Default English stop words list.

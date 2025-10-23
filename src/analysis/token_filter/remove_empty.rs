@@ -1,8 +1,7 @@
 //! Remove empty filter implementation.
 
-use super::Filter;
-
 use crate::analysis::token::{Token, TokenStream};
+use crate::analysis::token_filter::Filter;
 use crate::error::Result;
 
 /// A filter that removes empty tokens from the stream.

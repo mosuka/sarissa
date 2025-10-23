@@ -6,9 +6,8 @@ use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 
 use crate::analysis::token::{Token, TokenStream, TokenType};
+use crate::analysis::tokenizer::Tokenizer;
 use crate::error::{Result, SageError};
-
-use super::Tokenizer;
 
 pub struct LinderaTokenizer {
     // Add any necessary fields for the tokenizer

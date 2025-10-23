@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::vector::Vector;
-use crate::vector::index::{VectorIndex, VectorIndexBuildConfig};
+use crate::vector::index::{VectorIndex, VectorIndexWriterConfig};
 use crate::vector::search::VectorSearcher;
-use crate::vector::search::flat_searcher::FlatVectorSearcher;
+use crate::vector::search::searcher::flat::FlatVectorSearcher;
 use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
 
 /// A high-level unified vector engine that provides both indexing and searching capabilities.
@@ -20,12 +20,12 @@ use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
 ///
 /// ```
 /// use sage::vector::engine::VectorEngine;
-/// use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
+/// use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
 /// use sage::vector::{Vector, DistanceMetric, VectorSearchRequest};
 ///
 /// # fn main() -> sage::error::Result<()> {
 /// // Create engine
-/// let config = VectorIndexBuildConfig {
+/// let config = VectorIndexWriterConfig {
 ///     dimension: 3,
 ///     distance_metric: DistanceMetric::Cosine,
 ///     index_type: VectorIndexType::Flat,
@@ -58,7 +58,7 @@ pub struct VectorEngine {
 
 impl VectorEngine {
     /// Create a new vector engine with the given configuration.
-    pub fn create(config: VectorIndexBuildConfig) -> Result<Self> {
+    pub fn create(config: VectorIndexWriterConfig) -> Result<Self> {
         let index = VectorIndex::create(config)?;
         Ok(Self {
             index,
@@ -96,7 +96,17 @@ impl VectorEngine {
         {
             let mut searcher_ref = self.searcher.borrow_mut();
             if searcher_ref.is_none() {
-                let reader = self.index.reader()?;
+                // Get vectors directly from the index
+                let vectors = self.index.vectors()?;
+                let config = self.index.config();
+
+                // Create SimpleVectorReader
+                let reader = crate::vector::reader::SimpleVectorReader::new(
+                    vectors,
+                    config.dimension,
+                    config.distance_metric,
+                )?;
+
                 let searcher: Box<dyn VectorSearcher> =
                     Box::new(FlatVectorSearcher::new(Arc::new(reader))?);
                 *searcher_ref = Some(searcher);
@@ -137,7 +147,7 @@ impl VectorEngine {
     }
 
     /// Get the configuration.
-    pub fn config(&self) -> &VectorIndexBuildConfig {
+    pub fn config(&self) -> &VectorIndexWriterConfig {
         self.index.config()
     }
 }
@@ -150,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_vector_engine_basic() -> Result<()> {
-        let config = VectorIndexBuildConfig {
+        let config = VectorIndexWriterConfig {
             dimension: 3,
             distance_metric: DistanceMetric::Cosine,
             index_type: VectorIndexType::Flat,

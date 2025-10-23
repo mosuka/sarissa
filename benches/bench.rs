@@ -7,14 +7,16 @@
 //! - Spell correction
 //! - Parallel operations
 
+use std::hint::black_box;
+
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+
 use sage::analysis::analyzer::analyzer::Analyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::spelling::corrector::SpellingCorrector;
-use sage::vector::index::hnsw_builder::HnswIndexBuilder;
-use sage::vector::index::{VectorIndexBuildConfig, VectorIndexBuilder};
+use sage::vector::index::hnsw::HnswIndexWriter;
+use sage::vector::index::{VectorIndexWriterConfig, VectorIndexBuilder};
 use sage::vector::{DistanceMetric, Vector};
-use std::hint::black_box;
 
 /// Generate test documents for benchmarking.
 fn generate_test_documents(count: usize) -> Vec<String> {
@@ -128,7 +130,7 @@ fn bench_vector_search(c: &mut Criterion) {
     group.bench_function("hnsw_index_construction", |b| {
         b.iter_with_setup(
             || {
-                HnswIndexBuilder::new(VectorIndexBuildConfig {
+                HnswIndexWriter::new(VectorIndexWriterConfig {
                     dimension,
                     ..Default::default()
                 })
@@ -320,7 +322,7 @@ fn bench_scalability(c: &mut Criterion) {
 
                 b.iter_with_setup(
                     || {
-                        HnswIndexBuilder::new(VectorIndexBuildConfig {
+                        HnswIndexWriter::new(VectorIndexWriterConfig {
                             dimension: 128,
                             ..Default::default()
                         })

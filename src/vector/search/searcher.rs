@@ -1,4 +1,8 @@
-//! Base vector searcher configuration and utilities.
+//! Vector searcher implementations and utilities.
+
+pub mod flat;
+pub mod hnsw;
+pub mod ivf;
 
 use serde::{Deserialize, Serialize};
 

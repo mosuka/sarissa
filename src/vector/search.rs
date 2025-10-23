@@ -6,9 +6,6 @@
 //! - Advanced similarity metrics and ranking
 //! - Search result processing and filtering
 
-pub mod engine;
-pub mod flat_searcher;
-pub mod hnsw_searcher;
 pub mod hybrid;
 pub mod ranking;
 pub mod searcher;
@@ -19,39 +16,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::vector::Vector;
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
-
-/// Configuration for vector search operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorSearchEngineConfig {
-    /// Default number of results to return.
-    pub default_top_k: usize,
-    /// Default minimum similarity threshold.
-    pub default_min_similarity: f32,
-    /// Enable parallel search.
-    pub parallel_search: bool,
-    /// Search timeout in milliseconds.
-    pub search_timeout_ms: Option<u64>,
-    /// Enable result caching.
-    pub enable_caching: bool,
-    /// Cache size limit.
-    pub cache_size_limit: usize,
-    /// Enable search analytics.
-    pub enable_analytics: bool,
-}
-
-impl Default for VectorSearchEngineConfig {
-    fn default() -> Self {
-        Self {
-            default_top_k: 10,
-            default_min_similarity: 0.0,
-            parallel_search: true,
-            search_timeout_ms: Some(30000), // 30 seconds
-            enable_caching: true,
-            cache_size_limit: 1000,
-            enable_analytics: false,
-        }
-    }
-}
 
 /// Advanced search configuration with multiple search strategies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,27 +85,35 @@ pub enum FilterCondition {
 /// Trait for vector searchers.
 pub trait VectorSearcher: Send + Sync {
     /// Execute a vector similarity search.
+    ///
+    /// This method handles all search operations including basic search,
+    /// reranking, filtering, and strategy selection based on the config.
     fn search(&self, query: &Vector, config: &VectorSearchConfig) -> Result<VectorSearchResults>;
-
-    /// Execute an advanced search with additional options.
-    fn advanced_search(
-        &self,
-        query: &Vector,
-        config: &AdvancedSearchConfig,
-    ) -> Result<VectorSearchResults>;
 
     /// Execute a batch search for multiple queries.
     fn batch_search(
         &self,
         queries: &[Vector],
         config: &VectorSearchConfig,
-    ) -> Result<Vec<VectorSearchResults>>;
+    ) -> Result<Vec<VectorSearchResults>> {
+        // デフォルト実装: 各クエリを順次実行
+        queries
+            .iter()
+            .map(|query| self.search(query, config))
+            .collect()
+    }
 
     /// Get search statistics.
-    fn search_stats(&self) -> SearchStats;
+    fn search_stats(&self) -> SearchStats {
+        // デフォルト実装: 空の統計
+        SearchStats::default()
+    }
 
     /// Warm up the searcher (pre-load data, etc.).
-    fn warmup(&mut self) -> Result<()>;
+    fn warmup(&mut self) -> Result<()> {
+        // デフォルト実装: 何もしない
+        Ok(())
+    }
 }
 
 /// Search execution statistics.

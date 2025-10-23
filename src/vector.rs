@@ -6,6 +6,7 @@
 pub mod engine; // Unified vector engine (indexing + search)
 pub mod reader;
 pub mod types;
+pub mod writer;
 
 // Sub-modules
 pub mod index; // Vector indexing

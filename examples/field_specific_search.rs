@@ -1,15 +1,17 @@
 //! Field-specific search example - demonstrates searching within specific fields.
 
+use std::sync::Arc;
+
+use tempfile::TempDir;
+
 use sage::analysis::analyzer::analyzer::Analyzer;
 use sage::analysis::analyzer::keyword::KeywordAnalyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::document::document::Document;
 use sage::error::Result;
+use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::IndexConfig;
-use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::LexicalEngine;
-use std::sync::Arc;
-use tempfile::TempDir;
+use sage::lexical::types::SearchRequest;
 
 fn main() -> Result<()> {
     println!("=== Field-Specific Search Example ===\n");

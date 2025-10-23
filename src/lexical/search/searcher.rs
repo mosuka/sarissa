@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::lexical::reader::IndexReader;
-use crate::lexical::search::{SearchRequest, SortField, SortOrder};
+use crate::lexical::types::{SearchRequest, SortField, SortOrder};
 use crate::query::collector::{Collector, CountCollector, TopDocsCollector};
 use crate::query::query::Query;
 use crate::query::{SearchHit, SearchResults};

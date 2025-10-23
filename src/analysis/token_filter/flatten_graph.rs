@@ -11,9 +11,8 @@
 use std::collections::VecDeque;
 
 use crate::analysis::token::{Token, TokenStream};
+use crate::analysis::token_filter::Filter;
 use crate::error::Result;
-
-use super::Filter;
 
 /// Holds all tokens leaving a given input position.
 #[derive(Debug, Clone)]

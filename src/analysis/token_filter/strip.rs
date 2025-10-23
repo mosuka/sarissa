@@ -1,8 +1,7 @@
 //! Strip filter implementation.
 
-use super::Filter;
-
 use crate::analysis::token::TokenStream;
+use crate::analysis::token_filter::Filter;
 use crate::error::Result;
 
 /// A filter that removes leading and trailing whitespace from tokens.

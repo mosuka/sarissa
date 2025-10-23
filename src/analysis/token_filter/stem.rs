@@ -1,8 +1,7 @@
 //! Stemming token filter and stemmer implementations.
 
-use super::Filter;
-
 use crate::analysis::token::TokenStream;
+use crate::analysis::token_filter::Filter;
 use crate::error::Result;
 
 /// Trait for stemming algorithms.

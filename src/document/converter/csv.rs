@@ -7,13 +7,15 @@
 //! Python Basics,2023,15.50,false
 //! ```
 
+use std::sync::Arc;
+
+use csv::ReaderBuilder;
+
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
-use csv::ReaderBuilder;
-use std::sync::Arc;
 
 /// A document converter for CSV format.
 ///

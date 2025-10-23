@@ -1,8 +1,7 @@
 //! Whole tokenizer implementation.
 
-use super::Tokenizer;
-
 use crate::analysis::token::{Token, TokenStream};
+use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
 
 /// A tokenizer that treats the entire input as a single token.

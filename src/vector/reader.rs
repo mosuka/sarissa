@@ -1,22 +1,10 @@
-//! Vector index reader interface - bridges indexing and search modules.
+//! Vector index reader traits and implementations.
 
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use crate::error::Result;
+use crate::vector::types::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::{DistanceMetric, Vector};
-
-/// Statistics about a vector index.
-#[derive(Debug, Clone)]
-pub struct VectorStats {
-    /// Total number of vectors in the index.
-    pub vector_count: usize,
-    /// Vector dimension.
-    pub dimension: usize,
-    /// Index memory usage in bytes.
-    pub memory_usage: usize,
-    /// Build time in milliseconds.
-    pub build_time_ms: u64,
-}
 
 /// Trait for reading vector indexes (similar to IndexReader for inverted indexes).
 pub trait VectorIndexReader: Send + Sync {
@@ -72,267 +60,48 @@ pub trait VectorIterator: Send {
     fn reset(&mut self) -> Result<()>;
 }
 
-/// Metadata about a vector index.
-#[derive(Debug, Clone)]
-pub struct VectorIndexMetadata {
-    /// Index type (HNSW, Flat, IVF, etc.).
-    pub index_type: String,
-    /// Creation timestamp.
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    /// Last modified timestamp.
-    pub modified_at: chrono::DateTime<chrono::Utc>,
-    /// Index version.
-    pub version: String,
-    /// Build configuration.
-    pub build_config: serde_json::Value,
-    /// Custom metadata.
-    pub custom_metadata: std::collections::HashMap<String, String>,
-}
-
-/// Index validation report.
-#[derive(Debug, Clone)]
-pub struct ValidationReport {
-    /// Whether the index is valid.
-    pub is_valid: bool,
-    /// Validation errors found.
-    pub errors: Vec<String>,
-    /// Validation warnings.
-    pub warnings: Vec<String>,
-    /// Repair suggestions.
-    pub repair_suggestions: Vec<String>,
-}
-
-/// Factory for creating vector index readers.
-pub struct VectorIndexReaderFactory;
-
-impl VectorIndexReaderFactory {
-    /// Create a reader for a specific index type.
-    pub fn create_reader(
-        index_type: &str,
-        index_data: &[u8],
-    ) -> Result<Arc<dyn VectorIndexReader>> {
-        match index_type.to_lowercase().as_str() {
-            "flat" => {
-                let reader = FlatVectorIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
-            "hnsw" => {
-                let reader = HnswIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
-            "ivf" => {
-                let reader = IvfIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
-            _ => Err(crate::error::SageError::InvalidOperation(format!(
-                "Unknown index type: {index_type}"
-            ))),
-        }
-    }
-}
-
-// Forward declarations for specific readers
-struct FlatVectorIndexReader;
-struct HnswIndexReader;
-struct IvfIndexReader;
-
-impl FlatVectorIndexReader {
-    fn from_bytes(_data: &[u8]) -> Result<Self> {
-        // Implementation would deserialize flat index
-        Ok(FlatVectorIndexReader)
-    }
-}
-
-impl HnswIndexReader {
-    fn from_bytes(_data: &[u8]) -> Result<Self> {
-        // Implementation would deserialize HNSW index
-        Ok(HnswIndexReader)
-    }
-}
-
-impl IvfIndexReader {
-    fn from_bytes(_data: &[u8]) -> Result<Self> {
-        // Implementation would deserialize IVF index
-        Ok(IvfIndexReader)
-    }
-}
-
-// Placeholder implementations
-impl VectorIndexReader for FlatVectorIndexReader {
-    fn get_vector(&self, _doc_id: u64) -> Result<Option<Vector>> {
-        unimplemented!()
-    }
-
-    fn get_vectors(&self, _doc_ids: &[u64]) -> Result<Vec<Option<Vector>>> {
-        unimplemented!()
-    }
-
-    fn vector_ids(&self) -> Result<Vec<u64>> {
-        unimplemented!()
-    }
-
-    fn vector_count(&self) -> usize {
-        unimplemented!()
-    }
-
-    fn dimension(&self) -> usize {
-        unimplemented!()
-    }
-
-    fn distance_metric(&self) -> DistanceMetric {
-        DistanceMetric::Cosine
-    }
-
-    fn stats(&self) -> VectorStats {
-        unimplemented!()
-    }
-
-    fn contains_vector(&self, _doc_id: u64) -> bool {
-        unimplemented!()
-    }
-
-    fn get_vector_range(&self, _start_doc_id: u64, _end_doc_id: u64) -> Result<Vec<(u64, Vector)>> {
-        unimplemented!()
-    }
-
-    fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
-        unimplemented!()
-    }
-
-    fn metadata(&self) -> Result<VectorIndexMetadata> {
-        unimplemented!()
-    }
-
-    fn validate(&self) -> Result<ValidationReport> {
-        unimplemented!()
-    }
-}
-
-// Similar placeholder implementations for HnswIndexReader and IvfIndexReader would follow...
-impl VectorIndexReader for HnswIndexReader {
-    fn get_vector(&self, _doc_id: u64) -> Result<Option<Vector>> {
-        unimplemented!()
-    }
-    fn get_vectors(&self, _doc_ids: &[u64]) -> Result<Vec<Option<Vector>>> {
-        unimplemented!()
-    }
-    fn vector_ids(&self) -> Result<Vec<u64>> {
-        unimplemented!()
-    }
-    fn vector_count(&self) -> usize {
-        unimplemented!()
-    }
-    fn dimension(&self) -> usize {
-        unimplemented!()
-    }
-    fn distance_metric(&self) -> DistanceMetric {
-        DistanceMetric::Cosine
-    }
-    fn stats(&self) -> VectorStats {
-        unimplemented!()
-    }
-    fn contains_vector(&self, _doc_id: u64) -> bool {
-        unimplemented!()
-    }
-    fn get_vector_range(&self, _start_doc_id: u64, _end_doc_id: u64) -> Result<Vec<(u64, Vector)>> {
-        unimplemented!()
-    }
-    fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
-        unimplemented!()
-    }
-    fn metadata(&self) -> Result<VectorIndexMetadata> {
-        unimplemented!()
-    }
-    fn validate(&self) -> Result<ValidationReport> {
-        unimplemented!()
-    }
-}
-
-impl VectorIndexReader for IvfIndexReader {
-    fn get_vector(&self, _doc_id: u64) -> Result<Option<Vector>> {
-        unimplemented!()
-    }
-    fn get_vectors(&self, _doc_ids: &[u64]) -> Result<Vec<Option<Vector>>> {
-        unimplemented!()
-    }
-    fn vector_ids(&self) -> Result<Vec<u64>> {
-        unimplemented!()
-    }
-    fn vector_count(&self) -> usize {
-        unimplemented!()
-    }
-    fn dimension(&self) -> usize {
-        unimplemented!()
-    }
-    fn distance_metric(&self) -> DistanceMetric {
-        DistanceMetric::Cosine
-    }
-    fn stats(&self) -> VectorStats {
-        unimplemented!()
-    }
-    fn contains_vector(&self, _doc_id: u64) -> bool {
-        unimplemented!()
-    }
-    fn get_vector_range(&self, _start_doc_id: u64, _end_doc_id: u64) -> Result<Vec<(u64, Vector)>> {
-        unimplemented!()
-    }
-    fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
-        unimplemented!()
-    }
-    fn metadata(&self) -> Result<VectorIndexMetadata> {
-        unimplemented!()
-    }
-    fn validate(&self) -> Result<ValidationReport> {
-        unimplemented!()
-    }
-}
-
-/// In-memory vector index reader that holds vectors in memory.
-/// This is used for search after building an index.
-pub struct InMemoryVectorIndexReader {
-    vectors: Vec<(u64, Vector)>,
+/// Simple in-memory vector reader for basic use cases.
+/// This is a lightweight reader that holds vectors in memory.
+pub struct SimpleVectorReader {
+    vectors: HashMap<u64, Vector>,
+    vector_ids: Vec<u64>,
     dimension: usize,
     distance_metric: DistanceMetric,
 }
 
-impl InMemoryVectorIndexReader {
-    /// Create a new in-memory vector index reader.
+impl SimpleVectorReader {
+    /// Create a new simple vector reader.
     pub fn new(
         vectors: Vec<(u64, Vector)>,
         dimension: usize,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
+        let vector_ids: Vec<u64> = vectors.iter().map(|(id, _)| *id).collect();
+        let vectors: HashMap<u64, Vector> = vectors.into_iter().collect();
+
         Ok(Self {
             vectors,
+            vector_ids,
             dimension,
             distance_metric,
         })
     }
-
-    /// Get all vectors.
-    pub fn all_vectors(&self) -> &[(u64, Vector)] {
-        &self.vectors
-    }
 }
 
-impl VectorIndexReader for InMemoryVectorIndexReader {
+impl VectorIndexReader for SimpleVectorReader {
     fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>> {
-        Ok(self
-            .vectors
-            .iter()
-            .find(|(id, _)| *id == doc_id)
-            .map(|(_, v)| v.clone()))
+        Ok(self.vectors.get(&doc_id).cloned())
     }
 
     fn get_vectors(&self, doc_ids: &[u64]) -> Result<Vec<Option<Vector>>> {
         Ok(doc_ids
             .iter()
-            .map(|doc_id| self.get_vector(*doc_id).ok().flatten())
+            .map(|id| self.vectors.get(id).cloned())
             .collect())
     }
 
     fn vector_ids(&self) -> Result<Vec<u64>> {
-        Ok(self.vectors.iter().map(|(id, _)| *id).collect())
+        Ok(self.vector_ids.clone())
     }
 
     fn vector_count(&self) -> usize {
@@ -348,7 +117,7 @@ impl VectorIndexReader for InMemoryVectorIndexReader {
     }
 
     fn stats(&self) -> VectorStats {
-        let memory_usage = self.vectors.len() * (8 + self.dimension * 4); // Rough estimate
+        let memory_usage = self.vectors.len() * (8 + self.dimension * 4);
         VectorStats {
             vector_count: self.vectors.len(),
             dimension: self.dimension,
@@ -358,35 +127,40 @@ impl VectorIndexReader for InMemoryVectorIndexReader {
     }
 
     fn contains_vector(&self, doc_id: u64) -> bool {
-        self.vectors.iter().any(|(id, _)| *id == doc_id)
+        self.vectors.contains_key(&doc_id)
     }
 
     fn get_vector_range(&self, start_doc_id: u64, end_doc_id: u64) -> Result<Vec<(u64, Vector)>> {
         Ok(self
             .vectors
             .iter()
-            .filter(|(id, _)| *id >= start_doc_id && *id <= end_doc_id)
+            .filter(|(id, _)| **id >= start_doc_id && **id <= end_doc_id)
             .map(|(id, v)| (*id, v.clone()))
             .collect())
     }
 
     fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
-        Ok(Box::new(InMemoryVectorIterator::new(self.vectors.clone())))
+        Ok(Box::new(SimpleVectorIterator::new(
+            self.vectors
+                .iter()
+                .map(|(id, v)| (*id, v.clone()))
+                .collect(),
+        )))
     }
 
     fn metadata(&self) -> Result<VectorIndexMetadata> {
         Ok(VectorIndexMetadata {
-            index_type: "InMemory".to_string(),
+            index_type: "Simple".to_string(),
             created_at: chrono::Utc::now(),
             modified_at: chrono::Utc::now(),
             version: "1.0".to_string(),
             build_config: serde_json::json!({}),
-            custom_metadata: std::collections::HashMap::new(),
+            custom_metadata: HashMap::new(),
         })
     }
 
     fn validate(&self) -> Result<ValidationReport> {
-        let all_valid = self.vectors.iter().all(|(_, v)| v.is_valid());
+        let all_valid = self.vectors.values().all(|v| v.is_valid());
         Ok(ValidationReport {
             is_valid: all_valid,
             errors: vec![],
@@ -396,14 +170,15 @@ impl VectorIndexReader for InMemoryVectorIndexReader {
     }
 }
 
-/// In-memory vector iterator.
-struct InMemoryVectorIterator {
+/// Simple vector iterator.
+pub struct SimpleVectorIterator {
     vectors: Vec<(u64, Vector)>,
     position: usize,
 }
 
-impl InMemoryVectorIterator {
-    fn new(vectors: Vec<(u64, Vector)>) -> Self {
+impl SimpleVectorIterator {
+    /// Create a new simple vector iterator.
+    pub fn new(vectors: Vec<(u64, Vector)>) -> Self {
         Self {
             vectors,
             position: 0,
@@ -411,7 +186,7 @@ impl InMemoryVectorIterator {
     }
 }
 
-impl VectorIterator for InMemoryVectorIterator {
+impl VectorIterator for SimpleVectorIterator {
     fn next(&mut self) -> Result<Option<(u64, Vector)>> {
         if self.position < self.vectors.len() {
             let result = self.vectors[self.position].clone();

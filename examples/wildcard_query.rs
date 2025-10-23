@@ -1,12 +1,13 @@
 //! WildcardQuery example - demonstrates pattern matching with * and ? wildcards.
 
+use tempfile::TempDir;
+
 use sage::document::document::Document;
 use sage::error::Result;
+use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::IndexConfig;
-use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::LexicalEngine;
+use sage::lexical::types::SearchRequest;
 use sage::query::wildcard::WildcardQuery;
-use tempfile::TempDir;
 
 fn main() -> Result<()> {
     println!("=== WildcardQuery Example - Pattern Matching with Wildcards ===\n");

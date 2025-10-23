@@ -1,6 +1,6 @@
 //! Identity stemmer implementation.
 
-use super::Stemmer;
+use crate::analysis::token_filter::stem::Stemmer;
 
 /// Identity stemmer that returns words unchanged.
 #[derive(Debug, Clone, Default)]

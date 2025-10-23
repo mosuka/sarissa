@@ -6,22 +6,24 @@
 //! - Vector quantization and compression
 //! - Index optimization and maintenance
 
-pub mod flat_builder;
-pub mod hnsw_builder;
-pub mod ivf_builder;
+pub mod flat;
+pub mod hnsw;
+pub mod ivf;
 pub mod optimization;
 pub mod quantization;
-pub mod writer;
+pub mod reader_factory;
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 use crate::error::{Result, SageError};
+use crate::storage::traits::Storage;
+use crate::vector::writer::VectorIndexWriter;
 use crate::vector::{DistanceMetric, Vector};
 
 /// Configuration for vector index construction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorIndexBuildConfig {
+pub struct VectorIndexWriterConfig {
     /// Vector dimension.
     pub dimension: usize,
     /// Index type to build.
@@ -40,7 +42,7 @@ pub struct VectorIndexBuildConfig {
     pub memory_limit: Option<usize>,
 }
 
-impl Default for VectorIndexBuildConfig {
+impl Default for VectorIndexWriterConfig {
     fn default() -> Self {
         Self {
             dimension: 128,
@@ -66,43 +68,53 @@ pub enum VectorIndexType {
     IVF,
 }
 
-/// Trait for vector index builders.
-pub trait VectorIndexBuilder: Send + Sync {
-    /// Build an index from a collection of vectors.
-    fn build(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()>;
+/// Factory for creating vector index writers.
+pub struct VectorIndexWriterFactory;
 
-    /// Add vectors incrementally during construction.
-    fn add_vectors(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()>;
-
-    /// Finalize the index construction.
-    fn finalize(&mut self) -> Result<()>;
-
-    /// Get build progress (0.0 to 1.0).
-    fn progress(&self) -> f32;
-
-    /// Get estimated memory usage.
-    fn estimated_memory_usage(&self) -> usize;
-
-    /// Optimize the built index.
-    fn optimize(&mut self) -> Result<()>;
-
-    /// Get access to the stored vectors.
-    /// Returns a reference to the vectors stored in the builder.
-    fn vectors(&self) -> &[(u64, Vector)];
-}
-
-/// Factory for creating vector index builders.
-pub struct VectorIndexBuilderFactory;
-
-impl VectorIndexBuilderFactory {
+impl VectorIndexWriterFactory {
     /// Create a new vector index builder based on configuration.
-    pub fn create_builder(config: VectorIndexBuildConfig) -> Result<Box<dyn VectorIndexBuilder>> {
+    pub fn create_builder(config: VectorIndexWriterConfig) -> Result<Box<dyn VectorIndexWriter>> {
         match config.index_type {
-            VectorIndexType::Flat => {
-                Ok(Box::new(flat_builder::FlatVectorIndexBuilder::new(config)?))
+            VectorIndexType::Flat => Ok(Box::new(flat::FlatIndexWriter::new(config)?)),
+            VectorIndexType::HNSW => Ok(Box::new(hnsw::HnswIndexWriter::new(config)?)),
+            VectorIndexType::IVF => Ok(Box::new(ivf::IvfIndexWriter::new(config)?)),
+        }
+    }
+
+    /// Create a new vector index builder with storage support.
+    pub fn create_builder_with_storage(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn Storage>,
+    ) -> Result<Box<dyn VectorIndexWriter>> {
+        match config.index_type {
+            VectorIndexType::Flat => Ok(Box::new(flat::FlatIndexWriter::with_storage(
+                config, storage,
+            )?)),
+            VectorIndexType::HNSW => Ok(Box::new(hnsw::HnswIndexWriter::with_storage(
+                config, storage,
+            )?)),
+            VectorIndexType::IVF => Ok(Box::new(ivf::IvfIndexWriter::with_storage(
+                config, storage,
+            )?)),
+        }
+    }
+
+    /// Load an existing vector index from storage.
+    pub fn load_builder(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn Storage>,
+        path: &str,
+    ) -> Result<Box<dyn VectorIndexWriter>> {
+        match config.index_type {
+            VectorIndexType::Flat => Ok(Box::new(flat::FlatIndexWriter::load(
+                config, storage, path,
+            )?)),
+            VectorIndexType::HNSW => Ok(Box::new(hnsw::HnswIndexWriter::load(
+                config, storage, path,
+            )?)),
+            VectorIndexType::IVF => {
+                Ok(Box::new(ivf::IvfIndexWriter::load(config, storage, path)?))
             }
-            VectorIndexType::HNSW => Ok(Box::new(hnsw_builder::HnswIndexBuilder::new(config)?)),
-            VectorIndexType::IVF => Ok(Box::new(ivf_builder::IvfIndexBuilder::new(config)?)),
         }
     }
 }
@@ -110,19 +122,54 @@ impl VectorIndexBuilderFactory {
 /// In-memory vector index that manages the lifecycle of builders and readers.
 /// This is similar to FileIndex in the lexical module.
 pub struct VectorIndex {
-    config: VectorIndexBuildConfig,
-    builder: Arc<RwLock<Box<dyn VectorIndexBuilder>>>,
+    config: VectorIndexWriterConfig,
+    builder: Arc<RwLock<Box<dyn VectorIndexWriter>>>,
     is_finalized: Arc<RwLock<bool>>,
+    storage: Option<Arc<dyn Storage>>,
 }
 
 impl VectorIndex {
     /// Create a new in-memory vector index.
-    pub fn create(config: VectorIndexBuildConfig) -> Result<Self> {
-        let builder = VectorIndexBuilderFactory::create_builder(config.clone())?;
+    pub fn create(config: VectorIndexWriterConfig) -> Result<Self> {
+        let builder = VectorIndexWriterFactory::create_builder(config.clone())?;
         Ok(Self {
             config,
             builder: Arc::new(RwLock::new(builder)),
             is_finalized: Arc::new(RwLock::new(false)),
+            storage: None,
+        })
+    }
+
+    /// Create a new vector index with storage support.
+    pub fn create_with_storage(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn Storage>,
+    ) -> Result<Self> {
+        let builder = VectorIndexWriterFactory::create_builder_with_storage(
+            config.clone(),
+            storage.clone(),
+        )?;
+        Ok(Self {
+            config,
+            builder: Arc::new(RwLock::new(builder)),
+            is_finalized: Arc::new(RwLock::new(false)),
+            storage: Some(storage),
+        })
+    }
+
+    /// Load an existing vector index from storage.
+    pub fn load(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn Storage>,
+        path: &str,
+    ) -> Result<Self> {
+        let builder =
+            VectorIndexWriterFactory::load_builder(config.clone(), storage.clone(), path)?;
+        Ok(Self {
+            config,
+            builder: Arc::new(RwLock::new(builder)),
+            is_finalized: Arc::new(RwLock::new(true)),
+            storage: Some(storage),
         })
     }
 
@@ -156,7 +203,7 @@ impl VectorIndex {
     }
 
     /// Get the configuration.
-    pub fn config(&self) -> &VectorIndexBuildConfig {
+    pub fn config(&self) -> &VectorIndexWriterConfig {
         &self.config
     }
 
@@ -177,9 +224,48 @@ impl VectorIndex {
         *self.is_finalized.read().unwrap()
     }
 
-    /// Get a reader for this index.
-    /// This creates an in-memory reader that can access the built index data.
-    pub fn reader(&self) -> Result<crate::vector::reader::InMemoryVectorIndexReader> {
+    /// Get vectors from this index.
+    /// Returns a copy of all vectors stored in the index.
+    pub fn vectors(&self) -> Result<Vec<(u64, Vector)>> {
+        let finalized = *self.is_finalized.read().unwrap();
+        if !finalized {
+            return Err(SageError::InvalidOperation(
+                "Index must be finalized before accessing vectors".to_string(),
+            ));
+        }
+
+        let builder = self.builder.read().unwrap();
+        Ok(builder.vectors().to_vec())
+    }
+
+    /// Write the index to storage.
+    /// The index must be finalized before calling this method.
+    pub fn write(&self, path: &str) -> Result<()> {
+        let finalized = *self.is_finalized.read().unwrap();
+        if !finalized {
+            return Err(SageError::InvalidOperation(
+                "Index must be finalized before writing".to_string(),
+            ));
+        }
+
+        let builder = self.builder.read().unwrap();
+        if !builder.has_storage() {
+            return Err(SageError::InvalidOperation(
+                "Index was not created with storage support".to_string(),
+            ));
+        }
+
+        builder.write(path)
+    }
+
+    /// Check if this index has storage configured.
+    pub fn has_storage(&self) -> bool {
+        self.storage.is_some()
+    }
+
+    /// Create a reader for this index.
+    /// Returns a boxed VectorIndexReader that can be used for searching.
+    pub fn reader(&self) -> Result<Arc<dyn crate::vector::reader::VectorIndexReader>> {
         let finalized = *self.is_finalized.read().unwrap();
         if !finalized {
             return Err(SageError::InvalidOperation(
@@ -187,25 +273,22 @@ impl VectorIndex {
             ));
         }
 
-        // Access the builder to get vector data
-        let builder = self.builder.read().unwrap();
+        // If storage is available, load from storage
+        if self.storage.is_some() {
+            // We need a path to load from - for now, we'll use a default
+            // In a real implementation, this would be stored in the VectorIndex
+            return Err(SageError::InvalidOperation(
+                "Reader creation from storage not yet implemented. Use load() instead.".to_string(),
+            ));
+        }
 
-        // Extract vectors from the builder
-        let vectors = self.extract_vectors_from_builder(&**builder)?;
-
-        crate::vector::reader::InMemoryVectorIndexReader::new(
+        // Otherwise, create from in-memory vectors
+        let vectors = self.vectors()?;
+        let reader = crate::vector::reader::SimpleVectorReader::new(
             vectors,
             self.config.dimension,
             self.config.distance_metric,
-        )
-    }
-
-    /// Extract vectors from the builder (helper method).
-    fn extract_vectors_from_builder(
-        &self,
-        builder: &dyn VectorIndexBuilder,
-    ) -> Result<Vec<(u64, Vector)>> {
-        // Use the vectors() method from the trait
-        Ok(builder.vectors().to_vec())
+        )?;
+        Ok(Arc::new(reader))
     }
 }

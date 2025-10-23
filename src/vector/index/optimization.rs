@@ -1,13 +1,13 @@
 //! Vector index optimization utilities.
 
 use crate::error::{Result, SageError};
-use crate::vector::index::VectorIndexBuilder;
+use crate::vector::writer::VectorIndexWriter;
 
 /// Optimizer for vector indexes after construction.
 pub struct VectorIndexOptimizer {
     optimization_level: OptimizationLevel,
     memory_target: Option<usize>,
-    performance_target: Option<PerformanceTarget>,
+    performance_target: Option<OptimizationConfig>,
 }
 
 /// Level of optimization to apply.
@@ -23,7 +23,7 @@ pub enum OptimizationLevel {
 
 /// Performance optimization targets.
 #[derive(Debug, Clone)]
-pub struct PerformanceTarget {
+pub struct OptimizationConfig {
     /// Target search time in milliseconds.
     pub target_search_time_ms: f64,
     /// Target memory usage in bytes.
@@ -49,17 +49,17 @@ impl VectorIndexOptimizer {
     }
 
     /// Set performance targets.
-    pub fn with_performance_target(mut self, target: PerformanceTarget) -> Self {
+    pub fn with_performance_target(mut self, target: OptimizationConfig) -> Self {
         self.performance_target = Some(target);
         self
     }
 
     /// Optimize a vector index.
-    pub fn optimize(&self, builder: &mut dyn VectorIndexBuilder) -> Result<OptimizationReport> {
+    pub fn optimize(&self, builder: &mut dyn VectorIndexWriter) -> Result<OptimizationResult> {
         let initial_memory = builder.estimated_memory_usage();
         let start_time = std::time::Instant::now();
 
-        let mut report = OptimizationReport {
+        let mut report = OptimizationResult {
             initial_memory_bytes: initial_memory,
             final_memory_bytes: initial_memory,
             optimization_time_ms: 0.0,
@@ -100,8 +100,8 @@ impl VectorIndexOptimizer {
     /// Apply fast optimizations.
     fn apply_fast_optimizations(
         &self,
-        _builder: &mut dyn VectorIndexBuilder,
-        report: &mut OptimizationReport,
+        _builder: &mut dyn VectorIndexWriter,
+        report: &mut OptimizationResult,
     ) -> Result<()> {
         // Memory compaction
         report
@@ -115,8 +115,8 @@ impl VectorIndexOptimizer {
     /// Apply balanced optimizations.
     fn apply_balanced_optimizations(
         &self,
-        _builder: &mut dyn VectorIndexBuilder,
-        report: &mut OptimizationReport,
+        _builder: &mut dyn VectorIndexWriter,
+        report: &mut OptimizationResult,
     ) -> Result<()> {
         // Data structure reorganization
         report
@@ -136,8 +136,8 @@ impl VectorIndexOptimizer {
     /// Apply aggressive optimizations.
     fn apply_aggressive_optimizations(
         &self,
-        _builder: &mut dyn VectorIndexBuilder,
-        report: &mut OptimizationReport,
+        _builder: &mut dyn VectorIndexWriter,
+        report: &mut OptimizationResult,
     ) -> Result<()> {
         // Vector quantization (if not already applied)
         report
@@ -162,7 +162,7 @@ impl VectorIndexOptimizer {
 
     /// Validate optimization constraints.
     #[allow(dead_code)]
-    fn validate_constraints(&self, report: &OptimizationReport) -> Result<()> {
+    fn validate_constraints(&self, report: &OptimizationResult) -> Result<()> {
         if let Some(memory_target) = self.memory_target
             && report.final_memory_bytes > memory_target
         {
@@ -187,7 +187,7 @@ impl VectorIndexOptimizer {
 
 /// Report of optimization results.
 #[derive(Debug, Clone)]
-pub struct OptimizationReport {
+pub struct OptimizationResult {
     /// Initial memory usage before optimization.
     pub initial_memory_bytes: usize,
     /// Final memory usage after optimization.
@@ -202,7 +202,7 @@ pub struct OptimizationReport {
     pub estimated_speedup: f32,
 }
 
-impl OptimizationReport {
+impl OptimizationResult {
     /// Get memory savings in bytes.
     pub fn memory_savings(&self) -> usize {
         self.initial_memory_bytes
@@ -246,7 +246,7 @@ impl OptimizationReport {
     }
 }
 
-impl Default for OptimizationReport {
+impl Default for OptimizationResult {
     fn default() -> Self {
         Self {
             initial_memory_bytes: 0,

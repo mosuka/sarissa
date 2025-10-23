@@ -1,15 +1,16 @@
 //! BooleanQuery example - demonstrates complex boolean logic with AND, OR, NOT operations.
 
+use tempfile::TempDir;
+
 use sage::document::document::Document;
 use sage::error::Result;
+use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::IndexConfig;
-use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::LexicalEngine;
+use sage::lexical::types::SearchRequest;
 use sage::query::boolean::BooleanQuery;
 use sage::query::phrase::PhraseQuery;
 use sage::query::range::NumericRangeQuery;
 use sage::query::term::TermQuery;
-use tempfile::TempDir;
 
 fn main() -> Result<()> {
     println!("=== BooleanQuery Example - Complex Boolean Logic ===\n");

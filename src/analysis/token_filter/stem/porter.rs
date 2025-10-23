@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::Stemmer;
+use crate::analysis::token_filter::stem::Stemmer;
 
 /// Porter stemming algorithm implementation.
 ///

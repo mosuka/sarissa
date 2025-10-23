@@ -16,12 +16,14 @@
 //! - TopFieldCollector: Lucene-style collection-time sorting
 //! - Supports all field types: Text, Integer, Float, Boolean, DateTime, etc.
 
+use tempfile::TempDir;
+
 use sage::document::document::Document;
 use sage::document::field_value::FieldValue;
 use sage::error::Result;
+use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::IndexConfig;
-use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::LexicalEngine;
+use sage::lexical::types::SearchRequest;
 use sage::query::boolean::BooleanQuery;
 use sage::query::fuzzy::FuzzyQuery;
 use sage::query::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint};
@@ -29,7 +31,6 @@ use sage::query::phrase::PhraseQuery;
 use sage::query::range::NumericRangeQuery;
 use sage::query::term::TermQuery;
 use sage::query::wildcard::WildcardQuery;
-use tempfile::TempDir;
 
 fn main() -> Result<()> {
     println!("=== Comprehensive Lexical Search Example ===\n");

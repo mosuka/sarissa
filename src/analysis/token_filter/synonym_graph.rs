@@ -6,10 +6,9 @@
 use crate::analysis::synonym::dictionary::SynonymDictionary;
 use crate::analysis::synonym::graph_builder::SynonymGraphBuilder;
 use crate::analysis::token::{Token, TokenStream};
+use crate::analysis::token_filter::Filter;
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
-
-use super::Filter;
 
 /// Synonym graph filter that applies synonyms while maintaining correct token graph structure.
 ///

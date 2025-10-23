@@ -17,7 +17,7 @@ use rayon::ThreadPool;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector::index::VectorIndexBuildConfig;
+use crate::vector::index::VectorIndexWriterConfig;
 
 use crate::parallel_vector_index::builder::ParallelVectorIndexBuilder;
 use crate::parallel_vector_index::merger::MergeStrategy;
@@ -34,7 +34,7 @@ pub struct ParallelVectorIndexConfig {
     /// Maximum memory usage per segment (bytes).
     pub max_segment_memory: usize,
     /// Base configuration for individual segments.
-    pub base_config: VectorIndexBuildConfig,
+    pub base_config: VectorIndexWriterConfig,
     /// Enable background optimization.
     pub background_optimization: bool,
     /// Merge strategy for segments.
@@ -48,7 +48,7 @@ impl Default for ParallelVectorIndexConfig {
             segment_size: 10000,
             merge_threshold: 4,
             max_segment_memory: 512 * 1024 * 1024, // 512MB
-            base_config: VectorIndexBuildConfig::default(),
+            base_config: VectorIndexWriterConfig::default(),
             background_optimization: true,
             merge_strategy: MergeStrategy::SizeBased,
         }

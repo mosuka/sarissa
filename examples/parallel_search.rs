@@ -5,6 +5,11 @@
 //! 2. Perform concurrent searches across the indices with various merge strategies
 //! 3. Demonstrate performance metrics and optimization techniques
 
+use std::path::Path;
+use std::sync::Arc;
+
+use tempfile::TempDir;
+
 use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
@@ -20,9 +25,6 @@ use sage::query::phrase::PhraseQuery;
 use sage::query::term::TermQuery;
 use sage::storage::memory::MemoryStorage;
 use sage::storage::traits::StorageConfig;
-use std::path::Path;
-use std::sync::Arc;
-use tempfile::TempDir;
 
 fn main() -> Result<()> {
     println!("=== Parallel Search Example - Complete Indexing and Search Workflow ===\n");

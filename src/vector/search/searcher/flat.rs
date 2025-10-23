@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::vector::Vector;
 use crate::vector::reader::VectorIndexReader;
-use crate::vector::search::{AdvancedSearchConfig, SearchStats, VectorSearcher};
+use crate::vector::search::{SearchStats, VectorSearcher};
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
 
 /// Flat vector searcher that performs exact (brute force) search.
@@ -58,16 +58,32 @@ impl VectorSearcher for FlatVectorSearcher {
         // Sort by similarity (descending)
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
+        // Apply filters if specified
+        if !config.filters.is_empty() {
+            candidates.retain(|(doc_id, similarity, _, _)| {
+                self.matches_filters(*doc_id, *similarity, &config.filters)
+            });
+        }
+
         // Take top_k results
         let top_k = config.top_k.min(candidates.len());
         for (doc_id, similarity, distance, vector) in candidates.into_iter().take(top_k) {
+            // Apply minimum similarity threshold
+            if similarity < config.min_similarity {
+                break;
+            }
+
             results
                 .results
                 .push(crate::vector::types::VectorSearchResult {
                     doc_id,
                     similarity,
                     distance,
-                    vector: Some(vector),
+                    vector: if config.include_vectors {
+                        Some(vector)
+                    } else {
+                        None
+                    },
                     metadata: std::collections::HashMap::new(),
                 });
         }
@@ -76,30 +92,33 @@ impl VectorSearcher for FlatVectorSearcher {
         Ok(results)
     }
 
-    fn advanced_search(
-        &self,
-        query: &Vector,
-        config: &AdvancedSearchConfig,
-    ) -> Result<VectorSearchResults> {
-        self.search(query, &config.base_config)
-    }
-
-    fn batch_search(
-        &self,
-        queries: &[Vector],
-        config: &VectorSearchConfig,
-    ) -> Result<Vec<VectorSearchResults>> {
-        queries
-            .iter()
-            .map(|query| self.search(query, config))
-            .collect()
-    }
-
     fn search_stats(&self) -> SearchStats {
         self.stats.clone()
     }
+}
 
-    fn warmup(&mut self) -> Result<()> {
-        Ok(())
+impl FlatVectorSearcher {
+    /// フィルタにマッチするかチェック
+    fn matches_filters(
+        &self,
+        doc_id: u64,
+        similarity: f32,
+        filters: &[crate::vector::search::SearchFilter],
+    ) -> bool {
+        use crate::vector::search::SearchFilter;
+
+        filters.iter().all(|filter| match filter {
+            SearchFilter::SimilarityThreshold(threshold) => similarity >= *threshold,
+            SearchFilter::DocIdRange {
+                min_doc_id,
+                max_doc_id,
+            } => {
+                let min_ok = min_doc_id.map(|min| doc_id >= min).unwrap_or(true);
+                let max_ok = max_doc_id.map(|max| doc_id <= max).unwrap_or(true);
+                min_ok && max_ok
+            }
+            SearchFilter::MetadataFilter { .. } => true, // TODO: メタデータフィルタ実装
+            SearchFilter::Custom(_) => true,             // TODO: カスタムフィルタ実装
+        })
     }
 }

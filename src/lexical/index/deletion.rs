@@ -6,12 +6,13 @@
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::error::{Result, SageError};
-use crate::storage::structured::{StructReader, StructWriter};
-use crate::storage::traits::{Storage, StorageInput, StorageOutput};
 use ahash::AHashMap;
 use bit_vec::BitVec;
 use serde::{Deserialize, Serialize};
+
+use crate::error::{Result, SageError};
+use crate::storage::structured::{StructReader, StructWriter};
+use crate::storage::traits::{Storage, StorageInput, StorageOutput};
 
 /// Configuration for deletion management.
 #[derive(Debug, Clone, Serialize, Deserialize)]

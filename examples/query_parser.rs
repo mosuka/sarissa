@@ -10,13 +10,14 @@
 //! - Grouped queries
 //! - Actual search engine integration
 
+use tempfile::TempDir;
+
 use sage::document::document::Document;
 use sage::error::Result;
+use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::IndexConfig;
-use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::LexicalEngine;
+use sage::lexical::types::SearchRequest;
 use sage::query::parser::QueryParser;
-use tempfile::TempDir;
 
 fn main() -> Result<()> {
     println!("=== Query Parser - Complete Feature Demonstration ===\n");

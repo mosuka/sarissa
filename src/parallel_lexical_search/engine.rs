@@ -7,7 +7,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::error::{Result, SageError};
 use crate::lexical::reader::IndexReader;
-use crate::lexical::search::SearchRequest;
+use crate::lexical::types::SearchRequest;
 use crate::parallel_lexical_search::config::{ParallelSearchConfig, SearchOptions};
 use crate::parallel_lexical_search::index_manager::{IndexHandle, IndexManager};
 use crate::parallel_lexical_search::merger::MergerFactory;

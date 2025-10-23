@@ -8,13 +8,13 @@ use std::time::Instant;
 
 use rayon::ThreadPool;
 
-use super::merger::VectorResultMerger;
-use super::{LoadBalancingStrategy, ParallelSearchStats, ParallelVectorSearchConfig};
-
 use crate::error::{Result, SageError};
+use crate::parallel_vector_search::merger::VectorResultMerger;
+use crate::parallel_vector_search::{
+    LoadBalancingStrategy, ParallelSearchStats, ParallelVectorSearchConfig,
+};
 use crate::vector::Vector;
-use crate::vector::search::AdvancedSearchConfig;
-use crate::vector::search::engine::VectorSearchEngine;
+use crate::vector::search::VectorSearcher;
 use crate::vector::types::{VectorSearchConfig, VectorSearchResults};
 
 /// Task for parallel vector search execution.
@@ -26,8 +26,6 @@ pub struct SearchTask {
     pub query: Vector,
     /// Search configuration.
     pub config: VectorSearchConfig,
-    /// Optional advanced configuration.
-    pub advanced_config: Option<AdvancedSearchConfig>,
 }
 
 /// Result of a search task execution.
@@ -49,7 +47,7 @@ pub struct SearchTaskResult {
 pub struct ParallelVectorSearchExecutor {
     config: ParallelVectorSearchConfig,
     thread_pool: Arc<ThreadPool>,
-    search_engines: Vec<Arc<Mutex<VectorSearchEngine>>>,
+    searchers: Vec<Arc<dyn VectorSearcher>>,
     _result_merger: VectorResultMerger,
     result_cache: Arc<RwLock<HashMap<String, VectorSearchResults>>>,
     stats: Arc<Mutex<ParallelSearchStats>>,
@@ -57,8 +55,11 @@ pub struct ParallelVectorSearchExecutor {
 }
 
 impl ParallelVectorSearchExecutor {
-    /// Create a new parallel vector search executor.
-    pub fn new(config: ParallelVectorSearchConfig) -> Result<Self> {
+    /// Create a new parallel vector search executor with provided searchers.
+    pub fn new(
+        config: ParallelVectorSearchConfig,
+        searchers: Vec<Arc<dyn VectorSearcher>>,
+    ) -> Result<Self> {
         let thread_pool = Arc::new(
             rayon::ThreadPoolBuilder::new()
                 .num_threads(config.num_threads)
@@ -68,21 +69,6 @@ impl ParallelVectorSearchExecutor {
                 })?,
         );
 
-        Self::with_thread_pool(config, thread_pool)
-    }
-
-    /// Create an executor with an existing thread pool.
-    pub fn with_thread_pool(
-        config: ParallelVectorSearchConfig,
-        thread_pool: Arc<ThreadPool>,
-    ) -> Result<Self> {
-        // Create multiple search engines for parallel execution
-        let mut search_engines = Vec::new();
-        for _ in 0..config.num_threads {
-            let engine = VectorSearchEngine::new(config.base_config.clone())?;
-            search_engines.push(Arc::new(Mutex::new(engine)));
-        }
-
         let result_merger = VectorResultMerger::new(config.merge_strategy)?;
         let result_cache = Arc::new(RwLock::new(HashMap::new()));
         let stats = Arc::new(Mutex::new(ParallelSearchStats::default()));
@@ -91,7 +77,7 @@ impl ParallelVectorSearchExecutor {
         Ok(Self {
             config,
             thread_pool,
-            search_engines,
+            searchers,
             _result_merger: result_merger,
             result_cache,
             stats,
@@ -117,11 +103,8 @@ impl ParallelVectorSearchExecutor {
         }
 
         // Execute search
-        let engine = self.select_search_engine()?;
-        let result = {
-            let mut engine_guard = engine.lock().unwrap();
-            engine_guard.search(query, config).await?
-        };
+        let searcher = self.select_searcher()?;
+        let result = searcher.search(query, config)?;
 
         // Update cache
         if self.config.enable_result_caching {
@@ -152,7 +135,6 @@ impl ParallelVectorSearchExecutor {
                 task_id: i,
                 query: query.clone(),
                 config: config.clone(),
-                advanced_config: None,
             })
             .collect();
 
@@ -183,42 +165,6 @@ impl ParallelVectorSearchExecutor {
         self.update_batch_stats(batch_time, queries.len());
 
         final_results
-    }
-
-    /// Execute advanced search with multiple strategies.
-    pub async fn advanced_search(
-        &self,
-        query: &Vector,
-        config: &AdvancedSearchConfig,
-    ) -> Result<VectorSearchResults> {
-        let engine = self.select_search_engine()?;
-        let explained_results = {
-            let mut engine_guard = engine.lock().unwrap();
-            engine_guard.advanced_search(query, config).await?
-        };
-        Ok(explained_results.results)
-    }
-
-    /// Load index for all search engines.
-    pub async fn load_index(&mut self, index_path: &str) -> Result<()> {
-        for engine in &self.search_engines {
-            {
-                let mut engine_guard = engine.lock().unwrap();
-                engine_guard.load_index(index_path).await?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Warm up all search engines.
-    pub async fn warmup(&mut self) -> Result<()> {
-        for engine in &self.search_engines {
-            {
-                let mut engine_guard = engine.lock().unwrap();
-                engine_guard.warmup().await?;
-            }
-        }
-        Ok(())
     }
 
     /// Get search statistics.
@@ -259,14 +205,14 @@ impl ParallelVectorSearchExecutor {
         // Use thread pool scope for parallel execution
         self.thread_pool.scope(|scope| {
             for task in tasks {
-                let engine = match self.select_search_engine() {
-                    Ok(engine) => engine,
+                let searcher = match self.select_searcher() {
+                    Ok(searcher) => searcher,
                     Err(_) => continue,
                 };
 
                 let results_clone = Arc::clone(&results_arc);
                 scope.spawn(move |_| {
-                    let result = self.execute_single_task(task, engine);
+                    let result = self.execute_single_task(task, searcher);
                     results_clone.lock().unwrap().push(result);
                 });
             }
@@ -287,7 +233,7 @@ impl ParallelVectorSearchExecutor {
     fn execute_single_task(
         &self,
         task: SearchTask,
-        engine: Arc<Mutex<VectorSearchEngine>>,
+        searcher: Arc<dyn VectorSearcher>,
     ) -> SearchTaskResult {
         let start_time = Instant::now();
 
@@ -308,14 +254,8 @@ impl ParallelVectorSearchExecutor {
             false
         };
 
-        // Execute search
-        // For this synchronous context, we'll use a blocking approach
-        // In a real implementation, you might want to use async/await properly
-        #[allow(clippy::await_holding_lock)]
-        let search_result = futures::executor::block_on(async {
-            let mut engine_guard = engine.lock().unwrap();
-            engine_guard.search(&task.query, &task.config).await
-        });
+        // Execute search (synchronously)
+        let search_result = searcher.search(&task.query, &task.config);
 
         let execution_time_ms = start_time.elapsed().as_secs_f64() * 1000.0;
         let vectors_examined = match &search_result {
@@ -340,25 +280,34 @@ impl ParallelVectorSearchExecutor {
         }
     }
 
-    /// Select a search engine based on load balancing strategy.
-    fn select_search_engine(&self) -> Result<Arc<Mutex<VectorSearchEngine>>> {
+    /// Select a searcher based on load balancing strategy.
+    fn select_searcher(&self) -> Result<Arc<dyn VectorSearcher>> {
+        if self.searchers.is_empty() {
+            return Err(SageError::InvalidOperation(
+                "No searchers available".to_string(),
+            ));
+        }
+
         match self.config.load_balancing {
             LoadBalancingStrategy::RoundRobin => {
                 let mut next_index = self.next_engine_index.lock().unwrap();
                 let index = *next_index;
-                *next_index = (index + 1) % self.search_engines.len();
-                Ok(self.search_engines[index].clone())
+                *next_index = (index + 1) % self.searchers.len();
+                Ok(self.searchers[index].clone())
             }
             LoadBalancingStrategy::Random => {
                 use rand::Rng;
                 let mut rng = rand::rng();
-                let index = rng.random_range(0..self.search_engines.len());
-                Ok(self.search_engines[index].clone())
+                let index = rng.random_range(0..self.searchers.len());
+                Ok(self.searchers[index].clone())
             }
             LoadBalancingStrategy::LeastLoaded | LoadBalancingStrategy::QueryAware => {
                 // For now, fallback to round-robin
                 // TODO: Implement actual load balancing
-                self.select_search_engine()
+                let mut next_index = self.next_engine_index.lock().unwrap();
+                let index = *next_index;
+                *next_index = (index + 1) % self.searchers.len();
+                Ok(self.searchers[index].clone())
             }
         }
     }

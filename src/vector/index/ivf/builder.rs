@@ -1,14 +1,19 @@
 //! IVF (Inverted File) index builder for memory-efficient search.
 
+use std::sync::Arc;
+
 use rayon::prelude::*;
 
 use crate::error::{Result, SageError};
+use crate::storage::traits::Storage;
 use crate::vector::Vector;
-use crate::vector::index::{VectorIndexBuildConfig, VectorIndexBuilder};
+use crate::vector::index::VectorIndexWriterConfig;
+use crate::vector::writer::VectorIndexWriter;
 
 /// Builder for IVF vector indexes (memory-efficient search).
-pub struct IvfIndexBuilder {
-    config: VectorIndexBuildConfig,
+pub struct IvfIndexWriter {
+    config: VectorIndexWriterConfig,
+    storage: Option<Arc<dyn Storage>>,
     n_clusters: usize,                       // Number of clusters (cells)
     n_probe: usize,                          // Number of clusters to search
     centroids: Vec<Vector>,                  // Cluster centroids
@@ -18,13 +23,14 @@ pub struct IvfIndexBuilder {
     total_vectors_to_add: Option<usize>,
 }
 
-impl IvfIndexBuilder {
+impl IvfIndexWriter {
     /// Create a new IVF index builder.
-    pub fn new(config: VectorIndexBuildConfig) -> Result<Self> {
+    pub fn new(config: VectorIndexWriterConfig) -> Result<Self> {
         let n_clusters = Self::compute_default_clusters(1000); // Default for small datasets
 
         Ok(Self {
             config,
+            storage: None,
             n_clusters,
             n_probe: 1, // Default to searching 1 cluster
             centroids: Vec::new(),
@@ -32,6 +38,113 @@ impl IvfIndexBuilder {
             vectors: Vec::new(),
             is_finalized: false,
             total_vectors_to_add: None,
+        })
+    }
+
+    /// Create a new IVF index builder with storage.
+    pub fn with_storage(config: VectorIndexWriterConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+        let n_clusters = Self::compute_default_clusters(1000);
+
+        Ok(Self {
+            config,
+            storage: Some(storage),
+            n_clusters,
+            n_probe: 1,
+            centroids: Vec::new(),
+            inverted_lists: Vec::new(),
+            vectors: Vec::new(),
+            is_finalized: false,
+            total_vectors_to_add: None,
+        })
+    }
+
+    /// Load an existing IVF index from storage.
+    pub fn load(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn Storage>,
+        path: &str,
+    ) -> Result<Self> {
+        use std::io::Read;
+
+        // Open the index file
+        let file_name = format!("{}.ivf", path);
+        let mut input = storage.open_input(&file_name)?;
+
+        // Read metadata
+        let mut num_vectors_buf = [0u8; 4];
+        input.read_exact(&mut num_vectors_buf)?;
+        let num_vectors = u32::from_le_bytes(num_vectors_buf) as usize;
+
+        let mut dimension_buf = [0u8; 4];
+        input.read_exact(&mut dimension_buf)?;
+        let dimension = u32::from_le_bytes(dimension_buf) as usize;
+
+        let mut n_clusters_buf = [0u8; 4];
+        input.read_exact(&mut n_clusters_buf)?;
+        let n_clusters = u32::from_le_bytes(n_clusters_buf) as usize;
+
+        let mut n_probe_buf = [0u8; 4];
+        input.read_exact(&mut n_probe_buf)?;
+        let n_probe = u32::from_le_bytes(n_probe_buf) as usize;
+
+        if dimension != config.dimension {
+            return Err(SageError::InvalidOperation(format!(
+                "Dimension mismatch: expected {}, found {}",
+                config.dimension, dimension
+            )));
+        }
+
+        // Read centroids
+        let mut centroids = Vec::with_capacity(n_clusters);
+        for _ in 0..n_clusters {
+            let mut values = vec![0.0f32; dimension];
+            for value in &mut values {
+                let mut value_buf = [0u8; 4];
+                input.read_exact(&mut value_buf)?;
+                *value = f32::from_le_bytes(value_buf);
+            }
+            centroids.push(Vector::new(values));
+        }
+
+        // Read inverted lists
+        let mut inverted_lists = vec![Vec::new(); n_clusters];
+        for list in &mut inverted_lists {
+            let mut list_size_buf = [0u8; 4];
+            input.read_exact(&mut list_size_buf)?;
+            let list_size = u32::from_le_bytes(list_size_buf) as usize;
+
+            for _ in 0..list_size {
+                let mut doc_id_buf = [0u8; 8];
+                input.read_exact(&mut doc_id_buf)?;
+                let doc_id = u64::from_le_bytes(doc_id_buf);
+
+                let mut values = vec![0.0f32; dimension];
+                for value in &mut values {
+                    let mut value_buf = [0u8; 4];
+                    input.read_exact(&mut value_buf)?;
+                    *value = f32::from_le_bytes(value_buf);
+                }
+
+                list.push((doc_id, Vector::new(values)));
+            }
+        }
+
+        // Reconstruct vectors from inverted lists
+        let mut vectors = Vec::with_capacity(num_vectors);
+        for list in &inverted_lists {
+            vectors.extend(list.iter().cloned());
+        }
+
+        Ok(Self {
+            config,
+            storage: Some(storage),
+            n_clusters,
+            n_probe,
+            centroids,
+            inverted_lists,
+            vectors,
+            is_finalized: true,
+            total_vectors_to_add: Some(num_vectors),
         })
     }
 
@@ -339,7 +452,7 @@ impl IvfIndexBuilder {
     }
 }
 
-impl VectorIndexBuilder for IvfIndexBuilder {
+impl VectorIndexWriter for IvfIndexWriter {
     fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(SageError::InvalidOperation(
@@ -466,5 +579,55 @@ impl VectorIndexBuilder for IvfIndexBuilder {
 
     fn vectors(&self) -> &[(u64, Vector)] {
         &self.vectors
+    }
+
+    fn write(&self, path: &str) -> Result<()> {
+        use std::io::Write;
+
+        if !self.is_finalized {
+            return Err(SageError::InvalidOperation(
+                "Index must be finalized before writing".to_string(),
+            ));
+        }
+
+        let storage = self
+            .storage
+            .as_ref()
+            .ok_or_else(|| SageError::InvalidOperation("No storage configured".to_string()))?;
+
+        // Create the index file
+        let file_name = format!("{}.ivf", path);
+        let mut output = storage.create_output(&file_name)?;
+
+        // Write metadata
+        output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
+        output.write_all(&(self.config.dimension as u32).to_le_bytes())?;
+        output.write_all(&(self.n_clusters as u32).to_le_bytes())?;
+        output.write_all(&(self.n_probe as u32).to_le_bytes())?;
+
+        // Write centroids
+        for centroid in &self.centroids {
+            for value in &centroid.data {
+                output.write_all(&value.to_le_bytes())?;
+            }
+        }
+
+        // Write inverted lists
+        for list in &self.inverted_lists {
+            output.write_all(&(list.len() as u32).to_le_bytes())?;
+            for (doc_id, vector) in list {
+                output.write_all(&doc_id.to_le_bytes())?;
+                for value in &vector.data {
+                    output.write_all(&value.to_le_bytes())?;
+                }
+            }
+        }
+
+        output.flush()?;
+        Ok(())
+    }
+
+    fn has_storage(&self) -> bool {
+        self.storage.is_some()
     }
 }

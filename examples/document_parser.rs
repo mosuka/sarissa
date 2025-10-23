@@ -21,10 +21,10 @@ use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::document::document::Document;
 use sage::document::parser::DocumentParser;
 use sage::error::Result;
+use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::IndexConfig;
 use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sage::lexical::search::SearchRequest;
-use sage::lexical::search::engine::LexicalEngine;
+use sage::lexical::types::SearchRequest;
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");

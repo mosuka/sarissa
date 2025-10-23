@@ -4,11 +4,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::segment::{SegmentMetadata, VectorIndexSegment};
-
 use crate::error::{Result, SageError};
+use crate::parallel_vector_index::segment::{SegmentMetadata, VectorIndexSegment};
 use crate::vector::Vector;
-use crate::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
+use crate::vector::index::{VectorIndexWriterConfig, VectorIndexWriterFactory};
 
 /// Strategy for merging vector index segments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,7 +103,7 @@ impl SegmentMerger {
     pub fn merge_segments_with_config(
         &mut self,
         segments: Vec<VectorIndexSegment>,
-        config: VectorIndexBuildConfig,
+        config: VectorIndexWriterConfig,
     ) -> Result<VectorIndexSegment> {
         if segments.is_empty() {
             return Err(SageError::InvalidOperation(
@@ -187,7 +186,7 @@ impl SegmentMerger {
     fn create_merge_config(
         &self,
         segments: &[VectorIndexSegment],
-    ) -> Result<VectorIndexBuildConfig> {
+    ) -> Result<VectorIndexWriterConfig> {
         if segments.is_empty() {
             return Err(SageError::InvalidOperation(
                 "No segments to merge".to_string(),
@@ -212,7 +211,7 @@ impl SegmentMerger {
             }
         }
 
-        Ok(VectorIndexBuildConfig {
+        Ok(VectorIndexWriterConfig {
             dimension: first_metadata.dimension,
             index_type: first_metadata.index_type,
             distance_metric: first_metadata.distance_metric,
@@ -228,10 +227,10 @@ impl SegmentMerger {
     fn build_merged_segment(
         &self,
         vectors: Vec<(u64, Vector)>,
-        config: VectorIndexBuildConfig,
+        config: VectorIndexWriterConfig,
     ) -> Result<VectorIndexSegment> {
         // Create a builder for the merged segment
-        let mut builder = VectorIndexBuilderFactory::create_builder(config.clone())?;
+        let mut builder = VectorIndexWriterFactory::create_builder(config.clone())?;
 
         // Build the segment
         builder.build(vectors.clone())?;

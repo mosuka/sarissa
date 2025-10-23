@@ -2,9 +2,8 @@
 
 use std::collections::HashMap;
 
-use super::config::{MergeStrategy, ParallelHybridSearchConfig};
-use super::types::{ParallelHybridSearchResult, ScoreExplanation};
-
+use crate::parallel_hybrid_search::config::{MergeStrategy, ParallelHybridSearchConfig};
+use crate::parallel_hybrid_search::types::{ParallelHybridSearchResult, ScoreExplanation};
 use crate::query::SearchHit;
 use crate::vector::types::VectorSearchResult;
 

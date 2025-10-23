@@ -15,9 +15,10 @@
 //! ```
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use sage::embedding::{CandleTextEmbedder, OpenAITextEmbedder, TextEmbedder};
-#[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 use std::sync::Arc;
+
+#[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
+use sage::embedding::{CandleTextEmbedder, OpenAITextEmbedder, TextEmbedder};
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 #[tokio::main]

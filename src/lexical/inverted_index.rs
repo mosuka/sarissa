@@ -6,8 +6,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
-use crate::lexical::index::writer::IndexWriter;
 use crate::lexical::reader::IndexReader;
+use crate::lexical::writer::IndexWriter;
 use crate::storage::traits::Storage;
 
 /// Information about a segment in the index.
