@@ -4,5 +4,5 @@
 //! the HNSW algorithm, which offers excellent search performance with relatively
 //! low memory overhead.
 
-pub mod builder;
+pub mod writer;
 pub mod reader;
