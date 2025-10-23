@@ -17,14 +17,15 @@
 //! - A collection of images in an `images/` directory to search through
 //! - A query image to search with (passed as command line argument)
 
+use std::collections::HashMap;
+use std::path::Path;
+
 use sage::embedding::{CandleMultimodalEmbedder, ImageEmbedder};
 use sage::error::Result;
 use sage::vector::DistanceMetric;
 use sage::vector::VectorSearchRequest;
 use sage::vector::engine::VectorEngine;
-use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
-use std::collections::HashMap;
-use std::path::Path;
+use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -58,7 +59,7 @@ async fn main() -> Result<()> {
 
     // Create vector index configuration
     println!("Creating vector index configuration...");
-    let config = VectorIndexBuildConfig {
+    let config = VectorIndexWriterConfig {
         dimension: ImageEmbedder::dimension(&embedder),
         distance_metric: DistanceMetric::Cosine,
         index_type: VectorIndexType::HNSW,

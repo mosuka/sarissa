@@ -12,6 +12,13 @@ pub mod inverted_index;
 pub mod posting;
 pub mod reader;
 pub mod segment;
+pub mod writer;
+
+// High-level interface
+pub mod engine;
+
+// Type definitions
+pub mod types;
 
 // Sub-modules
 pub mod index;

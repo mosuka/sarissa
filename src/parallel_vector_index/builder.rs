@@ -5,13 +5,13 @@ use std::time::Instant;
 
 use rayon::ThreadPool;
 
-use super::executor::{IndexTask, ParallelIndexExecutor};
-use super::merger::SegmentMerger;
-use super::segment::VectorIndexSegment;
-use super::{ParallelIndexStats, ParallelVectorIndexConfig};
 use crate::error::{Result, SageError};
+use crate::parallel_vector_index::executor::{IndexTask, ParallelIndexExecutor};
+use crate::parallel_vector_index::merger::SegmentMerger;
+use crate::parallel_vector_index::segment::VectorIndexSegment;
+use crate::parallel_vector_index::{ParallelIndexStats, ParallelVectorIndexConfig};
 use crate::vector::Vector;
-use crate::vector::index::VectorIndexBuilder;
+use crate::vector::writer::VectorIndexWriter;
 
 /// Parallel vector index builder for high-performance construction.
 pub struct ParallelVectorIndexBuilder {
@@ -256,7 +256,7 @@ impl ParallelVectorIndexBuilder {
     }
 }
 
-impl VectorIndexBuilder for ParallelVectorIndexBuilder {
+impl VectorIndexWriter for ParallelVectorIndexBuilder {
     fn build(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()> {
         self.build_parallel(vectors)
     }
@@ -286,5 +286,15 @@ impl VectorIndexBuilder for ParallelVectorIndexBuilder {
         // For simplicity, return an empty slice for now
         // TODO: Collect vectors from all segments
         &[]
+    }
+
+    fn write(&self, _path: &str) -> Result<()> {
+        Err(SageError::InvalidOperation(
+            "ParallelVectorIndexBuilder does not support write operation".to_string(),
+        ))
+    }
+
+    fn has_storage(&self) -> bool {
+        false
     }
 }

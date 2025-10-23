@@ -5,7 +5,8 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
-use crate::vector::index::{VectorIndexBuilder, VectorIndexType};
+use crate::vector::index::VectorIndexType;
+use crate::vector::writer::VectorIndexWriter;
 use crate::vector::{DistanceMetric, Vector};
 
 /// Metadata for a vector index segment.
@@ -30,13 +31,13 @@ pub struct SegmentMetadata {
 /// A segment of a vector index for parallel construction.
 pub struct VectorIndexSegment {
     metadata: SegmentMetadata,
-    builder: Box<dyn VectorIndexBuilder>,
+    builder: Box<dyn VectorIndexWriter>,
     is_optimized: bool,
 }
 
 impl VectorIndexSegment {
     /// Create a new vector index segment.
-    pub fn new(metadata: SegmentMetadata, builder: Box<dyn VectorIndexBuilder>) -> Result<Self> {
+    pub fn new(metadata: SegmentMetadata, builder: Box<dyn VectorIndexWriter>) -> Result<Self> {
         Ok(Self {
             metadata,
             builder,

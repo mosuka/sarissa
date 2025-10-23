@@ -7,7 +7,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
-use crate::lexical::index::writer::IndexWriter;
+use crate::lexical::writer::IndexWriter;
 use crate::parallel_lexical_index::config::PartitionConfig;
 
 /// Statistics for a specific index partition.

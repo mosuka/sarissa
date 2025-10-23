@@ -10,12 +10,11 @@ use crate::error::{Result, SageError};
 use crate::lexical::index::deletion::DeletionManager;
 use crate::lexical::index::merge_engine::{MergeConfig, MergeEngine, MergeResult};
 use crate::lexical::index::segment_manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
-
 use crate::storage::traits::Storage;
 
 /// Optimization strategy types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum OptimizationStrategy {
+pub enum OptimizationLevel {
     /// Aggressive optimization - maximum compression and merging.
     Aggressive,
     /// Balanced optimization - good performance with reasonable resource usage.
@@ -31,7 +30,7 @@ pub enum OptimizationStrategy {
 #[derive(Debug, Clone)]
 pub struct OptimizationConfig {
     /// Optimization strategy to use.
-    pub strategy: OptimizationStrategy,
+    pub strategy: OptimizationLevel,
 
     /// Maximum number of segments to merge in one operation.
     pub max_merge_segments: usize,
@@ -61,7 +60,7 @@ pub struct OptimizationConfig {
 impl Default for OptimizationConfig {
     fn default() -> Self {
         OptimizationConfig {
-            strategy: OptimizationStrategy::Balanced,
+            strategy: OptimizationLevel::Balanced,
             max_merge_segments: 10,
             target_segment_count: 5,
             compaction_threshold: 0.1, // 10%
@@ -179,18 +178,16 @@ impl IndexOptimizer {
 
         // Perform optimization based on strategy
         let optimization_result = match self.config.strategy {
-            OptimizationStrategy::Aggressive => {
+            OptimizationLevel::Aggressive => {
                 self.optimize_aggressive(segment_manager, deletion_manager)?
             }
-            OptimizationStrategy::Balanced => {
+            OptimizationLevel::Balanced => {
                 self.optimize_balanced(segment_manager, deletion_manager)?
             }
-            OptimizationStrategy::Conservative => {
+            OptimizationLevel::Conservative => {
                 self.optimize_conservative(segment_manager, deletion_manager)?
             }
-            OptimizationStrategy::Custom => {
-                self.optimize_custom(segment_manager, deletion_manager)?
-            }
+            OptimizationLevel::Custom => self.optimize_custom(segment_manager, deletion_manager)?,
         };
 
         // Update result with optimization outcomes
@@ -466,9 +463,9 @@ impl IndexOptimizer {
         // Set overall recommendation
         if recommendations.should_compact || recommendations.should_merge_segments {
             recommendations.recommended_strategy = match recommendations.priority {
-                RecommendationPriority::High => OptimizationStrategy::Aggressive,
-                RecommendationPriority::Medium => OptimizationStrategy::Balanced,
-                RecommendationPriority::Low => OptimizationStrategy::Conservative,
+                RecommendationPriority::High => OptimizationLevel::Aggressive,
+                RecommendationPriority::Medium => OptimizationLevel::Balanced,
+                RecommendationPriority::Low => OptimizationLevel::Conservative,
             };
         }
 
@@ -502,7 +499,7 @@ pub struct OptimizationRecommendations {
     pub should_compact: bool,
 
     /// Recommended optimization strategy.
-    pub recommended_strategy: OptimizationStrategy,
+    pub recommended_strategy: OptimizationLevel,
 
     /// Priority level of the recommendation.
     pub priority: RecommendationPriority,
@@ -542,7 +539,7 @@ mod tests {
     fn test_optimization_config_default() {
         let config = OptimizationConfig::default();
 
-        assert_eq!(config.strategy, OptimizationStrategy::Balanced);
+        assert_eq!(config.strategy, OptimizationLevel::Balanced);
         assert_eq!(config.max_merge_segments, 10);
         assert_eq!(config.target_segment_count, 5);
         assert_eq!(config.compaction_threshold, 0.1);
@@ -574,7 +571,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
 
         let optimizer = IndexOptimizer::new(config, storage);
-        assert_eq!(optimizer.config.strategy, OptimizationStrategy::Balanced);
+        assert_eq!(optimizer.config.strategy, OptimizationLevel::Balanced);
     }
 
     #[test]

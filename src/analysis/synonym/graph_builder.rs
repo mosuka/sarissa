@@ -3,10 +3,9 @@
 //! This module provides the core logic for building token graphs with proper
 //! position_increment and position_length attributes for synonym expansion.
 
+use crate::analysis::synonym::dictionary::SynonymDictionary;
 use crate::analysis::token::{Token, TokenType};
 use crate::analysis::tokenizer::Tokenizer;
-
-use super::dictionary::SynonymDictionary;
 
 /// Builds token graphs with synonym expansion.
 pub struct SynonymGraphBuilder {

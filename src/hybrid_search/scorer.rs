@@ -2,10 +2,9 @@
 
 use std::collections::HashMap;
 
-use super::config::ScoreNormalization;
-use super::types::HybridSearchResult;
-
 use crate::error::Result;
+use crate::hybrid_search::config::ScoreNormalization;
+use crate::hybrid_search::types::HybridSearchResult;
 
 /// Score normalizer for hybrid search results.
 pub struct ScoreNormalizer {

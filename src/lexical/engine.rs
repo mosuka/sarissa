@@ -1,4 +1,7 @@
-//! High-level search engine that combines indexing and searching.
+//! High-level lexical search engine that combines indexing and searching.
+//!
+//! This module provides a unified interface for lexical indexing and search,
+//! similar to the VectorEngine for vector search.
 
 use std::cell::RefCell;
 use std::path::Path;
@@ -8,13 +11,14 @@ use crate::document::document::Document;
 use crate::error::Result;
 use crate::lexical::index::Index;
 use crate::lexical::index::{FileIndex, IndexConfig};
-use crate::lexical::search::SearchRequest;
 use crate::lexical::search::searcher::Searcher;
+use crate::lexical::types::SearchRequest;
 use crate::query::SearchResults;
 use crate::query::query::Query;
 use crate::storage::traits::Storage;
 
 /// A high-level lexical search engine that provides both indexing and searching capabilities.
+/// This is similar to the VectorEngine but for lexical search.
 #[derive(Debug)]
 pub struct LexicalEngine {
     /// The underlying index.

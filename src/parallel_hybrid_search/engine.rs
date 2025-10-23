@@ -6,13 +6,14 @@ use std::time::Instant;
 
 use tokio::sync::RwLock;
 
-use super::config::{LoadBalancingStrategy, ParallelHybridSearchConfig};
-use super::executor::ParallelHybridSearchExecutor;
-use super::types::{CacheStats, ParallelHybridSearchResults, SearchTimeBreakdown};
-
 use crate::embedding::engine::EmbeddingEngine;
 use crate::error::{Result, SageError};
 use crate::lexical::reader::IndexReader;
+use crate::parallel_hybrid_search::config::{LoadBalancingStrategy, ParallelHybridSearchConfig};
+use crate::parallel_hybrid_search::executor::ParallelHybridSearchExecutor;
+use crate::parallel_hybrid_search::types::{
+    CacheStats, ParallelHybridSearchResults, SearchTimeBreakdown,
+};
 use crate::query::query::Query;
 use crate::vector::reader::VectorIndexReader;
 

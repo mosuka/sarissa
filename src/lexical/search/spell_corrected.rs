@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::lexical::search::SearchRequest;
-use crate::lexical::search::engine::LexicalEngine;
+use crate::lexical::engine::LexicalEngine;
+use crate::lexical::types::SearchRequest;
 use crate::query::SearchResults;
 use crate::spelling::corrector::{
     CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector,

@@ -18,7 +18,7 @@ use crate::lexical::index::advanced_writer::AnalyzedDocument;
 /// ```rust,no_run
 /// use sage::lexical::index::advanced_writer::AdvancedIndexWriter;
 /// use sage::lexical::index::advanced_writer::AdvancedWriterConfig;
-/// use sage::lexical::index::writer::IndexWriter;
+/// use sage::lexical::writer::IndexWriter;
 /// use sage::storage::memory::MemoryStorage;
 /// use sage::storage::traits::StorageConfig;
 /// use std::sync::Arc;

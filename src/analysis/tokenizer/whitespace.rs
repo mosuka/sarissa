@@ -1,8 +1,7 @@
 //! Whitespace tokenizer implementation.
 
-use super::Tokenizer;
-
 use crate::analysis::token::{Token, TokenStream, TokenType};
+use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
 use crate::util::simd;
 

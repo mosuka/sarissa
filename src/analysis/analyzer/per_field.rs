@@ -1,10 +1,12 @@
 //! Per-field analyzer (Lucene-compatible).
 
+use std::sync::Arc;
+
+use ahash::AHashMap;
+
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::token::TokenStream;
 use crate::error::Result;
-use ahash::AHashMap;
-use std::sync::Arc;
 
 /// A per-field analyzer that applies different analyzers to different fields.
 ///

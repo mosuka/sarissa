@@ -2,11 +2,10 @@
 
 use std::collections::HashMap;
 
-use super::config::HybridSearchConfig;
-use super::scorer::ScoreNormalizer;
-use super::types::{HybridSearchResult, HybridSearchResults};
-
 use crate::error::Result;
+use crate::hybrid_search::config::HybridSearchConfig;
+use crate::hybrid_search::scorer::ScoreNormalizer;
+use crate::hybrid_search::types::{HybridSearchResult, HybridSearchResults};
 use crate::query::SearchResults;
 use crate::vector::types::VectorSearchResults;
 

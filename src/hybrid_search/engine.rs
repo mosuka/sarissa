@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use super::config::HybridSearchConfig;
-use super::merger::ResultMerger;
-use super::stats::HybridSearchStats;
-use super::types::HybridSearchResults;
 use crate::embedding::engine::EmbeddingEngine;
 use crate::error::Result;
-use crate::lexical::search::SearchRequest;
+use crate::hybrid_search::config::HybridSearchConfig;
+use crate::hybrid_search::merger::ResultMerger;
+use crate::hybrid_search::stats::HybridSearchStats;
+use crate::hybrid_search::types::HybridSearchResults;
+use crate::lexical::types::SearchRequest;
 use crate::query::SearchResults;
 use crate::query::query::Query;
 use crate::vector::types::{VectorSearchResult, VectorSearchResults};
@@ -243,7 +243,7 @@ impl HybridSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::search::SearchRequest;
+    use crate::lexical::types::SearchRequest;
     use crate::query::term::TermQuery;
     use crate::query::{SearchHit, SearchResults};
 

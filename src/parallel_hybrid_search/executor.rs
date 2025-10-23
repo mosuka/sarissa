@@ -6,16 +6,15 @@ use std::time::Instant;
 
 use rayon::ThreadPool;
 
-use super::config::ParallelHybridSearchConfig;
-use super::engine::HybridIndexHandle;
-use super::merger::ParallelHybridResultMerger;
-use super::types::{
+use crate::error::{Result, SageError};
+use crate::lexical::reader::IndexReader;
+use crate::parallel_hybrid_search::config::ParallelHybridSearchConfig;
+use crate::parallel_hybrid_search::engine::HybridIndexHandle;
+use crate::parallel_hybrid_search::merger::ParallelHybridResultMerger;
+use crate::parallel_hybrid_search::types::{
     HybridSearchTask, HybridSearchTaskResult, IndexSearchStats, ParallelHybridSearchResults,
     SearchTimeBreakdown,
 };
-
-use crate::error::{Result, SageError};
-use crate::lexical::reader::IndexReader;
 use crate::query::SearchResults;
 use crate::query::query::Query;
 use crate::vector::Vector;

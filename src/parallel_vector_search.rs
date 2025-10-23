@@ -9,15 +9,8 @@
 pub mod executor;
 pub mod merger;
 
-use std::sync::Arc;
-
-use rayon::ThreadPool;
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
-use crate::vector::search::VectorSearchEngineConfig;
-
-use crate::parallel_vector_search::executor::ParallelVectorSearchExecutor;
 use crate::parallel_vector_search::merger::MergeStrategy as SearchMergeStrategy;
 
 /// Configuration for parallel vector search operations.
@@ -35,8 +28,6 @@ pub struct ParallelVectorSearchConfig {
     pub cache_size_limit: usize,
     /// Merge strategy for combining results.
     pub merge_strategy: SearchMergeStrategy,
-    /// Base configuration for individual search engines.
-    pub base_config: VectorSearchEngineConfig,
     /// Load balancing strategy.
     pub load_balancing: LoadBalancingStrategy,
 }
@@ -50,7 +41,6 @@ impl Default for ParallelVectorSearchConfig {
             enable_result_caching: true,
             cache_size_limit: 10000,
             merge_strategy: SearchMergeStrategy::ScoreBased,
-            base_config: VectorSearchEngineConfig::default(),
             load_balancing: LoadBalancingStrategy::RoundRobin,
         }
     }
@@ -67,26 +57,6 @@ pub enum LoadBalancingStrategy {
     Random,
     /// Assign based on query characteristics.
     QueryAware,
-}
-
-/// Factory for creating parallel vector search executors.
-pub struct ParallelVectorSearchExecutorFactory;
-
-impl ParallelVectorSearchExecutorFactory {
-    /// Create a new parallel vector search executor.
-    pub fn create_executor(
-        config: ParallelVectorSearchConfig,
-    ) -> Result<ParallelVectorSearchExecutor> {
-        ParallelVectorSearchExecutor::new(config)
-    }
-
-    /// Create an executor with a specific thread pool.
-    pub fn create_executor_with_pool(
-        config: ParallelVectorSearchConfig,
-        thread_pool: Arc<ThreadPool>,
-    ) -> Result<ParallelVectorSearchExecutor> {
-        ParallelVectorSearchExecutor::with_thread_pool(config, thread_pool)
-    }
 }
 
 /// Statistics for parallel vector search operations.

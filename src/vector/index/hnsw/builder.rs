@@ -1,12 +1,17 @@
 //! HNSW (Hierarchical Navigable Small World) index builder for approximate search.
 
+use std::sync::Arc;
+
 use crate::error::{Result, SageError};
+use crate::storage::traits::Storage;
 use crate::vector::Vector;
-use crate::vector::index::{VectorIndexBuildConfig, VectorIndexBuilder};
+use crate::vector::index::VectorIndexWriterConfig;
+use crate::vector::writer::VectorIndexWriter;
 
 /// Builder for HNSW vector indexes (approximate search).
-pub struct HnswIndexBuilder {
-    config: VectorIndexBuildConfig,
+pub struct HnswIndexWriter {
+    config: VectorIndexWriterConfig,
+    storage: Option<Arc<dyn Storage>>,
     m: usize,               // Maximum number of connections per layer
     ef_construction: usize, // Size of the dynamic candidate list during construction
     _ml: f64,               // Level normalization factor
@@ -15,17 +20,97 @@ pub struct HnswIndexBuilder {
     total_vectors_to_add: Option<usize>,
 }
 
-impl HnswIndexBuilder {
+impl HnswIndexWriter {
     /// Create a new HNSW index builder.
-    pub fn new(config: VectorIndexBuildConfig) -> Result<Self> {
+    pub fn new(config: VectorIndexWriterConfig) -> Result<Self> {
         Ok(Self {
             config,
+            storage: None,
             m: 16,                     // Default M parameter
             ef_construction: 200,      // Default efConstruction parameter
             _ml: 1.0 / (2.0_f64).ln(), // 1/ln(2)
             vectors: Vec::new(),
             is_finalized: false,
             total_vectors_to_add: None,
+        })
+    }
+
+    /// Create a new HNSW index builder with storage.
+    pub fn with_storage(config: VectorIndexWriterConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+        Ok(Self {
+            config,
+            storage: Some(storage),
+            m: 16,
+            ef_construction: 200,
+            _ml: 1.0 / (2.0_f64).ln(),
+            vectors: Vec::new(),
+            is_finalized: false,
+            total_vectors_to_add: None,
+        })
+    }
+
+    /// Load an existing HNSW index from storage.
+    pub fn load(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn Storage>,
+        path: &str,
+    ) -> Result<Self> {
+        use std::io::Read;
+
+        // Open the index file
+        let file_name = format!("{}.hnsw", path);
+        let mut input = storage.open_input(&file_name)?;
+
+        // Read metadata
+        let mut num_vectors_buf = [0u8; 4];
+        input.read_exact(&mut num_vectors_buf)?;
+        let num_vectors = u32::from_le_bytes(num_vectors_buf) as usize;
+
+        let mut dimension_buf = [0u8; 4];
+        input.read_exact(&mut dimension_buf)?;
+        let dimension = u32::from_le_bytes(dimension_buf) as usize;
+
+        let mut m_buf = [0u8; 4];
+        input.read_exact(&mut m_buf)?;
+        let m = u32::from_le_bytes(m_buf) as usize;
+
+        let mut ef_construction_buf = [0u8; 4];
+        input.read_exact(&mut ef_construction_buf)?;
+        let ef_construction = u32::from_le_bytes(ef_construction_buf) as usize;
+
+        if dimension != config.dimension {
+            return Err(SageError::InvalidOperation(format!(
+                "Dimension mismatch: expected {}, found {}",
+                config.dimension, dimension
+            )));
+        }
+
+        // Read vectors
+        let mut vectors = Vec::with_capacity(num_vectors);
+        for _ in 0..num_vectors {
+            let mut doc_id_buf = [0u8; 8];
+            input.read_exact(&mut doc_id_buf)?;
+            let doc_id = u64::from_le_bytes(doc_id_buf);
+
+            let mut values = vec![0.0f32; dimension];
+            for value in &mut values {
+                let mut value_buf = [0u8; 4];
+                input.read_exact(&mut value_buf)?;
+                *value = f32::from_le_bytes(value_buf);
+            }
+
+            vectors.push((doc_id, Vector::new(values)));
+        }
+
+        Ok(Self {
+            config,
+            storage: Some(storage),
+            m,
+            ef_construction,
+            _ml: 1.0 / (2.0_f64).ln(),
+            vectors,
+            is_finalized: true,
+            total_vectors_to_add: Some(num_vectors),
         })
     }
 
@@ -144,7 +229,7 @@ impl HnswIndexBuilder {
     }
 }
 
-impl VectorIndexBuilder for HnswIndexBuilder {
+impl VectorIndexWriter for HnswIndexWriter {
     fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(SageError::InvalidOperation(
@@ -251,5 +336,45 @@ impl VectorIndexBuilder for HnswIndexBuilder {
 
     fn vectors(&self) -> &[(u64, Vector)] {
         &self.vectors
+    }
+
+    fn write(&self, path: &str) -> Result<()> {
+        use std::io::Write;
+
+        if !self.is_finalized {
+            return Err(SageError::InvalidOperation(
+                "Index must be finalized before writing".to_string(),
+            ));
+        }
+
+        let storage = self
+            .storage
+            .as_ref()
+            .ok_or_else(|| SageError::InvalidOperation("No storage configured".to_string()))?;
+
+        // Create the index file
+        let file_name = format!("{}.hnsw", path);
+        let mut output = storage.create_output(&file_name)?;
+
+        // Write metadata
+        output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
+        output.write_all(&(self.config.dimension as u32).to_le_bytes())?;
+        output.write_all(&(self.m as u32).to_le_bytes())?;
+        output.write_all(&(self.ef_construction as u32).to_le_bytes())?;
+
+        // Write vectors
+        for (doc_id, vector) in &self.vectors {
+            output.write_all(&doc_id.to_le_bytes())?;
+            for value in &vector.data {
+                output.write_all(&value.to_le_bytes())?;
+            }
+        }
+
+        output.flush()?;
+        Ok(())
+    }
+
+    fn has_storage(&self) -> bool {
+        self.storage.is_some()
     }
 }

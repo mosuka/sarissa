@@ -1,8 +1,7 @@
 //! Lowercase filter implementation.
 
-use super::Filter;
-
 use crate::analysis::token::TokenStream;
+use crate::analysis::token_filter::Filter;
 use crate::error::Result;
 use crate::util::simd;
 

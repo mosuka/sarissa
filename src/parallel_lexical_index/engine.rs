@@ -7,7 +7,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::document::document::Document;
 use crate::error::{Result, SageError};
-use crate::lexical::index::writer::IndexWriter;
+use crate::lexical::writer::IndexWriter;
 use crate::parallel_lexical_index::batch_processor::{BatchProcessingResult, BatchProcessor};
 use crate::parallel_lexical_index::config::{
     IndexingOptions, ParallelIndexConfig, PartitionConfig,

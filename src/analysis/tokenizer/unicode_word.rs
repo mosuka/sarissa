@@ -2,9 +2,8 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::Tokenizer;
-
 use crate::analysis::token::{Token, TokenStream, TokenType};
+use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
 
 /// A tokenizer that splits text on Unicode word boundaries.

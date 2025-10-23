@@ -57,6 +57,7 @@ impl VectorSearchRequest {
 /// Configuration for vector search operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorSearchConfig {
+    // 基本設定
     /// Number of results to return.
     pub top_k: usize,
     /// Minimum similarity threshold.
@@ -67,6 +68,16 @@ pub struct VectorSearchConfig {
     pub include_vectors: bool,
     /// Search timeout in milliseconds.
     pub timeout_ms: Option<u64>,
+
+    // 高度な設定（オプショナル）
+    /// Search strategy to use.
+    pub strategy: Option<crate::vector::search::SearchStrategy>,
+    /// Reranking configuration.
+    pub reranking: Option<crate::vector::search::ranking::RankingConfig>,
+    /// Post-processing filters.
+    pub filters: Vec<crate::vector::search::SearchFilter>,
+    /// Search result explanation.
+    pub explain: bool,
 }
 
 impl Default for VectorSearchConfig {
@@ -77,6 +88,10 @@ impl Default for VectorSearchConfig {
             include_scores: true,
             include_vectors: false,
             timeout_ms: None,
+            strategy: None,
+            reranking: None,
+            filters: Vec::new(),
+            explain: false,
         }
     }
 }
@@ -323,4 +338,47 @@ pub mod utils {
             .map(|vector| metric.distance(&query.data, &vector.data))
             .collect()
     }
+}
+
+/// Statistics about a vector index.
+#[derive(Debug, Clone)]
+pub struct VectorStats {
+    /// Total number of vectors in the index.
+    pub vector_count: usize,
+    /// Vector dimension.
+    pub dimension: usize,
+    /// Index memory usage in bytes.
+    pub memory_usage: usize,
+    /// Build time in milliseconds.
+    pub build_time_ms: u64,
+}
+
+/// Metadata about a vector index.
+#[derive(Debug, Clone)]
+pub struct VectorIndexMetadata {
+    /// Index type (HNSW, Flat, IVF, etc.).
+    pub index_type: String,
+    /// Creation timestamp.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Last modified timestamp.
+    pub modified_at: chrono::DateTime<chrono::Utc>,
+    /// Index version.
+    pub version: String,
+    /// Build configuration.
+    pub build_config: serde_json::Value,
+    /// Custom metadata.
+    pub custom_metadata: std::collections::HashMap<String, String>,
+}
+
+/// Index validation report.
+#[derive(Debug, Clone)]
+pub struct ValidationReport {
+    /// Whether the index is valid.
+    pub is_valid: bool,
+    /// Validation errors found.
+    pub errors: Vec<String>,
+    /// Validation warnings.
+    pub warnings: Vec<String>,
+    /// Repair suggestions.
+    pub repair_suggestions: Vec<String>,
 }

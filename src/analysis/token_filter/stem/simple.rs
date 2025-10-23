@@ -1,6 +1,6 @@
 //! Simple stemmer implementation.
 
-use super::Stemmer;
+use crate::analysis::token_filter::stem::Stemmer;
 
 /// Simple stemmer that just removes common suffixes.
 #[derive(Debug, Clone, Default)]

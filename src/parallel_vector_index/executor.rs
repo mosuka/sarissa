@@ -5,11 +5,10 @@ use std::time::Instant;
 
 use rayon::ThreadPool;
 
-use super::segment::{SegmentMetadata, VectorIndexSegment};
-
 use crate::error::{Result, SageError};
+use crate::parallel_vector_index::segment::{SegmentMetadata, VectorIndexSegment};
 use crate::vector::Vector;
-use crate::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
+use crate::vector::index::{VectorIndexWriterConfig, VectorIndexWriterFactory};
 
 /// Task for parallel vector index construction.
 #[derive(Debug, Clone)]
@@ -19,7 +18,7 @@ pub struct IndexTask {
     /// Vectors to index in this segment.
     pub vectors: Vec<(u64, Vector)>,
     /// Configuration for this segment.
-    pub config: VectorIndexBuildConfig,
+    pub config: VectorIndexWriterConfig,
 }
 
 /// Result of an index task execution.
@@ -97,7 +96,7 @@ impl ParallelIndexExecutor {
     /// Build a single segment from the task.
     fn build_segment(&self, task: IndexTask) -> Result<VectorIndexSegment> {
         // Create a builder for this segment
-        let mut builder = VectorIndexBuilderFactory::create_builder(task.config.clone())?;
+        let mut builder = VectorIndexWriterFactory::create_builder(task.config.clone())?;
 
         // Build the segment
         builder.build(task.vectors.clone())?;

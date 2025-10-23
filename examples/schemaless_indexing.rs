@@ -4,6 +4,8 @@
 //! allowing maximum flexibility in document structure.
 //! Analyzers are configured at the writer level using PerFieldAnalyzer.
 
+use std::sync::Arc;
+
 use sage::analysis::analyzer::keyword::KeywordAnalyzer;
 use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
@@ -12,7 +14,6 @@ use sage::document::field_value::FieldValue;
 use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
 use sage::storage::memory::MemoryStorage;
 use sage::storage::traits::StorageConfig;
-use std::sync::Arc;
 
 fn main() -> sage::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");

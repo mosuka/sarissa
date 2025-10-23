@@ -828,7 +828,7 @@ impl Drop for AdvancedIndexWriter {
 }
 
 // Implement IndexWriter trait for compatibility with existing code
-impl crate::lexical::index::writer::IndexWriter for AdvancedIndexWriter {
+impl crate::lexical::writer::IndexWriter for AdvancedIndexWriter {
     fn add_document(&mut self, doc: Document) -> Result<()> {
         AdvancedIndexWriter::add_document(self, doc)
     }

@@ -9,12 +9,13 @@
 //! }
 //! ```
 
+use std::sync::Arc;
+
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
-use std::sync::Arc;
 
 /// A document converter for JSON format.
 pub struct JsonDocumentConverter {

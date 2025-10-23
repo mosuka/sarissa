@@ -20,7 +20,7 @@ use sage::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
-use sage::vector::index::{VectorIndexBuildConfig, VectorIndexType};
+use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::{Vector, VectorSearchRequest};
 
@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     println!("Embeddings generated successfully!\n");
 
     // Step 4: Create vector index configuration
-    let vector_config = VectorIndexBuildConfig {
+    let vector_config = VectorIndexWriterConfig {
         dimension,
         distance_metric: DistanceMetric::Cosine,
         index_type: VectorIndexType::Flat,
