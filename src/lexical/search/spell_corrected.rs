@@ -376,7 +376,7 @@ impl SpellSearchUtils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::IndexConfig;
+    use crate::lexical::inverted_index::IndexConfig;
 
     use tempfile::TempDir;
 
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn test_spell_corrected_search_engine_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let config = crate::lexical::index::IndexConfig::default();
+        let config = crate::lexical::inverted_index::IndexConfig::default();
 
         let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);

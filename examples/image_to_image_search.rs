@@ -25,7 +25,7 @@ use sage::error::Result;
 use sage::vector::DistanceMetric;
 use sage::vector::VectorSearchRequest;
 use sage::vector::engine::VectorEngine;
-use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
+use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {

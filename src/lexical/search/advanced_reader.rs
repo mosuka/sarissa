@@ -16,7 +16,7 @@ use crate::error::{Result, SageError};
 use crate::lexical::dictionary::HybridTermDictionary;
 use crate::lexical::dictionary::TermInfo;
 use crate::lexical::doc_values::DocValuesReader;
-use crate::lexical::index::SegmentInfo;
+use crate::lexical::inverted_index::SegmentInfo;
 use crate::storage::structured::StructReader;
 use crate::storage::traits::Storage;
 

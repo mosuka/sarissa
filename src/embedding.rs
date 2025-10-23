@@ -126,33 +126,22 @@
 //! # }
 //! ```
 
-mod text_embedder;
-pub use text_embedder::TextEmbedder;
+pub mod text_embedder;
 
 // Candle implementation (requires feature flag)
 #[cfg(feature = "embeddings-candle")]
-mod candle_text_embedder;
-#[cfg(feature = "embeddings-candle")]
-pub use candle_text_embedder::CandleTextEmbedder;
+pub mod candle_text_embedder;
 
 // OpenAI implementation (requires feature flag)
 #[cfg(feature = "embeddings-openai")]
-mod openai_text_embedder;
-#[cfg(feature = "embeddings-openai")]
-pub use openai_text_embedder::OpenAITextEmbedder;
+pub mod openai_text_embedder;
 
 // Image and multimodal embeddings (requires embeddings-multimodal feature flag)
 #[cfg(feature = "embeddings-multimodal")]
-mod image_embedder;
-#[cfg(feature = "embeddings-multimodal")]
-pub use image_embedder::ImageEmbedder;
+pub mod image_embedder;
 
 #[cfg(feature = "embeddings-multimodal")]
-mod multimodal_embedder;
-#[cfg(feature = "embeddings-multimodal")]
-pub use multimodal_embedder::MultimodalEmbedder;
+pub mod multimodal_embedder;
 
 #[cfg(feature = "embeddings-multimodal")]
-mod candle_multimodal_embedder;
-#[cfg(feature = "embeddings-multimodal")]
-pub use candle_multimodal_embedder::CandleMultimodalEmbedder;
+pub mod candle_multimodal_embedder;

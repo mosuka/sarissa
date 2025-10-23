@@ -704,7 +704,7 @@ impl AdvancedIndexWriter {
 
     /// Write segment metadata.
     fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
-        use crate::lexical::index::SegmentInfo;
+        use crate::lexical::inverted_index::SegmentInfo;
 
         // Create SegmentInfo
         let segment_info = SegmentInfo {

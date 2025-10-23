@@ -75,9 +75,9 @@ impl VectorIndexWriterFactory {
     /// Create a new vector index builder based on configuration.
     pub fn create_builder(config: VectorIndexWriterConfig) -> Result<Box<dyn VectorIndexWriter>> {
         match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(flat::FlatIndexWriter::new(config)?)),
-            VectorIndexType::HNSW => Ok(Box::new(hnsw::HnswIndexWriter::new(config)?)),
-            VectorIndexType::IVF => Ok(Box::new(ivf::IvfIndexWriter::new(config)?)),
+            VectorIndexType::Flat => Ok(Box::new(flat::builder::FlatIndexWriter::new(config)?)),
+            VectorIndexType::HNSW => Ok(Box::new(hnsw::builder::HnswIndexWriter::new(config)?)),
+            VectorIndexType::IVF => Ok(Box::new(ivf::builder::IvfIndexWriter::new(config)?)),
         }
     }
 
@@ -87,13 +87,13 @@ impl VectorIndexWriterFactory {
         storage: Arc<dyn Storage>,
     ) -> Result<Box<dyn VectorIndexWriter>> {
         match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(flat::FlatIndexWriter::with_storage(
+            VectorIndexType::Flat => Ok(Box::new(flat::builder::FlatIndexWriter::with_storage(
                 config, storage,
             )?)),
-            VectorIndexType::HNSW => Ok(Box::new(hnsw::HnswIndexWriter::with_storage(
+            VectorIndexType::HNSW => Ok(Box::new(hnsw::builder::HnswIndexWriter::with_storage(
                 config, storage,
             )?)),
-            VectorIndexType::IVF => Ok(Box::new(ivf::IvfIndexWriter::with_storage(
+            VectorIndexType::IVF => Ok(Box::new(ivf::builder::IvfIndexWriter::with_storage(
                 config, storage,
             )?)),
         }
@@ -106,15 +106,15 @@ impl VectorIndexWriterFactory {
         path: &str,
     ) -> Result<Box<dyn VectorIndexWriter>> {
         match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(flat::FlatIndexWriter::load(
+            VectorIndexType::Flat => Ok(Box::new(flat::builder::FlatIndexWriter::load(
                 config, storage, path,
             )?)),
-            VectorIndexType::HNSW => Ok(Box::new(hnsw::HnswIndexWriter::load(
+            VectorIndexType::HNSW => Ok(Box::new(hnsw::builder::HnswIndexWriter::load(
                 config, storage, path,
             )?)),
-            VectorIndexType::IVF => {
-                Ok(Box::new(ivf::IvfIndexWriter::load(config, storage, path)?))
-            }
+            VectorIndexType::IVF => Ok(Box::new(ivf::builder::IvfIndexWriter::load(
+                config, storage, path,
+            )?)),
         }
     }
 }
@@ -145,10 +145,8 @@ impl VectorIndex {
         config: VectorIndexWriterConfig,
         storage: Arc<dyn Storage>,
     ) -> Result<Self> {
-        let builder = VectorIndexWriterFactory::create_builder_with_storage(
-            config.clone(),
-            storage.clone(),
-        )?;
+        let builder =
+            VectorIndexWriterFactory::create_builder_with_storage(config.clone(), storage.clone())?;
         Ok(Self {
             config,
             builder: Arc::new(RwLock::new(builder)),

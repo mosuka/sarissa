@@ -9,8 +9,7 @@ use std::sync::Arc;
 
 use crate::document::document::Document;
 use crate::error::Result;
-use crate::lexical::index::Index;
-use crate::lexical::index::{FileIndex, IndexConfig};
+use crate::lexical::inverted_index::{FileIndex, Index, IndexConfig};
 use crate::lexical::search::searcher::Searcher;
 use crate::lexical::types::SearchRequest;
 use crate::query::SearchResults;
@@ -156,7 +155,7 @@ impl LexicalEngine {
     }
 
     /// Get index statistics.
-    pub fn stats(&self) -> Result<crate::lexical::index::IndexStats> {
+    pub fn stats(&self) -> Result<crate::lexical::inverted_index::IndexStats> {
         self.index.stats()
     }
 

@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
-use crate::lexical::index::SegmentInfo;
+use crate::lexical::inverted_index::SegmentInfo;
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::traits::{Storage, StorageInput};
 
