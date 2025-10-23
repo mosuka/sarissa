@@ -273,6 +273,3 @@ impl DistanceMetric {
             .collect::<Result<Vec<_>>>()
     }
 }
-
-// Re-export commonly used types
-pub use types::{VectorSearchConfig, VectorSearchRequest, VectorSearchResult, VectorSearchResults};

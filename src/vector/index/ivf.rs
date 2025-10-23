@@ -5,7 +5,3 @@
 
 pub mod builder;
 pub mod reader;
-
-// Re-export main types for convenience
-pub use builder::IvfIndexWriter;
-pub use reader::IvfIndexReader;

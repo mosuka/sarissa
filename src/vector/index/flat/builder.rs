@@ -32,7 +32,10 @@ impl FlatIndexWriter {
     }
 
     /// Create a new flat vector index builder with storage.
-    pub fn with_storage(config: VectorIndexWriterConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+    pub fn with_storage(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn Storage>,
+    ) -> Result<Self> {
         Ok(Self {
             config,
             storage: Some(storage),

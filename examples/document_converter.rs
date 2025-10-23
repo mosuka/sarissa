@@ -10,7 +10,7 @@ use sage::document::converter::{
 };
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::IndexConfig;
+use sage::lexical::inverted_index::IndexConfig;
 use sage::lexical::types::SearchRequest;
 
 fn main() -> Result<()> {

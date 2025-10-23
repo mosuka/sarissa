@@ -42,7 +42,10 @@ impl IvfIndexWriter {
     }
 
     /// Create a new IVF index builder with storage.
-    pub fn with_storage(config: VectorIndexWriterConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+    pub fn with_storage(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn Storage>,
+    ) -> Result<Self> {
         let n_clusters = Self::compute_default_clusters(1000);
 
         Ok(Self {

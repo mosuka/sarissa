@@ -6,7 +6,3 @@
 
 pub mod builder;
 pub mod reader;
-
-// Re-export main types for convenience
-pub use builder::HnswIndexWriter;
-pub use reader::HnswIndexReader;

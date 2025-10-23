@@ -270,8 +270,8 @@ fn main() -> Result<()> {
                 let mut input = storage.open_input(&file)?;
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
-                let segment_info: sage::lexical::index::SegmentInfo = serde_json::from_slice(&data)
-                    .map_err(|e| {
+                let segment_info: sage::lexical::inverted_index::SegmentInfo =
+                    serde_json::from_slice(&data).map_err(|e| {
                         sage::error::SageError::index(format!(
                             "Failed to parse segment metadata: {e}"
                         ))

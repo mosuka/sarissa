@@ -20,7 +20,7 @@ use sage::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
-use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
+use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::{Vector, VectorSearchRequest};
 

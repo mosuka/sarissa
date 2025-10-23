@@ -14,8 +14,9 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use sage::analysis::analyzer::analyzer::Analyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::spelling::corrector::SpellingCorrector;
-use sage::vector::index::hnsw::HnswIndexWriter;
-use sage::vector::index::{VectorIndexWriterConfig, VectorIndexBuilder};
+use sage::vector::index::VectorIndexWriterConfig;
+use sage::vector::index::hnsw::builder::HnswIndexWriter;
+use sage::vector::writer::VectorIndexWriter;
 use sage::vector::{DistanceMetric, Vector};
 
 /// Generate test documents for benchmarking.
