@@ -4,5 +4,5 @@
 //! all vectors in memory and performs exact nearest neighbor search through
 //! exhaustive comparison.
 
-pub mod builder;
+pub mod writer;
 pub mod reader;
