@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "embeddings-openai")]
-use crate::embedding::TextEmbedder;
+use crate::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-openai")]
 use crate::error::{Result, SageError};
 #[cfg(feature = "embeddings-openai")]
@@ -56,7 +56,8 @@ struct EmbeddingData {
 /// # Examples
 ///
 /// ```no_run
-/// use sage::embedding::{TextEmbedder, OpenAITextEmbedder};
+/// use sage::embedding::text_embedder::TextEmbedder;
+/// use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// // Create embedder with API key
@@ -109,7 +110,7 @@ impl OpenAITextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sage::embedding::OpenAITextEmbedder;
+    /// use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
     ///
     /// # fn example() -> sage::error::Result<()> {
     /// // Small model (recommended for most use cases)
@@ -161,7 +162,7 @@ impl OpenAITextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sage::embedding::OpenAITextEmbedder;
+    /// use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
     ///
     /// # fn example() -> sage::error::Result<()> {
     /// // Use smaller dimension for cost savings

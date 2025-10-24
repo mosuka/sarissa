@@ -18,7 +18,9 @@ use hf_hub::api::sync::ApiBuilder;
 use tokenizers::Tokenizer;
 
 #[cfg(feature = "embeddings-multimodal")]
-use crate::embedding::{ImageEmbedder, TextEmbedder};
+use crate::embedding::image_embedder::ImageEmbedder;
+#[cfg(feature = "embeddings-multimodal")]
+use crate::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-multimodal")]
 use crate::error::{Result, SageError};
 #[cfg(feature = "embeddings-multimodal")]
@@ -50,7 +52,9 @@ use crate::vector::Vector;
 /// ## Text-to-Image Search
 ///
 /// ```no_run
-/// use sage::embedding::{TextEmbedder, ImageEmbedder, CandleMultimodalEmbedder};
+/// use sage::embedding::text_embedder::TextEmbedder;
+/// use sage::embedding::image_embedder::ImageEmbedder;
+/// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
@@ -73,7 +77,8 @@ use crate::vector::Vector;
 /// ## Image-to-Image Search
 ///
 /// ```no_run
-/// use sage::embedding::{ImageEmbedder, CandleMultimodalEmbedder};
+/// use sage::embedding::image_embedder::ImageEmbedder;
+/// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
@@ -123,7 +128,7 @@ impl CandleMultimodalEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sage::embedding::CandleMultimodalEmbedder;
+    /// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
     ///
     /// # fn example() -> sage::error::Result<()> {
     /// // Fast and efficient

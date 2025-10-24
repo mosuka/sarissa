@@ -29,7 +29,8 @@
 //! ```no_run
 //! # #[cfg(feature = "embeddings-candle")]
 //! # {
-//! use sage::embedding::{TextEmbedder, CandleTextEmbedder};
+//! use sage::embedding::text_embedder::TextEmbedder;
+//! use sage::embedding::candle_text_embedder::CandleTextEmbedder;
 //!
 //! # async fn example() -> sage::error::Result<()> {
 //! let embedder = CandleTextEmbedder::new(
@@ -55,7 +56,8 @@
 //! ```no_run
 //! # #[cfg(feature = "embeddings-openai")]
 //! # {
-//! use sage::embedding::{TextEmbedder, OpenAITextEmbedder};
+//! use sage::embedding::text_embedder::TextEmbedder;
+//! use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
 //!
 //! # async fn example() -> sage::error::Result<()> {
 //! let embedder = OpenAITextEmbedder::new(
@@ -75,7 +77,7 @@
 //!
 //! ```
 //! use async_trait::async_trait;
-//! use sage::embedding::TextEmbedder;
+//! use sage::embedding::text_embedder::TextEmbedder;
 //! use sage::error::Result;
 //! use sage::vector::Vector;
 //!
@@ -101,13 +103,14 @@
 //! You can switch between embedders at runtime using trait objects:
 //!
 //! ```no_run
-//! use sage::embedding::TextEmbedder;
+//! use sage::embedding::text_embedder::TextEmbedder;
 //! use std::sync::Arc;
 //!
 //! # async fn example() -> sage::error::Result<()> {
 //! #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 //! {
-//!     use sage::embedding::{CandleTextEmbedder, OpenAITextEmbedder};
+//!     use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+//!     use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
 //!
 //!     let embedder: Arc<dyn TextEmbedder> = if std::env::var("USE_OPENAI").is_ok() {
 //!         Arc::new(OpenAITextEmbedder::new(

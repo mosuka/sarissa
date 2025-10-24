@@ -1,6 +1,7 @@
 //! Multimodal embedding trait for cross-modal search.
 
-use crate::embedding::{ImageEmbedder, TextEmbedder};
+use crate::embedding::image_embedder::ImageEmbedder;
+use crate::embedding::text_embedder::TextEmbedder;
 
 /// Trait for embedders that support both text and image inputs in the same vector space.
 ///
@@ -20,7 +21,10 @@ use crate::embedding::{ImageEmbedder, TextEmbedder};
 /// ## Text-to-Image Search
 ///
 /// ```no_run
-/// use sage::embedding::{MultimodalEmbedder, TextEmbedder, ImageEmbedder, CandleMultimodalEmbedder};
+/// use sage::embedding::multimodal_embedder::MultimodalEmbedder;
+/// use sage::embedding::text_embedder::TextEmbedder;
+/// use sage::embedding::image_embedder::ImageEmbedder;
+/// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
@@ -39,7 +43,9 @@ use crate::embedding::{ImageEmbedder, TextEmbedder};
 /// ## Image-to-Image Search
 ///
 /// ```no_run
-/// use sage::embedding::{MultimodalEmbedder, ImageEmbedder, CandleMultimodalEmbedder};
+/// use sage::embedding::multimodal_embedder::MultimodalEmbedder;
+/// use sage::embedding::image_embedder::ImageEmbedder;
+/// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;

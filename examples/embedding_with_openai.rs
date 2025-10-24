@@ -16,7 +16,9 @@
 //! ```
 
 #[cfg(feature = "embeddings-openai")]
-use sage::embedding::{OpenAITextEmbedder, TextEmbedder};
+use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+#[cfg(feature = "embeddings-openai")]
+use sage::embedding::text_embedder::TextEmbedder;
 
 #[cfg(feature = "embeddings-openai")]
 #[tokio::main]

@@ -18,10 +18,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use sage::embedding::{CandleMultimodalEmbedder, ImageEmbedder, TextEmbedder};
+use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use sage::embedding::image_embedder::ImageEmbedder;
+use sage::embedding::text_embedder::TextEmbedder;
 use sage::error::Result;
 use sage::vector::DistanceMetric;
-use sage::vector::VectorSearchRequest;
+use sage::vector::types::VectorSearchRequest;
 use sage::vector::engine::VectorEngine;
 use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
 

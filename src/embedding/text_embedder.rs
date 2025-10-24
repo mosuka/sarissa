@@ -17,7 +17,8 @@ use crate::vector::Vector;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
-/// use sage::embedding::{TextEmbedder, CandleTextEmbedder};
+/// use sage::embedding::text_embedder::TextEmbedder;
+/// use sage::embedding::candle_text_embedder::CandleTextEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = CandleTextEmbedder::new(
@@ -36,7 +37,8 @@ use crate::vector::Vector;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-openai")]
 /// # {
-/// use sage::embedding::{TextEmbedder, OpenAITextEmbedder};
+/// use sage::embedding::text_embedder::TextEmbedder;
+/// use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = OpenAITextEmbedder::new(
@@ -54,7 +56,7 @@ use crate::vector::Vector;
 ///
 /// ```
 /// use async_trait::async_trait;
-/// use sage::embedding::TextEmbedder;
+/// use sage::embedding::text_embedder::TextEmbedder;
 /// use sage::error::Result;
 /// use sage::vector::Vector;
 ///

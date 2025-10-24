@@ -17,7 +17,7 @@ use hf_hub::api::sync::ApiBuilder;
 use tokenizers::Tokenizer;
 
 #[cfg(feature = "embeddings-candle")]
-use crate::embedding::TextEmbedder;
+use crate::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use crate::error::{Result, SageError};
 #[cfg(feature = "embeddings-candle")]
@@ -38,7 +38,8 @@ use crate::vector::Vector;
 /// # Examples
 ///
 /// ```no_run
-/// use sage::embedding::{TextEmbedder, CandleTextEmbedder};
+/// use sage::embedding::text_embedder::TextEmbedder;
+/// use sage::embedding::candle_text_embedder::CandleTextEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// // Create embedder with a sentence-transformers model
@@ -89,7 +90,7 @@ impl CandleTextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sage::embedding::CandleTextEmbedder;
+    /// use sage::embedding::candle_text_embedder::CandleTextEmbedder;
     ///
     /// # fn example() -> sage::error::Result<()> {
     /// // Small and fast model

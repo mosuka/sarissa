@@ -21,7 +21,8 @@ use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
 /// ```
 /// use sage::vector::engine::VectorEngine;
 /// use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
-/// use sage::vector::{Vector, DistanceMetric, VectorSearchRequest};
+/// use sage::vector::{Vector, DistanceMetric};
+/// use sage::vector::types::VectorSearchRequest;
 ///
 /// # fn main() -> sage::error::Result<()> {
 /// // Create engine
