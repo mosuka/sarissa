@@ -156,7 +156,8 @@ sage = { version = "0.1", features = ["embeddings-candle"] }
 ```
 
 ```rust
-use sage::embedding::{CandleTextEmbedder, TextEmbedder};
+use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+use sage::embedding::text_embedder::TextEmbedder;
 use sage::vector::*;
 
 // Initialize embedder with a sentence-transformers model
@@ -172,15 +173,14 @@ let documents = vec![
 let vectors = embedder.embed_batch(&documents).await?;
 
 // Build vector index
-let config = VectorIndexBuildConfig {
+let config = VectorIndexWriterConfig {
     dimension: embedder.dimension(),
     distance_metric: DistanceMetric::Cosine,
     index_type: VectorIndexType::Flat,
-    normalize_vectors: true,
     ..Default::default()
 };
 
-let mut builder = VectorIndexBuilderFactory::create_builder(config)?;
+let mut writer = sage::vector::index::VectorIndexWriter::create(config)?;
 let doc_vectors: Vec<(u64, Vector)> = documents
     .iter()
     .enumerate()
@@ -188,8 +188,8 @@ let doc_vectors: Vec<(u64, Vector)> = documents
     .map(|((idx, _), vec)| (idx as u64, vec.clone()))
     .collect();
 
-builder.add_vectors(doc_vectors)?;
-builder.finalize()?;
+writer.add_vectors(doc_vectors)?;
+writer.finalize()?;
 
 // Search with query embedding
 let query_vector = embedder.embed("programming languages").await?;
@@ -204,12 +204,13 @@ sage = { version = "0.1", features = ["embeddings-openai"] }
 ```
 
 ```rust
-use sage::embedding::{OpenAIEmbedder, TextEmbedder};
+use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+use sage::embedding::text_embedder::TextEmbedder;
 
 // Initialize with API key
-let embedder = OpenAIEmbedder::new(
-    "your-api-key",
-    "text-embedding-3-small"
+let embedder = OpenAITextEmbedder::new(
+    "your-api-key".to_string(),
+    "text-embedding-3-small".to_string()
 )?;
 
 // Generate embeddings
@@ -236,20 +237,23 @@ sage = { version = "0.1", features = ["embeddings-multimodal"] }
 #### Text-to-Image Search Example
 
 ```rust
-use sage::embedding::{CandleMultimodalEmbedder, TextEmbedder, ImageEmbedder};
-use sage::vector::index::{VectorIndexBuildConfig, VectorIndexBuilderFactory};
+use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use sage::embedding::text_embedder::TextEmbedder;
+use sage::embedding::image_embedder::ImageEmbedder;
+use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
+use sage::vector::{Vector, DistanceMetric};
 
 // Initialize CLIP embedder (automatically downloads model from HuggingFace)
 let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 
 // Create vector index with CLIP's embedding dimension (512)
-let config = VectorIndexBuildConfig {
-    dimension: embedder.dimension(), // 512 for CLIP ViT-Base-Patch32
+let config = VectorIndexWriterConfig {
+    dimension: ImageEmbedder::dimension(&embedder), // 512 for CLIP ViT-Base-Patch32
     distance_metric: DistanceMetric::Cosine,
-    index_type: VectorIndexType::HNSW,
+    index_type: VectorIndexType::Hnsw,
     ..Default::default()
 };
-let mut builder = VectorIndexBuilderFactory::create_builder(config)?;
+let mut writer = sage::vector::index::VectorIndexWriter::create(config)?;
 
 // Index your image collection
 let mut image_vectors = Vec::new();
@@ -257,8 +261,8 @@ for (id, image_path) in image_paths.iter().enumerate() {
     let vector = embedder.embed_image(image_path).await?;
     image_vectors.push((id as u64, vector));
 }
-builder.add_vectors(image_vectors)?;
-let index = builder.finalize()?;
+writer.add_vectors(image_vectors)?;
+writer.finalize()?;
 
 // Search images using natural language
 let query_vector = embedder.embed("a photo of a cat playing").await?;
@@ -480,6 +484,7 @@ Available features:
 
 - `embeddings-candle` - Local text embeddings using Candle and BERT models
 - `embeddings-openai` - OpenAI API-based text embeddings
+- `embeddings-multimodal` - Multimodal embeddings (text and images) using CLIP models
 - `embeddings-all` - All embedding providers
 
 ## 📚 Documentation
@@ -505,18 +510,3 @@ This project is licensed under either of
 - MIT License ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
 
 at your option.
-
-## 🙏 Acknowledgments
-
-- Inspired by the [Lucene](https://github.com/apache/lucene) and Lucene alternatives.
-- Built with the excellent Rust ecosystem
-
-## 📧 Contact
-
-- **Author**: [mosuka](https://github.com/mosuka)
-- **Repository**: <https://github.com/mosuka/sage>
-- **Issues**: <https://github.com/mosuka/sage/issues>
-
----
-
-*Sage - Fast, featureful full-text search for Rust* 🦀
