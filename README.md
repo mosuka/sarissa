@@ -4,22 +4,54 @@
 [![Documentation](https://docs.rs/sage/badge.svg)](https://docs.rs/sage)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A fast, featureful full-text search library for Rust, inspired by the [Lucene](https://github.com/apache/lucene) and Lucene alternatives.
+A fast, featureful search library for Rust supporting full-text search, vector search, and hybrid search. Inspired by [Apache Lucene](https://github.com/apache/lucene) and modern search engines, Sage combines the power of lexical search with semantic vector search capabilities.
 
 ## ✨ Features
 
-- **Pure Rust Implementation** - Memory-safe and fast performance
-- **Flexible Text Analysis** - Configurable tokenization, stemming, and filtering pipeline
-- **Multiple Storage Backends** - File system, memory-mapped files, and in-memory storage
-- **Advanced Query Types** - Term, phrase, range, boolean, fuzzy, wildcard, and geographic queries
-- **Vector Search** - HNSW-based approximate nearest neighbor search with multiple distance metrics
-- **Text Embeddings** - Built-in support for generating embeddings with Candle (local BERT models) and OpenAI
+### Core Search Capabilities
+
+- **Pure Rust Implementation** - Memory-safe and fast performance with zero-cost abstractions
+- **Lexical Search** - Full-text search with inverted index and BM25 scoring
+- **Vector Search** - HNSW-based approximate nearest neighbor search with multiple distance metrics (Cosine, Euclidean, Dot Product)
+- **Hybrid Search** - Combined lexical and vector search with configurable score fusion strategies
+
+### Text Analysis
+
+- **Flexible Text Analysis Pipeline** - Configurable tokenization, stemming, and filtering
+- **Multi-language Support** - Built-in support for Japanese, Korean, and Chinese via Lindera
+- **Custom Analyzers** - Create custom analysis pipelines with pluggable tokenizers and filters
+- **Synonym Support** - Synonym expansion for improved recall
+
+### Advanced Query Types
+
+- **Term Query** - Simple keyword matching
+- **Phrase Query** - Exact phrase matching with positional information
+- **Boolean Query** - Complex combinations with AND/OR/NOT logic
+- **Range Query** - Numeric and date range queries
+- **Fuzzy Query** - Approximate string matching with edit distance
+- **Wildcard Query** - Pattern matching with * and ? wildcards
+- **Geographic Query** - Location-based search with distance and bounding box queries
+
+### Embedding & Semantic Search
+
+- **Text Embeddings** - Generate semantic embeddings with Candle (local BERT models) or OpenAI API
 - **Multimodal Search** - Cross-modal search with CLIP models for text-to-image and image-to-image similarity
-- **BM25 Scoring** - Industry-standard relevance scoring with customizable parameters
-- **Spell Correction** - Built-in spell checking and query suggestion system
-- **Faceted Search** - Multi-dimensional search with facet aggregation
-- **Real-time Search** - Near real-time search with background index optimization
+- **Automatic Model Loading** - Models are automatically downloaded from HuggingFace on first use
+- **GPU Acceleration** - Automatic GPU usage when available for embedding generation
+
+### Storage & Performance
+
+- **Multiple Storage Backends** - Filesystem, memory-mapped files, and in-memory storage
 - **SIMD Acceleration** - Optimized vector operations for improved performance
+- **Parallel Processing** - Multi-threaded indexing and search operations
+- **Incremental Updates** - Real-time document addition without full reindexing
+
+### Additional Features
+
+- **Spell Correction** - Built-in spell checking and query suggestion system
+- **Faceted Search** - Multi-dimensional search with facet aggregation and filtering
+- **Schemaless Indexing** - Dynamic schema support for flexible document structures
+- **Document Parsing** - Built-in support for various document formats
 
 ## 🚀 Quick Start
 
@@ -33,25 +65,20 @@ sage = "0.1"
 ### Basic Usage
 
 ```rust
-use sage::prelude::*;
+use sage::document::document::Document;
+use sage::error::Result;
+use sage::lexical::engine::LexicalEngine;
+use sage::lexical::inverted_index::IndexConfig;
+use sage::query::term::TermQuery;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
     // Create a temporary directory for the index
     let temp_dir = TempDir::new().unwrap();
-    
-    // Define a schema
-    let mut schema = Schema::new();
-    schema.add_field("title", Box::new(TextField::new().stored(true).indexed(true)))?;
-    schema.add_field("content", Box::new(TextField::new().indexed(true)))?;
-    
-    // Create a search engine
-    let mut engine = SearchEngine::create_in_dir(
-        temp_dir.path(), 
-        schema, 
-        IndexConfig::default()
-    )?;
-    
+
+    // Create a lexical search engine
+    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+
     // Add documents
     let documents = vec![
         Document::builder()
@@ -59,23 +86,23 @@ fn main() -> Result<()> {
             .add_text("content", "Rust is a systems programming language")
             .build(),
         Document::builder()
-            .add_text("title", "Python Guide") 
+            .add_text("title", "Python Guide")
             .add_text("content", "Python is a versatile programming language")
             .build(),
     ];
-    
+
     engine.add_documents(documents)?;
     engine.commit()?;
-    
+
     // Search documents
     let query = TermQuery::new("content".to_string(), "programming".to_string());
     let results = engine.search(&query, 10)?;
-    
+
     println!("Found {} matches", results.total_hits);
     for hit in results.hits {
-        println!("Score: {:.2}, Document: {:?}", hit.score, hit.document);
+        println!("Score: {:.2}, Document ID: {}", hit.score, hit.doc_id);
     }
-    
+
     Ok(())
 }
 ```
@@ -86,33 +113,45 @@ Sage is built with a modular architecture:
 
 ### Core Components
 
-- **Schema & Fields** - Define document structure with typed fields (text, numeric, boolean, geographic)
+- **Schema & Fields** - Define document structure with typed fields (text, numeric, boolean, geographic, vector)
 - **Analysis Pipeline** - Configurable text processing with tokenizers, filters, and stemmers
-- **Storage Layer** - Pluggable storage backends with transaction support
-- **Index Structure** - Inverted index with posting lists and term dictionaries
+- **Storage Layer** - Pluggable storage backends (filesystem, memory-mapped, in-memory) with transaction support
+- **Lexical Index** - Inverted index with posting lists and term dictionaries for full-text search
+- **Vector Index** - HNSW-based approximate nearest neighbor search for semantic similarity
+- **Hybrid Search** - Combined lexical and vector search with configurable score fusion
 - **Query Engine** - Flexible query system supporting multiple query types
-- **Search Engine** - High-level interface combining indexing and search operations
+- **Parallel Processing** - Multi-threaded indexing and search operations for improved performance
 
 ### Field Types
 
+Sage supports the following field value types through the `Document` builder API:
+
 ```rust
-// Text field for full-text search
-TextField::new().stored(true).indexed(true)
+use sage::document::document::Document;
 
-// Numeric field for range queries
-NumericField::new().indexed(true)
+let doc = Document::builder()
+    // Text field for full-text search
+    .add_text("title", "Introduction to Rust")
 
-// Boolean field for filtering
-BooleanField::new().indexed(true)
+    // Integer field for numeric queries
+    .add_integer("year", 2024)
 
-// ID field for exact matches
-IdField::new()
+    // Float field for floating-point values
+    .add_float("price", 49.99)
 
-// Geographic field for spatial queries  
-GeoField::new().indexed(true)
+    // Boolean field for filtering
+    .add_boolean("published", true)
 
-// Vector field for similarity search
-VectorField::new(128).indexed(true) // 128-dimensional vectors
+    // DateTime field for temporal queries
+    .add_datetime("created_at", chrono::Utc::now())
+
+    // Geographic field for spatial queries
+    .add_geo("location", 35.6762, 139.6503) // latitude, longitude
+
+    // Binary field for arbitrary data
+    .add_binary("thumbnail", vec![0u8, 1, 2, 3])
+
+    .build();
 ```
 
 ### Query Types
@@ -158,42 +197,51 @@ sage = { version = "0.1", features = ["embeddings-candle"] }
 ```rust
 use sage::embedding::candle_text_embedder::CandleTextEmbedder;
 use sage::embedding::text_embedder::TextEmbedder;
-use sage::vector::*;
+use sage::vector::DistanceMetric;
+use sage::vector::engine::VectorEngine;
+use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
+use tempfile::TempDir;
 
-// Initialize embedder with a sentence-transformers model
-let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
+#[tokio::main]
+async fn main() -> sage::error::Result<()> {
+    // Initialize embedder with a sentence-transformers model
+    let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
 
-// Generate embeddings for documents
-let documents = vec![
-    "Rust is a systems programming language",
-    "Python is great for data science",
-    "Machine learning with neural networks",
-];
+    // Generate embeddings for documents
+    let documents = vec![
+        (1, "Rust is a systems programming language"),
+        (2, "Python is great for data science"),
+        (3, "Machine learning with neural networks"),
+    ];
 
-let vectors = embedder.embed_batch(&documents).await?;
+    // Build vector index
+    let temp_dir = TempDir::new()?;
+    let config = VectorIndexWriterConfig {
+        dimension: embedder.dimension(),
+        distance_metric: DistanceMetric::Cosine,
+        index_type: VectorIndexType::Hnsw,
+        ..Default::default()
+    };
 
-// Build vector index
-let config = VectorIndexWriterConfig {
-    dimension: embedder.dimension(),
-    distance_metric: DistanceMetric::Cosine,
-    index_type: VectorIndexType::Flat,
-    ..Default::default()
-};
+    let mut engine = VectorEngine::create_in_dir(temp_dir.path(), config)?;
 
-let mut writer = sage::vector::index::VectorIndexWriter::create(config)?;
-let doc_vectors: Vec<(u64, Vector)> = documents
-    .iter()
-    .enumerate()
-    .zip(vectors.iter())
-    .map(|((idx, _), vec)| (idx as u64, vec.clone()))
-    .collect();
+    // Add documents with their embeddings
+    for (id, text) in &documents {
+        let vector = embedder.embed(text).await?;
+        engine.add_vector(*id, vector)?;
+    }
+    engine.commit()?;
 
-writer.add_vectors(doc_vectors)?;
-writer.finalize()?;
+    // Search with query embedding
+    let query_vector = embedder.embed("programming languages").await?;
+    let results = engine.search(&query_vector, 10)?;
 
-// Search with query embedding
-let query_vector = embedder.embed("programming languages").await?;
-// Perform similarity search...
+    for result in results.hits {
+        println!("Doc ID: {}, Score: {:.4}", result.doc_id, result.score);
+    }
+
+    Ok(())
+}
 ```
 
 #### Using OpenAI Embeddings
@@ -240,33 +288,44 @@ sage = { version = "0.1", features = ["embeddings-multimodal"] }
 use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use sage::embedding::text_embedder::TextEmbedder;
 use sage::embedding::image_embedder::ImageEmbedder;
+use sage::vector::engine::VectorEngine;
 use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
-use sage::vector::{Vector, DistanceMetric};
+use sage::vector::DistanceMetric;
+use tempfile::TempDir;
 
-// Initialize CLIP embedder (automatically downloads model from HuggingFace)
-let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
+#[tokio::main]
+async fn main() -> sage::error::Result<()> {
+    // Initialize CLIP embedder (automatically downloads model from HuggingFace)
+    let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 
-// Create vector index with CLIP's embedding dimension (512)
-let config = VectorIndexWriterConfig {
-    dimension: ImageEmbedder::dimension(&embedder), // 512 for CLIP ViT-Base-Patch32
-    distance_metric: DistanceMetric::Cosine,
-    index_type: VectorIndexType::Hnsw,
-    ..Default::default()
-};
-let mut writer = sage::vector::index::VectorIndexWriter::create(config)?;
+    // Create vector index with CLIP's embedding dimension (512)
+    let temp_dir = TempDir::new()?;
+    let config = VectorIndexWriterConfig {
+        dimension: ImageEmbedder::dimension(&embedder), // 512 for CLIP ViT-Base-Patch32
+        distance_metric: DistanceMetric::Cosine,
+        index_type: VectorIndexType::Hnsw,
+        ..Default::default()
+    };
+    let mut engine = VectorEngine::create_in_dir(temp_dir.path(), config)?;
 
-// Index your image collection
-let mut image_vectors = Vec::new();
-for (id, image_path) in image_paths.iter().enumerate() {
-    let vector = embedder.embed_image(image_path).await?;
-    image_vectors.push((id as u64, vector));
+    // Index your image collection
+    let image_paths = vec!["image1.jpg", "image2.jpg", "image3.jpg"];
+    for (id, image_path) in image_paths.iter().enumerate() {
+        let vector = embedder.embed_image(image_path).await?;
+        engine.add_vector(id as u64, vector)?;
+    }
+    engine.commit()?;
+
+    // Search images using natural language
+    let query_vector = embedder.embed("a photo of a cat playing").await?;
+    let results = engine.search(&query_vector, 10)?;
+
+    for result in results.hits {
+        println!("Image ID: {}, Score: {:.4}", result.doc_id, result.score);
+    }
+
+    Ok(())
 }
-writer.add_vectors(image_vectors)?;
-writer.finalize()?;
-
-// Search images using natural language
-let query_vector = embedder.embed("a photo of a cat playing").await?;
-let results = index.search(&query_vector, 10)?;
 ```
 
 #### Image-to-Image Search Example
@@ -274,7 +333,11 @@ let results = index.search(&query_vector, 10)?;
 ```rust
 // Find visually similar images using an image as query
 let query_image_vector = embedder.embed_image("query.jpg").await?;
-let similar_images = index.search(&query_image_vector, 5)?;
+let similar_images = engine.search(&query_image_vector, 5)?;
+
+for result in similar_images.hits {
+    println!("Similar Image ID: {}, Score: {:.4}", result.doc_id, result.score);
+}
 ```
 
 #### How It Works
@@ -312,24 +375,30 @@ cargo run --example image_to_image_search --features embeddings-multimodal -- qu
 ### Faceted Search
 
 ```rust
-use sage::search::facet::*;
+use sage::lexical::search::facet::{FacetedSearchEngine, FacetConfig};
+use sage::query::term::TermQuery;
 
-// Configure faceted search
-let mut search_request = SearchRequest::new(query)
-    .add_facet("category".to_string(), FacetRequest::terms(10))
-    .add_facet("price".to_string(), FacetRequest::range(vec![
-        (0.0, 50.0),
-        (50.0, 100.0), 
-        (100.0, f64::INFINITY)
-    ]));
+// Create faceted search engine
+let facet_config = FacetConfig {
+    max_facet_count: 10,
+    min_count: 1,
+};
 
-let results = engine.search_with_facets(&search_request)?;
+let mut faceted_engine = FacetedSearchEngine::new(
+    engine,
+    vec!["category".to_string(), "author".to_string()],
+    facet_config,
+)?;
+
+// Perform faceted search
+let query = TermQuery::new("content".to_string(), "programming".to_string());
+let results = faceted_engine.search(&query, 10)?;
 
 // Access facet results
-for facet in results.facets {
-    println!("Facet: {}", facet.field);
-    for bucket in facet.buckets {
-        println!("  {}: {} documents", bucket.label, bucket.count);
+for facet in &results.facets {
+    println!("Facet field: {}", facet.field);
+    for count in &facet.counts {
+        println!("  {}: {} documents", count.value, count.count);
     }
 }
 ```
@@ -337,36 +406,65 @@ for facet in results.facets {
 ### Spell Correction
 
 ```rust
-use sage::spelling::*;
+use sage::spelling::corrector::{SpellingCorrector, CorrectorConfig};
+use sage::spelling::dictionary::Dictionary;
 
-// Create spell corrector
-let corrector = SpellCorrector::new()
-    .max_edit_distance(2)
-    .min_word_frequency(5);
+// Build a dictionary from your corpus
+let mut dictionary = Dictionary::new();
+dictionary.add_word("programming", 100);
+dictionary.add_word("program", 80);
+dictionary.add_word("programmer", 60);
+
+// Create spell corrector with configuration
+let config = CorrectorConfig {
+    max_edit_distance: 2,
+    min_word_frequency: 5,
+    max_suggestions: 5,
+};
+
+let corrector = SpellingCorrector::new(dictionary, config);
 
 // Check and suggest corrections
-if let Some(suggestion) = corrector.suggest("progamming")? {
-    println!("Did you mean: '{}'?", suggestion.suggestion);
+if let Some(correction) = corrector.correct("progamming") {
+    println!("Did you mean: '{}'? (confidence: {:.2})",
+        correction.suggestion, correction.confidence);
 }
 ```
 
 ### Custom Analysis Pipeline
 
 ```rust
-use sage::analysis::*;
+use sage::analysis::analyzer::pipeline::PipelineAnalyzer;
+use sage::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+use sage::analysis::token_filter::lowercase::LowercaseFilter;
+use sage::analysis::token_filter::stop::StopWordFilter;
 
-// Create custom analyzer
-let analyzer = Analyzer::new()
-    .tokenizer(Box::new(RegexTokenizer::new(r"\w+")?))
-    .add_filter(Box::new(LowercaseFilter::new()))
-    .add_filter(Box::new(StopWordFilter::english()))
-    .add_filter(Box::new(PorterStemmer::new()));
+// Create custom analyzer with multiple filters
+let mut analyzer = PipelineAnalyzer::new(Box::new(WhitespaceTokenizer));
+analyzer.add_filter(Box::new(LowercaseFilter));
+analyzer.add_filter(Box::new(StopWordFilter::english()));
 
-// Use in field definition
-let field = TextField::new()
-    .analyzer(analyzer)
-    .stored(true)
-    .indexed(true);
+// Analyze text
+let text = "The Quick Brown Fox Jumps Over the Lazy Dog";
+let tokens = analyzer.analyze(text)?;
+
+for token in tokens {
+    println!("Token: {}, Position: {}", token.text, token.position);
+}
+```
+
+For language-specific tokenization (Japanese, Korean, Chinese):
+
+```rust
+use sage::analysis::tokenizer::lindera::LinderaTokenizer;
+use sage::analysis::analyzer::pipeline::PipelineAnalyzer;
+
+// Japanese tokenization with Lindera
+let tokenizer = LinderaTokenizer::japanese()?;
+let analyzer = PipelineAnalyzer::new(Box::new(tokenizer));
+
+let text = "東京は日本の首都です";
+let tokens = analyzer.analyze(text)?;
 ```
 
 ## 📊 Performance
@@ -423,33 +521,35 @@ Sage includes numerous examples demonstrating various features:
 
 ### Lexical Search Examples
 
-- `term_query` - Basic term-based search
-- `phrase_query` - Multi-word phrase matching
-- `boolean_query` - Combining queries with AND/OR/NOT logic
-- `fuzzy_query` - Fuzzy string matching with edit distance
-- `wildcard_query` - Pattern matching with wildcards
-- `range_query` - Numeric and date range queries
-- `geo_query` - Geographic location-based search
-- `field_specific_search` - Search within specific fields
-- `lexical_search` - Full lexical search example
-- `query_parser` - Parsing user query strings
+- [term_query](examples/term_query.rs) - Basic term-based search
+- [phrase_query](examples/phrase_query.rs) - Multi-word phrase matching
+- [boolean_query](examples/boolean_query.rs) - Combining queries with AND/OR/NOT logic
+- [fuzzy_query](examples/fuzzy_query.rs) - Fuzzy string matching with edit distance
+- [wildcard_query](examples/wildcard_query.rs) - Pattern matching with wildcards
+- [range_query](examples/range_query.rs) - Numeric and date range queries
+- [geo_query](examples/geo_query.rs) - Geographic location-based search
+- [field_specific_search](examples/field_specific_search.rs) - Search within specific fields
+- [lexical_search](examples/lexical_search.rs) - Full lexical search example
+- [query_parser](examples/query_parser.rs) - Parsing user query strings
 
 ### Vector Search Examples
 
-- `vector_search` - Semantic text search using CandleTextEmbedder
-- `embedding_with_candle` - Local BERT model embeddings
-- `embedding_with_openai` - OpenAI API embeddings
-- `dynamic_embedder_switching` - Switch between embedding providers
+- [vector_search](examples/vector_search.rs) - Semantic text search using vector embeddings
+- [embedding_with_candle](examples/embedding_with_candle.rs) - Local BERT model embeddings
+- [embedding_with_openai](examples/embedding_with_openai.rs) - OpenAI API embeddings
+- [dynamic_embedder_switching](examples/dynamic_embedder_switching.rs) - Switch between embedding providers
+- [text_to_image_search](examples/text_to_image_search.rs) - Text-to-image search with CLIP
+- [image_to_image_search](examples/image_to_image_search.rs) - Image similarity search
 
 ### Advanced Features
 
-- `parallel_search` - Parallel search execution
-- `schemaless_indexing` - Dynamic schema management
-- `synonym_graph_filter` - Synonym expansion in queries
-- `keyword_based_intent_classifier` - Intent classification
-- `ml_based_intent_classifier` - ML-powered intent detection
-- `document_parser` - Parsing various document formats
-- `document_converter` - Converting between document formats
+- [parallel_search](examples/parallel_search.rs) - Parallel search execution
+- [schemaless_indexing](examples/schemaless_indexing.rs) - Dynamic schema management
+- [synonym_graph_filter](examples/synonym_graph_filter.rs) - Synonym expansion in queries
+- [keyword_based_intent_classifier](examples/keyword_based_intent_classifier.rs) - Intent classification
+- [ml_based_intent_classifier](examples/ml_based_intent_classifier.rs) - ML-powered intent detection
+- [document_parser](examples/document_parser.rs) - Parsing various document formats
+- [document_converter](examples/document_converter.rs) - Converting between document formats
 
 Run any example with:
 
@@ -459,6 +559,8 @@ cargo run --example <example_name>
 # For embedding examples, use feature flags:
 cargo run --example vector_search --features embeddings-candle
 cargo run --example embedding_with_openai --features embeddings-openai
+cargo run --example text_to_image_search --features embeddings-multimodal
+cargo run --example image_to_image_search --features embeddings-multimodal
 ```
 
 ## 🔧 Feature Flags
