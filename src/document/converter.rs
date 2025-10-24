@@ -1,30 +1,46 @@
-//! Document converter for creating documents from strings.
+//! Document converter for creating documents from files.
 //!
 //! This module provides a DocumentConverter trait and various implementations
-//! that can convert different formats into Document objects.
+//! that can convert different file formats into Document objects.
+
+use std::path::Path;
 
 use crate::document::document::Document;
 use crate::error::Result;
 
 pub mod csv;
-pub mod field_value;
-pub mod json;
+pub mod jsonl;
 
-/// A trait for converting various formats into Document objects.
+/// A trait for converting various file formats into Document iterators.
 ///
-/// This trait allows for extensible document conversion from different formats
-/// like field:value, JSON, YAML, PDF, etc.
+/// This trait allows for extensible document conversion from different file formats
+/// like CSV, JSONL, etc.
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run
 /// use sage::document::converter::DocumentConverter;
-/// use sage::document::converter::field_value::FieldValueDocumentConverter;
+/// use sage::document::converter::csv::CsvDocumentConverter;
+/// use sage::document::converter::jsonl::JsonlDocumentConverter;
 ///
-/// let converter = FieldValueDocumentConverter::new();
-/// let doc = converter.convert("title:Rust Programming\nbody:Search engine tutorial").unwrap();
+/// // CSV converter
+/// let csv_converter = CsvDocumentConverter::new();
+/// for doc in csv_converter.convert("documents.csv").unwrap() {
+///     let doc = doc.unwrap();
+///     println!("CSV Document: {:?}", doc);
+/// }
+///
+/// // JSONL converter
+/// let jsonl_converter = JsonlDocumentConverter::new();
+/// for doc in jsonl_converter.convert("documents.jsonl").unwrap() {
+///     let doc = doc.unwrap();
+///     println!("JSONL Document: {:?}", doc);
+/// }
 /// ```
 pub trait DocumentConverter {
-    /// Convert input string into a Document.
-    fn convert(&self, input: &str) -> Result<Document>;
+    /// The iterator type that yields documents.
+    type Iter: Iterator<Item = Result<Document>>;
+
+    /// Convert a file into an iterator of Documents.
+    fn convert<P: AsRef<Path>>(&self, path: P) -> Result<Self::Iter>;
 }

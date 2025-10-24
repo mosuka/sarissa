@@ -1,17 +1,18 @@
 //! Example demonstrating DocumentConverter usage.
 //!
-//! This example shows how to use DocumentConverter to create documents from strings,
-//! which can then be analyzed with DocumentParser (similar to QueryParser).
+//! This example shows how to use DocumentConverter to create documents from files,
+//! supporting both CSV and JSONL formats with various features including GeoPoint support.
 
-use tempfile::TempDir;
+use std::io::Write;
+use tempfile::{NamedTempFile, TempDir};
 
 use sage::document::converter::{
-    DocumentConverter, field_value::FieldValueDocumentConverter, json::JsonDocumentConverter,
+    csv::CsvDocumentConverter, jsonl::JsonlDocumentConverter, DocumentConverter,
 };
+use sage::document::field_value::FieldValue;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::inverted_index::IndexConfig;
-use sage::lexical::types::SearchRequest;
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");
@@ -20,136 +21,196 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}\n", temp_dir.path());
 
-    // Create search engine first
+    // Create search engine
     let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
-    println!("=== Example 1: Field:Value Format ===\n");
+    // ===================================================================
+    // Example 1: JSONL Format with nested GeoPoint objects
+    // ===================================================================
+    println!("=== Example 1: JSONL Format with GeoPoint ===\n");
 
-    // Create field:value document converter
-    let converter = FieldValueDocumentConverter::new();
+    let mut jsonl_file = NamedTempFile::new().unwrap();
+    writeln!(
+        jsonl_file,
+        r#"{{"id": "LOC-001", "title": "Tokyo Tower", "city": "Tokyo", "location": {{"lat": 35.6762, "lon": 139.6503}}}}"#
+    )
+    .unwrap();
+    writeln!(
+        jsonl_file,
+        r#"{{"id": "LOC-002", "title": "Eiffel Tower", "city": "Paris", "location": {{"lat": 48.8584, "lon": 2.2945}}}}"#
+    )
+    .unwrap();
+    writeln!(
+        jsonl_file,
+        r#"{{"id": "LOC-003", "title": "Statue of Liberty", "city": "New York", "location": {{"lat": 40.6892, "lon": -74.0445}}}}"#
+    )
+    .unwrap();
+    jsonl_file.flush().unwrap();
 
-    // Parse documents from field:value format
-    let doc1_text = r#"
-id:PROD-001
-title:Wireless Headphones
-category:electronics
-description:High-quality wireless headphones with noise cancellation
-price:199.99
-in_stock:true
-    "#;
+    let jsonl_converter = JsonlDocumentConverter::new();
 
-    let doc1 = converter.convert(doc1_text)?;
-    println!("Converted document 1:");
-    println!("  Fields: {:?}", doc1.field_names());
-    engine.add_document(doc1)?;
+    let mut doc_count = 0;
+    for result in jsonl_converter.convert(jsonl_file.path())? {
+        let doc = result?;
+        doc_count += 1;
 
-    let doc2_text = r#"
-id:BOOK-002
-title:Rust Programming Language
-category:books
-description:The official Rust book for learning Rust
-price:39.99
-pages:552
-in_stock:true
-    "#;
-
-    let doc2 = converter.convert(doc2_text)?;
-    println!("\nConverted document 2:");
-    println!("  Fields: {:?}", doc2.field_names());
-    engine.add_document(doc2)?;
-
-    let doc3_text = r#"
-id:SOFT-003
-title:Sage Search Engine
-category:software
-description:Fast and flexible full-text search engine in Rust
-price:0.0
-in_stock:true
-    "#;
-
-    let doc3 = converter.convert(doc3_text)?;
-    println!("\nConverted document 3:");
-    println!("  Fields: {:?}", doc3.field_names());
-    engine.add_document(doc3)?;
-
-    engine.commit()?;
-    println!("\n✓ All documents indexed successfully\n");
-
-    println!("=== Example 2: JSON Format ===\n");
-
-    // Create JSON document converter
-    let json_converter = JsonDocumentConverter::new();
-
-    let json_doc = r#"{
-        "id": "GAME-004",
-        "title": "Puzzle Game Collection",
-        "category": "games",
-        "description": "A collection of classic puzzle games",
-        "price": 29.99,
-        "in_stock": false
-    }"#;
-
-    let doc4 = json_converter.convert(json_doc)?;
-    println!("Converted JSON document:");
-    println!("  Fields: {:?}", doc4.field_names());
-    engine.add_document(doc4)?;
-    engine.commit()?;
-
-    println!("\n=== Example 3: Search Parsed Documents ===\n");
-
-    // Search by category (using KeywordAnalyzer - exact match)
-    println!("Search: category:electronics");
-    let query_parser = sage::query::parser::QueryParser::new();
-    let query = query_parser.parse_field("category", "electronics")?;
-    let results = engine.search(SearchRequest::new(query).load_documents(true))?;
-
-    println!("Found {} results:", results.total_hits);
-    for hit in results.hits.iter() {
-        if let Some(doc) = &hit.document
-            && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
-        {
-            println!("  - {title}");
+        if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
+            print!("  Loaded: {}", title);
+            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                println!(" at ({:.4}, {:.4})", geo.lat, geo.lon);
+            } else {
+                println!();
+            }
         }
+
+        engine.add_document(doc)?;
     }
 
-    // Search in description
-    println!("\nSearch: description:rust");
-    let query = query_parser.parse_field("description", "rust")?;
-    let results = engine.search(SearchRequest::new(query).load_documents(true))?;
+    engine.commit()?;
+    println!("✓ {} documents from JSONL indexed\n", doc_count);
 
-    println!("Found {} results:", results.total_hits);
-    for hit in results.hits.iter() {
-        if let Some(doc) = &hit.document
-            && let Some(title) = doc.get_field("title").and_then(|f| f.as_text())
-        {
-            println!("  - {title}");
+    // ===================================================================
+    // Example 2: CSV Format with dot notation for GeoPoint
+    // ===================================================================
+    println!("=== Example 2: CSV Format with location.lat/lon ===\n");
+
+    let mut csv_file = NamedTempFile::new().unwrap();
+    writeln!(csv_file, "id,name,city,location.lat,location.lon").unwrap();
+    writeln!(csv_file, "RES-001,Sushi Restaurant,Tokyo,35.6812,139.7671").unwrap();
+    writeln!(csv_file, "RES-002,Pizza Place,New York,40.7580,-73.9855").unwrap();
+    writeln!(csv_file, "RES-003,Cafe de Paris,Paris,48.8606,2.3376").unwrap();
+    csv_file.flush().unwrap();
+
+    let csv_converter = CsvDocumentConverter::new();
+
+    doc_count = 0;
+    for result in csv_converter.convert(csv_file.path())? {
+        let doc = result?;
+        doc_count += 1;
+
+        if let Some(name) = doc.get_field("name").and_then(|f| f.as_text()) {
+            print!("  Loaded: {}", name);
+            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                println!(" at ({:.4}, {:.4})", geo.lat, geo.lon);
+            } else {
+                println!();
+            }
         }
+
+        engine.add_document(doc)?;
     }
 
-    println!("\n=== Example 4: Type Inference ===\n");
+    engine.commit()?;
+    println!("✓ {} documents from CSV indexed\n", doc_count);
 
-    let type_test = r#"
-name:Test Document
-count:42
-rating:4.5
-active:true
-inactive:false
-    "#;
+    // ===================================================================
+    // Example 3: Type inference demonstration
+    // ===================================================================
+    println!("=== Example 3: Type Inference ===\n");
 
-    let type_doc = converter.convert(type_test)?;
-    println!("Type inference demonstration:");
-    println!("  name (text): {:?}", type_doc.get_field("name"));
-    println!("  count (integer): {:?}", type_doc.get_field("count"));
-    println!("  rating (float): {:?}", type_doc.get_field("rating"));
-    println!("  active (boolean): {:?}", type_doc.get_field("active"));
-    println!("  inactive (boolean): {:?}", type_doc.get_field("inactive"));
+    let mut types_file = NamedTempFile::new().unwrap();
+    writeln!(types_file, "name,count,price,active,rating").unwrap();
+    writeln!(types_file, "Product A,42,19.99,true,4.5").unwrap();
+    writeln!(types_file, "Product B,100,29.99,false,4.8").unwrap();
+    csv_file.flush().unwrap();
 
-    println!("\n=== Symmetry with QueryParser ===\n");
-    println!("Document side:");
-    println!("  String → DocumentConverter → Document → DocumentParser → AnalyzedDocument");
-    println!("\nQuery side:");
-    println!("  String → QueryParser → Query");
-    println!("\n✓ Both parsers use PerFieldAnalyzer for consistent analysis!");
+    doc_count = 0;
+    for result in csv_converter.convert(types_file.path())? {
+        let doc = result?;
+        doc_count += 1;
+
+        if doc_count == 1 {
+            // Show types for first document
+            println!("  Field types detected:");
+            if let Some(name) = doc.get_field("name") {
+                println!("    name: {:?} (Text)", name);
+            }
+            if let Some(count) = doc.get_field("count") {
+                println!("    count: {:?} (Integer)", count);
+            }
+            if let Some(price) = doc.get_field("price") {
+                println!("    price: {:?} (Float)", price);
+            }
+            if let Some(active) = doc.get_field("active") {
+                println!("    active: {:?} (Boolean)", active);
+            }
+            if let Some(rating) = doc.get_field("rating") {
+                println!("    rating: {:?} (Float)", rating);
+            }
+        }
+
+        engine.add_document(doc)?;
+    }
+
+    engine.commit()?;
+    println!("\n✓ {} documents with type inference indexed\n", doc_count);
+
+    // ===================================================================
+    // Example 4: Using resources files (if they exist)
+    // ===================================================================
+    println!("=== Example 4: Loading from resources/ (if available) ===\n");
+
+    if std::path::Path::new("resources/documents.csv").exists() {
+        println!("Loading from resources/documents.csv...");
+        let mut count = 0;
+        for result in csv_converter.convert("resources/documents.csv")? {
+            let doc = result?;
+            count += 1;
+            if count <= 3 {
+                if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
+                    print!("  {}: {}", count, title);
+                    if let Some(city) = doc.get_field("city").and_then(|f| f.as_text()) {
+                        print!(" ({})", city);
+                    }
+                    if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                        print!(" [{:.2}, {:.2}]", geo.lat, geo.lon);
+                    }
+                    println!();
+                }
+            }
+        }
+        println!("  ... (loaded {} total documents)", count);
+    } else {
+        println!("  resources/documents.csv not found (skipping)");
+    }
+
+    if std::path::Path::new("resources/documents.jsonl").exists() {
+        println!("\nLoading from resources/documents.jsonl...");
+        let mut count = 0;
+        for result in jsonl_converter.convert("resources/documents.jsonl")? {
+            let doc = result?;
+            count += 1;
+            if count <= 3 {
+                if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
+                    print!("  {}: {}", count, title);
+                    if let Some(city) = doc.get_field("city").and_then(|f| f.as_text()) {
+                        print!(" ({})", city);
+                    }
+                    if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                        print!(" [{:.2}, {:.2}]", geo.lat, geo.lon);
+                    }
+                    println!();
+                }
+            }
+        }
+        println!("  ... (loaded {} total documents)", count);
+    } else {
+        println!("  resources/documents.jsonl not found (skipping)");
+    }
+
+    // ===================================================================
+    // Summary
+    // ===================================================================
+    println!("\n=== Summary ===\n");
+    println!("DocumentConverter features:");
+    println!("  ✓ JSONL format: One JSON object per line");
+    println!("  ✓ CSV format: First row as header, subsequent rows as data");
+    println!("  ✓ Automatic type inference (Integer, Float, Boolean, Text)");
+    println!("  ✓ GeoPoint support:");
+    println!("    - JSONL: Nested {{\"lat\": 35.6, \"lon\": 139.7}} objects");
+    println!("    - CSV: Dot notation (location.lat, location.lon columns)");
+    println!("  ✓ Iterator-based streaming for memory efficiency");
+    println!("  ✓ Multiple GeoPoint fields per document supported");
 
     Ok(())
 }

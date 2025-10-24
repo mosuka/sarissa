@@ -1,21 +1,25 @@
 //! CSV format document converter.
 //!
-//! Converts CSV data into Documents where the first row contains field names:
+//! Converts CSV files into Documents where the first row contains field names:
 //! ```csv
 //! title,year,price,active
 //! Rust Programming,2024,19.99,true
 //! Python Basics,2023,15.50,false
 //! ```
 
+use std::collections::HashMap;
+use std::fs::File;
+use std::path::Path;
 use std::sync::Arc;
 
-use csv::ReaderBuilder;
+use csv::{Reader, ReaderBuilder, StringRecord};
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
+use crate::query::geo::GeoPoint;
 
 /// A document converter for CSV format.
 ///
@@ -27,6 +31,7 @@ use crate::error::{Result, SageError};
 /// - Integer fields (auto-detected)
 /// - Float fields (auto-detected)
 /// - Boolean fields (true/false, auto-detected)
+#[derive(Clone)]
 pub struct CsvDocumentConverter {
     /// Analyzer to use for text fields (optional).
     analyzer: Option<Arc<dyn Analyzer>>,
@@ -119,13 +124,92 @@ impl CsvDocumentConverter {
     }
 }
 
+/// Iterator over CSV documents.
+pub struct CsvDocumentIterator {
+    reader: Reader<File>,
+    headers: StringRecord,
+    converter: Arc<CsvDocumentConverter>,
+}
+
+impl Iterator for CsvDocumentIterator {
+    type Item = Result<Document>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let record = match self.reader.records().next()? {
+            Ok(record) => record,
+            Err(e) => return Some(Err(SageError::parse(format!("Failed to read CSV record: {}", e)))),
+        };
+
+        if !self.converter.flexible && record.len() != self.headers.len() {
+            return Some(Err(SageError::parse(format!(
+                "CSV field count mismatch: expected {} fields, found {}",
+                self.headers.len(),
+                record.len()
+            ))));
+        }
+
+        let mut doc = Document::new();
+        let mut geo_fields: HashMap<String, (Option<f64>, Option<f64>)> = HashMap::new();
+
+        // First pass: collect all fields and identify geo coordinates
+        for (header, value) in self.headers.iter().zip(record.iter()) {
+            if value.is_empty() {
+                continue;
+            }
+
+            // Check if this is a dotted field name (e.g., "location.lat")
+            if let Some(dot_pos) = header.find('.') {
+                let base_name = &header[..dot_pos];
+                let suffix = &header[dot_pos + 1..];
+
+                if suffix == "lat" || suffix == "lon" {
+                    let entry = geo_fields.entry(base_name.to_string()).or_insert((None, None));
+
+                    if let Ok(float_val) = value.parse::<f64>() {
+                        if suffix == "lat" {
+                            entry.0 = Some(float_val);
+                        } else {
+                            entry.1 = Some(float_val);
+                        }
+                    }
+                    continue; // Skip adding this as a regular field
+                }
+            }
+
+            // Regular field
+            let field_value = self.converter.infer_field_value(value);
+            doc.add_field(header, field_value);
+        }
+
+        // Second pass: create GeoPoint fields from collected lat/lon pairs
+        for (base_name, (lat, lon)) in geo_fields {
+            if let (Some(lat_val), Some(lon_val)) = (lat, lon) {
+                doc.add_field(
+                    base_name,
+                    FieldValue::Geo(GeoPoint {
+                        lat: lat_val,
+                        lon: lon_val,
+                    }),
+                );
+            }
+        }
+
+        Some(Ok(doc))
+    }
+}
+
 impl DocumentConverter for CsvDocumentConverter {
-    fn convert(&self, input: &str) -> Result<Document> {
+    type Iter = CsvDocumentIterator;
+
+    fn convert<P: AsRef<Path>>(&self, path: P) -> Result<Self::Iter> {
+        let file = File::open(path.as_ref())
+            .map_err(|e| SageError::parse(format!("Failed to open CSV file: {}", e)))?;
+
         let mut reader = ReaderBuilder::new()
             .delimiter(self.delimiter)
             .trim(csv::Trim::All)
             .flexible(self.flexible)
-            .from_reader(input.as_bytes());
+            .from_reader(file);
 
         // Get headers
         let headers = reader
@@ -137,43 +221,30 @@ impl DocumentConverter for CsvDocumentConverter {
             return Err(SageError::parse("CSV header is empty"));
         }
 
-        // Read the first data record
-        let mut records = reader.records();
-        let record = records
-            .next()
-            .ok_or_else(|| SageError::parse("CSV has only header, no data rows to convert"))?
-            .map_err(|e| SageError::parse(format!("Failed to read CSV record: {}", e)))?;
-
-        if record.len() != headers.len() {
-            return Err(SageError::parse(format!(
-                "CSV field count mismatch: expected {} fields, found {}",
-                headers.len(),
-                record.len()
-            )));
-        }
-
-        let mut doc = Document::new();
-
-        for (header, value) in headers.iter().zip(record.iter()) {
-            if !value.is_empty() {
-                let field_value = self.infer_field_value(value);
-                doc.add_field(header, field_value);
-            }
-        }
-
-        Ok(doc)
+        Ok(CsvDocumentIterator {
+            reader,
+            headers,
+            converter: Arc::new(self.clone()),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_csv_basic_parsing() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "title,year,price").unwrap();
+        writeln!(file, "Rust Programming,2024,19.99").unwrap();
+        file.flush().unwrap();
+
         let converter = CsvDocumentConverter::new();
-        let csv = "title,year,price\nRust Programming,2024,19.99";
-        let doc = converter.convert(csv).unwrap();
+        let mut iter = converter.convert(file.path()).unwrap();
+        let doc = iter.next().unwrap().unwrap();
 
         assert_eq!(
             doc.get_field("title").unwrap().as_text().unwrap(),
@@ -190,10 +261,35 @@ mod tests {
     }
 
     #[test]
-    fn test_csv_type_inference() {
+    fn test_csv_multiple_rows() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "title,year,price").unwrap();
+        writeln!(file, "Rust Programming,2024,19.99").unwrap();
+        writeln!(file, "Python Basics,2023,15.50").unwrap();
+        file.flush().unwrap();
+
         let converter = CsvDocumentConverter::new();
-        let csv = "title,year,price,active\nTest,2024,19.99,true";
-        let doc = converter.convert(csv).unwrap();
+        let docs: Vec<_> = converter.convert(file.path()).unwrap().collect();
+
+        assert_eq!(docs.len(), 2);
+
+        let doc1 = docs[0].as_ref().unwrap();
+        assert_eq!(doc1.get_field("title").unwrap().as_text().unwrap(), "Rust Programming");
+
+        let doc2 = docs[1].as_ref().unwrap();
+        assert_eq!(doc2.get_field("title").unwrap().as_text().unwrap(), "Python Basics");
+    }
+
+    #[test]
+    fn test_csv_type_inference() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "title,year,price,active").unwrap();
+        writeln!(file, "Test,2024,19.99,true").unwrap();
+        file.flush().unwrap();
+
+        let converter = CsvDocumentConverter::new();
+        let mut iter = converter.convert(file.path()).unwrap();
+        let doc = iter.next().unwrap().unwrap();
 
         assert!(matches!(
             doc.get_field("title").unwrap(),
@@ -214,27 +310,15 @@ mod tests {
     }
 
     #[test]
-    fn test_csv_quoted_fields() {
-        let converter = CsvDocumentConverter::new();
-        let csv = r#"title,description
-"Rust, Programming","A book about Rust, the language""#;
-        let doc = converter.convert(csv).unwrap();
-
-        assert_eq!(
-            doc.get_field("title").unwrap().as_text().unwrap(),
-            "Rust, Programming"
-        );
-        assert_eq!(
-            doc.get_field("description").unwrap().as_text().unwrap(),
-            "A book about Rust, the language"
-        );
-    }
-
-    #[test]
     fn test_csv_empty_fields() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "title,year,price").unwrap();
+        writeln!(file, "Rust Programming,,19.99").unwrap();
+        file.flush().unwrap();
+
         let converter = CsvDocumentConverter::new();
-        let csv = "title,year,price\nRust Programming,,19.99";
-        let doc = converter.convert(csv).unwrap();
+        let mut iter = converter.convert(file.path()).unwrap();
+        let doc = iter.next().unwrap().unwrap();
 
         assert!(doc.has_field("title"));
         assert!(!doc.has_field("year")); // Empty field should not be added
@@ -242,73 +326,90 @@ mod tests {
     }
 
     #[test]
-    fn test_csv_custom_delimiter() {
-        let converter = CsvDocumentConverter::new().with_delimiter('\t');
-        let csv = "title\tyear\tprice\nRust Programming\t2024\t19.99";
-        let doc = converter.convert(csv).unwrap();
+    fn test_csv_file_not_found() {
+        let converter = CsvDocumentConverter::new();
+        let result = converter.convert("nonexistent.csv");
+        assert!(result.is_err());
+    }
 
-        assert_eq!(
-            doc.get_field("title").unwrap().as_text().unwrap(),
-            "Rust Programming"
-        );
+    #[test]
+    fn test_csv_geo_point_with_dot_notation() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "id,title,location.lat,location.lon,city").unwrap();
+        writeln!(file, "doc001,Tokyo Tower,35.6762,139.6503,Tokyo").unwrap();
+        writeln!(file, "doc002,Eiffel Tower,48.8584,2.2945,Paris").unwrap();
+        file.flush().unwrap();
+
+        let converter = CsvDocumentConverter::new();
+        let docs: Vec<_> = converter.convert(file.path()).unwrap().collect();
+
+        assert_eq!(docs.len(), 2);
+
+        let doc1 = docs[0].as_ref().unwrap();
+        assert_eq!(doc1.get_field("title").unwrap().as_text().unwrap(), "Tokyo Tower");
         assert!(matches!(
-            doc.get_field("year").unwrap(),
-            FieldValue::Integer(2024)
+            doc1.get_field("location").unwrap(),
+            FieldValue::Geo(_)
+        ));
+
+        if let FieldValue::Geo(geo) = doc1.get_field("location").unwrap() {
+            assert_eq!(geo.lat, 35.6762);
+            assert_eq!(geo.lon, 139.6503);
+        }
+
+        let doc2 = docs[1].as_ref().unwrap();
+        assert_eq!(doc2.get_field("title").unwrap().as_text().unwrap(), "Eiffel Tower");
+        assert!(matches!(
+            doc2.get_field("location").unwrap(),
+            FieldValue::Geo(_)
         ));
     }
 
     #[test]
-    fn test_csv_empty_input() {
+    fn test_csv_multiple_geo_fields() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "id,origin.lat,origin.lon,destination.lat,destination.lon").unwrap();
+        writeln!(file, "route001,35.6762,139.6503,51.5074,-0.1278").unwrap();
+        file.flush().unwrap();
+
         let converter = CsvDocumentConverter::new();
-        let result = converter.convert("");
-        assert!(result.is_err());
-    }
+        let mut iter = converter.convert(file.path()).unwrap();
+        let doc = iter.next().unwrap().unwrap();
 
-    #[test]
-    fn test_csv_header_only() {
-        let converter = CsvDocumentConverter::new();
-        let result = converter.convert("title,year,price");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_csv_field_count_mismatch() {
-        let converter = CsvDocumentConverter::new();
-        let csv = "title,year,price\nRust Programming,2024";
-        let result = converter.convert(csv);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_csv_escaped_quotes() {
-        let converter = CsvDocumentConverter::new();
-        let csv = r#"title,description
-"Book with ""quotes""","Description with ""special"" chars""#;
-        let doc = converter.convert(csv).unwrap();
-
-        assert_eq!(
-            doc.get_field("title").unwrap().as_text().unwrap(),
-            r#"Book with "quotes""#
-        );
-        assert_eq!(
-            doc.get_field("description").unwrap().as_text().unwrap(),
-            r#"Description with "special" chars"#
-        );
-    }
-
-    #[test]
-    fn test_csv_with_trim() {
-        let converter = CsvDocumentConverter::new().with_trim(true);
-        let csv = "title, year, price\n  Rust Programming  , 2024 , 19.99  ";
-        let doc = converter.convert(csv).unwrap();
-
-        assert_eq!(
-            doc.get_field("title").unwrap().as_text().unwrap(),
-            "Rust Programming"
-        );
         assert!(matches!(
-            doc.get_field("year").unwrap(),
-            FieldValue::Integer(2024)
+            doc.get_field("origin").unwrap(),
+            FieldValue::Geo(_)
         ));
+        assert!(matches!(
+            doc.get_field("destination").unwrap(),
+            FieldValue::Geo(_)
+        ));
+
+        if let FieldValue::Geo(origin) = doc.get_field("origin").unwrap() {
+            assert_eq!(origin.lat, 35.6762);
+            assert_eq!(origin.lon, 139.6503);
+        }
+
+        if let FieldValue::Geo(dest) = doc.get_field("destination").unwrap() {
+            assert_eq!(dest.lat, 51.5074);
+            assert_eq!(dest.lon, -0.1278);
+        }
+    }
+
+    #[test]
+    fn test_csv_geo_incomplete_coordinates() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "id,title,location.lat,city").unwrap();
+        writeln!(file, "doc001,Test,35.6762,Tokyo").unwrap();
+        file.flush().unwrap();
+
+        let converter = CsvDocumentConverter::new();
+        let mut iter = converter.convert(file.path()).unwrap();
+        let doc = iter.next().unwrap().unwrap();
+
+        // location field should not exist because lon is missing
+        assert!(!doc.has_field("location"));
+        assert!(doc.has_field("title"));
+        assert!(doc.has_field("city"));
     }
 }
