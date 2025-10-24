@@ -21,7 +21,7 @@ use crate::vector::Vector;
 /// # Example
 ///
 /// ```rust,no_run
-/// use sage::vector::index::hnsw::HnswIndexWriter;
+/// use sage::vector::index::hnsw::writer::HnswIndexWriter;
 /// use sage::vector::index::VectorIndexWriterConfig;
 /// use sage::vector::writer::VectorIndexWriter;
 /// use sage::storage::memory::MemoryStorage;

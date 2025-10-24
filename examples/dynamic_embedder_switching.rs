@@ -18,7 +18,11 @@
 use std::sync::Arc;
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use sage::embedding::{CandleTextEmbedder, OpenAITextEmbedder, TextEmbedder};
+use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+#[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
+use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+#[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
+use sage::embedding::text_embedder::TextEmbedder;
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 #[tokio::main]

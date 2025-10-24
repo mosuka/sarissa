@@ -15,7 +15,8 @@ use crate::vector::Vector;
 /// ## Using Candle CLIP embedder (requires `embeddings-multimodal` feature)
 ///
 /// ```no_run
-/// use sage::embedding::{ImageEmbedder, CandleMultimodalEmbedder};
+/// use sage::embedding::image_embedder::ImageEmbedder;
+/// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
 /// # async fn example() -> sage::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
@@ -32,7 +33,7 @@ use crate::vector::Vector;
 ///
 /// ```
 /// use async_trait::async_trait;
-/// use sage::embedding::ImageEmbedder;
+/// use sage::embedding::image_embedder::ImageEmbedder;
 /// use sage::error::Result;
 /// use sage::vector::Vector;
 ///

@@ -12,7 +12,9 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
-use sage::embedding::{CandleTextEmbedder, TextEmbedder};
+use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+#[cfg(feature = "embeddings-candle")]
+use sage::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use sage::error::Result;
 #[cfg(feature = "embeddings-candle")]
@@ -22,7 +24,9 @@ use sage::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
 #[cfg(feature = "embeddings-candle")]
-use sage::vector::{Vector, VectorSearchRequest};
+use sage::vector::types::VectorSearchRequest;
+#[cfg(feature = "embeddings-candle")]
+use sage::vector::Vector;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]

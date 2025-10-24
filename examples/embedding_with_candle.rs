@@ -11,7 +11,9 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
-use sage::embedding::{CandleTextEmbedder, TextEmbedder};
+use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+#[cfg(feature = "embeddings-candle")]
+use sage::embedding::text_embedder::TextEmbedder;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
