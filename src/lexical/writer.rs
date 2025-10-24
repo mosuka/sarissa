@@ -1,31 +1,31 @@
 //! Index writer trait and common types.
 //!
 //! This module defines the `IndexWriter` trait which all index writer
-//! implementations must follow. The primary implementation is `AdvancedIndexWriter`
-//! in the `advanced_writer` module.
+//! implementations must follow. The primary implementation is `InvertedIndexWriter`
+//! in the `inverted_index_writer` module.
 
 use crate::document::document::Document;
 use crate::error::Result;
-use crate::lexical::index::advanced_writer::AnalyzedDocument;
+use crate::lexical::index::writer::inverted_index::AnalyzedDocument;
 
 /// Trait for index writers.
 ///
 /// This trait defines the common interface that all index writer implementations
-/// must follow. The primary implementation is `AdvancedIndexWriter`.
+/// must follow. The primary implementation is `InvertedIndexWriter`.
 ///
 /// # Example
 ///
 /// ```rust,no_run
-/// use sage::lexical::index::advanced_writer::AdvancedIndexWriter;
-/// use sage::lexical::index::advanced_writer::AdvancedWriterConfig;
+/// use sage::lexical::index::writer::inverted_index::InvertedIndexWriter;
+/// use sage::lexical::index::writer::inverted_index::InvertedIndexWriterConfig;
 /// use sage::lexical::writer::IndexWriter;
 /// use sage::storage::memory::MemoryStorage;
 /// use sage::storage::traits::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-/// let config = AdvancedWriterConfig::default();
-/// let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
+/// let config = InvertedIndexWriterConfig::default();
+/// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
 ///
 /// // Use IndexWriter trait methods
 /// // writer.add_document(doc).unwrap();

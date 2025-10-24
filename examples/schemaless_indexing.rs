@@ -11,7 +11,9 @@ use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::document::document::Document;
 use sage::document::field_value::FieldValue;
-use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+use sage::lexical::index::writer::inverted_index::{
+    InvertedIndexWriter, InvertedIndexWriterConfig,
+};
 use sage::storage::memory::MemoryStorage;
 use sage::storage::traits::StorageConfig;
 
@@ -29,13 +31,13 @@ fn main() -> sage::error::Result<()> {
 
     // Create storage and writer configuration
     let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-    let config = AdvancedWriterConfig {
+    let config = InvertedIndexWriterConfig {
         analyzer: Arc::new(per_field_analyzer),
         ..Default::default()
     };
 
     // Create writer in schema-less mode (no schema required!)
-    let mut writer = AdvancedIndexWriter::new(storage, config)?;
+    let mut writer = InvertedIndexWriter::new(storage, config)?;
     println!("✓ Created schema-less IndexWriter with PerFieldAnalyzer");
 
     println!("\n=== Adding E-commerce Product Documents ===");

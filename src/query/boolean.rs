@@ -488,7 +488,9 @@ impl Default for BooleanQueryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::lexical::index::reader::inverted_index::{
+        InvertedIndexReader, InvertedIndexReaderConfig,
+    };
     use crate::query::term::TermQuery;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;
@@ -558,7 +560,8 @@ mod tests {
     fn test_boolean_query_matcher() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader =
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
+                .unwrap();
 
         let query = BooleanQueryBuilder::new()
             .must(Box::new(TermQuery::new("title", "hello")))
@@ -573,7 +576,8 @@ mod tests {
     fn test_boolean_query_scorer() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader =
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
+                .unwrap();
 
         let query = BooleanQueryBuilder::new()
             .must(Box::new(TermQuery::new("title", "hello")))
@@ -602,7 +606,8 @@ mod tests {
     fn test_empty_boolean_query() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader =
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
+                .unwrap();
 
         let query = BooleanQuery::new();
 

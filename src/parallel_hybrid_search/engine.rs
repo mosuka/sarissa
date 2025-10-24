@@ -434,7 +434,7 @@ impl Clone for HybridIndexHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::lexical::index::reader::inverted_index::{InvertedIndexReader, InvertedIndexReaderConfig};
     use crate::query::term::TermQuery;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;
@@ -442,7 +442,7 @@ mod tests {
     fn create_test_keyword_reader() -> Arc<dyn IndexReader> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Arc::new(
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap(),
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default()).unwrap(),
         )
     }
 

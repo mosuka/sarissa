@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+use crate::lexical::index::reader::inverted_index::{
+    InvertedIndexReader, InvertedIndexReaderConfig,
+};
 use crate::parallel_lexical_search::config::{ParallelSearchConfig, SearchOptions};
 use crate::parallel_lexical_search::engine::ParallelSearchEngine;
 use crate::query::term::TermQuery;
@@ -26,10 +28,10 @@ pub fn example_parallel_search() -> Result<()> {
     // Add multiple indices to the engine
     for i in 0..3 {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let reader = Box::new(AdvancedIndexReader::new(
+        let reader = Box::new(InvertedIndexReader::new(
             vec![],
             storage,
-            AdvancedReaderConfig::default(),
+            InvertedIndexReaderConfig::default(),
         )?);
         engine.add_index(format!("index_{i}"), reader, 1.0)?;
     }

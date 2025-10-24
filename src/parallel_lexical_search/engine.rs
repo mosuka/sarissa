@@ -230,8 +230,9 @@ impl ParallelSearchEngine {
         };
 
         // Create searcher for this index
-        let searcher =
-            crate::lexical::search::searcher::Searcher::from_arc(Arc::clone(&index_handle.reader));
+        let searcher = crate::lexical::search::searcher::inverted_index::Searcher::from_arc(
+            Arc::clone(&index_handle.reader),
+        );
 
         // Create search request
         let mut request = SearchRequest::new(task.query)
@@ -277,7 +278,9 @@ impl ParallelSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::lexical::index::reader::inverted_index::{
+        InvertedIndexReader, InvertedIndexReaderConfig,
+    };
     use crate::query::term::TermQuery;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;
@@ -285,7 +288,8 @@ mod tests {
     fn create_test_reader() -> Box<dyn IndexReader> {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         Box::new(
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap(),
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
+                .unwrap(),
         )
     }
 

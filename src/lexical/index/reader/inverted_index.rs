@@ -22,7 +22,7 @@ use crate::storage::traits::Storage;
 
 /// Advanced index reader configuration.
 #[derive(Debug, Clone)]
-pub struct AdvancedReaderConfig {
+pub struct InvertedIndexReaderConfig {
     /// Maximum memory for caching (in bytes).
     pub max_cache_memory: usize,
 
@@ -39,9 +39,9 @@ pub struct AdvancedReaderConfig {
     pub max_cached_terms_per_field: usize,
 }
 
-impl Default for AdvancedReaderConfig {
+impl Default for InvertedIndexReaderConfig {
     fn default() -> Self {
-        AdvancedReaderConfig {
+        InvertedIndexReaderConfig {
             max_cache_memory: 128 * 1024 * 1024, // 128MB
             enable_term_cache: true,
             enable_posting_cache: true,
@@ -55,7 +55,7 @@ impl Default for AdvancedReaderConfig {
 
 /// Advanced posting iterator with block-based optimization.
 #[derive(Debug)]
-pub struct AdvancedPostingIterator {
+pub struct InvertedIndexPostingIterator {
     /// The posting data.
     postings: Vec<crate::lexical::posting::Posting>,
 
@@ -88,10 +88,10 @@ pub struct PostingBlock {
     pub count: usize,
 }
 
-impl AdvancedPostingIterator {
+impl InvertedIndexPostingIterator {
     /// Create a new advanced posting iterator.
     pub fn new(postings: Vec<crate::lexical::posting::Posting>) -> Self {
-        AdvancedPostingIterator {
+        InvertedIndexPostingIterator {
             postings,
             position: 0,
             block_cache: None,
@@ -103,7 +103,7 @@ impl AdvancedPostingIterator {
     /// Create posting iterator with block optimization.
     pub fn with_blocks(postings: Vec<crate::lexical::posting::Posting>, block_size: usize) -> Self {
         let blocks = Self::create_blocks(&postings, block_size);
-        AdvancedPostingIterator {
+        InvertedIndexPostingIterator {
             postings,
             position: 0,
             block_cache: Some(blocks),
@@ -163,7 +163,7 @@ impl AdvancedPostingIterator {
     }
 }
 
-impl crate::lexical::reader::PostingIterator for AdvancedPostingIterator {
+impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
     fn doc_id(&self) -> u64 {
         if self.position < self.postings.len() {
             self.postings[self.position].doc_id
@@ -661,7 +661,7 @@ impl SegmentReader {
             use crate::lexical::posting::PostingList;
             let posting_list = PostingList::decode(&mut reader)?;
 
-            Ok(Some(Box::new(AdvancedPostingIterator::with_blocks(
+            Ok(Some(Box::new(InvertedIndexPostingIterator::with_blocks(
                 posting_list.postings,
                 64,
             ))))
@@ -716,7 +716,7 @@ impl SegmentReader {
             if postings.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(Box::new(AdvancedPostingIterator::with_blocks(
+                Ok(Some(Box::new(InvertedIndexPostingIterator::with_blocks(
                     postings, 64,
                 ))))
             }
@@ -828,7 +828,7 @@ impl CacheStats {
 
 /// Advanced index reader with multi-segment support (schema-less mode).
 #[derive(Debug)]
-pub struct AdvancedIndexReader {
+pub struct InvertedIndexReader {
     /// Segment readers.
     segment_readers: Vec<Arc<RwLock<SegmentReader>>>,
 
@@ -837,7 +837,7 @@ pub struct AdvancedIndexReader {
 
     /// Reader configuration.
     #[allow(dead_code)]
-    config: AdvancedReaderConfig,
+    config: InvertedIndexReaderConfig,
 
     /// Whether the reader is closed.
     closed: AtomicBool,
@@ -846,12 +846,12 @@ pub struct AdvancedIndexReader {
     total_doc_count: u64,
 }
 
-impl AdvancedIndexReader {
+impl InvertedIndexReader {
     /// Create a new advanced index reader (schema-less mode).
     pub fn new(
         segments: Vec<SegmentInfo>,
         storage: Arc<dyn Storage>,
-        config: AdvancedReaderConfig,
+        config: InvertedIndexReaderConfig,
     ) -> Result<Self> {
         let cache_manager = Arc::new(CacheManager::new(config.max_cache_memory));
         let mut segment_readers = Vec::new();
@@ -868,7 +868,7 @@ impl AdvancedIndexReader {
             segment_readers.push(Arc::new(RwLock::new(reader)));
         }
 
-        Ok(AdvancedIndexReader {
+        Ok(InvertedIndexReader {
             segment_readers,
             cache_manager,
             config,
@@ -915,7 +915,7 @@ impl AdvancedIndexReader {
     }
 }
 
-impl crate::lexical::reader::IndexReader for AdvancedIndexReader {
+impl crate::lexical::reader::IndexReader for InvertedIndexReader {
     fn doc_count(&self) -> u64 {
         self.total_doc_count
     }
@@ -1168,7 +1168,7 @@ mod tests {
             },
         ];
 
-        let mut iter = AdvancedPostingIterator::with_blocks(postings, 2);
+        let mut iter = InvertedIndexPostingIterator::with_blocks(postings, 2);
 
         // Test skip_to functionality
         assert!(iter.skip_to(5).unwrap());

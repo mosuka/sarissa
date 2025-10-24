@@ -12,11 +12,11 @@ use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::lexical::dictionary::TermDictionaryBuilder;
 use crate::lexical::dictionary::TermInfo;
+use crate::lexical::index::reader::inverted_index::InvertedIndexReader;
 use crate::lexical::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::lexical::inverted_index::SegmentInfo;
 use crate::lexical::posting::InvertedIndex;
 use crate::lexical::reader::IndexReader;
-use crate::lexical::search::advanced_reader::AdvancedIndexReader;
 use crate::storage::structured::StructWriter;
 use crate::storage::traits::Storage;
 
@@ -373,9 +373,10 @@ impl MergeEngine {
         let segments = vec![segment_info.clone()];
 
         // Use default config for reader
-        let config = crate::lexical::search::advanced_reader::AdvancedReaderConfig::default();
+        let config =
+            crate::lexical::index::reader::inverted_index::InvertedIndexReaderConfig::default();
 
-        let reader = AdvancedIndexReader::new(segments, self.storage.clone(), config)?;
+        let reader = InvertedIndexReader::new(segments, self.storage.clone(), config)?;
         Ok(Box::new(reader) as Box<dyn IndexReader>)
     }
 

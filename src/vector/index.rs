@@ -6,12 +6,11 @@
 //! - Vector quantization and compression
 //! - Index optimization and maintenance
 
-pub mod flat;
-pub mod hnsw;
-pub mod ivf;
 pub mod optimization;
 pub mod quantization;
+pub mod reader;
 pub mod reader_factory;
+pub mod writer;
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
@@ -75,9 +74,9 @@ impl VectorIndexWriterFactory {
     /// Create a new vector index builder based on configuration.
     pub fn create_builder(config: VectorIndexWriterConfig) -> Result<Box<dyn VectorIndexWriter>> {
         match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(flat::writer::FlatIndexWriter::new(config)?)),
-            VectorIndexType::HNSW => Ok(Box::new(hnsw::writer::HnswIndexWriter::new(config)?)),
-            VectorIndexType::IVF => Ok(Box::new(ivf::writer::IvfIndexWriter::new(config)?)),
+            VectorIndexType::Flat => Ok(Box::new(writer::flat::FlatIndexWriter::new(config)?)),
+            VectorIndexType::HNSW => Ok(Box::new(writer::hnsw::HnswIndexWriter::new(config)?)),
+            VectorIndexType::IVF => Ok(Box::new(writer::ivf::IvfIndexWriter::new(config)?)),
         }
     }
 
@@ -87,13 +86,13 @@ impl VectorIndexWriterFactory {
         storage: Arc<dyn Storage>,
     ) -> Result<Box<dyn VectorIndexWriter>> {
         match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(flat::writer::FlatIndexWriter::with_storage(
+            VectorIndexType::Flat => Ok(Box::new(writer::flat::FlatIndexWriter::with_storage(
                 config, storage,
             )?)),
-            VectorIndexType::HNSW => Ok(Box::new(hnsw::writer::HnswIndexWriter::with_storage(
+            VectorIndexType::HNSW => Ok(Box::new(writer::hnsw::HnswIndexWriter::with_storage(
                 config, storage,
             )?)),
-            VectorIndexType::IVF => Ok(Box::new(ivf::writer::IvfIndexWriter::with_storage(
+            VectorIndexType::IVF => Ok(Box::new(writer::ivf::IvfIndexWriter::with_storage(
                 config, storage,
             )?)),
         }
@@ -106,13 +105,13 @@ impl VectorIndexWriterFactory {
         path: &str,
     ) -> Result<Box<dyn VectorIndexWriter>> {
         match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(flat::writer::FlatIndexWriter::load(
+            VectorIndexType::Flat => Ok(Box::new(writer::flat::FlatIndexWriter::load(
                 config, storage, path,
             )?)),
-            VectorIndexType::HNSW => Ok(Box::new(hnsw::writer::HnswIndexWriter::load(
+            VectorIndexType::HNSW => Ok(Box::new(writer::hnsw::HnswIndexWriter::load(
                 config, storage, path,
             )?)),
-            VectorIndexType::IVF => Ok(Box::new(ivf::writer::IvfIndexWriter::load(
+            VectorIndexType::IVF => Ok(Box::new(writer::ivf::IvfIndexWriter::load(
                 config, storage, path,
             )?)),
         }

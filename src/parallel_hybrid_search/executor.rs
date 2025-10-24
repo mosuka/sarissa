@@ -290,7 +290,7 @@ impl ParallelHybridSearchExecutor {
         config: &ParallelHybridSearchConfig,
         _index_id: &str,
     ) -> Result<SearchResults> {
-        use crate::lexical::search::searcher::Searcher;
+        use crate::lexical::search::searcher::inverted_index::Searcher;
         use crate::lexical::search::{SearchConfig, SearchRequest};
 
         // Create a searcher with the index reader using from_arc

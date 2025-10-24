@@ -140,7 +140,9 @@ impl Query for TermQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+    use crate::lexical::index::reader::inverted_index::{
+        InvertedIndexReader, InvertedIndexReaderConfig,
+    };
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;
     use std::sync::Arc;
@@ -168,7 +170,8 @@ mod tests {
     fn test_term_query_matcher() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader =
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
+                .unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -181,7 +184,8 @@ mod tests {
     fn test_term_query_scorer() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader =
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
+                .unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -195,7 +199,8 @@ mod tests {
     fn test_term_query_is_empty() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader =
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
+                .unwrap();
 
         let query = TermQuery::new("title", "hello");
 
@@ -211,7 +216,8 @@ mod tests {
     fn test_term_query_cost() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader =
-            AdvancedIndexReader::new(vec![], storage, AdvancedReaderConfig::default()).unwrap();
+            InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
+                .unwrap();
 
         let query = TermQuery::new("title", "hello");
 

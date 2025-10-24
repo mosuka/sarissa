@@ -17,20 +17,28 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use sage::hybrid::index::HybridIndex;
+//! ```rust
 //! use sage::hybrid::config::HybridSearchConfig;
 //! use sage::hybrid::engine::HybridSearchEngine;
+//! use sage::error::Result;
 //!
-//! // Create hybrid index
-//! let hybrid_index = HybridIndex::new(lexical_index, vector_index);
+//! fn example() -> Result<()> {
+//!     // Create hybrid search configuration
+//!     let config = HybridSearchConfig::default();
 //!
-//! // Create search configuration
-//! let config = HybridSearchConfig::default();
+//!     // Create hybrid search engine
+//!     let engine = HybridSearchEngine::new(config)?;
 //!
-//! // Perform hybrid search
-//! let results = hybrid_index.search("rust programming", Some(&query_vector), &config)?;
+//!     // Access configuration
+//!     println!("Keyword weight: {}", engine.config().keyword_weight);
+//!     println!("Vector weight: {}", engine.config().vector_weight);
+//!
+//!     Ok(())
+//! }
+//! # example().unwrap();
 //! ```
+//!
+//! For a complete working example, see `examples/hybrid_search.rs`.
 
 // Core data structure
 pub mod index; // Core hybrid index combining lexical and vector indexes
