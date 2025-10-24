@@ -43,7 +43,6 @@ A fast, featureful search library for Rust supporting full-text search, vector s
 
 - **Multiple Storage Backends** - Filesystem, memory-mapped files, and in-memory storage
 - **SIMD Acceleration** - Optimized vector operations for improved performance
-- **Parallel Processing** - Multi-threaded indexing and search operations
 - **Incremental Updates** - Real-time document addition without full reindexing
 
 ### Additional Features
@@ -120,7 +119,6 @@ Sage is built with a modular architecture:
 - **Vector Index** - HNSW-based approximate nearest neighbor search for semantic similarity
 - **Hybrid Search** - Combined lexical and vector search with configurable score fusion
 - **Query Engine** - Flexible query system supporting multiple query types
-- **Parallel Processing** - Multi-threaded indexing and search operations for improved performance
 
 ### Field Types
 
@@ -473,7 +471,6 @@ Sage is designed for high performance:
 
 - **SIMD Acceleration** - Uses wide instruction sets for vector operations
 - **Memory-Mapped I/O** - Efficient file access with minimal memory overhead
-- **Parallel Processing** - Multi-threaded indexing and search operations
 - **Incremental Updates** - Real-time document addition without full reindexing
 - **Index Optimization** - Background merge operations for optimal search performance
 
@@ -534,7 +531,6 @@ Sage includes numerous examples demonstrating various features:
 
 ### Advanced Features
 
-- [parallel_search](examples/parallel_search.rs) - Parallel search execution
 - [schemaless_indexing](examples/schemaless_indexing.rs) - Dynamic schema management
 - [synonym_graph_filter](examples/synonym_graph_filter.rs) - Synonym expansion in queries
 - [keyword_based_intent_classifier](examples/keyword_based_intent_classifier.rs) - Intent classification

@@ -18,12 +18,6 @@ pub mod error;
 pub mod hybrid;
 pub mod lexical;
 pub mod ml;
-// TODO: Update parallel_hybrid_search to use new TextEmbedder trait and hybrid module structure
-// pub mod parallel_hybrid_search;
-pub mod parallel_lexical_index;
-pub mod parallel_lexical_search;
-pub mod parallel_vector_index;
-pub mod parallel_vector_search;
 pub mod query;
 pub mod spelling;
 pub mod storage;
