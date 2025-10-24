@@ -477,15 +477,6 @@ Sage is designed for high performance:
 - **Incremental Updates** - Real-time document addition without full reindexing
 - **Index Optimization** - Background merge operations for optimal search performance
 
-### Benchmarks
-
-On a modern machine with SSD storage:
-
-- **Indexing**: ~50,000 documents/second
-- **Search**: ~100,000 queries/second  
-- **Memory Usage**: ~50MB per 1M documents
-- **Index Size**: ~60% of original document size
-
 ## 🛠️ Development
 
 ### Building from Source
