@@ -1,6 +1,6 @@
-//! Advanced index writer with inverted index support.
+//! Inverted index writer with full-text search support.
 //!
-//! This module provides a production-ready index writer that builds
+//! This module provides a production-ready inverted index writer that builds
 //! inverted indexes with term dictionaries and posting lists.
 
 use std::sync::Arc;
@@ -19,9 +19,9 @@ use crate::lexical::posting::{InvertedIndex, Posting};
 use crate::storage::structured::StructWriter;
 use crate::storage::traits::Storage;
 
-/// Advanced index writer configuration.
+/// Inverted index writer configuration.
 #[derive(Clone)]
-pub struct AdvancedWriterConfig {
+pub struct InvertedIndexWriterConfig {
     /// Maximum number of documents to buffer before flushing to disk.
     pub max_buffered_docs: usize,
 
@@ -41,9 +41,9 @@ pub struct AdvancedWriterConfig {
     pub analyzer: Arc<dyn Analyzer>,
 }
 
-impl std::fmt::Debug for AdvancedWriterConfig {
+impl std::fmt::Debug for InvertedIndexWriterConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AdvancedWriterConfig")
+        f.debug_struct("InvertedIndexWriterConfig")
             .field("max_buffered_docs", &self.max_buffered_docs)
             .field("max_buffer_memory", &self.max_buffer_memory)
             .field("segment_prefix", &self.segment_prefix)
@@ -54,9 +54,9 @@ impl std::fmt::Debug for AdvancedWriterConfig {
     }
 }
 
-impl Default for AdvancedWriterConfig {
+impl Default for InvertedIndexWriterConfig {
     fn default() -> Self {
-        AdvancedWriterConfig {
+        InvertedIndexWriterConfig {
             max_buffered_docs: 10000,
             max_buffer_memory: 64 * 1024 * 1024, // 64MB
             segment_prefix: "segment".to_string(),
@@ -116,13 +116,13 @@ pub struct WriterStats {
     pub segments_created: u32,
 }
 
-/// Advanced index writer implementation (schema-less mode).
-pub struct AdvancedIndexWriter {
+/// Inverted index writer implementation (schema-less mode).
+pub struct InvertedIndexWriter {
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
     /// Writer configuration.
-    config: AdvancedWriterConfig,
+    config: InvertedIndexWriterConfig,
 
     /// In-memory inverted index being built.
     inverted_index: InvertedIndex,
@@ -146,9 +146,9 @@ pub struct AdvancedIndexWriter {
     stats: WriterStats,
 }
 
-impl std::fmt::Debug for AdvancedIndexWriter {
+impl std::fmt::Debug for InvertedIndexWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AdvancedIndexWriter")
+        f.debug_struct("InvertedIndexWriter")
             .field("config", &self.config)
             .field("next_doc_id", &self.next_doc_id)
             .field("current_segment", &self.current_segment)
@@ -159,14 +159,14 @@ impl std::fmt::Debug for AdvancedIndexWriter {
     }
 }
 
-impl AdvancedIndexWriter {
-    /// Create a new advanced index writer (schema-less mode).
-    pub fn new(storage: Arc<dyn Storage>, config: AdvancedWriterConfig) -> Result<Self> {
+impl InvertedIndexWriter {
+    /// Create a new inverted index writer (schema-less mode).
+    pub fn new(storage: Arc<dyn Storage>, config: InvertedIndexWriterConfig) -> Result<Self> {
         // Create initial DocValuesWriter (will be reset per segment)
         let initial_segment_name = format!("{}_{:06}", config.segment_prefix, 0);
         let doc_values_writer = DocValuesWriter::new(storage.clone(), initial_segment_name);
 
-        Ok(AdvancedIndexWriter {
+        Ok(InvertedIndexWriter {
             storage,
             config,
             inverted_index: InvertedIndex::new(),
@@ -212,19 +212,19 @@ impl AdvancedIndexWriter {
     /// use sage::document::parser::DocumentParser;
     /// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
     /// use sage::analysis::analyzer::standard::StandardAnalyzer;
-    /// use sage::lexical::index::advanced_writer::AdvancedIndexWriter;
-    /// use sage::lexical::index::advanced_writer::AdvancedWriterConfig;
+    /// use sage::lexical::index::writer::inverted_index::InvertedIndexWriter;
+    /// use sage::lexical::index::writer::inverted_index::InvertedIndexWriterConfig;
     /// use sage::storage::memory::MemoryStorage;
     /// use sage::storage::traits::StorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
     /// let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
-    /// let config = AdvancedWriterConfig {
+    /// let config = InvertedIndexWriterConfig {
     ///     analyzer: Arc::new(per_field.clone()),
     ///     ..Default::default()
     /// };
-    /// let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
+    /// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
     ///
     /// let doc = Document::builder()
     ///     .add_text("title", "Rust Programming")
@@ -821,48 +821,48 @@ impl AdvancedIndexWriter {
     }
 }
 
-impl Drop for AdvancedIndexWriter {
+impl Drop for InvertedIndexWriter {
     fn drop(&mut self) {
         let _ = self.close();
     }
 }
 
 // Implement IndexWriter trait for compatibility with existing code
-impl crate::lexical::writer::IndexWriter for AdvancedIndexWriter {
+impl crate::lexical::writer::IndexWriter for InvertedIndexWriter {
     fn add_document(&mut self, doc: Document) -> Result<()> {
-        AdvancedIndexWriter::add_document(self, doc)
+        InvertedIndexWriter::add_document(self, doc)
     }
 
     fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<()> {
-        AdvancedIndexWriter::add_analyzed_document(self, doc)
+        InvertedIndexWriter::add_analyzed_document(self, doc)
     }
 
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
-        AdvancedIndexWriter::delete_documents(self, field, value)
+        InvertedIndexWriter::delete_documents(self, field, value)
     }
 
     fn update_document(&mut self, field: &str, value: &str, doc: Document) -> Result<()> {
-        AdvancedIndexWriter::update_document(self, field, value, doc)
+        InvertedIndexWriter::update_document(self, field, value, doc)
     }
 
     fn commit(&mut self) -> Result<()> {
-        AdvancedIndexWriter::commit(self)
+        InvertedIndexWriter::commit(self)
     }
 
     fn rollback(&mut self) -> Result<()> {
-        AdvancedIndexWriter::rollback(self)
+        InvertedIndexWriter::rollback(self)
     }
 
     fn pending_docs(&self) -> u64 {
-        AdvancedIndexWriter::pending_docs(self) as u64
+        InvertedIndexWriter::pending_docs(self) as u64
     }
 
     fn close(&mut self) -> Result<()> {
-        AdvancedIndexWriter::close(self)
+        InvertedIndexWriter::close(self)
     }
 
     fn is_closed(&self) -> bool {
-        AdvancedIndexWriter::is_closed(self)
+        InvertedIndexWriter::is_closed(self)
     }
 }
 
@@ -882,11 +882,11 @@ mod tests {
     }
 
     #[test]
-    fn test_advanced_writer_creation() {
+    fn test_inverted_index_writer_creation() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = AdvancedWriterConfig::default();
+        let config = InvertedIndexWriterConfig::default();
 
-        let writer = AdvancedIndexWriter::new(storage, config).unwrap();
+        let writer = InvertedIndexWriter::new(storage, config).unwrap();
 
         assert_eq!(writer.pending_docs(), 0);
         assert_eq!(writer.stats().docs_added, 0);
@@ -895,9 +895,9 @@ mod tests {
     #[test]
     fn test_add_document() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = AdvancedWriterConfig::default();
+        let config = InvertedIndexWriterConfig::default();
 
-        let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
+        let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
         let doc = create_test_document("Test Title", "This is test content");
 
         writer.add_document(doc).unwrap();
@@ -910,12 +910,12 @@ mod tests {
     #[test]
     fn test_auto_flush() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = AdvancedWriterConfig {
+        let config = InvertedIndexWriterConfig {
             max_buffered_docs: 2,
             ..Default::default()
         };
 
-        let mut writer = AdvancedIndexWriter::new(storage.clone(), config).unwrap();
+        let mut writer = InvertedIndexWriter::new(storage.clone(), config).unwrap();
 
         // Add first document
         writer
@@ -938,9 +938,9 @@ mod tests {
     #[test]
     fn test_commit() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = AdvancedWriterConfig::default();
+        let config = InvertedIndexWriterConfig::default();
 
-        let mut writer = AdvancedIndexWriter::new(storage.clone(), config).unwrap();
+        let mut writer = InvertedIndexWriter::new(storage.clone(), config).unwrap();
 
         writer
             .add_document(create_test_document("Test", "Content"))
@@ -958,9 +958,9 @@ mod tests {
     #[test]
     fn test_rollback() {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = AdvancedWriterConfig::default();
+        let config = InvertedIndexWriterConfig::default();
 
-        let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
+        let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
 
         writer
             .add_document(create_test_document("Test", "Content"))
@@ -976,9 +976,9 @@ mod tests {
     fn test_multiple_field_types() {
         // Schema-less mode: fields are inferred from document
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let config = AdvancedWriterConfig::default();
+        let config = InvertedIndexWriterConfig::default();
 
-        let mut writer = AdvancedIndexWriter::new(storage, config).unwrap();
+        let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
 
         let doc = Document::builder()
             .add_text("title", "Test Document")

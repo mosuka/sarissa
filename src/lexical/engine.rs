@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::document::document::Document;
 use crate::error::Result;
 use crate::lexical::inverted_index::{FileIndex, Index, IndexConfig};
-use crate::lexical::search::searcher::Searcher;
+use crate::lexical::search::searcher::inverted_index::Searcher;
 use crate::lexical::types::SearchRequest;
 use crate::query::SearchResults;
 use crate::query::query::Query;

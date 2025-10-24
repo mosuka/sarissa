@@ -88,7 +88,9 @@ fn main() -> Result<()> {
     // analyzer configuration across writer() calls yet
     {
         use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
-        use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+        use sage::lexical::index::writer::inverted_index::{
+            InvertedIndexWriter, InvertedIndexWriterConfig,
+        };
 
         let storage = engine.storage().clone();
 
@@ -102,12 +104,12 @@ fn main() -> Result<()> {
         per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
         per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
 
-        let config = AdvancedWriterConfig {
+        let config = InvertedIndexWriterConfig {
             analyzer: Arc::new(per_field_analyzer),
             ..Default::default()
         };
 
-        let mut writer = AdvancedIndexWriter::new(storage, config)?;
+        let mut writer = InvertedIndexWriter::new(storage, config)?;
 
         for doc in documents {
             writer.add_document(doc)?;

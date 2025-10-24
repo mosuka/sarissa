@@ -316,15 +316,17 @@ impl Index for FileIndex {
     fn reader(&self) -> Result<Box<dyn IndexReader>> {
         self.check_closed()?;
 
-        use crate::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+        use crate::lexical::index::reader::inverted_index::{
+            InvertedIndexReader, InvertedIndexReaderConfig,
+        };
 
         // Load segment information
         let segments = self.load_segments()?;
 
-        let reader = AdvancedIndexReader::new(
+        let reader = InvertedIndexReader::new(
             segments,
             self.storage.clone(),
-            AdvancedReaderConfig::default(),
+            InvertedIndexReaderConfig::default(),
         )?;
         Ok(Box::new(reader))
     }
@@ -332,10 +334,12 @@ impl Index for FileIndex {
     fn writer(&self) -> Result<Box<dyn IndexWriter>> {
         self.check_closed()?;
 
-        use crate::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
+        use crate::lexical::index::writer::inverted_index::{
+            InvertedIndexWriter, InvertedIndexWriterConfig,
+        };
 
         let writer =
-            AdvancedIndexWriter::new(self.storage.clone(), AdvancedWriterConfig::default())?;
+            InvertedIndexWriter::new(self.storage.clone(), InvertedIndexWriterConfig::default())?;
         Ok(Box::new(writer))
     }
 

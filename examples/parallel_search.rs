@@ -12,8 +12,12 @@ use tempfile::TempDir;
 
 use sage::document::document::Document;
 use sage::error::Result;
-use sage::lexical::index::advanced_writer::{AdvancedIndexWriter, AdvancedWriterConfig};
-use sage::lexical::search::advanced_reader::{AdvancedIndexReader, AdvancedReaderConfig};
+use sage::lexical::index::reader::inverted_index::{
+    InvertedIndexReader, InvertedIndexReaderConfig,
+};
+use sage::lexical::index::writer::inverted_index::{
+    InvertedIndexWriter, InvertedIndexWriterConfig,
+};
 use sage::parallel_lexical_index::config::{IndexingOptions, ParallelIndexConfig, PartitionConfig};
 use sage::parallel_lexical_index::engine::ParallelIndexEngine;
 use sage::parallel_lexical_index::partitioner::HashPartitioner;
@@ -77,9 +81,9 @@ fn main() -> Result<()> {
             Arc::new(MemoryStorage::new(StorageConfig::default()));
         storages.push(Arc::clone(&storage));
 
-        let writer = Box::new(AdvancedIndexWriter::new(
+        let writer = Box::new(InvertedIndexWriter::new(
             Arc::clone(&storage),
-            AdvancedWriterConfig::default(),
+            InvertedIndexWriterConfig::default(),
         )?);
         let partition_config = PartitionConfig::new(format!("partition_{i}"));
         parallel_engine.add_partition(format!("partition_{i}"), writer, partition_config)?;
@@ -281,10 +285,10 @@ fn main() -> Result<()> {
         }
         segments.sort_by_key(|s| s.generation);
 
-        let reader = Box::new(AdvancedIndexReader::new(
+        let reader = Box::new(InvertedIndexReader::new(
             segments,
             storage,
-            AdvancedReaderConfig::default(),
+            InvertedIndexReaderConfig::default(),
         )?);
         index_readers.push((format!("partition_{i}"), reader));
     }

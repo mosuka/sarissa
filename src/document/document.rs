@@ -12,7 +12,7 @@ use crate::query::geo::GeoPoint;
 /// Documents are collections of field values in schema-less mode.
 /// Fields can be added dynamically without predefined schema.
 ///
-/// Analyzers are configured at the writer level (via `AdvancedWriterConfig`),
+/// Analyzers are configured at the writer level (via `InvertedIndexWriterConfig`),
 /// not per-document, following Lucene's design.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Document {
