@@ -3,5 +3,5 @@
 //! This module provides an IVF index that partitions vectors into clusters
 //! for efficient approximate nearest neighbor search with reduced memory usage.
 
-pub mod writer;
 pub mod reader;
+pub mod writer;

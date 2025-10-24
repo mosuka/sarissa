@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use crate::error::Result;
-use crate::hybrid_search::config::ScoreNormalization;
-use crate::hybrid_search::types::HybridSearchResult;
+use crate::hybrid::config::ScoreNormalization;
+use crate::hybrid::types::HybridSearchResult;
 
 /// Score normalizer for hybrid search results.
 pub struct ScoreNormalizer {

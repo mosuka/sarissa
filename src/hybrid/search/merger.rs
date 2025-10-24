@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 
 use crate::error::Result;
-use crate::hybrid_search::config::HybridSearchConfig;
-use crate::hybrid_search::scorer::ScoreNormalizer;
-use crate::hybrid_search::types::{HybridSearchResult, HybridSearchResults};
+use crate::hybrid::config::HybridSearchConfig;
+use crate::hybrid::search::scorer::ScoreNormalizer;
+use crate::hybrid::types::{HybridSearchResult, HybridSearchResults};
 use crate::query::SearchResults;
 use crate::vector::types::VectorSearchResults;
 

@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::embedding::engine::EmbeddingConfig;
 use crate::vector::types::VectorSearchConfig;
 
 /// Configuration for hybrid search combining keyword and vector search.
@@ -24,8 +23,6 @@ pub struct HybridSearchConfig {
     pub normalization: ScoreNormalization,
     /// Vector search configuration.
     pub vector_config: VectorSearchConfig,
-    /// Embedding configuration for text processing.
-    pub embedding_config: EmbeddingConfig,
 }
 
 impl Default for HybridSearchConfig {
@@ -39,7 +36,6 @@ impl Default for HybridSearchConfig {
             require_both: false,
             normalization: ScoreNormalization::MinMax,
             vector_config: VectorSearchConfig::default(),
-            embedding_config: EmbeddingConfig::default(),
         }
     }
 }

@@ -20,13 +20,13 @@ use sage::error::Result;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
+use sage::vector::Vector;
+#[cfg(feature = "embeddings-candle")]
 use sage::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::types::VectorSearchRequest;
-#[cfg(feature = "embeddings-candle")]
-use sage::vector::Vector;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
