@@ -16,22 +16,22 @@ use crate::query::{SearchHit, SearchResults};
 
 /// A searcher that executes queries against an index reader.
 #[derive(Debug)]
-pub struct Searcher {
+pub struct InvertedIndexSearcher {
     /// The index reader to search against.
     reader: Arc<dyn IndexReader>,
 }
 
-impl Searcher {
+impl InvertedIndexSearcher {
     /// Create a new searcher with the given index reader.
     pub fn new(reader: Box<dyn IndexReader>) -> Self {
-        Searcher {
+        InvertedIndexSearcher {
             reader: Arc::from(reader),
         }
     }
 
     /// Create a new searcher with an Arc<dyn IndexReader>.
     pub fn from_arc(reader: Arc<dyn IndexReader>) -> Self {
-        Searcher { reader }
+        InvertedIndexSearcher { reader }
     }
 
     /// Get the index reader.
@@ -488,13 +488,13 @@ mod tests {
     use std::sync::Arc;
 
     #[allow(dead_code)]
-    fn create_test_searcher() -> Searcher {
+    fn create_test_searcher() -> InvertedIndexSearcher {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let reader = Box::new(
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap(),
         );
-        Searcher::new(reader)
+        InvertedIndexSearcher::new(reader)
     }
 
     #[test]

@@ -715,7 +715,7 @@ impl InvertedIndexWriter {
             has_deletions: false,
         };
 
-        // Write as JSON for compatibility with FileIndex::load_segments()
+        // Write as JSON for compatibility with InvertedIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
         let json_data = serde_json::to_string_pretty(&segment_info)
             .map_err(|e| SageError::index(format!("Failed to serialize segment metadata: {e}")))?;
