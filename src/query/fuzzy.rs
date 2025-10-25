@@ -840,7 +840,7 @@ mod tests {
 
     #[test]
     fn test_fuzzy_matcher() {
-        use crate::lexical::index::reader::inverted_index::{
+        use crate::lexical::index::reader::inverted::{
             InvertedIndexReader, InvertedIndexReaderConfig,
         };
         use crate::storage::memory::MemoryStorage;

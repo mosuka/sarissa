@@ -22,10 +22,10 @@ use sage::document::document::Document;
 use sage::document::parser::DocumentParser;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::writer::inverted_index::{
+use sage::lexical::index::writer::inverted::{
     InvertedIndexWriter, InvertedIndexWriterConfig,
 };
-use sage::lexical::inverted_index::IndexConfig;
+use sage::lexical::index::IndexConfig;
 use sage::lexical::types::SearchRequest;
 
 fn main() -> Result<()> {

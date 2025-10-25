@@ -153,7 +153,7 @@ impl PostingMatcher {
         // Create a dummy iterator that's already exhausted
         let postings = vec![];
         let posting_iter = Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings,
             ),
         );
@@ -853,7 +853,7 @@ mod tests {
             },
         ];
         let posting_iter = Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings,
             ),
         );
@@ -918,7 +918,7 @@ mod tests {
             },
         ];
         let matcher1 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings1,
             ),
         )));
@@ -962,7 +962,7 @@ mod tests {
             },
         ];
         let matcher2 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings2,
             ),
         )));
@@ -1025,7 +1025,7 @@ mod tests {
             },
         ];
         let positive = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings_pos,
             ),
         )));
@@ -1052,7 +1052,7 @@ mod tests {
             },
         ];
         let negative = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings_neg,
             ),
         )));
@@ -1097,7 +1097,7 @@ mod tests {
             },
         ];
         let negative = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings_neg,
             ),
         )));
@@ -1152,7 +1152,7 @@ mod tests {
             },
         ];
         let matcher1 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings1,
             ),
         )));
@@ -1178,7 +1178,7 @@ mod tests {
             },
         ];
         let matcher2 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted_index::InvertedIndexPostingIterator::new(
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
                 postings2,
             ),
         )));

@@ -87,7 +87,7 @@ impl InvertedIndexSearcher {
                 if let Some(inverted_index_reader) = self
                     .reader
                     .as_any()
-                    .downcast_ref::<crate::lexical::index::reader::inverted_index::InvertedIndexReader>()
+                    .downcast_ref::<crate::lexical::index::reader::inverted::InvertedIndexReader>()
                 {
                     inverted_index_reader.field_length(doc_id, field_name).ok().flatten().map(|len| len as f32)
                 } else {
@@ -478,7 +478,7 @@ impl InvertedIndexSearcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::reader::inverted_index::{
+    use crate::lexical::index::reader::inverted::{
         InvertedIndexReader, InvertedIndexReaderConfig,
     };
     use crate::query::boolean::{BooleanQuery, BooleanQueryBuilder};

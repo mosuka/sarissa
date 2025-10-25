@@ -1,12 +1,15 @@
-//! Inverted index writer with full-text search support.
+//! Inverted index implementation for full-text search.
 //!
-//! This module provides a production-ready inverted index writer that builds
-//! inverted indexes with term dictionaries and posting lists.
+//! This module contains both:
+//! - `InvertedIndex`: The index structure implementing the `Index` trait
+//! - `InvertedIndexWriter`: The writer implementing the `IndexWriter` trait
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ahash::AHashMap;
+use serde::{Deserialize, Serialize};
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::token::Token;
@@ -15,9 +18,290 @@ use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::lexical::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::doc_values::DocValuesWriter;
-use crate::lexical::posting::{InvertedIndex, Posting};
+use crate::lexical::index::{Index, IndexStats, LexicalIndexConfig, SegmentInfo};
+use crate::lexical::posting::{InvertedIndex as PostingInvertedIndex, Posting};
+use crate::lexical::reader::IndexReader;
+use crate::lexical::writer::IndexWriter;
 use crate::storage::structured::StructWriter;
 use crate::storage::traits::Storage;
+
+/// Metadata about an inverted index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexMetadata {
+    /// Version of the index format.
+    pub version: u32,
+
+    /// Creation time (seconds since epoch).
+    pub created: u64,
+
+    /// Last modified time (seconds since epoch).
+    pub modified: u64,
+
+    /// Number of documents indexed.
+    pub doc_count: u64,
+
+    /// Generation number for updates.
+    pub generation: u64,
+}
+
+impl Default for IndexMetadata {
+    fn default() -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        IndexMetadata {
+            version: 1,
+            created: now,
+            modified: now,
+            doc_count: 0,
+            generation: 0,
+        }
+    }
+}
+
+/// A concrete inverted index implementation for schema-less lexical indexing.
+#[derive(Debug)]
+pub struct InvertedIndex {
+    /// The storage backend.
+    storage: Arc<dyn Storage>,
+
+    /// Index configuration.
+    #[allow(dead_code)]
+    config: LexicalIndexConfig,
+
+    /// Whether the index is closed.
+    closed: bool,
+
+    /// Index metadata.
+    metadata: IndexMetadata,
+}
+
+impl InvertedIndex {
+    /// Create a new index in the given storage.
+    pub fn create(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
+        let metadata = IndexMetadata::default();
+
+        let index = InvertedIndex {
+            storage,
+            config,
+            closed: false,
+            metadata,
+        };
+
+        index.write_metadata()?;
+        Ok(index)
+    }
+
+    /// Open an existing index from storage.
+    pub fn open(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
+        if !storage.file_exists("metadata.json") {
+            return Err(SageError::index("Index does not exist"));
+        }
+
+        let metadata = Self::read_metadata(storage.as_ref())?;
+
+        Ok(InvertedIndex {
+            storage,
+            config,
+            closed: false,
+            metadata,
+        })
+    }
+
+    /// Create an index in a directory.
+    pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: LexicalIndexConfig) -> Result<Self> {
+        use crate::storage::file::FileStorage;
+        use crate::storage::traits::StorageConfig;
+
+        let storage_config = StorageConfig {
+            use_mmap: config.use_mmap,
+            ..Default::default()
+        };
+
+        let storage = Arc::new(FileStorage::new(dir, storage_config)?);
+        Self::create(storage, config)
+    }
+
+    /// Open an index from a directory.
+    pub fn open_dir<P: AsRef<Path>>(dir: P, config: LexicalIndexConfig) -> Result<Self> {
+        use crate::storage::file::FileStorage;
+        use crate::storage::traits::StorageConfig;
+
+        let storage_config = StorageConfig {
+            use_mmap: config.use_mmap,
+            ..Default::default()
+        };
+
+        let storage = Arc::new(FileStorage::new(dir, storage_config)?);
+        Self::open(storage, config)
+    }
+
+    /// Write metadata to storage.
+    fn write_metadata(&self) -> Result<()> {
+        let metadata_json = serde_json::to_string_pretty(&self.metadata)
+            .map_err(|e| SageError::index(format!("Failed to serialize metadata: {e}")))?;
+
+        let mut output = self.storage.create_output("metadata.json")?;
+        std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
+        output.close()?;
+
+        Ok(())
+    }
+
+    /// Read metadata from storage.
+    fn read_metadata(storage: &dyn Storage) -> Result<IndexMetadata> {
+        let mut input = storage.open_input("metadata.json")?;
+        let mut metadata_json = String::new();
+        std::io::Read::read_to_string(&mut input, &mut metadata_json)?;
+
+        let metadata: IndexMetadata = serde_json::from_str(&metadata_json)
+            .map_err(|e| SageError::index(format!("Failed to deserialize metadata: {e}")))?;
+
+        Ok(metadata)
+    }
+
+    /// Update metadata and write to storage.
+    fn update_metadata(&mut self) -> Result<()> {
+        self.metadata.modified = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        self.write_metadata()
+    }
+
+    /// Update the document count in the index metadata.
+    pub fn update_doc_count(&mut self, additional_docs: u64) -> Result<()> {
+        self.check_closed()?;
+        self.metadata.doc_count += additional_docs;
+        self.update_metadata()
+    }
+
+    /// Check if the index is closed.
+    fn check_closed(&self) -> Result<()> {
+        if self.closed {
+            Err(SageError::index("Index is closed"))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Load segment information from storage.
+    fn load_segments(&self) -> Result<Vec<SegmentInfo>> {
+        let files = self.storage.list_files()?;
+        let mut segments = Vec::new();
+
+        for file in &files {
+            if file.starts_with("segment_") && file.ends_with(".meta") {
+                let mut input = self.storage.open_input(file)?;
+                let mut data = Vec::new();
+                std::io::Read::read_to_end(&mut input, &mut data)?;
+
+                let segment_info: SegmentInfo = serde_json::from_slice(&data)
+                    .map_err(|e| SageError::index(format!("Failed to parse segment metadata: {e}")))?;
+
+                segments.push(segment_info);
+            }
+        }
+
+        segments.sort_by_key(|s| s.generation);
+        Ok(segments)
+    }
+
+    /// Check if an index exists in the given directory.
+    pub fn exists_in_dir<P: AsRef<Path>>(dir: P) -> bool {
+        let metadata_path = dir.as_ref().join("metadata.json");
+        metadata_path.exists()
+    }
+
+    /// Delete an index from the given directory.
+    pub fn delete_in_dir<P: AsRef<Path>>(dir: P) -> Result<()> {
+        use crate::storage::file::FileStorage;
+        use crate::storage::traits::StorageConfig;
+
+        let storage = FileStorage::new(dir, StorageConfig::default())?;
+
+        for file in storage.list_files()? {
+            storage.delete_file(&file)?;
+        }
+
+        Ok(())
+    }
+
+    /// List all files in the index.
+    pub fn list_files(&self) -> Result<Vec<String>> {
+        self.check_closed()?;
+        self.storage.list_files()
+    }
+}
+
+impl Index for InvertedIndex {
+    fn reader(&self) -> Result<Box<dyn IndexReader>> {
+        self.check_closed()?;
+
+        use crate::lexical::index::reader::inverted::{
+            InvertedIndexReader, InvertedIndexReaderConfig,
+        };
+
+        let segments = self.load_segments()?;
+        let reader = InvertedIndexReader::new(
+            segments,
+            self.storage.clone(),
+            InvertedIndexReaderConfig::default(),
+        )?;
+        Ok(Box::new(reader))
+    }
+
+    fn writer(&self) -> Result<Box<dyn IndexWriter>> {
+        self.check_closed()?;
+
+        let writer = InvertedIndexWriter::new(
+            self.storage.clone(),
+            InvertedIndexWriterConfig::default(),
+        )?;
+        Ok(Box::new(writer))
+    }
+
+    fn storage(&self) -> &Arc<dyn Storage> {
+        &self.storage
+    }
+
+    fn close(&mut self) -> Result<()> {
+        if !self.closed {
+            self.closed = true;
+        }
+        Ok(())
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    fn stats(&self) -> Result<IndexStats> {
+        self.check_closed()?;
+
+        Ok(IndexStats {
+            doc_count: self.metadata.doc_count,
+            term_count: 0,
+            segment_count: 0,
+            total_size: 0,
+            deleted_count: 0,
+            last_modified: self.metadata.modified,
+        })
+    }
+
+    fn optimize(&mut self) -> Result<()> {
+        self.check_closed()?;
+        self.update_metadata()?;
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Inverted index writer implementation
+// ============================================================================
 
 /// Inverted index writer configuration.
 #[derive(Clone)]
@@ -125,7 +409,7 @@ pub struct InvertedIndexWriter {
     config: InvertedIndexWriterConfig,
 
     /// In-memory inverted index being built.
-    inverted_index: InvertedIndex,
+    inverted_index: PostingInvertedIndex,
 
     /// Buffered analyzed documents.
     buffered_docs: Vec<AnalyzedDocument>,
@@ -169,7 +453,7 @@ impl InvertedIndexWriter {
         Ok(InvertedIndexWriter {
             storage,
             config,
-            inverted_index: InvertedIndex::new(),
+            inverted_index: PostingInvertedIndex::new(),
             buffered_docs: Vec::new(),
             doc_values_writer,
             next_doc_id: 0,
@@ -212,8 +496,7 @@ impl InvertedIndexWriter {
     /// use sage::document::parser::DocumentParser;
     /// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
     /// use sage::analysis::analyzer::standard::StandardAnalyzer;
-    /// use sage::lexical::index::writer::inverted_index::InvertedIndexWriter;
-    /// use sage::lexical::index::writer::inverted_index::InvertedIndexWriterConfig;
+    /// use sage::lexical::index::writer::inverted::{InvertedIndexWriter, InvertedIndexWriterConfig};
     /// use sage::storage::memory::MemoryStorage;
     /// use sage::storage::traits::StorageConfig;
     /// use std::sync::Arc;
@@ -460,7 +743,7 @@ impl InvertedIndexWriter {
 
         // Clear buffers
         self.buffered_docs.clear();
-        self.inverted_index = InvertedIndex::new();
+        self.inverted_index = PostingInvertedIndex::new();
 
         // Reset DocValuesWriter for next segment
         let next_segment_name = format!(
@@ -704,7 +987,7 @@ impl InvertedIndexWriter {
 
     /// Write segment metadata.
     fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
-        use crate::lexical::inverted_index::SegmentInfo;
+        use crate::lexical::index::SegmentInfo;
 
         // Create SegmentInfo
         let segment_info = SegmentInfo {
@@ -768,7 +1051,7 @@ impl InvertedIndexWriter {
 
         // Clear all buffers
         self.buffered_docs.clear();
-        self.inverted_index = InvertedIndex::new();
+        self.inverted_index = PostingInvertedIndex::new();
 
         Ok(())
     }
