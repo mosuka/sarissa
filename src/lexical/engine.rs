@@ -3,27 +3,39 @@
 //! This module provides a unified interface for lexical indexing and search,
 //! similar to the VectorEngine for vector search.
 
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell, RefMut};
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::document::document::Document;
 use crate::error::Result;
-use crate::lexical::inverted_index::{FileIndex, Index, IndexConfig};
+use crate::lexical::inverted_index::{FileIndex, Index, IndexConfig, IndexStats};
 use crate::lexical::search::searcher::inverted_index::Searcher;
 use crate::lexical::types::SearchRequest;
+use crate::lexical::writer::IndexWriter;
 use crate::query::SearchResults;
 use crate::query::query::Query;
 use crate::storage::traits::Storage;
 
 /// A high-level lexical search engine that provides both indexing and searching capabilities.
 /// This is similar to the VectorEngine but for lexical search.
-#[derive(Debug)]
 pub struct LexicalEngine {
     /// The underlying index.
     index: FileIndex,
     /// The searcher for executing queries.
     searcher: RefCell<Option<Searcher>>,
+    /// The writer for adding/updating documents (cached for efficiency).
+    writer: RefCell<Option<Box<dyn IndexWriter>>>,
+}
+
+impl std::fmt::Debug for LexicalEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LexicalEngine")
+            .field("index", &self.index)
+            .field("searcher", &self.searcher)
+            .field("writer", &"<cached writer>")
+            .finish()
+    }
 }
 
 impl LexicalEngine {
@@ -32,6 +44,7 @@ impl LexicalEngine {
         LexicalEngine {
             index,
             searcher: RefCell::new(None),
+            writer: RefCell::new(None),
         }
     }
 
@@ -52,71 +65,68 @@ impl LexicalEngine {
         self.index.storage()
     }
 
+    /// Get or create a writer for this engine.
+    fn get_or_create_writer(&self) -> Result<RefMut<'_, Box<dyn IndexWriter>>> {
+        {
+            let mut writer_ref = self.writer.borrow_mut();
+            if writer_ref.is_none() {
+                *writer_ref = Some(self.index.writer()?);
+            }
+        }
+
+        // Return a mutable reference to the writer
+        Ok(RefMut::map(self.writer.borrow_mut(), |opt| {
+            opt.as_mut().unwrap()
+        }))
+    }
+
     /// Add a document to the index.
+    /// Note: You must call `commit()` to persist the changes.
     pub fn add_document(&mut self, doc: Document) -> Result<()> {
-        let mut writer = self.index.writer()?;
+        let mut writer = self.get_or_create_writer()?;
         writer.add_document(doc)?;
-        writer.commit()?;
-
-        // Update index metadata with the new document count
-        self.index.update_doc_count(1)?;
-
-        // Invalidate searcher cache
-        *self.searcher.borrow_mut() = None;
 
         Ok(())
     }
 
     /// Add multiple documents to the index.
+    /// Note: You must call `commit()` to persist the changes.
     pub fn add_documents(&mut self, docs: Vec<Document>) -> Result<()> {
-        let doc_count = docs.len() as u64;
-        let mut writer = self.index.writer()?;
+        let mut writer = self.get_or_create_writer()?;
 
         for doc in docs {
             writer.add_document(doc)?;
         }
 
-        writer.commit()?;
-
-        // Update index metadata with the new document count
-        self.index.update_doc_count(doc_count)?;
-
-        // Invalidate searcher cache
-        *self.searcher.borrow_mut() = None;
-
         Ok(())
     }
 
     /// Delete documents matching the given term.
+    /// Note: You must call `commit()` to persist the changes.
     pub fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
-        let mut writer = self.index.writer()?;
+        let mut writer = self.get_or_create_writer()?;
         let count = writer.delete_documents(field, value)?;
-        writer.commit()?;
-
-        // Invalidate searcher cache
-        *self.searcher.borrow_mut() = None;
 
         Ok(count)
     }
 
     /// Update a document (delete old, add new).
+    /// Note: You must call `commit()` to persist the changes.
     pub fn update_document(&mut self, field: &str, value: &str, doc: Document) -> Result<()> {
-        let mut writer = self.index.writer()?;
+        let mut writer = self.get_or_create_writer()?;
         writer.update_document(field, value, doc)?;
-        writer.commit()?;
-
-        // Invalidate searcher cache
-        *self.searcher.borrow_mut() = None;
 
         Ok(())
     }
 
     /// Commit any pending changes to the index.
     pub fn commit(&mut self) -> Result<()> {
-        let mut writer = self.index.writer()?;
-        writer.commit()?;
+        // Take the cached writer if it exists
+        if let Some(mut writer) = self.writer.borrow_mut().take() {
+            writer.commit()?;
+        }
 
-        // Invalidate searcher cache
+        // Invalidate searcher cache to reflect the new changes
         *self.searcher.borrow_mut() = None;
 
         Ok(())
@@ -133,7 +143,7 @@ impl LexicalEngine {
     }
 
     /// Get or create a searcher for this engine.
-    fn get_searcher(&'_ self) -> Result<std::cell::Ref<'_, Searcher>> {
+    fn get_searcher(&'_ self) -> Result<Ref<'_, Searcher>> {
         {
             let mut searcher_ref = self.searcher.borrow_mut();
             if searcher_ref.is_none() {
@@ -143,7 +153,7 @@ impl LexicalEngine {
         }
 
         // Return a reference to the searcher
-        Ok(std::cell::Ref::map(self.searcher.borrow(), |opt| {
+        Ok(Ref::map(self.searcher.borrow(), |opt| {
             opt.as_ref().unwrap()
         }))
     }
@@ -155,12 +165,15 @@ impl LexicalEngine {
     }
 
     /// Get index statistics.
-    pub fn stats(&self) -> Result<crate::lexical::inverted_index::IndexStats> {
+    pub fn stats(&self) -> Result<IndexStats> {
         self.index.stats()
     }
 
     /// Close the search engine.
     pub fn close(&mut self) -> Result<()> {
+        // Drop the cached writer
+        *self.writer.borrow_mut() = None;
+        // Drop the cached searcher
         *self.searcher.borrow_mut() = None;
         self.index.close()
     }
@@ -236,6 +249,7 @@ mod tests {
 
         let doc = create_test_document("Hello World", "This is a test document");
         engine.add_document(doc).unwrap();
+        engine.commit().unwrap();
 
         // Check that document was added (through stats)
         let _stats = engine.stats().unwrap();
@@ -258,6 +272,7 @@ mod tests {
         ];
 
         engine.add_documents(docs).unwrap();
+        engine.commit().unwrap();
 
         let _stats = engine.stats().unwrap();
         // doc_count is usize, so >= 0 check is redundant
@@ -292,6 +307,7 @@ mod tests {
             create_test_document("Goodbye World", "This is another test document"),
         ];
         engine.add_documents(docs).unwrap();
+        engine.commit().unwrap();
 
         // Search for documents
         let query = Box::new(TermQuery::new("title", "Hello"));
@@ -328,6 +344,7 @@ mod tests {
         // Add a document
         let doc = create_test_document("Test Document", "Test content");
         engine.add_document(doc).unwrap();
+        engine.commit().unwrap();
 
         // Refresh should not fail
         engine.refresh().unwrap();

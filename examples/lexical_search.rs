@@ -18,7 +18,8 @@
 
 use tempfile::TempDir;
 
-use sage::document::document::Document;
+use sage::document::converter::jsonl::JsonlDocumentConverter;
+use sage::document::converter::DocumentConverter;
 use sage::document::field_value::FieldValue;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
@@ -43,175 +44,24 @@ fn main() -> Result<()> {
 
     let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
 
-    // Step 2: Prepare and index comprehensive test documents
-    println!("Step 2: Indexing comprehensive test documents...");
-    let documents = vec![
-        // Documents for basic text search
-        Document::builder()
-            .add_text("id", "doc001")
-            .add_text("title", "Introduction to Rust Programming")
-            .add_text(
-                "body",
-                "Rust is a modern systems programming language that focuses on safety, \
-                 speed, and concurrency. It provides memory safety without garbage collection \
-                 and enables developers to write efficient and reliable software.",
-            )
-            .add_text("author", "Alice Johnson")
-            .add_text("category", "programming")
-            .add_text("tags", "rust systems-programming memory-safety")
-            .add_integer("year", 2023)
-            .add_integer("rating", 5)
-            .add_geo("location", 35.6762, 139.6503) // Tokyo
-            .build(),
-        Document::builder()
-            .add_text("id", "doc002")
-            .add_text("title", "Web Development with Rust")
-            .add_text(
-                "body",
-                "Building web applications with Rust has become increasingly popular. \
-                 Frameworks like Actix and Rocket make it easy to create fast and secure \
-                 web services. Rust's performance and safety make it ideal for web development.",
-            )
-            .add_text("author", "Bob Smith")
-            .add_text("category", "web-development")
-            .add_text("tags", "rust web actix rocket")
-            .add_integer("year", 2023)
-            .add_integer("rating", 4)
-            .add_geo("location", 37.7749, -122.4194) // San Francisco
-            .build(),
-        Document::builder()
-            .add_text("id", "doc003")
-            .add_text("title", "Python for Data Science")
-            .add_text(
-                "body",
-                "Python is the most popular language for data science and machine learning. \
-                 Libraries like NumPy, Pandas, and Scikit-learn provide powerful tools for \
-                 data analysis and statistical computing.",
-            )
-            .add_text("author", "Carol Williams")
-            .add_text("category", "data-science")
-            .add_text("tags", "python data-science machine-learning")
-            .add_integer("year", 2022)
-            .add_integer("rating", 5)
-            .add_geo("location", 51.5074, -0.1278) // London
-            .build(),
-        // Documents with typos for fuzzy search
-        Document::builder()
-            .add_text("id", "doc004")
-            .add_text("title", "Building Microservices with Rast") // Typo: Rast instead of Rust
-            .add_text(
-                "body",
-                "Microservices architecture has revolutionized how we build distributed systems. \
-                 Rast's lightweight runtime and excellent performance make it a great choice for \
-                 building scalable microservices.",
-            )
-            .add_text("author", "David Brown")
-            .add_text("category", "architecture")
-            .add_text("tags", "rast microservices distributed-systems")
-            .add_integer("year", 2024)
-            .add_integer("rating", 4)
-            .add_geo("location", 40.7128, -74.0060) // New York
-            .build(),
-        Document::builder()
-            .add_text("id", "doc005")
-            .add_text("title", "JavaScript and TypeScript Best Practices")
-            .add_text(
-                "body",
-                "Modern JavaScript development relies heavily on TypeScript for type safety. \
-                 This guide covers best practices for writing maintainable JavaScript and \
-                 TypeScript code for web applications.",
-            )
-            .add_text("author", "Eve Davis")
-            .add_text("category", "web-development")
-            .add_text("tags", "javascript typescript web frontend")
-            .add_integer("year", 2023)
-            .add_integer("rating", 4)
-            .add_geo("location", 48.8566, 2.3522) // Paris
-            .build(),
-        Document::builder()
-            .add_text("id", "doc006")
-            .add_text("title", "Machine Learning with Pyhton") // Typo: Pyhton instead of Python
-            .add_text(
-                "body",
-                "Deep learning and neural networks are transforming artificial intelligence. \
-                 Pyhton frameworks like TensorFlow and PyTorch enable developers to build \
-                 sophisticated machine learning models.",
-            )
-            .add_text("author", "Frank Miller")
-            .add_text("category", "data-science")
-            .add_text("tags", "pyhton machine-learning deep-learning ai")
-            .add_integer("year", 2024)
-            .add_integer("rating", 5)
-            .add_geo("location", 52.5200, 13.4050) // Berlin
-            .build(),
-        // Documents for wildcard search
-        Document::builder()
-            .add_text("id", "doc007")
-            .add_text("title", "Concurrent Programming in Rust")
-            .add_text(
-                "body",
-                "Rust's ownership system makes concurrent programming safe and efficient. \
-                 Understanding threads, async/await, and message passing is essential for \
-                 building high-performance concurrent applications in Rust.",
-            )
-            .add_text("author", "Grace Taylor")
-            .add_text("category", "programming")
-            .add_text("tags", "rust concurrency async parallel")
-            .add_integer("year", 2024)
-            .add_integer("rating", 5)
-            .add_geo("location", 34.0522, -118.2437) // Los Angeles
-            .build(),
-        Document::builder()
-            .add_text("id", "doc008")
-            .add_text("title", "Database Design Principles")
-            .add_text(
-                "body",
-                "Effective database design is crucial for application performance. \
-                 This guide covers normalization, indexing strategies, and query optimization \
-                 for both SQL and NoSQL databases.",
-            )
-            .add_text("author", "Henry Wilson")
-            .add_text("category", "database")
-            .add_text("tags", "database sql nosql design")
-            .add_integer("year", 2023)
-            .add_integer("rating", 4)
-            .add_geo("location", 35.6762, 139.6503) // Tokyo
-            .build(),
-        // Additional documents for geographic queries
-        Document::builder()
-            .add_text("id", "doc009")
-            .add_text("title", "Cloud Architecture Patterns")
-            .add_text(
-                "body",
-                "Cloud-native architectures require different design patterns. \
-                 Learn about scalability, resilience, and cost optimization in cloud environments.",
-            )
-            .add_text("author", "Isabel Martinez")
-            .add_text("category", "cloud")
-            .add_text("tags", "cloud architecture scalability")
-            .add_integer("year", 2024)
-            .add_integer("rating", 5)
-            .add_geo("location", 35.6895, 139.6917) // Tokyo (nearby)
-            .build(),
-        Document::builder()
-            .add_text("id", "doc010")
-            .add_text("title", "DevOps Best Practices")
-            .add_text(
-                "body",
-                "DevOps combines development and operations for faster delivery. \
-                 CI/CD pipelines, infrastructure as code, and monitoring are key practices.",
-            )
-            .add_text("author", "Jack Anderson")
-            .add_text("category", "devops")
-            .add_text("tags", "devops cicd automation")
-            .add_integer("year", 2023)
-            .add_integer("rating", 4)
-            .add_geo("location", 37.5665, 126.9780) // Seoul
-            .build(),
-    ];
+    // Step 2: Load documents from JSONL file
+    println!("Step 2: Loading documents from resources/documents.jsonl...");
+    let converter = JsonlDocumentConverter::new();
+    let doc_iter = converter.convert("resources/documents.jsonl")?;
 
-    println!("  Indexed {} documents\n", documents.len());
-    engine.add_documents(documents)?;
+    // Add documents one by one using iterator (memory efficient)
+    // Note: The engine caches the writer, so calling add_document() repeatedly
+    // is efficient and doesn't create a new writer each time
+    let mut count = 0;
+    for doc_result in doc_iter {
+        engine.add_document(doc_result?)?;
+        count += 1;
+    }
+    println!("  Loaded {} documents from JSONL file", count);
+
+    // Commit the changes to make them searchable
+    engine.commit()?;
+    println!("  Documents committed to index\n");
 
     // Step 3: Demonstrate all query types
     println!("Step 3: Demonstrating ALL query types...\n");
