@@ -11,7 +11,7 @@ use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::document::document::Document;
 use sage::document::field_value::FieldValue;
-use sage::lexical::index::writer::inverted_index::{
+use sage::lexical::index::writer::inverted::{
     InvertedIndexWriter, InvertedIndexWriterConfig,
 };
 use sage::storage::memory::MemoryStorage;

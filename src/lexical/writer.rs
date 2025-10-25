@@ -1,12 +1,10 @@
 //! Index writer trait and common types.
 //!
 //! This module defines the `IndexWriter` trait which all index writer
-//! implementations must follow. The primary implementation is `InvertedIndexWriter`
-//! in the `inverted_index_writer` module.
+//! implementations must follow. The primary implementation is `InvertedIndexWriter`.
 
 use crate::document::document::Document;
 use crate::error::Result;
-use crate::lexical::index::writer::inverted_index::AnalyzedDocument;
 
 /// Trait for index writers.
 ///
@@ -16,8 +14,7 @@ use crate::lexical::index::writer::inverted_index::AnalyzedDocument;
 /// # Example
 ///
 /// ```rust,no_run
-/// use sage::lexical::index::writer::inverted_index::InvertedIndexWriter;
-/// use sage::lexical::index::writer::inverted_index::InvertedIndexWriterConfig;
+/// use sage::lexical::index::writer::inverted::{InvertedIndexWriter, InvertedIndexWriterConfig};
 /// use sage::lexical::writer::IndexWriter;
 /// use sage::storage::memory::MemoryStorage;
 /// use sage::storage::traits::StorageConfig;
@@ -39,7 +36,10 @@ pub trait IndexWriter: Send + std::fmt::Debug {
     ///
     /// This allows adding pre-analyzed documents that were processed
     /// using DocumentParser or from external tokenization systems.
-    fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<()>;
+    fn add_analyzed_document(
+        &mut self,
+        doc: crate::lexical::index::writer::inverted::AnalyzedDocument,
+    ) -> Result<()>;
 
     /// Delete documents matching the given term.
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64>;

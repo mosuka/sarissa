@@ -12,9 +12,9 @@ use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::lexical::dictionary::TermDictionaryBuilder;
 use crate::lexical::dictionary::TermInfo;
-use crate::lexical::index::reader::inverted_index::InvertedIndexReader;
+use crate::lexical::index::reader::inverted::InvertedIndexReader;
 use crate::lexical::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
-use crate::lexical::inverted_index::SegmentInfo;
+use crate::lexical::index::SegmentInfo;
 use crate::lexical::posting::InvertedIndex;
 use crate::lexical::reader::IndexReader;
 use crate::storage::structured::StructWriter;
@@ -374,7 +374,7 @@ impl MergeEngine {
 
         // Use default config for reader
         let config =
-            crate::lexical::index::reader::inverted_index::InvertedIndexReaderConfig::default();
+            crate::lexical::index::reader::inverted::InvertedIndexReaderConfig::default();
 
         let reader = InvertedIndexReader::new(segments, self.storage.clone(), config)?;
         Ok(Box::new(reader) as Box<dyn IndexReader>)
@@ -512,7 +512,7 @@ impl MergeEngine {
 mod tests {
     use super::*;
     use crate::lexical::index::segment_manager::ManagedSegmentInfo;
-    use crate::lexical::inverted_index::SegmentInfo;
+    use crate::lexical::index::SegmentInfo;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::traits::StorageConfig;

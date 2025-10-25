@@ -13,7 +13,7 @@ use crate::analysis::token::Token;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
-use crate::lexical::index::writer::inverted_index::{AnalyzedDocument, AnalyzedTerm};
+use crate::lexical::index::writer::inverted::{AnalyzedDocument, AnalyzedTerm};
 
 /// A document parser that converts Documents into AnalyzedDocuments.
 ///

@@ -488,7 +488,7 @@ impl Default for BooleanQueryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::reader::inverted_index::{
+    use crate::lexical::index::reader::inverted::{
         InvertedIndexReader, InvertedIndexReaderConfig,
     };
     use crate::query::term::TermQuery;

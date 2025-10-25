@@ -12,7 +12,7 @@ use sage::document::converter::{
 use sage::document::field_value::FieldValue;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::inverted_index::IndexConfig;
+use sage::lexical::index::IndexConfig;
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");

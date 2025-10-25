@@ -23,7 +23,7 @@ use sage::document::converter::DocumentConverter;
 use sage::document::field_value::FieldValue;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::inverted_index::IndexConfig;
+use sage::lexical::index::IndexConfig;
 use sage::lexical::types::SearchRequest;
 use sage::query::boolean::BooleanQuery;
 use sage::query::fuzzy::FuzzyQuery;

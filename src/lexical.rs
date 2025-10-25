@@ -8,7 +8,6 @@
 pub mod bkd_tree;
 pub mod dictionary;
 pub mod doc_values;
-pub mod inverted_index;
 pub mod posting;
 pub mod reader;
 pub mod segment;

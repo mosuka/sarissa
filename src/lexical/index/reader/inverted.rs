@@ -1,6 +1,6 @@
-//! Advanced index reader with segment-based architecture.
+//! Inverted index reader implementation.
 //!
-//! This module provides a production-ready index reader that efficiently
+//! This module provides a production-ready inverted index reader that efficiently
 //! handles multiple segments, caching, and optimized posting list access.
 
 use std::collections::BTreeMap;
@@ -16,7 +16,7 @@ use crate::error::{Result, SageError};
 use crate::lexical::dictionary::HybridTermDictionary;
 use crate::lexical::dictionary::TermInfo;
 use crate::lexical::doc_values::DocValuesReader;
-use crate::lexical::inverted_index::SegmentInfo;
+use crate::lexical::index::SegmentInfo;
 use crate::storage::structured::StructReader;
 use crate::storage::traits::Storage;
 
