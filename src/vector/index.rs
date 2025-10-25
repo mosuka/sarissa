@@ -119,7 +119,7 @@ impl VectorIndexWriterFactory {
 }
 
 /// In-memory vector index that manages the lifecycle of builders and readers.
-/// This is similar to FileIndex in the lexical module.
+/// This is similar to InvertedIndex in the lexical module.
 pub struct VectorIndex {
     config: VectorIndexWriterConfig,
     builder: Arc<RwLock<Box<dyn VectorIndexWriter>>>,

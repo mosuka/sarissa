@@ -114,9 +114,11 @@ impl Default for IndexConfig {
     }
 }
 
-/// A concrete index implementation for schema-less indexing.
+/// A concrete inverted index implementation for schema-less lexical indexing.
+///
+/// This index can use any storage backend (file, memory, mmap, etc.) via the Storage trait.
 #[derive(Debug)]
-pub struct FileIndex {
+pub struct InvertedIndex {
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
@@ -167,13 +169,13 @@ impl Default for IndexMetadata {
     }
 }
 
-impl FileIndex {
+impl InvertedIndex {
     /// Create a new index in the given storage (schema-less mode).
     pub fn create(storage: Arc<dyn Storage>, config: IndexConfig) -> Result<Self> {
         // Create metadata
         let metadata = IndexMetadata::default();
 
-        let index = FileIndex {
+        let index = InvertedIndex {
             storage,
             config,
             closed: false,
@@ -181,10 +183,10 @@ impl FileIndex {
         };
 
         // Write initial metadata
-        let temp_index = index;
-        temp_index.write_metadata()?;
+        let index = index;
+        index.write_metadata()?;
 
-        Ok(temp_index)
+        Ok(index)
     }
 
     /// Open an existing index from storage (schema-less mode).
@@ -197,7 +199,7 @@ impl FileIndex {
         // Read metadata
         let metadata = Self::read_metadata(storage.as_ref())?;
 
-        Ok(FileIndex {
+        Ok(InvertedIndex {
             storage,
             config,
             closed: false,
@@ -312,7 +314,7 @@ impl FileIndex {
     }
 }
 
-impl Index for FileIndex {
+impl Index for InvertedIndex {
     fn reader(&self) -> Result<Box<dyn IndexReader>> {
         self.check_closed()?;
 
@@ -382,7 +384,7 @@ impl Index for FileIndex {
 }
 
 /// Helper functions for index operations.
-impl FileIndex {
+impl InvertedIndex {
     /// Check if an index exists in the given directory.
     pub fn exists_in_dir<P: AsRef<Path>>(dir: P) -> bool {
         let metadata_path = dir.as_ref().join("metadata.json");
@@ -424,7 +426,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = IndexConfig::default();
 
-        let index = FileIndex::create(storage, config).unwrap();
+        let index = InvertedIndex::create(storage, config).unwrap();
 
         assert!(!index.is_closed());
     }
@@ -435,11 +437,11 @@ mod tests {
         let config = IndexConfig::default();
 
         // Create index
-        let mut index = FileIndex::create(storage.clone(), config.clone()).unwrap();
+        let mut index = InvertedIndex::create(storage.clone(), config.clone()).unwrap();
         index.close().unwrap();
 
         // Open index
-        let index = FileIndex::open(storage, config).unwrap();
+        let index = InvertedIndex::open(storage, config).unwrap();
 
         assert!(!index.is_closed());
     }
@@ -449,7 +451,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = IndexConfig::default();
 
-        let index = FileIndex::create(storage, config).unwrap();
+        let index = InvertedIndex::create(storage, config).unwrap();
         let stats = index.stats().unwrap();
 
         assert_eq!(stats.doc_count, 0);
@@ -464,7 +466,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = IndexConfig::default();
 
-        let mut index = FileIndex::create(storage, config).unwrap();
+        let mut index = InvertedIndex::create(storage, config).unwrap();
 
         assert!(!index.is_closed());
 
@@ -495,7 +497,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = IndexConfig::default();
 
-        let index = FileIndex::create(storage, config).unwrap();
+        let index = InvertedIndex::create(storage, config).unwrap();
         let files = index.list_files().unwrap();
 
         // Should have metadata and schema files
