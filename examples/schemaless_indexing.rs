@@ -11,11 +11,9 @@ use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::document::document::Document;
 use sage::document::field_value::FieldValue;
-use sage::lexical::index::writer::inverted::{
-    InvertedIndexWriter, InvertedIndexWriterConfig,
-};
+use sage::lexical::index::writer::inverted::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use sage::storage::memory::MemoryStorage;
-use sage::storage::traits::StorageConfig;
+use sage::storage::MemoryStorageConfig;
 
 fn main() -> sage::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");
@@ -30,7 +28,7 @@ fn main() -> sage::error::Result<()> {
     per_field_analyzer.add_analyzer("post_id", Arc::new(KeywordAnalyzer::new()));
 
     // Create storage and writer configuration
-    let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     let config = InvertedIndexWriterConfig {
         analyzer: Arc::new(per_field_analyzer),
         ..Default::default()

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 use crate::vector::Vector;
 use crate::vector::index::VectorIndexWriterConfig;
 use crate::vector::writer::VectorIndexWriter;

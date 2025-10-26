@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 use crate::vector::Vector;
 use crate::vector::index::VectorIndexWriterConfig;
 use crate::vector::writer::VectorIndexWriter;
@@ -25,14 +25,18 @@ pub struct IvfIndexWriter {
 
 impl IvfIndexWriter {
     /// Create a new IVF index builder.
-    pub fn new(config: VectorIndexWriterConfig) -> Result<Self> {
-        let n_clusters = Self::compute_default_clusters(1000); // Default for small datasets
-
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Vector index configuration
+    /// * `n_clusters` - Number of clusters (cells) to create (typical: sqrt(n_vectors))
+    /// * `n_probe` - Number of clusters to search (typical: 1-10, higher = more accurate but slower)
+    pub fn new(config: VectorIndexWriterConfig, n_clusters: usize, n_probe: usize) -> Result<Self> {
         Ok(Self {
             config,
             storage: None,
             n_clusters,
-            n_probe: 1, // Default to searching 1 cluster
+            n_probe,
             centroids: Vec::new(),
             inverted_lists: Vec::new(),
             vectors: Vec::new(),
@@ -42,17 +46,24 @@ impl IvfIndexWriter {
     }
 
     /// Create a new IVF index builder with storage.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Vector index configuration
+    /// * `storage` - Storage backend
+    /// * `n_clusters` - Number of clusters (cells) to create (typical: sqrt(n_vectors))
+    /// * `n_probe` - Number of clusters to search (typical: 1-10, higher = more accurate but slower)
     pub fn with_storage(
         config: VectorIndexWriterConfig,
         storage: Arc<dyn Storage>,
+        n_clusters: usize,
+        n_probe: usize,
     ) -> Result<Self> {
-        let n_clusters = Self::compute_default_clusters(1000);
-
         Ok(Self {
             config,
             storage: Some(storage),
             n_clusters,
-            n_probe: 1,
+            n_probe,
             centroids: Vec::new(),
             inverted_lists: Vec::new(),
             vectors: Vec::new(),

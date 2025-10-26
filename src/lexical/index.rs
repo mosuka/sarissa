@@ -16,7 +16,6 @@ pub mod segment_manager;
 pub mod transaction;
 pub mod writer;
 
-use std::path::Path;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -24,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::lexical::reader::IndexReader;
 use crate::lexical::writer::IndexWriter;
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 
 /// Information about a segment in the index.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -45,27 +44,45 @@ pub struct SegmentInfo {
     pub has_deletions: bool,
 }
 
-/// Trait for index implementations.
-pub trait Index: Send + Sync + std::fmt::Debug {
+/// Trait for lexical index implementations.
+///
+/// This trait defines the high-level interface for lexical indexes.
+/// Different index types (Inverted, ColumnStore, LSMTree, etc.) implement this trait
+/// to provide their specific functionality while maintaining a common interface.
+pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Get a reader for this index.
+    ///
+    /// Returns a reader that can be used to query the index.
     fn reader(&self) -> Result<Box<dyn IndexReader>>;
 
     /// Get a writer for this index.
+    ///
+    /// Returns a writer that can be used to add or update documents.
     fn writer(&self) -> Result<Box<dyn IndexWriter>>;
 
     /// Get the storage backend for this index.
+    ///
+    /// Returns a reference to the underlying storage.
     fn storage(&self) -> &Arc<dyn Storage>;
 
     /// Close the index and release resources.
+    ///
+    /// This should flush any pending writes and release all resources.
     fn close(&mut self) -> Result<()>;
 
     /// Check if the index is closed.
+    ///
+    /// Returns true if the index has been closed.
     fn is_closed(&self) -> bool;
 
     /// Get index statistics.
+    ///
+    /// Returns statistics about the index such as document count, term count, etc.
     fn stats(&self) -> Result<IndexStats>;
 
     /// Optimize the index (merge segments, etc.).
+    ///
+    /// Performs index optimization such as merging segments to improve query performance.
     fn optimize(&mut self) -> Result<()>;
 }
 
@@ -91,270 +108,194 @@ pub struct IndexStats {
     pub last_modified: u64,
 }
 
-/// Configuration for lexical index creation and management.
+/// Configuration for lexical index types.
+///
+/// This enum supports multiple index implementations (Inverted, ColumnStore, LSMTree, etc.)
+/// Each variant contains the configuration specific to that index type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LexicalIndexConfig {
-    /// Index type to build.
-    pub index_type: LexicalIndexType,
-
-    /// Maximum number of documents per segment.
-    pub max_docs_per_segment: u64,
-
-    /// Buffer size for writing operations.
-    pub write_buffer_size: usize,
-
-    /// Whether to use compression for stored fields.
-    pub compress_stored_fields: bool,
-
-    /// Whether to store term vectors.
-    pub store_term_vectors: bool,
-
-    /// Merge factor for segment merging.
-    pub merge_factor: u32,
-
-    /// Maximum number of segments before merging.
-    pub max_segments: u32,
-
-    /// Whether to use memory mapping for reading.
-    pub use_mmap: bool,
+#[serde(tag = "type")]
+pub enum LexicalIndexConfig {
+    /// Inverted index configuration
+    Inverted(InvertedIndexConfig),
+    // Future index types can be added here:
+    // ColumnStore(ColumnStoreConfig),
+    // LSMTree(LSMTreeConfig),
 }
+
 
 impl Default for LexicalIndexConfig {
     fn default() -> Self {
-        LexicalIndexConfig {
-            index_type: LexicalIndexType::Inverted,
+        LexicalIndexConfig::Inverted(InvertedIndexConfig::default())
+    }
+}
+
+/// Configuration specific to inverted index.
+///
+/// These settings control the behavior of the inverted index implementation,
+/// including segment management, buffering, compression, and term storage options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvertedIndexConfig {
+    /// Maximum number of documents per segment.
+    ///
+    /// When a segment reaches this size, it will be considered for merging.
+    /// Larger values reduce merge overhead but increase memory usage.
+    pub max_docs_per_segment: u64,
+
+    /// Buffer size for writing operations (in bytes).
+    ///
+    /// Controls how much data is buffered in memory before being flushed to disk.
+    /// Larger buffers improve write performance but use more memory.
+    pub write_buffer_size: usize,
+
+    /// Whether to use compression for stored fields.
+    ///
+    /// Enabling compression reduces disk usage but increases CPU overhead
+    /// for indexing and retrieval operations.
+    pub compress_stored_fields: bool,
+
+    /// Whether to store term vectors.
+    ///
+    /// Term vectors enable advanced features like highlighting and more-like-this
+    /// queries, but increase index size and indexing time.
+    pub store_term_vectors: bool,
+
+    /// Merge factor for segment merging.
+    ///
+    /// Controls how many segments are merged at once. Higher values reduce
+    /// the number of merge operations but create larger temporary segments.
+    pub merge_factor: u32,
+
+    /// Maximum number of segments before merging.
+    ///
+    /// When the number of segments exceeds this threshold, a merge operation
+    /// will be triggered to consolidate them.
+    pub max_segments: u32,
+}
+
+impl Default for InvertedIndexConfig {
+    fn default() -> Self {
+        InvertedIndexConfig {
             max_docs_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             compress_stored_fields: false,
             store_term_vectors: false,
             merge_factor: 10,
             max_segments: 100,
-            use_mmap: false,
         }
     }
 }
 
-/// Types of lexical indexes that can be built.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LexicalIndexType {
-    /// Inverted index for full-text search.
-    Inverted,
-    // Future additions:
-    // ColumnStore,
-    // LSMTree,
-    // SuffixArray,
-}
 
 /// Factory for creating lexical index instances.
 pub struct LexicalIndexFactory;
 
 impl LexicalIndexFactory {
-    /// Create a new lexical index based on configuration.
-    pub fn create(
-        storage: Arc<dyn Storage>,
-        config: LexicalIndexConfig,
-    ) -> Result<Box<dyn Index>> {
-        match config.index_type {
-            LexicalIndexType::Inverted => {
-                let index = writer::inverted::InvertedIndex::create(storage, config)?;
+    /// Create a new lexical index with the given storage and configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - Storage backend (MemoryStorage, FileStorage, etc.)
+    /// * `config` - Index configuration (enum containing type-specific settings)
+    ///
+    /// # Returns
+    ///
+    /// A boxed index implementation based on the configured index type.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
+    /// use sage::storage::memory::MemoryStorage;
+    /// use sage::storage::StorageConfig;
+    /// use std::sync::Arc;
+    ///
+    /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    /// let config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
+    /// let index = LexicalIndexFactory::create(storage, config)?;
+    /// ```
+    pub fn create(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Box<dyn LexicalIndex>> {
+        match config {
+            LexicalIndexConfig::Inverted(inverted_config) => {
+                let index = writer::inverted::InvertedIndex::create(storage, inverted_config)?;
                 Ok(Box::new(index))
-            }
-            // Future implementations will be added here
+            } // Future implementations will be added here
         }
     }
 
-    /// Open an existing lexical index based on configuration.
-    pub fn open(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Box<dyn Index>> {
-        match config.index_type {
-            LexicalIndexType::Inverted => {
-                let index = writer::inverted::InvertedIndex::open(storage, config)?;
+    /// Open an existing lexical index with the given storage and configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - Storage backend containing the existing index
+    /// * `config` - Index configuration (must match the stored index type)
+    ///
+    /// # Returns
+    ///
+    /// A boxed index implementation based on the configured index type.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
+    /// use sage::storage::file::FileStorage;
+    /// use sage::storage::StorageConfig;
+    /// use std::sync::Arc;
+    ///
+    /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
+    /// let config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
+    /// let index = LexicalIndexFactory::open(storage, config)?;
+    /// ```
+    pub fn open(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Box<dyn LexicalIndex>> {
+        match config {
+            LexicalIndexConfig::Inverted(inverted_config) => {
+                let index = writer::inverted::InvertedIndex::open(storage, inverted_config)?;
                 Ok(Box::new(index))
-            }
-            // Future implementations will be added here
+            } // Future implementations will be added here
         }
-    }
-
-    /// Create a new lexical index in a directory.
-    pub fn create_in_dir<P: AsRef<Path>>(
-        dir: P,
-        config: LexicalIndexConfig,
-    ) -> Result<Box<dyn Index>> {
-        use crate::storage::file::FileStorage;
-        use crate::storage::traits::StorageConfig;
-
-        let storage_config = StorageConfig {
-            use_mmap: config.use_mmap,
-            ..Default::default()
-        };
-
-        let storage = Arc::new(FileStorage::new(dir, storage_config)?);
-        Self::create(storage, config)
-    }
-
-    /// Open an existing lexical index from a directory.
-    pub fn open_dir<P: AsRef<Path>>(
-        dir: P,
-        config: LexicalIndexConfig,
-    ) -> Result<Box<dyn Index>> {
-        use crate::storage::file::FileStorage;
-        use crate::storage::traits::StorageConfig;
-
-        let storage_config = StorageConfig {
-            use_mmap: config.use_mmap,
-            ..Default::default()
-        };
-
-        let storage = Arc::new(FileStorage::new(dir, storage_config)?);
-        Self::open(storage, config)
-    }
-}
-
-/// A high-level lexical index that manages the lifecycle of readers and writers.
-/// This is similar to VectorIndex in the vector module.
-pub struct LexicalIndex {
-    /// The underlying index implementation.
-    index: Box<dyn Index>,
-
-    /// Index configuration.
-    config: LexicalIndexConfig,
-}
-
-impl LexicalIndex {
-    /// Create a new lexical index with the given configuration.
-    pub fn create(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
-        let index = LexicalIndexFactory::create(storage, config.clone())?;
-        Ok(Self { index, config })
-    }
-
-    /// Open an existing lexical index.
-    pub fn open(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
-        let index = LexicalIndexFactory::open(storage, config.clone())?;
-        Ok(Self { index, config })
-    }
-
-    /// Create a new lexical index in a directory.
-    pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: LexicalIndexConfig) -> Result<Self> {
-        use crate::storage::file::FileStorage;
-        use crate::storage::traits::StorageConfig;
-
-        let storage_config = StorageConfig {
-            use_mmap: config.use_mmap,
-            ..Default::default()
-        };
-
-        let storage = Arc::new(FileStorage::new(dir, storage_config)?);
-        Self::create(storage, config)
-    }
-
-    /// Open an existing lexical index from a directory.
-    pub fn open_dir<P: AsRef<Path>>(dir: P, config: LexicalIndexConfig) -> Result<Self> {
-        use crate::storage::file::FileStorage;
-        use crate::storage::traits::StorageConfig;
-
-        let storage_config = StorageConfig {
-            use_mmap: config.use_mmap,
-            ..Default::default()
-        };
-
-        let storage = Arc::new(FileStorage::new(dir, storage_config)?);
-        Self::open(storage, config)
-    }
-
-    /// Get a reader for this index.
-    pub fn reader(&self) -> Result<Box<dyn IndexReader>> {
-        self.index.reader()
-    }
-
-    /// Get a writer for this index.
-    pub fn writer(&self) -> Result<Box<dyn IndexWriter>> {
-        self.index.writer()
-    }
-
-    /// Get the storage backend for this index.
-    pub fn storage(&self) -> &Arc<dyn Storage> {
-        self.index.storage()
-    }
-
-    /// Close the index and release resources.
-    pub fn close(&mut self) -> Result<()> {
-        self.index.close()
-    }
-
-    /// Check if the index is closed.
-    pub fn is_closed(&self) -> bool {
-        self.index.is_closed()
-    }
-
-    /// Get index statistics.
-    pub fn stats(&self) -> Result<IndexStats> {
-        self.index.stats()
-    }
-
-    /// Optimize the index (merge segments, etc.).
-    pub fn optimize(&mut self) -> Result<()> {
-        self.index.optimize()
-    }
-
-    /// Get the configuration.
-    pub fn config(&self) -> &LexicalIndexConfig {
-        &self.config
-    }
-}
-
-impl std::fmt::Debug for LexicalIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LexicalIndex")
-            .field("config", &self.config)
-            .field("is_closed", &self.is_closed())
-            .finish()
     }
 }
 
 // Type aliases for backward compatibility
-/// Type alias for backward compatibility. Use `LexicalIndexConfig` for new code.
-pub type IndexConfig = LexicalIndexConfig;
-
-/// Type alias for backward compatibility. Use `LexicalIndex` for new code.
-pub type InvertedIndex = LexicalIndex;
+/// Type alias for backward compatibility. Use `writer::inverted::InvertedIndex` for new code.
+pub type InvertedIndex = writer::inverted::InvertedIndex;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
 
     #[test]
     fn test_lexical_index_creation() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = LexicalIndexConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let index = LexicalIndex::create(storage, config).unwrap();
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
 
         assert!(!index.is_closed());
-        assert_eq!(index.config().index_type, LexicalIndexType::Inverted);
     }
 
     #[test]
     fn test_lexical_index_open() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = LexicalIndexConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         // Create index
-        let mut index = LexicalIndex::create(storage.clone(), config.clone()).unwrap();
+        let mut index = LexicalIndexFactory::create(storage.clone(), config.clone()).unwrap();
         index.close().unwrap();
 
         // Open index
-        let index = LexicalIndex::open(storage, config).unwrap();
+        let index = LexicalIndexFactory::open(storage, config).unwrap();
 
         assert!(!index.is_closed());
     }
 
     #[test]
     fn test_lexical_index_stats() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = LexicalIndexConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let index = LexicalIndex::create(storage, config).unwrap();
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
         let stats = index.stats().unwrap();
 
         assert_eq!(stats.doc_count, 0);
@@ -366,10 +307,10 @@ mod tests {
 
     #[test]
     fn test_lexical_index_close() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
         let config = LexicalIndexConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let mut index = LexicalIndex::create(storage, config).unwrap();
+        let mut index = LexicalIndexFactory::create(storage, config).unwrap();
 
         assert!(!index.is_closed());
 
@@ -386,19 +327,22 @@ mod tests {
     fn test_lexical_index_config() {
         let config = LexicalIndexConfig::default();
 
-        assert_eq!(config.index_type, LexicalIndexType::Inverted);
-        assert_eq!(config.max_docs_per_segment, 1000000);
-        assert_eq!(config.write_buffer_size, 1024 * 1024);
-        assert!(!config.compress_stored_fields);
-        assert!(!config.store_term_vectors);
-        assert_eq!(config.merge_factor, 10);
-        assert_eq!(config.max_segments, 100);
-        assert!(!config.use_mmap);
+        // Test that default is Inverted and check its configuration
+        match config {
+            LexicalIndexConfig::Inverted(inverted) => {
+                assert_eq!(inverted.max_docs_per_segment, 1000000);
+                assert_eq!(inverted.write_buffer_size, 1024 * 1024);
+                assert!(!inverted.compress_stored_fields);
+                assert!(!inverted.store_term_vectors);
+                assert_eq!(inverted.merge_factor, 10);
+                assert_eq!(inverted.max_segments, 100);
+            }
+        }
     }
 
     #[test]
     fn test_factory_create() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = LexicalIndexConfig::default();
 
         let index = LexicalIndexFactory::create(storage, config).unwrap();

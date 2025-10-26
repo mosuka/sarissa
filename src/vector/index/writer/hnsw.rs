@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 use crate::vector::Vector;
 use crate::vector::index::VectorIndexWriterConfig;
 use crate::vector::writer::VectorIndexWriter;
@@ -22,12 +22,18 @@ pub struct HnswIndexWriter {
 
 impl HnswIndexWriter {
     /// Create a new HNSW index builder.
-    pub fn new(config: VectorIndexWriterConfig) -> Result<Self> {
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Vector index configuration
+    /// * `m` - Maximum number of connections per layer (typical: 16-48)
+    /// * `ef_construction` - Size of dynamic candidate list during construction (typical: 100-400)
+    pub fn new(config: VectorIndexWriterConfig, m: usize, ef_construction: usize) -> Result<Self> {
         Ok(Self {
             config,
             storage: None,
-            m: 16,                     // Default M parameter
-            ef_construction: 200,      // Default efConstruction parameter
+            m,
+            ef_construction,
             _ml: 1.0 / (2.0_f64).ln(), // 1/ln(2)
             vectors: Vec::new(),
             is_finalized: false,
@@ -36,15 +42,24 @@ impl HnswIndexWriter {
     }
 
     /// Create a new HNSW index builder with storage.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Vector index configuration
+    /// * `storage` - Storage backend
+    /// * `m` - Maximum number of connections per layer (typical: 16-48)
+    /// * `ef_construction` - Size of dynamic candidate list during construction (typical: 100-400)
     pub fn with_storage(
         config: VectorIndexWriterConfig,
         storage: Arc<dyn Storage>,
+        m: usize,
+        ef_construction: usize,
     ) -> Result<Self> {
         Ok(Self {
             config,
             storage: Some(storage),
-            m: 16,
-            ef_construction: 200,
+            m,
+            ef_construction,
             _ml: 1.0 / (2.0_f64).ln(),
             vectors: Vec::new(),
             is_finalized: false,

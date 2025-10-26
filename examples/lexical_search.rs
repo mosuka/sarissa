@@ -18,12 +18,12 @@
 
 use tempfile::TempDir;
 
-use sage::document::converter::jsonl::JsonlDocumentConverter;
 use sage::document::converter::DocumentConverter;
+use sage::document::converter::jsonl::JsonlDocumentConverter;
 use sage::document::field_value::FieldValue;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::IndexConfig;
+use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
 use sage::lexical::types::SearchRequest;
 use sage::query::boolean::BooleanQuery;
 use sage::query::fuzzy::FuzzyQuery;
@@ -32,6 +32,9 @@ use sage::query::phrase::PhraseQuery;
 use sage::query::range::NumericRangeQuery;
 use sage::query::term::TermQuery;
 use sage::query::wildcard::WildcardQuery;
+use sage::storage::file::FileStorage;
+use sage::storage::FileStorageConfig;
+use std::sync::Arc;
 
 fn main() -> Result<()> {
     println!("=== Comprehensive Lexical Search Example ===\n");
@@ -42,7 +45,10 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("  Index location: {:?}\n", temp_dir.path());
 
-    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let config = LexicalIndexConfig::default();
+    let storage = Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path()))?);
+    let index = LexicalIndexFactory::create(storage, config)?;
+    let mut engine = LexicalEngine::new(index)?;
 
     // Step 2: Load documents from JSONL file
     println!("Step 2: Loading documents from resources/documents.jsonl...");

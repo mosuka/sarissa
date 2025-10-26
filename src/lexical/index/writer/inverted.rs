@@ -18,12 +18,12 @@ use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::lexical::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::doc_values::DocValuesWriter;
-use crate::lexical::index::{Index, IndexStats, LexicalIndexConfig, SegmentInfo};
+use crate::lexical::index::{IndexStats, InvertedIndexConfig, SegmentInfo};
 use crate::lexical::posting::{InvertedIndex as PostingInvertedIndex, Posting};
 use crate::lexical::reader::IndexReader;
 use crate::lexical::writer::IndexWriter;
 use crate::storage::structured::StructWriter;
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 
 /// Metadata about an inverted index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,9 +67,9 @@ pub struct InvertedIndex {
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
-    /// Index configuration.
+    /// Inverted index specific configuration.
     #[allow(dead_code)]
-    config: LexicalIndexConfig,
+    config: InvertedIndexConfig,
 
     /// Whether the index is closed.
     closed: bool,
@@ -80,7 +80,7 @@ pub struct InvertedIndex {
 
 impl InvertedIndex {
     /// Create a new index in the given storage.
-    pub fn create(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
+    pub fn create(storage: Arc<dyn Storage>, config: InvertedIndexConfig) -> Result<Self> {
         let metadata = IndexMetadata::default();
 
         let index = InvertedIndex {
@@ -95,7 +95,7 @@ impl InvertedIndex {
     }
 
     /// Open an existing index from storage.
-    pub fn open(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
+    pub fn open(storage: Arc<dyn Storage>, config: InvertedIndexConfig) -> Result<Self> {
         if !storage.file_exists("metadata.json") {
             return Err(SageError::index("Index does not exist"));
         }
@@ -111,30 +111,22 @@ impl InvertedIndex {
     }
 
     /// Create an index in a directory.
-    pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: LexicalIndexConfig) -> Result<Self> {
+    pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: InvertedIndexConfig) -> Result<Self> {
         use crate::storage::file::FileStorage;
-        use crate::storage::traits::StorageConfig;
+        use crate::storage::FileStorageConfig;
 
-        let storage_config = StorageConfig {
-            use_mmap: config.use_mmap,
-            ..Default::default()
-        };
-
-        let storage = Arc::new(FileStorage::new(dir, storage_config)?);
+        let storage_config = FileStorageConfig::new(&dir);
+        let storage = Arc::new(FileStorage::new(&dir, storage_config)?);
         Self::create(storage, config)
     }
 
     /// Open an index from a directory.
-    pub fn open_dir<P: AsRef<Path>>(dir: P, config: LexicalIndexConfig) -> Result<Self> {
+    pub fn open_dir<P: AsRef<Path>>(dir: P, config: InvertedIndexConfig) -> Result<Self> {
         use crate::storage::file::FileStorage;
-        use crate::storage::traits::StorageConfig;
+        use crate::storage::FileStorageConfig;
 
-        let storage_config = StorageConfig {
-            use_mmap: config.use_mmap,
-            ..Default::default()
-        };
-
-        let storage = Arc::new(FileStorage::new(dir, storage_config)?);
+        let storage_config = FileStorageConfig::new(&dir);
+        let storage = Arc::new(FileStorage::new(&dir, storage_config)?);
         Self::open(storage, config)
     }
 
@@ -199,8 +191,9 @@ impl InvertedIndex {
                 let mut data = Vec::new();
                 std::io::Read::read_to_end(&mut input, &mut data)?;
 
-                let segment_info: SegmentInfo = serde_json::from_slice(&data)
-                    .map_err(|e| SageError::index(format!("Failed to parse segment metadata: {e}")))?;
+                let segment_info: SegmentInfo = serde_json::from_slice(&data).map_err(|e| {
+                    SageError::index(format!("Failed to parse segment metadata: {e}"))
+                })?;
 
                 segments.push(segment_info);
             }
@@ -219,9 +212,10 @@ impl InvertedIndex {
     /// Delete an index from the given directory.
     pub fn delete_in_dir<P: AsRef<Path>>(dir: P) -> Result<()> {
         use crate::storage::file::FileStorage;
-        use crate::storage::traits::StorageConfig;
+        use crate::storage::FileStorageConfig;
 
-        let storage = FileStorage::new(dir, StorageConfig::default())?;
+        let storage_config = FileStorageConfig::new(&dir);
+        let storage = FileStorage::new(&dir, storage_config)?;
 
         for file in storage.list_files()? {
             storage.delete_file(&file)?;
@@ -237,7 +231,7 @@ impl InvertedIndex {
     }
 }
 
-impl Index for InvertedIndex {
+impl crate::lexical::index::LexicalIndex for InvertedIndex {
     fn reader(&self) -> Result<Box<dyn IndexReader>> {
         self.check_closed()?;
 
@@ -257,10 +251,8 @@ impl Index for InvertedIndex {
     fn writer(&self) -> Result<Box<dyn IndexWriter>> {
         self.check_closed()?;
 
-        let writer = InvertedIndexWriter::new(
-            self.storage.clone(),
-            InvertedIndexWriterConfig::default(),
-        )?;
+        let writer =
+            InvertedIndexWriter::new(self.storage.clone(), InvertedIndexWriterConfig::default())?;
         Ok(Box::new(writer))
     }
 
@@ -498,10 +490,10 @@ impl InvertedIndexWriter {
     /// use sage::analysis::analyzer::standard::StandardAnalyzer;
     /// use sage::lexical::index::writer::inverted::{InvertedIndexWriter, InvertedIndexWriterConfig};
     /// use sage::storage::memory::MemoryStorage;
-    /// use sage::storage::traits::StorageConfig;
+    /// use sage::storage::StorageConfig;
     /// use std::sync::Arc;
     ///
-    /// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+    /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     /// let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
     /// let config = InvertedIndexWriterConfig {
     ///     analyzer: Arc::new(per_field.clone()),
@@ -1153,7 +1145,7 @@ impl crate::lexical::writer::IndexWriter for InvertedIndexWriter {
 mod tests {
     use super::*;
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
@@ -1166,7 +1158,7 @@ mod tests {
 
     #[test]
     fn test_inverted_index_writer_creation() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = InvertedIndexWriterConfig::default();
 
         let writer = InvertedIndexWriter::new(storage, config).unwrap();
@@ -1177,7 +1169,7 @@ mod tests {
 
     #[test]
     fn test_add_document() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = InvertedIndexWriterConfig::default();
 
         let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
@@ -1192,7 +1184,7 @@ mod tests {
 
     #[test]
     fn test_auto_flush() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = InvertedIndexWriterConfig {
             max_buffered_docs: 2,
             ..Default::default()
@@ -1220,7 +1212,7 @@ mod tests {
 
     #[test]
     fn test_commit() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = InvertedIndexWriterConfig::default();
 
         let mut writer = InvertedIndexWriter::new(storage.clone(), config).unwrap();
@@ -1240,7 +1232,7 @@ mod tests {
 
     #[test]
     fn test_rollback() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = InvertedIndexWriterConfig::default();
 
         let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
@@ -1258,7 +1250,7 @@ mod tests {
     #[test]
     fn test_multiple_field_types() {
         // Schema-less mode: fields are inferred from document
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = InvertedIndexWriterConfig::default();
 
         let mut writer = InvertedIndexWriter::new(storage, config).unwrap();

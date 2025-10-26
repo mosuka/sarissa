@@ -22,11 +22,11 @@ use sage::document::document::Document;
 use sage::document::parser::DocumentParser;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::writer::inverted::{
-    InvertedIndexWriter, InvertedIndexWriterConfig,
-};
-use sage::lexical::index::IndexConfig;
+use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use sage::lexical::index::writer::inverted::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use sage::lexical::types::SearchRequest;
+use sage::storage::file::FileStorage;
+use sage::storage::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");
@@ -43,10 +43,13 @@ fn main() -> Result<()> {
 
     // Step 2: Create temporary directory and search engine
     let temp_dir = TempDir::new().unwrap();
-    let engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let config = LexicalIndexConfig::default();
+    let storage = Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path()))?);
+    let index = LexicalIndexFactory::create(storage.clone(), config)?;
+    let engine = LexicalEngine::new(index)?;
 
-    // Get storage for creating custom writer
-    let storage = engine.storage().clone();
+    // Get storage for creating custom writer (already have it)
+    let storage = storage.clone();
     let config = InvertedIndexWriterConfig {
         analyzer: analyzer.clone(),
         ..Default::default()

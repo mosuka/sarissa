@@ -137,7 +137,12 @@ impl Iterator for CsvDocumentIterator {
     fn next(&mut self) -> Option<Self::Item> {
         let record = match self.reader.records().next()? {
             Ok(record) => record,
-            Err(e) => return Some(Err(SageError::parse(format!("Failed to read CSV record: {}", e)))),
+            Err(e) => {
+                return Some(Err(SageError::parse(format!(
+                    "Failed to read CSV record: {}",
+                    e
+                ))));
+            }
         };
 
         if !self.converter.flexible && record.len() != self.headers.len() {
@@ -163,7 +168,9 @@ impl Iterator for CsvDocumentIterator {
                 let suffix = &header[dot_pos + 1..];
 
                 if suffix == "lat" || suffix == "lon" {
-                    let entry = geo_fields.entry(base_name.to_string()).or_insert((None, None));
+                    let entry = geo_fields
+                        .entry(base_name.to_string())
+                        .or_insert((None, None));
 
                     if let Ok(float_val) = value.parse::<f64>() {
                         if suffix == "lat" {
@@ -274,10 +281,16 @@ mod tests {
         assert_eq!(docs.len(), 2);
 
         let doc1 = docs[0].as_ref().unwrap();
-        assert_eq!(doc1.get_field("title").unwrap().as_text().unwrap(), "Rust Programming");
+        assert_eq!(
+            doc1.get_field("title").unwrap().as_text().unwrap(),
+            "Rust Programming"
+        );
 
         let doc2 = docs[1].as_ref().unwrap();
-        assert_eq!(doc2.get_field("title").unwrap().as_text().unwrap(), "Python Basics");
+        assert_eq!(
+            doc2.get_field("title").unwrap().as_text().unwrap(),
+            "Python Basics"
+        );
     }
 
     #[test]
@@ -346,7 +359,10 @@ mod tests {
         assert_eq!(docs.len(), 2);
 
         let doc1 = docs[0].as_ref().unwrap();
-        assert_eq!(doc1.get_field("title").unwrap().as_text().unwrap(), "Tokyo Tower");
+        assert_eq!(
+            doc1.get_field("title").unwrap().as_text().unwrap(),
+            "Tokyo Tower"
+        );
         assert!(matches!(
             doc1.get_field("location").unwrap(),
             FieldValue::Geo(_)
@@ -358,7 +374,10 @@ mod tests {
         }
 
         let doc2 = docs[1].as_ref().unwrap();
-        assert_eq!(doc2.get_field("title").unwrap().as_text().unwrap(), "Eiffel Tower");
+        assert_eq!(
+            doc2.get_field("title").unwrap().as_text().unwrap(),
+            "Eiffel Tower"
+        );
         assert!(matches!(
             doc2.get_field("location").unwrap(),
             FieldValue::Geo(_)
@@ -368,7 +387,11 @@ mod tests {
     #[test]
     fn test_csv_multiple_geo_fields() {
         let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, "id,origin.lat,origin.lon,destination.lat,destination.lon").unwrap();
+        writeln!(
+            file,
+            "id,origin.lat,origin.lon,destination.lat,destination.lon"
+        )
+        .unwrap();
         writeln!(file, "route001,35.6762,139.6503,51.5074,-0.1278").unwrap();
         file.flush().unwrap();
 

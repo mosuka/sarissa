@@ -17,10 +17,10 @@ use crate::error::Result;
 /// use sage::lexical::index::writer::inverted::{InvertedIndexWriter, InvertedIndexWriterConfig};
 /// use sage::lexical::writer::IndexWriter;
 /// use sage::storage::memory::MemoryStorage;
-/// use sage::storage::traits::StorageConfig;
+/// use sage::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
-/// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+/// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 /// let config = InvertedIndexWriterConfig::default();
 /// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
 ///

@@ -844,12 +844,12 @@ mod tests {
             InvertedIndexReader, InvertedIndexReaderConfig,
         };
         use crate::storage::memory::MemoryStorage;
-        use crate::storage::traits::StorageConfig;
+        use crate::storage::{FileStorageConfig, MemoryStorageConfig};
         use std::sync::Arc;
 
         // Create a test schema and reader
 
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader =
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap();

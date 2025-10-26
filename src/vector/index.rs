@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 use crate::vector::writer::VectorIndexWriter;
 use crate::vector::{DistanceMetric, Vector};
 
@@ -75,8 +75,16 @@ impl VectorIndexWriterFactory {
     pub fn create_builder(config: VectorIndexWriterConfig) -> Result<Box<dyn VectorIndexWriter>> {
         match config.index_type {
             VectorIndexType::Flat => Ok(Box::new(writer::flat::FlatIndexWriter::new(config)?)),
-            VectorIndexType::HNSW => Ok(Box::new(writer::hnsw::HnswIndexWriter::new(config)?)),
-            VectorIndexType::IVF => Ok(Box::new(writer::ivf::IvfIndexWriter::new(config)?)),
+            VectorIndexType::HNSW => {
+                // Use default HNSW parameters: m=16, ef_construction=200
+                Ok(Box::new(writer::hnsw::HnswIndexWriter::new(
+                    config, 16, 200,
+                )?))
+            }
+            VectorIndexType::IVF => {
+                // Use default IVF parameters: n_clusters=100, n_probe=1
+                Ok(Box::new(writer::ivf::IvfIndexWriter::new(config, 100, 1)?))
+            }
         }
     }
 
@@ -89,12 +97,18 @@ impl VectorIndexWriterFactory {
             VectorIndexType::Flat => Ok(Box::new(writer::flat::FlatIndexWriter::with_storage(
                 config, storage,
             )?)),
-            VectorIndexType::HNSW => Ok(Box::new(writer::hnsw::HnswIndexWriter::with_storage(
-                config, storage,
-            )?)),
-            VectorIndexType::IVF => Ok(Box::new(writer::ivf::IvfIndexWriter::with_storage(
-                config, storage,
-            )?)),
+            VectorIndexType::HNSW => {
+                // Use default HNSW parameters: m=16, ef_construction=200
+                Ok(Box::new(writer::hnsw::HnswIndexWriter::with_storage(
+                    config, storage, 16, 200,
+                )?))
+            }
+            VectorIndexType::IVF => {
+                // Use default IVF parameters: n_clusters=100, n_probe=1
+                Ok(Box::new(writer::ivf::IvfIndexWriter::with_storage(
+                    config, storage, 100, 1,
+                )?))
+            }
         }
     }
 
@@ -128,44 +142,19 @@ pub struct VectorIndex {
 }
 
 impl VectorIndex {
-    /// Create a new in-memory vector index.
-    pub fn create(config: VectorIndexWriterConfig) -> Result<Self> {
-        let builder = VectorIndexWriterFactory::create_builder(config.clone())?;
-        Ok(Self {
-            config,
-            builder: Arc::new(RwLock::new(builder)),
-            is_finalized: Arc::new(RwLock::new(false)),
-            storage: None,
-        })
-    }
-
-    /// Create a new vector index with storage support.
-    pub fn create_with_storage(
-        config: VectorIndexWriterConfig,
-        storage: Arc<dyn Storage>,
-    ) -> Result<Self> {
+    /// Create a new vector index with the given configuration and storage.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Vector index configuration including index type
+    /// * `storage` - Storage backend (MemoryStorage, FileStorage, etc.)
+    pub fn new(config: VectorIndexWriterConfig, storage: Arc<dyn Storage>) -> Result<Self> {
         let builder =
             VectorIndexWriterFactory::create_builder_with_storage(config.clone(), storage.clone())?;
         Ok(Self {
             config,
             builder: Arc::new(RwLock::new(builder)),
             is_finalized: Arc::new(RwLock::new(false)),
-            storage: Some(storage),
-        })
-    }
-
-    /// Load an existing vector index from storage.
-    pub fn load(
-        config: VectorIndexWriterConfig,
-        storage: Arc<dyn Storage>,
-        path: &str,
-    ) -> Result<Self> {
-        let builder =
-            VectorIndexWriterFactory::load_builder(config.clone(), storage.clone(), path)?;
-        Ok(Self {
-            config,
-            builder: Arc::new(RwLock::new(builder)),
-            is_finalized: Arc::new(RwLock::new(true)),
             storage: Some(storage),
         })
     }

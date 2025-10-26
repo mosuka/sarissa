@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::{StorageInput, StorageOutput};
+use crate::storage::{StorageInput, StorageOutput};
 use crate::util::varint::{decode_u64, encode_u64};
 
 /// A structured file writer for binary data.
@@ -497,12 +497,12 @@ impl<R: StorageInput> BlockReader<R> {
 mod tests {
     use super::*;
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::{Storage, StorageConfig};
+    use crate::storage::{ Storage, FileStorageConfig, MemoryStorageConfig};
     use std::sync::Arc;
 
     #[test]
     fn test_struct_writer_reader() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         // Write structured data
         {
@@ -550,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_block_writer_reader() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         // Write blocks
         {
@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn test_string_u64_map() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let mut original_map = HashMap::new();
         original_map.insert("term1".to_string(), 100);
@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn test_delta_compression() {
         let values = vec![1000, 1005, 1010, 1020, 1050, 1100];
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         // Write compressed values
         {

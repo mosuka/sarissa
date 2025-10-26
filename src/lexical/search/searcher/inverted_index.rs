@@ -478,18 +478,16 @@ impl InvertedIndexSearcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::reader::inverted::{
-        InvertedIndexReader, InvertedIndexReaderConfig,
-    };
+    use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
     use crate::query::boolean::{BooleanQuery, BooleanQueryBuilder};
     use crate::query::term::TermQuery;
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
     fn create_test_searcher() -> InvertedIndexSearcher {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader = Box::new(
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap(),

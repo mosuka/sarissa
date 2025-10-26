@@ -5,8 +5,9 @@ use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::{
-    LockManager, Storage, StorageConfig, StorageError, StorageInput, StorageLock, StorageOutput,
+use crate::storage::{
+    LockManager, MemoryStorageConfig, Storage, StorageError, StorageInput, StorageLock,
+    StorageOutput,
 };
 
 /// An in-memory storage implementation.
@@ -21,16 +22,17 @@ pub struct MemoryStorage {
     lock_manager: Arc<MemoryLockManager>,
     /// Storage configuration.
     #[allow(dead_code)]
-    config: StorageConfig,
+    config: MemoryStorageConfig,
     /// Whether the storage is closed.
     closed: bool,
 }
 
 impl MemoryStorage {
     /// Create a new memory storage.
-    pub fn new(config: StorageConfig) -> Self {
+    pub fn new(config: MemoryStorageConfig) -> Self {
+        let initial_capacity = config.initial_capacity;
         MemoryStorage {
-            files: Arc::new(Mutex::new(HashMap::new())),
+            files: Arc::new(Mutex::new(HashMap::with_capacity(initial_capacity))),
             lock_manager: Arc::new(MemoryLockManager::new()),
             config,
             closed: false,
@@ -39,7 +41,7 @@ impl MemoryStorage {
 
     /// Create a new memory storage with default configuration.
     pub fn new_default() -> Self {
-        Self::new(StorageConfig::default())
+        Self::new(MemoryStorageConfig::default())
     }
 
     /// Check if the storage is closed.
@@ -139,7 +141,7 @@ impl Storage for MemoryStorage {
         Ok(data.len() as u64)
     }
 
-    fn metadata(&self, name: &str) -> Result<crate::storage::traits::FileMetadata> {
+    fn metadata(&self, name: &str) -> Result<crate::storage::FileMetadata> {
         self.check_closed()?;
 
         let files = self.files.lock().unwrap();
@@ -149,7 +151,7 @@ impl Storage for MemoryStorage {
                 .unwrap_or_default()
                 .as_secs();
 
-            Ok(crate::storage::traits::FileMetadata {
+            Ok(crate::storage::FileMetadata {
                 size: data.len() as u64,
                 modified: now,
                 created: now,

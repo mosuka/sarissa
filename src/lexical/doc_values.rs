@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 
 /// DocValues file extension
 const DOC_VALUES_EXTENSION: &str = ".dv";
@@ -250,7 +250,7 @@ impl DocValuesReader {
 mod tests {
     use super::*;
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
 
     #[test]
     fn test_field_doc_values() {
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_doc_values_write_read() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let segment_name = "segment_0".to_string();
 
         // Write DocValues

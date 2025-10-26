@@ -9,7 +9,7 @@ use ahash::AHashMap;
 
 use crate::error::{Result, SageError};
 use crate::storage::structured::{StructReader, StructWriter};
-use crate::storage::traits::{StorageInput, StorageOutput};
+use crate::storage::{StorageInput, StorageOutput};
 
 /// Information about a term in the dictionary.
 #[derive(Debug, Clone, PartialEq)]
@@ -554,7 +554,7 @@ impl HashTermDictionary {
 mod tests {
     use super::*;
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::{Storage, StorageConfig};
+    use crate::storage::{ FileStorageConfig, MemoryStorageConfig, Storage};
     use std::sync::Arc;
 
     fn create_test_term_info(offset: u64) -> TermInfo {
@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn test_dictionary_serialization() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let mut builder = TermDictionaryBuilder::new();
         builder.add_term("apple".to_string(), create_test_term_info(0));

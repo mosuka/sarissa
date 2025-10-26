@@ -14,7 +14,7 @@ use crate::error::{Result, SageError};
 use crate::lexical::index::deletion::{DeletionManager, GlobalDeletionState};
 use crate::lexical::index::merge_engine::MergeEngine;
 use crate::lexical::index::segment_manager::SegmentManager;
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 
 /// Transaction isolation levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -447,7 +447,7 @@ pub trait AtomicOperations {
 mod tests {
     use super::*;
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
 
     #[test]
     fn test_transaction_creation() {
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn test_transaction_manager() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let manager = TransactionManager::new(storage);
 

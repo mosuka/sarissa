@@ -25,12 +25,13 @@ use crate::vector::Vector;
 /// use sage::vector::index::VectorIndexWriterConfig;
 /// use sage::vector::writer::VectorIndexWriter;
 /// use sage::storage::memory::MemoryStorage;
-/// use sage::storage::traits::StorageConfig;
+/// use sage::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
-/// let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+/// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 /// let config = VectorIndexWriterConfig::default();
-/// let mut writer = HnswIndexWriter::with_storage(config, storage).unwrap();
+/// // HnswIndexWriter requires m and ef_construction parameters
+/// let mut writer = HnswIndexWriter::with_storage(config, storage, 16, 200).unwrap();
 ///
 /// // Use VectorIndexWriter trait methods
 /// // writer.add_vectors(vectors).unwrap();

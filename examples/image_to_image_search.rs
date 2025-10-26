@@ -23,10 +23,13 @@ use std::path::Path;
 use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use sage::embedding::image_embedder::ImageEmbedder;
 use sage::error::Result;
+use sage::storage::memory::MemoryStorage;
+use sage::storage::MemoryStorageConfig;
 use sage::vector::DistanceMetric;
 use sage::vector::engine::VectorEngine;
 use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
 use sage::vector::types::VectorSearchRequest;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -123,7 +126,8 @@ async fn main() -> Result<()> {
 
     // Build the index using VectorEngine
     println!("Building HNSW index...");
-    let mut engine = VectorEngine::create(config)?;
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let mut engine = VectorEngine::new(config, storage)?;
     engine.add_vectors(doc_vectors)?;
     engine.finalize()?;
 

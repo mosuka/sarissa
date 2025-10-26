@@ -23,6 +23,9 @@ use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
 /// use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
 /// use sage::vector::{Vector, DistanceMetric};
 /// use sage::vector::types::VectorSearchRequest;
+/// use sage::storage::memory::MemoryStorage;
+/// use sage::storage::StorageConfig;
+/// use std::sync::Arc;
 ///
 /// # fn main() -> sage::error::Result<()> {
 /// // Create engine
@@ -32,7 +35,8 @@ use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
 ///     index_type: VectorIndexType::Flat,
 ///     ..Default::default()
 /// };
-/// let mut engine = VectorEngine::create(config)?;
+/// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+/// let mut engine = VectorEngine::new(config, storage)?;
 ///
 /// // Add vectors
 /// let vectors = vec![
@@ -58,9 +62,37 @@ pub struct VectorEngine {
 }
 
 impl VectorEngine {
-    /// Create a new vector engine with the given configuration.
-    pub fn create(config: VectorIndexWriterConfig) -> Result<Self> {
-        let index = VectorIndex::create(config)?;
+    /// Create a new vector engine with the given configuration and storage.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Vector index configuration including index type
+    /// * `storage` - Storage backend (MemoryStorage, FileStorage, etc.)
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use sage::vector::engine::VectorEngine;
+    /// use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
+    /// use sage::vector::DistanceMetric;
+    /// use sage::storage::memory::MemoryStorage;
+    /// use sage::storage::StorageConfig;
+    /// use std::sync::Arc;
+    ///
+    /// let config = VectorIndexWriterConfig {
+    ///     dimension: 128,
+    ///     distance_metric: DistanceMetric::Cosine,
+    ///     index_type: VectorIndexType::Flat,
+    ///     ..Default::default()
+    /// };
+    /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    /// let engine = VectorEngine::new(config, storage).unwrap();
+    /// ```
+    pub fn new(
+        config: VectorIndexWriterConfig,
+        storage: Arc<dyn crate::storage::Storage>,
+    ) -> Result<Self> {
+        let index = VectorIndex::new(config, storage)?;
         Ok(Self {
             index,
             searcher: RefCell::new(None),
@@ -156,8 +188,11 @@ impl VectorEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::memory::MemoryStorage;
+    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
     use crate::vector::index::VectorIndexType;
+    use std::sync::Arc;
 
     #[test]
     fn test_vector_engine_basic() -> Result<()> {
@@ -167,8 +202,9 @@ mod tests {
             index_type: VectorIndexType::Flat,
             ..Default::default()
         };
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let mut engine = VectorEngine::create(config)?;
+        let mut engine = VectorEngine::new(config, storage)?;
 
         // Add some vectors
         let vectors = vec![

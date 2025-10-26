@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
 use crate::vector::types::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::{DistanceMetric, Vector};

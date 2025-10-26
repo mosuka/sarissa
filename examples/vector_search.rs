@@ -18,6 +18,10 @@ use sage::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use sage::error::Result;
 #[cfg(feature = "embeddings-candle")]
+use sage::storage::memory::MemoryStorage;
+#[cfg(feature = "embeddings-candle")]
+use sage::storage::MemoryStorageConfig;
+#[cfg(feature = "embeddings-candle")]
 use sage::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::Vector;
@@ -27,6 +31,8 @@ use sage::vector::engine::VectorEngine;
 use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::types::VectorSearchRequest;
+#[cfg(feature = "embeddings-candle")]
+use std::sync::Arc;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
@@ -98,7 +104,8 @@ async fn main() -> Result<()> {
 
     // Step 5: Build the vector index using VectorEngine
     println!("Building vector index...");
-    let mut engine = VectorEngine::create(vector_config)?;
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let mut engine = VectorEngine::new(vector_config, storage)?;
 
     // Add document vectors to the index
     let doc_vectors: Vec<(u64, sage::vector::Vector)> = documents
