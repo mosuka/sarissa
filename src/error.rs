@@ -84,7 +84,7 @@ pub enum SageError {
 /// Result type alias for operations that may fail with SageError.
 pub type Result<T> = std::result::Result<T, SageError>;
 
-/// Implement From<MLError> for SageError
+/// Implement `From<MLError>` for SageError
 impl From<crate::ml::MLError> for SageError {
     fn from(err: crate::ml::MLError) -> Self {
         SageError::ML(err.to_string())

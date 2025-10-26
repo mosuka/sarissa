@@ -29,7 +29,7 @@ impl InvertedIndexSearcher {
         }
     }
 
-    /// Create a new searcher with an Arc<dyn IndexReader>.
+    /// Create a new searcher with an `Arc<dyn IndexReader>`.
     pub fn from_arc(reader: Arc<dyn IndexReader>) -> Self {
         InvertedIndexSearcher { reader }
     }

@@ -1,7 +1,38 @@
 //! Storage abstraction layer for Sage.
 //!
 //! This module provides a pluggable storage system similar to Whoosh's storage architecture.
-//! It supports different storage backends like file system, memory, and potentially remote storage.
+//! It supports different storage backends (file system, memory) with a unified interface.
+//!
+//! # Architecture
+//!
+//! - **Storage trait**: Unified interface for all storage backends
+//! - **StorageConfig enum**: Type-safe configuration for different storage types
+//! - **StorageFactory**: Factory pattern for creating storage instances
+//!
+//! # Storage Types
+//!
+//! ## FileStorage
+//! - Disk-based persistent storage
+//! - Supports memory-mapped files (mmap) for high-performance reads
+//! - Configurable buffering, syncing, and locking
+//!
+//! ## MemoryStorage
+//! - In-memory storage for testing and temporary data
+//! - Fast but non-persistent
+//!
+//! # Example
+//!
+//! ```ignore
+//! use sage::storage::{StorageFactory, StorageConfig, FileStorageConfig, MemoryStorageConfig};
+//!
+//! // Create file storage with mmap enabled
+//! let mut file_config = FileStorageConfig::new("/path/to/index");
+//! file_config.use_mmap = true;
+//! let storage = StorageFactory::create(StorageConfig::File(file_config))?;
+//!
+//! // Create memory storage
+//! let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+//! ```
 
 use std::io::{Read, Seek, Write};
 
@@ -387,11 +418,34 @@ pub trait StorageLock: Send + std::fmt::Debug {
 
 /// Configuration for storage backends.
 ///
-/// This enum supports multiple storage implementations (File, Memory, etc.)
-/// Each variant contains the configuration specific to that storage type.
+/// This enum provides type-safe configuration for different storage implementations.
+/// Each variant contains the configuration specific to that storage type, including
+/// the path for file-based storage.
+///
+/// # Design Pattern
+///
+/// This follows an enum-based configuration pattern where:
+/// - Each storage type has its own dedicated config struct
+/// - The path is part of `FileStorageConfig` (not a separate parameter)
+/// - Pattern matching ensures exhaustive handling of all storage types
+///
+/// # Example
+///
+/// ```ignore
+/// use sage::storage::{StorageConfig, FileStorageConfig, MemoryStorageConfig};
+///
+/// // File storage with custom settings
+/// let mut file_config = FileStorageConfig::new("/data/index");
+/// file_config.use_mmap = true;
+/// file_config.buffer_size = 131072; // 128KB
+/// let config = StorageConfig::File(file_config);
+///
+/// // Memory storage with default settings
+/// let config = StorageConfig::Memory(MemoryStorageConfig::default());
+/// ```
 #[derive(Debug, Clone)]
 pub enum StorageConfig {
-    /// File-based storage configuration
+    /// File-based storage configuration (includes path)
     File(FileStorageConfig),
 
     /// Memory-based storage configuration
@@ -405,38 +459,88 @@ impl Default for StorageConfig {
 }
 
 /// Configuration specific to file-based storage.
+///
+/// This configuration includes the storage path and various options for
+/// file I/O, memory-mapping, and locking behavior.
+///
+/// # Memory-Mapped Files (mmap)
+///
+/// When `use_mmap` is enabled, FileStorage uses memory-mapped I/O for reading files,
+/// which can significantly improve performance for large files by:
+/// - Avoiding system call overhead
+/// - Leveraging the OS page cache
+/// - Enabling zero-copy reads
+///
+/// Additional mmap options:
+/// - `mmap_cache_size`: Number of mmap files to keep cached
+/// - `mmap_enable_prefault`: Pre-populate page tables for faster initial access
+/// - `mmap_enable_hugepages`: Use huge pages if available (Linux)
+///
+/// # Example
+///
+/// ```ignore
+/// use sage::storage::FileStorageConfig;
+///
+/// // Basic file storage
+/// let config = FileStorageConfig::new("/data/index");
+///
+/// // High-performance configuration with mmap
+/// let mut config = FileStorageConfig::new("/data/index");
+/// config.use_mmap = true;
+/// config.mmap_enable_prefault = true;
+/// config.buffer_size = 131072; // 128KB for non-mmap operations
+/// ```
 #[derive(Debug, Clone)]
 pub struct FileStorageConfig {
     /// Path to the storage directory.
     pub path: std::path::PathBuf,
 
-    /// Whether to use memory-mapped files.
+    /// Whether to use memory-mapped files for reading.
+    /// When true, files are read using mmap instead of traditional I/O.
     pub use_mmap: bool,
 
-    /// Buffer size for I/O operations.
+    /// Buffer size for traditional I/O operations (bytes).
+    /// Default: 65536 (64KB). Used when `use_mmap` is false.
     pub buffer_size: usize,
 
-    /// Whether to sync writes immediately.
+    /// Whether to sync writes immediately to disk.
+    /// When true, calls fsync after each write for durability.
     pub sync_writes: bool,
 
-    /// Whether to use file locking.
+    /// Whether to use file locking for concurrency control.
     pub use_locking: bool,
 
     /// Temporary directory for temp files.
+    /// If None, uses the storage directory.
     pub temp_dir: Option<String>,
 
-    /// Maximum number of memory-mapped files to cache (only used when use_mmap is true).
+    /// Maximum number of memory-mapped files to cache.
+    /// Only used when `use_mmap` is true. Default: 100.
     pub mmap_cache_size: usize,
 
-    /// Enable prefaulting for memory-mapped files (pre-populate page tables).
+    /// Enable prefaulting for memory-mapped files.
+    /// Pre-populates page tables for faster initial access.
+    /// Only used when `use_mmap` is true.
     pub mmap_enable_prefault: bool,
 
     /// Enable huge pages for memory-mapped files if available.
+    /// Can improve TLB performance for large files (Linux only).
+    /// Only used when `use_mmap` is true.
     pub mmap_enable_hugepages: bool,
 }
 
 impl FileStorageConfig {
     /// Create a new FileStorageConfig with the given path and default settings.
+    ///
+    /// # Default Settings
+    ///
+    /// - `use_mmap`: false
+    /// - `buffer_size`: 65536 (64KB)
+    /// - `sync_writes`: false
+    /// - `use_locking`: true
+    /// - `mmap_cache_size`: 100
+    /// - `mmap_enable_prefault`: false
+    /// - `mmap_enable_hugepages`: false
     pub fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
         FileStorageConfig {
             path: path.as_ref().to_path_buf(),

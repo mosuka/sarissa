@@ -1,4 +1,44 @@
 //! File-based storage implementation.
+//!
+//! This module provides disk-based persistent storage with support for both
+//! traditional file I/O and memory-mapped files (mmap).
+//!
+//! # Features
+//!
+//! - **Traditional I/O**: Buffered reads/writes with configurable buffer size
+//! - **Memory-mapped I/O**: High-performance reads using mmap with caching
+//! - **File locking**: Concurrent access control
+//! - **Flexible configuration**: Buffer size, sync writes, temp directory, etc.
+//!
+//! # Memory-Mapped Mode
+//!
+//! When `FileStorageConfig.use_mmap` is enabled:
+//! - Files are mapped into memory for reading
+//! - Mapped files are cached for reuse
+//! - File modifications are detected and cache is invalidated
+//! - Supports prefaulting and huge pages for performance
+//!
+//! # Example
+//!
+//! ```ignore
+//! use sage::storage::{FileStorage, FileStorageConfig};
+//! use std::io::Write;
+//!
+//! // Create storage with mmap enabled
+//! let mut config = FileStorageConfig::new("/tmp/index");
+//! config.use_mmap = true;
+//! let storage = FileStorage::new("/tmp/index", config)?;
+//!
+//! // Write a file
+//! let mut output = storage.create_output("test.dat")?;
+//! output.write_all(b"Hello, world!")?;
+//! output.close()?;
+//!
+//! // Read using mmap
+//! let mut input = storage.open_input("test.dat")?;
+//! let mut buffer = Vec::new();
+//! input.read_to_end(&mut buffer)?;
+//! ```
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -23,6 +63,14 @@ struct MmapFileMetadata {
 }
 
 /// A file-based storage implementation.
+///
+/// FileStorage provides persistent disk-based storage with two read modes:
+///
+/// 1. **Traditional I/O** (default): Uses buffered file reads with `BufReader`
+/// 2. **Memory-mapped I/O**: Uses mmap for zero-copy reads when `config.use_mmap` is true
+///
+/// The mmap mode includes caching and automatic invalidation on file changes,
+/// making it suitable for read-heavy workloads with large files.
 #[derive(Debug)]
 pub struct FileStorage {
     /// The root directory for storage.

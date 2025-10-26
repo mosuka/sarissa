@@ -110,8 +110,41 @@ pub struct IndexStats {
 
 /// Configuration for lexical index types.
 ///
-/// This enum supports multiple index implementations (Inverted, ColumnStore, LSMTree, etc.)
+/// This enum provides type-safe configuration for different index implementations.
 /// Each variant contains the configuration specific to that index type.
+///
+/// # Design Pattern
+///
+/// This follows an enum-based configuration pattern where:
+/// - Each index type has its own dedicated config struct
+/// - Pattern matching ensures exhaustive handling of all index types
+/// - New index types can be added without breaking existing code
+///
+/// # Index Types
+///
+/// - **Inverted**: Traditional inverted index (default)
+///   - Fast full-text search
+///   - Good for keyword queries
+///   - Supports boolean operations
+///
+/// Future index types that could be added:
+/// - **ColumnStore**: Column-oriented index for aggregations
+/// - **LSMTree**: Log-structured merge-tree for write-heavy workloads
+///
+/// # Example
+///
+/// ```ignore
+/// use sage::lexical::index::{LexicalIndexConfig, InvertedIndexConfig};
+///
+/// // Use default inverted index
+/// let config = LexicalIndexConfig::default();
+///
+/// // Custom inverted index configuration
+/// let mut inverted_config = InvertedIndexConfig::default();
+/// inverted_config.max_docs_per_segment = 500_000;
+/// inverted_config.compress_stored_fields = true;
+/// let config = LexicalIndexConfig::Inverted(inverted_config);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum LexicalIndexConfig {
@@ -187,6 +220,31 @@ impl Default for InvertedIndexConfig {
 
 
 /// Factory for creating lexical index instances.
+///
+/// This factory follows the Factory design pattern to create appropriate
+/// index implementations based on the provided configuration.
+///
+/// # Design Benefits
+///
+/// - **Decoupling**: Client code doesn't need to know about concrete index types
+/// - **Extensibility**: New index types can be added by extending the enum
+/// - **Type safety**: Pattern matching ensures all cases are handled
+///
+/// # Example with StorageFactory
+///
+/// ```ignore
+/// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig};
+/// use sage::storage::{StorageFactory, StorageConfig, MemoryStorageConfig};
+/// use std::sync::Arc;
+///
+/// // Create storage using factory
+/// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+/// let storage = Arc::new(storage);
+///
+/// // Create index using factory
+/// let config = LexicalIndexConfig::default();
+/// let index = LexicalIndexFactory::create(storage, config)?;
+/// ```
 pub struct LexicalIndexFactory;
 
 impl LexicalIndexFactory {
@@ -194,24 +252,28 @@ impl LexicalIndexFactory {
     ///
     /// # Arguments
     ///
-    /// * `storage` - Storage backend (MemoryStorage, FileStorage, etc.)
-    /// * `config` - Index configuration (enum containing type-specific settings)
+    /// * `storage` - Storage backend (created using `StorageFactory`)
+    /// * `config` - Index configuration enum containing type-specific settings
     ///
     /// # Returns
     ///
-    /// A boxed index implementation based on the configured index type.
+    /// A boxed trait object implementing `LexicalIndex` trait.
+    /// The concrete type is determined by the config variant.
     ///
     /// # Example
     ///
     /// ```ignore
     /// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
-    /// use sage::storage::memory::MemoryStorage;
-    /// use sage::storage::StorageConfig;
+    /// use sage::storage::{StorageFactory, StorageConfig, FileStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    /// let config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
-    /// let index = LexicalIndexFactory::create(storage, config)?;
+    /// // Create file storage
+    /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
+    /// let storage = Arc::new(StorageFactory::create(storage_config)?);
+    ///
+    /// // Create inverted index
+    /// let index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
+    /// let index = LexicalIndexFactory::create(storage, index_config)?;
     /// ```
     pub fn create(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Box<dyn LexicalIndex>> {
         match config {
