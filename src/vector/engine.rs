@@ -6,12 +6,19 @@
 use std::cell::{RefCell, RefMut};
 use std::sync::Arc;
 
-use crate::error::Result;
-use crate::vector::Vector;
-use crate::vector::index::VectorIndex;
+use crate::error::{Result, SageError};
+use crate::storage::Storage;
+use crate::vector::index::reader::flat::FlatVectorIndexReader;
+use crate::vector::index::reader::hnsw::HnswIndexReader;
+use crate::vector::index::reader::ivf::IvfIndexReader;
+use crate::vector::index::{VectorIndex, VectorIndexStats};
+use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::VectorSearcher;
 use crate::vector::search::searcher::flat::FlatVectorSearcher;
+use crate::vector::search::searcher::hnsw::HnswSearcher;
+use crate::vector::search::searcher::ivf::IvfSearcher;
 use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
+use crate::vector::{DistanceMetric, Vector};
 
 /// A high-level unified vector engine that provides both indexing and searching capabilities.
 /// This is similar to the lexical SearchEngine but for vector search.
@@ -61,6 +68,8 @@ pub struct VectorEngine {
     reader: RefCell<Option<Arc<dyn crate::vector::reader::VectorIndexReader>>>,
     /// The writer for adding/updating vectors (cached for efficiency).
     writer: RefCell<Option<Box<dyn crate::vector::writer::VectorIndexWriter>>>,
+    /// The searcher for executing searches (cached for efficiency).
+    searcher: RefCell<Option<Box<dyn crate::vector::search::VectorSearcher>>>,
 }
 
 impl VectorEngine {
@@ -116,7 +125,23 @@ impl VectorEngine {
             index,
             reader: RefCell::new(None),
             writer: RefCell::new(None),
+            searcher: RefCell::new(None),
         })
+    }
+
+    /// Get or create a reader for this engine.
+    fn get_or_create_reader(&self) -> Result<std::cell::Ref<'_, Arc<dyn VectorIndexReader>>> {
+        {
+            let mut reader_ref = self.reader.borrow_mut();
+            if reader_ref.is_none() {
+                *reader_ref = Some(self.index.reader()?);
+            }
+        }
+
+        // Return a reference to the reader
+        Ok(std::cell::Ref::map(self.reader.borrow(), |opt| {
+            opt.as_ref().unwrap()
+        }))
     }
 
     /// Get or create a writer for this engine.
@@ -132,6 +157,47 @@ impl VectorEngine {
 
         // Return a mutable reference to the writer
         Ok(RefMut::map(self.writer.borrow_mut(), |opt| {
+            opt.as_mut().unwrap()
+        }))
+    }
+
+    /// Refresh the reader to see latest changes.
+    pub fn refresh(&mut self) -> Result<()> {
+        *self.reader.borrow_mut() = None;
+        *self.searcher.borrow_mut() = None;
+        Ok(())
+    }
+
+    /// Get or create a searcher for this engine.
+    ///
+    /// The searcher is created based on the reader type (Flat, HNSW, or IVF)
+    /// and cached for efficiency.
+    fn get_or_create_searcher(&self) -> Result<RefMut<'_, Box<dyn VectorSearcher>>> {
+        {
+            let mut searcher_ref = self.searcher.borrow_mut();
+            if searcher_ref.is_none() {
+                let reader = self.get_or_create_reader()?;
+
+                // Try to downcast to specific reader types and create appropriate searcher
+                let searcher: Box<dyn VectorSearcher> =
+                    if reader.as_any().is::<FlatVectorIndexReader>() {
+                        Box::new(FlatVectorSearcher::new(reader.clone())?)
+                    } else if reader.as_any().is::<HnswIndexReader>() {
+                        Box::new(HnswSearcher::new(reader.clone())?)
+                    } else if reader.as_any().is::<IvfIndexReader>() {
+                        Box::new(IvfSearcher::new(reader.clone())?)
+                    } else {
+                        return Err(SageError::InvalidOperation(
+                            "Unknown vector index reader type".to_string(),
+                        ));
+                    };
+
+                *searcher_ref = Some(searcher);
+            }
+        }
+
+        // Return a mutable reference to the searcher
+        Ok(RefMut::map(self.searcher.borrow_mut(), |opt| {
             opt.as_mut().unwrap()
         }))
     }
@@ -183,8 +249,9 @@ impl VectorEngine {
             writer.write("default_index")?;
         }
 
-        // Invalidate reader cache to reflect the new changes
+        // Invalidate reader and searcher caches to reflect the new changes
         *self.reader.borrow_mut() = None;
+        *self.searcher.borrow_mut() = None;
 
         Ok(())
     }
@@ -192,31 +259,9 @@ impl VectorEngine {
     /// Optimize the index.
     pub fn optimize(&mut self) -> Result<()> {
         self.index.optimize()?;
-        // Invalidate reader cache
+        // Invalidate reader and searcher caches
         *self.reader.borrow_mut() = None;
-        Ok(())
-    }
-
-    /// Get or create a reader for this engine.
-    fn get_or_create_reader(
-        &self,
-    ) -> Result<std::cell::Ref<'_, Arc<dyn crate::vector::reader::VectorIndexReader>>> {
-        {
-            let mut reader_ref = self.reader.borrow_mut();
-            if reader_ref.is_none() {
-                *reader_ref = Some(self.index.reader()?);
-            }
-        }
-
-        // Return a reference to the reader
-        Ok(std::cell::Ref::map(self.reader.borrow(), |opt| {
-            opt.as_ref().unwrap()
-        }))
-    }
-
-    /// Refresh the reader to see latest changes.
-    pub fn refresh(&mut self) -> Result<()> {
-        *self.reader.borrow_mut() = None;
+        *self.searcher.borrow_mut() = None;
         Ok(())
     }
 
@@ -243,14 +288,22 @@ impl VectorEngine {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn stats(&self) -> Result<crate::vector::index::VectorIndexStats> {
+    pub fn stats(&self) -> Result<VectorIndexStats> {
         self.index.stats()
     }
 
+    /// Get the storage backend.
+    pub fn storage(&self) -> &Arc<dyn Storage> {
+        self.index.storage()
+    }
+
     /// Search for similar vectors.
+    ///
+    /// This method automatically selects the appropriate searcher implementation
+    /// based on the underlying index type (Flat, HNSW, or IVF).
+    /// The searcher is cached for efficiency.
     pub fn search(&self, request: VectorSearchRequest) -> Result<VectorSearchResults> {
-        let reader = self.get_or_create_reader()?;
-        let searcher = FlatVectorSearcher::new(reader.clone())?;
+        let searcher = self.get_or_create_searcher()?;
         searcher.search(&request.query, &request.config)
     }
 
@@ -285,9 +338,36 @@ impl VectorEngine {
     }
 
     /// Get the distance metric.
-    pub fn distance_metric(&self) -> Result<crate::vector::DistanceMetric> {
+    pub fn distance_metric(&self) -> Result<DistanceMetric> {
         let reader = self.index.reader()?;
         Ok(reader.distance_metric())
+    }
+
+    /// Close the vector engine.
+    ///
+    /// This method releases all cached resources (reader and writer) and closes the
+    /// underlying index. After calling this method, the engine should not be used.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if the close operation fails.
+    pub fn close(&mut self) -> Result<()> {
+        // Drop the cached writer
+        *self.writer.borrow_mut() = None;
+        // Drop the cached reader
+        *self.reader.borrow_mut() = None;
+        // Drop the cached searcher
+        *self.searcher.borrow_mut() = None;
+        self.index.close()
+    }
+
+    /// Check if the engine is closed.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the engine has been closed, `false` otherwise.
+    pub fn is_closed(&self) -> bool {
+        self.index.is_closed()
     }
 }
 

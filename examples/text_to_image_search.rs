@@ -26,7 +26,7 @@ use sage::storage::memory::MemoryStorage;
 use sage::storage::memory::MemoryStorageConfig;
 use sage::vector::DistanceMetric;
 use sage::vector::engine::VectorEngine;
-use sage::vector::index::{VectorIndexConfig, HnswIndexConfig};
+use sage::vector::index::{HnswIndexConfig, VectorIndexConfig};
 use sage::vector::types::VectorSearchRequest;
 use std::sync::Arc;
 

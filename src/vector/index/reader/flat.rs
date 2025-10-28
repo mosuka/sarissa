@@ -76,6 +76,10 @@ impl FlatVectorIndexReader {
 }
 
 impl VectorIndexReader for FlatVectorIndexReader {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>> {
         Ok(self.vectors.get(&doc_id).cloned())
     }

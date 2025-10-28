@@ -642,3 +642,14 @@ mod tests {
         assert_eq!(request.config.timeout_ms, Some(5000));
     }
 }
+
+// Implement LexicalSearcher trait for InvertedIndexSearcher
+impl crate::lexical::search::searcher::LexicalSearcher for InvertedIndexSearcher {
+    fn search(&self, request: SearchRequest) -> Result<SearchResults> {
+        InvertedIndexSearcher::search(self, request)
+    }
+
+    fn count(&self, query: Box<dyn Query>) -> Result<u64> {
+        InvertedIndexSearcher::count(self, query)
+    }
+}

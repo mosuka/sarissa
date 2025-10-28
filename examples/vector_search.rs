@@ -28,7 +28,7 @@ use sage::vector::Vector;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
-use sage::vector::index::{VectorIndexConfig, FlatIndexConfig};
+use sage::vector::index::{FlatIndexConfig, VectorIndexConfig};
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::types::VectorSearchRequest;
 #[cfg(feature = "embeddings-candle")]

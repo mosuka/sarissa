@@ -54,9 +54,12 @@ use std::cell::{RefCell, RefMut};
 use std::sync::Arc;
 
 use crate::document::document::Document;
-use crate::error::Result;
+use crate::error::{Result, SageError};
+use crate::lexical::index::reader::inverted::InvertedIndexReader;
 use crate::lexical::index::{InvertedIndexStats, LexicalIndex};
 use crate::lexical::reader::IndexReader;
+use crate::lexical::search::searcher::LexicalSearcher;
+use crate::lexical::search::searcher::inverted_index::InvertedIndexSearcher;
 use crate::lexical::types::SearchRequest;
 use crate::lexical::writer::IndexWriter;
 use crate::query::SearchResults;
@@ -118,6 +121,8 @@ pub struct LexicalEngine {
     reader: RefCell<Option<Box<dyn IndexReader>>>,
     /// The writer for adding/updating documents (cached for efficiency).
     writer: RefCell<Option<Box<dyn IndexWriter>>>,
+    /// The searcher for executing searches (cached for efficiency).
+    searcher: RefCell<Option<Box<dyn crate::lexical::search::searcher::LexicalSearcher>>>,
 }
 
 impl std::fmt::Debug for LexicalEngine {
@@ -126,6 +131,7 @@ impl std::fmt::Debug for LexicalEngine {
             .field("index", &self.index)
             .field("reader", &"<cached reader>")
             .field("writer", &"<cached writer>")
+            .field("searcher", &"<cached searcher>")
             .finish()
     }
 }
@@ -179,12 +185,24 @@ impl LexicalEngine {
             index,
             reader: RefCell::new(None),
             writer: RefCell::new(None),
+            searcher: RefCell::new(None),
         })
     }
 
-    /// Get the storage backend.
-    pub fn storage(&self) -> &Arc<dyn Storage> {
-        self.index.storage()
+    /// Get or create a reader for this engine.
+    #[allow(dead_code)]
+    fn get_or_create_reader(&self) -> Result<RefMut<'_, Box<dyn IndexReader>>> {
+        {
+            let mut reader_ref = self.reader.borrow_mut();
+            if reader_ref.is_none() {
+                *reader_ref = Some(self.index.reader()?);
+            }
+        }
+
+        // Return a mutable reference to the reader
+        Ok(RefMut::map(self.reader.borrow_mut(), |opt| {
+            opt.as_mut().unwrap()
+        }))
     }
 
     /// Get or create a writer for this engine.
@@ -198,6 +216,37 @@ impl LexicalEngine {
 
         // Return a mutable reference to the writer
         Ok(RefMut::map(self.writer.borrow_mut(), |opt| {
+            opt.as_mut().unwrap()
+        }))
+    }
+
+    /// Get or create a searcher for this engine.
+    ///
+    /// The searcher is created from the index reader and cached for efficiency.
+    fn get_or_create_searcher(&self) -> Result<RefMut<'_, Box<dyn LexicalSearcher>>> {
+        {
+            let mut searcher_ref = self.searcher.borrow_mut();
+            if searcher_ref.is_none() {
+                // Get a fresh reader from the index
+                let reader = self.index.reader()?;
+
+                // Downcast to InvertedIndexReader and create appropriate searcher
+                let searcher: Box<dyn LexicalSearcher> = if let Some(inverted_reader) =
+                    reader.as_any().downcast_ref::<InvertedIndexReader>()
+                {
+                    Box::new(InvertedIndexSearcher::new(Box::new(
+                        inverted_reader.clone(),
+                    )))
+                } else {
+                    return Err(SageError::index("Unknown lexical index reader type"));
+                };
+
+                *searcher_ref = Some(searcher);
+            }
+        }
+
+        // Return a mutable reference to the searcher
+        Ok(RefMut::map(self.searcher.borrow_mut(), |opt| {
             opt.as_mut().unwrap()
         }))
     }
@@ -325,8 +374,9 @@ impl LexicalEngine {
             writer.commit()?;
         }
 
-        // Invalidate reader cache to reflect the new changes
+        // Invalidate reader and searcher caches to reflect the new changes
         *self.reader.borrow_mut() = None;
+        *self.searcher.borrow_mut() = None;
 
         Ok(())
     }
@@ -335,7 +385,7 @@ impl LexicalEngine {
     ///
     /// This method triggers index optimization, which typically involves merging smaller
     /// index segments into larger ones to improve search performance and reduce storage overhead.
-    /// After optimization, the reader cache is invalidated to reflect the optimized structure.
+    /// After optimization, the reader and searcher caches are invalidated to reflect the optimized structure.
     ///
     /// # Returns
     ///
@@ -376,31 +426,17 @@ impl LexicalEngine {
     pub fn optimize(&mut self) -> Result<()> {
         self.index.optimize()?;
 
-        // Invalidate reader cache
+        // Invalidate reader and searcher caches
         *self.reader.borrow_mut() = None;
+        *self.searcher.borrow_mut() = None;
 
         Ok(())
-    }
-
-    /// Get or create a reader for this engine.
-    #[allow(dead_code)]
-    fn get_or_create_reader(&self) -> Result<RefMut<'_, Box<dyn IndexReader>>> {
-        {
-            let mut reader_ref = self.reader.borrow_mut();
-            if reader_ref.is_none() {
-                *reader_ref = Some(self.index.reader()?);
-            }
-        }
-
-        // Return a mutable reference to the reader
-        Ok(RefMut::map(self.reader.borrow_mut(), |opt| {
-            opt.as_mut().unwrap()
-        }))
     }
 
     /// Refresh the reader to see latest changes.
     pub fn refresh(&mut self) -> Result<()> {
         *self.reader.borrow_mut() = None;
+        *self.searcher.borrow_mut() = None;
         Ok(())
     }
 
@@ -409,25 +445,15 @@ impl LexicalEngine {
         self.index.stats()
     }
 
-    /// Close the search engine.
-    pub fn close(&mut self) -> Result<()> {
-        // Drop the cached writer
-        *self.writer.borrow_mut() = None;
-        // Drop the cached reader
-        *self.reader.borrow_mut() = None;
-        self.index.close()
-    }
-
-    /// Check if the engine is closed.
-    pub fn is_closed(&self) -> bool {
-        self.index.is_closed()
+    /// Get the storage backend.
+    pub fn storage(&self) -> &Arc<dyn Storage> {
+        self.index.storage()
     }
 
     /// Search with the given request.
     ///
-    /// This method executes a search query against the index. It creates a fresh reader
-    /// from the index to ensure it sees all committed changes, then executes the search
-    /// using the appropriate searcher implementation.
+    /// This method executes a search query against the index using a cached searcher
+    /// for improved performance.
     ///
     /// # Arguments
     ///
@@ -489,42 +515,32 @@ impl LexicalEngine {
     /// let results = engine.search(SearchRequest::new(query)).unwrap();
     /// ```
     pub fn search(&self, request: SearchRequest) -> Result<SearchResults> {
-        use crate::lexical::index::reader::inverted::InvertedIndexReader;
-        use crate::lexical::search::searcher::inverted_index::InvertedIndexSearcher;
-
-        // Get a fresh reader from the index
-        let reader = self.index.reader()?;
-
-        // Downcast to InvertedIndexReader
-        let inverted_reader = reader
-            .as_any()
-            .downcast_ref::<InvertedIndexReader>()
-            .ok_or_else(|| crate::error::SageError::index("Expected InvertedIndexReader"))?
-            .clone();
-
-        // Create a searcher and execute search
-        let searcher = InvertedIndexSearcher::new(Box::new(inverted_reader));
-        InvertedIndexSearcher::search(&searcher, request)
+        let searcher = self.get_or_create_searcher()?;
+        searcher.search(request)
     }
 
     /// Count documents matching the query.
+    ///
+    /// Uses a cached searcher for improved performance.
     pub fn count(&self, query: Box<dyn Query>) -> Result<u64> {
-        use crate::lexical::index::reader::inverted::InvertedIndexReader;
-        use crate::lexical::search::searcher::inverted_index::InvertedIndexSearcher;
+        let searcher = self.get_or_create_searcher()?;
+        searcher.count(query)
+    }
 
-        // Get a fresh reader from the index
-        let reader = self.index.reader()?;
+    /// Close the search engine.
+    pub fn close(&mut self) -> Result<()> {
+        // Drop the cached writer
+        *self.writer.borrow_mut() = None;
+        // Drop the cached reader
+        *self.reader.borrow_mut() = None;
+        // Drop the cached searcher
+        *self.searcher.borrow_mut() = None;
+        self.index.close()
+    }
 
-        // Downcast to InvertedIndexReader
-        let inverted_reader = reader
-            .as_any()
-            .downcast_ref::<InvertedIndexReader>()
-            .ok_or_else(|| crate::error::SageError::index("Expected InvertedIndexReader"))?
-            .clone();
-
-        // Create a searcher and execute count
-        let searcher = InvertedIndexSearcher::new(Box::new(inverted_reader));
-        InvertedIndexSearcher::count(&searcher, query)
+    /// Check if the engine is closed.
+    pub fn is_closed(&self) -> bool {
+        self.index.is_closed()
     }
 }
 

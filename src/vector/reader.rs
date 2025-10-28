@@ -9,6 +9,9 @@ use crate::vector::{DistanceMetric, Vector};
 
 /// Trait for reading vector indexes (similar to IndexReader for inverted indexes).
 pub trait VectorIndexReader: Send + Sync {
+    /// Cast to Any for downcasting to concrete types.
+    fn as_any(&self) -> &dyn std::any::Any;
+
     /// Get a vector by document ID.
     fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>>;
 
@@ -90,6 +93,10 @@ impl SimpleVectorReader {
 }
 
 impl VectorIndexReader for SimpleVectorReader {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>> {
         Ok(self.vectors.get(&doc_id).cloned())
     }
