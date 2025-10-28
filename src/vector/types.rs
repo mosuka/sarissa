@@ -57,7 +57,6 @@ impl VectorSearchRequest {
 /// Configuration for vector search operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorSearchConfig {
-    // 基本設定
     /// Number of results to return.
     pub top_k: usize,
     /// Minimum similarity threshold.
@@ -68,16 +67,8 @@ pub struct VectorSearchConfig {
     pub include_vectors: bool,
     /// Search timeout in milliseconds.
     pub timeout_ms: Option<u64>,
-
-    // 高度な設定（オプショナル）
-    /// Search strategy to use.
-    pub strategy: Option<crate::vector::search::SearchStrategy>,
     /// Reranking configuration.
     pub reranking: Option<crate::vector::search::ranking::RankingConfig>,
-    /// Post-processing filters.
-    pub filters: Vec<crate::vector::search::SearchFilter>,
-    /// Search result explanation.
-    pub explain: bool,
 }
 
 impl Default for VectorSearchConfig {
@@ -88,10 +79,7 @@ impl Default for VectorSearchConfig {
             include_scores: true,
             include_vectors: false,
             timeout_ms: None,
-            strategy: None,
             reranking: None,
-            filters: Vec::new(),
-            explain: false,
         }
     }
 }

@@ -14,7 +14,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use sage::analysis::analyzer::analyzer::Analyzer;
 use sage::analysis::analyzer::standard::StandardAnalyzer;
 use sage::spelling::corrector::SpellingCorrector;
-use sage::vector::index::VectorIndexWriterConfig;
+use sage::vector::index::HnswIndexConfig;
 use sage::vector::index::writer::hnsw::HnswIndexWriter;
 use sage::vector::writer::VectorIndexWriter;
 use sage::vector::{DistanceMetric, Vector};
@@ -131,15 +131,16 @@ fn bench_vector_search(c: &mut Criterion) {
     group.bench_function("hnsw_index_construction", |b| {
         b.iter_with_setup(
             || {
-                HnswIndexWriter::new(
-                    VectorIndexWriterConfig {
-                        dimension,
-                        ..Default::default()
-                    },
-                    16,  // m: number of connections per layer
-                    200, // ef_construction: size of dynamic candidate list
-                )
-                .unwrap()
+                let index_config = HnswIndexConfig {
+                    dimension,
+                    distance_metric: DistanceMetric::Cosine,
+                    m: 16,
+                    ef_construction: 200,
+                    ..Default::default()
+                };
+                let writer_config = sage::vector::writer::VectorIndexWriterConfig::default();
+                HnswIndexWriter::new(index_config, writer_config)
+                    .unwrap()
             },
             |mut builder| {
                 let indexed_vectors: Vec<(u64, Vector)> = vectors
@@ -327,15 +328,16 @@ fn bench_scalability(c: &mut Criterion) {
 
                 b.iter_with_setup(
                     || {
-                        HnswIndexWriter::new(
-                            VectorIndexWriterConfig {
-                                dimension: 128,
-                                ..Default::default()
-                            },
-                            16,  // m: number of connections per layer
-                            200, // ef_construction: size of dynamic candidate list
-                        )
-                        .unwrap()
+                        let index_config = HnswIndexConfig {
+                            dimension: 128,
+                            distance_metric: DistanceMetric::Cosine,
+                            m: 16,
+                            ef_construction: 200,
+                            ..Default::default()
+                        };
+                        let writer_config = sage::vector::writer::VectorIndexWriterConfig::default();
+                        HnswIndexWriter::new(index_config, writer_config)
+                            .unwrap()
                     },
                     |mut builder| {
                         let indexed_vectors: Vec<(u64, Vector)> = vectors

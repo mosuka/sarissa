@@ -13,10 +13,10 @@ use crate::vector::index::reader::hnsw::HnswIndexReader;
 use crate::vector::index::reader::ivf::IvfIndexReader;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
-use crate::vector::search::VectorSearcher;
 use crate::vector::search::searcher::flat::FlatVectorSearcher;
 use crate::vector::search::searcher::hnsw::HnswSearcher;
 use crate::vector::search::searcher::ivf::IvfSearcher;
+use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
 use crate::vector::{DistanceMetric, Vector};
 
@@ -69,7 +69,7 @@ pub struct VectorEngine {
     /// The writer for adding/updating vectors (cached for efficiency).
     writer: RefCell<Option<Box<dyn crate::vector::writer::VectorIndexWriter>>>,
     /// The searcher for executing searches (cached for efficiency).
-    searcher: RefCell<Option<Box<dyn crate::vector::search::VectorSearcher>>>,
+    searcher: RefCell<Option<Box<dyn VectorSearcher>>>,
 }
 
 impl VectorEngine {
@@ -304,7 +304,7 @@ impl VectorEngine {
     /// The searcher is cached for efficiency.
     pub fn search(&self, request: VectorSearchRequest) -> Result<VectorSearchResults> {
         let searcher = self.get_or_create_searcher()?;
-        searcher.search(&request.query, &request.config)
+        searcher.search(&request)
     }
 
     /// Get build progress (0.0 to 1.0).
