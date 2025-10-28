@@ -67,16 +67,30 @@ sage = "0.1"
 use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::inverted_index::IndexConfig;
+use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::term::TermQuery;
+use sage::storage::file::FileStorage;
+use sage::storage::file::FileStorageConfig;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
     // Create a temporary directory for the index
     let temp_dir = TempDir::new().unwrap();
 
+    // Create storage
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
+
+    // Create index using factory
+    let config = LexicalIndexConfig::default();
+    let index = LexicalIndexFactory::create(storage, config)?;
+
     // Create a lexical search engine
-    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let mut engine = LexicalEngine::new(index)?;
 
     // Add documents
     let documents = vec![
@@ -90,14 +104,17 @@ fn main() -> Result<()> {
             .build(),
     ];
 
-    engine.add_documents(documents)?;
+    for doc in documents {
+        engine.add_document(doc)?;
+    }
     engine.commit()?;
 
     // Search documents
-    let query = TermQuery::new("content".to_string(), "programming".to_string());
-    let results = engine.search(&query, 10)?;
+    let query = Box::new(TermQuery::new("content", "programming"));
+    let request = LexicalSearchRequest::new(query).max_docs(10);
+    let results = engine.search(request)?;
 
-    println!("Found {} matches", results.total_hits);
+    println!("Found {} matches", results.hits.len());
     for hit in results.hits {
         println!("Score: {:.2}, Document ID: {}", hit.score, hit.doc_id);
     }
@@ -155,28 +172,50 @@ let doc = Document::builder()
 ### Query Types
 
 ```rust
-// Term query
-TermQuery::new("field".to_string(), "term".to_string())
+use sage::query::term::TermQuery;
+use sage::query::phrase::PhraseQuery;
+use sage::query::range::NumericRangeQuery;
+use sage::query::boolean::BooleanQuery;
+use sage::query::fuzzy::FuzzyQuery;
+use sage::query::wildcard::WildcardQuery;
+use sage::query::geo::{GeoDistanceQuery, GeoBoundingBoxQuery, GeoPoint, GeoBoundingBox};
 
-// Phrase query
-PhraseQuery::new("field".to_string(), vec!["hello".to_string(), "world".to_string()])
+// Term query - simple keyword matching
+let query = Box::new(TermQuery::new("field", "term"));
 
-// Range query
-RangeQuery::new("price".to_string(), Some(100.0), Some(500.0))
+// Phrase query - exact phrase matching
+let query = Box::new(PhraseQuery::new("field", vec!["hello", "world"]));
 
-// Boolean query
-BooleanQuery::new()
-    .add_must(TermQuery::new("category".to_string(), "book".to_string()))
-    .add_should(TermQuery::new("author".to_string(), "tolkien".to_string()))
+// Numeric range query
+let query = Box::new(NumericRangeQuery::new_float("price", Some(100.0), Some(500.0)));
 
-// Fuzzy query
-FuzzyQuery::new("title".to_string(), "progamming".to_string(), 2) // max edit distance: 2
+// Boolean query - combine multiple queries
+let mut bool_query = BooleanQuery::new();
+bool_query.add_must(Box::new(TermQuery::new("category", "book")));
+bool_query.add_should(Box::new(TermQuery::new("author", "tolkien")));
+let query = Box::new(bool_query);
 
-// Wildcard query  
-WildcardQuery::new("filename".to_string(), "*.pdf".to_string())
+// Fuzzy query - approximate string matching
+let query = Box::new(FuzzyQuery::new("title", "progamming", 2)); // max edit distance: 2
 
-// Geographic query
-GeoQuery::within_radius("location".to_string(), 40.7128, -74.0060, 10.0) // NYC, 10km radius
+// Wildcard query - pattern matching
+let query = Box::new(WildcardQuery::new("filename", "*.pdf"));
+
+// Geographic distance query
+let query = Box::new(GeoDistanceQuery::new(
+    "location",
+    GeoPoint::new(40.7128, -74.0060), // NYC coordinates
+    10.0, // 10km radius
+));
+
+// Geographic bounding box query
+let query = Box::new(GeoBoundingBoxQuery::new(
+    "location",
+    GeoBoundingBox::new(
+        GeoPoint::new(40.5, -74.5), // bottom-left
+        GeoPoint::new(41.0, -73.5), // top-right
+    ),
+));
 ```
 
 ## 🎯 Advanced Features
@@ -197,8 +236,10 @@ use sage::embedding::candle_text_embedder::CandleTextEmbedder;
 use sage::embedding::text_embedder::TextEmbedder;
 use sage::vector::DistanceMetric;
 use sage::vector::engine::VectorEngine;
-use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
-use tempfile::TempDir;
+use sage::vector::index::{FlatIndexConfig, VectorIndexConfig, VectorIndexFactory};
+use sage::vector::types::VectorSearchRequest;
+use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> sage::error::Result<()> {
@@ -212,16 +253,18 @@ async fn main() -> sage::error::Result<()> {
         (3, "Machine learning with neural networks"),
     ];
 
-    // Build vector index
-    let temp_dir = TempDir::new()?;
-    let config = VectorIndexWriterConfig {
+    // Create vector index configuration
+    let vector_config = VectorIndexConfig::Flat(FlatIndexConfig {
         dimension: embedder.dimension(),
         distance_metric: DistanceMetric::Cosine,
-        index_type: VectorIndexType::Hnsw,
+        normalize_vectors: true,
         ..Default::default()
-    };
+    });
 
-    let mut engine = VectorEngine::create_in_dir(temp_dir.path(), config)?;
+    // Create storage and index
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let index = VectorIndexFactory::create(storage, vector_config)?;
+    let mut engine = VectorEngine::new(index)?;
 
     // Add documents with their embeddings
     for (id, text) in &documents {
@@ -232,10 +275,11 @@ async fn main() -> sage::error::Result<()> {
 
     // Search with query embedding
     let query_vector = embedder.embed("programming languages").await?;
-    let results = engine.search(&query_vector, 10)?;
+    let request = VectorSearchRequest::new(query_vector).top_k(10);
+    let results = engine.search(request)?;
 
-    for result in results.hits {
-        println!("Doc ID: {}, Score: {:.4}", result.doc_id, result.score);
+    for result in results.results {
+        println!("Doc ID: {}, Similarity: {:.4}", result.doc_id, result.similarity);
     }
 
     Ok(())
@@ -287,9 +331,11 @@ use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use sage::embedding::text_embedder::TextEmbedder;
 use sage::embedding::image_embedder::ImageEmbedder;
 use sage::vector::engine::VectorEngine;
-use sage::vector::index::{VectorIndexWriterConfig, VectorIndexType};
+use sage::vector::index::{HnswIndexConfig, VectorIndexConfig, VectorIndexFactory};
+use sage::vector::types::VectorSearchRequest;
 use sage::vector::DistanceMetric;
-use tempfile::TempDir;
+use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> sage::error::Result<()> {
@@ -297,14 +343,15 @@ async fn main() -> sage::error::Result<()> {
     let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 
     // Create vector index with CLIP's embedding dimension (512)
-    let temp_dir = TempDir::new()?;
-    let config = VectorIndexWriterConfig {
+    let vector_config = VectorIndexConfig::Hnsw(HnswIndexConfig {
         dimension: ImageEmbedder::dimension(&embedder), // 512 for CLIP ViT-Base-Patch32
         distance_metric: DistanceMetric::Cosine,
-        index_type: VectorIndexType::Hnsw,
         ..Default::default()
-    };
-    let mut engine = VectorEngine::create_in_dir(temp_dir.path(), config)?;
+    });
+
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let index = VectorIndexFactory::create(storage, vector_config)?;
+    let mut engine = VectorEngine::new(index)?;
 
     // Index your image collection
     let image_paths = vec!["image1.jpg", "image2.jpg", "image3.jpg"];
@@ -316,10 +363,11 @@ async fn main() -> sage::error::Result<()> {
 
     // Search images using natural language
     let query_vector = embedder.embed("a photo of a cat playing").await?;
-    let results = engine.search(&query_vector, 10)?;
+    let request = VectorSearchRequest::new(query_vector).top_k(10);
+    let results = engine.search(request)?;
 
-    for result in results.hits {
-        println!("Image ID: {}, Score: {:.4}", result.doc_id, result.score);
+    for result in results.results {
+        println!("Image ID: {}, Similarity: {:.4}", result.doc_id, result.similarity);
     }
 
     Ok(())
@@ -331,10 +379,11 @@ async fn main() -> sage::error::Result<()> {
 ```rust
 // Find visually similar images using an image as query
 let query_image_vector = embedder.embed_image("query.jpg").await?;
-let similar_images = engine.search(&query_image_vector, 5)?;
+let request = VectorSearchRequest::new(query_image_vector).top_k(5);
+let results = engine.search(request)?;
 
-for result in similar_images.hits {
-    println!("Similar Image ID: {}, Score: {:.4}", result.doc_id, result.score);
+for result in results.results {
+    println!("Similar Image ID: {}, Similarity: {:.4}", result.doc_id, result.similarity);
 }
 ```
 
@@ -374,6 +423,7 @@ cargo run --example image_to_image_search --features embeddings-multimodal -- qu
 
 ```rust
 use sage::lexical::search::facet::{FacetedSearchEngine, FacetConfig};
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::term::TermQuery;
 
 // Create faceted search engine
@@ -389,8 +439,9 @@ let mut faceted_engine = FacetedSearchEngine::new(
 )?;
 
 // Perform faceted search
-let query = TermQuery::new("content".to_string(), "programming".to_string());
-let results = faceted_engine.search(&query, 10)?;
+let query = Box::new(TermQuery::new("content", "programming"));
+let request = LexicalSearchRequest::new(query).max_docs(10);
+let results = faceted_engine.search(request)?;
 
 // Access facet results
 for facet in &results.facets {
