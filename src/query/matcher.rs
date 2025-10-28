@@ -153,9 +153,7 @@ impl PostingMatcher {
         // Create a dummy iterator that's already exhausted
         let postings = vec![];
         let posting_iter = Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
-                postings,
-            ),
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings),
         );
         PostingMatcher {
             posting_iter,
@@ -853,9 +851,7 @@ mod tests {
             },
         ];
         let posting_iter = Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
-                postings,
-            ),
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings),
         );
         let mut matcher = PostingMatcher::new(posting_iter);
 
@@ -918,9 +914,7 @@ mod tests {
             },
         ];
         let matcher1 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
-                postings1,
-            ),
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings1),
         )));
 
         let postings2 = vec![
@@ -962,9 +956,7 @@ mod tests {
             },
         ];
         let matcher2 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
-                postings2,
-            ),
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings2),
         )));
 
         let mut conjunction = ConjunctionMatcher::new(vec![matcher1, matcher2]);
@@ -1152,9 +1144,7 @@ mod tests {
             },
         ];
         let matcher1 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
-                postings1,
-            ),
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings1),
         )));
 
         let postings2 = vec![
@@ -1178,9 +1168,7 @@ mod tests {
             },
         ];
         let matcher2 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
-                postings2,
-            ),
+            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings2),
         )));
 
         let conjunction = ConjunctionMatcher::new(vec![matcher1, matcher2]);

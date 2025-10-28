@@ -5,9 +5,12 @@ use tempfile::TempDir;
 use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::IndexConfig;
-use sage::lexical::types::SearchRequest;
+use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::term::TermQuery;
+use sage::storage::file::FileStorage;
+use sage::storage::file::FileStorageConfig;
+use std::sync::Arc;
 
 fn main() -> Result<()> {
     println!("=== TermQuery Example - Single Term Exact Matching ===\n");
@@ -17,7 +20,13 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}", temp_dir.path());
 
     // Create a search engine
-    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let config = LexicalIndexConfig::default();
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
+    let index = LexicalIndexFactory::create(storage, config)?;
+    let mut engine = LexicalEngine::new(index)?;
 
     // Add documents with various terms
     let documents = vec![
@@ -76,7 +85,7 @@ fn main() -> Result<()> {
     // Example 1: Search for exact term in title field
     println!("1. Searching for 'Rust' in title field:");
     let query = TermQuery::new("title", "Rust");
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -98,7 +107,7 @@ fn main() -> Result<()> {
     // Example 2: Search for exact term in body field
     println!("\n2. Searching for 'language' in body field:");
     let query = TermQuery::new("body", "language");
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -120,7 +129,7 @@ fn main() -> Result<()> {
     // Example 3: Search for exact term in category field
     println!("\n3. Searching for 'programming' in category field:");
     let query = TermQuery::new("category", "programming");
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -142,7 +151,7 @@ fn main() -> Result<()> {
     // Example 4: Search for non-existent term
     println!("\n4. Searching for non-existent term 'golang':");
     let query = TermQuery::new("title", "golang");
-    let request = SearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query));
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -150,7 +159,7 @@ fn main() -> Result<()> {
     // Example 5: Case sensitivity demonstration
     println!("\n5. Case sensitivity - searching for 'rust' (lowercase):");
     let query = TermQuery::new("title", "rust");
-    let request = SearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query));
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -159,7 +168,7 @@ fn main() -> Result<()> {
     // Example 6: Author exact match
     println!("\n6. Searching for exact author 'John Smith':");
     let query = TermQuery::new("author", "John Smith");
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);

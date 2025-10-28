@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
 use crate::vector::types::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::{DistanceMetric, Vector};
@@ -118,6 +118,10 @@ impl IvfIndexReader {
 }
 
 impl VectorIndexReader for IvfIndexReader {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>> {
         Ok(self.vectors.get(&doc_id).cloned())
     }

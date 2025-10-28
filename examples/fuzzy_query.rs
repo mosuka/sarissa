@@ -5,9 +5,12 @@ use tempfile::TempDir;
 use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::IndexConfig;
-use sage::lexical::types::SearchRequest;
+use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::fuzzy::FuzzyQuery;
+use sage::storage::file::FileStorage;
+use sage::storage::file::FileStorageConfig;
+use std::sync::Arc;
 
 fn main() -> Result<()> {
     println!("=== FuzzyQuery Example - Approximate String Matching ===\n");
@@ -17,7 +20,13 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}", temp_dir.path());
 
     // Create a search engine
-    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let config = LexicalIndexConfig::default();
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
+    let index = LexicalIndexFactory::create(storage, config)?;
+    let mut engine = LexicalEngine::new(index)?;
 
     // Add documents with various spellings and terms for fuzzy matching
     let documents = vec![
@@ -101,7 +110,7 @@ fn main() -> Result<()> {
     // Example 1: Simple fuzzy search with small edit distance
     println!("1. Fuzzy search for 'javascritp' (typo for 'javascript') with edit distance 1:");
     let query = FuzzyQuery::new("body", "javascritp").max_edits(1);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -123,7 +132,7 @@ fn main() -> Result<()> {
     // Example 2: Fuzzy search with higher edit distance
     println!("\n2. Fuzzy search for 'programing' (missing 'm') with edit distance 2:");
     let query = FuzzyQuery::new("body", "programing").max_edits(2);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -145,7 +154,7 @@ fn main() -> Result<()> {
     // Example 3: Fuzzy search in title field
     println!("\n3. Fuzzy search for 'machne' (missing 'i') in title with edit distance 1:");
     let query = FuzzyQuery::new("title", "machne").max_edits(1);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -167,7 +176,7 @@ fn main() -> Result<()> {
     // Example 4: Fuzzy search for author names
     println!("\n4. Fuzzy search for 'Jon' (should match 'John') in author with edit distance 1:");
     let query = FuzzyQuery::new("author", "Jon").max_edits(1);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -195,7 +204,7 @@ fn main() -> Result<()> {
     // Example 5: Fuzzy search with various misspellings
     println!("\n5. Fuzzy search for 'algoritm' (missing 'h') with edit distance 2:");
     let query = FuzzyQuery::new("body", "algoritm").max_edits(2);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -217,7 +226,7 @@ fn main() -> Result<()> {
     // Example 6: Fuzzy search in tags
     println!("\n6. Fuzzy search for 'artifical' (missing 'i') in tags with edit distance 1:");
     let query = FuzzyQuery::new("tags", "artifical").max_edits(1);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -239,7 +248,7 @@ fn main() -> Result<()> {
     // Example 7: Fuzzy search with exact match (edit distance 0)
     println!("\n7. Fuzzy search for exact 'python' with edit distance 0:");
     let query = FuzzyQuery::new("body", "python").max_edits(0);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -261,7 +270,7 @@ fn main() -> Result<()> {
     // Example 8: Fuzzy search with high edit distance (more permissive)
     println!("\n8. Fuzzy search for 'databse' (missing 'a') with edit distance 3:");
     let query = FuzzyQuery::new("body", "databse").max_edits(3);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -283,7 +292,7 @@ fn main() -> Result<()> {
     // Example 9: No fuzzy matches found
     println!("\n9. Fuzzy search for 'xyz123' (no similar terms) with edit distance 2:");
     let query = FuzzyQuery::new("body", "xyz123").max_edits(2);
-    let request = SearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query));
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);

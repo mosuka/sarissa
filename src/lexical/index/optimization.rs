@@ -10,7 +10,7 @@ use crate::error::{Result, SageError};
 use crate::lexical::index::deletion::DeletionManager;
 use crate::lexical::index::merge_engine::{MergeConfig, MergeEngine, MergeResult};
 use crate::lexical::index::segment_manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 
 /// Optimization strategy types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -531,8 +531,9 @@ mod tests {
     use super::*;
     use crate::lexical::index::deletion::DeletionConfig;
     use crate::lexical::index::segment_manager::SegmentManagerConfig;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[allow(dead_code)]
     #[test]
@@ -568,7 +569,7 @@ mod tests {
     fn test_index_optimizer_creation() {
         let config = OptimizationConfig::default();
 
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let optimizer = IndexOptimizer::new(config, storage);
         assert_eq!(optimizer.config.strategy, OptimizationLevel::Balanced);
@@ -578,7 +579,7 @@ mod tests {
     fn test_optimization_recommendations() {
         let config = OptimizationConfig::default();
 
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let optimizer = IndexOptimizer::new(config, storage.clone());
 

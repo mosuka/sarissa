@@ -107,7 +107,10 @@ impl JsonlDocumentConverter {
                                 (obj.get("lat"), obj.get("lon"))
                             {
                                 if let (Some(lat_f), Some(lon_f)) = (lat.as_f64(), lon.as_f64()) {
-                                    FieldValue::Geo(GeoPoint { lat: lat_f, lon: lon_f })
+                                    FieldValue::Geo(GeoPoint {
+                                        lat: lat_f,
+                                        lon: lon_f,
+                                    })
                                 } else {
                                     FieldValue::Text(val.to_string())
                                 }
@@ -151,7 +154,7 @@ impl Iterator for JsonlDocumentIterator {
                     return Some(self.converter.parse_json_line(line));
                 }
                 Err(e) => {
-                    return Some(Err(SageError::parse(format!("Failed to read line: {}", e))))
+                    return Some(Err(SageError::parse(format!("Failed to read line: {}", e))));
                 }
             }
         }
@@ -213,7 +216,11 @@ mod tests {
     #[test]
     fn test_jsonl_type_inference() {
         let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, r#"{{"title": "Test", "year": 2024, "price": 19.99, "active": true}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"title": "Test", "year": 2024, "price": 19.99, "active": true}}"#
+        )
+        .unwrap();
         file.flush().unwrap();
 
         let converter = JsonlDocumentConverter::new();
@@ -241,7 +248,11 @@ mod tests {
     #[test]
     fn test_jsonl_geo_point() {
         let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, r#"{{"title": "Tokyo", "location": {{"lat": 35.6762, "lon": 139.6503}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"title": "Tokyo", "location": {{"lat": 35.6762, "lon": 139.6503}}}}"#
+        )
+        .unwrap();
         file.flush().unwrap();
 
         let converter = JsonlDocumentConverter::new();

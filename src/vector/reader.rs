@@ -1,6 +1,7 @@
 //! Vector index reader traits and implementations.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::error::Result;
 use crate::vector::types::{ValidationReport, VectorIndexMetadata, VectorStats};
@@ -8,6 +9,9 @@ use crate::vector::{DistanceMetric, Vector};
 
 /// Trait for reading vector indexes (similar to IndexReader for inverted indexes).
 pub trait VectorIndexReader: Send + Sync {
+    /// Cast to Any for downcasting to concrete types.
+    fn as_any(&self) -> &dyn std::any::Any;
+
     /// Get a vector by document ID.
     fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>>;
 
@@ -89,6 +93,10 @@ impl SimpleVectorReader {
 }
 
 impl VectorIndexReader for SimpleVectorReader {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>> {
         Ok(self.vectors.get(&doc_id).cloned())
     }
@@ -214,5 +222,50 @@ impl VectorIterator for SimpleVectorIterator {
     fn reset(&mut self) -> Result<()> {
         self.position = 0;
         Ok(())
+    }
+}
+
+/// Factory for creating vector index readers.
+///
+/// This factory provides a centralized way to create readers for different
+/// vector index types (Flat, HNSW, IVF) from serialized index data.
+pub struct VectorIndexReaderFactory;
+
+impl VectorIndexReaderFactory {
+    /// Create a reader for a specific index type from serialized data.
+    ///
+    /// # Arguments
+    ///
+    /// * `index_type` - The type of index ("flat", "hnsw", or "ivf")
+    /// * `index_data` - Serialized index data
+    ///
+    /// # Returns
+    ///
+    /// An `Arc<dyn VectorIndexReader>` that can be used to query the index.
+    pub fn create_reader(
+        index_type: &str,
+        index_data: &[u8],
+    ) -> Result<Arc<dyn VectorIndexReader>> {
+        use crate::vector::index::reader::flat::FlatVectorIndexReader;
+        use crate::vector::index::reader::hnsw::HnswIndexReader;
+        use crate::vector::index::reader::ivf::IvfIndexReader;
+
+        match index_type.to_lowercase().as_str() {
+            "flat" => {
+                let reader = FlatVectorIndexReader::from_bytes(index_data)?;
+                Ok(Arc::new(reader))
+            }
+            "hnsw" => {
+                let reader = HnswIndexReader::from_bytes(index_data)?;
+                Ok(Arc::new(reader))
+            }
+            "ivf" => {
+                let reader = IvfIndexReader::from_bytes(index_data)?;
+                Ok(Arc::new(reader))
+            }
+            _ => Err(crate::error::SageError::InvalidOperation(format!(
+                "Unknown index type: {index_type}"
+            ))),
+        }
     }
 }

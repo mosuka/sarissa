@@ -17,8 +17,8 @@ use crate::lexical::dictionary::HybridTermDictionary;
 use crate::lexical::dictionary::TermInfo;
 use crate::lexical::doc_values::DocValuesReader;
 use crate::lexical::index::SegmentInfo;
+use crate::storage::Storage;
 use crate::storage::structured::StructReader;
-use crate::storage::traits::Storage;
 
 /// Advanced index reader configuration.
 #[derive(Debug, Clone)]
@@ -827,7 +827,7 @@ impl CacheStats {
 }
 
 /// Advanced index reader with multi-segment support (schema-less mode).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InvertedIndexReader {
     /// Segment readers.
     segment_readers: Vec<Arc<RwLock<SegmentReader>>>,
@@ -840,7 +840,7 @@ pub struct InvertedIndexReader {
     config: InvertedIndexReaderConfig,
 
     /// Whether the reader is closed.
-    closed: AtomicBool,
+    closed: Arc<AtomicBool>,
 
     /// Total document count across all segments.
     total_doc_count: u64,
@@ -872,7 +872,7 @@ impl InvertedIndexReader {
             segment_readers,
             cache_manager,
             config,
-            closed: AtomicBool::new(false),
+            closed: Arc::new(AtomicBool::new(false)),
             total_doc_count,
         })
     }

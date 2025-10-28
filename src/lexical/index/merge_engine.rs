@@ -12,13 +12,13 @@ use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::lexical::dictionary::TermDictionaryBuilder;
 use crate::lexical::dictionary::TermInfo;
+use crate::lexical::index::SegmentInfo;
 use crate::lexical::index::reader::inverted::InvertedIndexReader;
 use crate::lexical::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
-use crate::lexical::index::SegmentInfo;
 use crate::lexical::posting::InvertedIndex;
 use crate::lexical::reader::IndexReader;
+use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
-use crate::storage::traits::Storage;
 
 /// Configuration for merge operations.
 #[derive(Debug, Clone)]
@@ -373,8 +373,7 @@ impl MergeEngine {
         let segments = vec![segment_info.clone()];
 
         // Use default config for reader
-        let config =
-            crate::lexical::index::reader::inverted::InvertedIndexReaderConfig::default();
+        let config = crate::lexical::index::reader::inverted::InvertedIndexReaderConfig::default();
 
         let reader = InvertedIndexReader::new(segments, self.storage.clone(), config)?;
         Ok(Box::new(reader) as Box<dyn IndexReader>)
@@ -511,11 +510,11 @@ impl MergeEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::segment_manager::ManagedSegmentInfo;
     use crate::lexical::index::SegmentInfo;
+    use crate::lexical::index::segment_manager::ManagedSegmentInfo;
 
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[allow(dead_code)]
     fn create_test_segment(id: &str, doc_count: u64) -> ManagedSegmentInfo {
@@ -533,7 +532,7 @@ mod tests {
     #[test]
     fn test_merge_engine_creation() {
         let config = MergeConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let engine = MergeEngine::new(config, storage);
         assert_eq!(engine.config.batch_size, 10000);

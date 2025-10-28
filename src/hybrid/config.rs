@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::vector::types::VectorSearchConfig;
+use crate::vector::types::VectorSearchParams;
 
 /// Configuration for hybrid search combining keyword and vector search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,7 +22,7 @@ pub struct HybridSearchConfig {
     /// Normalization strategy for combining scores.
     pub normalization: ScoreNormalization,
     /// Vector search configuration.
-    pub vector_config: VectorSearchConfig,
+    pub vector_config: VectorSearchParams,
 }
 
 impl Default for HybridSearchConfig {
@@ -35,7 +35,7 @@ impl Default for HybridSearchConfig {
             max_results: 50,
             require_both: false,
             normalization: ScoreNormalization::MinMax,
-            vector_config: VectorSearchConfig::default(),
+            vector_config: VectorSearchParams::default(),
         }
     }
 }

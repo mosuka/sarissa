@@ -1,33 +1,198 @@
 //! File-based storage implementation.
+//!
+//! This module provides disk-based persistent storage with support for both
+//! traditional file I/O and memory-mapped files (mmap).
+//!
+//! # Features
+//!
+//! - **Traditional I/O**: Buffered reads/writes with configurable buffer size
+//! - **Memory-mapped I/O**: High-performance reads using mmap with caching
+//! - **File locking**: Concurrent access control
+//! - **Flexible configuration**: Buffer size, sync writes, temp directory, etc.
+//!
+//! # Memory-Mapped Mode
+//!
+//! When `FileStorageConfig.use_mmap` is enabled:
+//! - Files are mapped into memory for reading
+//! - Mapped files are cached for reuse
+//! - File modifications are detected and cache is invalidated
+//! - Supports prefaulting and huge pages for performance
+//!
+//! # Example
+//!
+//! ```
+//! use sage::storage::file::{FileStorage, FileStorageConfig};
+//! use sage::storage::Storage;
+//! use std::io::Write;
+//! use tempfile::TempDir;
+//!
+//! # fn main() -> sage::error::Result<()> {
+//! // Create storage with mmap enabled
+//! let temp_dir = TempDir::new().unwrap();
+//! let mut config = FileStorageConfig::new(temp_dir.path());
+//! config.use_mmap = true;
+//! let storage = FileStorage::new(temp_dir.path(), config)?;
+//!
+//! // Write a file
+//! let mut output = storage.create_output("test.dat")?;
+//! output.write_all(b"Hello, world!")?;
+//! output.close()?;
+//!
+//! // Read using mmap
+//! let mut input = storage.open_input("test.dat")?;
+//! let mut buffer = Vec::new();
+//! input.read_to_end(&mut buffer)?;
+//! # Ok(())
+//! # }
+//! ```
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::SystemTime;
 
+use memmap2::{Mmap, MmapOptions};
+
 use crate::error::{Result, SageError};
-use crate::storage::traits::{
-    LockManager, Storage, StorageConfig, StorageError, StorageInput, StorageLock, StorageOutput,
+use crate::storage::{
+    LockManager, Storage, StorageError, StorageInput, StorageLock, StorageOutput,
 };
 
+/// Configuration specific to file-based storage.
+///
+/// This configuration includes the storage path and various options for
+/// file I/O, memory-mapping, and locking behavior.
+///
+/// # Memory-Mapped Files (mmap)
+///
+/// When `use_mmap` is enabled, FileStorage uses memory-mapped I/O for reading files,
+/// which can significantly improve performance for large files by:
+/// - Avoiding system call overhead
+/// - Leveraging the OS page cache
+/// - Enabling zero-copy reads
+///
+/// Additional mmap options:
+/// - `mmap_cache_size`: Number of mmap files to keep cached
+/// - `mmap_enable_prefault`: Pre-populate page tables for faster initial access
+/// - `mmap_enable_hugepages`: Use huge pages if available (Linux)
+///
+/// # Example
+///
+/// ```
+/// use sage::storage::file::FileStorageConfig;
+///
+/// // Basic file storage
+/// let config = FileStorageConfig::new("/data/index");
+///
+/// // High-performance configuration with mmap
+/// let mut config = FileStorageConfig::new("/data/index");
+/// config.use_mmap = true;
+/// config.mmap_enable_prefault = true;
+/// config.buffer_size = 131072; // 128KB for non-mmap operations
+/// ```
+#[derive(Debug, Clone)]
+pub struct FileStorageConfig {
+    /// Path to the storage directory.
+    pub path: std::path::PathBuf,
+
+    /// Whether to use memory-mapped files for reading.
+    /// When true, files are read using mmap instead of traditional I/O.
+    pub use_mmap: bool,
+
+    /// Buffer size for traditional I/O operations (bytes).
+    /// Default: 65536 (64KB). Used when `use_mmap` is false.
+    pub buffer_size: usize,
+
+    /// Whether to sync writes immediately to disk.
+    /// When true, calls fsync after each write for durability.
+    pub sync_writes: bool,
+
+    /// Whether to use file locking for concurrency control.
+    pub use_locking: bool,
+
+    /// Temporary directory for temp files.
+    /// If None, uses the storage directory.
+    pub temp_dir: Option<String>,
+
+    /// Maximum number of memory-mapped files to cache.
+    /// Only used when `use_mmap` is true. Default: 100.
+    pub mmap_cache_size: usize,
+
+    /// Enable prefaulting for memory-mapped files.
+    /// Pre-populates page tables for faster initial access.
+    /// Only used when `use_mmap` is true.
+    pub mmap_enable_prefault: bool,
+
+    /// Enable huge pages for memory-mapped files if available.
+    /// Can improve TLB performance for large files (Linux only).
+    /// Only used when `use_mmap` is true.
+    pub mmap_enable_hugepages: bool,
+}
+
+impl FileStorageConfig {
+    /// Create a new FileStorageConfig with the given path and default settings.
+    ///
+    /// # Default Settings
+    ///
+    /// - `use_mmap`: false
+    /// - `buffer_size`: 65536 (64KB)
+    /// - `sync_writes`: false
+    /// - `use_locking`: true
+    /// - `mmap_cache_size`: 100
+    /// - `mmap_enable_prefault`: false
+    /// - `mmap_enable_hugepages`: false
+    pub fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
+        FileStorageConfig {
+            path: path.as_ref().to_path_buf(),
+            use_mmap: false,
+            buffer_size: 65536,
+            sync_writes: false,
+            use_locking: true,
+            temp_dir: None,
+            mmap_cache_size: 100,
+            mmap_enable_prefault: false,
+            mmap_enable_hugepages: false,
+        }
+    }
+}
+
+/// Metadata information for cached files.
+#[derive(Debug, Clone)]
+struct MmapFileMetadata {
+    size: u64,
+    modified: u64,
+}
+
 /// A file-based storage implementation.
+///
+/// FileStorage provides persistent disk-based storage with two read modes:
+///
+/// 1. **Traditional I/O** (default): Uses buffered file reads with `BufReader`
+/// 2. **Memory-mapped I/O**: Uses mmap for zero-copy reads when `config.use_mmap` is true
+///
+/// The mmap mode includes caching and automatic invalidation on file changes,
+/// making it suitable for read-heavy workloads with large files.
 #[derive(Debug)]
 pub struct FileStorage {
     /// The root directory for storage.
     directory: PathBuf,
     /// Storage configuration.
-    config: StorageConfig,
+    config: FileStorageConfig,
     /// Lock manager for coordinating access.
     lock_manager: Arc<FileLockManager>,
     /// Whether the storage is closed.
     closed: bool,
+    /// Cache of memory-mapped files (only used when use_mmap is true).
+    mmap_cache: Arc<RwLock<HashMap<String, Arc<Mmap>>>>,
+    /// Cache of file metadata for mmap files.
+    mmap_metadata_cache: Arc<RwLock<HashMap<String, MmapFileMetadata>>>,
 }
 
 impl FileStorage {
     /// Create a new file storage in the given directory.
-    pub fn new<P: AsRef<Path>>(directory: P, config: StorageConfig) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(directory: P, config: FileStorageConfig) -> Result<Self> {
         let directory = directory.as_ref().to_path_buf();
 
         // Create directory if it doesn't exist
@@ -51,6 +216,8 @@ impl FileStorage {
             config,
             lock_manager,
             closed: false,
+            mmap_cache: Arc::new(RwLock::new(HashMap::new())),
+            mmap_metadata_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -67,22 +234,119 @@ impl FileStorage {
             Ok(())
         }
     }
+
+    /// Get or create a memory map for a file.
+    fn get_mmap(&self, name: &str) -> Result<Arc<Mmap>> {
+        let file_path = self.file_path(name);
+
+        // Check cache first
+        {
+            let cache = self.mmap_cache.read().unwrap();
+            if let Some(mmap) = cache.get(name) {
+                // Verify the file hasn't changed
+                if self.is_mmap_file_unchanged(name, &file_path)? {
+                    return Ok(Arc::clone(mmap));
+                }
+            }
+        }
+
+        // Create new memory map
+        let file = File::open(&file_path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StorageError::FileNotFound(name.to_string())
+            } else {
+                StorageError::IoError(format!("Failed to open file {name}: {e}"))
+            }
+        })?;
+
+        let mut mmap_opts = MmapOptions::new();
+        if self.config.mmap_enable_prefault {
+            mmap_opts.populate();
+        }
+
+        let mmap = unsafe {
+            mmap_opts
+                .map(&file)
+                .map_err(|e| SageError::storage(format!("Failed to mmap file {name}: {e}")))?
+        };
+
+        let mmap_arc = Arc::new(mmap);
+
+        // Update cache
+        {
+            let mut cache = self.mmap_cache.write().unwrap();
+            cache.insert(name.to_string(), Arc::clone(&mmap_arc));
+        }
+
+        // Update metadata cache
+        self.update_mmap_metadata_cache(name, &file_path)?;
+
+        Ok(mmap_arc)
+    }
+
+    /// Check if a memory-mapped file has been modified since last cached.
+    fn is_mmap_file_unchanged(&self, name: &str, path: &Path) -> Result<bool> {
+        let metadata_cache = self.mmap_metadata_cache.read().unwrap();
+
+        if let Some(cached_meta) = metadata_cache.get(name) {
+            let current_meta = std::fs::metadata(path)
+                .map_err(|e| SageError::storage(format!("Failed to get metadata: {e}")))?;
+
+            let current_size = current_meta.len();
+            let current_modified = current_meta
+                .modified()
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            return Ok(cached_meta.size == current_size && cached_meta.modified == current_modified);
+        }
+
+        Ok(false)
+    }
+
+    /// Update metadata cache for a memory-mapped file.
+    fn update_mmap_metadata_cache(&self, name: &str, path: &Path) -> Result<()> {
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| SageError::storage(format!("Failed to get metadata: {e}")))?;
+
+        let size = metadata.len();
+        let modified = metadata
+            .modified()
+            .unwrap_or(SystemTime::UNIX_EPOCH)
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let mut cache = self.mmap_metadata_cache.write().unwrap();
+        cache.insert(name.to_string(), MmapFileMetadata { size, modified });
+
+        Ok(())
+    }
 }
 
 impl Storage for FileStorage {
     fn open_input(&self, name: &str) -> Result<Box<dyn StorageInput>> {
         self.check_closed()?;
 
-        let path = self.file_path(name);
-        let file = File::open(&path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                StorageError::FileNotFound(name.to_string())
-            } else {
-                StorageError::IoError(e.to_string())
-            }
-        })?;
+        if self.config.use_mmap {
+            // Use memory-mapped file
+            let mmap = self.get_mmap(name)?;
+            Ok(Box::new(MmapInput::new(mmap)))
+        } else {
+            // Use traditional file I/O
+            let path = self.file_path(name);
+            let file = File::open(&path).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    StorageError::FileNotFound(name.to_string())
+                } else {
+                    StorageError::IoError(e.to_string())
+                }
+            })?;
 
-        Ok(Box::new(FileInput::new(file, self.config.buffer_size)?))
+            Ok(Box::new(FileInput::new(file, self.config.buffer_size)?))
+        }
     }
 
     fn create_output(&self, name: &str) -> Result<Box<dyn StorageOutput>> {
@@ -177,7 +441,7 @@ impl Storage for FileStorage {
         Ok(metadata.len())
     }
 
-    fn metadata(&self, name: &str) -> Result<crate::storage::traits::FileMetadata> {
+    fn metadata(&self, name: &str) -> Result<crate::storage::FileMetadata> {
         self.check_closed()?;
 
         let path = self.file_path(name);
@@ -203,7 +467,7 @@ impl Storage for FileStorage {
             .unwrap_or_default()
             .as_secs();
 
-        Ok(crate::storage::traits::FileMetadata {
+        Ok(crate::storage::FileMetadata {
             size: metadata.len(),
             modified,
             created,
@@ -307,6 +571,82 @@ impl StorageInput for FileInput {
     fn close(&mut self) -> Result<()> {
         // BufReader doesn't have an explicit close method
         // The file will be closed when the BufReader is dropped
+        Ok(())
+    }
+}
+
+/// A memory-mapped file input implementation.
+#[derive(Debug)]
+pub struct MmapInput {
+    mmap: Arc<Mmap>,
+    #[allow(dead_code)]
+    cursor: Cursor<Vec<u8>>,
+    position: u64,
+}
+
+impl MmapInput {
+    fn new(mmap: Arc<Mmap>) -> Self {
+        MmapInput {
+            mmap,
+            cursor: Cursor::new(Vec::new()),
+            position: 0,
+        }
+    }
+}
+
+impl Read for MmapInput {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let available = (self.mmap.len() as u64).saturating_sub(self.position) as usize;
+        let to_read = buf.len().min(available);
+
+        if to_read == 0 {
+            return Ok(0);
+        }
+
+        let start = self.position as usize;
+        let end = start + to_read;
+        buf[..to_read].copy_from_slice(&self.mmap[start..end]);
+        self.position += to_read as u64;
+
+        Ok(to_read)
+    }
+}
+
+impl Seek for MmapInput {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let new_pos = match pos {
+            SeekFrom::Start(offset) => offset as i64,
+            SeekFrom::End(offset) => self.mmap.len() as i64 + offset,
+            SeekFrom::Current(offset) => self.position as i64 + offset,
+        };
+
+        if new_pos < 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid seek to a negative position",
+            ));
+        }
+
+        self.position = new_pos as u64;
+        Ok(self.position)
+    }
+}
+
+impl StorageInput for MmapInput {
+    fn size(&self) -> Result<u64> {
+        Ok(self.mmap.len() as u64)
+    }
+
+    fn clone_input(&self) -> Result<Box<dyn StorageInput>> {
+        Ok(Box::new(MmapInput {
+            mmap: Arc::clone(&self.mmap),
+            cursor: Cursor::new(Vec::new()),
+            position: 0,
+        }))
+    }
+
+    fn close(&mut self) -> Result<()> {
+        // Memory map will be automatically unmapped when dropped
         Ok(())
     }
 }
@@ -521,7 +861,7 @@ mod tests {
 
     fn create_test_storage() -> (TempDir, FileStorage) {
         let temp_dir = TempDir::new().unwrap();
-        let config = StorageConfig::default();
+        let config = FileStorageConfig::new(temp_dir.path());
         let storage = FileStorage::new(temp_dir.path(), config).unwrap();
         (temp_dir, storage)
     }
@@ -619,5 +959,83 @@ mod tests {
         // Operations should fail after close
         let result = storage.create_output("test.txt");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mmap_storage() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = true;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+
+        // Create a file
+        let mut output = storage.create_output("test_mmap.txt").unwrap();
+        output.write_all(b"Hello, Memory-Mapped World!").unwrap();
+        output.close().unwrap();
+
+        // Read the file using mmap
+        let mut input = storage.open_input("test_mmap.txt").unwrap();
+        let mut buffer = Vec::new();
+        input.read_to_end(&mut buffer).unwrap();
+
+        assert_eq!(buffer, b"Hello, Memory-Mapped World!");
+        assert_eq!(input.size().unwrap(), 27);
+    }
+
+    #[test]
+    fn test_mmap_cache() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = true;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+
+        // Create a file
+        let mut output = storage.create_output("cached.txt").unwrap();
+        output.write_all(b"Cached content").unwrap();
+        output.close().unwrap();
+
+        // Read the file twice to test cache
+        let mut input1 = storage.open_input("cached.txt").unwrap();
+        let mut buffer1 = Vec::new();
+        input1.read_to_end(&mut buffer1).unwrap();
+
+        let mut input2 = storage.open_input("cached.txt").unwrap();
+        let mut buffer2 = Vec::new();
+        input2.read_to_end(&mut buffer2).unwrap();
+
+        assert_eq!(buffer1, buffer2);
+        assert_eq!(buffer1, b"Cached content");
+
+        // Check that cache was used
+        let cache = storage.mmap_cache.read().unwrap();
+        assert!(cache.contains_key("cached.txt"));
+    }
+
+    #[test]
+    fn test_mmap_clone_input() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = true;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+
+        // Create a file
+        let mut output = storage.create_output("clone_test.txt").unwrap();
+        output.write_all(b"Clone me!").unwrap();
+        output.close().unwrap();
+
+        // Open and clone the input
+        let mut input1 = storage.open_input("clone_test.txt").unwrap();
+        let input2 = input1.clone_input().unwrap();
+
+        // Read from both
+        let mut buffer1 = Vec::new();
+        input1.read_to_end(&mut buffer1).unwrap();
+
+        let mut buffer2 = Vec::new();
+        let mut input2_mut = input2;
+        input2_mut.read_to_end(&mut buffer2).unwrap();
+
+        assert_eq!(buffer1, buffer2);
+        assert_eq!(buffer1, b"Clone me!");
     }
 }

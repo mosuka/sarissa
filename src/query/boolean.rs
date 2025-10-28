@@ -488,12 +488,11 @@ impl Default for BooleanQueryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::reader::inverted::{
-        InvertedIndexReader, InvertedIndexReaderConfig,
-    };
+    use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
     use crate::query::term::TermQuery;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::memory::MemoryStorageConfig;
     use std::sync::Arc;
 
     #[allow(dead_code)]
@@ -558,7 +557,7 @@ mod tests {
 
     #[test]
     fn test_boolean_query_matcher() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader =
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap();
@@ -574,7 +573,7 @@ mod tests {
 
     #[test]
     fn test_boolean_query_scorer() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader =
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap();
@@ -604,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_empty_boolean_query() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader =
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap();

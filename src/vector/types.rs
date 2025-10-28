@@ -11,7 +11,7 @@ pub struct VectorSearchRequest {
     /// The query vector.
     pub query: Vector,
     /// Search configuration.
-    pub config: VectorSearchConfig,
+    pub params: VectorSearchParams,
 }
 
 impl VectorSearchRequest {
@@ -19,45 +19,44 @@ impl VectorSearchRequest {
     pub fn new(query: Vector) -> Self {
         VectorSearchRequest {
             query,
-            config: VectorSearchConfig::default(),
+            params: VectorSearchParams::default(),
         }
     }
 
     /// Set the number of results to return.
     pub fn top_k(mut self, top_k: usize) -> Self {
-        self.config.top_k = top_k;
+        self.params.top_k = top_k;
         self
     }
 
     /// Set minimum similarity threshold.
     pub fn min_similarity(mut self, threshold: f32) -> Self {
-        self.config.min_similarity = threshold;
+        self.params.min_similarity = threshold;
         self
     }
 
     /// Set whether to include scores in results.
     pub fn include_scores(mut self, include: bool) -> Self {
-        self.config.include_scores = include;
+        self.params.include_scores = include;
         self
     }
 
     /// Set whether to include vectors in results.
     pub fn include_vectors(mut self, include: bool) -> Self {
-        self.config.include_vectors = include;
+        self.params.include_vectors = include;
         self
     }
 
     /// Set search timeout in milliseconds.
     pub fn timeout_ms(mut self, timeout: u64) -> Self {
-        self.config.timeout_ms = Some(timeout);
+        self.params.timeout_ms = Some(timeout);
         self
     }
 }
 
 /// Configuration for vector search operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorSearchConfig {
-    // 基本設定
+pub struct VectorSearchParams {
     /// Number of results to return.
     pub top_k: usize,
     /// Minimum similarity threshold.
@@ -68,19 +67,11 @@ pub struct VectorSearchConfig {
     pub include_vectors: bool,
     /// Search timeout in milliseconds.
     pub timeout_ms: Option<u64>,
-
-    // 高度な設定（オプショナル）
-    /// Search strategy to use.
-    pub strategy: Option<crate::vector::search::SearchStrategy>,
     /// Reranking configuration.
     pub reranking: Option<crate::vector::search::ranking::RankingConfig>,
-    /// Post-processing filters.
-    pub filters: Vec<crate::vector::search::SearchFilter>,
-    /// Search result explanation.
-    pub explain: bool,
 }
 
-impl Default for VectorSearchConfig {
+impl Default for VectorSearchParams {
     fn default() -> Self {
         Self {
             top_k: 10,
@@ -88,10 +79,7 @@ impl Default for VectorSearchConfig {
             include_scores: true,
             include_vectors: false,
             timeout_ms: None,
-            strategy: None,
             reranking: None,
-            filters: Vec::new(),
-            explain: false,
         }
     }
 }

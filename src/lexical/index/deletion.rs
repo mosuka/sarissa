@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SageError};
 use crate::storage::structured::{StructReader, StructWriter};
-use crate::storage::traits::{Storage, StorageInput, StorageOutput};
+use crate::storage::{Storage, StorageInput, StorageOutput};
 
 /// Configuration for deletion management.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -945,8 +945,9 @@ impl CompactionScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[test]
     fn test_deletion_bitmap_creation() {
@@ -997,7 +998,7 @@ mod tests {
     #[test]
     fn test_deletion_manager_creation() {
         let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let manager = DeletionManager::new(config, storage).unwrap();
 
@@ -1009,7 +1010,7 @@ mod tests {
     #[test]
     fn test_deletion_manager_operations() {
         let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();
 
         // Initialize segment
@@ -1044,7 +1045,7 @@ mod tests {
     #[test]
     fn test_batch_deletion() {
         let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();
 
         manager.initialize_segment("seg001", 20).unwrap(); // Reduced from 1000 to 20
@@ -1071,7 +1072,7 @@ mod tests {
             ..Default::default()
         };
 
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();
 
         // Initialize segments (reduced sizes)
@@ -1095,7 +1096,7 @@ mod tests {
     #[test]
     fn test_global_deletion_state() {
         let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();
 
         // Initialize multiple segments (reduced sizes)
@@ -1130,7 +1131,7 @@ mod tests {
     #[test]
     fn test_deletion_report() {
         let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();
 
         // Initialize segments and add deletions (reduced sizes)
@@ -1193,7 +1194,7 @@ mod tests {
             ..Default::default()
         };
 
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();
 
         // Initialize segment and delete enough to trigger compaction
@@ -1211,7 +1212,7 @@ mod tests {
     #[test]
     fn test_mark_compaction_completed() {
         let config = DeletionConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = DeletionManager::new(config, storage).unwrap();
 
         // Initialize segments

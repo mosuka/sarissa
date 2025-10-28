@@ -15,9 +15,12 @@ use tempfile::TempDir;
 use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::IndexConfig;
-use sage::lexical::types::SearchRequest;
+use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::parser::QueryParser;
+use sage::storage::file::FileStorage;
+use sage::storage::file::FileStorageConfig;
+use std::sync::Arc;
 
 fn main() -> Result<()> {
     println!("=== Query Parser - Complete Feature Demonstration ===\n");
@@ -27,7 +30,13 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}\n", temp_dir.path());
 
     // Create a search engine
-    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let config = LexicalIndexConfig::default();
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
+    let index = LexicalIndexFactory::create(storage, config)?;
+    let mut engine = LexicalEngine::new(index)?;
 
     // Add sample documents
     let documents = vec![
@@ -234,7 +243,7 @@ fn execute_search(engine: &mut LexicalEngine, parser: &QueryParser, query_str: &
     let query = parser.parse(query_str)?;
     println!("Parsed: {}", query.description());
 
-    let request = SearchRequest::new(query).load_documents(true);
+    let request = LexicalSearchRequest::new(query).load_documents(true);
     let results = engine.search(request)?;
 
     println!("Results: {} hits", results.total_hits);

@@ -7,12 +7,15 @@ use std::io::Write;
 use tempfile::{NamedTempFile, TempDir};
 
 use sage::document::converter::{
-    csv::CsvDocumentConverter, jsonl::JsonlDocumentConverter, DocumentConverter,
+    DocumentConverter, csv::CsvDocumentConverter, jsonl::JsonlDocumentConverter,
 };
 use sage::document::field_value::FieldValue;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::IndexConfig;
+use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use sage::storage::file::FileStorage;
+use sage::storage::file::FileStorageConfig;
+use std::sync::Arc;
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");
@@ -22,7 +25,13 @@ fn main() -> Result<()> {
     println!("Creating index in: {:?}\n", temp_dir.path());
 
     // Create search engine
-    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let config = LexicalIndexConfig::default();
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
+    let index = LexicalIndexFactory::create(storage, config)?;
+    let mut engine = LexicalEngine::new(index)?;
 
     // ===================================================================
     // Example 1: JSONL Format with nested GeoPoint objects

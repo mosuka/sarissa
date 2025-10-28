@@ -7,7 +7,7 @@ use ahash::AHashMap;
 
 use crate::error::{Result, SageError};
 use crate::storage::structured::{StructReader, StructWriter};
-use crate::storage::traits::{StorageInput, StorageOutput};
+use crate::storage::{StorageInput, StorageOutput};
 
 /// A single posting in a posting list.
 #[derive(Debug, Clone, PartialEq)]
@@ -534,8 +534,10 @@ impl InvertedIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::Storage;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::{Storage, StorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
     use std::sync::Arc;
 
     #[test]
@@ -638,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_posting_list_encoding() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let mut original_list = PostingList::new("test".to_string());
         original_list.add_posting(Posting::with_positions(1, vec![0, 5, 10]));
@@ -678,7 +680,7 @@ mod tests {
 
     #[test]
     fn test_inverted_index_serialization() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let mut original_index = InvertedIndex::new();
         original_index.add_document(

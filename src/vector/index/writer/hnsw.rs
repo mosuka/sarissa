@@ -3,18 +3,17 @@
 use std::sync::Arc;
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 use crate::vector::Vector;
-use crate::vector::index::VectorIndexWriterConfig;
-use crate::vector::writer::VectorIndexWriter;
+use crate::vector::index::HnswIndexConfig;
+use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Builder for HNSW vector indexes (approximate search).
 pub struct HnswIndexWriter {
-    config: VectorIndexWriterConfig,
+    index_config: HnswIndexConfig,
+    writer_config: VectorIndexWriterConfig,
     storage: Option<Arc<dyn Storage>>,
-    m: usize,               // Maximum number of connections per layer
-    ef_construction: usize, // Size of the dynamic candidate list during construction
-    _ml: f64,               // Level normalization factor
+    _ml: f64, // Level normalization factor
     vectors: Vec<(u64, Vector)>,
     is_finalized: bool,
     total_vectors_to_add: Option<usize>,
@@ -22,12 +21,14 @@ pub struct HnswIndexWriter {
 
 impl HnswIndexWriter {
     /// Create a new HNSW index builder.
-    pub fn new(config: VectorIndexWriterConfig) -> Result<Self> {
+    pub fn new(
+        index_config: HnswIndexConfig,
+        writer_config: VectorIndexWriterConfig,
+    ) -> Result<Self> {
         Ok(Self {
-            config,
+            index_config,
+            writer_config,
             storage: None,
-            m: 16,                     // Default M parameter
-            ef_construction: 200,      // Default efConstruction parameter
             _ml: 1.0 / (2.0_f64).ln(), // 1/ln(2)
             vectors: Vec::new(),
             is_finalized: false,
@@ -37,14 +38,14 @@ impl HnswIndexWriter {
 
     /// Create a new HNSW index builder with storage.
     pub fn with_storage(
-        config: VectorIndexWriterConfig,
+        index_config: HnswIndexConfig,
+        writer_config: VectorIndexWriterConfig,
         storage: Arc<dyn Storage>,
     ) -> Result<Self> {
         Ok(Self {
-            config,
+            index_config,
+            writer_config,
             storage: Some(storage),
-            m: 16,
-            ef_construction: 200,
             _ml: 1.0 / (2.0_f64).ln(),
             vectors: Vec::new(),
             is_finalized: false,
@@ -54,7 +55,8 @@ impl HnswIndexWriter {
 
     /// Load an existing HNSW index from storage.
     pub fn load(
-        config: VectorIndexWriterConfig,
+        index_config: HnswIndexConfig,
+        writer_config: VectorIndexWriterConfig,
         storage: Arc<dyn Storage>,
         path: &str,
     ) -> Result<Self> {
@@ -75,16 +77,16 @@ impl HnswIndexWriter {
 
         let mut m_buf = [0u8; 4];
         input.read_exact(&mut m_buf)?;
-        let m = u32::from_le_bytes(m_buf) as usize;
+        let _m = u32::from_le_bytes(m_buf) as usize;
 
         let mut ef_construction_buf = [0u8; 4];
         input.read_exact(&mut ef_construction_buf)?;
-        let ef_construction = u32::from_le_bytes(ef_construction_buf) as usize;
+        let _ef_construction = u32::from_le_bytes(ef_construction_buf) as usize;
 
-        if dimension != config.dimension {
+        if dimension != index_config.dimension {
             return Err(SageError::InvalidOperation(format!(
                 "Dimension mismatch: expected {}, found {}",
-                config.dimension, dimension
+                index_config.dimension, dimension
             )));
         }
 
@@ -106,10 +108,9 @@ impl HnswIndexWriter {
         }
 
         Ok(Self {
-            config,
+            index_config,
+            writer_config,
             storage: Some(storage),
-            m,
-            ef_construction,
             _ml: 1.0 / (2.0_f64).ln(),
             vectors,
             is_finalized: true,
@@ -119,8 +120,8 @@ impl HnswIndexWriter {
 
     /// Set HNSW-specific parameters.
     pub fn with_hnsw_params(mut self, m: usize, ef_construction: usize) -> Self {
-        self.m = m;
-        self.ef_construction = ef_construction;
+        self.index_config.m = m;
+        self.index_config.ef_construction = ef_construction;
         self
     }
 
@@ -149,12 +150,12 @@ impl HnswIndexWriter {
         }
 
         for (doc_id, vector) in vectors {
-            if vector.dimension() != self.config.dimension {
+            if vector.dimension() != self.index_config.dimension {
                 return Err(SageError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
                     doc_id,
                     vector.dimension(),
-                    self.config.dimension
+                    self.index_config.dimension
                 )));
             }
 
@@ -170,13 +171,13 @@ impl HnswIndexWriter {
 
     /// Normalize vectors if configured to do so.
     fn normalize_vectors(&self, vectors: &mut [(u64, Vector)]) {
-        if !self.config.normalize_vectors {
+        if !self.index_config.normalize_vectors {
             return;
         }
 
         use rayon::prelude::*;
 
-        if self.config.parallel_build && vectors.len() > 100 {
+        if self.writer_config.parallel_build && vectors.len() > 100 {
             vectors.par_iter_mut().for_each(|(_, vector)| {
                 vector.normalize();
             });
@@ -199,7 +200,7 @@ impl HnswIndexWriter {
         println!("Building HNSW graph with {} vectors", self.vectors.len());
         println!(
             "Parameters: M={}, efConstruction={}",
-            self.m, self.ef_construction
+            self.index_config.m, self.index_config.ef_construction
         );
 
         // Placeholder: just sort vectors by ID for now
@@ -210,7 +211,7 @@ impl HnswIndexWriter {
 
     /// Check for memory limits.
     fn check_memory_limit(&self) -> Result<()> {
-        if let Some(limit) = self.config.memory_limit {
+        if let Some(limit) = self.writer_config.memory_limit {
             let current_usage = self.estimated_memory_usage();
             if current_usage > limit {
                 return Err(SageError::ResourceExhausted(format!(
@@ -228,7 +229,7 @@ impl HnswIndexWriter {
 
     /// Get HNSW parameters.
     pub fn hnsw_params(&self) -> (usize, usize) {
-        (self.m, self.ef_construction)
+        (self.index_config.m, self.index_config.ef_construction)
     }
 }
 
@@ -301,7 +302,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         let vector_memory = self.vectors.len()
             * (
                 8 + // doc_id
-            self.config.dimension * 4 + // f32 values
+            self.index_config.dimension * 4 + // f32 values
             std::mem::size_of::<Vector>()
                 // Vector struct overhead
             );
@@ -310,7 +311,8 @@ impl VectorIndexWriter for HnswIndexWriter {
         // Each vector can have up to M connections per layer
         // Average layers per vector is approximately 1/(1-p) where p=0.5
         let avg_layers = 2.0;
-        let graph_memory = self.vectors.len() * (self.m as f32 * avg_layers * 8.0) as usize;
+        let graph_memory =
+            self.vectors.len() * (self.index_config.m as f32 * avg_layers * 8.0) as usize;
 
         let metadata_memory = self.vectors.len() * 128; // Increased for graph structure
 
@@ -361,9 +363,9 @@ impl VectorIndexWriter for HnswIndexWriter {
 
         // Write metadata
         output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
-        output.write_all(&(self.config.dimension as u32).to_le_bytes())?;
-        output.write_all(&(self.m as u32).to_le_bytes())?;
-        output.write_all(&(self.ef_construction as u32).to_le_bytes())?;
+        output.write_all(&(self.index_config.dimension as u32).to_le_bytes())?;
+        output.write_all(&(self.index_config.m as u32).to_le_bytes())?;
+        output.write_all(&(self.index_config.ef_construction as u32).to_le_bytes())?;
 
         // Write vectors
         for (doc_id, vector) in &self.vectors {

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 
 /// Segment metadata and management.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -355,8 +355,9 @@ impl MergeOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[test]
     fn test_segment_creation() {
@@ -385,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_segment_manager() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let mut manager = SegmentManager::new(storage);
 
         let segment1 = manager.create_segment().unwrap();
@@ -398,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_segment_manager_merge_candidates() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let mut manager = SegmentManager::new(storage);
 
         // Create segments with different deletion ratios

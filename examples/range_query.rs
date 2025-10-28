@@ -5,9 +5,12 @@ use tempfile::TempDir;
 use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::IndexConfig;
-use sage::lexical::types::SearchRequest;
+use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::range::NumericRangeQuery;
+use sage::storage::file::FileStorage;
+use sage::storage::file::FileStorageConfig;
+use std::sync::Arc;
 
 fn main() -> Result<()> {
     println!("=== RangeQuery Example - Numeric and Date Range Search ===\n");
@@ -19,7 +22,13 @@ fn main() -> Result<()> {
     // Create a schema with numeric fields
 
     // Create a search engine
-    let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), IndexConfig::default())?;
+    let config = LexicalIndexConfig::default();
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
+    let index = LexicalIndexFactory::create(storage, config)?;
+    let mut engine = LexicalEngine::new(index)?;
 
     // Add documents with various numeric values
     let documents = vec![
@@ -97,7 +106,7 @@ fn main() -> Result<()> {
     // Example 1: Price range query
     println!("1. Books with price between $50.00 and $70.00:");
     let query = NumericRangeQuery::f64_range("price", Some(50.0), Some(70.0));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -125,7 +134,7 @@ fn main() -> Result<()> {
     // Example 2: Rating range query (high-rated books)
     println!("\n2. Books with rating 4.5 or higher:");
     let query = NumericRangeQuery::f64_range("rating", Some(4.5), None);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -153,7 +162,7 @@ fn main() -> Result<()> {
     // Example 3: Year range query (recent books)
     println!("\n3. Books published after 2010:");
     let query = NumericRangeQuery::i64_range("year", Some(2010), None);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -181,7 +190,7 @@ fn main() -> Result<()> {
     // Example 4: Page count range query (shorter books)
     println!("\n4. Books with 400 pages or fewer:");
     let query = NumericRangeQuery::i64_range("pages", None, Some(400));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -209,7 +218,7 @@ fn main() -> Result<()> {
     // Example 5: Exact year range (books from 2008-2009)
     println!("\n5. Books published between 2008 and 2009:");
     let query = NumericRangeQuery::i64_range("year", Some(2008), Some(2009));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -237,7 +246,7 @@ fn main() -> Result<()> {
     // Example 6: Budget-friendly books (price under $50)
     println!("\n6. Budget-friendly books (price under $50.00):");
     let query = NumericRangeQuery::f64_range_exclusive_upper("price", None, Some(50.0));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -265,7 +274,7 @@ fn main() -> Result<()> {
     // Example 7: Large books (more than 500 pages)
     println!("\n7. Large books (more than 500 pages):");
     let query = NumericRangeQuery::i64_range("pages", Some(500), None);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -299,7 +308,7 @@ fn main() -> Result<()> {
     // Example 9: Empty range (no results expected)
     println!("\n9. Books with impossible price range ($200-$300):");
     let query = NumericRangeQuery::f64_range("price", Some(200.0), Some(300.0));
-    let request = SearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query));
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);

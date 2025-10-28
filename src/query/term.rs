@@ -140,11 +140,10 @@ impl Query for TermQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::reader::inverted::{
-        InvertedIndexReader, InvertedIndexReaderConfig,
-    };
+    use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::memory::MemoryStorageConfig;
     use std::sync::Arc;
 
     #[allow(dead_code)]
@@ -168,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_term_query_matcher() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader =
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap();
@@ -182,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_term_query_scorer() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader =
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap();
@@ -197,7 +196,7 @@ mod tests {
 
     #[test]
     fn test_term_query_is_empty() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader =
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap();
@@ -214,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_term_query_cost() {
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let reader =
             InvertedIndexReader::new(vec![], storage, InvertedIndexReaderConfig::default())
                 .unwrap();

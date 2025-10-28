@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, SageError};
 use crate::lexical::index::SegmentInfo;
 use crate::storage::structured::{StructReader, StructWriter};
-use crate::storage::traits::{Storage, StorageInput};
+use crate::storage::{Storage, StorageInput};
 
 /// Configuration for segment management.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1106,8 +1106,9 @@ impl SegmentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::traits::StorageConfig;
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[allow(dead_code)]
     fn create_test_segment_info(segment_id: &str, doc_count: u64) -> SegmentInfo {
@@ -1150,7 +1151,7 @@ mod tests {
     #[test]
     fn test_segment_manager_creation() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let manager = SegmentManager::new(config, storage).unwrap();
 
@@ -1162,7 +1163,7 @@ mod tests {
     #[test]
     fn test_add_segment() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         let segment_info = create_test_segment_info("seg001", 1000);
@@ -1182,7 +1183,7 @@ mod tests {
     #[test]
     fn test_remove_segment() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         let segment_info = create_test_segment_info("seg001", 1000);
@@ -1198,7 +1199,7 @@ mod tests {
     #[test]
     fn test_mark_deleted() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         let segment_info = create_test_segment_info("seg001", 10); // Reduced from 1000 to 10
@@ -1219,7 +1220,7 @@ mod tests {
             ..Default::default()
         };
 
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         // Add segments with different deletion ratios (reduced sizes)
@@ -1244,7 +1245,7 @@ mod tests {
     #[test]
     fn test_tier_calculation() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         assert_eq!(manager.calculate_tier(500 * 1024), 0); // < min_segment_size
@@ -1256,7 +1257,7 @@ mod tests {
     #[test]
     fn test_merge_candidate_generation() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         // Add multiple segments of different sizes
@@ -1278,7 +1279,7 @@ mod tests {
     #[test]
     fn test_deletion_based_merge_candidates() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         // Add segments and mark some with high deletion (reduced sizes)
@@ -1310,7 +1311,7 @@ mod tests {
     #[test]
     fn test_mark_segments_merging() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         let segment_info = create_test_segment_info("seg001", 1000);
@@ -1336,7 +1337,7 @@ mod tests {
     #[test]
     fn test_complete_merge() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         // Add segments to be merged
@@ -1377,7 +1378,7 @@ mod tests {
             ..Default::default()
         };
 
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         // Add enough segments to trigger merge
@@ -1399,7 +1400,7 @@ mod tests {
     #[test]
     fn test_segments_by_tier() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         // Add segments with different sizes to create different tiers
@@ -1428,7 +1429,7 @@ mod tests {
     #[test]
     fn test_rebalance_tiers() {
         let config = SegmentManagerConfig::default();
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let manager = SegmentManager::new(config, storage).unwrap();
 
         // Add segment with initial size

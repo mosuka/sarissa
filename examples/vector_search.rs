@@ -18,15 +18,21 @@ use sage::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use sage::error::Result;
 #[cfg(feature = "embeddings-candle")]
+use sage::storage::memory::MemoryStorage;
+#[cfg(feature = "embeddings-candle")]
+use sage::storage::memory::MemoryStorageConfig;
+#[cfg(feature = "embeddings-candle")]
 use sage::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::Vector;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
-use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
+use sage::vector::index::{FlatIndexConfig, VectorIndexConfig};
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::types::VectorSearchRequest;
+#[cfg(feature = "embeddings-candle")]
+use std::sync::Arc;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
@@ -88,17 +94,18 @@ async fn main() -> Result<()> {
     println!("Embeddings generated successfully!\n");
 
     // Step 4: Create vector index configuration
-    let vector_config = VectorIndexWriterConfig {
+    let vector_config = VectorIndexConfig::Flat(FlatIndexConfig {
         dimension,
         distance_metric: DistanceMetric::Cosine,
-        index_type: VectorIndexType::Flat,
         normalize_vectors: true,
         ..Default::default()
-    };
+    });
 
     // Step 5: Build the vector index using VectorEngine
     println!("Building vector index...");
-    let mut engine = VectorEngine::create(vector_config)?;
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let index = sage::vector::index::VectorIndexFactory::create(storage, vector_config)?;
+    let mut engine = VectorEngine::new(index)?;
 
     // Add document vectors to the index
     let doc_vectors: Vec<(u64, sage::vector::Vector)> = documents
@@ -108,7 +115,7 @@ async fn main() -> Result<()> {
         .collect();
 
     engine.add_vectors(doc_vectors)?;
-    engine.finalize()?;
+    engine.commit()?;
     engine.optimize()?;
 
     println!("Vector index built successfully!");
@@ -201,14 +208,14 @@ async fn main() -> Result<()> {
         .timeout_ms(1000);
 
     println!("Search configuration:");
-    println!("  Top K: {}", search_request.config.top_k);
-    println!("  Min similarity: {}", search_request.config.min_similarity);
-    println!("  Include scores: {}", search_request.config.include_scores);
+    println!("  Top K: {}", search_request.params.top_k);
+    println!("  Min similarity: {}", search_request.params.min_similarity);
+    println!("  Include scores: {}", search_request.params.include_scores);
     println!(
         "  Include vectors: {}",
-        search_request.config.include_vectors
+        search_request.params.include_vectors
     );
-    println!("  Timeout: {:?} ms", search_request.config.timeout_ms);
+    println!("  Timeout: {:?} ms", search_request.params.timeout_ms);
 
     println!("\n=== Example completed successfully! ===");
     Ok(())

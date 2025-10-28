@@ -12,7 +12,7 @@ use byteorder::{BigEndian, ByteOrder};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 
 /// Column value types supported by the column storage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn test_column_storage() {
         let storage = Arc::new(MemoryStorage::new(
-            crate::storage::traits::StorageConfig::default(),
+            crate::storage::memory::MemoryStorageConfig::default(),
         ));
         let column_storage = ColumnStorage::new(storage);
 

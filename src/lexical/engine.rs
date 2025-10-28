@@ -1,79 +1,208 @@
 //! High-level lexical search engine that combines indexing and searching.
 //!
-//! This module provides a unified interface for lexical indexing and search,
-//! similar to the VectorEngine for vector search.
+//! This module provides a unified interface for lexical indexing and search operations,
+//! abstracting away the complexity of managing separate readers and writers.
+//! The engine handles caching of readers and writers for efficiency and provides
+//! convenient methods for common operations like adding documents, searching, and committing.
+//!
+//! # Architecture
+//!
+//! The `LexicalEngine` wraps a `LexicalIndex` trait object and provides:
+//! - **Automatic writer caching**: Writers are created on-demand and cached for efficiency
+//! - **Automatic reader invalidation**: Readers are invalidated after commits to reflect new changes
+//! - **Simplified API**: Single entry point for all indexing and search operations
+//! - **Index abstraction**: Supports different index types (Inverted, etc.) transparently
+//!
+//! # Usage
+//!
+//! ```rust,no_run
+//! use sage::document::document::Document;
+//! use sage::lexical::engine::LexicalEngine;
+//! use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+//! use sage::lexical::types::LexicalSearchRequest;
+//! use sage::query::term::TermQuery;
+//! use sage::storage::{StorageConfig, StorageFactory};
+//! use sage::storage::memory::MemoryStorageConfig;
+//! use std::sync::Arc;
+//!
+//! // Create storage using factory
+//! let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+//! let storage = StorageFactory::create(storage_config).unwrap();
+//!
+//! // Create index using factory
+//! let index_config = LexicalIndexConfig::default();
+//! let index = LexicalIndexFactory::create(storage, index_config).unwrap();
+//!
+//! // Create engine
+//! let mut engine = LexicalEngine::new(index).unwrap();
+//!
+//! // Add documents
+//! let doc = Document::builder()
+//!     .add_text("title", "Hello World")
+//!     .add_text("body", "This is a test document")
+//!     .build();
+//! engine.add_document(doc).unwrap();
+//! engine.commit().unwrap();
+//!
+//! // Search
+//! let query = Box::new(TermQuery::new("title", "hello"));
+//! let request = LexicalSearchRequest::new(query);
+//! let results = engine.search(request).unwrap();
+//! ```
 
-use std::cell::{Ref, RefCell, RefMut};
-use std::path::Path;
+use std::cell::{RefCell, RefMut};
 use std::sync::Arc;
 
 use crate::document::document::Document;
-use crate::error::Result;
-use crate::lexical::index::{InvertedIndex, IndexConfig, IndexStats};
+use crate::error::{Result, SageError};
+use crate::lexical::index::reader::inverted::InvertedIndexReader;
+use crate::lexical::index::{InvertedIndexStats, LexicalIndex};
+use crate::lexical::reader::IndexReader;
+use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::search::searcher::inverted_index::InvertedIndexSearcher;
-use crate::lexical::types::SearchRequest;
+use crate::lexical::types::LexicalSearchRequest;
 use crate::lexical::writer::IndexWriter;
 use crate::query::SearchResults;
 use crate::query::query::Query;
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
 
 /// A high-level lexical search engine that provides both indexing and searching capabilities.
-/// This is similar to the VectorEngine but for lexical search.
+///
+/// The `LexicalEngine` wraps a `LexicalIndex` trait object and provides a simplified,
+/// unified interface for all lexical search operations. It manages the complexity of
+/// coordinating between readers and writers while maintaining efficiency through caching.
+///
+/// # Features
+///
+/// - **Writer caching**: The writer is created on-demand and cached until commit
+/// - **Reader invalidation**: Readers are automatically invalidated after commits/optimizations
+/// - **Index abstraction**: Works with any `LexicalIndex` implementation (Inverted, etc.)
+/// - **Simplified workflow**: Handles the lifecycle of readers and writers automatically
+///
+/// # Caching Strategy
+///
+/// - **Writer**: Created on first write operation, cached until `commit()` is called
+/// - **Reader**: Invalidated after `commit()` or `optimize()` to ensure fresh data
+/// - This design ensures that you always read committed data while minimizing object creation
+///
+/// # Usage Example
+///
+/// ```rust,no_run
+/// use sage::document::document::Document;
+/// use sage::lexical::engine::LexicalEngine;
+/// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+/// use sage::lexical::types::LexicalSearchRequest;
+/// use sage::query::term::TermQuery;
+/// use sage::storage::{StorageConfig, StorageFactory};
+/// use sage::storage::memory::MemoryStorageConfig;
+/// use std::sync::Arc;
+///
+/// // Setup
+/// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+/// let storage = StorageFactory::create(storage_config).unwrap();
+/// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
+/// let mut engine = LexicalEngine::new(index).unwrap();
+///
+/// // Add documents
+/// let doc = Document::builder()
+///     .add_text("title", "Rust Programming")
+///     .build();
+/// engine.add_document(doc).unwrap();
+/// engine.commit().unwrap();
+///
+/// // Search
+/// let query = Box::new(TermQuery::new("title", "rust"));
+/// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
+/// ```
 pub struct LexicalEngine {
-    /// The underlying inverted index.
-    index: InvertedIndex,
-    /// The searcher for executing queries.
-    searcher: RefCell<Option<InvertedIndexSearcher>>,
+    /// The underlying lexical index.
+    index: Box<dyn LexicalIndex>,
+    /// The reader for executing queries (cached for efficiency).
+    reader: RefCell<Option<Box<dyn IndexReader>>>,
     /// The writer for adding/updating documents (cached for efficiency).
     writer: RefCell<Option<Box<dyn IndexWriter>>>,
+    /// The searcher for executing searches (cached for efficiency).
+    searcher: RefCell<Option<Box<dyn crate::lexical::search::searcher::LexicalSearcher>>>,
 }
 
 impl std::fmt::Debug for LexicalEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LexicalEngine")
             .field("index", &self.index)
-            .field("searcher", &self.searcher)
+            .field("reader", &"<cached reader>")
             .field("writer", &"<cached writer>")
+            .field("searcher", &"<cached searcher>")
             .finish()
     }
 }
 
 impl LexicalEngine {
-    /// Create a new lexical search engine with the given inverted index.
-    pub fn new(index: InvertedIndex) -> Self {
-        LexicalEngine {
+    /// Create a new lexical search engine with the given lexical index.
+    ///
+    /// This constructor wraps a `LexicalIndex` and initializes empty caches for
+    /// the reader and writer. The reader and writer will be created on-demand
+    /// when needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - A lexical index trait object (contains configuration and storage)
+    ///
+    /// # Returns
+    ///
+    /// Returns a new `LexicalEngine` instance.
+    ///
+    /// # Example with Memory Storage
+    ///
+    /// ```rust,no_run
+    /// use sage::lexical::engine::LexicalEngine;
+    /// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use std::sync::Arc;
+    ///
+    /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+    /// let storage = StorageFactory::create(storage_config).unwrap();
+    /// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
+    /// let engine = LexicalEngine::new(index).unwrap();
+    /// ```
+    ///
+    /// # Example with File Storage
+    ///
+    /// ```rust,no_run
+    /// use sage::lexical::engine::LexicalEngine;
+    /// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::file::FileStorageConfig;
+    /// use std::sync::Arc;
+    ///
+    /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
+    /// let storage = StorageFactory::create(storage_config).unwrap();
+    /// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
+    /// let engine = LexicalEngine::new(index).unwrap();
+    /// ```
+    pub fn new(index: Box<dyn LexicalIndex>) -> Result<Self> {
+        Ok(Self {
             index,
-            searcher: RefCell::new(None),
+            reader: RefCell::new(None),
             writer: RefCell::new(None),
+            searcher: RefCell::new(None),
+        })
+    }
+
+    /// Get or create a reader for this engine.
+    #[allow(dead_code)]
+    fn get_or_create_reader(&self) -> Result<RefMut<'_, Box<dyn IndexReader>>> {
+        {
+            let mut reader_ref = self.reader.borrow_mut();
+            if reader_ref.is_none() {
+                *reader_ref = Some(self.index.reader()?);
+            }
         }
-    }
 
-    /// Create a new lexical search engine in the given directory (schema-less mode).
-    pub fn create_in_dir<P: AsRef<Path>>(dir: P, index_config: IndexConfig) -> Result<Self> {
-        let index = InvertedIndex::create_in_dir(dir, index_config)?;
-        Ok(LexicalEngine::new(index))
-    }
-
-    /// Create a new in-memory lexical search engine (schema-less mode).
-    /// This is useful for testing and temporary indexes.
-    pub fn create_in_memory(index_config: IndexConfig) -> Result<Self> {
-        use crate::storage::memory::MemoryStorage;
-        use crate::storage::traits::StorageConfig;
-
-        let storage = Arc::new(MemoryStorage::new(StorageConfig::default()));
-        let index = InvertedIndex::create(storage, index_config)?;
-        Ok(LexicalEngine::new(index))
-    }
-
-    /// Open an existing lexical search engine from the given directory.
-    pub fn open_dir<P: AsRef<Path>>(dir: P, index_config: IndexConfig) -> Result<Self> {
-        let index = InvertedIndex::open_dir(dir, index_config)?;
-        Ok(LexicalEngine::new(index))
-    }
-
-    /// Get the storage backend.
-    pub fn storage(&self) -> &Arc<dyn Storage> {
-        self.index.storage()
+        // Return a mutable reference to the reader
+        Ok(RefMut::map(self.reader.borrow_mut(), |opt| {
+            opt.as_mut().unwrap()
+        }))
     }
 
     /// Get or create a writer for this engine.
@@ -91,8 +220,75 @@ impl LexicalEngine {
         }))
     }
 
+    /// Get or create a searcher for this engine.
+    ///
+    /// The searcher is created from the index reader and cached for efficiency.
+    fn get_or_create_searcher(&self) -> Result<RefMut<'_, Box<dyn LexicalSearcher>>> {
+        {
+            let mut searcher_ref = self.searcher.borrow_mut();
+            if searcher_ref.is_none() {
+                // Get a fresh reader from the index
+                let reader = self.index.reader()?;
+
+                // Downcast to InvertedIndexReader and create appropriate searcher
+                let searcher: Box<dyn LexicalSearcher> = if let Some(inverted_reader) =
+                    reader.as_any().downcast_ref::<InvertedIndexReader>()
+                {
+                    Box::new(InvertedIndexSearcher::new(Box::new(
+                        inverted_reader.clone(),
+                    )))
+                } else {
+                    return Err(SageError::index("Unknown lexical index reader type"));
+                };
+
+                *searcher_ref = Some(searcher);
+            }
+        }
+
+        // Return a mutable reference to the searcher
+        Ok(RefMut::map(self.searcher.borrow_mut(), |opt| {
+            opt.as_mut().unwrap()
+        }))
+    }
+
     /// Add a document to the index.
-    /// Note: You must call `commit()` to persist the changes.
+    ///
+    /// This method adds a single document to the index. The writer is created
+    /// and cached on the first call. Changes are not persisted until you call `commit()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc` - The document to add
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if the operation fails.
+    ///
+    /// # Important
+    ///
+    /// You must call `commit()` to persist the changes to storage.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use sage::document::document::Document;
+    /// # use sage::lexical::engine::LexicalEngine;
+    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
+    /// # use std::sync::Arc;
+    /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
+    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    ///
+    /// let doc = Document::builder()
+    ///     .add_text("title", "Hello World")
+    ///     .add_text("body", "This is a test")
+    ///     .build();
+    /// engine.add_document(doc).unwrap();
+    /// engine.commit().unwrap();  // Don't forget to commit!
+    /// ```
     pub fn add_document(&mut self, doc: Document) -> Result<()> {
         let mut writer = self.get_or_create_writer()?;
         writer.add_document(doc)?;
@@ -131,59 +327,212 @@ impl LexicalEngine {
     }
 
     /// Commit any pending changes to the index.
+    ///
+    /// This method flushes all pending write operations to storage and makes them
+    /// visible to subsequent searches. The cached writer is consumed and the reader
+    /// cache is invalidated to ensure fresh data on the next search.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if the commit fails.
+    ///
+    /// # Important
+    ///
+    /// - All write operations (add, update, delete) are not persisted until commit
+    /// - After commit, the reader cache is invalidated automatically
+    /// - The writer cache is cleared and will be recreated on the next write operation
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use sage::document::document::Document;
+    /// # use sage::lexical::engine::LexicalEngine;
+    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
+    /// # use std::sync::Arc;
+    /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
+    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    ///
+    /// // Add multiple documents
+    /// for i in 0..10 {
+    ///     let doc = Document::builder()
+    ///         .add_text("id", &i.to_string())
+    ///         .add_text("title", &format!("Document {}", i))
+    ///         .build();
+    ///     engine.add_document(doc).unwrap();
+    /// }
+    ///
+    /// // Commit all changes at once
+    /// engine.commit().unwrap();
+    /// ```
     pub fn commit(&mut self) -> Result<()> {
         // Take the cached writer if it exists
         if let Some(mut writer) = self.writer.borrow_mut().take() {
             writer.commit()?;
         }
 
-        // Invalidate searcher cache to reflect the new changes
+        // Invalidate reader and searcher caches to reflect the new changes
+        *self.reader.borrow_mut() = None;
         *self.searcher.borrow_mut() = None;
 
         Ok(())
     }
 
     /// Optimize the index.
+    ///
+    /// This method triggers index optimization, which typically involves merging smaller
+    /// index segments into larger ones to improve search performance and reduce storage overhead.
+    /// After optimization, the reader and searcher caches are invalidated to reflect the optimized structure.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if optimization fails.
+    ///
+    /// # Performance Considerations
+    ///
+    /// - Optimization can be I/O and CPU intensive for large indexes
+    /// - It's typically performed during off-peak hours or maintenance windows
+    /// - The benefits include faster search performance and reduced storage space
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use sage::document::document::Document;
+    /// # use sage::lexical::engine::LexicalEngine;
+    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
+    /// # use std::sync::Arc;
+    /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
+    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    ///
+    /// // Add and commit many documents
+    /// for i in 0..1000 {
+    ///     let doc = Document::builder()
+    ///         .add_text("id", &i.to_string())
+    ///         .build();
+    ///     engine.add_document(doc).unwrap();
+    /// }
+    /// engine.commit().unwrap();
+    ///
+    /// // Optimize the index for better performance
+    /// engine.optimize().unwrap();
+    /// ```
     pub fn optimize(&mut self) -> Result<()> {
         self.index.optimize()?;
 
-        // Invalidate searcher cache
+        // Invalidate reader and searcher caches
+        *self.reader.borrow_mut() = None;
         *self.searcher.borrow_mut() = None;
 
         Ok(())
     }
 
-    /// Get or create a searcher for this engine.
-    fn get_searcher(&'_ self) -> Result<Ref<'_, InvertedIndexSearcher>> {
-        {
-            let mut searcher_ref = self.searcher.borrow_mut();
-            if searcher_ref.is_none() {
-                let reader = self.index.reader()?;
-                *searcher_ref = Some(InvertedIndexSearcher::new(reader));
-            }
-        }
-
-        // Return a reference to the searcher
-        Ok(Ref::map(self.searcher.borrow(), |opt| {
-            opt.as_ref().unwrap()
-        }))
-    }
-
-    /// Refresh the searcher to see latest changes.
+    /// Refresh the reader to see latest changes.
     pub fn refresh(&mut self) -> Result<()> {
+        *self.reader.borrow_mut() = None;
         *self.searcher.borrow_mut() = None;
         Ok(())
     }
 
     /// Get index statistics.
-    pub fn stats(&self) -> Result<IndexStats> {
+    pub fn stats(&self) -> Result<InvertedIndexStats> {
         self.index.stats()
+    }
+
+    /// Get the storage backend.
+    pub fn storage(&self) -> &Arc<dyn Storage> {
+        self.index.storage()
+    }
+
+    /// Search with the given request.
+    ///
+    /// This method executes a search query against the index using a cached searcher
+    /// for improved performance.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The search request containing the query and search parameters
+    ///
+    /// # Returns
+    ///
+    /// Returns `SearchResults` containing matching documents, scores, and metadata.
+    ///
+    /// # Example with TermQuery
+    ///
+    /// ```rust,no_run
+    /// use sage::document::document::Document;
+    /// use sage::lexical::types::LexicalSearchRequest;
+    /// use sage::query::term::TermQuery;
+    /// # use sage::lexical::engine::LexicalEngine;
+    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
+    /// # use std::sync::Arc;
+    /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
+    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    /// # let doc = Document::builder().add_text("title", "hello world").build();
+    /// # engine.add_document(doc).unwrap();
+    /// # engine.commit().unwrap();
+    ///
+    /// let query = Box::new(TermQuery::new("title", "hello"));
+    /// let request = LexicalSearchRequest::new(query)
+    ///     .max_docs(10)
+    ///     .min_score(0.5);
+    /// let results = engine.search(request).unwrap();
+    ///
+    /// println!("Found {} documents", results.total_hits);
+    /// for hit in results.hits {
+    ///     println!("Doc ID: {}, Score: {}", hit.doc_id, hit.score);
+    /// }
+    /// ```
+    ///
+    /// # Example with QueryParser
+    ///
+    /// ```rust,no_run
+    /// use sage::query::parser::QueryParser;
+    /// use sage::lexical::types::LexicalSearchRequest;
+    /// # use sage::document::document::Document;
+    /// # use sage::lexical::engine::LexicalEngine;
+    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
+    /// # use std::sync::Arc;
+    /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
+    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    ///
+    /// let parser = QueryParser::new().with_default_field("title");
+    /// let query = parser.parse("rust AND programming").unwrap();
+    /// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
+    /// ```
+    pub fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults> {
+        let searcher = self.get_or_create_searcher()?;
+        searcher.search(request)
+    }
+
+    /// Count documents matching the query.
+    ///
+    /// Uses a cached searcher for improved performance.
+    pub fn count(&self, query: Box<dyn Query>) -> Result<u64> {
+        let searcher = self.get_or_create_searcher()?;
+        searcher.count(query)
     }
 
     /// Close the search engine.
     pub fn close(&mut self) -> Result<()> {
         // Drop the cached writer
         *self.writer.borrow_mut() = None;
+        // Drop the cached reader
+        *self.reader.borrow_mut() = None;
         // Drop the cached searcher
         *self.searcher.borrow_mut() = None;
         self.index.close()
@@ -195,25 +544,14 @@ impl LexicalEngine {
     }
 }
 
-impl LexicalEngine {
-    /// Search with the given request.
-    pub fn search(&self, request: SearchRequest) -> Result<SearchResults> {
-        let searcher = self.get_searcher()?;
-        InvertedIndexSearcher::search(&searcher, request)
-    }
-
-    /// Count documents matching the query.
-    pub fn count(&self, query: Box<dyn Query>) -> Result<u64> {
-        let searcher = self.get_searcher()?;
-        InvertedIndexSearcher::count(&searcher, query)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
     use crate::query::term::TermQuery;
-
+    use crate::storage::file::{FileStorage, FileStorageConfig};
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     #[allow(dead_code)]
@@ -227,9 +565,12 @@ mod tests {
     #[test]
     fn test_search_engine_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
-
-        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let config = LexicalIndexConfig::default();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let engine = LexicalEngine::new(index).unwrap();
 
         // Schema-less mode: no schema() method available
         assert!(!engine.is_closed());
@@ -237,9 +578,10 @@ mod tests {
 
     #[test]
     fn test_search_engine_in_memory() {
-        let config = IndexConfig::default();
-
-        let mut engine = LexicalEngine::create_in_memory(config).unwrap();
+        let config = LexicalIndexConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let mut engine = LexicalEngine::new(index).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -251,7 +593,7 @@ mod tests {
 
         // Search for documents
         let query = Box::new(TermQuery::new("title", "Test"));
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
 
         // Should find documents in memory
@@ -263,14 +605,22 @@ mod tests {
     #[test]
     fn test_search_engine_open() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
         // Create engine
-        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config.clone()).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config.clone()).unwrap();
+        let mut engine = LexicalEngine::new(index).unwrap();
         engine.close().unwrap();
 
         // Open engine
-        let engine = LexicalEngine::open_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let engine = LexicalEngine::new(index).unwrap();
 
         // Schema-less mode: no schema() method available
         assert!(!engine.is_closed());
@@ -279,9 +629,13 @@ mod tests {
     #[test]
     fn test_add_document() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let mut engine = LexicalEngine::new(index).unwrap();
 
         let doc = create_test_document("Hello World", "This is a test document");
         engine.add_document(doc).unwrap();
@@ -297,9 +651,13 @@ mod tests {
     #[test]
     fn test_add_multiple_documents() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let mut engine = LexicalEngine::new(index).unwrap();
 
         let docs = vec![
             create_test_document("First Document", "Content of first document"),
@@ -317,12 +675,16 @@ mod tests {
     #[test]
     fn test_search_empty_index() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let engine = LexicalEngine::new(index).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let results = engine.search(request).unwrap();
 
         assert_eq!(results.hits.len(), 0);
@@ -333,9 +695,13 @@ mod tests {
     #[test]
     fn test_search_with_documents() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let mut engine = LexicalEngine::new(index).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -347,7 +713,7 @@ mod tests {
 
         // Search for documents
         let query = Box::new(TermQuery::new("title", "Hello"));
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
 
         // Results depend on the actual indexing implementation
@@ -359,9 +725,13 @@ mod tests {
     #[test]
     fn test_count_query() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let engine = LexicalEngine::new(index).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
         let count = engine.count(query).unwrap();
@@ -373,9 +743,13 @@ mod tests {
     #[test]
     fn test_engine_refresh() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let mut engine = LexicalEngine::new(index).unwrap();
 
         // Add a document
         let doc = create_test_document("Test Document", "Test content");
@@ -387,7 +761,7 @@ mod tests {
 
         // Search should still work
         let query = Box::new(TermQuery::new("title", "Test"));
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
         // hits.len() is usize, so >= 0 check is redundant
     }
@@ -395,9 +769,13 @@ mod tests {
     #[test]
     fn test_engine_stats() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let engine = LexicalEngine::new(index).unwrap();
 
         let stats = engine.stats().unwrap();
         // doc_count is usize, so >= 0 check is redundant
@@ -408,9 +786,13 @@ mod tests {
     #[test]
     fn test_engine_close() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let mut engine = LexicalEngine::new(index).unwrap();
 
         assert!(!engine.is_closed());
 
@@ -422,12 +804,16 @@ mod tests {
     #[test]
     fn test_search_request_configuration() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let engine = LexicalEngine::new(index).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
-        let request = SearchRequest::new(query)
+        let request = LexicalSearchRequest::new(query)
             .max_docs(5)
             .min_score(0.5)
             .load_documents(false);
@@ -442,9 +828,13 @@ mod tests {
     #[test]
     fn test_search_with_query_parser() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let mut engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let mut engine = LexicalEngine::new(index).unwrap();
 
         // Add some documents with lowercase titles for testing
         let docs = vec![
@@ -462,7 +852,7 @@ mod tests {
 
         // QueryParser analyzes "Hello" to "hello" before creating TermQuery
         let query = parser.parse("Hello").unwrap();
-        let results = engine.search(SearchRequest::new(query)).unwrap();
+        let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 
         // Should find the document
         // QueryParser analyzes "Hello" -> "hello", which matches the indexed "hello"
@@ -473,15 +863,19 @@ mod tests {
     #[test]
     fn test_search_field_with_string() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let engine = LexicalEngine::new(index).unwrap();
 
         // Search specific field
         use crate::query::parser::QueryParser;
         let parser = QueryParser::new();
         let query = parser.parse_field("title", "hello world").unwrap();
-        let results = engine.search(SearchRequest::new(query)).unwrap();
+        let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 
         // Should parse and execute the query
         assert_eq!(results.hits.len(), 0);
@@ -491,9 +885,16 @@ mod tests {
     #[test]
     fn test_query_parser_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
-
-        let _engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let config = LexicalIndexConfig::default();
+        let storage = Arc::new(
+            crate::storage::file::FileStorage::new(
+                temp_dir.path(),
+                crate::storage::file::FileStorageConfig::new(temp_dir.path()),
+            )
+            .unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let _engine = LexicalEngine::new(index).unwrap();
 
         use crate::query::parser::QueryParser;
         let parser = QueryParser::new();
@@ -506,15 +907,19 @@ mod tests {
     #[test]
     fn test_complex_string_query() {
         let temp_dir = TempDir::new().unwrap();
-        let config = IndexConfig::default();
+        let config = LexicalIndexConfig::default();
 
-        let engine = LexicalEngine::create_in_dir(temp_dir.path(), config).unwrap();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
+        let engine = LexicalEngine::new(index).unwrap();
 
         // Test complex query parsing
         use crate::query::parser::QueryParser;
         let parser = QueryParser::new().with_default_field("title");
         let query = parser.parse("title:hello AND body:world").unwrap();
-        let results = engine.search(SearchRequest::new(query)).unwrap();
+        let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 
         // Should parse the complex query without error
         assert_eq!(results.hits.len(), 0);

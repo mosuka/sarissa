@@ -6,146 +6,447 @@
 //! - Vector quantization and compression
 //! - Index optimization and maintenance
 
+pub mod deletion;
+pub mod flat;
+pub mod hnsw;
+pub mod ivf;
+pub mod merge_engine;
+pub mod merge_policy;
 pub mod optimization;
 pub mod quantization;
 pub mod reader;
-pub mod reader_factory;
+pub mod segment_manager;
 pub mod writer;
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 use crate::error::{Result, SageError};
-use crate::storage::traits::Storage;
+use crate::storage::Storage;
+use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::VectorIndexWriter;
 use crate::vector::{DistanceMetric, Vector};
 
-/// Configuration for vector index construction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorIndexWriterConfig {
-    /// Vector dimension.
-    pub dimension: usize,
-    /// Index type to build.
-    pub index_type: VectorIndexType,
-    /// Distance metric to use.
-    pub distance_metric: DistanceMetric,
-    /// Whether to normalize vectors.
-    pub normalize_vectors: bool,
-    /// Whether to use quantization.
-    pub use_quantization: bool,
-    /// Quantization method.
-    pub quantization_method: quantization::QuantizationMethod,
-    /// Build in parallel.
-    pub parallel_build: bool,
-    /// Memory limit for construction (in bytes).
-    pub memory_limit: Option<usize>,
+/// Trait for vector index implementations.
+///
+/// This trait defines the high-level interface for vector indexes.
+/// Different index types (Flat, HNSW, IVF, etc.) implement this trait
+/// to provide their specific functionality while maintaining a common interface.
+pub trait VectorIndex: Send + Sync + std::fmt::Debug {
+    /// Get a reader for this index.
+    ///
+    /// Returns a reader that can be used to query the index.
+    fn reader(&self) -> Result<Arc<dyn VectorIndexReader>>;
+
+    /// Get a writer for this index.
+    ///
+    /// Returns a writer that can be used to add or update vectors.
+    fn writer(&self) -> Result<Box<dyn VectorIndexWriter>>;
+
+    /// Get the storage backend for this index.
+    ///
+    /// Returns a reference to the underlying storage.
+    fn storage(&self) -> &Arc<dyn Storage>;
+
+    /// Close the index and release resources.
+    ///
+    /// This should flush any pending writes and release all resources.
+    fn close(&mut self) -> Result<()>;
+
+    /// Check if the index is closed.
+    ///
+    /// Returns true if the index has been closed.
+    fn is_closed(&self) -> bool;
+
+    /// Get index statistics.
+    ///
+    /// Returns statistics about the index such as vector count, dimension, etc.
+    fn stats(&self) -> Result<VectorIndexStats>;
+
+    /// Optimize the index.
+    ///
+    /// Performs index optimization to improve query performance.
+    fn optimize(&mut self) -> Result<()>;
 }
 
-impl Default for VectorIndexWriterConfig {
+/// Statistics about a vector index.
+#[derive(Debug, Clone)]
+pub struct VectorIndexStats {
+    /// Number of vectors in the index.
+    pub vector_count: u64,
+
+    /// Dimension of vectors.
+    pub dimension: usize,
+
+    /// Total size of the index in bytes.
+    pub total_size: u64,
+
+    /// Number of deleted vectors.
+    pub deleted_count: u64,
+
+    /// Last modified time (seconds since epoch).
+    pub last_modified: u64,
+}
+
+/// Configuration for vector index types.
+///
+/// This enum provides type-safe configuration for different index implementations.
+/// Each variant contains the configuration specific to that index type.
+///
+/// # Design Pattern
+///
+/// This follows an enum-based configuration pattern where:
+/// - Each index type has its own dedicated config struct
+/// - Pattern matching ensures exhaustive handling of all index types
+/// - New index types can be added without breaking existing code
+///
+/// # Index Types
+///
+/// - **Flat**: Brute-force exact search (default)
+///   - Best for small datasets (< 100K vectors)
+///   - Guaranteed 100% recall
+///   - Linear search complexity O(n)
+///
+/// - **HNSW**: Hierarchical Navigable Small World graph
+///   - Best for medium to large datasets
+///   - Fast approximate search
+///   - Good balance between speed and accuracy
+///
+/// - **IVF**: Inverted File with clustering
+///   - Best for very large datasets
+///   - Memory-efficient
+///   - Tunable speed/accuracy tradeoff
+///
+/// # Example
+///
+/// ```no_run
+/// use sage::vector::index::{VectorIndexConfig, FlatIndexConfig, HnswIndexConfig};
+/// use sage::vector::DistanceMetric;
+///
+/// // Use default flat index
+/// let config = VectorIndexConfig::default();
+///
+/// // Custom flat index configuration
+/// let flat_config = FlatIndexConfig {
+///     dimension: 384,
+///     distance_metric: DistanceMetric::Euclidean,
+///     max_vectors_per_segment: 500_000,
+///     ..Default::default()
+/// };
+/// let config = VectorIndexConfig::Flat(flat_config);
+///
+/// // HNSW configuration for approximate search
+/// let hnsw_config = HnswIndexConfig {
+///     dimension: 768,
+///     m: 32,
+///     ef_construction: 400,
+///     ..Default::default()
+/// };
+/// let config = VectorIndexConfig::HNSW(hnsw_config);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum VectorIndexConfig {
+    /// Flat index configuration
+    Flat(FlatIndexConfig),
+    /// HNSW index configuration
+    HNSW(HnswIndexConfig),
+    /// IVF index configuration
+    IVF(IvfIndexConfig),
+}
+
+impl Default for VectorIndexConfig {
+    fn default() -> Self {
+        VectorIndexConfig::Flat(FlatIndexConfig::default())
+    }
+}
+
+impl VectorIndexConfig {
+    /// Get the index type as a string.
+    pub fn index_type_name(&self) -> &'static str {
+        match self {
+            VectorIndexConfig::Flat(_) => "Flat",
+            VectorIndexConfig::HNSW(_) => "HNSW",
+            VectorIndexConfig::IVF(_) => "IVF",
+        }
+    }
+
+    /// Get the dimension from the config.
+    pub fn dimension(&self) -> usize {
+        match self {
+            VectorIndexConfig::Flat(config) => config.dimension,
+            VectorIndexConfig::HNSW(config) => config.dimension,
+            VectorIndexConfig::IVF(config) => config.dimension,
+        }
+    }
+
+    /// Get the distance metric from the config.
+    pub fn distance_metric(&self) -> DistanceMetric {
+        match self {
+            VectorIndexConfig::Flat(config) => config.distance_metric,
+            VectorIndexConfig::HNSW(config) => config.distance_metric,
+            VectorIndexConfig::IVF(config) => config.distance_metric,
+        }
+    }
+
+    /// Get the max vectors per segment from the config.
+    pub fn max_vectors_per_segment(&self) -> u64 {
+        match self {
+            VectorIndexConfig::Flat(config) => config.max_vectors_per_segment,
+            VectorIndexConfig::HNSW(config) => config.max_vectors_per_segment,
+            VectorIndexConfig::IVF(config) => config.max_vectors_per_segment,
+        }
+    }
+
+    /// Get the merge factor from the config.
+    pub fn merge_factor(&self) -> u32 {
+        match self {
+            VectorIndexConfig::Flat(config) => config.merge_factor,
+            VectorIndexConfig::HNSW(config) => config.merge_factor,
+            VectorIndexConfig::IVF(config) => config.merge_factor,
+        }
+    }
+}
+
+/// Configuration specific to Flat index.
+///
+/// These settings control the behavior of the flat index implementation,
+/// including segment management, buffering, and storage options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlatIndexConfig {
+    /// Vector dimension.
+    pub dimension: usize,
+
+    /// Distance metric to use.
+    pub distance_metric: DistanceMetric,
+
+    /// Whether to normalize vectors.
+    pub normalize_vectors: bool,
+
+    /// Maximum number of vectors per segment.
+    ///
+    /// When a segment reaches this size, it will be considered for merging.
+    /// Larger values reduce merge overhead but increase memory usage.
+    pub max_vectors_per_segment: u64,
+
+    /// Buffer size for writing operations (in bytes).
+    ///
+    /// Controls how much data is buffered in memory before being flushed to disk.
+    /// Larger buffers improve write performance but use more memory.
+    pub write_buffer_size: usize,
+
+    /// Whether to use quantization.
+    pub use_quantization: bool,
+
+    /// Quantization method.
+    pub quantization_method: quantization::QuantizationMethod,
+
+    /// Merge factor for segment merging.
+    ///
+    /// Controls how many segments are merged at once. Higher values reduce
+    /// the number of merge operations but create larger temporary segments.
+    pub merge_factor: u32,
+
+    /// Maximum number of segments before merging.
+    ///
+    /// When the number of segments exceeds this threshold, a merge operation
+    /// will be triggered to consolidate them.
+    pub max_segments: u32,
+}
+
+impl Default for FlatIndexConfig {
     fn default() -> Self {
         Self {
             dimension: 128,
-            index_type: VectorIndexType::HNSW,
             distance_metric: DistanceMetric::Cosine,
             normalize_vectors: true,
+            max_vectors_per_segment: 1000000,
+            write_buffer_size: 1024 * 1024, // 1MB
             use_quantization: false,
             quantization_method: quantization::QuantizationMethod::None,
-            parallel_build: true,
-            memory_limit: None,
+            merge_factor: 10,
+            max_segments: 100,
         }
     }
 }
 
-/// Types of vector indexes that can be built.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VectorIndexType {
-    /// Flat index for exact search.
-    Flat,
-    /// HNSW index for approximate search.
-    HNSW,
-    /// IVF index for memory-efficient search.
-    IVF,
+/// Configuration specific to HNSW index.
+///
+/// These settings control the behavior of the HNSW (Hierarchical Navigable Small World)
+/// index implementation, including graph construction parameters and storage options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HnswIndexConfig {
+    /// Vector dimension.
+    pub dimension: usize,
+
+    /// Distance metric to use.
+    pub distance_metric: DistanceMetric,
+
+    /// Whether to normalize vectors.
+    pub normalize_vectors: bool,
+
+    /// Number of bi-directional links created for every new element during construction.
+    ///
+    /// Higher values improve recall but increase memory usage and construction time.
+    pub m: usize,
+
+    /// Size of the dynamic candidate list during construction.
+    ///
+    /// Higher values improve index quality but increase construction time.
+    pub ef_construction: usize,
+
+    /// Maximum number of vectors per segment.
+    pub max_vectors_per_segment: u64,
+
+    /// Buffer size for writing operations (in bytes).
+    pub write_buffer_size: usize,
+
+    /// Whether to use quantization.
+    pub use_quantization: bool,
+
+    /// Quantization method.
+    pub quantization_method: quantization::QuantizationMethod,
+
+    /// Merge factor for segment merging.
+    pub merge_factor: u32,
+
+    /// Maximum number of segments before merging.
+    pub max_segments: u32,
 }
 
-/// Factory for creating vector index writers.
-pub struct VectorIndexWriterFactory;
-
-impl VectorIndexWriterFactory {
-    /// Create a new vector index builder based on configuration.
-    pub fn create_builder(config: VectorIndexWriterConfig) -> Result<Box<dyn VectorIndexWriter>> {
-        match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(writer::flat::FlatIndexWriter::new(config)?)),
-            VectorIndexType::HNSW => Ok(Box::new(writer::hnsw::HnswIndexWriter::new(config)?)),
-            VectorIndexType::IVF => Ok(Box::new(writer::ivf::IvfIndexWriter::new(config)?)),
-        }
-    }
-
-    /// Create a new vector index builder with storage support.
-    pub fn create_builder_with_storage(
-        config: VectorIndexWriterConfig,
-        storage: Arc<dyn Storage>,
-    ) -> Result<Box<dyn VectorIndexWriter>> {
-        match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(writer::flat::FlatIndexWriter::with_storage(
-                config, storage,
-            )?)),
-            VectorIndexType::HNSW => Ok(Box::new(writer::hnsw::HnswIndexWriter::with_storage(
-                config, storage,
-            )?)),
-            VectorIndexType::IVF => Ok(Box::new(writer::ivf::IvfIndexWriter::with_storage(
-                config, storage,
-            )?)),
-        }
-    }
-
-    /// Load an existing vector index from storage.
-    pub fn load_builder(
-        config: VectorIndexWriterConfig,
-        storage: Arc<dyn Storage>,
-        path: &str,
-    ) -> Result<Box<dyn VectorIndexWriter>> {
-        match config.index_type {
-            VectorIndexType::Flat => Ok(Box::new(writer::flat::FlatIndexWriter::load(
-                config, storage, path,
-            )?)),
-            VectorIndexType::HNSW => Ok(Box::new(writer::hnsw::HnswIndexWriter::load(
-                config, storage, path,
-            )?)),
-            VectorIndexType::IVF => Ok(Box::new(writer::ivf::IvfIndexWriter::load(
-                config, storage, path,
-            )?)),
+impl Default for HnswIndexConfig {
+    fn default() -> Self {
+        Self {
+            dimension: 128,
+            distance_metric: DistanceMetric::Cosine,
+            normalize_vectors: true,
+            m: 16,
+            ef_construction: 200,
+            max_vectors_per_segment: 1000000,
+            write_buffer_size: 1024 * 1024, // 1MB
+            use_quantization: false,
+            quantization_method: quantization::QuantizationMethod::None,
+            merge_factor: 10,
+            max_segments: 100,
         }
     }
 }
 
-/// In-memory vector index that manages the lifecycle of builders and readers.
-/// This is similar to InvertedIndex in the lexical module.
-pub struct VectorIndex {
-    config: VectorIndexWriterConfig,
+/// Configuration specific to IVF index.
+///
+/// These settings control the behavior of the IVF (Inverted File)
+/// index implementation, including clustering parameters and storage options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IvfIndexConfig {
+    /// Vector dimension.
+    pub dimension: usize,
+
+    /// Distance metric to use.
+    pub distance_metric: DistanceMetric,
+
+    /// Whether to normalize vectors.
+    pub normalize_vectors: bool,
+
+    /// Number of clusters for IVF.
+    ///
+    /// Higher values improve search quality but increase memory usage
+    /// and construction time.
+    pub n_clusters: usize,
+
+    /// Number of clusters to probe during search.
+    ///
+    /// Higher values improve recall but increase search time.
+    pub n_probe: usize,
+
+    /// Maximum number of vectors per segment.
+    pub max_vectors_per_segment: u64,
+
+    /// Buffer size for writing operations (in bytes).
+    pub write_buffer_size: usize,
+
+    /// Whether to use quantization.
+    pub use_quantization: bool,
+
+    /// Quantization method.
+    pub quantization_method: quantization::QuantizationMethod,
+
+    /// Merge factor for segment merging.
+    pub merge_factor: u32,
+
+    /// Maximum number of segments before merging.
+    pub max_segments: u32,
+}
+
+impl Default for IvfIndexConfig {
+    fn default() -> Self {
+        Self {
+            dimension: 128,
+            distance_metric: DistanceMetric::Cosine,
+            normalize_vectors: true,
+            n_clusters: 100,
+            n_probe: 1,
+            max_vectors_per_segment: 1000000,
+            write_buffer_size: 1024 * 1024, // 1MB
+            use_quantization: false,
+            quantization_method: quantization::QuantizationMethod::None,
+            merge_factor: 10,
+            max_segments: 100,
+        }
+    }
+}
+
+/// Internal implementation for managing vector index lifecycle.
+///
+/// This structure wraps a vector index writer and manages its state.
+/// For most use cases, prefer using `VectorEngine` which provides a higher-level interface.
+///
+/// # Note
+///
+/// This is an internal implementation detail. The public API for vector indexes
+/// is defined by the `VectorIndex` trait and `VectorIndexFactory`.
+pub struct ManagedVectorIndex {
+    config: VectorIndexConfig,
     builder: Arc<RwLock<Box<dyn VectorIndexWriter>>>,
     is_finalized: Arc<RwLock<bool>>,
     storage: Option<Arc<dyn Storage>>,
 }
 
-impl VectorIndex {
-    /// Create a new in-memory vector index.
-    pub fn create(config: VectorIndexWriterConfig) -> Result<Self> {
-        let builder = VectorIndexWriterFactory::create_builder(config.clone())?;
-        Ok(Self {
-            config,
-            builder: Arc::new(RwLock::new(builder)),
-            is_finalized: Arc::new(RwLock::new(false)),
-            storage: None,
-        })
-    }
+impl ManagedVectorIndex {
+    /// Create a new vector index with the given configuration and storage.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Vector index configuration including index type
+    /// * `storage` - Storage backend (MemoryStorage, FileStorage, etc.)
+    pub fn new(config: VectorIndexConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+        // Create builder based on config type
+        let builder: Box<dyn VectorIndexWriter> = match &config {
+            VectorIndexConfig::Flat(flat_config) => {
+                let writer_config = Self::default_writer_config();
+                Box::new(writer::flat::FlatIndexWriter::with_storage(
+                    flat_config.clone(),
+                    writer_config,
+                    storage.clone(),
+                )?)
+            }
+            VectorIndexConfig::HNSW(hnsw_config) => {
+                let writer_config = Self::default_writer_config();
+                Box::new(writer::hnsw::HnswIndexWriter::with_storage(
+                    hnsw_config.clone(),
+                    writer_config,
+                    storage.clone(),
+                )?)
+            }
+            VectorIndexConfig::IVF(ivf_config) => {
+                let writer_config = Self::default_writer_config();
+                Box::new(writer::ivf::IvfIndexWriter::with_storage(
+                    ivf_config.clone(),
+                    writer_config,
+                    storage.clone(),
+                )?)
+            }
+        };
 
-    /// Create a new vector index with storage support.
-    pub fn create_with_storage(
-        config: VectorIndexWriterConfig,
-        storage: Arc<dyn Storage>,
-    ) -> Result<Self> {
-        let builder =
-            VectorIndexWriterFactory::create_builder_with_storage(config.clone(), storage.clone())?;
         Ok(Self {
             config,
             builder: Arc::new(RwLock::new(builder)),
@@ -154,20 +455,9 @@ impl VectorIndex {
         })
     }
 
-    /// Load an existing vector index from storage.
-    pub fn load(
-        config: VectorIndexWriterConfig,
-        storage: Arc<dyn Storage>,
-        path: &str,
-    ) -> Result<Self> {
-        let builder =
-            VectorIndexWriterFactory::load_builder(config.clone(), storage.clone(), path)?;
-        Ok(Self {
-            config,
-            builder: Arc::new(RwLock::new(builder)),
-            is_finalized: Arc::new(RwLock::new(true)),
-            storage: Some(storage),
-        })
+    /// Helper to create a default writer config.
+    fn default_writer_config() -> crate::vector::writer::VectorIndexWriterConfig {
+        crate::vector::writer::VectorIndexWriterConfig::default()
     }
 
     /// Add vectors to the index.
@@ -200,7 +490,7 @@ impl VectorIndex {
     }
 
     /// Get the configuration.
-    pub fn config(&self) -> &VectorIndexWriterConfig {
+    pub fn config(&self) -> &VectorIndexConfig {
         &self.config
     }
 
@@ -283,9 +573,137 @@ impl VectorIndex {
         let vectors = self.vectors()?;
         let reader = crate::vector::reader::SimpleVectorReader::new(
             vectors,
-            self.config.dimension,
-            self.config.distance_metric,
+            self.config.dimension(),
+            self.config.distance_metric(),
         )?;
         Ok(Arc::new(reader))
+    }
+}
+
+/// Factory for creating vector index instances.
+///
+/// This factory follows the Factory design pattern to create appropriate
+/// index implementations based on the provided configuration.
+///
+/// # Design Benefits
+///
+/// - **Decoupling**: Client code doesn't need to know about concrete index types
+/// - **Extensibility**: New index types can be added by extending the enum
+/// - **Type safety**: Pattern matching ensures all cases are handled
+///
+/// # Example with StorageFactory
+///
+/// ```
+/// use sage::vector::index::{VectorIndexFactory, VectorIndexConfig};
+/// use sage::storage::{StorageFactory, StorageConfig};
+/// use sage::storage::memory::MemoryStorageConfig;
+///
+/// # fn main() -> sage::error::Result<()> {
+/// // Create storage using factory
+/// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+///
+/// // Create index using factory
+/// let config = VectorIndexConfig::default();
+/// // Note: VectorIndexFactory is not yet fully implemented
+/// // let index = VectorIndexFactory::create(storage, config)?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct VectorIndexFactory;
+
+impl VectorIndexFactory {
+    /// Create a new vector index with the given storage and configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - Storage backend (created using `StorageFactory`)
+    /// * `config` - Index configuration enum containing type-specific settings
+    ///
+    /// # Returns
+    ///
+    /// A boxed trait object implementing `VectorIndex` trait.
+    /// The concrete type is determined by the config variant.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use sage::vector::index::{VectorIndexFactory, VectorIndexConfig, FlatIndexConfig};
+    /// use sage::storage::{StorageFactory, StorageConfig};
+    /// use sage::storage::memory::MemoryStorageConfig;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// // Create memory storage
+    /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+    /// let storage = StorageFactory::create(storage_config)?;
+    ///
+    /// // Create flat index (currently not implemented, use ManagedVectorIndex instead)
+    /// // let index_config = VectorIndexConfig::Flat(FlatIndexConfig::default());
+    /// // let index = VectorIndexFactory::create(storage, index_config)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn create(
+        storage: Arc<dyn Storage>,
+        config: VectorIndexConfig,
+    ) -> Result<Box<dyn VectorIndex>> {
+        match config {
+            VectorIndexConfig::Flat(flat_config) => {
+                let index = flat::FlatIndex::create(storage, flat_config)?;
+                Ok(Box::new(index))
+            }
+            VectorIndexConfig::HNSW(hnsw_config) => {
+                let index = hnsw::HnswIndex::create(storage, hnsw_config)?;
+                Ok(Box::new(index))
+            }
+            VectorIndexConfig::IVF(ivf_config) => {
+                let index = ivf::IvfIndex::create(storage, ivf_config)?;
+                Ok(Box::new(index))
+            }
+        }
+    }
+
+    /// Open an existing vector index with the given storage and configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - Storage backend containing the existing index
+    /// * `config` - Index configuration (must match the stored index type)
+    ///
+    /// # Returns
+    ///
+    /// A boxed index implementation based on the configured index type.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use sage::vector::index::{VectorIndexFactory, VectorIndexConfig, FlatIndexConfig};
+    /// use sage::storage::file::{FileStorage, FileStorageConfig};
+    /// use std::sync::Arc;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
+    /// let config = VectorIndexConfig::Flat(FlatIndexConfig::default());
+    /// let index = VectorIndexFactory::open(storage, config)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn open(
+        storage: Arc<dyn Storage>,
+        config: VectorIndexConfig,
+    ) -> Result<Box<dyn VectorIndex>> {
+        match config {
+            VectorIndexConfig::Flat(flat_config) => {
+                let index = flat::FlatIndex::open(storage, flat_config)?;
+                Ok(Box::new(index))
+            }
+            VectorIndexConfig::HNSW(hnsw_config) => {
+                let index = hnsw::HnswIndex::open(storage, hnsw_config)?;
+                Ok(Box::new(index))
+            }
+            VectorIndexConfig::IVF(ivf_config) => {
+                let index = ivf::IvfIndex::open(storage, ivf_config)?;
+                Ok(Box::new(index))
+            }
+        }
     }
 }
