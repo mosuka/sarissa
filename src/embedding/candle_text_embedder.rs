@@ -38,10 +38,10 @@ use crate::vector::Vector;
 /// # Examples
 ///
 /// ```no_run
-/// use sage::embedding::text_embedder::TextEmbedder;
-/// use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use yatagarasu::embedding::text_embedder::TextEmbedder;
+/// use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
 ///
-/// # async fn example() -> sage::error::Result<()> {
+/// # async fn example() -> yatagarasu::error::Result<()> {
 /// // Create embedder with a sentence-transformers model
 /// let embedder = CandleTextEmbedder::new(
 ///     "sentence-transformers/all-MiniLM-L6-v2"
@@ -90,9 +90,9 @@ impl CandleTextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+    /// use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
     ///
-    /// # fn example() -> sage::error::Result<()> {
+    /// # fn example() -> yatagarasu::error::Result<()> {
     /// // Small and fast model
     /// let embedder = CandleTextEmbedder::new(
     ///     "sentence-transformers/all-MiniLM-L6-v2"

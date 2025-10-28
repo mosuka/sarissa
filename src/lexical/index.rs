@@ -134,7 +134,7 @@ pub struct InvertedIndexStats {
 /// # Example
 ///
 /// ```no_run
-/// use sage::lexical::index::{LexicalIndexConfig, InvertedIndexConfig};
+/// use yatagarasu::lexical::index::{LexicalIndexConfig, InvertedIndexConfig};
 ///
 /// // Use default inverted index
 /// let config = LexicalIndexConfig::default();
@@ -243,11 +243,11 @@ impl Default for InvertedIndexConfig {
 /// # Example with StorageFactory
 ///
 /// ```
-/// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig};
-/// use sage::storage::{StorageFactory, StorageConfig};
-/// use sage::storage::memory::MemoryStorageConfig;
+/// use yatagarasu::lexical::index::{LexicalIndexFactory, LexicalIndexConfig};
+/// use yatagarasu::storage::{StorageFactory, StorageConfig};
+/// use yatagarasu::storage::memory::MemoryStorageConfig;
 ///
-/// # fn main() -> sage::error::Result<()> {
+/// # fn main() -> yatagarasu::error::Result<()> {
 /// // Create storage using factory
 /// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
 ///
@@ -275,11 +275,11 @@ impl LexicalIndexFactory {
     /// # Example
     ///
     /// ```
-    /// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
-    /// use sage::storage::{StorageFactory, StorageConfig};
-    /// use sage::storage::file::FileStorageConfig;
+    /// use yatagarasu::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
+    /// use yatagarasu::storage::{StorageFactory, StorageConfig};
+    /// use yatagarasu::storage::file::FileStorageConfig;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// // Create file storage
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
     /// let storage = StorageFactory::create(storage_config)?;
@@ -316,11 +316,11 @@ impl LexicalIndexFactory {
     /// # Example
     ///
     /// ```no_run
-    /// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
-    /// use sage::storage::file::{FileStorage, FileStorageConfig};
+    /// use yatagarasu::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
+    /// use yatagarasu::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
     /// let config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
     /// let index = LexicalIndexFactory::open(storage, config)?;

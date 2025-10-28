@@ -16,13 +16,13 @@
 //! ```
 
 #[cfg(feature = "embeddings-openai")]
-use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
 #[cfg(feature = "embeddings-openai")]
-use sage::embedding::text_embedder::TextEmbedder;
+use yatagarasu::embedding::text_embedder::TextEmbedder;
 
 #[cfg(feature = "embeddings-openai")]
 #[tokio::main]
-async fn main() -> sage::error::Result<()> {
+async fn main() -> yatagarasu::error::Result<()> {
     println!("=== OpenAI Text Embedder Example ===\n");
 
     // Get API key from environment

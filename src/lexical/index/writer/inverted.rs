@@ -481,13 +481,13 @@ impl InvertedIndexWriter {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use sage::document::document::Document;
-    /// use sage::document::parser::DocumentParser;
-    /// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
-    /// use sage::analysis::analyzer::standard::StandardAnalyzer;
-    /// use sage::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::StorageConfig;
+    /// use yatagarasu::document::document::Document;
+    /// use yatagarasu::document::parser::DocumentParser;
+    /// use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+    /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+    /// use yatagarasu::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::StorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

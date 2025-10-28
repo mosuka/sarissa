@@ -26,15 +26,15 @@ use crate::vector::{DistanceMetric, Vector};
 /// # Example
 ///
 /// ```
-/// use sage::vector::engine::VectorEngine;
-/// use sage::vector::index::{VectorIndexConfig, VectorIndexFactory, FlatIndexConfig};
-/// use sage::vector::{Vector, DistanceMetric};
-/// use sage::vector::types::VectorSearchRequest;
-/// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-/// use sage::storage::StorageConfig;
+/// use yatagarasu::vector::engine::VectorEngine;
+/// use yatagarasu::vector::index::{VectorIndexConfig, VectorIndexFactory, FlatIndexConfig};
+/// use yatagarasu::vector::{Vector, DistanceMetric};
+/// use yatagarasu::vector::types::VectorSearchRequest;
+/// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+/// use yatagarasu::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
-/// # fn main() -> sage::error::Result<()> {
+/// # fn main() -> yatagarasu::error::Result<()> {
 /// // Create engine with flat index
 /// let config = VectorIndexConfig::Flat(FlatIndexConfig {
 ///     dimension: 3,
@@ -90,12 +90,12 @@ impl VectorEngine {
     /// # Example with Memory Storage
     ///
     /// ```rust,no_run
-    /// use sage::vector::engine::VectorEngine;
-    /// use sage::vector::index::{VectorIndexConfig, VectorIndexFactory};
-    /// use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::vector::engine::VectorEngine;
+    /// use yatagarasu::vector::index::{VectorIndexConfig, VectorIndexFactory};
+    /// use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::memory::MemoryStorageConfig;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// let storage = StorageFactory::create(storage_config)?;
     /// let index = VectorIndexFactory::create(storage, VectorIndexConfig::default())?;
@@ -107,12 +107,12 @@ impl VectorEngine {
     /// # Example with File Storage
     ///
     /// ```rust,no_run
-    /// use sage::vector::engine::VectorEngine;
-    /// use sage::vector::index::{VectorIndexConfig, VectorIndexFactory};
-    /// use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::file::FileStorageConfig;
+    /// use yatagarasu::vector::engine::VectorEngine;
+    /// use yatagarasu::vector::index::{VectorIndexConfig, VectorIndexFactory};
+    /// use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::file::FileStorageConfig;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/vector_index"));
     /// let storage = StorageFactory::create(storage_config)?;
     /// let index = VectorIndexFactory::create(storage, VectorIndexConfig::default())?;
@@ -221,13 +221,13 @@ impl VectorEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use sage::vector::engine::VectorEngine;
-    /// use sage::vector::index::{VectorIndexConfig, VectorIndexFactory};
-    /// use sage::vector::Vector;
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::vector::engine::VectorEngine;
+    /// use yatagarasu::vector::index::{VectorIndexConfig, VectorIndexFactory};
+    /// use yatagarasu::vector::Vector;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let config = VectorIndexConfig::default();
     /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     /// let index = VectorIndexFactory::create(storage, config)?;
@@ -272,12 +272,12 @@ impl VectorEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use sage::vector::engine::VectorEngine;
-    /// use sage::vector::index::{VectorIndexConfig, VectorIndexFactory};
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::vector::engine::VectorEngine;
+    /// use yatagarasu::vector::index::{VectorIndexConfig, VectorIndexFactory};
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let config = VectorIndexConfig::default();
     /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     /// let index = VectorIndexFactory::create(storage, config)?;

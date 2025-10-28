@@ -20,16 +20,16 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-use sage::embedding::image_embedder::ImageEmbedder;
-use sage::error::Result;
-use sage::storage::memory::MemoryStorage;
-use sage::storage::memory::MemoryStorageConfig;
-use sage::vector::DistanceMetric;
-use sage::vector::engine::VectorEngine;
-use sage::vector::index::{HnswIndexConfig, VectorIndexConfig};
-use sage::vector::types::VectorSearchRequest;
 use std::sync::Arc;
+use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use yatagarasu::embedding::image_embedder::ImageEmbedder;
+use yatagarasu::error::Result;
+use yatagarasu::storage::memory::MemoryStorage;
+use yatagarasu::storage::memory::MemoryStorageConfig;
+use yatagarasu::vector::DistanceMetric;
+use yatagarasu::vector::engine::VectorEngine;
+use yatagarasu::vector::index::{HnswIndexConfig, VectorIndexConfig};
+use yatagarasu::vector::types::VectorSearchRequest;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -126,7 +126,7 @@ async fn main() -> Result<()> {
     // Build the index using VectorEngine
     println!("Building HNSW index...");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let index = sage::vector::index::VectorIndexFactory::create(storage, config)?;
+    let index = yatagarasu::vector::index::VectorIndexFactory::create(storage, config)?;
     let mut engine = VectorEngine::new(index)?;
     engine.add_vectors(doc_vectors)?;
     engine.commit()?;

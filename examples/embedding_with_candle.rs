@@ -11,13 +11,13 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
-use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(feature = "embeddings-candle")]
-use sage::embedding::text_embedder::TextEmbedder;
+use yatagarasu::embedding::text_embedder::TextEmbedder;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
-async fn main() -> sage::error::Result<()> {
+async fn main() -> yatagarasu::error::Result<()> {
     println!("=== Candle Text Embedder Example ===\n");
 
     // Create embedder with a sentence-transformers model

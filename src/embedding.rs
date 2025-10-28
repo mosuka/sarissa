@@ -22,17 +22,17 @@
 //! Add to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! sage = { version = "0.1", features = ["embeddings-candle"] }
+//! yatagarasu = { version = "0.1", features = ["embeddings-candle"] }
 //! ```
 //!
 //! Then use:
 //! ```no_run
 //! # #[cfg(feature = "embeddings-candle")]
 //! # {
-//! use sage::embedding::text_embedder::TextEmbedder;
-//! use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use yatagarasu::embedding::text_embedder::TextEmbedder;
+//! use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
 //!
-//! # async fn example() -> sage::error::Result<()> {
+//! # async fn example() -> yatagarasu::error::Result<()> {
 //! let embedder = CandleTextEmbedder::new(
 //!     "sentence-transformers/all-MiniLM-L6-v2"
 //! )?;
@@ -49,17 +49,17 @@
 //! Add to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! sage = { version = "0.1", features = ["embeddings-openai"] }
+//! yatagarasu = { version = "0.1", features = ["embeddings-openai"] }
 //! ```
 //!
 //! Then use:
 //! ```no_run
 //! # #[cfg(feature = "embeddings-openai")]
 //! # {
-//! use sage::embedding::text_embedder::TextEmbedder;
-//! use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+//! use yatagarasu::embedding::text_embedder::TextEmbedder;
+//! use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
 //!
-//! # async fn example() -> sage::error::Result<()> {
+//! # async fn example() -> yatagarasu::error::Result<()> {
 //! let embedder = OpenAITextEmbedder::new(
 //!     std::env::var("OPENAI_API_KEY").unwrap(),
 //!     "text-embedding-3-small".to_string()
@@ -77,9 +77,9 @@
 //!
 //! ```
 //! use async_trait::async_trait;
-//! use sage::embedding::text_embedder::TextEmbedder;
-//! use sage::error::Result;
-//! use sage::vector::Vector;
+//! use yatagarasu::embedding::text_embedder::TextEmbedder;
+//! use yatagarasu::error::Result;
+//! use yatagarasu::vector::Vector;
 //!
 //! struct MyEmbedder {
 //!     dimension: usize,
@@ -103,14 +103,14 @@
 //! You can switch between embedders at runtime using trait objects:
 //!
 //! ```no_run
-//! use sage::embedding::text_embedder::TextEmbedder;
+//! use yatagarasu::embedding::text_embedder::TextEmbedder;
 //! use std::sync::Arc;
 //!
-//! # async fn example() -> sage::error::Result<()> {
+//! # async fn example() -> yatagarasu::error::Result<()> {
 //! #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 //! {
-//!     use sage::embedding::candle_text_embedder::CandleTextEmbedder;
-//!     use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+//!     use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+//!     use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
 //!
 //!     let embedder: Arc<dyn TextEmbedder> = if std::env::var("USE_OPENAI").is_ok() {
 //!         Arc::new(OpenAITextEmbedder::new(

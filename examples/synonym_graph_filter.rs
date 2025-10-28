@@ -6,12 +6,12 @@
 //! - Use boost to adjust synonym weights
 //! - Observe how tokens are expanded with synonyms
 
-use sage::analysis::synonym::dictionary::SynonymDictionary;
-use sage::analysis::token_filter::Filter;
-use sage::analysis::token_filter::synonym_graph::SynonymGraphFilter;
-use sage::analysis::tokenizer::Tokenizer;
-use sage::analysis::tokenizer::whitespace::WhitespaceTokenizer;
-use sage::error::Result;
+use yatagarasu::analysis::synonym::dictionary::SynonymDictionary;
+use yatagarasu::analysis::token_filter::Filter;
+use yatagarasu::analysis::token_filter::synonym_graph::SynonymGraphFilter;
+use yatagarasu::analysis::tokenizer::Tokenizer;
+use yatagarasu::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+use yatagarasu::error::Result;
 
 fn main() -> Result<()> {
     println!("=== SynonymGraphFilter Usage Example ===\n");

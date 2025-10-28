@@ -15,9 +15,9 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use sage::ml::intent_classifier::types::IntentSample;
-//! use sage::ml::intent_classifier::core::new_ml_based;
-//! use sage::analysis::analyzer::standard::StandardAnalyzer;
+//! use yatagarasu::ml::intent_classifier::types::IntentSample;
+//! use yatagarasu::ml::intent_classifier::core::new_ml_based;
+//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {

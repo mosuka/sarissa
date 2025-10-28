@@ -4,15 +4,15 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use sage::analysis::analyzer::analyzer::Analyzer;
-use sage::analysis::analyzer::keyword::KeywordAnalyzer;
-use sage::analysis::analyzer::standard::StandardAnalyzer;
-use sage::document::document::Document;
-use sage::error::Result;
-use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::LexicalSearchRequest;
-use sage::storage::file::{FileStorage, FileStorageConfig};
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+use yatagarasu::document::document::Document;
+use yatagarasu::error::Result;
+use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::storage::file::{FileStorage, FileStorageConfig};
 
 fn main() -> Result<()> {
     println!("=== Field-Specific Search Example ===\n");
@@ -94,8 +94,8 @@ fn main() -> Result<()> {
     // Note: We need to manually configure the writer since SearchEngine doesn't persist
     // analyzer configuration across writer() calls yet
     {
-        use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
-        use sage::lexical::index::writer::inverted::{
+        use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+        use yatagarasu::lexical::index::writer::inverted::{
             InvertedIndexWriter, LexicalIndexWriterConfig,
         };
 
@@ -132,7 +132,7 @@ fn main() -> Result<()> {
 
     // Example 1: Search by author
     println!("1. Search by author (author:Orwell):");
-    let parser = sage::query::parser::QueryParser::new();
+    let parser = yatagarasu::query::parser::QueryParser::new();
     let query = parser.parse_field("author", "Orwell")?;
     let results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
@@ -147,7 +147,7 @@ fn main() -> Result<()> {
 
     // Example 2: Search by author with document loading
     println!("\n2. Search by author with document details (author:Orwell):");
-    let request = LexicalSearchRequest::new(Box::new(sage::query::term::TermQuery::new(
+    let request = LexicalSearchRequest::new(Box::new(yatagarasu::query::term::TermQuery::new(
         "author", "orwell",
     )))
     .load_documents(true);
@@ -171,7 +171,7 @@ fn main() -> Result<()> {
             {
                 println!("      Category: {category}");
             }
-            if let Some(sage::document::field_value::FieldValue::Integer(year)) =
+            if let Some(yatagarasu::document::field_value::FieldValue::Integer(year)) =
                 doc.get_field("year")
             {
                 println!("      Year: {year}");
@@ -181,7 +181,7 @@ fn main() -> Result<()> {
 
     // Example 3: Search by category
     println!("\n3. Search by category (category:classic):");
-    let parser = sage::query::parser::QueryParser::new();
+    let parser = yatagarasu::query::parser::QueryParser::new();
     let query = parser.parse_field("category", "classic")?;
     let results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
@@ -196,7 +196,7 @@ fn main() -> Result<()> {
 
     // Example 4: Search in tags field
     println!("\n4. Search in tags field (tags:british):");
-    let request = LexicalSearchRequest::new(Box::new(sage::query::term::TermQuery::new(
+    let request = LexicalSearchRequest::new(Box::new(yatagarasu::query::term::TermQuery::new(
         "tags", "british",
     )))
     .load_documents(true);
@@ -230,7 +230,7 @@ fn main() -> Result<()> {
 
     // Example 5: Search in title field
     println!("\n5. Search in title field (title:farm):");
-    let parser = sage::query::parser::QueryParser::new();
+    let parser = yatagarasu::query::parser::QueryParser::new();
     let query = parser.parse_field("title", "farm")?;
     let results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
@@ -245,7 +245,7 @@ fn main() -> Result<()> {
 
     // Example 6: Search in body field
     println!("\n6. Search in body field (body:father):");
-    let parser = sage::query::parser::QueryParser::new();
+    let parser = yatagarasu::query::parser::QueryParser::new();
     let query = parser.parse_field("body", "father")?;
     let results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
@@ -263,7 +263,7 @@ fn main() -> Result<()> {
     println!("   Searching for 'american' in different fields:");
 
     // Search in tags
-    let parser = sage::query::parser::QueryParser::new();
+    let parser = yatagarasu::query::parser::QueryParser::new();
     let query = parser.parse_field("tags", "american")?;
     let tags_results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   - In tags field: {} results", tags_results.total_hits);
@@ -283,7 +283,7 @@ fn main() -> Result<()> {
 
     // Example 8: Using query parser with field specification
     println!("\n8. Using query parser with field specification:");
-    let parser = sage::query::parser::QueryParser::new();
+    let parser = yatagarasu::query::parser::QueryParser::new();
 
     // Parse field:value syntax
     let query = parser.parse("author:austen OR category:dystopian")?;

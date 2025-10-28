@@ -56,10 +56,10 @@ struct EmbeddingData {
 /// # Examples
 ///
 /// ```no_run
-/// use sage::embedding::text_embedder::TextEmbedder;
-/// use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+/// use yatagarasu::embedding::text_embedder::TextEmbedder;
+/// use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
 ///
-/// # async fn example() -> sage::error::Result<()> {
+/// # async fn example() -> yatagarasu::error::Result<()> {
 /// // Create embedder with API key
 /// let embedder = OpenAITextEmbedder::new(
 ///     std::env::var("OPENAI_API_KEY").unwrap(),
@@ -110,9 +110,9 @@ impl OpenAITextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+    /// use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
     ///
-    /// # fn example() -> sage::error::Result<()> {
+    /// # fn example() -> yatagarasu::error::Result<()> {
     /// // Small model (recommended for most use cases)
     /// let embedder = OpenAITextEmbedder::new(
     ///     "sk-...".to_string(),
@@ -162,9 +162,9 @@ impl OpenAITextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+    /// use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
     ///
-    /// # fn example() -> sage::error::Result<()> {
+    /// # fn example() -> yatagarasu::error::Result<()> {
     /// // Use smaller dimension for cost savings
     /// let embedder = OpenAITextEmbedder::with_dimension(
     ///     "sk-...".to_string(),

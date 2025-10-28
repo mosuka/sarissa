@@ -64,11 +64,11 @@ impl Default for VectorIndexWriterConfig {
 /// # Example
 ///
 /// ```rust,no_run
-/// use sage::vector::index::writer::hnsw::HnswIndexWriter;
-/// use sage::vector::index::HnswIndexConfig;
-/// use sage::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
-/// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-/// use sage::storage::StorageConfig;
+/// use yatagarasu::vector::index::writer::hnsw::HnswIndexWriter;
+/// use yatagarasu::vector::index::HnswIndexConfig;
+/// use yatagarasu::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+/// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+/// use yatagarasu::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

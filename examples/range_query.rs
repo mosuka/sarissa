@@ -2,15 +2,15 @@
 
 use tempfile::TempDir;
 
-use sage::document::document::Document;
-use sage::error::Result;
-use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::LexicalSearchRequest;
-use sage::query::range::NumericRangeQuery;
-use sage::storage::file::FileStorage;
-use sage::storage::file::FileStorageConfig;
 use std::sync::Arc;
+use yatagarasu::document::document::Document;
+use yatagarasu::error::Result;
+use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::query::range::NumericRangeQuery;
+use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== RangeQuery Example - Numeric and Date Range Search ===\n");
@@ -123,7 +123,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::field_value::FieldValue::Float(price)) =
+            if let Some(yatagarasu::document::field_value::FieldValue::Float(price)) =
                 doc.get_field("price")
             {
                 println!("      Price: ${price:.2}");
@@ -151,7 +151,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::field_value::FieldValue::Float(rating)) =
+            if let Some(yatagarasu::document::field_value::FieldValue::Float(rating)) =
                 doc.get_field("rating")
             {
                 println!("      Rating: {rating:.1}");
@@ -179,7 +179,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::field_value::FieldValue::Integer(year)) =
+            if let Some(yatagarasu::document::field_value::FieldValue::Integer(year)) =
                 doc.get_field("year")
             {
                 println!("      Year: {year}");
@@ -207,7 +207,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::field_value::FieldValue::Integer(pages)) =
+            if let Some(yatagarasu::document::field_value::FieldValue::Integer(pages)) =
                 doc.get_field("pages")
             {
                 println!("      Pages: {pages}");
@@ -235,7 +235,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::field_value::FieldValue::Integer(year)) =
+            if let Some(yatagarasu::document::field_value::FieldValue::Integer(year)) =
                 doc.get_field("year")
             {
                 println!("      Year: {year}");
@@ -263,7 +263,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::field_value::FieldValue::Float(price)) =
+            if let Some(yatagarasu::document::field_value::FieldValue::Float(price)) =
                 doc.get_field("price")
             {
                 println!("      Price: ${price:.2}");
@@ -291,7 +291,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(sage::document::field_value::FieldValue::Integer(pages)) =
+            if let Some(yatagarasu::document::field_value::FieldValue::Integer(pages)) =
                 doc.get_field("pages")
             {
                 println!("      Pages: {pages}");

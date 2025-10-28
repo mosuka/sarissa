@@ -52,11 +52,11 @@ use crate::vector::Vector;
 /// ## Text-to-Image Search
 ///
 /// ```no_run
-/// use sage::embedding::text_embedder::TextEmbedder;
-/// use sage::embedding::image_embedder::ImageEmbedder;
-/// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use yatagarasu::embedding::text_embedder::TextEmbedder;
+/// use yatagarasu::embedding::image_embedder::ImageEmbedder;
+/// use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
-/// # async fn example() -> sage::error::Result<()> {
+/// # async fn example() -> yatagarasu::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
 ///     "openai/clip-vit-base-patch32"
 /// )?;
@@ -77,10 +77,10 @@ use crate::vector::Vector;
 /// ## Image-to-Image Search
 ///
 /// ```no_run
-/// use sage::embedding::image_embedder::ImageEmbedder;
-/// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use yatagarasu::embedding::image_embedder::ImageEmbedder;
+/// use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
-/// # async fn example() -> sage::error::Result<()> {
+/// # async fn example() -> yatagarasu::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
 ///     "openai/clip-vit-base-patch32"
 /// )?;
@@ -128,9 +128,9 @@ impl CandleMultimodalEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+    /// use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
     ///
-    /// # fn example() -> sage::error::Result<()> {
+    /// # fn example() -> yatagarasu::error::Result<()> {
     /// // Fast and efficient
     /// let embedder = CandleMultimodalEmbedder::new(
     ///     "openai/clip-vit-base-patch32"

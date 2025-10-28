@@ -23,10 +23,10 @@ use crate::error::Result;
 /// # Example
 ///
 /// ```
-/// use sage::analysis::analyzer::analyzer::Analyzer;
-/// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
-/// use sage::analysis::analyzer::standard::StandardAnalyzer;
-/// use sage::analysis::analyzer::keyword::KeywordAnalyzer;
+/// use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+/// use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+/// use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 /// use std::sync::Arc;
 ///
 /// // Reuse analyzer instances to save memory

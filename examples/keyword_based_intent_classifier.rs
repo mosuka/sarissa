@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use sage::analysis::analyzer::language::english::EnglishAnalyzer;
-use sage::analysis::analyzer::language::japanese::JapaneseAnalyzer;
-use sage::ml::intent_classifier::core;
+use yatagarasu::analysis::analyzer::language::english::EnglishAnalyzer;
+use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+use yatagarasu::ml::intent_classifier::core;
 
 #[tokio::main]
 async fn main() -> Result<()> {

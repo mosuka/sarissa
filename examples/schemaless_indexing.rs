@@ -6,16 +6,16 @@
 
 use std::sync::Arc;
 
-use sage::analysis::analyzer::keyword::KeywordAnalyzer;
-use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
-use sage::analysis::analyzer::standard::StandardAnalyzer;
-use sage::document::document::Document;
-use sage::document::field_value::FieldValue;
-use sage::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
-use sage::storage::memory::MemoryStorage;
-use sage::storage::memory::MemoryStorageConfig;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+use yatagarasu::document::document::Document;
+use yatagarasu::document::field_value::FieldValue;
+use yatagarasu::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
+use yatagarasu::storage::memory::MemoryStorage;
+use yatagarasu::storage::memory::MemoryStorageConfig;
 
-fn main() -> sage::error::Result<()> {
+fn main() -> yatagarasu::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");
 
     // Configure per-field analyzers using PerFieldAnalyzer (Lucene-style)

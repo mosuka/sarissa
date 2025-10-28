@@ -18,9 +18,9 @@
 //! # Example
 //!
 //! ```rust
-//! use sage::hybrid::config::HybridSearchConfig;
-//! use sage::hybrid::engine::HybridSearchEngine;
-//! use sage::error::Result;
+//! use yatagarasu::hybrid::config::HybridSearchConfig;
+//! use yatagarasu::hybrid::engine::HybridSearchEngine;
+//! use yatagarasu::error::Result;
 //!
 //! fn example() -> Result<()> {
 //!     // Create hybrid search configuration

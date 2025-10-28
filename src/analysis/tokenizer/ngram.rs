@@ -15,8 +15,8 @@ use crate::error::{Result, SageError};
 /// # Examples
 ///
 /// ```
-/// use sage::analysis::tokenizer::ngram::NgramTokenizer;
-/// use sage::analysis::tokenizer::Tokenizer;
+/// use yatagarasu::analysis::tokenizer::ngram::NgramTokenizer;
+/// use yatagarasu::analysis::tokenizer::Tokenizer;
 ///
 /// // Bigram (n=2)
 /// let tokenizer = NgramTokenizer::new(2, 2).unwrap();

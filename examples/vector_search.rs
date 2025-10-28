@@ -12,27 +12,27 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
-use sage::embedding::candle_text_embedder::CandleTextEmbedder;
-#[cfg(feature = "embeddings-candle")]
-use sage::embedding::text_embedder::TextEmbedder;
-#[cfg(feature = "embeddings-candle")]
-use sage::error::Result;
-#[cfg(feature = "embeddings-candle")]
-use sage::storage::memory::MemoryStorage;
-#[cfg(feature = "embeddings-candle")]
-use sage::storage::memory::MemoryStorageConfig;
-#[cfg(feature = "embeddings-candle")]
-use sage::vector::DistanceMetric;
-#[cfg(feature = "embeddings-candle")]
-use sage::vector::Vector;
-#[cfg(feature = "embeddings-candle")]
-use sage::vector::engine::VectorEngine;
-#[cfg(feature = "embeddings-candle")]
-use sage::vector::index::{FlatIndexConfig, VectorIndexConfig};
-#[cfg(feature = "embeddings-candle")]
-use sage::vector::types::VectorSearchRequest;
-#[cfg(feature = "embeddings-candle")]
 use std::sync::Arc;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::embedding::text_embedder::TextEmbedder;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::error::Result;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::storage::memory::MemoryStorage;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::storage::memory::MemoryStorageConfig;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::DistanceMetric;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::Vector;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::engine::VectorEngine;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::index::{FlatIndexConfig, VectorIndexConfig};
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::types::VectorSearchRequest;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
@@ -104,11 +104,11 @@ async fn main() -> Result<()> {
     // Step 5: Build the vector index using VectorEngine
     println!("Building vector index...");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let index = sage::vector::index::VectorIndexFactory::create(storage, vector_config)?;
+    let index = yatagarasu::vector::index::VectorIndexFactory::create(storage, vector_config)?;
     let mut engine = VectorEngine::new(index)?;
 
     // Add document vectors to the index
-    let doc_vectors: Vec<(u64, sage::vector::Vector)> = documents
+    let doc_vectors: Vec<(u64, yatagarasu::vector::Vector)> = documents
         .iter()
         .zip(vectors.iter())
         .map(|((id, _), vector)| (*id, vector.clone()))

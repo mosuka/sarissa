@@ -16,13 +16,13 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use sage::document::document::Document;
-//! use sage::lexical::engine::LexicalEngine;
-//! use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-//! use sage::lexical::types::LexicalSearchRequest;
-//! use sage::query::term::TermQuery;
-//! use sage::storage::{StorageConfig, StorageFactory};
-//! use sage::storage::memory::MemoryStorageConfig;
+//! use yatagarasu::document::document::Document;
+//! use yatagarasu::lexical::engine::LexicalEngine;
+//! use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+//! use yatagarasu::lexical::types::LexicalSearchRequest;
+//! use yatagarasu::query::term::TermQuery;
+//! use yatagarasu::storage::{StorageConfig, StorageFactory};
+//! use yatagarasu::storage::memory::MemoryStorageConfig;
 //! use std::sync::Arc;
 //!
 //! // Create storage using factory
@@ -88,13 +88,13 @@ use crate::storage::Storage;
 /// # Usage Example
 ///
 /// ```rust,no_run
-/// use sage::document::document::Document;
-/// use sage::lexical::engine::LexicalEngine;
-/// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-/// use sage::lexical::types::LexicalSearchRequest;
-/// use sage::query::term::TermQuery;
-/// use sage::storage::{StorageConfig, StorageFactory};
-/// use sage::storage::memory::MemoryStorageConfig;
+/// use yatagarasu::document::document::Document;
+/// use yatagarasu::lexical::engine::LexicalEngine;
+/// use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+/// use yatagarasu::lexical::types::LexicalSearchRequest;
+/// use yatagarasu::query::term::TermQuery;
+/// use yatagarasu::storage::{StorageConfig, StorageFactory};
+/// use yatagarasu::storage::memory::MemoryStorageConfig;
 /// use std::sync::Arc;
 ///
 /// // Setup
@@ -154,10 +154,10 @@ impl LexicalEngine {
     /// # Example with Memory Storage
     ///
     /// ```rust,no_run
-    /// use sage::lexical::engine::LexicalEngine;
-    /// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::lexical::engine::LexicalEngine;
+    /// use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
@@ -169,10 +169,10 @@ impl LexicalEngine {
     /// # Example with File Storage
     ///
     /// ```rust,no_run
-    /// use sage::lexical::engine::LexicalEngine;
-    /// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::file::FileStorageConfig;
+    /// use yatagarasu::lexical::engine::LexicalEngine;
+    /// use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::file::FileStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
@@ -271,11 +271,11 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use sage::document::document::Document;
-    /// # use sage::lexical::engine::LexicalEngine;
-    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::document::document::Document;
+    /// # use yatagarasu::lexical::engine::LexicalEngine;
+    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
@@ -345,11 +345,11 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use sage::document::document::Document;
-    /// # use sage::lexical::engine::LexicalEngine;
-    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::document::document::Document;
+    /// # use yatagarasu::lexical::engine::LexicalEngine;
+    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
@@ -400,11 +400,11 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use sage::document::document::Document;
-    /// # use sage::lexical::engine::LexicalEngine;
-    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::document::document::Document;
+    /// # use yatagarasu::lexical::engine::LexicalEngine;
+    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
@@ -466,13 +466,13 @@ impl LexicalEngine {
     /// # Example with TermQuery
     ///
     /// ```rust,no_run
-    /// use sage::document::document::Document;
-    /// use sage::lexical::types::LexicalSearchRequest;
-    /// use sage::query::term::TermQuery;
-    /// # use sage::lexical::engine::LexicalEngine;
-    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::document::document::Document;
+    /// use yatagarasu::lexical::types::LexicalSearchRequest;
+    /// use yatagarasu::query::term::TermQuery;
+    /// # use yatagarasu::lexical::engine::LexicalEngine;
+    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
@@ -497,13 +497,13 @@ impl LexicalEngine {
     /// # Example with QueryParser
     ///
     /// ```rust,no_run
-    /// use sage::query::parser::QueryParser;
-    /// use sage::lexical::types::LexicalSearchRequest;
-    /// # use sage::document::document::Document;
-    /// # use sage::lexical::engine::LexicalEngine;
-    /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory};
-    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::query::parser::QueryParser;
+    /// use yatagarasu::lexical::types::LexicalSearchRequest;
+    /// # use yatagarasu::document::document::Document;
+    /// # use yatagarasu::lexical::engine::LexicalEngine;
+    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
+    /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();

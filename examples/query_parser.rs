@@ -12,15 +12,15 @@
 
 use tempfile::TempDir;
 
-use sage::document::document::Document;
-use sage::error::Result;
-use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::LexicalSearchRequest;
-use sage::query::parser::QueryParser;
-use sage::storage::file::FileStorage;
-use sage::storage::file::FileStorageConfig;
 use std::sync::Arc;
+use yatagarasu::document::document::Document;
+use yatagarasu::error::Result;
+use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::query::parser::QueryParser;
+use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== Query Parser - Complete Feature Demonstration ===\n");

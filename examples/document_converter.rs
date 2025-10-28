@@ -6,16 +6,16 @@
 use std::io::Write;
 use tempfile::{NamedTempFile, TempDir};
 
-use sage::document::converter::{
+use std::sync::Arc;
+use yatagarasu::document::converter::{
     DocumentConverter, csv::CsvDocumentConverter, jsonl::JsonlDocumentConverter,
 };
-use sage::document::field_value::FieldValue;
-use sage::error::Result;
-use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::storage::file::FileStorage;
-use sage::storage::file::FileStorageConfig;
-use std::sync::Arc;
+use yatagarasu::document::field_value::FieldValue;
+use yatagarasu::error::Result;
+use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== DocumentConverter Example ===\n");

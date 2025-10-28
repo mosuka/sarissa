@@ -879,7 +879,7 @@ impl GeoQuery {
     ///
     /// # Example
     /// ```rust
-    /// use sage::query::geo::GeoQuery;
+    /// use yatagarasu::query::geo::GeoQuery;
     ///
     /// let query = GeoQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
     /// ```
@@ -906,7 +906,7 @@ impl GeoQuery {
     ///
     /// # Example
     /// ```rust
-    /// use sage::query::geo::GeoQuery;
+    /// use yatagarasu::query::geo::GeoQuery;
     ///
     /// let query = GeoQuery::within_bounding_box("location", 40.0, -75.0, 41.0, -74.0).unwrap();
     /// ```

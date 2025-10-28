@@ -18,23 +18,23 @@
 
 use tempfile::TempDir;
 
-use sage::document::converter::DocumentConverter;
-use sage::document::converter::jsonl::JsonlDocumentConverter;
-use sage::document::field_value::FieldValue;
-use sage::error::Result;
-use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::LexicalSearchRequest;
-use sage::query::boolean::BooleanQuery;
-use sage::query::fuzzy::FuzzyQuery;
-use sage::query::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint};
-use sage::query::phrase::PhraseQuery;
-use sage::query::range::NumericRangeQuery;
-use sage::query::term::TermQuery;
-use sage::query::wildcard::WildcardQuery;
-use sage::storage::file::FileStorage;
-use sage::storage::file::FileStorageConfig;
 use std::sync::Arc;
+use yatagarasu::document::converter::DocumentConverter;
+use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+use yatagarasu::document::field_value::FieldValue;
+use yatagarasu::error::Result;
+use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::query::boolean::BooleanQuery;
+use yatagarasu::query::fuzzy::FuzzyQuery;
+use yatagarasu::query::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint};
+use yatagarasu::query::phrase::PhraseQuery;
+use yatagarasu::query::range::NumericRangeQuery;
+use yatagarasu::query::term::TermQuery;
+use yatagarasu::query::wildcard::WildcardQuery;
+use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== Comprehensive Lexical Search Example ===\n");
@@ -501,7 +501,7 @@ fn main() -> Result<()> {
 }
 
 /// Helper function to display search results in a formatted way
-fn display_results(results: &sage::query::SearchResults) {
+fn display_results(results: &yatagarasu::query::SearchResults) {
     for (i, hit) in results.hits.iter().enumerate() {
         println!("  {}. Score: {:.4}", i + 1, hit.score);
 

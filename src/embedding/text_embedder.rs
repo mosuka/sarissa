@@ -17,10 +17,10 @@ use crate::vector::Vector;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
-/// use sage::embedding::text_embedder::TextEmbedder;
-/// use sage::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use yatagarasu::embedding::text_embedder::TextEmbedder;
+/// use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
 ///
-/// # async fn example() -> sage::error::Result<()> {
+/// # async fn example() -> yatagarasu::error::Result<()> {
 /// let embedder = CandleTextEmbedder::new(
 ///     "sentence-transformers/all-MiniLM-L6-v2"
 /// )?;
@@ -37,10 +37,10 @@ use crate::vector::Vector;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-openai")]
 /// # {
-/// use sage::embedding::text_embedder::TextEmbedder;
-/// use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
+/// use yatagarasu::embedding::text_embedder::TextEmbedder;
+/// use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
 ///
-/// # async fn example() -> sage::error::Result<()> {
+/// # async fn example() -> yatagarasu::error::Result<()> {
 /// let embedder = OpenAITextEmbedder::new(
 ///     "your-api-key".to_string(),
 ///     "text-embedding-3-small".to_string()
@@ -56,9 +56,9 @@ use crate::vector::Vector;
 ///
 /// ```
 /// use async_trait::async_trait;
-/// use sage::embedding::text_embedder::TextEmbedder;
-/// use sage::error::Result;
-/// use sage::vector::Vector;
+/// use yatagarasu::embedding::text_embedder::TextEmbedder;
+/// use yatagarasu::error::Result;
+/// use yatagarasu::vector::Vector;
 ///
 /// struct MyCustomEmbedder {
 ///     dimension: usize,

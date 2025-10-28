@@ -14,10 +14,10 @@ use crate::error::Result;
 /// # Example
 ///
 /// ```rust,no_run
-/// use sage::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
-/// use sage::lexical::writer::IndexWriter;
-/// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-/// use sage::storage::StorageConfig;
+/// use yatagarasu::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
+/// use yatagarasu::lexical::writer::IndexWriter;
+/// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+/// use yatagarasu::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

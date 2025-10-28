@@ -21,12 +21,12 @@
 //! # Example
 //!
 //! ```
-//! use sage::storage::file::{FileStorage, FileStorageConfig};
-//! use sage::storage::Storage;
+//! use yatagarasu::storage::file::{FileStorage, FileStorageConfig};
+//! use yatagarasu::storage::Storage;
 //! use std::io::Write;
 //! use tempfile::TempDir;
 //!
-//! # fn main() -> sage::error::Result<()> {
+//! # fn main() -> yatagarasu::error::Result<()> {
 //! // Create storage with mmap enabled
 //! let temp_dir = TempDir::new().unwrap();
 //! let mut config = FileStorageConfig::new(temp_dir.path());
@@ -81,7 +81,7 @@ use crate::storage::{
 /// # Example
 ///
 /// ```
-/// use sage::storage::file::FileStorageConfig;
+/// use yatagarasu::storage::file::FileStorageConfig;
 ///
 /// // Basic file storage
 /// let config = FileStorageConfig::new("/data/index");

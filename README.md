@@ -1,10 +1,10 @@
-# Sage
+# Yatagarasu
 
-[![Crates.io](https://img.shields.io/crates/v/sage.svg)](https://crates.io/crates/sage)
-[![Documentation](https://docs.rs/sage/badge.svg)](https://docs.rs/sage)
+[![Crates.io](https://img.shields.io/crates/v/yatagarasu.svg)](https://crates.io/crates/yatagarasu)
+[![Documentation](https://docs.rs/yatagarasu/badge.svg)](https://docs.rs/yatagarasu)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A fast, featureful search library for Rust supporting full-text search, vector search, and hybrid search. Inspired by [Apache Lucene](https://github.com/apache/lucene) and modern search engines, Sage combines the power of lexical search with semantic vector search capabilities.
+A fast, featureful search library for Rust supporting full-text search, vector search, and hybrid search. Inspired by [Apache Lucene](https://github.com/apache/lucene) and modern search engines, Yatagarasu combines the power of lexical search with semantic vector search capabilities.
 
 ## ✨ Features
 
@@ -54,24 +54,24 @@ A fast, featureful search library for Rust supporting full-text search, vector s
 
 ## 🚀 Quick Start
 
-Add Sage to your `Cargo.toml`:
+Add Yatagarasu to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sage = "0.1"
+yatagarasu = "0.1"
 ```
 
 ### Basic Usage
 
 ```rust
-use sage::document::document::Document;
-use sage::error::Result;
-use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::LexicalSearchRequest;
-use sage::query::term::TermQuery;
-use sage::storage::file::FileStorage;
-use sage::storage::file::FileStorageConfig;
+use yatagarasu::document::document::Document;
+use yatagarasu::error::Result;
+use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::query::term::TermQuery;
+use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::file::FileStorageConfig;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -125,7 +125,7 @@ fn main() -> Result<()> {
 
 ## 🏗️ Architecture
 
-Sage is built with a modular architecture:
+Yatagarasu is built with a modular architecture:
 
 ### Core Components
 
@@ -139,10 +139,10 @@ Sage is built with a modular architecture:
 
 ### Field Types
 
-Sage supports the following field value types through the `Document` builder API:
+Yatagarasu supports the following field value types through the `Document` builder API:
 
 ```rust
-use sage::document::document::Document;
+use yatagarasu::document::document::Document;
 
 let doc = Document::builder()
     // Text field for full-text search
@@ -172,13 +172,13 @@ let doc = Document::builder()
 ### Query Types
 
 ```rust
-use sage::query::term::TermQuery;
-use sage::query::phrase::PhraseQuery;
-use sage::query::range::NumericRangeQuery;
-use sage::query::boolean::BooleanQuery;
-use sage::query::fuzzy::FuzzyQuery;
-use sage::query::wildcard::WildcardQuery;
-use sage::query::geo::{GeoDistanceQuery, GeoBoundingBoxQuery, GeoPoint, GeoBoundingBox};
+use yatagarasu::query::term::TermQuery;
+use yatagarasu::query::phrase::PhraseQuery;
+use yatagarasu::query::range::NumericRangeQuery;
+use yatagarasu::query::boolean::BooleanQuery;
+use yatagarasu::query::fuzzy::FuzzyQuery;
+use yatagarasu::query::wildcard::WildcardQuery;
+use yatagarasu::query::geo::{GeoDistanceQuery, GeoBoundingBoxQuery, GeoPoint, GeoBoundingBox};
 
 // Term query - simple keyword matching
 let query = Box::new(TermQuery::new("field", "term"));
@@ -222,27 +222,27 @@ let query = Box::new(GeoBoundingBoxQuery::new(
 
 ### Vector Search with Text Embeddings
 
-Sage supports semantic search using text embeddings. You can use local BERT models via Candle or OpenAI's API.
+Yatagarasu supports semantic search using text embeddings. You can use local BERT models via Candle or OpenAI's API.
 
 #### Using Candle (Local BERT Models)
 
 ```toml
 [dependencies]
-sage = { version = "0.1", features = ["embeddings-candle"] }
+yatagarasu = { version = "0.1", features = ["embeddings-candle"] }
 ```
 
 ```rust
-use sage::embedding::candle_text_embedder::CandleTextEmbedder;
-use sage::embedding::text_embedder::TextEmbedder;
-use sage::vector::DistanceMetric;
-use sage::vector::engine::VectorEngine;
-use sage::vector::index::{FlatIndexConfig, VectorIndexConfig, VectorIndexFactory};
-use sage::vector::types::VectorSearchRequest;
-use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+use yatagarasu::embedding::text_embedder::TextEmbedder;
+use yatagarasu::vector::DistanceMetric;
+use yatagarasu::vector::engine::VectorEngine;
+use yatagarasu::vector::index::{FlatIndexConfig, VectorIndexConfig, VectorIndexFactory};
+use yatagarasu::vector::types::VectorSearchRequest;
+use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
 
 #[tokio::main]
-async fn main() -> sage::error::Result<()> {
+async fn main() -> yatagarasu::error::Result<()> {
     // Initialize embedder with a sentence-transformers model
     let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
 
@@ -290,12 +290,12 @@ async fn main() -> sage::error::Result<()> {
 
 ```toml
 [dependencies]
-sage = { version = "0.1", features = ["embeddings-openai"] }
+yatagarasu = { version = "0.1", features = ["embeddings-openai"] }
 ```
 
 ```rust
-use sage::embedding::openai_text_embedder::OpenAITextEmbedder;
-use sage::embedding::text_embedder::TextEmbedder;
+use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
+use yatagarasu::embedding::text_embedder::TextEmbedder;
 
 // Initialize with API key
 let embedder = OpenAITextEmbedder::new(
@@ -309,7 +309,7 @@ let vector = embedder.embed("your text here").await?;
 
 ### Multimodal Search (Text + Images)
 
-Sage supports cross-modal search using CLIP (Contrastive Language-Image Pre-Training) models, enabling semantic search across text and images. This allows you to:
+Yatagarasu supports cross-modal search using CLIP (Contrastive Language-Image Pre-Training) models, enabling semantic search across text and images. This allows you to:
 
 - **Text-to-Image Search**: Find images using natural language queries
 - **Image-to-Image Search**: Find visually similar images using an image query
@@ -321,24 +321,24 @@ Add the `embeddings-multimodal` feature to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sage = { version = "0.1", features = ["embeddings-multimodal"] }
+yatagarasu = { version = "0.1", features = ["embeddings-multimodal"] }
 ```
 
 #### Text-to-Image Search Example
 
 ```rust
-use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-use sage::embedding::text_embedder::TextEmbedder;
-use sage::embedding::image_embedder::ImageEmbedder;
-use sage::vector::engine::VectorEngine;
-use sage::vector::index::{HnswIndexConfig, VectorIndexConfig, VectorIndexFactory};
-use sage::vector::types::VectorSearchRequest;
-use sage::vector::DistanceMetric;
-use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use yatagarasu::embedding::text_embedder::TextEmbedder;
+use yatagarasu::embedding::image_embedder::ImageEmbedder;
+use yatagarasu::vector::engine::VectorEngine;
+use yatagarasu::vector::index::{HnswIndexConfig, VectorIndexConfig, VectorIndexFactory};
+use yatagarasu::vector::types::VectorSearchRequest;
+use yatagarasu::vector::DistanceMetric;
+use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
 
 #[tokio::main]
-async fn main() -> sage::error::Result<()> {
+async fn main() -> yatagarasu::error::Result<()> {
     // Initialize CLIP embedder (automatically downloads model from HuggingFace)
     let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 
@@ -422,9 +422,9 @@ cargo run --example image_to_image_search --features embeddings-multimodal -- qu
 ### Faceted Search
 
 ```rust
-use sage::lexical::search::facet::{FacetedSearchEngine, FacetConfig};
-use sage::lexical::types::LexicalSearchRequest;
-use sage::query::term::TermQuery;
+use yatagarasu::lexical::search::facet::{FacetedSearchEngine, FacetConfig};
+use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::query::term::TermQuery;
 
 // Create faceted search engine
 let facet_config = FacetConfig {
@@ -455,8 +455,8 @@ for facet in &results.facets {
 ### Spell Correction
 
 ```rust
-use sage::spelling::corrector::{SpellingCorrector, CorrectorConfig};
-use sage::spelling::dictionary::Dictionary;
+use yatagarasu::spelling::corrector::{SpellingCorrector, CorrectorConfig};
+use yatagarasu::spelling::dictionary::Dictionary;
 
 // Build a dictionary from your corpus
 let mut dictionary = Dictionary::new();
@@ -483,10 +483,10 @@ if let Some(correction) = corrector.correct("progamming") {
 ### Custom Analysis Pipeline
 
 ```rust
-use sage::analysis::analyzer::pipeline::PipelineAnalyzer;
-use sage::analysis::tokenizer::whitespace::WhitespaceTokenizer;
-use sage::analysis::token_filter::lowercase::LowercaseFilter;
-use sage::analysis::token_filter::stop::StopWordFilter;
+use yatagarasu::analysis::analyzer::pipeline::PipelineAnalyzer;
+use yatagarasu::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
+use yatagarasu::analysis::token_filter::stop::StopWordFilter;
 
 // Create custom analyzer with multiple filters
 let mut analyzer = PipelineAnalyzer::new(Box::new(WhitespaceTokenizer));
@@ -505,8 +505,8 @@ for token in tokens {
 For language-specific tokenization (Japanese, Korean, Chinese):
 
 ```rust
-use sage::analysis::tokenizer::lindera::LinderaTokenizer;
-use sage::analysis::analyzer::pipeline::PipelineAnalyzer;
+use yatagarasu::analysis::tokenizer::lindera::LinderaTokenizer;
+use yatagarasu::analysis::analyzer::pipeline::PipelineAnalyzer;
 
 // Japanese tokenization with Lindera
 let tokenizer = LinderaTokenizer::japanese()?;
@@ -518,7 +518,7 @@ let tokens = analyzer.analyze(text)?;
 
 ## 📊 Performance
 
-Sage is designed for high performance:
+Yatagarasu is designed for high performance:
 
 - **SIMD Acceleration** - Uses wide instruction sets for vector operations
 - **Memory-Mapped I/O** - Efficient file access with minimal memory overhead
@@ -530,8 +530,8 @@ Sage is designed for high performance:
 ### Building from Source
 
 ```bash
-git clone https://github.com/mosuka/sage.git
-cd sage
+git clone https://github.com/mosuka/yatagarasu.git
+cd yatagarasu
 cargo build --release
 ```
 
@@ -556,7 +556,7 @@ cargo fmt --check
 
 ## 📖 Examples
 
-Sage includes numerous examples demonstrating various features:
+Yatagarasu includes numerous examples demonstrating various features:
 
 ### Lexical Search Examples
 
@@ -603,21 +603,21 @@ cargo run --example image_to_image_search --features embeddings-multimodal
 
 ## 🔧 Feature Flags
 
-Sage uses feature flags to enable optional functionality:
+Yatagarasu uses feature flags to enable optional functionality:
 
 ```toml
 [dependencies]
 # Default features only
-sage = "0.1"
+yatagarasu = "0.1"
 
 # With Candle embeddings (local BERT models)
-sage = { version = "0.1", features = ["embeddings-candle"] }
+yatagarasu = { version = "0.1", features = ["embeddings-candle"] }
 
 # With OpenAI embeddings
-sage = { version = "0.1", features = ["embeddings-openai"] }
+yatagarasu = { version = "0.1", features = ["embeddings-openai"] }
 
 # With all embedding features
-sage = { version = "0.1", features = ["embeddings-all"] }
+yatagarasu = { version = "0.1", features = ["embeddings-all"] }
 ```
 
 Available features:
@@ -629,8 +629,8 @@ Available features:
 
 ## 📚 Documentation
 
-- [API Documentation](https://docs.rs/sage)
-- [User Guide](https://github.com/mosuka/sage/wiki)
+- [API Documentation](https://docs.rs/yatagarasu)
+- [User Guide](https://github.com/mosuka/yatagarasu/wiki)
 - [Examples](./examples/)
 
 ## 🤝 Contributing

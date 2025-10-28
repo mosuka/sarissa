@@ -15,10 +15,10 @@ use crate::vector::Vector;
 /// ## Using Candle CLIP embedder (requires `embeddings-multimodal` feature)
 ///
 /// ```no_run
-/// use sage::embedding::image_embedder::ImageEmbedder;
-/// use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use yatagarasu::embedding::image_embedder::ImageEmbedder;
+/// use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
-/// # async fn example() -> sage::error::Result<()> {
+/// # async fn example() -> yatagarasu::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
 ///     "openai/clip-vit-base-patch32"
 /// )?;
@@ -33,9 +33,9 @@ use crate::vector::Vector;
 ///
 /// ```
 /// use async_trait::async_trait;
-/// use sage::embedding::image_embedder::ImageEmbedder;
-/// use sage::error::Result;
-/// use sage::vector::Vector;
+/// use yatagarasu::embedding::image_embedder::ImageEmbedder;
+/// use yatagarasu::error::Result;
+/// use yatagarasu::vector::Vector;
 ///
 /// struct MyCustomImageEmbedder {
 ///     dimension: usize,

@@ -14,19 +14,19 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use sage::analysis::analyzer::analyzer::Analyzer;
-use sage::analysis::analyzer::keyword::KeywordAnalyzer;
-use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
-use sage::analysis::analyzer::standard::StandardAnalyzer;
-use sage::document::document::Document;
-use sage::document::parser::DocumentParser;
-use sage::error::Result;
-use sage::lexical::engine::LexicalEngine;
-use sage::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
-use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::LexicalSearchRequest;
-use sage::storage::file::FileStorage;
-use sage::storage::file::FileStorageConfig;
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+use yatagarasu::document::document::Document;
+use yatagarasu::document::parser::DocumentParser;
+use yatagarasu::error::Result;
+use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
+use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");
@@ -116,7 +116,7 @@ fn main() -> Result<()> {
     let query_str = "category:programming";
     println!("Query: {query_str}");
 
-    use sage::query::parser::QueryParser;
+    use yatagarasu::query::parser::QueryParser;
     let parser = QueryParser::new();
     let query = parser.parse(query_str)?;
 

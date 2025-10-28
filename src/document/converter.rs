@@ -19,9 +19,9 @@ pub mod jsonl;
 /// # Example
 ///
 /// ```no_run
-/// use sage::document::converter::DocumentConverter;
-/// use sage::document::converter::csv::CsvDocumentConverter;
-/// use sage::document::converter::jsonl::JsonlDocumentConverter;
+/// use yatagarasu::document::converter::DocumentConverter;
+/// use yatagarasu::document::converter::csv::CsvDocumentConverter;
+/// use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
 ///
 /// // CSV converter
 /// let csv_converter = CsvDocumentConverter::new();

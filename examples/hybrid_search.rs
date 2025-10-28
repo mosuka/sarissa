@@ -17,10 +17,10 @@
 
 use std::collections::HashMap;
 
-use sage::error::Result;
-use sage::hybrid::config::{HybridSearchConfig, ScoreNormalization};
-use sage::hybrid::engine::HybridSearchEngine;
-use sage::hybrid::types::{HybridSearchResult, HybridSearchResults};
+use yatagarasu::error::Result;
+use yatagarasu::hybrid::config::{HybridSearchConfig, ScoreNormalization};
+use yatagarasu::hybrid::engine::HybridSearchEngine;
+use yatagarasu::hybrid::types::{HybridSearchResult, HybridSearchResults};
 
 fn main() -> Result<()> {
     println!("=== Hybrid Search Configuration Example ===\n");

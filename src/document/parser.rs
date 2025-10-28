@@ -24,11 +24,11 @@ use crate::lexical::index::writer::inverted::{AnalyzedDocument, AnalyzedTerm};
 /// # Example
 ///
 /// ```
-/// use sage::document::document::Document;
-/// use sage::document::parser::DocumentParser;
-/// use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
-/// use sage::analysis::analyzer::standard::StandardAnalyzer;
-/// use sage::analysis::analyzer::keyword::KeywordAnalyzer;
+/// use yatagarasu::document::document::Document;
+/// use yatagarasu::document::parser::DocumentParser;
+/// use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+/// use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 /// use std::sync::Arc;
 ///
 /// let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));

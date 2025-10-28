@@ -23,11 +23,11 @@
 //! # Example
 //!
 //! ```
-//! use sage::storage::{StorageFactory, StorageConfig};
-//! use sage::storage::file::FileStorageConfig;
-//! use sage::storage::memory::MemoryStorageConfig;
+//! use yatagarasu::storage::{StorageFactory, StorageConfig};
+//! use yatagarasu::storage::file::FileStorageConfig;
+//! use yatagarasu::storage::memory::MemoryStorageConfig;
 //!
-//! # fn main() -> sage::error::Result<()> {
+//! # fn main() -> yatagarasu::error::Result<()> {
 //! // Create file storage with mmap enabled
 //! let mut file_config = FileStorageConfig::new("/tmp/test_index");
 //! file_config.use_mmap = true;
@@ -87,11 +87,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::{Read, Write};
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // First create a file
@@ -126,11 +126,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// let mut output = storage.create_output("index.bin")?;
@@ -160,11 +160,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::{Read, Write};
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create file with initial content
@@ -205,11 +205,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// assert!(!storage.file_exists("index.bin"));
@@ -241,11 +241,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file
@@ -278,11 +278,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create some files
@@ -321,11 +321,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file with known size
@@ -359,11 +359,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file
@@ -400,11 +400,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a temp file
@@ -441,11 +441,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a temp file with prefix
@@ -478,11 +478,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Write some data
@@ -512,11 +512,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use sage::storage::Storage;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use yatagarasu::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// let mut storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Use storage
@@ -629,9 +629,9 @@ pub trait StorageLock: Send + std::fmt::Debug {
 /// # Example
 ///
 /// ```
-/// use sage::storage::StorageConfig;
-/// use sage::storage::file::FileStorageConfig;
-/// use sage::storage::memory::MemoryStorageConfig;
+/// use yatagarasu::storage::StorageConfig;
+/// use yatagarasu::storage::file::FileStorageConfig;
+/// use yatagarasu::storage::memory::MemoryStorageConfig;
 ///
 /// // File storage with custom settings
 /// let mut file_config = FileStorageConfig::new("/data/index");
@@ -677,11 +677,11 @@ impl StorageFactory {
     /// # Example
     ///
     /// ```
-    /// use sage::storage::{StorageFactory, StorageConfig};
-    /// use sage::storage::file::FileStorageConfig;
-    /// use sage::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::storage::{StorageFactory, StorageConfig};
+    /// use yatagarasu::storage::file::FileStorageConfig;
+    /// use yatagarasu::storage::memory::MemoryStorageConfig;
     ///
-    /// # fn main() -> sage::error::Result<()> {
+    /// # fn main() -> yatagarasu::error::Result<()> {
     /// // Create memory storage
     /// let config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// let storage = StorageFactory::create(config)?;
