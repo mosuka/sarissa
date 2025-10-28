@@ -16,7 +16,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::SearchRequest;
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::parser::QueryParser;
 use sage::storage::file::FileStorage;
 use sage::storage::file::FileStorageConfig;
@@ -243,7 +243,7 @@ fn execute_search(engine: &mut LexicalEngine, parser: &QueryParser, query_str: &
     let query = parser.parse(query_str)?;
     println!("Parsed: {}", query.description());
 
-    let request = SearchRequest::new(query).load_documents(true);
+    let request = LexicalSearchRequest::new(query).load_documents(true);
     let results = engine.search(request)?;
 
     println!("Results: {} hits", results.total_hits);

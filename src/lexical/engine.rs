@@ -19,7 +19,7 @@
 //! use sage::document::document::Document;
 //! use sage::lexical::engine::LexicalEngine;
 //! use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-//! use sage::lexical::types::SearchRequest;
+//! use sage::lexical::types::LexicalSearchRequest;
 //! use sage::query::term::TermQuery;
 //! use sage::storage::{StorageConfig, StorageFactory};
 //! use sage::storage::memory::MemoryStorageConfig;
@@ -46,7 +46,7 @@
 //!
 //! // Search
 //! let query = Box::new(TermQuery::new("title", "hello"));
-//! let request = SearchRequest::new(query);
+//! let request = LexicalSearchRequest::new(query);
 //! let results = engine.search(request).unwrap();
 //! ```
 
@@ -60,7 +60,7 @@ use crate::lexical::index::{InvertedIndexStats, LexicalIndex};
 use crate::lexical::reader::IndexReader;
 use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::search::searcher::inverted_index::InvertedIndexSearcher;
-use crate::lexical::types::SearchRequest;
+use crate::lexical::types::LexicalSearchRequest;
 use crate::lexical::writer::IndexWriter;
 use crate::query::SearchResults;
 use crate::query::query::Query;
@@ -91,7 +91,7 @@ use crate::storage::Storage;
 /// use sage::document::document::Document;
 /// use sage::lexical::engine::LexicalEngine;
 /// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-/// use sage::lexical::types::SearchRequest;
+/// use sage::lexical::types::LexicalSearchRequest;
 /// use sage::query::term::TermQuery;
 /// use sage::storage::{StorageConfig, StorageFactory};
 /// use sage::storage::memory::MemoryStorageConfig;
@@ -112,7 +112,7 @@ use crate::storage::Storage;
 ///
 /// // Search
 /// let query = Box::new(TermQuery::new("title", "rust"));
-/// let results = engine.search(SearchRequest::new(query)).unwrap();
+/// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 /// ```
 pub struct LexicalEngine {
     /// The underlying lexical index.
@@ -467,7 +467,7 @@ impl LexicalEngine {
     ///
     /// ```rust,no_run
     /// use sage::document::document::Document;
-    /// use sage::lexical::types::SearchRequest;
+    /// use sage::lexical::types::LexicalSearchRequest;
     /// use sage::query::term::TermQuery;
     /// # use sage::lexical::engine::LexicalEngine;
     /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
@@ -483,7 +483,7 @@ impl LexicalEngine {
     /// # engine.commit().unwrap();
     ///
     /// let query = Box::new(TermQuery::new("title", "hello"));
-    /// let request = SearchRequest::new(query)
+    /// let request = LexicalSearchRequest::new(query)
     ///     .max_docs(10)
     ///     .min_score(0.5);
     /// let results = engine.search(request).unwrap();
@@ -498,7 +498,7 @@ impl LexicalEngine {
     ///
     /// ```rust,no_run
     /// use sage::query::parser::QueryParser;
-    /// use sage::lexical::types::SearchRequest;
+    /// use sage::lexical::types::LexicalSearchRequest;
     /// # use sage::document::document::Document;
     /// # use sage::lexical::engine::LexicalEngine;
     /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
@@ -512,9 +512,9 @@ impl LexicalEngine {
     ///
     /// let parser = QueryParser::new().with_default_field("title");
     /// let query = parser.parse("rust AND programming").unwrap();
-    /// let results = engine.search(SearchRequest::new(query)).unwrap();
+    /// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
     /// ```
-    pub fn search(&self, request: SearchRequest) -> Result<SearchResults> {
+    pub fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults> {
         let searcher = self.get_or_create_searcher()?;
         searcher.search(request)
     }
@@ -593,7 +593,7 @@ mod tests {
 
         // Search for documents
         let query = Box::new(TermQuery::new("title", "Test"));
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
 
         // Should find documents in memory
@@ -684,7 +684,7 @@ mod tests {
         let engine = LexicalEngine::new(index).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let results = engine.search(request).unwrap();
 
         assert_eq!(results.hits.len(), 0);
@@ -713,7 +713,7 @@ mod tests {
 
         // Search for documents
         let query = Box::new(TermQuery::new("title", "Hello"));
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
 
         // Results depend on the actual indexing implementation
@@ -761,7 +761,7 @@ mod tests {
 
         // Search should still work
         let query = Box::new(TermQuery::new("title", "Test"));
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
         // hits.len() is usize, so >= 0 check is redundant
     }
@@ -813,7 +813,7 @@ mod tests {
         let engine = LexicalEngine::new(index).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello"));
-        let request = SearchRequest::new(query)
+        let request = LexicalSearchRequest::new(query)
             .max_docs(5)
             .min_score(0.5)
             .load_documents(false);
@@ -852,7 +852,7 @@ mod tests {
 
         // QueryParser analyzes "Hello" to "hello" before creating TermQuery
         let query = parser.parse("Hello").unwrap();
-        let results = engine.search(SearchRequest::new(query)).unwrap();
+        let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 
         // Should find the document
         // QueryParser analyzes "Hello" -> "hello", which matches the indexed "hello"
@@ -875,7 +875,7 @@ mod tests {
         use crate::query::parser::QueryParser;
         let parser = QueryParser::new();
         let query = parser.parse_field("title", "hello world").unwrap();
-        let results = engine.search(SearchRequest::new(query)).unwrap();
+        let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 
         // Should parse and execute the query
         assert_eq!(results.hits.len(), 0);
@@ -919,7 +919,7 @@ mod tests {
         use crate::query::parser::QueryParser;
         let parser = QueryParser::new().with_default_field("title");
         let query = parser.parse("title:hello AND body:world").unwrap();
-        let results = engine.search(SearchRequest::new(query)).unwrap();
+        let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 
         // Should parse the complex query without error
         assert_eq!(results.hits.len(), 0);

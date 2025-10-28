@@ -3,8 +3,6 @@
 //! This module contains common type definitions used across the lexical search module,
 //! mirroring the structure of vector::types for consistency.
 
-use crate::error::Result;
-use crate::query::SearchResults;
 use crate::query::query::Query;
 
 /// Sort order for search results.
@@ -33,7 +31,7 @@ pub enum SortField {
 
 /// Configuration for search operations.
 #[derive(Debug, Clone)]
-pub struct SearchConfig {
+pub struct LexicalSearchParams {
     /// Maximum number of documents to return.
     pub max_docs: usize,
     /// Minimum score threshold.
@@ -48,9 +46,9 @@ pub struct SearchConfig {
     pub sort_by: SortField,
 }
 
-impl Default for SearchConfig {
+impl Default for LexicalSearchParams {
     fn default() -> Self {
-        SearchConfig {
+        LexicalSearchParams {
             max_docs: 10,
             min_score: 0.0,
             load_documents: true,
@@ -63,64 +61,64 @@ impl Default for SearchConfig {
 
 /// Search request containing query and configuration.
 #[derive(Debug)]
-pub struct SearchRequest {
+pub struct LexicalSearchRequest {
     /// The query to execute.
     pub query: Box<dyn Query>,
     /// Search configuration.
-    pub config: SearchConfig,
+    pub params: LexicalSearchParams,
 }
 
-impl Clone for SearchRequest {
+impl Clone for LexicalSearchRequest {
     fn clone(&self) -> Self {
-        SearchRequest {
+        LexicalSearchRequest {
             query: self.query.clone_box(),
-            config: self.config.clone(),
+            params: self.params.clone(),
         }
     }
 }
 
-impl SearchRequest {
+impl LexicalSearchRequest {
     /// Create a new search request.
     pub fn new(query: Box<dyn Query>) -> Self {
-        SearchRequest {
+        LexicalSearchRequest {
             query,
-            config: SearchConfig::default(),
+            params: LexicalSearchParams::default(),
         }
     }
 
     /// Set the maximum number of documents to return.
     pub fn max_docs(mut self, max_docs: usize) -> Self {
-        self.config.max_docs = max_docs;
+        self.params.max_docs = max_docs;
         self
     }
 
     /// Set the minimum score threshold.
     pub fn min_score(mut self, min_score: f32) -> Self {
-        self.config.min_score = min_score;
+        self.params.min_score = min_score;
         self
     }
 
     /// Set whether to load document content.
     pub fn load_documents(mut self, load_documents: bool) -> Self {
-        self.config.load_documents = load_documents;
+        self.params.load_documents = load_documents;
         self
     }
 
     /// Set the search timeout.
     pub fn timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.config.timeout_ms = Some(timeout_ms);
+        self.params.timeout_ms = Some(timeout_ms);
         self
     }
 
     /// Enable parallel search.
     pub fn parallel(mut self, parallel: bool) -> Self {
-        self.config.parallel = parallel;
+        self.params.parallel = parallel;
         self
     }
 
     /// Sort results by a field in ascending order.
     pub fn sort_by_field_asc(mut self, field: &str) -> Self {
-        self.config.sort_by = SortField::Field {
+        self.params.sort_by = SortField::Field {
             name: field.to_string(),
             order: SortOrder::Asc,
         };
@@ -129,7 +127,7 @@ impl SearchRequest {
 
     /// Sort results by a field in descending order.
     pub fn sort_by_field_desc(mut self, field: &str) -> Self {
-        self.config.sort_by = SortField::Field {
+        self.params.sort_by = SortField::Field {
             name: field.to_string(),
             order: SortOrder::Desc,
         };
@@ -138,16 +136,8 @@ impl SearchRequest {
 
     /// Sort results by relevance score (default).
     pub fn sort_by_score(mut self) -> Self {
-        self.config.sort_by = SortField::Score;
+        self.params.sort_by = SortField::Score;
         self
-    }
-
-    /// Execute the search request.
-    pub fn search(
-        self,
-        engine: &mut crate::lexical::engine::LexicalEngine,
-    ) -> Result<SearchResults> {
-        engine.search(self)
     }
 }
 

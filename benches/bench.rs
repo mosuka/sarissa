@@ -139,8 +139,7 @@ fn bench_vector_search(c: &mut Criterion) {
                     ..Default::default()
                 };
                 let writer_config = sage::vector::writer::VectorIndexWriterConfig::default();
-                HnswIndexWriter::new(index_config, writer_config)
-                    .unwrap()
+                HnswIndexWriter::new(index_config, writer_config).unwrap()
             },
             |mut builder| {
                 let indexed_vectors: Vec<(u64, Vector)> = vectors
@@ -335,9 +334,9 @@ fn bench_scalability(c: &mut Criterion) {
                             ef_construction: 200,
                             ..Default::default()
                         };
-                        let writer_config = sage::vector::writer::VectorIndexWriterConfig::default();
-                        HnswIndexWriter::new(index_config, writer_config)
-                            .unwrap()
+                        let writer_config =
+                            sage::vector::writer::VectorIndexWriterConfig::default();
+                        HnswIndexWriter::new(index_config, writer_config).unwrap()
                     },
                     |mut builder| {
                         let indexed_vectors: Vec<(u64, Vector)> = vectors

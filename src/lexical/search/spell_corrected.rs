@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::lexical::engine::LexicalEngine;
-use crate::lexical::types::SearchRequest;
+use crate::lexical::types::LexicalSearchRequest;
 use crate::query::SearchResults;
 use crate::spelling::corrector::{
     CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector,
@@ -155,7 +155,7 @@ impl SpellCorrectedSearchEngine {
             use crate::query::parser::QueryParser;
             let parser = QueryParser::new().with_default_field(default_field);
             let query = parser.parse(query_str)?;
-            let results = self.engine.search(SearchRequest::new(query))?;
+            let results = self.engine.search(LexicalSearchRequest::new(query))?;
             let correction = CorrectionResult::new(query_str.to_string());
             return Ok(SpellCorrectedSearchResults::new(results, correction));
         }
@@ -167,7 +167,7 @@ impl SpellCorrectedSearchEngine {
         use crate::query::parser::QueryParser;
         let parser = QueryParser::new().with_default_field(default_field);
         let query = parser.parse(query_str)?;
-        let original_results = self.engine.search(SearchRequest::new(query))?;
+        let original_results = self.engine.search(LexicalSearchRequest::new(query))?;
 
         // Decide whether to use correction
         let should_use_correction = self.should_use_correction(&original_results, &correction);
@@ -176,7 +176,7 @@ impl SpellCorrectedSearchEngine {
             // Use the corrected query
             let corrected_query = correction.query();
             let query = parser.parse(corrected_query)?;
-            let corrected_results = self.engine.search(SearchRequest::new(query))?;
+            let corrected_results = self.engine.search(LexicalSearchRequest::new(query))?;
             (corrected_results, true)
         } else {
             (original_results, false)
@@ -207,7 +207,7 @@ impl SpellCorrectedSearchEngine {
             use crate::query::parser::QueryParser;
             let parser = QueryParser::new();
             let query = parser.parse_field(field, query_str)?;
-            let results = self.engine.search(SearchRequest::new(query))?;
+            let results = self.engine.search(LexicalSearchRequest::new(query))?;
             let correction = CorrectionResult::new(query_str.to_string());
             return Ok(SpellCorrectedSearchResults::new(results, correction));
         }
@@ -219,7 +219,7 @@ impl SpellCorrectedSearchEngine {
         use crate::query::parser::QueryParser;
         let parser = QueryParser::new();
         let query = parser.parse_field(field, query_str)?;
-        let original_results = self.engine.search(SearchRequest::new(query))?;
+        let original_results = self.engine.search(LexicalSearchRequest::new(query))?;
 
         // Decide whether to use correction
         let should_use_correction = self.should_use_correction(&original_results, &correction);
@@ -228,7 +228,7 @@ impl SpellCorrectedSearchEngine {
             // Use the corrected query
             let corrected_query = correction.query();
             let query = parser.parse_field(field, corrected_query)?;
-            let corrected_results = self.engine.search(SearchRequest::new(query))?;
+            let corrected_results = self.engine.search(LexicalSearchRequest::new(query))?;
             (corrected_results, true)
         } else {
             (original_results, false)

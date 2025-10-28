@@ -62,10 +62,10 @@ impl VectorSearcher for HnswSearcher {
 
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let top_k = request.config.top_k.min(candidates.len());
+        let top_k = request.params.top_k.min(candidates.len());
         for (doc_id, similarity, distance, vector) in candidates.into_iter().take(top_k) {
             // Apply minimum similarity threshold
-            if similarity < request.config.min_similarity {
+            if similarity < request.params.min_similarity {
                 break;
             }
 
@@ -75,7 +75,7 @@ impl VectorSearcher for HnswSearcher {
                     doc_id,
                     similarity,
                     distance,
-                    vector: if request.config.include_vectors {
+                    vector: if request.params.include_vectors {
                         Some(vector)
                     } else {
                         None

@@ -208,14 +208,14 @@ async fn main() -> Result<()> {
         .timeout_ms(1000);
 
     println!("Search configuration:");
-    println!("  Top K: {}", search_request.config.top_k);
-    println!("  Min similarity: {}", search_request.config.min_similarity);
-    println!("  Include scores: {}", search_request.config.include_scores);
+    println!("  Top K: {}", search_request.params.top_k);
+    println!("  Min similarity: {}", search_request.params.min_similarity);
+    println!("  Include scores: {}", search_request.params.include_scores);
     println!(
         "  Include vectors: {}",
-        search_request.config.include_vectors
+        search_request.params.include_vectors
     );
-    println!("  Timeout: {:?} ms", search_request.config.timeout_ms);
+    println!("  Timeout: {:?} ms", search_request.params.timeout_ms);
 
     println!("\n=== Example completed successfully! ===");
     Ok(())

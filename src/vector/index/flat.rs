@@ -57,8 +57,10 @@ pub struct FlatIndex {
 impl FlatIndex {
     /// Create a new flat index in the given storage.
     pub fn create(storage: Arc<dyn Storage>, config: FlatIndexConfig) -> Result<Self> {
-        let mut metadata = IndexMetadata::default();
-        metadata.dimension = config.dimension;
+        let metadata = IndexMetadata {
+            dimension: config.dimension,
+            ..Default::default()
+        };
 
         let index = FlatIndex {
             storage,

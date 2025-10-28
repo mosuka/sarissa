@@ -6,7 +6,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::SearchRequest;
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::wildcard::WildcardQuery;
 use sage::storage::file::FileStorage;
 use sage::storage::file::FileStorageConfig;
@@ -107,7 +107,7 @@ fn main() -> Result<()> {
     // Example 1: Wildcard at the end (prefix matching)
     println!("1. Files starting with 'java' using 'java*' pattern:");
     let query = WildcardQuery::new("filename", "java*")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -129,7 +129,7 @@ fn main() -> Result<()> {
     // Example 2: Wildcard at the beginning (suffix matching)
     println!("\n2. Files ending with '.pdf' using '*.pdf' pattern:");
     let query = WildcardQuery::new("filename", "*.pdf")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -151,7 +151,7 @@ fn main() -> Result<()> {
     // Example 3: Wildcard in the middle
     println!("\n3. Files with 'web' followed by anything ending in '.txt' using 'web*.txt':");
     let query = WildcardQuery::new("filename", "web*.txt")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -173,7 +173,7 @@ fn main() -> Result<()> {
     // Example 4: Single character wildcard (?)
     println!("\n4. Extensions with pattern '?sx' (jsx, tsx, etc.):");
     let query = WildcardQuery::new("extension", "?sx")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -195,7 +195,7 @@ fn main() -> Result<()> {
     // Example 5: Multiple wildcards
     println!("\n5. Categories starting with 'prog' and ending with 'ing' using 'prog*ing':");
     let query = WildcardQuery::new("category", "prog*ing")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -217,7 +217,7 @@ fn main() -> Result<()> {
     // Example 6: Complex pattern with both wildcards
     println!("\n6. Filenames with pattern '*_*.????' (underscore and 4-char extension):");
     let query = WildcardQuery::new("filename", "*_*.????")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -239,7 +239,7 @@ fn main() -> Result<()> {
     // Example 7: Title pattern matching
     println!("\n7. Titles containing 'Development' using '*Development*':");
     let query = WildcardQuery::new("title", "*Development*")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -261,7 +261,7 @@ fn main() -> Result<()> {
     // Example 8: Single character matching
     println!("\n8. Extensions with exactly 3 characters using '???':");
     let query = WildcardQuery::new("extension", "???")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -283,7 +283,7 @@ fn main() -> Result<()> {
     // Example 9: Match all files with any extension
     println!("\n9. All files with any extension using '*.*':");
     let query = WildcardQuery::new("filename", "*.*")?;
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -305,7 +305,7 @@ fn main() -> Result<()> {
     // Example 10: No matches
     println!("\n10. Pattern with no matches using 'xyz*abc':");
     let query = WildcardQuery::new("filename", "xyz*abc")?;
-    let request = SearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query));
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);

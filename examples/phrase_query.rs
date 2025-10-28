@@ -6,7 +6,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::SearchRequest;
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::phrase::PhraseQuery;
 use sage::storage::file::FileStorage;
 use sage::storage::file::FileStorageConfig;
@@ -70,7 +70,7 @@ fn main() -> Result<()> {
     // Example 1: Simple two-word phrase
     println!("1. Searching for phrase 'machine learning' in body:");
     let query = PhraseQuery::new("body", vec!["machine".to_string(), "learning".to_string()]);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -99,7 +99,7 @@ fn main() -> Result<()> {
             "networks".to_string(),
         ],
     );
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -121,7 +121,7 @@ fn main() -> Result<()> {
     // Example 3: Phrase in title field
     println!("\n3. Searching for phrase 'deep learning' in title:");
     let query = PhraseQuery::new("title", vec!["deep".to_string(), "learning".to_string()]);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -146,7 +146,7 @@ fn main() -> Result<()> {
         "description",
         vec!["data".to_string(), "science".to_string()],
     );
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -168,7 +168,7 @@ fn main() -> Result<()> {
     // Example 5: Non-existent phrase
     println!("\n5. Searching for non-existent phrase 'quantum computing':");
     let query = PhraseQuery::new("body", vec!["quantum".to_string(), "computing".to_string()]);
-    let request = SearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query));
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -176,7 +176,7 @@ fn main() -> Result<()> {
     // Example 6: Single word phrase (equivalent to TermQuery)
     println!("\n6. Searching for single word phrase 'intelligence' in body:");
     let query = PhraseQuery::new("body", vec!["intelligence".to_string()]);
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -206,7 +206,7 @@ fn main() -> Result<()> {
             "data".to_string(),
         ],
     );
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);

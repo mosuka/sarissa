@@ -57,8 +57,10 @@ pub struct IvfIndex {
 impl IvfIndex {
     /// Create a new IVF index in the given storage.
     pub fn create(storage: Arc<dyn Storage>, config: IvfIndexConfig) -> Result<Self> {
-        let mut metadata = IndexMetadata::default();
-        metadata.dimension = config.dimension;
+        let metadata = IndexMetadata {
+            dimension: config.dimension,
+            ..Default::default()
+        };
 
         let index = IvfIndex {
             storage,

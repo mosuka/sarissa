@@ -6,7 +6,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::SearchRequest;
+use sage::lexical::types::LexicalSearchRequest;
 use sage::query::boolean::BooleanQuery;
 use sage::query::phrase::PhraseQuery;
 use sage::query::range::NumericRangeQuery;
@@ -107,7 +107,7 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("body", "python")));
     query.add_must(Box::new(TermQuery::new("body", "programming")));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -131,7 +131,7 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(TermQuery::new("body", "python")));
     query.add_should(Box::new(TermQuery::new("body", "javascript")));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -155,7 +155,7 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("category", "programming")));
     query.add_must_not(Box::new(TermQuery::new("body", "javascript")));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -188,7 +188,7 @@ fn main() -> Result<()> {
         None,
         Some(50.0),
     )));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -226,7 +226,7 @@ fn main() -> Result<()> {
         "body",
         vec!["machine".to_string(), "learning".to_string()],
     )));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -255,7 +255,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("tags", "advanced")));
     query.add_must(Box::new(language_query));
 
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -283,7 +283,7 @@ fn main() -> Result<()> {
         Some(60.0),
     )));
     query.add_must_not(Box::new(TermQuery::new("body", "design")));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -318,7 +318,7 @@ fn main() -> Result<()> {
         Some(4.5),
         None,
     )));
-    let request = SearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -373,7 +373,7 @@ fn main() -> Result<()> {
         None,
     )));
 
-    let request = SearchRequest::new(Box::new(main_query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(main_query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -432,7 +432,7 @@ fn main() -> Result<()> {
         Some(60.0),
     )));
 
-    let request = SearchRequest::new(Box::new(final_query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(final_query)).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);

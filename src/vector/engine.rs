@@ -13,10 +13,10 @@ use crate::vector::index::reader::hnsw::HnswIndexReader;
 use crate::vector::index::reader::ivf::IvfIndexReader;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
+use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::search::searcher::flat::FlatVectorSearcher;
 use crate::vector::search::searcher::hnsw::HnswSearcher;
 use crate::vector::search::searcher::ivf::IvfSearcher;
-use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
 use crate::vector::{DistanceMetric, Vector};
 

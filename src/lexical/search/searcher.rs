@@ -4,7 +4,7 @@
 //! queries and collecting results from inverted indexes.
 
 use crate::error::Result;
-use crate::lexical::types::SearchRequest;
+use crate::lexical::types::LexicalSearchRequest;
 use crate::query::SearchResults;
 use crate::query::query::Query;
 
@@ -19,7 +19,7 @@ pub trait LexicalSearcher: Send + Sync {
     ///
     /// This method handles search operations including query execution,
     /// scoring, and result collection based on the search request configuration.
-    fn search(&self, request: SearchRequest) -> Result<SearchResults>;
+    fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults>;
 
     /// Count documents matching the given query.
     ///

@@ -82,10 +82,10 @@ impl VectorSearcher for IvfSearcher {
 
         // Take top_k results
         let candidates_len = candidates.len();
-        let top_k = request.config.top_k.min(candidates_len);
+        let top_k = request.params.top_k.min(candidates_len);
         for (doc_id, similarity, distance, vector) in candidates.into_iter().take(top_k) {
             // Apply minimum similarity threshold
-            if similarity < request.config.min_similarity {
+            if similarity < request.params.min_similarity {
                 break;
             }
 
@@ -95,7 +95,7 @@ impl VectorSearcher for IvfSearcher {
                     doc_id,
                     similarity,
                     distance,
-                    vector: if request.config.include_vectors {
+                    vector: if request.params.include_vectors {
                         Some(vector)
                     } else {
                         None

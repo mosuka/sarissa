@@ -11,7 +11,7 @@ use sage::document::document::Document;
 use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::SearchRequest;
+use sage::lexical::types::LexicalSearchRequest;
 use sage::storage::file::{FileStorage, FileStorageConfig};
 
 fn main() -> Result<()> {
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
     println!("1. Search by author (author:Orwell):");
     let parser = sage::query::parser::QueryParser::new();
     let query = parser.parse_field("author", "Orwell")?;
-    let results = engine.search(SearchRequest::new(query))?;
+    let results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -147,7 +147,7 @@ fn main() -> Result<()> {
 
     // Example 2: Search by author with document loading
     println!("\n2. Search by author with document details (author:Orwell):");
-    let request = SearchRequest::new(Box::new(sage::query::term::TermQuery::new(
+    let request = LexicalSearchRequest::new(Box::new(sage::query::term::TermQuery::new(
         "author", "orwell",
     )))
     .load_documents(true);
@@ -183,7 +183,7 @@ fn main() -> Result<()> {
     println!("\n3. Search by category (category:classic):");
     let parser = sage::query::parser::QueryParser::new();
     let query = parser.parse_field("category", "classic")?;
-    let results = engine.search(SearchRequest::new(query))?;
+    let results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -196,7 +196,7 @@ fn main() -> Result<()> {
 
     // Example 4: Search in tags field
     println!("\n4. Search in tags field (tags:british):");
-    let request = SearchRequest::new(Box::new(sage::query::term::TermQuery::new(
+    let request = LexicalSearchRequest::new(Box::new(sage::query::term::TermQuery::new(
         "tags", "british",
     )))
     .load_documents(true);
@@ -232,7 +232,7 @@ fn main() -> Result<()> {
     println!("\n5. Search in title field (title:farm):");
     let parser = sage::query::parser::QueryParser::new();
     let query = parser.parse_field("title", "farm")?;
-    let results = engine.search(SearchRequest::new(query))?;
+    let results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -247,7 +247,7 @@ fn main() -> Result<()> {
     println!("\n6. Search in body field (body:father):");
     let parser = sage::query::parser::QueryParser::new();
     let query = parser.parse_field("body", "father")?;
-    let results = engine.search(SearchRequest::new(query))?;
+    let results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -265,17 +265,17 @@ fn main() -> Result<()> {
     // Search in tags
     let parser = sage::query::parser::QueryParser::new();
     let query = parser.parse_field("tags", "american")?;
-    let tags_results = engine.search(SearchRequest::new(query))?;
+    let tags_results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   - In tags field: {} results", tags_results.total_hits);
 
     // Search in body
     let query = parser.parse_field("body", "american")?;
-    let body_results = engine.search(SearchRequest::new(query))?;
+    let body_results = engine.search(LexicalSearchRequest::new(query))?;
     println!("   - In body field: {} results", body_results.total_hits);
 
     // Search in category
     let query = parser.parse_field("category", "american")?;
-    let category_results = engine.search(SearchRequest::new(query))?;
+    let category_results = engine.search(LexicalSearchRequest::new(query))?;
     println!(
         "   - In category field: {} results",
         category_results.total_hits
@@ -289,7 +289,7 @@ fn main() -> Result<()> {
     let query = parser.parse("author:austen OR category:dystopian")?;
     println!("   Query: author:austen OR category:dystopian");
 
-    let request = SearchRequest::new(query).load_documents(true);
+    let request = LexicalSearchRequest::new(query).load_documents(true);
     let results = engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {

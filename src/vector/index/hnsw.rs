@@ -57,8 +57,10 @@ pub struct HnswIndex {
 impl HnswIndex {
     /// Create a new HNSW index in the given storage.
     pub fn create(storage: Arc<dyn Storage>, config: HnswIndexConfig) -> Result<Self> {
-        let mut metadata = IndexMetadata::default();
-        metadata.dimension = config.dimension;
+        let metadata = IndexMetadata {
+            dimension: config.dimension,
+            ..Default::default()
+        };
 
         let index = HnswIndex {
             storage,

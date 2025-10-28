@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::lexical::reader::IndexReader;
-use crate::lexical::types::{SearchRequest, SortField, SortOrder};
+use crate::lexical::types::{LexicalSearchRequest, SortField, SortOrder};
 use crate::query::collector::{Collector, CountCollector, TopDocsCollector};
 use crate::query::query::Query;
 use crate::query::{SearchHit, SearchResults};
@@ -209,21 +209,21 @@ impl InvertedIndexSearcher {
     /// Execute a search with timeout.
     fn search_with_timeout(
         &self,
-        request: SearchRequest,
+        request: LexicalSearchRequest,
         timeout: Duration,
     ) -> Result<SearchResults> {
         let start_time = Instant::now();
 
         // Create collector based on sort type
-        let (mut hits, total_hits) = match &request.config.sort_by {
+        let (mut hits, total_hits) = match &request.params.sort_by {
             SortField::Field { name, order } => {
                 // Use TopFieldCollector for field-based sorting (Lucene-style)
                 use crate::query::collector::TopFieldCollector;
 
                 let ascending = matches!(order, SortOrder::Asc);
                 let collector = TopFieldCollector::with_min_score(
-                    request.config.max_docs,
-                    request.config.min_score,
+                    request.params.max_docs,
+                    request.params.min_score,
                     name.clone(),
                     ascending,
                     self.reader.as_ref(),
@@ -232,7 +232,7 @@ impl InvertedIndexSearcher {
                 let result_collector = self.search_with_collector_parallel(
                     request.query,
                     collector,
-                    request.config.parallel,
+                    request.params.parallel,
                 )?;
 
                 (result_collector.results(), result_collector.total_hits())
@@ -240,14 +240,14 @@ impl InvertedIndexSearcher {
             SortField::Score => {
                 // Use TopDocsCollector for score-based sorting
                 let collector = TopDocsCollector::with_min_score(
-                    request.config.max_docs,
-                    request.config.min_score,
+                    request.params.max_docs,
+                    request.params.min_score,
                 );
 
                 let result_collector = self.search_with_collector_parallel(
                     request.query,
                     collector,
-                    request.config.parallel,
+                    request.params.parallel,
                 )?;
 
                 (result_collector.results(), result_collector.total_hits())
@@ -260,8 +260,8 @@ impl InvertedIndexSearcher {
         }
 
         // Load documents if requested
-        if request.config.load_documents {
-            if request.config.parallel && hits.len() > 10 {
+        if request.params.load_documents {
+            if request.params.parallel && hits.len() > 10 {
                 self.load_documents_parallel(&mut hits)?;
             } else {
                 self.load_documents(&mut hits)?;
@@ -281,7 +281,7 @@ impl InvertedIndexSearcher {
     }
 
     /// Search with the given request.
-    pub fn search(&self, request: SearchRequest) -> Result<SearchResults> {
+    pub fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults> {
         // Check if query is empty
         if request.query.is_empty(self.reader.as_ref())? {
             return Ok(SearchResults {
@@ -292,20 +292,20 @@ impl InvertedIndexSearcher {
         }
 
         // Execute search with timeout if specified
-        if let Some(timeout_ms) = request.config.timeout_ms {
+        if let Some(timeout_ms) = request.params.timeout_ms {
             let timeout = Duration::from_millis(timeout_ms);
             self.search_with_timeout(request, timeout)
         } else {
             // Check if we should use field-based sorting during collection
-            match &request.config.sort_by {
+            match &request.params.sort_by {
                 SortField::Field { name, order } => {
                     // Use TopFieldCollector for field-based sorting (Lucene-style)
                     use crate::query::collector::TopFieldCollector;
 
                     let ascending = matches!(order, SortOrder::Asc);
                     let collector = TopFieldCollector::with_min_score(
-                        request.config.max_docs,
-                        request.config.min_score,
+                        request.params.max_docs,
+                        request.params.min_score,
                         name.clone(),
                         ascending,
                         self.reader.as_ref(),
@@ -314,14 +314,14 @@ impl InvertedIndexSearcher {
                     let result_collector = self.search_with_collector_parallel(
                         request.query,
                         collector,
-                        request.config.parallel,
+                        request.params.parallel,
                     )?;
 
                     let mut hits = result_collector.results();
                     let total_hits = result_collector.total_hits();
 
                     // Load documents if requested
-                    if request.config.load_documents {
+                    if request.params.load_documents {
                         self.load_documents(&mut hits)?;
                     }
 
@@ -339,20 +339,20 @@ impl InvertedIndexSearcher {
                 SortField::Score => {
                     // Use TopDocsCollector for score-based sorting
                     let collector = TopDocsCollector::with_min_score(
-                        request.config.max_docs,
-                        request.config.min_score,
+                        request.params.max_docs,
+                        request.params.min_score,
                     );
                     let result_collector = self.search_with_collector_parallel(
                         request.query,
                         collector,
-                        request.config.parallel,
+                        request.params.parallel,
                     )?;
 
                     let mut hits = result_collector.results();
                     let total_hits = result_collector.total_hits();
 
                     // Load documents if requested
-                    if request.config.load_documents {
+                    if request.params.load_documents {
                         self.load_documents(&mut hits)?;
                     }
 
@@ -517,7 +517,7 @@ mod tests {
         let searcher = create_test_searcher();
         let query = Box::new(TermQuery::new("title", "hello"));
 
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let results = searcher.search(request).unwrap();
 
         // Should return empty results for non-existent terms
@@ -537,7 +537,7 @@ mod tests {
                 .build(),
         );
 
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let results = searcher.search(request).unwrap();
 
         // Should return empty results for non-existent terms
@@ -551,7 +551,7 @@ mod tests {
         let searcher = create_test_searcher();
         let query = Box::new(TermQuery::new("title", "hello"));
 
-        let request = SearchRequest::new(query)
+        let request = LexicalSearchRequest::new(query)
             .max_docs(5)
             .min_score(0.5)
             .load_documents(false);
@@ -579,7 +579,7 @@ mod tests {
         let searcher = create_test_searcher();
         let query = Box::new(TermQuery::new("title", "hello"));
 
-        let request = SearchRequest::new(query).timeout_ms(1000); // 1 second timeout
+        let request = LexicalSearchRequest::new(query).timeout_ms(1000); // 1 second timeout
 
         let results = searcher.search(request).unwrap();
 
@@ -606,7 +606,7 @@ mod tests {
         // Create a boolean query with no clauses (empty query)
         let query = Box::new(BooleanQuery::new());
 
-        let request = SearchRequest::new(query);
+        let request = LexicalSearchRequest::new(query);
         let results = searcher.search(request).unwrap();
 
         // Should return empty results for empty query
@@ -630,22 +630,22 @@ mod tests {
     fn test_search_request_builder() {
         let query = Box::new(TermQuery::new("title", "hello"));
 
-        let request = SearchRequest::new(query)
+        let request = LexicalSearchRequest::new(query)
             .max_docs(20)
             .min_score(0.1)
             .load_documents(false)
             .timeout_ms(5000);
 
-        assert_eq!(request.config.max_docs, 20);
-        assert_eq!(request.config.min_score, 0.1);
-        assert!(!request.config.load_documents);
-        assert_eq!(request.config.timeout_ms, Some(5000));
+        assert_eq!(request.params.max_docs, 20);
+        assert_eq!(request.params.min_score, 0.1);
+        assert!(!request.params.load_documents);
+        assert_eq!(request.params.timeout_ms, Some(5000));
     }
 }
 
 // Implement LexicalSearcher trait for InvertedIndexSearcher
 impl crate::lexical::search::searcher::LexicalSearcher for InvertedIndexSearcher {
-    fn search(&self, request: SearchRequest) -> Result<SearchResults> {
+    fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults> {
         InvertedIndexSearcher::search(self, request)
     }
 

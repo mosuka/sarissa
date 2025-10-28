@@ -24,7 +24,7 @@ use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
 use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use sage::lexical::types::SearchRequest;
+use sage::lexical::types::LexicalSearchRequest;
 use sage::storage::file::FileStorage;
 use sage::storage::file::FileStorageConfig;
 
@@ -120,7 +120,7 @@ fn main() -> Result<()> {
     let parser = QueryParser::new();
     let query = parser.parse(query_str)?;
 
-    let request = SearchRequest::new(query).load_documents(true);
+    let request = LexicalSearchRequest::new(query).load_documents(true);
     let results = engine.search(request)?;
 
     println!("Results: {} hits", results.total_hits);
