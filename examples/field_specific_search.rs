@@ -12,8 +12,7 @@ use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
 use sage::lexical::types::SearchRequest;
-use sage::storage::file::FileStorage;
-use sage::storage::FileStorageConfig;
+use sage::storage::file::{FileStorage, FileStorageConfig};
 
 fn main() -> Result<()> {
     println!("=== Field-Specific Search Example ===\n");
@@ -24,7 +23,10 @@ fn main() -> Result<()> {
 
     // Create a search engine
     let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path()))?);
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
     let index = LexicalIndexFactory::create(storage, config)?;
     let mut engine = LexicalEngine::new(index)?;
 
@@ -94,7 +96,7 @@ fn main() -> Result<()> {
     {
         use sage::analysis::analyzer::per_field::PerFieldAnalyzer;
         use sage::lexical::index::writer::inverted::{
-            InvertedIndexWriter, InvertedIndexWriterConfig,
+            InvertedIndexWriter, LexicalIndexWriterConfig,
         };
 
         let storage = engine.storage().clone();
@@ -109,7 +111,7 @@ fn main() -> Result<()> {
         per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
         per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
 
-        let config = InvertedIndexWriterConfig {
+        let config = LexicalIndexWriterConfig {
             analyzer: Arc::new(per_field_analyzer),
             ..Default::default()
         };

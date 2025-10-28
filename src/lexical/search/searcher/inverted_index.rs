@@ -481,8 +481,9 @@ mod tests {
     use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
     use crate::query::boolean::{BooleanQuery, BooleanQueryBuilder};
     use crate::query::term::TermQuery;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
     use std::sync::Arc;
 
     #[allow(dead_code)]

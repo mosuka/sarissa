@@ -534,8 +534,10 @@ impl InvertedIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::Storage;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{ Storage, FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
     use std::sync::Arc;
 
     #[test]

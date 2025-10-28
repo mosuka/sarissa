@@ -22,19 +22,25 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use sage::storage::{StorageFactory, StorageConfig, FileStorageConfig, MemoryStorageConfig};
+//! ```
+//! use sage::storage::{StorageFactory, StorageConfig};
+//! use sage::storage::file::FileStorageConfig;
+//! use sage::storage::memory::MemoryStorageConfig;
 //!
+//! # fn main() -> sage::error::Result<()> {
 //! // Create file storage with mmap enabled
-//! let mut file_config = FileStorageConfig::new("/path/to/index");
+//! let mut file_config = FileStorageConfig::new("/tmp/test_index");
 //! file_config.use_mmap = true;
 //! let storage = StorageFactory::create(StorageConfig::File(file_config))?;
 //!
 //! // Create memory storage
 //! let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+//! # Ok(())
+//! # }
 //! ```
 
 use std::io::{Read, Seek, Write};
+use std::sync::Arc;
 
 use crate::error::{Result, SageError};
 
@@ -80,9 +86,26 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// let input = storage.open_input("index.bin")?;
-    /// // Read data from input...
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::{Read, Write};
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // First create a file
+    /// let mut output = storage.create_output("index.bin")?;
+    /// output.write_all(b"test data")?;
+    /// output.close()?;
+    ///
+    /// // Now open it for reading
+    /// let mut input = storage.open_input("index.bin")?;
+    /// let mut buffer = Vec::new();
+    /// input.read_to_end(&mut buffer)?;
+    /// assert_eq!(buffer, b"test data");
+    /// # Ok(())
+    /// # }
     /// ```
     fn open_input(&self, name: &str) -> Result<Box<dyn StorageInput>>;
 
@@ -102,10 +125,21 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
     /// let mut output = storage.create_output("index.bin")?;
-    /// output.write_all(&data)?;
-    /// output.flush_and_sync()?;
+    /// output.write_all(b"Hello, World!")?;
+    /// output.close()?;
+    ///
+    /// assert!(storage.file_exists("index.bin"));
+    /// # Ok(())
+    /// # }
     /// ```
     fn create_output(&self, name: &str) -> Result<Box<dyn StorageOutput>>;
 
@@ -125,9 +159,32 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::{Read, Write};
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Create file with initial content
+    /// let mut output = storage.create_output("log.txt")?;
+    /// output.write_all(b"First entry\n")?;
+    /// output.close()?;
+    ///
+    /// // Append to the file
     /// let mut output = storage.create_output_append("log.txt")?;
-    /// output.write_all(b"New log entry\n")?;
+    /// output.write_all(b"Second entry\n")?;
+    /// output.close()?;
+    ///
+    /// // Verify both entries are present
+    /// let mut input = storage.open_input("log.txt")?;
+    /// let mut buffer = String::new();
+    /// input.read_to_string(&mut buffer)?;
+    /// assert!(buffer.contains("First entry"));
+    /// assert!(buffer.contains("Second entry"));
+    /// # Ok(())
+    /// # }
     /// ```
     fn create_output_append(&self, name: &str) -> Result<Box<dyn StorageOutput>>;
 
@@ -147,10 +204,23 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// if storage.file_exists("index.bin") {
-    ///     // File exists, can safely open it
-    /// }
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// assert!(!storage.file_exists("index.bin"));
+    ///
+    /// let mut output = storage.create_output("index.bin")?;
+    /// output.write_all(b"data")?;
+    /// output.close()?;
+    ///
+    /// assert!(storage.file_exists("index.bin"));
+    /// # Ok(())
+    /// # }
     /// ```
     fn file_exists(&self, name: &str) -> bool;
 
@@ -170,8 +240,27 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Create a file
+    /// let mut output = storage.create_output("temp.bin")?;
+    /// output.write_all(b"temporary data")?;
+    /// output.close()?;
+    ///
+    /// assert!(storage.file_exists("temp.bin"));
+    ///
+    /// // Delete the file
     /// storage.delete_file("temp.bin")?;
+    ///
+    /// assert!(!storage.file_exists("temp.bin"));
+    /// # Ok(())
+    /// # }
     /// ```
     fn delete_file(&self, name: &str) -> Result<()>;
 
@@ -188,11 +277,30 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Create some files
+    /// let mut output = storage.create_output("file1.bin")?;
+    /// output.write_all(b"data1")?;
+    /// output.close()?;
+    ///
+    /// let mut output = storage.create_output("file2.bin")?;
+    /// output.write_all(b"data2")?;
+    /// output.close()?;
+    ///
+    /// // List all files
     /// let files = storage.list_files()?;
-    /// for file in files {
-    ///     println!("Found file: {}", file);
-    /// }
+    /// assert_eq!(files.len(), 2);
+    /// assert!(files.contains(&"file1.bin".to_string()));
+    /// assert!(files.contains(&"file2.bin".to_string()));
+    /// # Ok(())
+    /// # }
     /// ```
     fn list_files(&self) -> Result<Vec<String>>;
 
@@ -212,9 +320,24 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Create a file with known size
+    /// let mut output = storage.create_output("index.bin")?;
+    /// output.write_all(b"12345")?;
+    /// output.close()?;
+    ///
+    /// // Get file size
     /// let size = storage.file_size("index.bin")?;
-    /// println!("Index size: {} bytes", size);
+    /// assert_eq!(size, 5);
+    /// # Ok(())
+    /// # }
     /// ```
     fn file_size(&self, name: &str) -> Result<u64>;
 
@@ -235,9 +358,25 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Create a file
+    /// let mut output = storage.create_output("index.bin")?;
+    /// output.write_all(b"test")?;
+    /// output.close()?;
+    ///
+    /// // Get metadata
     /// let meta = storage.metadata("index.bin")?;
-    /// println!("Size: {}, Modified: {}", meta.size, meta.modified);
+    /// assert_eq!(meta.size, 4);
+    /// assert!(meta.modified > 0);
+    /// # Ok(())
+    /// # }
     /// ```
     fn metadata(&self, name: &str) -> Result<FileMetadata>;
 
@@ -260,11 +399,26 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// // Atomic file replacement pattern
-    /// storage.create_output("index.tmp")?;
-    /// // ... write data ...
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Create a temp file
+    /// let mut output = storage.create_output("index.tmp")?;
+    /// output.write_all(b"new data")?;
+    /// output.close()?;
+    ///
+    /// // Rename to final name (atomic replacement pattern)
     /// storage.rename_file("index.tmp", "index.bin")?;
+    ///
+    /// assert!(storage.file_exists("index.bin"));
+    /// assert!(!storage.file_exists("index.tmp"));
+    /// # Ok(())
+    /// # }
     /// ```
     fn rename_file(&self, old_name: &str, new_name: &str) -> Result<()>;
 
@@ -286,11 +440,27 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Create a temp file with prefix
     /// let (temp_name, mut temp_output) = storage.create_temp_output("merge_")?;
-    /// // ... write temporary data ...
+    /// temp_output.write_all(b"temporary data")?;
     /// temp_output.close()?;
-    /// // Later: storage.delete_file(&temp_name)?;
+    ///
+    /// // Verify file was created
+    /// assert!(storage.file_exists(&temp_name));
+    /// assert!(temp_name.starts_with("merge_"));
+    ///
+    /// // Clean up
+    /// storage.delete_file(&temp_name)?;
+    /// # Ok(())
+    /// # }
     /// ```
     fn create_temp_output(&self, prefix: &str) -> Result<(String, Box<dyn StorageOutput>)>;
 
@@ -307,9 +477,23 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// // After writing important data
-    /// storage.sync()?; // Ensure data is persisted
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Write some data
+    /// let mut output = storage.create_output("important.dat")?;
+    /// output.write_all(b"critical data")?;
+    /// output.close()?;
+    ///
+    /// // Ensure data is persisted
+    /// storage.sync()?;
+    /// # Ok(())
+    /// # }
     /// ```
     fn sync(&self) -> Result<()>;
 
@@ -327,10 +511,23 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// let mut storage = FileStorage::new("./data", config)?;
-    /// // ... use storage ...
-    /// storage.close()?; // Clean shutdown
+    /// ```
+    /// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sage::storage::Storage;
+    /// use std::io::Write;
+    ///
+    /// # fn main() -> sage::error::Result<()> {
+    /// let mut storage = MemoryStorage::new(MemoryStorageConfig::default());
+    ///
+    /// // Use storage
+    /// let mut output = storage.create_output("data.bin")?;
+    /// output.write_all(b"some data")?;
+    /// output.close()?;
+    ///
+    /// // Clean shutdown
+    /// storage.close()?;
+    /// # Ok(())
+    /// # }
     /// ```
     fn close(&mut self) -> Result<()>;
 }
@@ -431,8 +628,10 @@ pub trait StorageLock: Send + std::fmt::Debug {
 ///
 /// # Example
 ///
-/// ```ignore
-/// use sage::storage::{StorageConfig, FileStorageConfig, MemoryStorageConfig};
+/// ```
+/// use sage::storage::StorageConfig;
+/// use sage::storage::file::FileStorageConfig;
+/// use sage::storage::memory::MemoryStorageConfig;
 ///
 /// // File storage with custom settings
 /// let mut file_config = FileStorageConfig::new("/data/index");
@@ -446,128 +645,15 @@ pub trait StorageLock: Send + std::fmt::Debug {
 #[derive(Debug, Clone)]
 pub enum StorageConfig {
     /// File-based storage configuration (includes path)
-    File(FileStorageConfig),
+    File(file::FileStorageConfig),
 
     /// Memory-based storage configuration
-    Memory(MemoryStorageConfig),
+    Memory(memory::MemoryStorageConfig),
 }
 
 impl Default for StorageConfig {
     fn default() -> Self {
-        StorageConfig::Memory(MemoryStorageConfig::default())
-    }
-}
-
-/// Configuration specific to file-based storage.
-///
-/// This configuration includes the storage path and various options for
-/// file I/O, memory-mapping, and locking behavior.
-///
-/// # Memory-Mapped Files (mmap)
-///
-/// When `use_mmap` is enabled, FileStorage uses memory-mapped I/O for reading files,
-/// which can significantly improve performance for large files by:
-/// - Avoiding system call overhead
-/// - Leveraging the OS page cache
-/// - Enabling zero-copy reads
-///
-/// Additional mmap options:
-/// - `mmap_cache_size`: Number of mmap files to keep cached
-/// - `mmap_enable_prefault`: Pre-populate page tables for faster initial access
-/// - `mmap_enable_hugepages`: Use huge pages if available (Linux)
-///
-/// # Example
-///
-/// ```ignore
-/// use sage::storage::FileStorageConfig;
-///
-/// // Basic file storage
-/// let config = FileStorageConfig::new("/data/index");
-///
-/// // High-performance configuration with mmap
-/// let mut config = FileStorageConfig::new("/data/index");
-/// config.use_mmap = true;
-/// config.mmap_enable_prefault = true;
-/// config.buffer_size = 131072; // 128KB for non-mmap operations
-/// ```
-#[derive(Debug, Clone)]
-pub struct FileStorageConfig {
-    /// Path to the storage directory.
-    pub path: std::path::PathBuf,
-
-    /// Whether to use memory-mapped files for reading.
-    /// When true, files are read using mmap instead of traditional I/O.
-    pub use_mmap: bool,
-
-    /// Buffer size for traditional I/O operations (bytes).
-    /// Default: 65536 (64KB). Used when `use_mmap` is false.
-    pub buffer_size: usize,
-
-    /// Whether to sync writes immediately to disk.
-    /// When true, calls fsync after each write for durability.
-    pub sync_writes: bool,
-
-    /// Whether to use file locking for concurrency control.
-    pub use_locking: bool,
-
-    /// Temporary directory for temp files.
-    /// If None, uses the storage directory.
-    pub temp_dir: Option<String>,
-
-    /// Maximum number of memory-mapped files to cache.
-    /// Only used when `use_mmap` is true. Default: 100.
-    pub mmap_cache_size: usize,
-
-    /// Enable prefaulting for memory-mapped files.
-    /// Pre-populates page tables for faster initial access.
-    /// Only used when `use_mmap` is true.
-    pub mmap_enable_prefault: bool,
-
-    /// Enable huge pages for memory-mapped files if available.
-    /// Can improve TLB performance for large files (Linux only).
-    /// Only used when `use_mmap` is true.
-    pub mmap_enable_hugepages: bool,
-}
-
-impl FileStorageConfig {
-    /// Create a new FileStorageConfig with the given path and default settings.
-    ///
-    /// # Default Settings
-    ///
-    /// - `use_mmap`: false
-    /// - `buffer_size`: 65536 (64KB)
-    /// - `sync_writes`: false
-    /// - `use_locking`: true
-    /// - `mmap_cache_size`: 100
-    /// - `mmap_enable_prefault`: false
-    /// - `mmap_enable_hugepages`: false
-    pub fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
-        FileStorageConfig {
-            path: path.as_ref().to_path_buf(),
-            use_mmap: false,
-            buffer_size: 65536,
-            sync_writes: false,
-            use_locking: true,
-            temp_dir: None,
-            mmap_cache_size: 100,
-            mmap_enable_prefault: false,
-            mmap_enable_hugepages: false,
-        }
-    }
-}
-
-/// Configuration specific to memory-based storage.
-#[derive(Debug, Clone)]
-pub struct MemoryStorageConfig {
-    /// Initial capacity hint for the file map.
-    pub initial_capacity: usize,
-}
-
-impl Default for MemoryStorageConfig {
-    fn default() -> Self {
-        MemoryStorageConfig {
-            initial_capacity: 16,
-        }
+        StorageConfig::Memory(memory::MemoryStorageConfig::default())
     }
 }
 
@@ -590,9 +676,12 @@ impl StorageFactory {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use sage::storage::{StorageFactory, StorageConfig, MemoryStorageConfig, FileStorageConfig};
+    /// ```
+    /// use sage::storage::{StorageFactory, StorageConfig};
+    /// use sage::storage::file::FileStorageConfig;
+    /// use sage::storage::memory::MemoryStorageConfig;
     ///
+    /// # fn main() -> sage::error::Result<()> {
     /// // Create memory storage
     /// let config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// let storage = StorageFactory::create(config)?;
@@ -601,17 +690,19 @@ impl StorageFactory {
     /// let file_config = FileStorageConfig::new("/tmp/index");
     /// let config = StorageConfig::File(file_config);
     /// let storage = StorageFactory::create(config)?;
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn create(config: StorageConfig) -> Result<Box<dyn Storage>> {
+    pub fn create(config: StorageConfig) -> Result<Arc<dyn Storage>> {
         match config {
             StorageConfig::Memory(mem_config) => {
                 let storage = memory::MemoryStorage::new(mem_config);
-                Ok(Box::new(storage))
+                Ok(Arc::new(storage))
             }
             StorageConfig::File(file_config) => {
                 let path = file_config.path.clone();
                 let storage = file::FileStorage::new(&path, file_config)?;
-                Ok(Box::new(storage))
+                Ok(Arc::new(storage))
             }
         }
     }
@@ -620,7 +711,7 @@ impl StorageFactory {
     ///
     /// This is similar to `create` but intended for opening existing storage.
     /// The behavior is currently the same, but may differ in the future.
-    pub fn open(config: StorageConfig) -> Result<Box<dyn Storage>> {
+    pub fn open(config: StorageConfig) -> Result<Arc<dyn Storage>> {
         Self::create(config)
     }
 }
@@ -675,6 +766,8 @@ impl From<StorageError> for SageError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::file::FileStorageConfig;
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[test]
     fn test_storage_config_default() {
@@ -767,8 +860,8 @@ mod tests {
 
     #[test]
     fn test_storage_factory_with_mmap() {
-        use tempfile::TempDir;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let mut file_config = FileStorageConfig::new(temp_dir.path());

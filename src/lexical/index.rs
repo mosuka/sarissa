@@ -78,7 +78,7 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Get index statistics.
     ///
     /// Returns statistics about the index such as document count, term count, etc.
-    fn stats(&self) -> Result<IndexStats>;
+    fn stats(&self) -> Result<InvertedIndexStats>;
 
     /// Optimize the index (merge segments, etc.).
     ///
@@ -88,7 +88,7 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
 
 /// Statistics about an index.
 #[derive(Debug, Clone)]
-pub struct IndexStats {
+pub struct InvertedIndexStats {
     /// Number of documents in the index.
     pub doc_count: u64,
 
@@ -133,7 +133,7 @@ pub struct IndexStats {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use sage::lexical::index::{LexicalIndexConfig, InvertedIndexConfig};
 ///
 /// // Use default inverted index
@@ -155,10 +155,21 @@ pub enum LexicalIndexConfig {
     // LSMTree(LSMTreeConfig),
 }
 
-
 impl Default for LexicalIndexConfig {
     fn default() -> Self {
         LexicalIndexConfig::Inverted(InvertedIndexConfig::default())
+    }
+}
+
+impl LexicalIndexConfig {
+    /// Get a human-readable name for the index type.
+    pub fn index_type_name(&self) -> &str {
+        match self {
+            LexicalIndexConfig::Inverted(_) => "Inverted",
+            // Future index types:
+            // LexicalIndexConfig::ColumnStore(_) => "ColumnStore",
+            // LexicalIndexConfig::LSMTree(_) => "LSMTree",
+        }
     }
 }
 
@@ -218,7 +229,6 @@ impl Default for InvertedIndexConfig {
     }
 }
 
-
 /// Factory for creating lexical index instances.
 ///
 /// This factory follows the Factory design pattern to create appropriate
@@ -232,18 +242,20 @@ impl Default for InvertedIndexConfig {
 ///
 /// # Example with StorageFactory
 ///
-/// ```ignore
+/// ```
 /// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig};
-/// use sage::storage::{StorageFactory, StorageConfig, MemoryStorageConfig};
-/// use std::sync::Arc;
+/// use sage::storage::{StorageFactory, StorageConfig};
+/// use sage::storage::memory::MemoryStorageConfig;
 ///
+/// # fn main() -> sage::error::Result<()> {
 /// // Create storage using factory
 /// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
-/// let storage = Arc::new(storage);
 ///
 /// // Create index using factory
 /// let config = LexicalIndexConfig::default();
 /// let index = LexicalIndexFactory::create(storage, config)?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct LexicalIndexFactory;
 
@@ -262,20 +274,26 @@ impl LexicalIndexFactory {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
     /// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
-    /// use sage::storage::{StorageFactory, StorageConfig, FileStorageConfig};
-    /// use std::sync::Arc;
+    /// use sage::storage::{StorageFactory, StorageConfig};
+    /// use sage::storage::file::FileStorageConfig;
     ///
+    /// # fn main() -> sage::error::Result<()> {
     /// // Create file storage
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
-    /// let storage = Arc::new(StorageFactory::create(storage_config)?);
+    /// let storage = StorageFactory::create(storage_config)?;
     ///
     /// // Create inverted index
     /// let index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
     /// let index = LexicalIndexFactory::create(storage, index_config)?;
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn create(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Box<dyn LexicalIndex>> {
+    pub fn create(
+        storage: Arc<dyn Storage>,
+        config: LexicalIndexConfig,
+    ) -> Result<Box<dyn LexicalIndex>> {
         match config {
             LexicalIndexConfig::Inverted(inverted_config) => {
                 let index = writer::inverted::InvertedIndex::create(storage, inverted_config)?;
@@ -297,17 +315,22 @@ impl LexicalIndexFactory {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use sage::lexical::index::{LexicalIndexFactory, LexicalIndexConfig, InvertedIndexConfig};
-    /// use sage::storage::file::FileStorage;
-    /// use sage::storage::StorageConfig;
+    /// use sage::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
     ///
+    /// # fn main() -> sage::error::Result<()> {
     /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
     /// let config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
     /// let index = LexicalIndexFactory::open(storage, config)?;
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn open(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Box<dyn LexicalIndex>> {
+    pub fn open(
+        storage: Arc<dyn Storage>,
+        config: LexicalIndexConfig,
+    ) -> Result<Box<dyn LexicalIndex>> {
         match config {
             LexicalIndexConfig::Inverted(inverted_config) => {
                 let index = writer::inverted::InvertedIndex::open(storage, inverted_config)?;
@@ -317,15 +340,12 @@ impl LexicalIndexFactory {
     }
 }
 
-// Type aliases for backward compatibility
-/// Type alias for backward compatibility. Use `writer::inverted::InvertedIndex` for new code.
-pub type InvertedIndex = writer::inverted::InvertedIndex;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[test]
     fn test_lexical_index_creation() {

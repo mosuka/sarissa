@@ -1106,8 +1106,9 @@ impl SegmentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[allow(dead_code)]
     fn create_test_segment_info(segment_id: &str, doc_count: u64) -> SegmentInfo {

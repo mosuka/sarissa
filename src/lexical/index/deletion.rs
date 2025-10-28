@@ -945,8 +945,9 @@ impl CompactionScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[test]
     fn test_deletion_bitmap_creation() {

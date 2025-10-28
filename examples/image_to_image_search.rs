@@ -24,10 +24,10 @@ use sage::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use sage::embedding::image_embedder::ImageEmbedder;
 use sage::error::Result;
 use sage::storage::memory::MemoryStorage;
-use sage::storage::MemoryStorageConfig;
+use sage::storage::memory::MemoryStorageConfig;
 use sage::vector::DistanceMetric;
 use sage::vector::engine::VectorEngine;
-use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
+use sage::vector::index::{VectorIndexConfig, HnswIndexConfig};
 use sage::vector::types::VectorSearchRequest;
 use std::sync::Arc;
 
@@ -63,13 +63,12 @@ async fn main() -> Result<()> {
 
     // Create vector index configuration
     println!("Creating vector index configuration...");
-    let config = VectorIndexWriterConfig {
+    let config = VectorIndexConfig::HNSW(HnswIndexConfig {
         dimension: ImageEmbedder::dimension(&embedder),
         distance_metric: DistanceMetric::Cosine,
-        index_type: VectorIndexType::HNSW,
         normalize_vectors: true,
         ..Default::default()
-    };
+    });
 
     // Index sample images
     println!("Indexing image collection...");
@@ -127,9 +126,10 @@ async fn main() -> Result<()> {
     // Build the index using VectorEngine
     println!("Building HNSW index...");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let mut engine = VectorEngine::new(config, storage)?;
+    let index = sage::vector::index::VectorIndexFactory::create(storage, config)?;
+    let mut engine = VectorEngine::new(index)?;
     engine.add_vectors(doc_vectors)?;
-    engine.finalize()?;
+    engine.commit()?;
 
     println!("Index built successfully!\n");
 

@@ -531,8 +531,9 @@ mod tests {
     use super::*;
     use crate::lexical::index::deletion::DeletionConfig;
     use crate::lexical::index::segment_manager::SegmentManagerConfig;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[allow(dead_code)]
     #[test]

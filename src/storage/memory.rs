@@ -6,9 +6,23 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::{Result, SageError};
 use crate::storage::{
-    LockManager, MemoryStorageConfig, Storage, StorageError, StorageInput, StorageLock,
-    StorageOutput,
+    LockManager, Storage, StorageError, StorageInput, StorageLock, StorageOutput,
 };
+
+/// Configuration specific to memory-based storage.
+#[derive(Debug, Clone)]
+pub struct MemoryStorageConfig {
+    /// Initial capacity hint for the file map.
+    pub initial_capacity: usize,
+}
+
+impl Default for MemoryStorageConfig {
+    fn default() -> Self {
+        MemoryStorageConfig {
+            initial_capacity: 16,
+        }
+    }
+}
 
 /// An in-memory storage implementation.
 ///

@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn test_column_storage() {
         let storage = Arc::new(MemoryStorage::new(
-            crate::storage::MemoryStorageConfig::default(),
+            crate::storage::memory::MemoryStorageConfig::default(),
         ));
         let column_storage = ColumnStorage::new(storage);
 

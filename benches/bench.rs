@@ -131,10 +131,14 @@ fn bench_vector_search(c: &mut Criterion) {
     group.bench_function("hnsw_index_construction", |b| {
         b.iter_with_setup(
             || {
-                HnswIndexWriter::new(VectorIndexWriterConfig {
-                    dimension,
-                    ..Default::default()
-                })
+                HnswIndexWriter::new(
+                    VectorIndexWriterConfig {
+                        dimension,
+                        ..Default::default()
+                    },
+                    16,  // m: number of connections per layer
+                    200, // ef_construction: size of dynamic candidate list
+                )
                 .unwrap()
             },
             |mut builder| {
@@ -323,10 +327,14 @@ fn bench_scalability(c: &mut Criterion) {
 
                 b.iter_with_setup(
                     || {
-                        HnswIndexWriter::new(VectorIndexWriterConfig {
-                            dimension: 128,
-                            ..Default::default()
-                        })
+                        HnswIndexWriter::new(
+                            VectorIndexWriterConfig {
+                                dimension: 128,
+                                ..Default::default()
+                            },
+                            16,  // m: number of connections per layer
+                            200, // ef_construction: size of dynamic candidate list
+                        )
                         .unwrap()
                     },
                     |mut builder| {

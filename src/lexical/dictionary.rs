@@ -553,8 +553,10 @@ impl HashTermDictionary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::Storage;
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{ FileStorageConfig, MemoryStorageConfig, Storage};
+    use crate::storage::memory::MemoryStorageConfig;
     use std::sync::Arc;
 
     fn create_test_term_info(offset: u64) -> TermInfo {

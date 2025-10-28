@@ -7,15 +7,14 @@ use rayon::prelude::*;
 use crate::error::{Result, SageError};
 use crate::storage::Storage;
 use crate::vector::Vector;
-use crate::vector::index::VectorIndexWriterConfig;
-use crate::vector::writer::VectorIndexWriter;
+use crate::vector::index::IvfIndexConfig;
+use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Builder for IVF vector indexes (memory-efficient search).
 pub struct IvfIndexWriter {
-    config: VectorIndexWriterConfig,
+    index_config: IvfIndexConfig,
+    writer_config: VectorIndexWriterConfig,
     storage: Option<Arc<dyn Storage>>,
-    n_clusters: usize,                       // Number of clusters (cells)
-    n_probe: usize,                          // Number of clusters to search
     centroids: Vec<Vector>,                  // Cluster centroids
     inverted_lists: Vec<Vec<(u64, Vector)>>, // Inverted lists for each cluster
     vectors: Vec<(u64, Vector)>,             // All vectors (used during construction)
@@ -31,12 +30,15 @@ impl IvfIndexWriter {
     /// * `config` - Vector index configuration
     /// * `n_clusters` - Number of clusters (cells) to create (typical: sqrt(n_vectors))
     /// * `n_probe` - Number of clusters to search (typical: 1-10, higher = more accurate but slower)
-    pub fn new(config: VectorIndexWriterConfig, n_clusters: usize, n_probe: usize) -> Result<Self> {
+    pub fn new(
+        index_config: IvfIndexConfig,
+        writer_config: VectorIndexWriterConfig,
+    ) -> Result<Self> {
         Ok(Self {
-            config,
+            index_config,
+            writer_config,
             storage: None,
-            n_clusters,
-            n_probe,
+
             centroids: Vec::new(),
             inverted_lists: Vec::new(),
             vectors: Vec::new(),
@@ -46,24 +48,15 @@ impl IvfIndexWriter {
     }
 
     /// Create a new IVF index builder with storage.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Vector index configuration
-    /// * `storage` - Storage backend
-    /// * `n_clusters` - Number of clusters (cells) to create (typical: sqrt(n_vectors))
-    /// * `n_probe` - Number of clusters to search (typical: 1-10, higher = more accurate but slower)
     pub fn with_storage(
-        config: VectorIndexWriterConfig,
+        index_config: IvfIndexConfig,
+        writer_config: VectorIndexWriterConfig,
         storage: Arc<dyn Storage>,
-        n_clusters: usize,
-        n_probe: usize,
     ) -> Result<Self> {
         Ok(Self {
-            config,
+            index_config,
+            writer_config,
             storage: Some(storage),
-            n_clusters,
-            n_probe,
             centroids: Vec::new(),
             inverted_lists: Vec::new(),
             vectors: Vec::new(),
@@ -74,7 +67,8 @@ impl IvfIndexWriter {
 
     /// Load an existing IVF index from storage.
     pub fn load(
-        config: VectorIndexWriterConfig,
+        index_config: IvfIndexConfig,
+        writer_config: VectorIndexWriterConfig,
         storage: Arc<dyn Storage>,
         path: &str,
     ) -> Result<Self> {
@@ -99,12 +93,12 @@ impl IvfIndexWriter {
 
         let mut n_probe_buf = [0u8; 4];
         input.read_exact(&mut n_probe_buf)?;
-        let n_probe = u32::from_le_bytes(n_probe_buf) as usize;
+        let _n_probe = u32::from_le_bytes(n_probe_buf) as usize;
 
-        if dimension != config.dimension {
+        if dimension != index_config.dimension {
             return Err(SageError::InvalidOperation(format!(
                 "Dimension mismatch: expected {}, found {}",
-                config.dimension, dimension
+                index_config.dimension, dimension
             )));
         }
 
@@ -150,10 +144,10 @@ impl IvfIndexWriter {
         }
 
         Ok(Self {
-            config,
+            index_config,
+            writer_config,
             storage: Some(storage),
-            n_clusters,
-            n_probe,
+
             centroids,
             inverted_lists,
             vectors,
@@ -164,8 +158,8 @@ impl IvfIndexWriter {
 
     /// Set IVF-specific parameters.
     pub fn with_ivf_params(mut self, n_clusters: usize, n_probe: usize) -> Self {
-        self.n_clusters = n_clusters;
-        self.n_probe = n_probe;
+        self.index_config.n_clusters = n_clusters;
+        self.index_config.n_probe = n_probe;
         self
     }
 
@@ -173,7 +167,7 @@ impl IvfIndexWriter {
     pub fn set_expected_vector_count(&mut self, count: usize) {
         self.total_vectors_to_add = Some(count);
         // Adjust number of clusters based on dataset size
-        self.n_clusters = Self::compute_default_clusters(count);
+        self.index_config.n_clusters = Self::compute_default_clusters(count);
     }
 
     /// Compute default number of clusters based on dataset size.
@@ -190,12 +184,12 @@ impl IvfIndexWriter {
         }
 
         for (doc_id, vector) in vectors {
-            if vector.dimension() != self.config.dimension {
+            if vector.dimension() != self.index_config.dimension {
                 return Err(SageError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
                     doc_id,
                     vector.dimension(),
-                    self.config.dimension
+                    self.index_config.dimension
                 )));
             }
 
@@ -211,11 +205,11 @@ impl IvfIndexWriter {
 
     /// Normalize vectors if configured to do so.
     fn normalize_vectors(&self, vectors: &mut [(u64, Vector)]) {
-        if !self.config.normalize_vectors {
+        if !self.index_config.normalize_vectors {
             return;
         }
 
-        if self.config.parallel_build && vectors.len() > 100 {
+        if self.writer_config.parallel_build && vectors.len() > 100 {
             vectors.par_iter_mut().for_each(|(_, vector)| {
                 vector.normalize();
             });
@@ -234,15 +228,18 @@ impl IvfIndexWriter {
             ));
         }
 
-        if self.vectors.len() < self.n_clusters {
+        if self.vectors.len() < self.index_config.n_clusters {
             return Err(SageError::InvalidOperation(format!(
                 "Cannot create {} clusters from {} vectors",
-                self.n_clusters,
+                self.index_config.n_clusters,
                 self.vectors.len()
             )));
         }
 
-        println!("Training {} centroids using k-means...", self.n_clusters);
+        println!(
+            "Training {} centroids using k-means...",
+            self.index_config.n_clusters
+        );
 
         // Initialize centroids with k-means++
         self.init_centroids_kmeans_plus_plus()?;
@@ -283,7 +280,7 @@ impl IvfIndexWriter {
         self.centroids.push(self.vectors[first_idx].1.clone());
 
         // Choose remaining centroids with probability proportional to squared distance
-        for _ in 1..self.n_clusters {
+        for _ in 1..self.index_config.n_clusters {
             let mut distances = Vec::with_capacity(self.vectors.len());
             let mut total_weight = 0.0;
 
@@ -292,7 +289,7 @@ impl IvfIndexWriter {
                     .centroids
                     .iter()
                     .map(|centroid| {
-                        self.config
+                        self.index_config
                             .distance_metric
                             .distance(&vector.data, &centroid.data)
                             .unwrap_or(f32::INFINITY)
@@ -329,7 +326,7 @@ impl IvfIndexWriter {
 
     /// Assign each vector to its nearest cluster.
     fn assign_vectors_to_clusters(&self) -> Vec<usize> {
-        if self.config.parallel_build && self.vectors.len() > 1000 {
+        if self.writer_config.parallel_build && self.vectors.len() > 1000 {
             self.vectors
                 .par_iter()
                 .map(|(_, vector)| self.find_nearest_centroid(vector))
@@ -349,7 +346,7 @@ impl IvfIndexWriter {
 
         for (i, centroid) in self.centroids.iter().enumerate() {
             if let Ok(distance) = self
-                .config
+                .index_config
                 .distance_metric
                 .distance(&vector.data, &centroid.data)
                 && distance < best_distance
@@ -364,8 +361,9 @@ impl IvfIndexWriter {
 
     /// Update centroids based on cluster assignments.
     fn update_centroids(&mut self, assignments: &[usize]) -> Result<()> {
-        let mut cluster_sums = vec![vec![0.0; self.config.dimension]; self.n_clusters];
-        let mut cluster_counts = vec![0; self.n_clusters];
+        let mut cluster_sums =
+            vec![vec![0.0; self.index_config.dimension]; self.index_config.n_clusters];
+        let mut cluster_counts = vec![0; self.index_config.n_clusters];
 
         // Sum vectors in each cluster
         for (i, (_, vector)) in self.vectors.iter().enumerate() {
@@ -401,7 +399,11 @@ impl IvfIndexWriter {
         let mut total_movement = 0.0;
 
         for (old, new) in old_centroids.iter().zip(self.centroids.iter()) {
-            if let Ok(distance) = self.config.distance_metric.distance(&old.data, &new.data) {
+            if let Ok(distance) = self
+                .index_config
+                .distance_metric
+                .distance(&old.data, &new.data)
+            {
                 total_movement += distance;
             }
         }
@@ -411,7 +413,7 @@ impl IvfIndexWriter {
 
     /// Build inverted lists by assigning vectors to clusters.
     fn build_inverted_lists(&mut self) -> Result<()> {
-        self.inverted_lists = vec![Vec::new(); self.n_clusters];
+        self.inverted_lists = vec![Vec::new(); self.index_config.n_clusters];
 
         for (doc_id, vector) in &self.vectors {
             let cluster = self.find_nearest_centroid(vector);
@@ -419,7 +421,7 @@ impl IvfIndexWriter {
         }
 
         // Sort each inverted list by document ID
-        if self.config.parallel_build {
+        if self.writer_config.parallel_build {
             self.inverted_lists.par_iter_mut().for_each(|list| {
                 list.sort_by_key(|(doc_id, _)| *doc_id);
             });
@@ -434,7 +436,7 @@ impl IvfIndexWriter {
 
     /// Check for memory limits.
     fn check_memory_limit(&self) -> Result<()> {
-        if let Some(limit) = self.config.memory_limit {
+        if let Some(limit) = self.writer_config.memory_limit {
             let current_usage = self.estimated_memory_usage();
             if current_usage > limit {
                 return Err(SageError::ResourceExhausted(format!(
@@ -452,7 +454,7 @@ impl IvfIndexWriter {
 
     /// Get IVF parameters.
     pub fn ivf_params(&self) -> (usize, usize) {
-        (self.n_clusters, self.n_probe)
+        (self.index_config.n_clusters, self.index_config.n_probe)
     }
 
     /// Get centroids.
@@ -481,8 +483,8 @@ impl VectorIndexWriter for IvfIndexWriter {
         self.total_vectors_to_add = Some(self.vectors.len());
 
         // Adjust cluster count if needed
-        if self.vectors.len() < self.n_clusters {
-            self.n_clusters = self.vectors.len().max(1);
+        if self.vectors.len() < self.index_config.n_clusters {
+            self.index_config.n_clusters = self.vectors.len().max(1);
         }
 
         self.check_memory_limit()?;
@@ -549,14 +551,14 @@ impl VectorIndexWriter for IvfIndexWriter {
         let vector_memory = self.vectors.len()
             * (
                 8 + // doc_id
-            self.config.dimension * 4 + // f32 values
+            self.index_config.dimension * 4 + // f32 values
             std::mem::size_of::<Vector>()
                 // Vector struct overhead
             );
 
         // Centroid memory
-        let centroid_memory =
-            self.centroids.len() * (self.config.dimension * 4 + std::mem::size_of::<Vector>());
+        let centroid_memory = self.centroids.len()
+            * (self.index_config.dimension * 4 + std::mem::size_of::<Vector>());
 
         // Inverted list overhead (pointers and metadata)
         let inverted_list_memory =
@@ -615,9 +617,9 @@ impl VectorIndexWriter for IvfIndexWriter {
 
         // Write metadata
         output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
-        output.write_all(&(self.config.dimension as u32).to_le_bytes())?;
-        output.write_all(&(self.n_clusters as u32).to_le_bytes())?;
-        output.write_all(&(self.n_probe as u32).to_le_bytes())?;
+        output.write_all(&(self.index_config.dimension as u32).to_le_bytes())?;
+        output.write_all(&(self.index_config.n_clusters as u32).to_le_bytes())?;
+        output.write_all(&(self.index_config.n_probe as u32).to_le_bytes())?;
 
         // Write centroids
         for centroid in &self.centroids {

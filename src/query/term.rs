@@ -141,8 +141,9 @@ impl Query for TermQuery {
 mod tests {
     use super::*;
     use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
+
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
     use std::sync::Arc;
 
     #[allow(dead_code)]

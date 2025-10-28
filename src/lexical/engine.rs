@@ -21,12 +21,13 @@
 //! use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
 //! use sage::lexical::types::SearchRequest;
 //! use sage::query::term::TermQuery;
-//! use sage::storage::{StorageConfig, StorageFactory, MemoryStorageConfig};
+//! use sage::storage::{StorageConfig, StorageFactory};
+//! use sage::storage::memory::MemoryStorageConfig;
 //! use std::sync::Arc;
 //!
 //! // Create storage using factory
 //! let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-//! let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+//! let storage = StorageFactory::create(storage_config).unwrap();
 //!
 //! // Create index using factory
 //! let index_config = LexicalIndexConfig::default();
@@ -54,7 +55,7 @@ use std::sync::Arc;
 
 use crate::document::document::Document;
 use crate::error::Result;
-use crate::lexical::index::{IndexStats, LexicalIndex};
+use crate::lexical::index::{InvertedIndexStats, LexicalIndex};
 use crate::lexical::reader::IndexReader;
 use crate::lexical::types::SearchRequest;
 use crate::lexical::writer::IndexWriter;
@@ -89,12 +90,13 @@ use crate::storage::Storage;
 /// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
 /// use sage::lexical::types::SearchRequest;
 /// use sage::query::term::TermQuery;
-/// use sage::storage::{StorageConfig, StorageFactory, MemoryStorageConfig};
+/// use sage::storage::{StorageConfig, StorageFactory};
+/// use sage::storage::memory::MemoryStorageConfig;
 /// use std::sync::Arc;
 ///
 /// // Setup
 /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-/// let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+/// let storage = StorageFactory::create(storage_config).unwrap();
 /// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
 /// let mut engine = LexicalEngine::new(index).unwrap();
 ///
@@ -148,11 +150,12 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use sage::lexical::engine::LexicalEngine;
     /// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// use sage::storage::{StorageConfig, StorageFactory, MemoryStorageConfig};
+    /// use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-    /// let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+    /// let storage = StorageFactory::create(storage_config).unwrap();
     /// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// let engine = LexicalEngine::new(index).unwrap();
     /// ```
@@ -162,11 +165,12 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use sage::lexical::engine::LexicalEngine;
     /// use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// use sage::storage::{StorageConfig, StorageFactory, FileStorageConfig};
+    /// use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::file::FileStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
-    /// let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+    /// let storage = StorageFactory::create(storage_config).unwrap();
     /// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// let engine = LexicalEngine::new(index).unwrap();
     /// ```
@@ -221,10 +225,11 @@ impl LexicalEngine {
     /// use sage::document::document::Document;
     /// # use sage::lexical::engine::LexicalEngine;
     /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory, MemoryStorageConfig};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-    /// # let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
@@ -294,10 +299,11 @@ impl LexicalEngine {
     /// use sage::document::document::Document;
     /// # use sage::lexical::engine::LexicalEngine;
     /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory, MemoryStorageConfig};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-    /// # let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
@@ -347,10 +353,11 @@ impl LexicalEngine {
     /// use sage::document::document::Document;
     /// # use sage::lexical::engine::LexicalEngine;
     /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory, MemoryStorageConfig};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-    /// # let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
@@ -398,7 +405,7 @@ impl LexicalEngine {
     }
 
     /// Get index statistics.
-    pub fn stats(&self) -> Result<IndexStats> {
+    pub fn stats(&self) -> Result<InvertedIndexStats> {
         self.index.stats()
     }
 
@@ -415,9 +422,7 @@ impl LexicalEngine {
     pub fn is_closed(&self) -> bool {
         self.index.is_closed()
     }
-}
 
-impl LexicalEngine {
     /// Search with the given request.
     ///
     /// This method executes a search query against the index. It creates a fresh reader
@@ -440,10 +445,11 @@ impl LexicalEngine {
     /// use sage::query::term::TermQuery;
     /// # use sage::lexical::engine::LexicalEngine;
     /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory, MemoryStorageConfig};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-    /// # let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     /// # let doc = Document::builder().add_text("title", "hello world").build();
@@ -470,10 +476,11 @@ impl LexicalEngine {
     /// # use sage::document::document::Document;
     /// # use sage::lexical::engine::LexicalEngine;
     /// # use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-    /// # use sage::storage::{StorageConfig, StorageFactory, MemoryStorageConfig};
+    /// # use sage::storage::{StorageConfig, StorageFactory};
+    /// use sage::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-    /// # let storage = Arc::new(StorageFactory::create(storage_config).unwrap());
+    /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
@@ -526,9 +533,8 @@ mod tests {
     use super::*;
     use crate::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
     use crate::query::term::TermQuery;
-    use crate::storage::file::FileStorage;
-    use crate::storage::memory::MemoryStorage;
-    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::file::{FileStorage, FileStorageConfig};
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -544,8 +550,9 @@ mod tests {
     fn test_search_engine_creation() {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
@@ -585,15 +592,17 @@ mod tests {
         let config = LexicalIndexConfig::default();
 
         // Create engine
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config.clone()).unwrap();
         let mut engine = LexicalEngine::new(index).unwrap();
         engine.close().unwrap();
 
         // Open engine
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
@@ -606,8 +615,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let mut engine = LexicalEngine::new(index).unwrap();
 
@@ -627,8 +637,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let mut engine = LexicalEngine::new(index).unwrap();
 
@@ -650,8 +661,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
@@ -669,8 +681,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let mut engine = LexicalEngine::new(index).unwrap();
 
@@ -698,8 +711,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
@@ -715,8 +729,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let mut engine = LexicalEngine::new(index).unwrap();
 
@@ -740,8 +755,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
@@ -756,8 +772,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let mut engine = LexicalEngine::new(index).unwrap();
 
@@ -773,8 +790,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
@@ -796,8 +814,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let mut engine = LexicalEngine::new(index).unwrap();
 
@@ -830,8 +849,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
@@ -853,7 +873,7 @@ mod tests {
         let storage = Arc::new(
             crate::storage::file::FileStorage::new(
                 temp_dir.path(),
-                crate::storage::FileStorageConfig::new(temp_dir.path()),
+                crate::storage::file::FileStorageConfig::new(temp_dir.path()),
             )
             .unwrap(),
         );
@@ -873,8 +893,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = LexicalIndexConfig::default();
 
-        let storage =
-            Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap());
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 

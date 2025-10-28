@@ -20,7 +20,7 @@ use sage::error::Result;
 #[cfg(feature = "embeddings-candle")]
 use sage::storage::memory::MemoryStorage;
 #[cfg(feature = "embeddings-candle")]
-use sage::storage::MemoryStorageConfig;
+use sage::storage::memory::MemoryStorageConfig;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
@@ -28,7 +28,7 @@ use sage::vector::Vector;
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
-use sage::vector::index::{VectorIndexType, VectorIndexWriterConfig};
+use sage::vector::index::{VectorIndexConfig, FlatIndexConfig};
 #[cfg(feature = "embeddings-candle")]
 use sage::vector::types::VectorSearchRequest;
 #[cfg(feature = "embeddings-candle")]
@@ -94,18 +94,18 @@ async fn main() -> Result<()> {
     println!("Embeddings generated successfully!\n");
 
     // Step 4: Create vector index configuration
-    let vector_config = VectorIndexWriterConfig {
+    let vector_config = VectorIndexConfig::Flat(FlatIndexConfig {
         dimension,
         distance_metric: DistanceMetric::Cosine,
-        index_type: VectorIndexType::Flat,
         normalize_vectors: true,
         ..Default::default()
-    };
+    });
 
     // Step 5: Build the vector index using VectorEngine
     println!("Building vector index...");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let mut engine = VectorEngine::new(vector_config, storage)?;
+    let index = sage::vector::index::VectorIndexFactory::create(storage, vector_config)?;
+    let mut engine = VectorEngine::new(index)?;
 
     // Add document vectors to the index
     let doc_vectors: Vec<(u64, sage::vector::Vector)> = documents
@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
         .collect();
 
     engine.add_vectors(doc_vectors)?;
-    engine.finalize()?;
+    engine.commit()?;
     engine.optimize()?;
 
     println!("Vector index built successfully!");

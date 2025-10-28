@@ -12,7 +12,7 @@ use sage::query::phrase::PhraseQuery;
 use sage::query::range::NumericRangeQuery;
 use sage::query::term::TermQuery;
 use sage::storage::file::FileStorage;
-use sage::storage::FileStorageConfig;
+use sage::storage::file::FileStorageConfig;
 use std::sync::Arc;
 
 fn main() -> Result<()> {
@@ -24,7 +24,10 @@ fn main() -> Result<()> {
 
     // Create a search engine
     let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path()))?);
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
     let index = LexicalIndexFactory::create(storage, config)?;
     let mut engine = LexicalEngine::new(index)?;
 

@@ -17,8 +17,8 @@ use crate::lexical::index::reader::inverted::InvertedIndexReader;
 use crate::lexical::index::segment_manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::lexical::posting::InvertedIndex;
 use crate::lexical::reader::IndexReader;
-use crate::storage::structured::StructWriter;
 use crate::storage::Storage;
+use crate::storage::structured::StructWriter;
 
 /// Configuration for merge operations.
 #[derive(Debug, Clone)]
@@ -514,7 +514,7 @@ mod tests {
     use crate::lexical::index::segment_manager::ManagedSegmentInfo;
 
     use crate::storage::memory::MemoryStorage;
-    use crate::storage::{FileStorageConfig, MemoryStorageConfig};
+    use crate::storage::memory::MemoryStorageConfig;
 
     #[allow(dead_code)]
     fn create_test_segment(id: &str, doc_count: u64) -> ManagedSegmentInfo {

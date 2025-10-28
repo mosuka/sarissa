@@ -14,14 +14,14 @@ use crate::error::Result;
 /// # Example
 ///
 /// ```rust,no_run
-/// use sage::lexical::index::writer::inverted::{InvertedIndexWriter, InvertedIndexWriterConfig};
+/// use sage::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
 /// use sage::lexical::writer::IndexWriter;
-/// use sage::storage::memory::MemoryStorage;
+/// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use sage::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-/// let config = InvertedIndexWriterConfig::default();
+/// let config = LexicalIndexWriterConfig::default();
 /// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
 ///
 /// // Use IndexWriter trait methods

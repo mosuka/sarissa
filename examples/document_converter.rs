@@ -14,7 +14,7 @@ use sage::error::Result;
 use sage::lexical::engine::LexicalEngine;
 use sage::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
 use sage::storage::file::FileStorage;
-use sage::storage::FileStorageConfig;
+use sage::storage::file::FileStorageConfig;
 use std::sync::Arc;
 
 fn main() -> Result<()> {
@@ -26,7 +26,10 @@ fn main() -> Result<()> {
 
     // Create search engine
     let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path()))?);
+    let storage = Arc::new(FileStorage::new(
+        temp_dir.path(),
+        FileStorageConfig::new(temp_dir.path()),
+    )?);
     let index = LexicalIndexFactory::create(storage, config)?;
     let mut engine = LexicalEngine::new(index)?;
 

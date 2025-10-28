@@ -8,6 +8,49 @@
 
 use crate::error::Result;
 use crate::vector::Vector;
+use serde::{Deserialize, Serialize};
+
+/// Configuration for vector index writers common to all index types.
+///
+/// This configuration contains settings that are common across all vector index writer
+/// implementations (Flat, HNSW, IVF), similar to `InvertedIndexWriterConfig` in the lexical module.
+///
+/// Type-specific settings (dimension, distance metric, HNSW parameters, etc.) are defined
+/// in the respective index configs: `FlatIndexConfig`, `HnswIndexConfig`, `IvfIndexConfig`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorIndexWriterConfig {
+    /// Maximum number of vectors to buffer before flushing to storage.
+    pub max_buffered_vectors: usize,
+
+    /// Maximum memory usage for buffering (in bytes).
+    pub max_buffer_memory: usize,
+
+    /// Segment name prefix.
+    pub segment_prefix: String,
+
+    /// Build index in parallel (when supported by the index type).
+    pub parallel_build: bool,
+
+    /// Memory limit for index construction (in bytes).
+    /// If None, no explicit limit is enforced.
+    pub memory_limit: Option<usize>,
+
+    /// Auto-flush threshold: flush when buffer reaches this percentage (0.0-1.0).
+    pub auto_flush_threshold: f32,
+}
+
+impl Default for VectorIndexWriterConfig {
+    fn default() -> Self {
+        Self {
+            max_buffered_vectors: 10000,
+            max_buffer_memory: 512 * 1024 * 1024, // 512 MB
+            segment_prefix: "segment".to_string(),
+            parallel_build: true,
+            memory_limit: None,
+            auto_flush_threshold: 0.9,
+        }
+    }
+}
 
 /// Trait for vector index writers.
 ///
@@ -22,16 +65,16 @@ use crate::vector::Vector;
 ///
 /// ```rust,no_run
 /// use sage::vector::index::writer::hnsw::HnswIndexWriter;
-/// use sage::vector::index::VectorIndexWriterConfig;
-/// use sage::vector::writer::VectorIndexWriter;
-/// use sage::storage::memory::MemoryStorage;
+/// use sage::vector::index::HnswIndexConfig;
+/// use sage::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+/// use sage::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use sage::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-/// let config = VectorIndexWriterConfig::default();
-/// // HnswIndexWriter requires m and ef_construction parameters
-/// let mut writer = HnswIndexWriter::with_storage(config, storage, 16, 200).unwrap();
+/// let index_config = HnswIndexConfig::default();
+/// let writer_config = VectorIndexWriterConfig::default();
+/// let mut writer = HnswIndexWriter::with_storage(index_config, writer_config, storage).unwrap();
 ///
 /// // Use VectorIndexWriter trait methods
 /// // writer.add_vectors(vectors).unwrap();
