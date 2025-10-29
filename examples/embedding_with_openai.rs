@@ -31,6 +31,7 @@ async fn main() -> yatagarasu::error::Result<()> {
         eprintln!("Please set it with: export OPENAI_API_KEY=your-api-key-here");
         std::process::exit(1);
     });
+    println!("Using OPENAI_API_KEY: {}", api_key);
 
     // Create embedder with text-embedding-3-small model
     println!("Creating OpenAI embedder with model: text-embedding-3-small");
@@ -53,8 +54,12 @@ async fn main() -> yatagarasu::error::Result<()> {
         &vector.data[..5.min(vector.data.len())]
     );
 
+    // Wait to avoid rate limiting
+    println!("Waiting 2 seconds to avoid rate limiting...");
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
     // Example 2: Batch processing (more efficient for multiple texts)
-    println!("--- Example 2: Batch Processing ---");
+    println!("\n--- Example 2: Batch Processing ---");
     let texts = vec![
         "Machine learning is transforming technology",
         "Deep learning uses neural networks",

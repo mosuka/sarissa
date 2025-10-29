@@ -193,7 +193,7 @@ impl TextEmbedder for OpenAITextEmbedder {
             input: vec![text.to_string()],
         };
 
-        let response = self
+        let http_response = self
             .client
             .post("https://api.openai.com/v1/embeddings")
             .header("Authorization", format!("Bearer {}", self.api_key))
@@ -201,11 +201,27 @@ impl TextEmbedder for OpenAITextEmbedder {
             .json(&request)
             .send()
             .await
-            .map_err(|e| SageError::InvalidOperation(format!("OpenAI API request failed: {}", e)))?
-            .json::<EmbeddingResponse>()
+            .map_err(|e| SageError::InvalidOperation(format!("OpenAI API request failed: {}", e)))?;
+
+        let status = http_response.status();
+        let response_text = http_response
+            .text()
             .await
+            .map_err(|e| SageError::InvalidOperation(format!("Failed to read response text: {}", e)))?;
+
+        if !status.is_success() {
+            return Err(SageError::InvalidOperation(format!(
+                "OpenAI API error (status {}): {}",
+                status, response_text
+            )));
+        }
+
+        let response: EmbeddingResponse = serde_json::from_str(&response_text)
             .map_err(|e| {
-                SageError::InvalidOperation(format!("Failed to parse OpenAI response: {}", e))
+                SageError::InvalidOperation(format!(
+                    "Failed to parse OpenAI response: {}. Response text: {}",
+                    e, response_text
+                ))
             })?;
 
         let embedding = response
@@ -228,7 +244,7 @@ impl TextEmbedder for OpenAITextEmbedder {
             input: texts.iter().map(|s| s.to_string()).collect(),
         };
 
-        let response = self
+        let http_response = self
             .client
             .post("https://api.openai.com/v1/embeddings")
             .header("Authorization", format!("Bearer {}", self.api_key))
@@ -236,11 +252,27 @@ impl TextEmbedder for OpenAITextEmbedder {
             .json(&request)
             .send()
             .await
-            .map_err(|e| SageError::InvalidOperation(format!("OpenAI API request failed: {}", e)))?
-            .json::<EmbeddingResponse>()
+            .map_err(|e| SageError::InvalidOperation(format!("OpenAI API request failed: {}", e)))?;
+
+        let status = http_response.status();
+        let response_text = http_response
+            .text()
             .await
+            .map_err(|e| SageError::InvalidOperation(format!("Failed to read response text: {}", e)))?;
+
+        if !status.is_success() {
+            return Err(SageError::InvalidOperation(format!(
+                "OpenAI API error (status {}): {}",
+                status, response_text
+            )));
+        }
+
+        let response: EmbeddingResponse = serde_json::from_str(&response_text)
             .map_err(|e| {
-                SageError::InvalidOperation(format!("Failed to parse OpenAI response: {}", e))
+                SageError::InvalidOperation(format!(
+                    "Failed to parse OpenAI response: {}. Response text: {}",
+                    e, response_text
+                ))
             })?;
 
         Ok(response
