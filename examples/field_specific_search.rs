@@ -6,29 +6,42 @@ use tempfile::TempDir;
 
 use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field_value::FieldValue;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::index::{InvertedIndexConfig, LexicalIndexConfig, LexicalIndexFactory};
 use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::storage::file::{FileStorage, FileStorageConfig};
+use yatagarasu::query::term::TermQuery;
+use yatagarasu::storage::file::FileStorageConfig;
+use yatagarasu::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== Field-Specific Search Example ===\n");
 
-    // Create a temporary directory for the index
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("Creating index in: {:?}", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    // Create a search engine
-    let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Prepare documents
     let documents = vec![
@@ -88,53 +101,18 @@ fn main() -> Result<()> {
             .build(),
     ];
 
-    println!("Adding documents to the index...");
-
-    // Add documents with per-field analyzer configuration
-    // Note: We need to manually configure the writer since SearchEngine doesn't persist
-    // analyzer configuration across writer() calls yet
-    {
-        use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-        use yatagarasu::lexical::index::writer::inverted::{
-            InvertedIndexWriter, LexicalIndexWriterConfig,
-        };
-
-        let storage = engine.storage().clone();
-
-        // Configure field-specific analyzers using PerFieldAnalyzer (Lucene-style)
-        // - category and id use KeywordAnalyzer (entire field as one token)
-        // - other fields use StandardAnalyzer (default) for tokenized search
-        // Note: Reuse analyzer instances with Arc::clone to save memory
-        let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
-        let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
-        let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
-        per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
-        per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
-
-        let config = LexicalIndexWriterConfig {
-            analyzer: Arc::new(per_field_analyzer),
-            ..Default::default()
-        };
-
-        let mut writer = InvertedIndexWriter::new(storage, config)?;
-
-        for doc in documents {
-            writer.add_document(doc)?;
-        }
-
-        writer.commit()?;
-    }
+    // Add documents to the lexical engine
+    lexical_engine.add_documents(documents)?;
 
     // Commit changes to engine
-    engine.commit()?;
+    lexical_engine.commit()?;
 
     println!("\n=== Field-Specific Search Examples ===\n");
 
-    // Example 1: Search by author
-    println!("1. Search by author (author:Orwell):");
-    let parser = yatagarasu::query::parser::QueryParser::new();
-    let query = parser.parse_field("author", "Orwell")?;
-    let results = engine.search(LexicalSearchRequest::new(query))?;
+    // Example 1: Search by author using DSL string
+    println!("1. Search by author using DSL string (author:Orwell):");
+    let request = LexicalSearchRequest::new("author:Orwell");
+    let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -147,11 +125,11 @@ fn main() -> Result<()> {
 
     // Example 2: Search by author with document loading
     println!("\n2. Search by author with document details (author:Orwell):");
-    let request = LexicalSearchRequest::new(Box::new(yatagarasu::query::term::TermQuery::new(
-        "author", "orwell",
-    )))
-    .load_documents(true);
-    let results = engine.search(request)?;
+    let request =
+        LexicalSearchRequest::new(Box::new(TermQuery::new("author", "orwell"))
+            as Box<dyn yatagarasu::query::query::Query>)
+        .load_documents(true);
+    let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -171,19 +149,16 @@ fn main() -> Result<()> {
             {
                 println!("      Category: {category}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Integer(year)) =
-                doc.get_field("year")
-            {
+            if let Some(FieldValue::Integer(year)) = doc.get_field("year") {
                 println!("      Year: {year}");
             }
         }
     }
 
-    // Example 3: Search by category
-    println!("\n3. Search by category (category:classic):");
-    let parser = yatagarasu::query::parser::QueryParser::new();
-    let query = parser.parse_field("category", "classic")?;
-    let results = engine.search(LexicalSearchRequest::new(query))?;
+    // Example 3: Search by category using DSL string
+    println!("\n3. Search by category using DSL string (category:classic):");
+    let request = LexicalSearchRequest::new("category:classic");
+    let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -196,11 +171,11 @@ fn main() -> Result<()> {
 
     // Example 4: Search in tags field
     println!("\n4. Search in tags field (tags:british):");
-    let request = LexicalSearchRequest::new(Box::new(yatagarasu::query::term::TermQuery::new(
-        "tags", "british",
-    )))
+    let request = LexicalSearchRequest::new(
+        Box::new(TermQuery::new("tags", "british")) as Box<dyn yatagarasu::query::query::Query>
+    )
     .load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -228,11 +203,10 @@ fn main() -> Result<()> {
         }
     }
 
-    // Example 5: Search in title field
-    println!("\n5. Search in title field (title:farm):");
-    let parser = yatagarasu::query::parser::QueryParser::new();
-    let query = parser.parse_field("title", "farm")?;
-    let results = engine.search(LexicalSearchRequest::new(query))?;
+    // Example 5: Search in title field using DSL string
+    println!("\n5. Search in title field using DSL string (title:farm):");
+    let request = LexicalSearchRequest::new("title:farm");
+    let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -243,11 +217,10 @@ fn main() -> Result<()> {
         );
     }
 
-    // Example 6: Search in body field
-    println!("\n6. Search in body field (body:father):");
-    let parser = yatagarasu::query::parser::QueryParser::new();
-    let query = parser.parse_field("body", "father")?;
-    let results = engine.search(LexicalSearchRequest::new(query))?;
+    // Example 6: Search in body field using DSL string
+    println!("\n6. Search in body field using DSL string (body:father):");
+    let request = LexicalSearchRequest::new("body:father");
+    let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -263,34 +236,27 @@ fn main() -> Result<()> {
     println!("   Searching for 'american' in different fields:");
 
     // Search in tags
-    let parser = yatagarasu::query::parser::QueryParser::new();
-    let query = parser.parse_field("tags", "american")?;
-    let tags_results = engine.search(LexicalSearchRequest::new(query))?;
+    let tags_results = lexical_engine.search(LexicalSearchRequest::new("tags:american"))?;
     println!("   - In tags field: {} results", tags_results.total_hits);
 
     // Search in body
-    let query = parser.parse_field("body", "american")?;
-    let body_results = engine.search(LexicalSearchRequest::new(query))?;
+    let body_results = lexical_engine.search(LexicalSearchRequest::new("body:american"))?;
     println!("   - In body field: {} results", body_results.total_hits);
 
     // Search in category
-    let query = parser.parse_field("category", "american")?;
-    let category_results = engine.search(LexicalSearchRequest::new(query))?;
+    let category_results = lexical_engine.search(LexicalSearchRequest::new("category:american"))?;
     println!(
         "   - In category field: {} results",
         category_results.total_hits
     );
 
-    // Example 8: Using query parser with field specification
-    println!("\n8. Using query parser with field specification:");
-    let parser = yatagarasu::query::parser::QueryParser::new();
-
-    // Parse field:value syntax
-    let query = parser.parse("author:austen OR category:dystopian")?;
+    // Example 8: Using query parser with field specification (DSL string)
+    println!("\n8. Using DSL string with boolean operators:");
     println!("   Query: author:austen OR category:dystopian");
 
-    let request = LexicalSearchRequest::new(query).load_documents(true);
-    let results = engine.search(request)?;
+    let request =
+        LexicalSearchRequest::new("author:austen OR category:dystopian").load_documents(true);
+    let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         println!(
@@ -318,7 +284,7 @@ fn main() -> Result<()> {
         }
     }
 
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\nField-specific search example completed successfully!");
 
     Ok(())

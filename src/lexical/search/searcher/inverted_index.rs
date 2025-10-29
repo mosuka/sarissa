@@ -6,11 +6,16 @@ use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 
+use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
+use crate::lexical::index::reader::inverted::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
-use crate::lexical::types::{LexicalSearchRequest, SortField, SortOrder};
-use crate::query::collector::{Collector, CountCollector, TopDocsCollector};
+use crate::lexical::types::{
+    LexicalSearchParams, LexicalSearchQuery, LexicalSearchRequest, SortField, SortOrder,
+};
+use crate::query::boolean::BooleanQuery;
+use crate::query::collector::{Collector, CountCollector, TopDocsCollector, TopFieldCollector};
 use crate::query::query::Query;
 use crate::query::{SearchHit, SearchResults};
 
@@ -56,11 +61,7 @@ impl InvertedIndexSearcher {
         parallel: bool,
     ) -> Result<C> {
         // For BooleanQuery with multiple clauses, try to execute sub-queries in parallel
-        if parallel
-            && let Some(boolean_query) = query
-                .as_any()
-                .downcast_ref::<crate::query::boolean::BooleanQuery>()
-        {
+        if parallel && let Some(boolean_query) = query.as_any().downcast_ref::<BooleanQuery>() {
             return self.search_boolean_query_parallel(boolean_query, collector);
         }
 
@@ -84,12 +85,14 @@ impl InvertedIndexSearcher {
 
             // Retrieve actual field length if query targets a specific field
             let field_length = if let Some(field_name) = query.field() {
-                if let Some(inverted_index_reader) = self
-                    .reader
-                    .as_any()
-                    .downcast_ref::<crate::lexical::index::reader::inverted::InvertedIndexReader>()
+                if let Some(inverted_index_reader) =
+                    self.reader.as_any().downcast_ref::<InvertedIndexReader>()
                 {
-                    inverted_index_reader.field_length(doc_id, field_name).ok().flatten().map(|len| len as f32)
+                    inverted_index_reader
+                        .field_length(doc_id, field_name)
+                        .ok()
+                        .flatten()
+                        .map(|len| len as f32)
                 } else {
                     None
                 }
@@ -119,7 +122,7 @@ impl InvertedIndexSearcher {
     /// Execute a BooleanQuery with parallel sub-query execution.
     fn search_boolean_query_parallel<C: Collector>(
         &self,
-        boolean_query: &crate::query::boolean::BooleanQuery,
+        boolean_query: &BooleanQuery,
         collector: C,
     ) -> Result<C> {
         let clauses = boolean_query.clauses();
@@ -206,49 +209,42 @@ impl InvertedIndexSearcher {
         Ok(())
     }
 
-    /// Execute a search with timeout.
-    fn search_with_timeout(
+    /// Execute a search with timeout (internal implementation).
+    fn search_with_timeout_internal(
         &self,
-        request: LexicalSearchRequest,
+        query: Box<dyn Query>,
+        params: &LexicalSearchParams,
         timeout: Duration,
     ) -> Result<SearchResults> {
         let start_time = Instant::now();
 
         // Create collector based on sort type
-        let (mut hits, total_hits) = match &request.params.sort_by {
+        let (mut hits, total_hits) = match &params.sort_by {
             SortField::Field { name, order } => {
-                // Use TopFieldCollector for field-based sorting (Lucene-style)
-                use crate::query::collector::TopFieldCollector;
-
+                // Use TopFieldCollector for field-based sorting
                 let ascending = matches!(order, SortOrder::Asc);
                 let collector = TopFieldCollector::with_min_score(
-                    request.params.max_docs,
-                    request.params.min_score,
+                    params.max_docs,
+                    params.min_score,
                     name.clone(),
                     ascending,
                     self.reader.as_ref(),
                 );
 
                 let result_collector = self.search_with_collector_parallel(
-                    request.query,
+                    query.clone_box(),
                     collector,
-                    request.params.parallel,
+                    params.parallel,
                 )?;
 
                 (result_collector.results(), result_collector.total_hits())
             }
             SortField::Score => {
                 // Use TopDocsCollector for score-based sorting
-                let collector = TopDocsCollector::with_min_score(
-                    request.params.max_docs,
-                    request.params.min_score,
-                );
+                let collector = TopDocsCollector::with_min_score(params.max_docs, params.min_score);
 
-                let result_collector = self.search_with_collector_parallel(
-                    request.query,
-                    collector,
-                    request.params.parallel,
-                )?;
+                let result_collector =
+                    self.search_with_collector_parallel(query, collector, params.parallel)?;
 
                 (result_collector.results(), result_collector.total_hits())
             }
@@ -260,8 +256,8 @@ impl InvertedIndexSearcher {
         }
 
         // Load documents if requested
-        if request.params.load_documents {
-            if request.params.parallel && hits.len() > 10 {
+        if params.load_documents {
+            if params.parallel && hits.len() > 10 {
                 self.load_documents_parallel(&mut hits)?;
             } else {
                 self.load_documents(&mut hits)?;
@@ -282,8 +278,29 @@ impl InvertedIndexSearcher {
 
     /// Search with the given request.
     pub fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults> {
+        // Convert DSL query to Query object if necessary
+        let query = match &request.query {
+            LexicalSearchQuery::Dsl(dsl_string) => {
+                // Get analyzer from reader
+                let analyzer = if let Some(inverted_index_reader) =
+                    self.reader.as_any().downcast_ref::<InvertedIndexReader>()
+                {
+                    inverted_index_reader.analyzer().clone()
+                } else {
+                    // Fallback to standard analyzer
+                    Arc::new(StandardAnalyzer::new()?)
+                };
+
+                // Parse DSL string into Query object
+                let parser =
+                    crate::query::parser::QueryParser::new().with_analyzer(analyzer.clone());
+                parser.parse(dsl_string)?
+            }
+            LexicalSearchQuery::Obj(q) => q.clone_box(),
+        };
+
         // Check if query is empty
-        if request.query.is_empty(self.reader.as_ref())? {
+        if query.is_empty(self.reader.as_ref())? {
             return Ok(SearchResults {
                 hits: Vec::new(),
                 total_hits: 0,
@@ -294,14 +311,12 @@ impl InvertedIndexSearcher {
         // Execute search with timeout if specified
         if let Some(timeout_ms) = request.params.timeout_ms {
             let timeout = Duration::from_millis(timeout_ms);
-            self.search_with_timeout(request, timeout)
+            self.search_with_timeout_internal(query, &request.params, timeout)
         } else {
             // Check if we should use field-based sorting during collection
             match &request.params.sort_by {
                 SortField::Field { name, order } => {
-                    // Use TopFieldCollector for field-based sorting (Lucene-style)
-                    use crate::query::collector::TopFieldCollector;
-
+                    // Use TopFieldCollector for field-based sorting
                     let ascending = matches!(order, SortOrder::Asc);
                     let collector = TopFieldCollector::with_min_score(
                         request.params.max_docs,
@@ -312,7 +327,7 @@ impl InvertedIndexSearcher {
                     );
 
                     let result_collector = self.search_with_collector_parallel(
-                        request.query,
+                        query.clone_box(),
                         collector,
                         request.params.parallel,
                     )?;
@@ -343,7 +358,7 @@ impl InvertedIndexSearcher {
                         request.params.min_score,
                     );
                     let result_collector = self.search_with_collector_parallel(
-                        request.query,
+                        query,
                         collector,
                         request.params.parallel,
                     )?;
@@ -461,7 +476,31 @@ impl InvertedIndexSearcher {
     }
 
     /// Count documents matching the query.
-    pub fn count(&self, query: Box<dyn Query>) -> Result<u64> {
+    pub fn count(&self, query: LexicalSearchQuery) -> Result<u64> {
+        // Use the provided LexicalSearchQuery
+        let lexical_query = query;
+
+        // Parse DSL string if needed
+        let query = if let LexicalSearchQuery::Dsl(_) = &lexical_query {
+            // Get analyzer from reader
+            let analyzer = if let Some(inverted_index_reader) =
+                self.reader.as_any().downcast_ref::<InvertedIndexReader>()
+            {
+                inverted_index_reader.analyzer().clone()
+            } else {
+                // Fallback to standard analyzer
+                Arc::new(StandardAnalyzer::new()?)
+            };
+
+            // Parse DSL string into Query object
+            lexical_query.into_query(&analyzer)?
+        } else {
+            match lexical_query {
+                LexicalSearchQuery::Obj(q) => q,
+                _ => unreachable!(),
+            }
+        };
+
         // Check if query is empty
         if query.is_empty(self.reader.as_ref())? {
             return Ok(0);
@@ -515,7 +554,7 @@ mod tests {
     #[test]
     fn test_search_term_query() {
         let searcher = create_test_searcher();
-        let query = Box::new(TermQuery::new("title", "hello"));
+        let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
 
         let request = LexicalSearchRequest::new(query);
         let results = searcher.search(request).unwrap();
@@ -535,7 +574,7 @@ mod tests {
                 .must(Box::new(TermQuery::new("title", "hello")))
                 .should(Box::new(TermQuery::new("body", "world")))
                 .build(),
-        );
+        ) as Box<dyn Query>;
 
         let request = LexicalSearchRequest::new(query);
         let results = searcher.search(request).unwrap();
@@ -549,7 +588,7 @@ mod tests {
     #[test]
     fn test_search_with_config() {
         let searcher = create_test_searcher();
-        let query = Box::new(TermQuery::new("title", "hello"));
+        let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
 
         let request = LexicalSearchRequest::new(query)
             .max_docs(5)
@@ -566,9 +605,9 @@ mod tests {
     #[test]
     fn test_count_query() {
         let searcher = create_test_searcher();
-        let query = Box::new(TermQuery::new("title", "hello"));
+        let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
 
-        let count = searcher.count(query).unwrap();
+        let count = searcher.count(query.into()).unwrap();
 
         // Should return 0 for non-existent terms
         assert_eq!(count, 0);
@@ -577,7 +616,7 @@ mod tests {
     #[test]
     fn test_search_with_timeout() {
         let searcher = create_test_searcher();
-        let query = Box::new(TermQuery::new("title", "hello"));
+        let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
 
         let request = LexicalSearchRequest::new(query).timeout_ms(1000); // 1 second timeout
 
@@ -604,7 +643,7 @@ mod tests {
     fn test_search_empty_query() {
         let searcher = create_test_searcher();
         // Create a boolean query with no clauses (empty query)
-        let query = Box::new(BooleanQuery::new());
+        let query = Box::new(BooleanQuery::new()) as Box<dyn Query>;
 
         let request = LexicalSearchRequest::new(query);
         let results = searcher.search(request).unwrap();
@@ -618,9 +657,9 @@ mod tests {
     #[test]
     fn test_count_empty_query() {
         let searcher = create_test_searcher();
-        let query = Box::new(BooleanQuery::new());
+        let query = Box::new(BooleanQuery::new()) as Box<dyn Query>;
 
-        let count = searcher.count(query).unwrap();
+        let count = searcher.count(query.into()).unwrap();
 
         // Should return 0 for empty query
         assert_eq!(count, 0);
@@ -628,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_search_request_builder() {
-        let query = Box::new(TermQuery::new("title", "hello"));
+        let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
 
         let request = LexicalSearchRequest::new(query)
             .max_docs(20)
@@ -649,7 +688,7 @@ impl crate::lexical::search::searcher::LexicalSearcher for InvertedIndexSearcher
         InvertedIndexSearcher::search(self, request)
     }
 
-    fn count(&self, query: Box<dyn Query>) -> Result<u64> {
+    fn count(&self, query: crate::lexical::types::LexicalSearchQuery) -> Result<u64> {
         InvertedIndexSearcher::count(self, query)
     }
 }

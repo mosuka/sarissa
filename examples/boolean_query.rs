@@ -1,8 +1,9 @@
 //! BooleanQuery example - demonstrates complex boolean logic with AND, OR, NOT operations.
 
+use std::sync::Arc;
+
 use tempfile::TempDir;
 
-use std::sync::Arc;
 use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
@@ -14,6 +15,7 @@ use yatagarasu::lexical::index::{InvertedIndexConfig, LexicalIndexConfig, Lexica
 use yatagarasu::lexical::types::LexicalSearchRequest;
 use yatagarasu::query::boolean::BooleanQuery;
 use yatagarasu::query::phrase::PhraseQuery;
+use yatagarasu::query::query::Query;
 use yatagarasu::query::range::NumericRangeQuery;
 use yatagarasu::query::term::TermQuery;
 use yatagarasu::storage::file::FileStorage;
@@ -123,7 +125,7 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("body", "python")));
     query.add_must(Box::new(TermQuery::new("body", "programming")));
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -147,7 +149,7 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(TermQuery::new("body", "python")));
     query.add_should(Box::new(TermQuery::new("body", "javascript")));
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -171,7 +173,7 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_must(Box::new(TermQuery::new("category", "programming")));
     query.add_must_not(Box::new(TermQuery::new("body", "javascript")));
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -204,7 +206,7 @@ fn main() -> Result<()> {
         None,
         Some(50.0),
     )));
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -242,7 +244,7 @@ fn main() -> Result<()> {
         "body",
         vec!["machine".to_string(), "learning".to_string()],
     )));
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -271,7 +273,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("tags", "advanced")));
     query.add_must(Box::new(language_query));
 
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -299,7 +301,7 @@ fn main() -> Result<()> {
         Some(60.0),
     )));
     query.add_must_not(Box::new(TermQuery::new("body", "design")));
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -334,7 +336,7 @@ fn main() -> Result<()> {
         Some(4.5),
         None,
     )));
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -389,7 +391,8 @@ fn main() -> Result<()> {
         None,
     )));
 
-    let request = LexicalSearchRequest::new(Box::new(main_query)).load_documents(true);
+    let request =
+        LexicalSearchRequest::new(Box::new(main_query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -448,7 +451,8 @@ fn main() -> Result<()> {
         Some(60.0),
     )));
 
-    let request = LexicalSearchRequest::new(Box::new(final_query)).load_documents(true);
+    let request =
+        LexicalSearchRequest::new(Box::new(final_query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -478,7 +482,7 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(TermQuery::new("category", "data-science")));
     query.add_should(Box::new(TermQuery::new("category", "web-development")));
-    let count = engine.count(Box::new(query))?;
+    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("   Count: {count} books");
 
     engine.close()?;

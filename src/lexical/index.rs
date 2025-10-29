@@ -222,7 +222,8 @@ pub struct InvertedIndexConfig {
     ///
     /// This analyzer is used to tokenize text during indexing and querying.
     /// Can be a PerFieldAnalyzer to use different analyzers for different fields.
-    #[serde(skip, default = "default_analyzer")]
+    #[serde(skip)]
+    #[serde(default = "default_analyzer")]
     pub analyzer: Arc<dyn Analyzer>,
 }
 

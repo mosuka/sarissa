@@ -1,14 +1,16 @@
 //! GeoQuery example - demonstrates geographic location-based searches.
 
+use std::sync::Arc;
+
 use tempfile::TempDir;
 
-use std::sync::Arc;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
 use yatagarasu::lexical::types::LexicalSearchRequest;
 use yatagarasu::query::geo::GeoQuery;
+use yatagarasu::query::query::Query;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
 
@@ -114,7 +116,7 @@ fn main() -> Result<()> {
     // Example 1: Find locations within radius of Times Square, NYC
     println!("1. Locations within 5km of Times Square (40.7580° N, 73.9855° W):");
     let query = GeoQuery::within_radius("location", 40.7580, -73.9855, 5.0)?;
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -142,7 +144,7 @@ fn main() -> Result<()> {
     // Example 2: Find locations within radius of downtown San Francisco
     println!("\n2. Locations within 10km of downtown San Francisco (37.7749° N, 122.4194° W):");
     let query = GeoQuery::within_radius("location", 37.7749, -122.4194, 10.0)?;
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -171,7 +173,7 @@ fn main() -> Result<()> {
     println!("\n3. Locations within bounding box of Los Angeles area:");
     println!("   (33.9° N, 118.6° W) to (34.3° N, 118.1° W)");
     let query = GeoQuery::within_bounding_box("location", 33.9, -118.6, 34.3, -118.1)?;
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -199,7 +201,7 @@ fn main() -> Result<()> {
     // Example 4: Find locations within a large radius to include multiple cities
     println!("\n4. All West Coast locations within 1000km of San Francisco:");
     let query = GeoQuery::within_radius("location", 37.7749, -122.4194, 1000.0)?;
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -227,7 +229,7 @@ fn main() -> Result<()> {
     // Example 5: Find locations within radius of Seattle
     println!("\n5. Locations within 2km of downtown Seattle (47.6062° N, 122.3321° W):");
     let query = GeoQuery::within_radius("location", 47.6062, -122.3321, 2.0)?;
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -255,7 +257,7 @@ fn main() -> Result<()> {
     // Example 6: Find locations within a tight radius (should find few/no results)
     println!("\n6. Locations within 1km of a specific point in the ocean:");
     let query = GeoQuery::within_radius("location", 36.0, -125.0, 1.0)?; // Pacific Ocean
-    let request = LexicalSearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -264,7 +266,7 @@ fn main() -> Result<()> {
     println!("\n7. All locations within US continental bounding box:");
     println!("   (25° N, 125° W) to (49° N, 66° W)");
     let query = GeoQuery::within_bounding_box("location", 25.0, -125.0, 49.0, -66.0)?;
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -292,7 +294,7 @@ fn main() -> Result<()> {
     // Example 8: Count locations within a specific area
     println!("\n8. Counting locations within 50km of Los Angeles center:");
     let query = GeoQuery::within_radius("location", 34.0522, -118.2437, 50.0)?;
-    let count = engine.count(Box::new(query))?;
+    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("   Count: {count} locations");
 
     engine.close()?;

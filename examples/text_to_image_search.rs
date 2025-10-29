@@ -17,8 +17,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-
 use std::sync::Arc;
+
 use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use yatagarasu::embedding::image_embedder::ImageEmbedder;
 use yatagarasu::embedding::text_embedder::TextEmbedder;

@@ -4,9 +4,10 @@
 //! supporting both CSV and JSONL formats with various features including GeoPoint support.
 
 use std::io::Write;
+use std::sync::Arc;
+
 use tempfile::{NamedTempFile, TempDir};
 
-use std::sync::Arc;
 use yatagarasu::document::converter::{
     DocumentConverter, csv::CsvDocumentConverter, jsonl::JsonlDocumentConverter,
 };

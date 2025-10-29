@@ -10,6 +10,7 @@ use std::sync::{Arc, RwLock};
 use ahash::AHashMap;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
@@ -21,7 +22,7 @@ use crate::storage::Storage;
 use crate::storage::structured::StructReader;
 
 /// Advanced index reader configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct InvertedIndexReaderConfig {
     /// Maximum memory for caching (in bytes).
     pub max_cache_memory: usize,
@@ -37,6 +38,25 @@ pub struct InvertedIndexReaderConfig {
 
     /// Maximum number of cached terms per field.
     pub max_cached_terms_per_field: usize,
+
+    /// Analyzer for query term analysis.
+    pub analyzer: Arc<dyn Analyzer>,
+}
+
+impl std::fmt::Debug for InvertedIndexReaderConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InvertedIndexReaderConfig")
+            .field("max_cache_memory", &self.max_cache_memory)
+            .field("enable_term_cache", &self.enable_term_cache)
+            .field("enable_posting_cache", &self.enable_posting_cache)
+            .field("preload_segments", &self.preload_segments)
+            .field(
+                "max_cached_terms_per_field",
+                &self.max_cached_terms_per_field,
+            )
+            .field("analyzer", &self.analyzer.name())
+            .finish()
+    }
 }
 
 impl Default for InvertedIndexReaderConfig {
@@ -47,6 +67,9 @@ impl Default for InvertedIndexReaderConfig {
             enable_posting_cache: true,
             preload_segments: false,
             max_cached_terms_per_field: 10000,
+            analyzer: Arc::new(
+                StandardAnalyzer::new().expect("StandardAnalyzer should be creatable"),
+            ),
         }
     }
 }
@@ -836,7 +859,6 @@ pub struct InvertedIndexReader {
     cache_manager: Arc<CacheManager>,
 
     /// Reader configuration.
-    #[allow(dead_code)]
     config: InvertedIndexReaderConfig,
 
     /// Whether the reader is closed.
@@ -880,6 +902,11 @@ impl InvertedIndexReader {
     /// Get cache statistics.
     pub fn cache_stats(&self) -> CacheStats {
         self.cache_manager.stats()
+    }
+
+    /// Get the analyzer from configuration.
+    pub fn analyzer(&self) -> &Arc<dyn Analyzer> {
+        &self.config.analyzer
     }
 
     /// Check if the reader is closed.

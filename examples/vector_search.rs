@@ -13,6 +13,7 @@
 
 #[cfg(feature = "embeddings-candle")]
 use std::sync::Arc;
+
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(feature = "embeddings-candle")]

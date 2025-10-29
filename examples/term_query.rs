@@ -1,13 +1,15 @@
 //! TermQuery example - demonstrates single term exact matching search.
 
+use std::sync::Arc;
+
 use tempfile::TempDir;
 
-use std::sync::Arc;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
 use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::query::query::Query;
 use yatagarasu::query::term::TermQuery;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
@@ -85,7 +87,7 @@ fn main() -> Result<()> {
     // Example 1: Search for exact term in title field
     println!("1. Searching for 'Rust' in title field:");
     let query = TermQuery::new("title", "Rust");
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -107,7 +109,7 @@ fn main() -> Result<()> {
     // Example 2: Search for exact term in body field
     println!("\n2. Searching for 'language' in body field:");
     let query = TermQuery::new("body", "language");
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -129,7 +131,7 @@ fn main() -> Result<()> {
     // Example 3: Search for exact term in category field
     println!("\n3. Searching for 'programming' in category field:");
     let query = TermQuery::new("category", "programming");
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -151,7 +153,7 @@ fn main() -> Result<()> {
     // Example 4: Search for non-existent term
     println!("\n4. Searching for non-existent term 'golang':");
     let query = TermQuery::new("title", "golang");
-    let request = LexicalSearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -159,7 +161,7 @@ fn main() -> Result<()> {
     // Example 5: Case sensitivity demonstration
     println!("\n5. Case sensitivity - searching for 'rust' (lowercase):");
     let query = TermQuery::new("title", "rust");
-    let request = LexicalSearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -168,7 +170,7 @@ fn main() -> Result<()> {
     // Example 6: Author exact match
     println!("\n6. Searching for exact author 'John Smith':");
     let query = TermQuery::new("author", "John Smith");
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -196,7 +198,7 @@ fn main() -> Result<()> {
     // Example 7: Count matching documents
     println!("\n7. Counting documents containing 'programming':");
     let query = TermQuery::new("body", "programming");
-    let count = engine.count(Box::new(query))?;
+    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("   Count: {count} documents");
 
     engine.close()?;

@@ -44,9 +44,8 @@
 //! engine.add_document(doc).unwrap();
 //! engine.commit().unwrap();
 //!
-//! // Search
-//! let query = Box::new(TermQuery::new("title", "hello"));
-//! let request = LexicalSearchRequest::new(query);
+//! // Search using DSL string
+//! let request = LexicalSearchRequest::new("title:hello");
 //! let results = engine.search(request).unwrap();
 //! ```
 
@@ -60,10 +59,9 @@ use crate::lexical::index::{InvertedIndexStats, LexicalIndex};
 use crate::lexical::reader::IndexReader;
 use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::search::searcher::inverted_index::InvertedIndexSearcher;
-use crate::lexical::types::LexicalSearchRequest;
+use crate::lexical::types::{LexicalSearchQuery, LexicalSearchRequest};
 use crate::lexical::writer::IndexWriter;
 use crate::query::SearchResults;
-use crate::query::query::Query;
 use crate::storage::Storage;
 
 /// A high-level lexical search engine that provides both indexing and searching capabilities.
@@ -110,9 +108,8 @@ use crate::storage::Storage;
 /// engine.add_document(doc).unwrap();
 /// engine.commit().unwrap();
 ///
-/// // Search
-/// let query = Box::new(TermQuery::new("title", "rust"));
-/// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
+/// // Search using DSL string
+/// let results = engine.search(LexicalSearchRequest::new("title:rust")).unwrap();
 /// ```
 pub struct LexicalEngine {
     /// The underlying lexical index.
@@ -482,8 +479,8 @@ impl LexicalEngine {
     /// # engine.add_document(doc).unwrap();
     /// # engine.commit().unwrap();
     ///
-    /// let query = Box::new(TermQuery::new("title", "hello"));
-    /// let request = LexicalSearchRequest::new(query)
+    /// // Using DSL string
+    /// let request = LexicalSearchRequest::new("title:hello")
     ///     .max_docs(10)
     ///     .min_score(0.5);
     /// let results = engine.search(request).unwrap();
@@ -522,9 +519,32 @@ impl LexicalEngine {
     /// Count documents matching the query.
     ///
     /// Uses a cached searcher for improved performance.
-    pub fn count(&self, query: Box<dyn Query>) -> Result<u64> {
+    ///
+    /// Accepts:
+    /// - `&str`: DSL query string
+    /// - `String`: DSL query string
+    /// - `Box<dyn Query>`: Query object
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use yatagarasu::lexical::engine::LexicalEngine;
+    /// # use yatagarasu::lexical::index::LexicalIndexFactory;
+    /// # use yatagarasu::lexical::index::LexicalIndexConfig;
+    /// # use yatagarasu::storage::memory::MemoryStorage;
+    /// # use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// # use std::sync::Arc;
+    /// # let config = LexicalIndexConfig::default();
+    /// # let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    /// # let index = LexicalIndexFactory::create(storage, config).unwrap();
+    /// # let engine = LexicalEngine::new(index).unwrap();
+    /// // Using DSL string
+    /// let count = engine.count("title:hello").unwrap();
+    /// println!("Found {} documents", count);
+    /// ```
+    pub fn count(&self, query: impl Into<LexicalSearchQuery>) -> Result<u64> {
         let searcher = self.get_or_create_searcher()?;
-        searcher.count(query)
+        searcher.count(query.into())
     }
 
     /// Close the search engine.
@@ -548,6 +568,7 @@ impl LexicalEngine {
 mod tests {
     use super::*;
     use crate::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    use crate::query::query::Query;
     use crate::query::term::TermQuery;
     use crate::storage::file::{FileStorage, FileStorageConfig};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
@@ -592,7 +613,7 @@ mod tests {
         engine.commit().unwrap();
 
         // Search for documents
-        let query = Box::new(TermQuery::new("title", "Test"));
+        let query = Box::new(TermQuery::new("title", "Test")) as Box<dyn Query>;
         let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
 
@@ -683,7 +704,7 @@ mod tests {
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
-        let query = Box::new(TermQuery::new("title", "hello"));
+        let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
         let request = LexicalSearchRequest::new(query);
         let results = engine.search(request).unwrap();
 
@@ -712,7 +733,7 @@ mod tests {
         engine.commit().unwrap();
 
         // Search for documents
-        let query = Box::new(TermQuery::new("title", "Hello"));
+        let query = Box::new(TermQuery::new("title", "Hello")) as Box<dyn Query>;
         let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
 
@@ -733,7 +754,7 @@ mod tests {
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
-        let query = Box::new(TermQuery::new("title", "hello"));
+        let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
         let count = engine.count(query).unwrap();
 
         // Should return 0 for empty index
@@ -760,7 +781,7 @@ mod tests {
         engine.refresh().unwrap();
 
         // Search should still work
-        let query = Box::new(TermQuery::new("title", "Test"));
+        let query = Box::new(TermQuery::new("title", "Test")) as Box<dyn Query>;
         let request = LexicalSearchRequest::new(query);
         let _results = engine.search(request).unwrap();
         // hits.len() is usize, so >= 0 check is redundant
@@ -812,7 +833,7 @@ mod tests {
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let engine = LexicalEngine::new(index).unwrap();
 
-        let query = Box::new(TermQuery::new("title", "hello"));
+        let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
         let request = LexicalSearchRequest::new(query)
             .max_docs(5)
             .min_score(0.5)
