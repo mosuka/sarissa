@@ -3,10 +3,14 @@
 use tempfile::TempDir;
 
 use std::sync::Arc;
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::index::{InvertedIndexConfig, LexicalIndexConfig, LexicalIndexFactory};
 use yatagarasu::lexical::types::LexicalSearchRequest;
 use yatagarasu::query::boolean::BooleanQuery;
 use yatagarasu::query::phrase::PhraseQuery;
@@ -22,8 +26,20 @@ fn main() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
     println!("Creating index in: {:?}", temp_dir.path());
 
+    // Configure PerFieldAnalyzer
+    // - category field uses KeywordAnalyzer (treats "web-development" as single token)
+    // - other fields use StandardAnalyzer (default tokenization)
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
+
+    // Create index config with custom analyzer
+    let mut inverted_config = InvertedIndexConfig::default();
+    inverted_config.analyzer = Arc::new(per_field_analyzer);
+    let config = LexicalIndexConfig::Inverted(inverted_config);
+
     // Create a search engine
-    let config = LexicalIndexConfig::default();
     let storage = Arc::new(FileStorage::new(
         temp_dir.path(),
         FileStorageConfig::new(temp_dir.path()),

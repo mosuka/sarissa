@@ -4,6 +4,7 @@
 //! - `InvertedIndex`: The index structure implementing the `Index` trait
 //! - `InvertedIndexWriter`: The writer implementing the `IndexWriter` trait
 
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,17 +13,21 @@ use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
+use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::lexical::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::doc_values::DocValuesWriter;
+use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
 use crate::lexical::index::{InvertedIndexConfig, InvertedIndexStats, SegmentInfo};
 use crate::lexical::posting::{InvertedIndex as PostingInvertedIndex, Posting};
 use crate::lexical::reader::IndexReader;
 use crate::lexical::writer::IndexWriter;
 use crate::storage::Storage;
+use crate::storage::file::{FileStorage, FileStorageConfig};
 use crate::storage::structured::StructWriter;
 
 /// Metadata about an inverted index.
@@ -68,7 +73,6 @@ pub struct InvertedIndex {
     storage: Arc<dyn Storage>,
 
     /// Inverted index specific configuration.
-    #[allow(dead_code)]
     config: InvertedIndexConfig,
 
     /// Whether the index is closed.
@@ -112,8 +116,6 @@ impl InvertedIndex {
 
     /// Create an index in a directory.
     pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: InvertedIndexConfig) -> Result<Self> {
-        use crate::storage::file::{FileStorage, FileStorageConfig};
-
         let storage_config = FileStorageConfig::new(&dir);
         let storage = Arc::new(FileStorage::new(&dir, storage_config)?);
         Self::create(storage, config)
@@ -121,8 +123,6 @@ impl InvertedIndex {
 
     /// Open an index from a directory.
     pub fn open_dir<P: AsRef<Path>>(dir: P, config: InvertedIndexConfig) -> Result<Self> {
-        use crate::storage::file::{FileStorage, FileStorageConfig};
-
         let storage_config = FileStorageConfig::new(&dir);
         let storage = Arc::new(FileStorage::new(&dir, storage_config)?);
         Self::open(storage, config)
@@ -144,7 +144,7 @@ impl InvertedIndex {
     fn read_metadata(storage: &dyn Storage) -> Result<IndexMetadata> {
         let mut input = storage.open_input("metadata.json")?;
         let mut metadata_json = String::new();
-        std::io::Read::read_to_string(&mut input, &mut metadata_json)?;
+        Read::read_to_string(&mut input, &mut metadata_json)?;
 
         let metadata: IndexMetadata = serde_json::from_str(&metadata_json)
             .map_err(|e| SageError::index(format!("Failed to deserialize metadata: {e}")))?;
@@ -154,8 +154,8 @@ impl InvertedIndex {
 
     /// Update metadata and write to storage.
     fn update_metadata(&mut self) -> Result<()> {
-        self.metadata.modified = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        self.metadata.modified = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
 
@@ -187,7 +187,7 @@ impl InvertedIndex {
             if file.starts_with("segment_") && file.ends_with(".meta") {
                 let mut input = self.storage.open_input(file)?;
                 let mut data = Vec::new();
-                std::io::Read::read_to_end(&mut input, &mut data)?;
+                Read::read_to_end(&mut input, &mut data)?;
 
                 let segment_info: SegmentInfo = serde_json::from_slice(&data).map_err(|e| {
                     SageError::index(format!("Failed to parse segment metadata: {e}"))
@@ -209,8 +209,6 @@ impl InvertedIndex {
 
     /// Delete an index from the given directory.
     pub fn delete_in_dir<P: AsRef<Path>>(dir: P) -> Result<()> {
-        use crate::storage::file::{FileStorage, FileStorageConfig};
-
         let storage_config = FileStorageConfig::new(&dir);
         let storage = FileStorage::new(&dir, storage_config)?;
 
@@ -232,10 +230,6 @@ impl crate::lexical::index::LexicalIndex for InvertedIndex {
     fn reader(&self) -> Result<Box<dyn IndexReader>> {
         self.check_closed()?;
 
-        use crate::lexical::index::reader::inverted::{
-            InvertedIndexReader, InvertedIndexReaderConfig,
-        };
-
         let segments = self.load_segments()?;
         let reader = InvertedIndexReader::new(
             segments,
@@ -248,8 +242,12 @@ impl crate::lexical::index::LexicalIndex for InvertedIndex {
     fn writer(&self) -> Result<Box<dyn IndexWriter>> {
         self.check_closed()?;
 
-        let writer =
-            InvertedIndexWriter::new(self.storage.clone(), LexicalIndexWriterConfig::default())?;
+        // Use analyzer from index config
+        let writer_config = LexicalIndexWriterConfig {
+            analyzer: self.config.analyzer.clone(),
+            ..Default::default()
+        };
+        let writer = InvertedIndexWriter::new(self.storage.clone(), writer_config)?;
         Ok(Box::new(writer))
     }
 
@@ -335,9 +333,7 @@ impl Default for LexicalIndexWriterConfig {
             segment_prefix: "segment".to_string(),
             store_term_positions: true,
             optimize_segments: false,
-            analyzer: Arc::new(
-                crate::analysis::analyzer::standard::StandardAnalyzer::new().unwrap(),
-            ),
+            analyzer: Arc::new(StandardAnalyzer::new().unwrap()),
         }
     }
 }
@@ -550,8 +546,6 @@ impl InvertedIndexWriter {
             match field_value {
                 FieldValue::Text(text) => {
                     // Use analyzer from config (can be PerFieldAnalyzer for field-specific analysis)
-                    use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
-
                     let tokens = if let Some(per_field) = self
                         .config
                         .analyzer
@@ -1100,7 +1094,7 @@ impl Drop for InvertedIndexWriter {
 }
 
 // Implement IndexWriter trait for compatibility with existing code
-impl crate::lexical::writer::IndexWriter for InvertedIndexWriter {
+impl IndexWriter for InvertedIndexWriter {
     fn add_document(&mut self, doc: Document) -> Result<()> {
         InvertedIndexWriter::add_document(self, doc)
     }
