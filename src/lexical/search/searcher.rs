@@ -4,9 +4,8 @@
 //! queries and collecting results from inverted indexes.
 
 use crate::error::Result;
-use crate::lexical::types::LexicalSearchRequest;
+use crate::lexical::types::{LexicalSearchQuery, LexicalSearchRequest};
 use crate::query::SearchResults;
-use crate::query::query::Query;
 
 pub mod inverted_index;
 
@@ -25,7 +24,7 @@ pub trait LexicalSearcher: Send + Sync {
     ///
     /// This method returns the total number of documents that match the query
     /// without actually retrieving the documents.
-    fn count(&self, query: Box<dyn Query>) -> Result<u64>;
+    fn count(&self, query: LexicalSearchQuery) -> Result<u64>;
 
     /// Warm up the searcher (pre-load data, caches, etc.).
     ///

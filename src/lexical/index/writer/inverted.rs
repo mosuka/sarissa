@@ -22,7 +22,7 @@ use crate::error::{Result, SageError};
 use crate::lexical::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::doc_values::DocValuesWriter;
 use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
-use crate::lexical::index::{InvertedIndexConfig, InvertedIndexStats, SegmentInfo};
+use crate::lexical::index::{InvertedIndexConfig, InvertedIndexStats, LexicalIndex, SegmentInfo};
 use crate::lexical::posting::{InvertedIndex as PostingInvertedIndex, Posting};
 use crate::lexical::reader::IndexReader;
 use crate::lexical::writer::IndexWriter;
@@ -226,16 +226,19 @@ impl InvertedIndex {
     }
 }
 
-impl crate::lexical::index::LexicalIndex for InvertedIndex {
+impl LexicalIndex for InvertedIndex {
     fn reader(&self) -> Result<Box<dyn IndexReader>> {
         self.check_closed()?;
 
         let segments = self.load_segments()?;
-        let reader = InvertedIndexReader::new(
-            segments,
-            self.storage.clone(),
-            InvertedIndexReaderConfig::default(),
-        )?;
+
+        // Use analyzer from index config
+        let reader_config = InvertedIndexReaderConfig {
+            analyzer: self.config.analyzer.clone(),
+            ..InvertedIndexReaderConfig::default()
+        };
+
+        let reader = InvertedIndexReader::new(segments, self.storage.clone(), reader_config)?;
         Ok(Box::new(reader))
     }
 

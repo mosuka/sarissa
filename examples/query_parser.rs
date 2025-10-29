@@ -10,9 +10,10 @@
 //! - Grouped queries
 //! - Actual search engine integration
 
+use std::sync::Arc;
+
 use tempfile::TempDir;
 
-use std::sync::Arc;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;

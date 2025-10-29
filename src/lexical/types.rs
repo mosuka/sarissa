@@ -3,6 +3,8 @@
 //! This module contains common type definitions used across the lexical search module,
 //! mirroring the structure of vector::types for consistency.
 
+use std::sync::Arc;
+
 use crate::query::query::Query;
 
 /// Sort order for search results.
@@ -59,29 +61,95 @@ impl Default for LexicalSearchParams {
     }
 }
 
+/// Query representation that can be either a DSL string or a Query object.
+#[derive(Debug)]
+pub enum LexicalSearchQuery {
+    /// Query specified as a DSL string (will be parsed at search time).
+    Dsl(String),
+    /// Query specified as a Query object.
+    Obj(Box<dyn Query>),
+}
+
 /// Search request containing query and configuration.
 #[derive(Debug)]
 pub struct LexicalSearchRequest {
     /// The query to execute.
-    pub query: Box<dyn Query>,
+    pub query: LexicalSearchQuery,
     /// Search configuration.
     pub params: LexicalSearchParams,
+}
+
+impl Clone for LexicalSearchQuery {
+    fn clone(&self) -> Self {
+        match self {
+            LexicalSearchQuery::Dsl(s) => LexicalSearchQuery::Dsl(s.clone()),
+            LexicalSearchQuery::Obj(q) => LexicalSearchQuery::Obj(q.clone_box()),
+        }
+    }
 }
 
 impl Clone for LexicalSearchRequest {
     fn clone(&self) -> Self {
         LexicalSearchRequest {
-            query: self.query.clone_box(),
+            query: self.query.clone(),
             params: self.params.clone(),
         }
     }
 }
 
+impl From<String> for LexicalSearchQuery {
+    fn from(s: String) -> Self {
+        LexicalSearchQuery::Dsl(s)
+    }
+}
+
+impl From<&str> for LexicalSearchQuery {
+    fn from(s: &str) -> Self {
+        LexicalSearchQuery::Dsl(s.to_string())
+    }
+}
+
+impl From<Box<dyn Query>> for LexicalSearchQuery {
+    fn from(q: Box<dyn Query>) -> Self {
+        LexicalSearchQuery::Obj(q)
+    }
+}
+
+impl LexicalSearchQuery {
+    /// Parse DSL string into Query object using the given analyzer.
+    pub fn into_query(
+        self,
+        analyzer: &Arc<dyn crate::analysis::analyzer::analyzer::Analyzer>,
+    ) -> crate::error::Result<Box<dyn Query>> {
+        match self {
+            LexicalSearchQuery::Dsl(dsl_string) => {
+                let parser =
+                    crate::query::parser::QueryParser::new().with_analyzer(analyzer.clone());
+                parser.parse(&dsl_string)
+            }
+            LexicalSearchQuery::Obj(query) => Ok(query),
+        }
+    }
+
+    /// Extract the Query object, panics if this is a DSL string.
+    pub fn unwrap_query(self) -> Box<dyn Query> {
+        match self {
+            LexicalSearchQuery::Obj(query) => query,
+            LexicalSearchQuery::Dsl(_) => panic!("Expected Query object, found DSL string"),
+        }
+    }
+}
+
 impl LexicalSearchRequest {
-    /// Create a new search request.
-    pub fn new(query: Box<dyn Query>) -> Self {
+    /// Create a new search request from any query type.
+    ///
+    /// Accepts:
+    /// - `&str`: DSL query string
+    /// - `String`: DSL query string
+    /// - `Box<dyn Query>`: Query object
+    pub fn new(query: impl Into<LexicalSearchQuery>) -> Self {
         LexicalSearchRequest {
-            query,
+            query: query.into(),
             params: LexicalSearchParams::default(),
         }
     }

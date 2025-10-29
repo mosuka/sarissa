@@ -201,13 +201,14 @@ impl TextEmbedder for OpenAITextEmbedder {
             .json(&request)
             .send()
             .await
-            .map_err(|e| SageError::InvalidOperation(format!("OpenAI API request failed: {}", e)))?;
+            .map_err(|e| {
+                SageError::InvalidOperation(format!("OpenAI API request failed: {}", e))
+            })?;
 
         let status = http_response.status();
-        let response_text = http_response
-            .text()
-            .await
-            .map_err(|e| SageError::InvalidOperation(format!("Failed to read response text: {}", e)))?;
+        let response_text = http_response.text().await.map_err(|e| {
+            SageError::InvalidOperation(format!("Failed to read response text: {}", e))
+        })?;
 
         if !status.is_success() {
             return Err(SageError::InvalidOperation(format!(
@@ -216,13 +217,12 @@ impl TextEmbedder for OpenAITextEmbedder {
             )));
         }
 
-        let response: EmbeddingResponse = serde_json::from_str(&response_text)
-            .map_err(|e| {
-                SageError::InvalidOperation(format!(
-                    "Failed to parse OpenAI response: {}. Response text: {}",
-                    e, response_text
-                ))
-            })?;
+        let response: EmbeddingResponse = serde_json::from_str(&response_text).map_err(|e| {
+            SageError::InvalidOperation(format!(
+                "Failed to parse OpenAI response: {}. Response text: {}",
+                e, response_text
+            ))
+        })?;
 
         let embedding = response
             .data
@@ -252,13 +252,14 @@ impl TextEmbedder for OpenAITextEmbedder {
             .json(&request)
             .send()
             .await
-            .map_err(|e| SageError::InvalidOperation(format!("OpenAI API request failed: {}", e)))?;
+            .map_err(|e| {
+                SageError::InvalidOperation(format!("OpenAI API request failed: {}", e))
+            })?;
 
         let status = http_response.status();
-        let response_text = http_response
-            .text()
-            .await
-            .map_err(|e| SageError::InvalidOperation(format!("Failed to read response text: {}", e)))?;
+        let response_text = http_response.text().await.map_err(|e| {
+            SageError::InvalidOperation(format!("Failed to read response text: {}", e))
+        })?;
 
         if !status.is_success() {
             return Err(SageError::InvalidOperation(format!(
@@ -267,13 +268,12 @@ impl TextEmbedder for OpenAITextEmbedder {
             )));
         }
 
-        let response: EmbeddingResponse = serde_json::from_str(&response_text)
-            .map_err(|e| {
-                SageError::InvalidOperation(format!(
-                    "Failed to parse OpenAI response: {}. Response text: {}",
-                    e, response_text
-                ))
-            })?;
+        let response: EmbeddingResponse = serde_json::from_str(&response_text).map_err(|e| {
+            SageError::InvalidOperation(format!(
+                "Failed to parse OpenAI response: {}. Response text: {}",
+                e, response_text
+            ))
+        })?;
 
         Ok(response
             .data

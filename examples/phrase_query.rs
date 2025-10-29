@@ -1,14 +1,16 @@
 //! PhraseQuery example - demonstrates phrase search for exact word sequences.
 
+use std::sync::Arc;
+
 use tempfile::TempDir;
 
-use std::sync::Arc;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
 use yatagarasu::lexical::types::LexicalSearchRequest;
 use yatagarasu::query::phrase::PhraseQuery;
+use yatagarasu::query::query::Query;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
 
@@ -70,7 +72,7 @@ fn main() -> Result<()> {
     // Example 1: Simple two-word phrase
     println!("1. Searching for phrase 'machine learning' in body:");
     let query = PhraseQuery::new("body", vec!["machine".to_string(), "learning".to_string()]);
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -99,7 +101,7 @@ fn main() -> Result<()> {
             "networks".to_string(),
         ],
     );
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -121,7 +123,7 @@ fn main() -> Result<()> {
     // Example 3: Phrase in title field
     println!("\n3. Searching for phrase 'deep learning' in title:");
     let query = PhraseQuery::new("title", vec!["deep".to_string(), "learning".to_string()]);
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -146,7 +148,7 @@ fn main() -> Result<()> {
         "description",
         vec!["data".to_string(), "science".to_string()],
     );
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -168,7 +170,7 @@ fn main() -> Result<()> {
     // Example 5: Non-existent phrase
     println!("\n5. Searching for non-existent phrase 'quantum computing':");
     let query = PhraseQuery::new("body", vec!["quantum".to_string(), "computing".to_string()]);
-    let request = LexicalSearchRequest::new(Box::new(query));
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -176,7 +178,7 @@ fn main() -> Result<()> {
     // Example 6: Single word phrase (equivalent to TermQuery)
     println!("\n6. Searching for single word phrase 'intelligence' in body:");
     let query = PhraseQuery::new("body", vec!["intelligence".to_string()]);
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -206,7 +208,7 @@ fn main() -> Result<()> {
             "data".to_string(),
         ],
     );
-    let request = LexicalSearchRequest::new(Box::new(query)).load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
     let results = engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
@@ -228,7 +230,7 @@ fn main() -> Result<()> {
     // Example 8: Count phrase matches
     println!("\n8. Counting documents with phrase 'computer vision':");
     let query = PhraseQuery::new("body", vec!["computer".to_string(), "vision".to_string()]);
-    let count = engine.count(Box::new(query))?;
+    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("   Count: {count} documents");
 
     engine.close()?;
