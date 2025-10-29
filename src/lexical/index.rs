@@ -20,7 +20,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::analyzer::analyzer::Analyzer;
+use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::error::Result;
+use crate::lexical::index::writer::inverted::InvertedIndex;
 use crate::lexical::reader::IndexReader;
 use crate::lexical::writer::IndexWriter;
 use crate::storage::Storage;
@@ -177,7 +180,7 @@ impl LexicalIndexConfig {
 ///
 /// These settings control the behavior of the inverted index implementation,
 /// including segment management, buffering, compression, and term storage options.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InvertedIndexConfig {
     /// Maximum number of documents per segment.
     ///
@@ -214,6 +217,17 @@ pub struct InvertedIndexConfig {
     /// When the number of segments exceeds this threshold, a merge operation
     /// will be triggered to consolidate them.
     pub max_segments: u32,
+
+    /// Analyzer for text fields.
+    ///
+    /// This analyzer is used to tokenize text during indexing and querying.
+    /// Can be a PerFieldAnalyzer to use different analyzers for different fields.
+    #[serde(skip, default = "default_analyzer")]
+    pub analyzer: Arc<dyn Analyzer>,
+}
+
+fn default_analyzer() -> Arc<dyn Analyzer> {
+    Arc::new(StandardAnalyzer::new().expect("StandardAnalyzer should be creatable"))
 }
 
 impl Default for InvertedIndexConfig {
@@ -225,7 +239,25 @@ impl Default for InvertedIndexConfig {
             store_term_vectors: false,
             merge_factor: 10,
             max_segments: 100,
+            analyzer: std::sync::Arc::new(
+                crate::analysis::analyzer::standard::StandardAnalyzer::new()
+                    .expect("StandardAnalyzer should be creatable"),
+            ),
         }
+    }
+}
+
+impl std::fmt::Debug for InvertedIndexConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InvertedIndexConfig")
+            .field("max_docs_per_segment", &self.max_docs_per_segment)
+            .field("write_buffer_size", &self.write_buffer_size)
+            .field("compress_stored_fields", &self.compress_stored_fields)
+            .field("store_term_vectors", &self.store_term_vectors)
+            .field("merge_factor", &self.merge_factor)
+            .field("max_segments", &self.max_segments)
+            .field("analyzer", &self.analyzer.name())
+            .finish()
     }
 }
 
@@ -296,7 +328,7 @@ impl LexicalIndexFactory {
     ) -> Result<Box<dyn LexicalIndex>> {
         match config {
             LexicalIndexConfig::Inverted(inverted_config) => {
-                let index = writer::inverted::InvertedIndex::create(storage, inverted_config)?;
+                let index = InvertedIndex::create(storage, inverted_config)?;
                 Ok(Box::new(index))
             } // Future implementations will be added here
         }
@@ -333,7 +365,7 @@ impl LexicalIndexFactory {
     ) -> Result<Box<dyn LexicalIndex>> {
         match config {
             LexicalIndexConfig::Inverted(inverted_config) => {
-                let index = writer::inverted::InvertedIndex::open(storage, inverted_config)?;
+                let index = InvertedIndex::open(storage, inverted_config)?;
                 Ok(Box::new(index))
             } // Future implementations will be added here
         }
