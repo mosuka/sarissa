@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::lexical::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
-use crate::lexical::index::reader::inverted::InvertedIndexReader;
+use crate::lexical::core::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
+use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
-use crate::lexical::terms::{TermDictionaryAccess, TermsEnum as _};
+use crate::lexical::core::terms::{TermDictionaryAccess, TermsEnum as _};
 use crate::query::matcher::Matcher;
 use crate::query::query::Query;
 use crate::query::scorer::Scorer;
@@ -568,7 +568,7 @@ mod tests {
 
     #[test]
     fn test_fuzzy_matcher() {
-        use crate::lexical::index::reader::inverted::{
+        use crate::lexical::index::inverted::reader::{
             InvertedIndexReader, InvertedIndexReaderConfig,
         };
         use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};

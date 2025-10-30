@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
-use crate::lexical::index::reader::inverted::InvertedIndexReader;
+use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
 use crate::lexical::types::{
     LexicalSearchParams, LexicalSearchQuery, LexicalSearchRequest, SortField, SortOrder,
@@ -517,7 +517,7 @@ impl InvertedIndexSearcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
+    use crate::lexical::index::inverted::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
     use crate::query::boolean::{BooleanQuery, BooleanQueryBuilder};
     use crate::query::term::TermQuery;
 

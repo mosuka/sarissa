@@ -11,10 +11,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
 use crate::error::{Result, SageError};
-use crate::lexical::index::deletion::DeletionManager;
-use crate::lexical::index::merge_engine::MergeEngine;
-use crate::lexical::index::merge_policy::MergePolicy;
-use crate::lexical::index::segment_manager::SegmentManager;
+use crate::lexical::index::maintenance::deletion::DeletionManager;
+use crate::lexical::index::segment::merge_engine::MergeEngine;
+use crate::lexical::index::segment::merge_policy::MergePolicy;
+use crate::lexical::index::segment::manager::SegmentManager;
 
 /// Type of background task.
 #[derive(Debug, Clone, PartialEq)]

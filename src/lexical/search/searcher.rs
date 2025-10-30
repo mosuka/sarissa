@@ -1,35 +1,16 @@
-//! Search execution implementations.
-//!
-//! This module provides various searcher implementations for executing
-//! queries and collecting results from inverted indexes.
+//! Searcher trait for lexical search execution.
 
 use crate::error::Result;
 use crate::lexical::types::{LexicalSearchQuery, LexicalSearchRequest};
 use crate::query::SearchResults;
 
-pub mod inverted_index;
-
-/// Trait for lexical searchers.
+/// Trait for lexical search implementations.
 ///
-/// This trait defines the interface for all lexical search implementations,
-/// similar to the VectorSearcher trait for vector search.
-pub trait LexicalSearcher: Send + Sync {
+/// This trait defines the interface for executing searches against lexical indexes.
+pub trait LexicalSearcher: Send + Sync + std::fmt::Debug {
     /// Execute a search with the given request.
-    ///
-    /// This method handles search operations including query execution,
-    /// scoring, and result collection based on the search request configuration.
     fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults>;
 
-    /// Count documents matching the given query.
-    ///
-    /// This method returns the total number of documents that match the query
-    /// without actually retrieving the documents.
+    /// Count the number of matching documents for a query.
     fn count(&self, query: LexicalSearchQuery) -> Result<u64>;
-
-    /// Warm up the searcher (pre-load data, caches, etc.).
-    ///
-    /// Default implementation does nothing.
-    fn warmup(&mut self) -> Result<()> {
-        Ok(())
-    }
 }

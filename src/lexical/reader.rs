@@ -3,7 +3,7 @@
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
-use crate::lexical::bkd_tree::SimpleBKDTree;
+use crate::lexical::core::bkd_tree::SimpleBKDTree;
 use crate::lexical::types::{FieldStatistics, FieldStats, ReaderTermInfo};
 
 /// Trait for index readers.

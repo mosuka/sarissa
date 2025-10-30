@@ -153,7 +153,7 @@ impl PostingMatcher {
         // Create a dummy iterator that's already exhausted
         let postings = vec![];
         let posting_iter = Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings),
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(postings),
         );
         PostingMatcher {
             posting_iter,
@@ -819,31 +819,31 @@ mod tests {
     #[test]
     fn test_posting_matcher() {
         let postings = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 0,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 1,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 2,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 3,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 4,
                 frequency: 1,
                 positions: Some(vec![]),
@@ -851,7 +851,7 @@ mod tests {
             },
         ];
         let posting_iter = Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings),
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(postings),
         );
         let mut matcher = PostingMatcher::new(posting_iter);
 
@@ -882,31 +882,31 @@ mod tests {
     fn test_conjunction_matcher() {
         // Create two posting matchers with overlapping documents
         let postings1 = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 0,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 2,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 4,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 6,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 8,
                 frequency: 1_u32,
                 positions: Some(vec![]),
@@ -914,41 +914,41 @@ mod tests {
             },
         ];
         let matcher1 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings1),
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(postings1),
         )));
 
         let postings2 = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 1,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 2,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 3,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 4,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 5,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 6,
                 frequency: 1_u32,
                 positions: Some(vec![]),
@@ -956,7 +956,7 @@ mod tests {
             },
         ];
         let matcher2 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings2),
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(postings2),
         )));
 
         let mut conjunction = ConjunctionMatcher::new(vec![matcher1, matcher2]);
@@ -979,37 +979,37 @@ mod tests {
     fn test_conjunction_not_matcher() {
         // Positive matcher: documents 0, 1, 2, 3, 4, 5
         let postings_pos = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 0,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 1,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 2,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 3,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 4,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 5,
                 frequency: 1,
                 positions: Some(vec![]),
@@ -1017,26 +1017,26 @@ mod tests {
             },
         ];
         let positive = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(
                 postings_pos,
             ),
         )));
 
         // Negative matcher: documents 1, 3, 5
         let postings_neg = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 1,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 3,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 5,
                 frequency: 1,
                 positions: Some(vec![]),
@@ -1044,7 +1044,7 @@ mod tests {
             },
         ];
         let negative = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(
                 postings_neg,
             ),
         )));
@@ -1069,19 +1069,19 @@ mod tests {
     fn test_not_matcher() {
         // Negative matcher: documents 1, 3, 5
         let postings_neg = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 1,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 3,
                 frequency: 1,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 5,
                 frequency: 1,
                 positions: Some(vec![]),
@@ -1089,7 +1089,7 @@ mod tests {
             },
         ];
         let negative = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(
                 postings_neg,
             ),
         )));
@@ -1124,19 +1124,19 @@ mod tests {
     fn test_conjunction_matcher_no_overlap() {
         // Create two posting matchers with no overlapping documents
         let postings1 = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 0,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 2,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 4,
                 frequency: 1_u32,
                 positions: Some(vec![]),
@@ -1144,23 +1144,23 @@ mod tests {
             },
         ];
         let matcher1 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings1),
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(postings1),
         )));
 
         let postings2 = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 1,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 3,
                 frequency: 1_u32,
                 positions: Some(vec![]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 5,
                 frequency: 1_u32,
                 positions: Some(vec![]),
@@ -1168,7 +1168,7 @@ mod tests {
             },
         ];
         let matcher2 = Box::new(PostingMatcher::new(Box::new(
-            crate::lexical::index::reader::inverted::InvertedIndexPostingIterator::new(postings2),
+            crate::lexical::index::inverted::reader::InvertedIndexPostingIterator::new(postings2),
         )));
 
         let conjunction = ConjunctionMatcher::new(vec![matcher1, matcher2]);
