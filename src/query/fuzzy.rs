@@ -5,7 +5,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::lexical::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
+use crate::lexical::index::reader::inverted::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
+use crate::lexical::terms::{TermDictionaryAccess, TermsEnum as _};
 use crate::query::matcher::Matcher;
 use crate::query::query::Query;
 use crate::query::scorer::Scorer;
@@ -116,10 +119,6 @@ impl FuzzyQuery {
     ///
     /// Returns a vector of FuzzyMatch results, sorted by similarity score.
     pub fn find_matches(&self, reader: &dyn IndexReader) -> Result<Vec<FuzzyMatch>> {
-        use crate::lexical::index::reader::inverted::InvertedIndexReader;
-        use crate::lexical::terms::{TermDictionaryAccess, TermsEnum as _};
-        use crate::lexical::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
-
         let mut matches = Vec::new();
 
         // Try to downcast to InvertedIndexReader and use Term Dictionary API
@@ -179,7 +178,6 @@ impl FuzzyQuery {
 
         Ok(matches)
     }
-
 
     /// Calculate similarity score based on edit distance.
     fn calculate_similarity_score(&self, edit_distance: u32) -> f32 {
@@ -556,60 +554,6 @@ mod tests {
         assert_eq!(query.calculate_similarity_score(1), 0.8); // 1 edit
         assert_eq!(query.calculate_similarity_score(2), 0.6); // 2 edits
         assert_eq!(query.calculate_similarity_score(3), 0.0); // Beyond max_edits
-    }
-
-    #[test]
-    fn test_fuzzy_edit_candidate_generation() {
-        let query = FuzzyQuery::new("field", "cat")
-            .max_edits(1)
-            .prefix_length(0);
-        let candidates = query.generate_edit_candidates_for_term("cat");
-
-        // Should include exact match
-        assert!(candidates.contains(&"cat".to_string()));
-
-        // Should include some 1-edit variations
-        assert!(candidates.len() > 1);
-
-        // Check specific expected candidates
-        assert!(candidates.contains(&"ca".to_string())); // deletion
-        assert!(candidates.contains(&"bat".to_string())); // substitution
-        assert!(candidates.contains(&"cast".to_string())); // insertion
-    }
-
-    #[test]
-    fn test_prefix_constraint() {
-        let query = FuzzyQuery::new("field", "search")
-            .max_edits(1)
-            .prefix_length(2);
-
-        // Should respect prefix "se"
-        assert!(query.respects_prefix("search"));
-        assert!(query.respects_prefix("searchy"));
-        assert!(query.respects_prefix("serach"));
-        assert!(!query.respects_prefix("research"));
-        assert!(!query.respects_prefix("asearch"));
-    }
-
-    #[test]
-    fn test_advanced_similarity_scoring() {
-        let query = FuzzyQuery::new("field", "search").max_edits(2);
-
-        // Exact match should score highest
-        let exact_score = query.calculate_similarity_score_advanced(0, "search");
-        assert_eq!(exact_score, 1.0);
-
-        // Single edit should score lower but still high
-        let single_edit_score = query.calculate_similarity_score_advanced(1, "serach");
-        assert!(single_edit_score > 0.7 && single_edit_score < 1.0);
-
-        // Double edit should score lower
-        let double_edit_score = query.calculate_similarity_score_advanced(2, "serch");
-        assert!(double_edit_score < single_edit_score);
-
-        // Beyond max edits should score 0
-        let beyond_max_score = query.calculate_similarity_score_advanced(3, "xyz");
-        assert_eq!(beyond_max_score, 0.0);
     }
 
     #[test]

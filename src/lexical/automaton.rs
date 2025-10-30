@@ -2,6 +2,8 @@
 //!
 //! This module provides Levenshtein automaton for efficient fuzzy matching.
 
+use crate::error::Result;
+use crate::lexical::terms::{TermStats, TermsEnum};
 use crate::spelling::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
 
 /// A simple Levenshtein automaton for fuzzy string matching.
@@ -55,8 +57,15 @@ impl LevenshteinAutomaton {
     pub fn matches(&self, candidate: &str) -> bool {
         // Check prefix requirement
         if self.prefix_length > 0 {
-            let pattern_prefix = self.pattern.chars().take(self.prefix_length).collect::<String>();
-            let candidate_prefix = candidate.chars().take(self.prefix_length).collect::<String>();
+            let pattern_prefix = self
+                .pattern
+                .chars()
+                .take(self.prefix_length)
+                .collect::<String>();
+            let candidate_prefix = candidate
+                .chars()
+                .take(self.prefix_length)
+                .collect::<String>();
 
             if pattern_prefix != candidate_prefix {
                 return false;
@@ -109,7 +118,7 @@ impl LevenshteinAutomaton {
 /// A terms enum that filters terms using an automaton.
 ///
 /// This wraps another TermsEnum and only yields terms that match the automaton.
-pub struct AutomatonTermsEnum<T: crate::lexical::terms::TermsEnum> {
+pub struct AutomatonTermsEnum<T: TermsEnum> {
     /// The underlying terms enum
     inner: T,
     /// The automaton to filter with
@@ -120,7 +129,7 @@ pub struct AutomatonTermsEnum<T: crate::lexical::terms::TermsEnum> {
     matches_found: usize,
 }
 
-impl<T: crate::lexical::terms::TermsEnum> AutomatonTermsEnum<T> {
+impl<T: TermsEnum> AutomatonTermsEnum<T> {
     /// Create a new automaton terms enum.
     pub fn new(inner: T, automaton: LevenshteinAutomaton) -> Self {
         AutomatonTermsEnum {
@@ -143,20 +152,20 @@ impl<T: crate::lexical::terms::TermsEnum> AutomatonTermsEnum<T> {
     }
 }
 
-impl<T: crate::lexical::terms::TermsEnum> crate::lexical::terms::TermsEnum for AutomatonTermsEnum<T> {
-    fn next(&mut self) -> crate::error::Result<Option<crate::lexical::terms::TermStats>> {
+impl<T: TermsEnum> TermsEnum for AutomatonTermsEnum<T> {
+    fn next(&mut self) -> Result<Option<TermStats>> {
         // Check if we've reached the max matches limit
-        if let Some(max) = self.max_matches {
-            if self.matches_found >= max {
-                return Ok(None);
-            }
+        if let Some(max) = self.max_matches
+            && self.matches_found >= max
+        {
+            return Ok(None);
         }
 
         // Seek to the initial position if we haven't started yet
-        if self.matches_found == 0 {
-            if let Some(seek_term) = self.automaton.initial_seek_term() {
-                self.inner.seek(&seek_term)?;
-            }
+        if self.matches_found == 0
+            && let Some(seek_term) = self.automaton.initial_seek_term()
+        {
+            self.inner.seek(&seek_term)?;
         }
 
         // Find the next matching term
@@ -168,26 +177,26 @@ impl<T: crate::lexical::terms::TermsEnum> crate::lexical::terms::TermsEnum for A
 
             // Optimization: if we've moved past possible matches, stop early
             // This works if the term dictionary is sorted
-            if let Some(prefix) = self.automaton.initial_seek_term() {
-                if !term_stats.term.starts_with(&prefix) {
-                    // We've moved past all terms with the required prefix
-                    return Ok(None);
-                }
+            if let Some(prefix) = self.automaton.initial_seek_term()
+                && !term_stats.term.starts_with(&prefix)
+            {
+                // We've moved past all terms with the required prefix
+                return Ok(None);
             }
         }
 
         Ok(None)
     }
 
-    fn seek(&mut self, target: &str) -> crate::error::Result<bool> {
+    fn seek(&mut self, target: &str) -> Result<bool> {
         self.inner.seek(target)
     }
 
-    fn seek_exact(&mut self, term: &str) -> crate::error::Result<bool> {
+    fn seek_exact(&mut self, term: &str) -> Result<bool> {
         self.inner.seek_exact(term)
     }
 
-    fn current(&self) -> Option<&crate::lexical::terms::TermStats> {
+    fn current(&self) -> Option<&TermStats> {
         self.inner.current()
     }
 }
@@ -200,22 +209,22 @@ mod tests {
     fn test_levenshtein_automaton() {
         let automaton = LevenshteinAutomaton::new("hello", 1, 0, true);
 
-        assert!(automaton.matches("hello"));  // exact match
-        assert!(automaton.matches("helo"));   // 1 deletion
-        assert!(automaton.matches("hallo"));  // 1 substitution
+        assert!(automaton.matches("hello")); // exact match
+        assert!(automaton.matches("helo")); // 1 deletion
+        assert!(automaton.matches("hallo")); // 1 substitution
         assert!(automaton.matches("helllo")); // 1 insertion
-        assert!(automaton.matches("ehllo"));  // 1 transposition
+        assert!(automaton.matches("ehllo")); // 1 transposition
 
         assert!(!automaton.matches("world")); // too different
-        assert!(!automaton.matches("helo")); // This should fail - wait, it should match (1 edit)
+        assert!(!automaton.matches("hi")); // too different (2 edits)
     }
 
     #[test]
     fn test_prefix_constraint() {
         let automaton = LevenshteinAutomaton::new("hello", 2, 2, true);
 
-        assert!(automaton.matches("hello"));  // exact match
-        assert!(automaton.matches("heLLo"));  // 2 edits, prefix "he" matches
+        assert!(automaton.matches("hello")); // exact match
+        assert!(automaton.matches("heLLo")); // 2 edits, prefix "he" matches
 
         assert!(!automaton.matches("xello")); // prefix doesn't match
         assert!(!automaton.matches("world")); // prefix doesn't match

@@ -502,13 +502,15 @@ impl LexicalEngine {
     /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
-    /// let parser = QueryParser::new().with_default_field("title");
+    /// let analyzer = Arc::new(StandardAnalyzer::default());
+    /// let parser = QueryParser::new(analyzer).with_default_field("title");
     /// let query = parser.parse("rust AND programming").unwrap();
     /// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
     /// ```

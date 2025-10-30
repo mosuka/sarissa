@@ -1183,7 +1183,7 @@ impl TermDictionaryAccess for InvertedIndexReader {
 
             // Load the term dictionary if not already loaded
             if seg.term_dictionary.read().unwrap().is_none() {
-                let _ = seg.load_term_dictionary()?;
+                seg.load_term_dictionary()?;
             }
 
             if let Some(dict) = seg.term_dictionary.read().unwrap().clone() {
