@@ -11,7 +11,7 @@ use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::document::field_value::FieldValue;
-use yatagarasu::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
+use yatagarasu::lexical::index::inverted::index::{InvertedIndexWriter, LexicalIndexWriterConfig};
 use yatagarasu::storage::memory::MemoryStorage;
 use yatagarasu::storage::memory::MemoryStorageConfig;
 

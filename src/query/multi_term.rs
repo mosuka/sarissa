@@ -5,7 +5,7 @@
 
 use crate::error::Result;
 use crate::lexical::reader::IndexReader;
-use crate::lexical::terms::TermsEnum;
+use crate::lexical::core::terms::TermsEnum;
 use crate::query::query::Query;
 
 /// A query that matches multiple terms based on some pattern or criteria.

@@ -140,7 +140,7 @@ impl Query for TermQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
+    use crate::lexical::index::inverted::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;

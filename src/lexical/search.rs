@@ -6,10 +6,14 @@
 //! - Result collection and processing
 //! - Faceting and aggregation
 //! - Highlighting and similarity
-pub mod facet;
-pub mod highlight;
-pub mod result_processor;
+//!
+//! # Module Structure
+//!
+//! - `scoring`: Scoring algorithms (BM25, similarity)
+//! - `features`: Search features (faceting, highlighting, spell correction)
+//! - `result_processor`: Result processing utilities
+
 pub mod scoring;
+pub mod features;
+pub mod result_processor;
 pub mod searcher;
-pub mod similarity;
-pub mod spell_corrected;

@@ -18,7 +18,8 @@
 //! ```rust,no_run
 //! use yatagarasu::document::document::Document;
 //! use yatagarasu::lexical::engine::LexicalEngine;
-//! use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+//! use yatagarasu::lexical::index::config::LexicalIndexConfig;
+//! use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 //! use yatagarasu::lexical::types::LexicalSearchRequest;
 //! use yatagarasu::query::term::TermQuery;
 //! use yatagarasu::storage::{StorageConfig, StorageFactory};
@@ -55,11 +56,11 @@ use std::sync::Arc;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::document::Document;
 use crate::error::{Result, SageError};
-use crate::lexical::index::reader::inverted::InvertedIndexReader;
-use crate::lexical::index::{InvertedIndexStats, LexicalIndex};
+use crate::lexical::index::inverted::reader::InvertedIndexReader;
+use crate::lexical::index::traits::{InvertedIndexStats, LexicalIndex};
 use crate::lexical::reader::IndexReader;
 use crate::lexical::search::searcher::LexicalSearcher;
-use crate::lexical::search::searcher::inverted_index::InvertedIndexSearcher;
+use crate::lexical::index::inverted::searcher::InvertedIndexSearcher;
 use crate::lexical::types::{LexicalSearchQuery, LexicalSearchRequest};
 use crate::lexical::writer::IndexWriter;
 use crate::query::SearchResults;
@@ -89,7 +90,8 @@ use crate::storage::Storage;
 /// ```rust,no_run
 /// use yatagarasu::document::document::Document;
 /// use yatagarasu::lexical::engine::LexicalEngine;
-/// use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+/// use yatagarasu::lexical::index::config::LexicalIndexConfig;
+/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 /// use yatagarasu::lexical::types::LexicalSearchRequest;
 /// use yatagarasu::query::term::TermQuery;
 /// use yatagarasu::storage::{StorageConfig, StorageFactory};
@@ -153,7 +155,8 @@ impl LexicalEngine {
     ///
     /// ```rust,no_run
     /// use yatagarasu::lexical::engine::LexicalEngine;
-    /// use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// use yatagarasu::lexical::index::config::LexicalIndexConfig;
+/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// use std::sync::Arc;
@@ -168,7 +171,8 @@ impl LexicalEngine {
     ///
     /// ```rust,no_run
     /// use yatagarasu::lexical::engine::LexicalEngine;
-    /// use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// use yatagarasu::lexical::index::config::LexicalIndexConfig;
+/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::file::FileStorageConfig;
     /// use std::sync::Arc;
@@ -271,7 +275,8 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
+/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -345,7 +350,8 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
+/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -400,7 +406,8 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
+/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -468,7 +475,8 @@ impl LexicalEngine {
     /// use yatagarasu::lexical::types::LexicalSearchRequest;
     /// use yatagarasu::query::term::TermQuery;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
+/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -499,7 +507,8 @@ impl LexicalEngine {
     /// use yatagarasu::lexical::types::LexicalSearchRequest;
     /// # use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
+/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
@@ -532,8 +541,8 @@ impl LexicalEngine {
     ///
     /// ```no_run
     /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::LexicalIndexFactory;
-    /// # use yatagarasu::lexical::index::LexicalIndexConfig;
+    /// # use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
     /// # use yatagarasu::storage::memory::MemoryStorage;
     /// # use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -580,7 +589,7 @@ impl LexicalEngine {
     /// Returns an error if the reader cannot be created or the index type
     /// doesn't support analyzers.
     pub fn analyzer(&self) -> Result<Arc<dyn Analyzer>> {
-        use crate::lexical::index::reader::inverted::InvertedIndexReader;
+        use crate::lexical::index::inverted::reader::InvertedIndexReader;
 
         let reader = self.index.reader()?;
 
@@ -598,7 +607,8 @@ impl LexicalEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    use crate::lexical::index::config::LexicalIndexConfig;
+    use crate::lexical::index::factory::LexicalIndexFactory;
     use crate::query::query::Query;
     use crate::query::term::TermQuery;
     use crate::storage::file::{FileStorage, FileStorageConfig};

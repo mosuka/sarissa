@@ -382,7 +382,8 @@ impl SpellSearchUtils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+    use crate::lexical::index::config::LexicalIndexConfig;
+    use crate::lexical::index::factory::LexicalIndexFactory;
     use crate::storage::file::{FileStorage, FileStorageConfig};
     use std::sync::Arc;
     use tempfile::TempDir;

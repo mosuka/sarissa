@@ -3,24 +3,22 @@
 //! This module provides lexical (keyword-based) search functionality through
 //! inverted index structures, supporting BM25 scoring, phrase queries, and
 //! various query types based on token matching.
+//!
+//! # Module Structure
+//!
+//! - `core`: Core data structures (posting, dictionary, segment, etc.)
+//! - `index`: Index management (config, factory, traits, inverted, segment, maintenance)
+//! - `search`: Search execution (scoring, features, result processing)
+//! - `engine`: High-level engine interface
+//! - `types`: Type definitions
+//! - `reader`: Index reader trait
+//! - `writer`: Index writer trait
 
-// Core data structures
-pub mod automaton;
-pub mod bkd_tree;
-pub mod dictionary;
-pub mod doc_values;
-pub mod posting;
-pub mod reader;
-pub mod segment;
-pub mod terms;
-pub mod writer;
-
-// High-level interface
-pub mod engine;
-
-// Type definitions
-pub mod types;
-
-// Sub-modules
+pub mod core;
 pub mod index;
 pub mod search;
+
+pub mod engine;
+pub mod types;
+pub mod reader;
+pub mod writer;

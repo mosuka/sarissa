@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::lexical::reader::IndexReader;
-use crate::lexical::search::facet::{FacetCollector, FacetResults};
-use crate::lexical::search::highlight::{HighlightConfig, Highlighter};
+use crate::lexical::search::features::facet::{FacetCollector, FacetResults};
+use crate::lexical::search::features::highlight::{HighlightConfig, Highlighter};
 use crate::query::QueryResult;
 use crate::query::query::Query;
 
@@ -238,7 +238,7 @@ impl ResultProcessor {
         };
 
         let facet_collector = if config.enable_faceting {
-            let facet_config = crate::lexical::search::facet::FacetConfig::default(); // Use default config
+            let facet_config = crate::lexical::search::features::facet::FacetConfig::default(); // Use default config
             Some(FacetCollector::new(
                 facet_config,
                 config.facet_fields.clone(),

@@ -14,7 +14,8 @@ use yatagarasu::document::converter::{
 use yatagarasu::document::field_value::FieldValue;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::index::config::LexicalIndexConfig;
+use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
 

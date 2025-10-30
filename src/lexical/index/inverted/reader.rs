@@ -15,13 +15,13 @@ use crate::analysis::token::Token;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
-use crate::lexical::dictionary::HybridTermDictionary;
-use crate::lexical::dictionary::TermInfo;
-use crate::lexical::doc_values::DocValuesReader;
-use crate::lexical::index::SegmentInfo;
-use crate::lexical::posting::{Posting, PostingList};
+use crate::lexical::core::dictionary::HybridTermDictionary;
+use crate::lexical::core::dictionary::TermInfo;
+use crate::lexical::core::doc_values::DocValuesReader;
+use crate::lexical::index::traits::SegmentInfo;
+use crate::lexical::core::posting::{Posting, PostingList};
 use crate::lexical::reader::PostingIterator;
-use crate::lexical::terms::{InvertedIndexTerms, TermDictionaryAccess, Terms};
+use crate::lexical::core::terms::{InvertedIndexTerms, TermDictionaryAccess, Terms};
 use crate::lexical::types::FieldStats;
 use crate::storage::Storage;
 use crate::storage::structured::StructReader;
@@ -105,7 +105,7 @@ impl Default for InvertedIndexReaderConfig {
 #[derive(Debug)]
 pub struct InvertedIndexPostingIterator {
     /// The posting data.
-    postings: Vec<crate::lexical::posting::Posting>,
+    postings: Vec<crate::lexical::core::posting::Posting>,
 
     /// Current position in the posting list.
     position: usize,
@@ -779,7 +779,7 @@ pub struct CacheManager {
 
     /// Posting list cache.
     #[allow(dead_code)]
-    posting_cache: RwLock<AHashMap<String, Arc<Vec<crate::lexical::posting::Posting>>>>,
+    posting_cache: RwLock<AHashMap<String, Arc<Vec<crate::lexical::core::posting::Posting>>>>,
 
     /// Current memory usage.
     memory_usage: AtomicUsize,
@@ -1204,31 +1204,31 @@ mod tests {
     #[test]
     fn test_advanced_posting_iterator() {
         let postings = vec![
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 1,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 3,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 5,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 7,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::lexical::posting::Posting {
+            crate::lexical::core::posting::Posting {
                 doc_id: 9,
                 frequency: 1,
                 positions: Some(vec![0]),

@@ -19,11 +19,12 @@ use crate::analysis::token::Token;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
-use crate::lexical::dictionary::{TermDictionaryBuilder, TermInfo};
-use crate::lexical::doc_values::DocValuesWriter;
-use crate::lexical::index::reader::inverted::{InvertedIndexReader, InvertedIndexReaderConfig};
-use crate::lexical::index::{InvertedIndexConfig, InvertedIndexStats, LexicalIndex, SegmentInfo};
-use crate::lexical::posting::{InvertedIndex as PostingInvertedIndex, Posting};
+use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
+use crate::lexical::core::doc_values::DocValuesWriter;
+use crate::lexical::index::inverted::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
+use crate::lexical::index::config::InvertedIndexConfig;
+use crate::lexical::index::traits::{InvertedIndexStats, LexicalIndex, SegmentInfo};
+use crate::lexical::core::posting::{InvertedIndex as PostingInvertedIndex, Posting};
 use crate::lexical::reader::IndexReader;
 use crate::lexical::writer::IndexWriter;
 use crate::storage::Storage;
@@ -484,7 +485,7 @@ impl InvertedIndexWriter {
     /// use yatagarasu::document::parser::DocumentParser;
     /// use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
     /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-    /// use yatagarasu::lexical::index::writer::inverted::{InvertedIndexWriter, LexicalIndexWriterConfig};
+    /// use yatagarasu::lexical::index::inverted::index::{InvertedIndexWriter, LexicalIndexWriterConfig};
     /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use yatagarasu::storage::StorageConfig;
     /// use std::sync::Arc;
@@ -973,7 +974,7 @@ impl InvertedIndexWriter {
 
     /// Write segment metadata.
     fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
-        use crate::lexical::index::SegmentInfo;
+        use crate::lexical::index::traits::SegmentInfo;
 
         // Create SegmentInfo
         let segment_info = SegmentInfo {
