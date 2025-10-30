@@ -123,8 +123,7 @@ impl LexicalSearchQuery {
     ) -> crate::error::Result<Box<dyn Query>> {
         match self {
             LexicalSearchQuery::Dsl(dsl_string) => {
-                let parser =
-                    crate::query::parser::QueryParser::new().with_analyzer(analyzer.clone());
+                let parser = crate::query::parser::QueryParser::new(analyzer.clone());
                 parser.parse(&dsl_string)
             }
             LexicalSearchQuery::Obj(query) => Ok(query),

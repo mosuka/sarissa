@@ -4,31 +4,43 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
+use yatagarasu::lexical::index::{InvertedIndexConfig, LexicalIndexConfig, LexicalIndexFactory};
 use yatagarasu::lexical::types::LexicalSearchRequest;
 use yatagarasu::query::fuzzy::FuzzyQuery;
 use yatagarasu::query::query::Query;
-use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
+use yatagarasu::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== FuzzyQuery Example - Approximate String Matching ===\n");
 
-    // Create a temporary directory for the index
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("Creating index in: {:?}", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    // Create a search engine
-    let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Add documents with various spellings and terms for fuzzy matching
     let documents = vec![
@@ -105,7 +117,10 @@ fn main() -> Result<()> {
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    engine.add_documents(documents)?;
+    lexical_engine.add_documents(documents)?;
+
+    // Commit changes to engine
+    lexical_engine.commit()?;
 
     println!("\n=== FuzzyQuery Examples ===\n");
 
@@ -113,7 +128,7 @@ fn main() -> Result<()> {
     println!("1. Fuzzy search for 'javascritp' (typo for 'javascript') with edit distance 1:");
     let query = FuzzyQuery::new("body", "javascritp").max_edits(1);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -135,7 +150,7 @@ fn main() -> Result<()> {
     println!("\n2. Fuzzy search for 'programing' (missing 'm') with edit distance 2:");
     let query = FuzzyQuery::new("body", "programing").max_edits(2);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -157,7 +172,7 @@ fn main() -> Result<()> {
     println!("\n3. Fuzzy search for 'machne' (missing 'i') in title with edit distance 1:");
     let query = FuzzyQuery::new("title", "machne").max_edits(1);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -179,7 +194,7 @@ fn main() -> Result<()> {
     println!("\n4. Fuzzy search for 'Jon' (should match 'John') in author with edit distance 1:");
     let query = FuzzyQuery::new("author", "Jon").max_edits(1);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -207,7 +222,7 @@ fn main() -> Result<()> {
     println!("\n5. Fuzzy search for 'algoritm' (missing 'h') with edit distance 2:");
     let query = FuzzyQuery::new("body", "algoritm").max_edits(2);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -229,7 +244,7 @@ fn main() -> Result<()> {
     println!("\n6. Fuzzy search for 'artifical' (missing 'i') in tags with edit distance 1:");
     let query = FuzzyQuery::new("tags", "artifical").max_edits(1);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -251,7 +266,7 @@ fn main() -> Result<()> {
     println!("\n7. Fuzzy search for exact 'python' with edit distance 0:");
     let query = FuzzyQuery::new("body", "python").max_edits(0);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -273,7 +288,7 @@ fn main() -> Result<()> {
     println!("\n8. Fuzzy search for 'databse' (missing 'a') with edit distance 3:");
     let query = FuzzyQuery::new("body", "databse").max_edits(3);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -295,17 +310,17 @@ fn main() -> Result<()> {
     println!("\n9. Fuzzy search for 'xyz123' (no similar terms) with edit distance 2:");
     let query = FuzzyQuery::new("body", "xyz123").max_edits(2);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
     // Example 10: Count fuzzy matches
     println!("\n10. Counting documents with fuzzy match for 'developement' (extra 'e'):");
     let query = FuzzyQuery::new("body", "developement").max_edits(2);
-    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("    Count: {count} documents");
 
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\nFuzzyQuery example completed successfully!");
 
     Ok(())

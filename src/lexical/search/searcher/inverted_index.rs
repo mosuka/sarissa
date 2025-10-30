@@ -16,6 +16,7 @@ use crate::lexical::types::{
 };
 use crate::query::boolean::BooleanQuery;
 use crate::query::collector::{Collector, CountCollector, TopDocsCollector, TopFieldCollector};
+use crate::query::parser::QueryParser;
 use crate::query::query::Query;
 use crate::query::{SearchHit, SearchResults};
 
@@ -292,8 +293,7 @@ impl InvertedIndexSearcher {
                 };
 
                 // Parse DSL string into Query object
-                let parser =
-                    crate::query::parser::QueryParser::new().with_analyzer(analyzer.clone());
+                let parser = QueryParser::new(analyzer.clone());
                 parser.parse(dsl_string)?
             }
             LexicalSearchQuery::Obj(q) => q.clone_box(),

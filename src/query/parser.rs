@@ -35,8 +35,13 @@ use crate::query::wildcard::WildcardQuery;
 struct QueryStringParser;
 
 /// Query parser.
+///
+/// Similar to Lucene's QueryParser, this requires an Analyzer to properly
+/// normalize query terms before matching against the index.
 pub struct QueryParser {
-    analyzer: Option<Arc<dyn Analyzer>>,
+    /// Analyzer for tokenizing and normalizing query terms.
+    /// Required - following Lucene's design where Analyzer is mandatory.
+    analyzer: Arc<dyn Analyzer>,
     default_field: Option<String>,
     default_occur: Occur,
 }
@@ -44,44 +49,43 @@ pub struct QueryParser {
 impl std::fmt::Debug for QueryParser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueryParser")
-            .field("analyzer", &self.analyzer.as_ref().map(|a| a.name()))
+            .field("analyzer", &self.analyzer.name())
             .field("default_field", &self.default_field)
             .field("default_occur", &self.default_occur)
             .finish()
     }
 }
 
-impl Default for QueryParser {
-    fn default() -> Self {
+impl QueryParser {
+    /// Creates a new query parser with the given analyzer.
+    ///
+    /// Following Lucene's design, an Analyzer is required.
+    ///
+    /// # Arguments
+    /// * `analyzer` - The analyzer to use for tokenizing and normalizing query terms
+    ///
+    /// # Example
+    /// ```
+    /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+    /// use yatagarasu::query::parser::QueryParser;
+    /// use std::sync::Arc;
+    ///
+    /// let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+    /// let parser = QueryParser::new(analyzer);
+    /// ```
+    pub fn new(analyzer: Arc<dyn Analyzer>) -> Self {
         Self {
-            analyzer: None,
+            analyzer,
             default_field: None,
             default_occur: Occur::Should,
         }
     }
-}
-
-impl QueryParser {
-    /// Creates a new parser.
-    pub fn new() -> Self {
-        Self::default()
-    }
 
     /// Create a query parser with the standard analyzer.
     ///
-    /// Terms are analyzed before matching.
+    /// This is a convenience method for the common case.
     pub fn with_standard_analyzer() -> Result<Self> {
-        Ok(QueryParser {
-            analyzer: Some(Arc::new(StandardAnalyzer::new()?)),
-            default_field: None,
-            default_occur: Occur::Should,
-        })
-    }
-
-    /// Sets the analyzer.
-    pub fn with_analyzer(mut self, analyzer: Arc<dyn Analyzer>) -> Self {
-        self.analyzer = Some(analyzer);
-        self
+        Ok(QueryParser::new(Arc::new(StandardAnalyzer::new()?)))
     }
 
     /// Sets the default field.
@@ -445,8 +449,19 @@ impl QueryParser {
             }
         }
 
+        // ✅ Normalize the term using the analyzer (like Lucene does)
+        // This ensures the query term is in the same form as indexed terms
+        let terms = self.analyze_term(Some(field_name), &term)?;
+        let normalized_term = if terms.is_empty() {
+            // Fallback to original term if analyzer produces no tokens
+            &term
+        } else {
+            // Use the first token (following Lucene's behavior)
+            &terms[0]
+        };
+
         Ok(Box::new(
-            FuzzyQuery::new(field_name, &term).max_edits(fuzziness as u32),
+            FuzzyQuery::new(field_name, normalized_term).max_edits(fuzziness as u32),
         ))
     }
 
@@ -528,52 +543,37 @@ impl QueryParser {
     }
 
     fn analyze_term(&self, field: Option<&str>, term: &str) -> Result<Vec<String>> {
-        if let Some(analyzer) = &self.analyzer {
-            let token_stream = if let Some(field_name) = field {
-                if let Some(per_field) = analyzer.as_any().downcast_ref::<PerFieldAnalyzer>() {
-                    per_field.analyze_field(field_name, term)?
-                } else {
-                    analyzer.analyze(term)?
-                }
+        let token_stream = if let Some(field_name) = field {
+            // Use field-specific analyzer if available (PerFieldAnalyzer)
+            if let Some(per_field) = self.analyzer.as_any().downcast_ref::<PerFieldAnalyzer>() {
+                per_field.analyze_field(field_name, term)?
             } else {
-                analyzer.analyze(term)?
-            };
-
-            let tokens: Vec<String> = token_stream.into_iter().map(|t| t.text).collect();
-            Ok(tokens)
+                self.analyzer.analyze(term)?
+            }
         } else {
-            Ok(vec![term.to_string()])
-        }
+            self.analyzer.analyze(term)?
+        };
+
+        let tokens: Vec<String> = token_stream.into_iter().map(|t| t.text).collect();
+        Ok(tokens)
     }
 }
 
 /// Builder for QueryParser.
 pub struct QueryParserBuilder {
-    analyzer: Option<Arc<dyn Analyzer>>,
+    analyzer: Arc<dyn Analyzer>,
     default_field: Option<String>,
     default_occur: Occur,
 }
 
-impl Default for QueryParserBuilder {
-    fn default() -> Self {
+impl QueryParserBuilder {
+    /// Creates a new builder with the given analyzer.
+    pub fn new(analyzer: Arc<dyn Analyzer>) -> Self {
         Self {
-            analyzer: None,
+            analyzer,
             default_field: None,
             default_occur: Occur::Should,
         }
-    }
-}
-
-impl QueryParserBuilder {
-    /// Creates a new builder.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Sets the analyzer.
-    pub fn analyzer(mut self, analyzer: Arc<dyn Analyzer>) -> Self {
-        self.analyzer = Some(analyzer);
-        self
     }
 
     /// Sets the default field.
@@ -589,85 +589,92 @@ impl QueryParserBuilder {
     }
 
     /// Builds the parser.
-    pub fn build(self) -> QueryParser {
-        QueryParser {
+    pub fn build(self) -> Result<QueryParser> {
+        Ok(QueryParser {
             analyzer: self.analyzer,
             default_field: self.default_field,
             default_occur: self.default_occur,
-        }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::analyzer::standard::StandardAnalyzer;
+
+    /// Helper function to create a test parser with StandardAnalyzer
+    fn create_test_parser() -> QueryParser {
+        let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+        QueryParser::new(analyzer)
+    }
 
     #[test]
     fn test_simple_term() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("hello").unwrap();
         assert!(format!("{query:?}").contains("TermQuery"));
     }
 
     #[test]
     fn test_field_query() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("title:hello").unwrap();
         assert!(format!("{query:?}").contains("TermQuery"));
     }
 
     #[test]
     fn test_boolean_query() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("hello AND world").unwrap();
         assert!(format!("{query:?}").contains("BooleanQuery"));
     }
 
     #[test]
     fn test_phrase_query() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("\"hello world\"").unwrap();
         assert!(format!("{query:?}").contains("PhraseQuery"));
     }
 
     #[test]
     fn test_fuzzy_query() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("hello~2").unwrap();
         assert!(format!("{query:?}").contains("FuzzyQuery"));
     }
 
     #[test]
     fn test_wildcard_query() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("hel*").unwrap();
         assert!(format!("{query:?}").contains("WildcardQuery"));
     }
 
     #[test]
     fn test_required_clause() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("+hello world").unwrap();
         assert!(format!("{query:?}").contains("BooleanQuery"));
     }
 
     #[test]
     fn test_prohibited_clause() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("hello -world").unwrap();
         assert!(format!("{query:?}").contains("BooleanQuery"));
     }
 
     #[test]
     fn test_grouped_query() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("(hello OR world) AND test").unwrap();
         assert!(format!("{query:?}").contains("BooleanQuery"));
     }
 
     #[test]
     fn test_proximity_search() {
-        let parser = QueryParser::new().with_default_field("content");
+        let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("\"hello world\"~10").unwrap();
         assert!(format!("{query:?}").contains("PhraseQuery"));
     }

@@ -150,10 +150,14 @@ impl SpellCorrectedSearchEngine {
         query_str: &str,
         default_field: &str,
     ) -> Result<SpellCorrectedSearchResults> {
+        use crate::query::parser::QueryParser;
+
+        // Get analyzer from engine
+        let analyzer = self.engine.analyzer()?;
+
         if !self.config.enabled {
             // Spell correction disabled, perform normal search
-            use crate::query::parser::QueryParser;
-            let parser = QueryParser::new().with_default_field(default_field);
+            let parser = QueryParser::new(analyzer).with_default_field(default_field);
             let query = parser.parse(query_str)?;
             let results = self.engine.search(LexicalSearchRequest::new(query))?;
             let correction = CorrectionResult::new(query_str.to_string());
@@ -164,8 +168,7 @@ impl SpellCorrectedSearchEngine {
         let correction = self.corrector.correct(query_str);
 
         // Try original query first
-        use crate::query::parser::QueryParser;
-        let parser = QueryParser::new().with_default_field(default_field);
+        let parser = QueryParser::new(analyzer).with_default_field(default_field);
         let query = parser.parse(query_str)?;
         let original_results = self.engine.search(LexicalSearchRequest::new(query))?;
 
@@ -202,10 +205,14 @@ impl SpellCorrectedSearchEngine {
         field: &str,
         query_str: &str,
     ) -> Result<SpellCorrectedSearchResults> {
+        use crate::query::parser::QueryParser;
+
+        // Get analyzer from engine
+        let analyzer = self.engine.analyzer()?;
+
         if !self.config.enabled {
             // Spell correction disabled, perform normal search
-            use crate::query::parser::QueryParser;
-            let parser = QueryParser::new();
+            let parser = QueryParser::new(analyzer);
             let query = parser.parse_field(field, query_str)?;
             let results = self.engine.search(LexicalSearchRequest::new(query))?;
             let correction = CorrectionResult::new(query_str.to_string());
@@ -216,8 +223,7 @@ impl SpellCorrectedSearchEngine {
         let correction = self.corrector.correct(query_str);
 
         // Try original query first
-        use crate::query::parser::QueryParser;
-        let parser = QueryParser::new();
+        let parser = QueryParser::new(analyzer);
         let query = parser.parse_field(field, query_str)?;
         let original_results = self.engine.search(LexicalSearchRequest::new(query))?;
 

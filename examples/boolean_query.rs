@@ -18,36 +18,32 @@ use yatagarasu::query::phrase::PhraseQuery;
 use yatagarasu::query::query::Query;
 use yatagarasu::query::range::NumericRangeQuery;
 use yatagarasu::query::term::TermQuery;
-use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
+use yatagarasu::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== BooleanQuery Example - Complex Boolean Logic ===\n");
 
-    // Create a temporary directory for the index
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("Creating index in: {:?}", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    // Configure PerFieldAnalyzer
-    // - category field uses KeywordAnalyzer (treats "web-development" as single token)
-    // - other fields use StandardAnalyzer (default tokenization)
+    // Create an analyzer
     let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
     let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
     let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
     per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
 
-    // Create index config with custom analyzer
-    let mut inverted_config = InvertedIndexConfig::default();
-    inverted_config.analyzer = Arc::new(per_field_analyzer);
-    let config = LexicalIndexConfig::Inverted(inverted_config);
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
 
-    // Create a search engine
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Add documents for testing boolean queries
     let documents = vec![
@@ -114,8 +110,12 @@ fn main() -> Result<()> {
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    engine.add_documents(documents)?;
-    engine.commit()?;
+
+    // Add documents to the lexical engine
+    lexical_engine.add_documents(documents)?;
+
+    // Commit changes to engine
+    lexical_engine.commit()?;
 
     println!("\n=== BooleanQuery Examples ===\n");
 
@@ -126,7 +126,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("body", "python")));
     query.add_must(Box::new(TermQuery::new("body", "programming")));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -150,7 +150,7 @@ fn main() -> Result<()> {
     query.add_should(Box::new(TermQuery::new("body", "python")));
     query.add_should(Box::new(TermQuery::new("body", "javascript")));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -174,7 +174,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("category", "programming")));
     query.add_must_not(Box::new(TermQuery::new("body", "javascript")));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -207,7 +207,7 @@ fn main() -> Result<()> {
         Some(50.0),
     )));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -245,7 +245,7 @@ fn main() -> Result<()> {
         vec!["machine".to_string(), "learning".to_string()],
     )));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -274,7 +274,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(language_query));
 
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -302,7 +302,7 @@ fn main() -> Result<()> {
     )));
     query.add_must_not(Box::new(TermQuery::new("body", "design")));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -337,7 +337,7 @@ fn main() -> Result<()> {
         None,
     )));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -393,7 +393,7 @@ fn main() -> Result<()> {
 
     let request =
         LexicalSearchRequest::new(Box::new(main_query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -453,7 +453,7 @@ fn main() -> Result<()> {
 
     let request =
         LexicalSearchRequest::new(Box::new(final_query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -482,10 +482,10 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(TermQuery::new("category", "data-science")));
     query.add_should(Box::new(TermQuery::new("category", "web-development")));
-    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("   Count: {count} books");
 
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\nBooleanQuery example completed successfully!");
 
     Ok(())
