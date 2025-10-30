@@ -5,12 +5,14 @@
 //! various query types based on token matching.
 
 // Core data structures
+pub mod automaton;
 pub mod bkd_tree;
 pub mod dictionary;
 pub mod doc_values;
 pub mod posting;
 pub mod reader;
 pub mod segment;
+pub mod terms;
 pub mod writer;
 
 // High-level interface

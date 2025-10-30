@@ -265,7 +265,23 @@ impl PostingList {
     }
 }
 
-/// Iterator over postings that match a query.
+/// Simple in-memory posting list iterator.
+///
+/// # Purpose
+/// Used for sequentially processing a `Vec<Posting>` in memory.
+///
+/// # Implemented Traits
+/// - Standard Rust `Iterator` trait
+/// - Does NOT implement `reader::PostingIterator` trait
+///
+/// # Features
+/// - Basic iteration (`next()` only)
+/// - No skip functionality
+/// - No block caching
+///
+/// # Use Cases
+/// - When you need to process an in-memory `Vec<Posting>` rather than reading from an index
+/// - When advanced query features (like `skip_to()`) are not needed
 pub struct PostingIterator {
     postings: Vec<Posting>,
     position: usize,

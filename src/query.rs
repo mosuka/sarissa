@@ -6,6 +6,7 @@ pub mod collector;
 pub mod fuzzy;
 pub mod geo;
 pub mod matcher;
+pub mod multi_term;
 pub mod parser;
 pub mod phrase;
 #[allow(clippy::module_inception)]

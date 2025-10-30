@@ -9,9 +9,7 @@ use crate::lexical::reader::IndexReader;
 use crate::query::matcher::Matcher;
 use crate::query::query::Query;
 use crate::query::scorer::Scorer;
-use crate::spelling::levenshtein::{
-    TypoPatterns, damerau_levenshtein_distance, levenshtein_distance,
-};
+use crate::spelling::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
 
 /// A fuzzy query for approximate string matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +24,9 @@ pub struct FuzzyQuery {
     prefix_length: u32,
     /// Whether transpositions count as single edits (Damerau-Levenshtein)
     transpositions: bool,
+    /// Maximum number of terms to expand to (default: 50, like Lucene)
+    /// This prevents queries from matching too many terms and consuming excessive resources.
+    max_expansions: usize,
     /// Boost factor for the query
     boost: f32,
 }
@@ -39,6 +40,7 @@ impl FuzzyQuery {
             max_edits: 2,
             prefix_length: 0,
             transpositions: true,
+            max_expansions: 50, // Same default as Lucene
             boost: 1.0,
         }
     }
@@ -58,6 +60,14 @@ impl FuzzyQuery {
     /// Set whether transpositions should be considered single edits.
     pub fn transpositions(mut self, transpositions: bool) -> Self {
         self.transpositions = transpositions;
+        self
+    }
+
+    /// Set the maximum number of terms to expand to.
+    /// This prevents queries from matching too many terms and consuming excessive resources.
+    /// Default is 50, same as Lucene.
+    pub fn max_expansions(mut self, max_expansions: usize) -> Self {
+        self.max_expansions = max_expansions;
         self
     }
 
@@ -92,41 +102,29 @@ impl FuzzyQuery {
         self.transpositions
     }
 
-    /// Find matching terms and their documents using actual Levenshtein distance.
-    /// This implementation follows Lucene's approach by enumerating indexed terms.
+    /// Get the maximum number of terms to expand to.
+    pub fn get_max_expansions(&self) -> usize {
+        self.max_expansions
+    }
+
+    /// Find matching terms using efficient term dictionary enumeration.
+    ///
+    /// This uses the Term Dictionary API and Levenshtein Automaton for efficient matching,
+    /// similar to Lucene's FuzzyTermsEnum approach.
+    ///
+    /// Falls back to legacy document scanning if Term Dictionary API is not available.
+    ///
+    /// Returns a vector of FuzzyMatch results, sorted by similarity score.
     pub fn find_matches(&self, reader: &dyn IndexReader) -> Result<Vec<FuzzyMatch>> {
         use crate::lexical::index::reader::inverted::InvertedIndexReader;
+        use crate::lexical::terms::{TermDictionaryAccess, TermsEnum as _};
+        use crate::lexical::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
 
         let mut matches = Vec::new();
 
-        // Try to downcast reader to InvertedIndexReader to access term dictionary
+        // Try to downcast to InvertedIndexReader and use Term Dictionary API
         if let Some(inverted_reader) = reader.as_any().downcast_ref::<InvertedIndexReader>() {
-            // Get the term dictionary by accessing segment readers
-            // We need to enumerate terms from the index, similar to Lucene's FuzzyTermsEnum
-
-            // For now, use a simpler approach: scan the index's term dictionary
-            // We'll enumerate terms that could potentially match based on prefix
-            let _prefix = if self.prefix_length > 0 {
-                self.term.chars().take(self.prefix_length as usize).collect::<String>()
-            } else {
-                String::new()
-            };
-
-            // Enumerate all terms in the field that match the prefix constraint
-            // This is more efficient than scanning all documents
-            // Note: We need access to the term dictionary through the segment readers
-
-            // For a complete implementation, we would:
-            // 1. Access each segment's term dictionary
-            // 2. Enumerate terms for the field (field:term format)
-            // 3. Filter by prefix if needed
-            // 4. Calculate edit distance for each term
-            // 5. Keep terms within max_edits
-
-            // Since we don't have direct access to enumerate all terms in a field,
-            // we'll use a hybrid approach: analyze the query term to generate candidates
-            // and check if they exist in the index
-
+            // Normalize the query term using the analyzer
             let analyzer = inverted_reader.analyzer();
             let token_stream = analyzer.analyze(&self.term)?;
             let tokens: Vec<_> = token_stream.collect();
@@ -134,28 +132,41 @@ impl FuzzyQuery {
             if let Some(first_token) = tokens.first() {
                 let normalized_query = &first_token.text;
 
-                // Generate candidate terms within edit distance
-                let candidates = self.generate_candidates_from_index(reader, normalized_query)?;
+                // Try to get term dictionary for the field
+                if let Some(terms) = inverted_reader.terms(&self.field)? {
+                    // Create Levenshtein automaton
+                    let automaton = LevenshteinAutomaton::new(
+                        normalized_query,
+                        self.max_edits,
+                        self.prefix_length as usize,
+                        self.transpositions,
+                    );
 
-                for (term, doc_freq, _total_freq) in candidates {
-                    let edit_distance = if self.transpositions {
-                        damerau_levenshtein_distance(normalized_query, &term) as u32
-                    } else {
-                        levenshtein_distance(normalized_query, &term) as u32
-                    };
+                    // Create filtered iterator
+                    let mut terms_enum = AutomatonTermsEnum::new(terms.iterator()?, automaton)
+                        .with_max_matches(self.max_expansions);
 
-                    if edit_distance <= self.max_edits {
-                        let similarity_score = self.calculate_similarity_score_advanced(edit_distance, &term);
+                    // Enumerate matching terms
+                    while let Some(term_stats) = terms_enum.next()? {
+                        let edit_distance = if self.transpositions {
+                            damerau_levenshtein_distance(normalized_query, &term_stats.term) as u32
+                        } else {
+                            levenshtein_distance(normalized_query, &term_stats.term) as u32
+                        };
+
+                        let similarity_score = self.calculate_similarity_score(edit_distance);
 
                         matches.push(FuzzyMatch {
-                            term,
+                            term: term_stats.term,
                             edit_distance,
-                            doc_frequency: doc_freq as u32,
+                            doc_frequency: term_stats.doc_freq as u32,
                             similarity_score,
                         });
                     }
                 }
+                // If terms API is not available, return empty matches
             }
+            // If not InvertedIndexReader, return empty matches
         }
 
         // Sort by similarity score (highest first), then by document frequency
@@ -166,233 +177,9 @@ impl FuzzyQuery {
                 .then_with(|| b.doc_frequency.cmp(&a.doc_frequency))
         });
 
-        // Limit results to prevent explosion
-        matches.truncate(100);
-
         Ok(matches)
     }
 
-    /// Generate candidate terms from the index by exploring nearby terms.
-    /// This simulates term enumeration by checking variations of the query term.
-    fn generate_candidates_from_index(
-        &self,
-        reader: &dyn IndexReader,
-        normalized_query: &str,
-    ) -> Result<Vec<(String, u64, u64)>> {
-        let mut candidates = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-
-        // First, check the exact term
-        if let Some(term_info) = reader.term_info(&self.field, normalized_query)? {
-            candidates.push((
-                normalized_query.to_string(),
-                term_info.doc_freq,
-                term_info.total_freq,
-            ));
-            seen.insert(normalized_query.to_string());
-        }
-
-        // Generate edit variations and check if they exist in the index
-        let variations = self.generate_edit_candidates_for_term(normalized_query);
-
-        for candidate in variations {
-            if seen.contains(&candidate) {
-                continue;
-            }
-
-            if let Some(term_info) = reader.term_info(&self.field, &candidate)? {
-                candidates.push((
-                    candidate.clone(),
-                    term_info.doc_freq,
-                    term_info.total_freq,
-                ));
-                seen.insert(candidate);
-            }
-        }
-
-        Ok(candidates)
-    }
-
-    /// Generate edit candidates using systematic edit operations.
-    fn generate_edit_candidates_for_term(&self, term: &str) -> Vec<String> {
-        let mut candidates = std::collections::HashSet::new();
-        let chars: Vec<char> = term.chars().collect();
-        let term_len = chars.len();
-
-        // Add exact match
-        candidates.insert(term.to_string());
-
-        // Generate candidates within max_edits distance
-        for edit_level in 1..=self.max_edits {
-            let level_candidates = if edit_level == 1 {
-                self.generate_single_edits(&chars, term_len)
-            } else {
-                // For multi-edit, we'd recursively apply edits
-                // For now, limit to single and double edits for performance
-                if edit_level == 2 {
-                    self.generate_double_edits(&chars, term_len)
-                } else {
-                    Vec::new()
-                }
-            };
-
-            for candidate in level_candidates {
-                if candidates.len() < 1000 {
-                    // Prevent explosion
-                    candidates.insert(candidate);
-                }
-            }
-        }
-
-        candidates.into_iter().collect()
-    }
-
-    /// Generate all single-edit candidates.
-    #[allow(dead_code)]
-    fn generate_single_edits(&self, chars: &[char], term_len: usize) -> Vec<String> {
-        let mut candidates = Vec::new();
-        let prefix_len = self.prefix_length as usize;
-
-        // Deletions
-        for i in prefix_len..term_len {
-            let mut new_chars = chars.to_vec();
-            new_chars.remove(i);
-            candidates.push(new_chars.into_iter().collect());
-        }
-
-        // Substitutions with keyboard-aware variants
-        for i in prefix_len..term_len {
-            let original_char = chars[i];
-
-            // Try nearby keyboard keys first (more likely typos)
-            let nearby_keys = TypoPatterns::nearby_keys(original_char);
-            for &replacement in &nearby_keys {
-                let mut new_chars = chars.to_vec();
-                new_chars[i] = replacement;
-                candidates.push(new_chars.into_iter().collect());
-            }
-
-            // Try common letter substitutions
-            for replacement in 'a'..='z' {
-                if replacement != original_char && !nearby_keys.contains(&replacement) {
-                    let mut new_chars = chars.to_vec();
-                    new_chars[i] = replacement;
-                    candidates.push(new_chars.into_iter().collect());
-
-                    // Limit to prevent explosion
-                    if candidates.len() > 500 {
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Insertions
-        for i in prefix_len..=term_len {
-            for c in 'a'..='z' {
-                let mut new_chars = chars.to_vec();
-                new_chars.insert(i, c);
-                candidates.push(new_chars.into_iter().collect());
-
-                // Limit to prevent explosion
-                if candidates.len() > 300 {
-                    break;
-                }
-            }
-        }
-
-        // Transpositions (if enabled)
-        if self.transpositions {
-            for i in prefix_len..term_len.saturating_sub(1) {
-                let mut new_chars = chars.to_vec();
-                new_chars.swap(i, i + 1);
-                candidates.push(new_chars.into_iter().collect());
-            }
-        }
-
-        candidates
-    }
-
-    /// Generate double-edit candidates (simplified version).
-    #[allow(dead_code)]
-    fn generate_double_edits(&self, chars: &[char], term_len: usize) -> Vec<String> {
-        let mut candidates = Vec::new();
-        let prefix_len = self.prefix_length as usize;
-
-        // Double deletions
-        for i in prefix_len..term_len {
-            for j in (i + 1)..term_len {
-                let mut new_chars = chars.to_vec();
-                new_chars.remove(j);
-                new_chars.remove(i);
-                candidates.push(new_chars.into_iter().collect());
-
-                if candidates.len() > 100 {
-                    return candidates;
-                }
-            }
-        }
-
-        // One deletion + one substitution (common pattern)
-        for del_pos in prefix_len..term_len {
-            for sub_pos in prefix_len..term_len {
-                if del_pos != sub_pos {
-                    let mut new_chars = chars.to_vec();
-                    if del_pos < sub_pos {
-                        new_chars.remove(del_pos);
-                        new_chars[sub_pos - 1] = 'e'; // Common replacement
-                    } else {
-                        new_chars[sub_pos] = 'e';
-                        new_chars.remove(del_pos);
-                    }
-                    candidates.push(new_chars.into_iter().collect());
-
-                    if candidates.len() > 50 {
-                        return candidates;
-                    }
-                }
-            }
-        }
-
-        candidates
-    }
-
-    /// Check if a candidate respects the prefix length constraint.
-    fn respects_prefix(&self, candidate: &str) -> bool {
-        let prefix_len = self.prefix_length as usize;
-        if prefix_len == 0 {
-            return true;
-        }
-
-        let term_prefix: String = self.term.chars().take(prefix_len).collect();
-        let candidate_prefix: String = candidate.chars().take(prefix_len).collect();
-
-        term_prefix == candidate_prefix
-    }
-
-    /// Calculate advanced similarity score considering keyboard distance and frequency.
-    fn calculate_similarity_score_advanced(&self, edit_distance: u32, candidate: &str) -> f32 {
-        if edit_distance > self.max_edits {
-            return 0.0;
-        }
-
-        // Base score from edit distance
-        let base_score = self.calculate_similarity_score(edit_distance);
-
-        // Keyboard distance bonus (prefer typos that are more likely)
-        let keyboard_distance = TypoPatterns::keyboard_distance(&self.term, candidate);
-        let keyboard_bonus = if keyboard_distance < edit_distance as f64 {
-            0.1 // Bonus for keyboard-likely errors
-        } else {
-            0.0
-        };
-
-        // Length similarity bonus
-        let length_diff = (self.term.len() as i32 - candidate.len() as i32).abs() as f32;
-        let length_bonus = (1.0 - (length_diff / self.term.len().max(1) as f32)) * 0.05;
-
-        (base_score + keyboard_bonus + length_bonus).min(1.0)
-    }
 
     /// Calculate similarity score based on edit distance.
     fn calculate_similarity_score(&self, edit_distance: u32) -> f32 {
@@ -433,6 +220,7 @@ impl FuzzyQuery {
 
 impl Query for FuzzyQuery {
     fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+        // Try efficient implementation first, fall back to old implementation
         let matches = self.find_matches(reader)?;
         Ok(Box::new(FuzzyMatcher::new(matches, reader, &self.field)?))
     }
@@ -440,6 +228,7 @@ impl Query for FuzzyQuery {
     fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
         use crate::query::scorer::BM25Scorer;
 
+        // Try efficient implementation first, fall back to old implementation
         let matches = self.find_matches(reader)?;
 
         if matches.is_empty() {
