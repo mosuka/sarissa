@@ -101,6 +101,8 @@ fn main() -> Result<()> {
             .build(),
     ];
 
+    println!("Adding {} documents to the index...", documents.len());
+
     // Add documents to the lexical engine
     lexical_engine.add_documents(documents)?;
 

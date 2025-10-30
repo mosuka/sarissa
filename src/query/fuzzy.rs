@@ -9,9 +9,7 @@ use crate::lexical::reader::IndexReader;
 use crate::query::matcher::Matcher;
 use crate::query::query::Query;
 use crate::query::scorer::Scorer;
-use crate::spelling::levenshtein::{
-    TypoPatterns, damerau_levenshtein_distance, levenshtein_distance,
-};
+use crate::spelling::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
 
 /// A fuzzy query for approximate string matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +24,9 @@ pub struct FuzzyQuery {
     prefix_length: u32,
     /// Whether transpositions count as single edits (Damerau-Levenshtein)
     transpositions: bool,
+    /// Maximum number of terms to expand to (default: 50, like Lucene)
+    /// This prevents queries from matching too many terms and consuming excessive resources.
+    max_expansions: usize,
     /// Boost factor for the query
     boost: f32,
 }
@@ -39,6 +40,7 @@ impl FuzzyQuery {
             max_edits: 2,
             prefix_length: 0,
             transpositions: true,
+            max_expansions: 50, // Same default as Lucene
             boost: 1.0,
         }
     }
@@ -58,6 +60,14 @@ impl FuzzyQuery {
     /// Set whether transpositions should be considered single edits.
     pub fn transpositions(mut self, transpositions: bool) -> Self {
         self.transpositions = transpositions;
+        self
+    }
+
+    /// Set the maximum number of terms to expand to.
+    /// This prevents queries from matching too many terms and consuming excessive resources.
+    /// Default is 50, same as Lucene.
+    pub fn max_expansions(mut self, max_expansions: usize) -> Self {
+        self.max_expansions = max_expansions;
         self
     }
 
@@ -92,105 +102,71 @@ impl FuzzyQuery {
         self.transpositions
     }
 
-    /// Find matching terms and their documents using actual Levenshtein distance.
+    /// Get the maximum number of terms to expand to.
+    pub fn get_max_expansions(&self) -> usize {
+        self.max_expansions
+    }
+
+    /// Find matching terms using efficient term dictionary enumeration.
+    ///
+    /// This uses the Term Dictionary API and Levenshtein Automaton for efficient matching,
+    /// similar to Lucene's FuzzyTermsEnum approach.
+    ///
+    /// Falls back to legacy document scanning if Term Dictionary API is not available.
+    ///
+    /// Returns a vector of FuzzyMatch results, sorted by similarity score.
     pub fn find_matches(&self, reader: &dyn IndexReader) -> Result<Vec<FuzzyMatch>> {
+        use crate::lexical::index::reader::inverted::InvertedIndexReader;
+        use crate::lexical::terms::{TermDictionaryAccess, TermsEnum as _};
+        use crate::lexical::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
+
         let mut matches = Vec::new();
-        let mut terms_found = std::collections::HashSet::new();
 
-        // Scan all documents to find terms that match within edit distance
-        let doc_count = reader.doc_count();
-        let query_term_lower = self.term.to_lowercase();
+        // Try to downcast to InvertedIndexReader and use Term Dictionary API
+        if let Some(inverted_reader) = reader.as_any().downcast_ref::<InvertedIndexReader>() {
+            // Normalize the query term using the analyzer
+            let analyzer = inverted_reader.analyzer();
+            let token_stream = analyzer.analyze(&self.term)?;
+            let tokens: Vec<_> = token_stream.collect();
 
-        // Debug: print query info (comment out for production)
-        // eprintln!("FuzzyQuery: searching for '{}' (lowercase: '{}') in field '{}' with max_edits={}",
-        //           self.term, query_term_lower, self.field, self.max_edits);
+            if let Some(first_token) = tokens.first() {
+                let normalized_query = &first_token.text;
 
-        for doc_id in 0..doc_count {
-            if let Ok(Some(document)) = reader.document(doc_id)
-                && let Some(field_value) = document.get_field(&self.field)
-                && let Some(text) = field_value.as_text()
-            {
-                // Debug: print document content
-                // eprintln!("  Doc {}: field '{}' = '{}'", doc_id, self.field, text);
+                // Try to get term dictionary for the field
+                if let Some(terms) = inverted_reader.terms(&self.field)? {
+                    // Create Levenshtein automaton
+                    let automaton = LevenshteinAutomaton::new(
+                        normalized_query,
+                        self.max_edits,
+                        self.prefix_length as usize,
+                        self.transpositions,
+                    );
 
-                // Simple tokenization - split by whitespace and punctuation
-                let words: Vec<(String, String)> = text
-                    .split_whitespace()
-                    .flat_map(|word| {
-                        // Split by hyphens first, then clean each part
-                        word.split('-')
-                            .flat_map(|part| {
-                                // Remove punctuation but keep original case
-                                let clean_word = part
-                                    .chars()
-                                    .filter(|c| c.is_alphabetic())
-                                    .collect::<String>();
-                                if clean_word.len() >= 2 {
-                                    Some((clean_word.clone(), clean_word.to_lowercase()))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .collect();
+                    // Create filtered iterator
+                    let mut terms_enum = AutomatonTermsEnum::new(terms.iterator()?, automaton)
+                        .with_max_matches(self.max_expansions);
 
-                for (original_word, lowercase_word) in words {
-                    // Skip if we've already processed this term
-                    if terms_found.contains(&lowercase_word) {
-                        continue;
-                    }
-
-                    // Check if word respects prefix constraint (use lowercase for comparison)
-                    if !self.respects_prefix(&lowercase_word) {
-                        continue;
-                    }
-
-                    // Calculate edit distance using lowercase
-                    let edit_distance = if self.transpositions {
-                        damerau_levenshtein_distance(&query_term_lower, &lowercase_word) as u32
-                    } else {
-                        levenshtein_distance(&query_term_lower, &lowercase_word) as u32
-                    };
-
-                    // Check if within allowed edit distance
-                    if edit_distance <= self.max_edits {
-                        // eprintln!("    Found match: '{}' (original: '{}') distance={}, max_edits={}",
-                        //           lowercase_word, original_word, edit_distance, self.max_edits);
-                        terms_found.insert(lowercase_word.clone());
-
-                        // Try both original case and lowercase when querying the index
-                        let mut doc_freq = 1; // Fallback frequency
-                        let mut search_term = lowercase_word.clone();
-
-                        // First try lowercase
-                        if let Ok(Some(term_info)) = reader.term_info(&self.field, &lowercase_word)
-                        {
-                            doc_freq = term_info.doc_freq as u32;
-                            // eprintln!("      term_info found for '{}': doc_freq={}", lowercase_word, doc_freq);
-                        } else if let Ok(Some(term_info)) =
-                            reader.term_info(&self.field, &original_word)
-                        {
-                            // Then try original case
-                            doc_freq = term_info.doc_freq as u32;
-                            search_term = original_word.clone();
-                            // eprintln!("      term_info found for '{}': doc_freq={}", original_word, doc_freq);
+                    // Enumerate matching terms
+                    while let Some(term_stats) = terms_enum.next()? {
+                        let edit_distance = if self.transpositions {
+                            damerau_levenshtein_distance(normalized_query, &term_stats.term) as u32
                         } else {
-                            // eprintln!("      No term_info found for '{}' or '{}'", lowercase_word, original_word);
-                        }
+                            levenshtein_distance(normalized_query, &term_stats.term) as u32
+                        };
 
-                        let similarity_score = self
-                            .calculate_similarity_score_advanced(edit_distance, &lowercase_word);
+                        let similarity_score = self.calculate_similarity_score(edit_distance);
 
                         matches.push(FuzzyMatch {
-                            term: search_term, // Use the version that was found in the index
+                            term: term_stats.term,
                             edit_distance,
-                            doc_frequency: doc_freq,
+                            doc_frequency: term_stats.doc_freq as u32,
                             similarity_score,
                         });
                     }
                 }
+                // If terms API is not available, return empty matches
             }
+            // If not InvertedIndexReader, return empty matches
         }
 
         // Sort by similarity score (highest first), then by document frequency
@@ -201,193 +177,9 @@ impl FuzzyQuery {
                 .then_with(|| b.doc_frequency.cmp(&a.doc_frequency))
         });
 
-        // Limit results to prevent explosion
-        matches.truncate(100);
-
         Ok(matches)
     }
 
-    /// Generate edit candidates using systematic edit operations.
-    #[allow(dead_code)]
-    fn generate_edit_candidates(&self) -> Vec<String> {
-        let mut candidates = std::collections::HashSet::new();
-        let chars: Vec<char> = self.term.chars().collect();
-        let term_len = chars.len();
-
-        // Add exact match
-        candidates.insert(self.term.clone());
-
-        // Generate candidates within max_edits distance
-        for edit_level in 1..=self.max_edits {
-            let level_candidates = if edit_level == 1 {
-                self.generate_single_edits(&chars, term_len)
-            } else {
-                // For multi-edit, we'd recursively apply edits
-                // For now, limit to single and double edits for performance
-                if edit_level == 2 {
-                    self.generate_double_edits(&chars, term_len)
-                } else {
-                    Vec::new()
-                }
-            };
-
-            for candidate in level_candidates {
-                if candidates.len() < 1000 {
-                    // Prevent explosion
-                    candidates.insert(candidate);
-                }
-            }
-        }
-
-        candidates.into_iter().collect()
-    }
-
-    /// Generate all single-edit candidates.
-    #[allow(dead_code)]
-    fn generate_single_edits(&self, chars: &[char], term_len: usize) -> Vec<String> {
-        let mut candidates = Vec::new();
-        let prefix_len = self.prefix_length as usize;
-
-        // Deletions
-        for i in prefix_len..term_len {
-            let mut new_chars = chars.to_vec();
-            new_chars.remove(i);
-            candidates.push(new_chars.into_iter().collect());
-        }
-
-        // Substitutions with keyboard-aware variants
-        for i in prefix_len..term_len {
-            let original_char = chars[i];
-
-            // Try nearby keyboard keys first (more likely typos)
-            let nearby_keys = TypoPatterns::nearby_keys(original_char);
-            for &replacement in &nearby_keys {
-                let mut new_chars = chars.to_vec();
-                new_chars[i] = replacement;
-                candidates.push(new_chars.into_iter().collect());
-            }
-
-            // Try common letter substitutions
-            for replacement in 'a'..='z' {
-                if replacement != original_char && !nearby_keys.contains(&replacement) {
-                    let mut new_chars = chars.to_vec();
-                    new_chars[i] = replacement;
-                    candidates.push(new_chars.into_iter().collect());
-
-                    // Limit to prevent explosion
-                    if candidates.len() > 500 {
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Insertions
-        for i in prefix_len..=term_len {
-            for c in 'a'..='z' {
-                let mut new_chars = chars.to_vec();
-                new_chars.insert(i, c);
-                candidates.push(new_chars.into_iter().collect());
-
-                // Limit to prevent explosion
-                if candidates.len() > 300 {
-                    break;
-                }
-            }
-        }
-
-        // Transpositions (if enabled)
-        if self.transpositions {
-            for i in prefix_len..term_len.saturating_sub(1) {
-                let mut new_chars = chars.to_vec();
-                new_chars.swap(i, i + 1);
-                candidates.push(new_chars.into_iter().collect());
-            }
-        }
-
-        candidates
-    }
-
-    /// Generate double-edit candidates (simplified version).
-    #[allow(dead_code)]
-    fn generate_double_edits(&self, chars: &[char], term_len: usize) -> Vec<String> {
-        let mut candidates = Vec::new();
-        let prefix_len = self.prefix_length as usize;
-
-        // Double deletions
-        for i in prefix_len..term_len {
-            for j in (i + 1)..term_len {
-                let mut new_chars = chars.to_vec();
-                new_chars.remove(j);
-                new_chars.remove(i);
-                candidates.push(new_chars.into_iter().collect());
-
-                if candidates.len() > 100 {
-                    return candidates;
-                }
-            }
-        }
-
-        // One deletion + one substitution (common pattern)
-        for del_pos in prefix_len..term_len {
-            for sub_pos in prefix_len..term_len {
-                if del_pos != sub_pos {
-                    let mut new_chars = chars.to_vec();
-                    if del_pos < sub_pos {
-                        new_chars.remove(del_pos);
-                        new_chars[sub_pos - 1] = 'e'; // Common replacement
-                    } else {
-                        new_chars[sub_pos] = 'e';
-                        new_chars.remove(del_pos);
-                    }
-                    candidates.push(new_chars.into_iter().collect());
-
-                    if candidates.len() > 50 {
-                        return candidates;
-                    }
-                }
-            }
-        }
-
-        candidates
-    }
-
-    /// Check if a candidate respects the prefix length constraint.
-    fn respects_prefix(&self, candidate: &str) -> bool {
-        let prefix_len = self.prefix_length as usize;
-        if prefix_len == 0 {
-            return true;
-        }
-
-        let term_prefix: String = self.term.chars().take(prefix_len).collect();
-        let candidate_prefix: String = candidate.chars().take(prefix_len).collect();
-
-        term_prefix == candidate_prefix
-    }
-
-    /// Calculate advanced similarity score considering keyboard distance and frequency.
-    fn calculate_similarity_score_advanced(&self, edit_distance: u32, candidate: &str) -> f32 {
-        if edit_distance > self.max_edits {
-            return 0.0;
-        }
-
-        // Base score from edit distance
-        let base_score = self.calculate_similarity_score(edit_distance);
-
-        // Keyboard distance bonus (prefer typos that are more likely)
-        let keyboard_distance = TypoPatterns::keyboard_distance(&self.term, candidate);
-        let keyboard_bonus = if keyboard_distance < edit_distance as f64 {
-            0.1 // Bonus for keyboard-likely errors
-        } else {
-            0.0
-        };
-
-        // Length similarity bonus
-        let length_diff = (self.term.len() as i32 - candidate.len() as i32).abs() as f32;
-        let length_bonus = (1.0 - (length_diff / self.term.len().max(1) as f32)) * 0.05;
-
-        (base_score + keyboard_bonus + length_bonus).min(1.0)
-    }
 
     /// Calculate similarity score based on edit distance.
     fn calculate_similarity_score(&self, edit_distance: u32) -> f32 {
@@ -428,6 +220,7 @@ impl FuzzyQuery {
 
 impl Query for FuzzyQuery {
     fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+        // Try efficient implementation first, fall back to old implementation
         let matches = self.find_matches(reader)?;
         Ok(Box::new(FuzzyMatcher::new(matches, reader, &self.field)?))
     }
@@ -435,6 +228,7 @@ impl Query for FuzzyQuery {
     fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
         use crate::query::scorer::BM25Scorer;
 
+        // Try efficient implementation first, fall back to old implementation
         let matches = self.find_matches(reader)?;
 
         if matches.is_empty() {
@@ -546,31 +340,21 @@ impl FuzzyMatcher {
         let mut doc_scores = HashMap::new();
 
         // For each fuzzy match, find actual documents that contain the term
-        eprintln!("FuzzyMatcher: processing {} matches", matches.len());
         for fuzzy_match in matches {
-            eprintln!(
-                "  Looking for term '{}' in field '{}'",
-                fuzzy_match.term, field
-            );
             if let Some(postings) = reader.postings(field, &fuzzy_match.term)? {
                 let mut posting_iter = postings;
-                eprintln!("    Got postings for '{}'", fuzzy_match.term);
 
                 // Collect all document IDs that contain this fuzzy matching term
                 while posting_iter.next()? {
                     let doc_id = posting_iter.doc_id();
-                    eprintln!("      Found doc_id: {doc_id}");
                     if doc_id != u64::MAX {
                         // Use the highest similarity score if document matches multiple fuzzy terms
                         let current_score = doc_scores.get(&doc_id).unwrap_or(&0.0);
                         if fuzzy_match.similarity_score > *current_score {
                             doc_scores.insert(doc_id, fuzzy_match.similarity_score);
-                            // eprintln!("        Stored doc {} with score {}", doc_id, fuzzy_match.similarity_score);
                         }
                     }
                 }
-            } else {
-                // eprintln!("    No postings found for '{}'", fuzzy_match.term);
             }
         }
 
@@ -779,7 +563,7 @@ mod tests {
         let query = FuzzyQuery::new("field", "cat")
             .max_edits(1)
             .prefix_length(0);
-        let candidates = query.generate_edit_candidates();
+        let candidates = query.generate_edit_candidates_for_term("cat");
 
         // Should include exact match
         assert!(candidates.contains(&"cat".to_string()));

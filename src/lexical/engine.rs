@@ -52,6 +52,7 @@
 use std::cell::{RefCell, RefMut};
 use std::sync::Arc;
 
+use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::lexical::index::reader::inverted::InvertedIndexReader;
@@ -562,6 +563,34 @@ impl LexicalEngine {
     pub fn is_closed(&self) -> bool {
         self.index.is_closed()
     }
+
+    /// Get the analyzer used by this engine.
+    ///
+    /// Returns the analyzer from the underlying index reader.
+    /// This is useful for query parsing and term normalization.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<Arc<dyn Analyzer>>` containing the analyzer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the reader cannot be created or the index type
+    /// doesn't support analyzers.
+    pub fn analyzer(&self) -> Result<Arc<dyn Analyzer>> {
+        use crate::lexical::index::reader::inverted::InvertedIndexReader;
+
+        let reader = self.index.reader()?;
+
+        // Downcast to InvertedIndexReader to access analyzer
+        if let Some(inverted_reader) = reader.as_any().downcast_ref::<InvertedIndexReader>() {
+            Ok(Arc::clone(inverted_reader.analyzer()))
+        } else {
+            // For other index types, return StandardAnalyzer as default
+            use crate::analysis::analyzer::standard::StandardAnalyzer;
+            Ok(Arc::new(StandardAnalyzer::new()?))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -893,8 +922,10 @@ mod tests {
         let engine = LexicalEngine::new(index).unwrap();
 
         // Search specific field
+        use crate::analysis::analyzer::standard::StandardAnalyzer;
         use crate::query::parser::QueryParser;
-        let parser = QueryParser::new();
+        let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+        let parser = QueryParser::new(analyzer);
         let query = parser.parse_field("title", "hello world").unwrap();
         let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 
@@ -917,11 +948,13 @@ mod tests {
         let index = LexicalIndexFactory::create(storage, config).unwrap();
         let _engine = LexicalEngine::new(index).unwrap();
 
+        use crate::analysis::analyzer::standard::StandardAnalyzer;
         use crate::query::parser::QueryParser;
-        let parser = QueryParser::new();
+        let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+        let parser = QueryParser::new(analyzer.clone());
         assert!(parser.default_field().is_none());
 
-        let parser_with_default = QueryParser::new().with_default_field("title");
+        let parser_with_default = QueryParser::new(analyzer).with_default_field("title");
         assert_eq!(parser_with_default.default_field(), Some("title"));
     }
 
@@ -937,8 +970,10 @@ mod tests {
         let engine = LexicalEngine::new(index).unwrap();
 
         // Test complex query parsing
+        use crate::analysis::analyzer::standard::StandardAnalyzer;
         use crate::query::parser::QueryParser;
-        let parser = QueryParser::new().with_default_field("title");
+        let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+        let parser = QueryParser::new(analyzer).with_default_field("title");
         let query = parser.parse("title:hello AND body:world").unwrap();
         let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 

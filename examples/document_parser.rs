@@ -117,7 +117,7 @@ fn main() -> Result<()> {
     println!("Query: {query_str}");
 
     use yatagarasu::query::parser::QueryParser;
-    let parser = QueryParser::new();
+    let parser = QueryParser::new(analyzer.clone());
     let query = parser.parse(query_str)?;
 
     let request = LexicalSearchRequest::new(query).load_documents(true);

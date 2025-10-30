@@ -11,6 +11,7 @@ use ahash::AHashMap;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
+use crate::analysis::token::Token;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
@@ -18,6 +19,10 @@ use crate::lexical::dictionary::HybridTermDictionary;
 use crate::lexical::dictionary::TermInfo;
 use crate::lexical::doc_values::DocValuesReader;
 use crate::lexical::index::SegmentInfo;
+use crate::lexical::posting::{Posting, PostingList};
+use crate::lexical::reader::PostingIterator;
+use crate::lexical::terms::{InvertedIndexTerms, TermDictionaryAccess, Terms};
+use crate::lexical::types::FieldStats;
 use crate::storage::Storage;
 use crate::storage::structured::StructReader;
 
@@ -74,9 +79,29 @@ impl Default for InvertedIndexReaderConfig {
     }
 }
 
-// SegmentInfo is now imported from crate::index
-
-/// Advanced posting iterator with block-based optimization.
+/// Advanced posting iterator for efficiently reading postings from the index.
+///
+/// # Purpose
+/// Used when executing queries against the actual index.
+///
+/// # Implemented Traits
+/// - `reader::PostingIterator` trait
+///
+/// # Features
+/// - `next()`: Move to the next document
+/// - `skip_to(target)`: Efficiently skip to a specified document ID
+/// - Block-based optimization for fast skip operations
+/// - Position information retrieval
+/// - Cost calculation for optimization
+///
+/// # Use Cases
+/// - Returned as `Box<dyn reader::PostingIterator>` from `InvertedIndexReader.postings()`
+/// - Used during query execution (BooleanQuery, FuzzyQuery, etc.)
+/// - When efficient processing of multiple query conditions is needed
+///
+/// # Difference from `posting::PostingIterator`
+/// - `posting::PostingIterator`: Simple in-memory iteration
+/// - `InvertedIndexPostingIterator`: Advanced iterator for index queries
 #[derive(Debug)]
 pub struct InvertedIndexPostingIterator {
     /// The posting data.
@@ -113,7 +138,7 @@ pub struct PostingBlock {
 
 impl InvertedIndexPostingIterator {
     /// Create a new advanced posting iterator.
-    pub fn new(postings: Vec<crate::lexical::posting::Posting>) -> Self {
+    pub fn new(postings: Vec<Posting>) -> Self {
         InvertedIndexPostingIterator {
             postings,
             position: 0,
@@ -124,7 +149,7 @@ impl InvertedIndexPostingIterator {
     }
 
     /// Create posting iterator with block optimization.
-    pub fn with_blocks(postings: Vec<crate::lexical::posting::Posting>, block_size: usize) -> Self {
+    pub fn with_blocks(postings: Vec<Posting>, block_size: usize) -> Self {
         let blocks = Self::create_blocks(&postings, block_size);
         InvertedIndexPostingIterator {
             postings,
@@ -136,10 +161,7 @@ impl InvertedIndexPostingIterator {
     }
 
     /// Create posting blocks for efficient skip-to operations.
-    fn create_blocks(
-        postings: &[crate::lexical::posting::Posting],
-        block_size: usize,
-    ) -> Vec<PostingBlock> {
+    fn create_blocks(postings: &[Posting], block_size: usize) -> Vec<PostingBlock> {
         let mut blocks = Vec::new();
         let mut start = 0;
 
@@ -587,7 +609,7 @@ impl SegmentReader {
     }
 
     /// Get field statistics for a specific field.
-    pub fn field_stats(&self, field: &str) -> Result<Option<crate::lexical::types::FieldStats>> {
+    pub fn field_stats(&self, field: &str) -> Result<Option<FieldStats>> {
         // Ensure field stats are loaded
         if self.field_stats.read().unwrap().is_none() {
             self.load_field_stats()?;
@@ -656,11 +678,7 @@ impl SegmentReader {
     }
 
     /// Get posting list for a field and term.
-    pub fn postings(
-        &self,
-        field: &str,
-        term: &str,
-    ) -> Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>> {
+    pub fn postings(&self, field: &str, term: &str) -> Result<Option<Box<dyn PostingIterator>>> {
         // Load postings from storage
         let postings_file = format!("{}.post", self.info.segment_id);
 
@@ -681,7 +699,6 @@ impl SegmentReader {
             }
 
             // Decode the posting list
-            use crate::lexical::posting::PostingList;
             let posting_list = PostingList::decode(&mut reader)?;
 
             Ok(Some(Box::new(InvertedIndexPostingIterator::with_blocks(
@@ -698,7 +715,7 @@ impl SegmentReader {
         &self,
         field: &str,
         term: &str,
-    ) -> Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>> {
+    ) -> Result<Option<Box<dyn PostingIterator>>> {
         // Ensure documents are loaded
         if !self.loaded.load(Ordering::Acquire) {
             // Load documents on-demand
@@ -708,7 +725,7 @@ impl SegmentReader {
         let docs = self.stored_documents.read().unwrap();
         if let Some(documents) = docs.as_ref() {
             let mut postings = Vec::new();
-            let default_analyzer = crate::analysis::analyzer::standard::StandardAnalyzer::new()?;
+            let default_analyzer = StandardAnalyzer::new()?;
 
             for (doc_id, doc) in documents.iter() {
                 if let Some(field_value) = doc.get_field(field)
@@ -716,7 +733,7 @@ impl SegmentReader {
                 {
                     // Use default analyzer (analyzers are configured at writer level)
                     let token_stream = default_analyzer.analyze(text)?;
-                    let tokens: Vec<crate::analysis::token::Token> = token_stream.collect();
+                    let tokens: Vec<Token> = token_stream.collect();
 
                     let mut positions = Vec::new();
                     for token in tokens.iter() {
@@ -726,7 +743,7 @@ impl SegmentReader {
                     }
 
                     if !positions.is_empty() {
-                        postings.push(crate::lexical::posting::Posting {
+                        postings.push(Posting {
                             doc_id: *doc_id,
                             frequency: positions.len() as u32,
                             positions: Some(positions),
@@ -1152,6 +1169,30 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
             let seg = seg_lock.read().unwrap();
             seg.has_doc_values(field)
         })
+    }
+}
+
+// Implementation of TermDictionaryAccess for InvertedIndexReader
+impl TermDictionaryAccess for InvertedIndexReader {
+    fn terms(&self, field: &str) -> Result<Option<Box<dyn Terms>>> {
+        // Get the first segment's term dictionary
+        // In a multi-segment index, we would need to merge terms from all segments.
+        // For now, we'll use a simplified approach with the first segment.
+        if let Some(seg_lock) = self.segment_readers.first() {
+            let seg = seg_lock.read().unwrap();
+
+            // Load the term dictionary if not already loaded
+            if seg.term_dictionary.read().unwrap().is_none() {
+                let _ = seg.load_term_dictionary()?;
+            }
+
+            if let Some(dict) = seg.term_dictionary.read().unwrap().clone() {
+                let terms = InvertedIndexTerms::new(field, dict);
+                return Ok(Some(Box::new(terms)));
+            }
+        }
+
+        Ok(None)
     }
 }
 
