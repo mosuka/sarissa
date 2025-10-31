@@ -4,7 +4,7 @@
 
 use crate::error::Result;
 use crate::lexical::index::inverted::core::terms::{TermStats, TermsEnum};
-use crate::spelling::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
+use crate::util::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
 
 /// A simple Levenshtein automaton for fuzzy string matching.
 ///

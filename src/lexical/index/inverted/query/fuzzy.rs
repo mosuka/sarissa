@@ -12,7 +12,7 @@ use crate::lexical::index::inverted::query::matcher::Matcher;
 use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
-use crate::spelling::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
+use crate::util::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
 
 /// A fuzzy query for approximate string matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]

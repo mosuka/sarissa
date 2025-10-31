@@ -5,5 +5,5 @@
 
 pub mod corrector;
 pub mod dictionary;
-pub mod levenshtein;
 pub mod suggest;
+pub mod typo_patterns;

@@ -6,7 +6,8 @@ use std::collections::{BinaryHeap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::spelling::dictionary::SpellingDictionary;
-use crate::spelling::levenshtein::{LevenshteinMatcher, TypoPatterns};
+use crate::spelling::typo_patterns::TypoPatterns;
+use crate::util::levenshtein::LevenshteinMatcher;
 
 /// A spelling suggestion with a score indicating confidence.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
