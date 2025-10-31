@@ -19,6 +19,6 @@ pub mod index;
 pub mod search;
 
 pub mod engine;
-pub mod types;
 pub mod reader;
+pub mod types;
 pub mod writer;

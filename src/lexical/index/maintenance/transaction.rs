@@ -12,8 +12,8 @@ use uuid::Uuid;
 use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::lexical::index::maintenance::deletion::{DeletionManager, GlobalDeletionState};
-use crate::lexical::index::segment::merge_engine::MergeEngine;
 use crate::lexical::index::segment::manager::SegmentManager;
+use crate::lexical::index::segment::merge_engine::MergeEngine;
 use crate::storage::Storage;
 
 /// Transaction isolation levels.

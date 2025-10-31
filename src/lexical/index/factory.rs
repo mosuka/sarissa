@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use crate::error::Result;
+use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::LexicalIndexConfig;
 use crate::lexical::index::inverted::index::InvertedIndex;
-use crate::lexical::index::traits::LexicalIndex;
 use crate::storage::Storage;
 
 /// Factory for creating lexical index instances.
