@@ -20,7 +20,7 @@ use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::core::doc_values::DocValuesReader;
 use crate::lexical::index::inverted::core::posting::{Posting, PostingList};
 use crate::lexical::index::inverted::core::terms::{InvertedIndexTerms, TermDictionaryAccess, Terms};
-use crate::lexical::index::inverted::segment::types::SegmentInfo;
+use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::reader::PostingIterator;
 use crate::lexical::types::FieldStats;
 use crate::storage::Storage;
