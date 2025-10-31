@@ -9,11 +9,11 @@ Yatagarasu (pronounced yah-tah-gah-rah-soo) is a Rust-based hybrid search engine
 The name comes from Yatagarasu (八咫烏) — the three-legged crow of Japanese mythology that guided emperors through unknown lands.
 Each of its three legs symbolizes a distinct form of understanding:
 
-🦶 Keyword Search — precise retrieval through lexical and linguistic matching.
+🐦‍⬛ Keyword Search — precise retrieval through lexical and linguistic matching.
 
-🦶 Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
+🐦‍⬛ Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
 
-🦶 Multimodal Search — bridging text, image, and other modalities through shared representations.
+🐦‍⬛ Multimodal Search — bridging text, image, and other modalities through shared representations.
 
 Together, they form a unified search architecture that guides users toward knowledge hidden across all forms of data.
 
@@ -24,9 +24,9 @@ Built in Rust for performance, safety, and extensibility, Yatagarasu is designed
 ### Core Search Capabilities
 
 - **Pure Rust Implementation** - Memory-safe and fast performance with zero-cost abstractions
-- **Lexical Search** - Full-text search with inverted index and BM25 scoring
-- **Vector Search** - HNSW-based approximate nearest neighbor search with multiple distance metrics (Cosine, Euclidean, Dot Product)
-- **Hybrid Search** - Combined lexical and vector search with configurable score fusion strategies
+- **Keyword Search** - Full-text search with inverted index and BM25 scoring
+- **Semantic Search** - HNSW-based approximate nearest neighbor search with multiple distance metrics (Cosine, Euclidean, Dot Product)
+- **Multimodal Search** - Combined lexical and vector search with configurable score fusion strategies
 
 ### Text Analysis
 
