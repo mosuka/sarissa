@@ -33,7 +33,7 @@ use yatagarasu::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::index::{FlatIndexConfig, VectorIndexConfig};
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::vector::types::VectorSearchRequest;
+use yatagarasu::vector::search::searcher::VectorSearchRequest;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]

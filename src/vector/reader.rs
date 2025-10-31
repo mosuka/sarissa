@@ -4,8 +4,50 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::vector::types::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::{DistanceMetric, Vector};
+
+/// Statistics about a vector index.
+#[derive(Debug, Clone)]
+pub struct VectorStats {
+    /// Total number of vectors in the index.
+    pub vector_count: usize,
+    /// Vector dimension.
+    pub dimension: usize,
+    /// Index memory usage in bytes.
+    pub memory_usage: usize,
+    /// Build time in milliseconds.
+    pub build_time_ms: u64,
+}
+
+/// Metadata about a vector index.
+#[derive(Debug, Clone)]
+pub struct VectorIndexMetadata {
+    /// Index type (HNSW, Flat, IVF, etc.).
+    pub index_type: String,
+    /// Creation timestamp.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Last modified timestamp.
+    pub modified_at: chrono::DateTime<chrono::Utc>,
+    /// Index version.
+    pub version: String,
+    /// Build configuration.
+    pub build_config: serde_json::Value,
+    /// Custom metadata.
+    pub custom_metadata: std::collections::HashMap<String, String>,
+}
+
+/// Index validation report.
+#[derive(Debug, Clone)]
+pub struct ValidationReport {
+    /// Whether the index is valid.
+    pub is_valid: bool,
+    /// Validation errors found.
+    pub errors: Vec<String>,
+    /// Validation warnings.
+    pub warnings: Vec<String>,
+    /// Repair suggestions.
+    pub repair_suggestions: Vec<String>,
+}
 
 /// Trait for reading vector indexes (similar to IndexReader for inverted indexes).
 pub trait VectorIndexReader: Send + Sync {
@@ -246,9 +288,9 @@ impl VectorIndexReaderFactory {
         index_type: &str,
         index_data: &[u8],
     ) -> Result<Arc<dyn VectorIndexReader>> {
-        use crate::vector::index::reader::flat::FlatVectorIndexReader;
-        use crate::vector::index::reader::hnsw::HnswIndexReader;
-        use crate::vector::index::reader::ivf::IvfIndexReader;
+        use crate::vector::index::flat::reader::FlatVectorIndexReader;
+        use crate::vector::index::hnsw::reader::HnswIndexReader;
+        use crate::vector::index::ivf::reader::IvfIndexReader;
 
         match index_type.to_lowercase().as_str() {
             "flat" => {

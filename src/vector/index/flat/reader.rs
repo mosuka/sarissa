@@ -1,25 +1,23 @@
-//! HNSW vector index reader implementation.
+//! Flat vector index reader implementation.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::{Result, SageError};
 use crate::storage::Storage;
+use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
-use crate::vector::types::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::{DistanceMetric, Vector};
 
-/// Reader for HNSW (Hierarchical Navigable Small World) vector indexes.
-pub struct HnswIndexReader {
+/// Reader for flat (brute-force) vector indexes.
+pub struct FlatVectorIndexReader {
     vectors: HashMap<u64, Vector>,
     vector_ids: Vec<u64>,
     dimension: usize,
     distance_metric: DistanceMetric,
-    m: usize,
-    ef_construction: usize,
 }
 
-impl HnswIndexReader {
+impl FlatVectorIndexReader {
     /// Create a reader from serialized bytes.
     pub fn from_bytes(_data: &[u8]) -> Result<Self> {
         Err(SageError::InvalidOperation(
@@ -27,7 +25,7 @@ impl HnswIndexReader {
         ))
     }
 
-    /// Load an HNSW vector index from storage.
+    /// Load a flat vector index from storage.
     pub fn load(
         storage: Arc<dyn Storage>,
         path: &str,
@@ -36,7 +34,7 @@ impl HnswIndexReader {
         use std::io::Read;
 
         // Open the index file
-        let file_name = format!("{}.hnsw", path);
+        let file_name = format!("{}.flat", path);
         let mut input = storage.open_input(&file_name)?;
 
         // Read metadata
@@ -47,14 +45,6 @@ impl HnswIndexReader {
         let mut dimension_buf = [0u8; 4];
         input.read_exact(&mut dimension_buf)?;
         let dimension = u32::from_le_bytes(dimension_buf) as usize;
-
-        let mut m_buf = [0u8; 4];
-        input.read_exact(&mut m_buf)?;
-        let m = u32::from_le_bytes(m_buf) as usize;
-
-        let mut ef_construction_buf = [0u8; 4];
-        input.read_exact(&mut ef_construction_buf)?;
-        let ef_construction = u32::from_le_bytes(ef_construction_buf) as usize;
 
         // Read vectors
         let mut vectors = HashMap::with_capacity(num_vectors);
@@ -81,18 +71,11 @@ impl HnswIndexReader {
             vector_ids,
             dimension,
             distance_metric,
-            m,
-            ef_construction,
         })
-    }
-
-    /// Get HNSW parameters.
-    pub fn hnsw_params(&self) -> (usize, usize) {
-        (self.m, self.ef_construction)
     }
 }
 
-impl VectorIndexReader for HnswIndexReader {
+impl VectorIndexReader for FlatVectorIndexReader {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -147,7 +130,7 @@ impl VectorIndexReader for HnswIndexReader {
     }
 
     fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
-        Ok(Box::new(HnswVectorIterator {
+        Ok(Box::new(FlatVectorIterator {
             vectors: self
                 .vector_ids
                 .iter()
@@ -159,7 +142,7 @@ impl VectorIndexReader for HnswIndexReader {
 
     fn metadata(&self) -> Result<VectorIndexMetadata> {
         Ok(VectorIndexMetadata {
-            index_type: "hnsw".to_string(),
+            index_type: "flat".to_string(),
             created_at: chrono::Utc::now(),
             modified_at: chrono::Utc::now(),
             version: "1".to_string(),
@@ -170,7 +153,7 @@ impl VectorIndexReader for HnswIndexReader {
 
     fn validate(&self) -> Result<ValidationReport> {
         let mut errors = Vec::new();
-        let mut warnings = Vec::new();
+        let warnings = Vec::new();
 
         // Check for duplicate IDs
         if self.vector_ids.len() != self.vectors.len() {
@@ -200,17 +183,6 @@ impl VectorIndexReader for HnswIndexReader {
             }
         }
 
-        // HNSW-specific validation
-        if self.m == 0 {
-            warnings.push("HNSW parameter M is 0, this may indicate a corrupted index".to_string());
-        }
-        if self.ef_construction == 0 {
-            warnings.push(
-                "HNSW parameter ef_construction is 0, this may indicate a corrupted index"
-                    .to_string(),
-            );
-        }
-
         Ok(ValidationReport {
             repair_suggestions: Vec::new(),
             is_valid: errors.is_empty(),
@@ -220,13 +192,13 @@ impl VectorIndexReader for HnswIndexReader {
     }
 }
 
-/// Iterator for HNSW vector index.
-struct HnswVectorIterator {
+/// Iterator for flat vector index.
+struct FlatVectorIterator {
     vectors: Vec<(u64, Vector)>,
     current: usize,
 }
 
-impl VectorIterator for HnswVectorIterator {
+impl VectorIterator for FlatVectorIterator {
     fn next(&mut self) -> Result<Option<(u64, Vector)>> {
         if self.current < self.vectors.len() {
             let result = self.vectors[self.current].clone();

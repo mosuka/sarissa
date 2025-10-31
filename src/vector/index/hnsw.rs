@@ -1,11 +1,15 @@
 //! HNSW vector index implementation.
 
+pub mod reader;
+pub mod searcher;
+pub mod writer;
+
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::{Result, SageError};
 use crate::storage::Storage;
-use crate::vector::index::writer::hnsw::HnswIndexWriter;
+use crate::vector::index::hnsw::writer::HnswIndexWriter;
 use crate::vector::index::{HnswIndexConfig, VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
@@ -149,7 +153,7 @@ impl VectorIndex for HnswIndex {
     fn reader(&self) -> Result<Arc<dyn VectorIndexReader>> {
         self.check_closed()?;
 
-        use crate::vector::index::reader::hnsw::HnswIndexReader;
+        use crate::vector::index::hnsw::reader::HnswIndexReader;
 
         let reader = HnswIndexReader::load(
             self.storage.clone(),

@@ -4,7 +4,20 @@
 [![Documentation](https://docs.rs/yatagarasu/badge.svg)](https://docs.rs/yatagarasu)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A fast, featureful search library for Rust supporting full-text search, vector search, and hybrid search. Inspired by [Apache Lucene](https://github.com/apache/lucene) and modern search engines, Yatagarasu combines the power of lexical search with semantic vector search capabilities.
+Yatagarasu (pronounced yah-tah-gah-rah-soo) is a Rust-based hybrid search engine that unifies Keyword Search, Semantic Search, and Multimodal Search into a single, extensible system.
+
+The name comes from Yatagarasu (八咫烏) — the three-legged crow of Japanese mythology that guided emperors through unknown lands.
+Each of its three legs symbolizes a distinct form of understanding:
+
+🦶 Keyword Search — precise retrieval through lexical and linguistic matching.
+
+🦶 Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
+
+🦶 Multimodal Search — bridging text, image, and other modalities through shared representations.
+
+Together, they form a unified search architecture that guides users toward knowledge hidden across all forms of data.
+
+Built in Rust for performance, safety, and extensibility, Yatagarasu is designed for both research exploration and production-grade search applications.
 
 ## ✨ Features
 

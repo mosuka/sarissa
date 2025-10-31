@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::vector::index::reader::flat::FlatVectorIndexReader;
-use crate::vector::index::reader::hnsw::HnswIndexReader;
-use crate::vector::index::reader::ivf::IvfIndexReader;
+use crate::vector::index::flat::reader::FlatVectorIndexReader;
+use crate::vector::index::hnsw::reader::HnswIndexReader;
+use crate::vector::index::ivf::reader::IvfIndexReader;
 use crate::vector::reader::VectorIndexReader;
 
 /// Factory for creating vector index readers.

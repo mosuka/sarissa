@@ -28,7 +28,7 @@ use yatagarasu::storage::memory::MemoryStorageConfig;
 use yatagarasu::vector::DistanceMetric;
 use yatagarasu::vector::engine::VectorEngine;
 use yatagarasu::vector::index::{HnswIndexConfig, VectorIndexConfig};
-use yatagarasu::vector::types::VectorSearchRequest;
+use yatagarasu::vector::search::searcher::VectorSearchRequest;
 
 #[tokio::main]
 async fn main() -> Result<()> {

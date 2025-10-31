@@ -1,11 +1,15 @@
 //! Flat vector index implementation.
 
+pub mod reader;
+pub mod searcher;
+pub mod writer;
+
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::{Result, SageError};
 use crate::storage::Storage;
-use crate::vector::index::writer::flat::FlatIndexWriter;
+use crate::vector::index::flat::writer::FlatIndexWriter;
 use crate::vector::index::{FlatIndexConfig, VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
@@ -149,7 +153,7 @@ impl VectorIndex for FlatIndex {
     fn reader(&self) -> Result<Arc<dyn VectorIndexReader>> {
         self.check_closed()?;
 
-        use crate::vector::index::reader::flat::FlatVectorIndexReader;
+        use crate::vector::index::flat::reader::FlatVectorIndexReader;
 
         // Load the index data from storage
         // For now, use a default path. In the future, this should be configurable.
