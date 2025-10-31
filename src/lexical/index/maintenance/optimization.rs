@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{Result, SageError};
 use crate::lexical::index::maintenance::deletion::DeletionManager;
-use crate::lexical::index::segment::merge_engine::{MergeConfig, MergeEngine, MergeResult};
 use crate::lexical::index::segment::manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
+use crate::lexical::index::segment::merge_engine::{MergeConfig, MergeEngine, MergeResult};
 use crate::storage::Storage;
 
 /// Optimization strategy types.

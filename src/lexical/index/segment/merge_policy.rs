@@ -400,7 +400,7 @@ impl MergePolicy for NoMergePolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::traits::SegmentInfo;
+    use crate::lexical::index::inverted::types::SegmentInfo;
     use crate::lexical::index::segment::manager::ManagedSegmentInfo;
 
     #[allow(dead_code)]

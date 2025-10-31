@@ -13,7 +13,7 @@
 //! - `features`: Search features (faceting, highlighting, spell correction)
 //! - `result_processor`: Result processing utilities
 
-pub mod scoring;
 pub mod features;
 pub mod result_processor;
+pub mod scoring;
 pub mod searcher;

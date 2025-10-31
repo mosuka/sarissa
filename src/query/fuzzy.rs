@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::lexical::core::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
+use crate::lexical::core::terms::{TermDictionaryAccess, TermsEnum as _};
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
-use crate::lexical::core::terms::{TermDictionaryAccess, TermsEnum as _};
 use crate::query::matcher::Matcher;
 use crate::query::query::Query;
 use crate::query::scorer::Scorer;

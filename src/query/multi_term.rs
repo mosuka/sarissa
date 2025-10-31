@@ -4,8 +4,8 @@
 //! similar to Lucene's MultiTermQuery.
 
 use crate::error::Result;
-use crate::lexical::reader::IndexReader;
 use crate::lexical::core::terms::TermsEnum;
+use crate::lexical::reader::IndexReader;
 use crate::query::query::Query;
 
 /// A query that matches multiple terms based on some pattern or criteria.
@@ -144,9 +144,7 @@ pub enum RewriteMethod {
 impl Default for RewriteMethod {
     fn default() -> Self {
         // Use TopTermsBlended as default, same as Lucene's FuzzyQuery
-        RewriteMethod::TopTermsBlended {
-            max_expansions: 50,
-        }
+        RewriteMethod::TopTermsBlended { max_expansions: 50 }
     }
 }
 

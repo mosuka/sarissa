@@ -11,7 +11,9 @@ use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::document::field_value::FieldValue;
-use yatagarasu::lexical::index::inverted::index::{InvertedIndexWriter, LexicalIndexWriterConfig};
+use yatagarasu::lexical::index::inverted::writer::{
+    InvertedIndexWriter, InvertedIndexWriterConfig,
+};
 use yatagarasu::storage::memory::MemoryStorage;
 use yatagarasu::storage::memory::MemoryStorageConfig;
 
@@ -29,7 +31,7 @@ fn main() -> yatagarasu::error::Result<()> {
 
     // Create storage and writer configuration
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let config = LexicalIndexWriterConfig {
+    let config = InvertedIndexWriterConfig {
         analyzer: Arc::new(per_field_analyzer),
         ..Default::default()
     };

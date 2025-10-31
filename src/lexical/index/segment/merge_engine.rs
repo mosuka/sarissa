@@ -12,10 +12,10 @@ use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
-use crate::lexical::index::traits::SegmentInfo;
-use crate::lexical::index::inverted::reader::InvertedIndexReader;
-use crate::lexical::index::segment::manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::lexical::core::posting::InvertedIndex;
+use crate::lexical::index::inverted::reader::InvertedIndexReader;
+use crate::lexical::index::inverted::types::SegmentInfo;
+use crate::lexical::index::segment::manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
 use crate::lexical::reader::IndexReader;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
@@ -510,7 +510,7 @@ impl MergeEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::traits::SegmentInfo;
+    use crate::lexical::index::inverted::types::SegmentInfo;
     use crate::lexical::index::segment::manager::ManagedSegmentInfo;
 
     use crate::storage::memory::MemoryStorage;
