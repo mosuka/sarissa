@@ -15,7 +15,7 @@ use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::spelling::corrector::SpellingCorrector;
 use yatagarasu::vector::index::HnswIndexConfig;
-use yatagarasu::vector::index::writer::hnsw::HnswIndexWriter;
+use yatagarasu::vector::index::hnsw::writer::HnswIndexWriter;
 use yatagarasu::vector::writer::VectorIndexWriter;
 use yatagarasu::vector::{DistanceMetric, Vector};
 
