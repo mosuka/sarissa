@@ -14,10 +14,10 @@ use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::index::inverted::core::posting::TermPostingIndex;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
+use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::inverted::segment::manager::{
     ManagedSegmentInfo, MergeCandidate, MergeStrategy,
 };
-use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::reader::IndexReader;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
@@ -512,8 +512,8 @@ impl MergeEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::inverted::segment::manager::ManagedSegmentInfo;
     use crate::lexical::index::inverted::segment::SegmentInfo;
+    use crate::lexical::index::inverted::segment::manager::ManagedSegmentInfo;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;

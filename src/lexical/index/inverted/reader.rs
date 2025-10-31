@@ -19,10 +19,12 @@ use crate::lexical::core::dictionary::HybridTermDictionary;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::core::doc_values::DocValuesReader;
 use crate::lexical::index::inverted::core::posting::{Posting, PostingList};
-use crate::lexical::index::inverted::core::terms::{InvertedIndexTerms, TermDictionaryAccess, Terms};
+use crate::lexical::index::inverted::core::terms::{
+    InvertedIndexTerms, TermDictionaryAccess, Terms,
+};
 use crate::lexical::index::inverted::segment::SegmentInfo;
-use crate::lexical::reader::PostingIterator;
 use crate::lexical::reader::FieldStats;
+use crate::lexical::reader::PostingIterator;
 use crate::storage::Storage;
 use crate::storage::structured::StructReader;
 
@@ -782,7 +784,8 @@ pub struct CacheManager {
 
     /// Posting list cache.
     #[allow(dead_code)]
-    posting_cache: RwLock<AHashMap<String, Arc<Vec<crate::lexical::index::inverted::core::posting::Posting>>>>,
+    posting_cache:
+        RwLock<AHashMap<String, Arc<Vec<crate::lexical::index::inverted::core::posting::Posting>>>>,
 
     /// Current memory usage.
     memory_usage: AtomicUsize,
