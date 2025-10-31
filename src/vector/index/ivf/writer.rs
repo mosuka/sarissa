@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::Vector;
 use crate::vector::index::IvfIndexConfig;
@@ -96,7 +96,7 @@ impl IvfIndexWriter {
         let _n_probe = u32::from_le_bytes(n_probe_buf) as usize;
 
         if dimension != index_config.dimension {
-            return Err(SageError::InvalidOperation(format!(
+            return Err(YatagarasuError::InvalidOperation(format!(
                 "Dimension mismatch: expected {}, found {}",
                 index_config.dimension, dimension
             )));
@@ -185,7 +185,7 @@ impl IvfIndexWriter {
 
         for (doc_id, vector) in vectors {
             if vector.dimension() != self.index_config.dimension {
-                return Err(SageError::InvalidOperation(format!(
+                return Err(YatagarasuError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
                     doc_id,
                     vector.dimension(),
@@ -194,7 +194,7 @@ impl IvfIndexWriter {
             }
 
             if !vector.is_valid() {
-                return Err(SageError::InvalidOperation(format!(
+                return Err(YatagarasuError::InvalidOperation(format!(
                     "Vector {doc_id} contains invalid values (NaN or infinity)"
                 )));
             }
@@ -223,13 +223,13 @@ impl IvfIndexWriter {
     /// Train centroids using k-means clustering.
     fn train_centroids(&mut self) -> Result<()> {
         if self.vectors.is_empty() {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Cannot train centroids on empty vector set".to_string(),
             ));
         }
 
         if self.vectors.len() < self.index_config.n_clusters {
-            return Err(SageError::InvalidOperation(format!(
+            return Err(YatagarasuError::InvalidOperation(format!(
                 "Cannot create {} clusters from {} vectors",
                 self.index_config.n_clusters,
                 self.vectors.len()
@@ -439,7 +439,7 @@ impl IvfIndexWriter {
         if let Some(limit) = self.writer_config.memory_limit {
             let current_usage = self.estimated_memory_usage();
             if current_usage > limit {
-                return Err(SageError::ResourceExhausted(format!(
+                return Err(YatagarasuError::ResourceExhausted(format!(
                     "Memory usage {current_usage} bytes exceeds limit {limit} bytes"
                 )));
             }
@@ -471,7 +471,7 @@ impl IvfIndexWriter {
 impl VectorIndexWriter for IvfIndexWriter {
     fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
             ));
         }
@@ -493,7 +493,7 @@ impl VectorIndexWriter for IvfIndexWriter {
 
     fn add_vectors(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
             ));
         }
@@ -512,7 +512,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         }
 
         if self.vectors.is_empty() {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Cannot finalize empty index".to_string(),
             ));
         }
@@ -571,7 +571,7 @@ impl VectorIndexWriter for IvfIndexWriter {
 
     fn optimize(&mut self) -> Result<()> {
         if !self.is_finalized {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Index must be finalized before optimization".to_string(),
             ));
         }
@@ -601,7 +601,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         use std::io::Write;
 
         if !self.is_finalized {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Index must be finalized before writing".to_string(),
             ));
         }
@@ -609,7 +609,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         let storage = self
             .storage
             .as_ref()
-            .ok_or_else(|| SageError::InvalidOperation("No storage configured".to_string()))?;
+            .ok_or_else(|| YatagarasuError::InvalidOperation("No storage configured".to_string()))?;
 
         // Create the index file
         let file_name = format!("{}.ivf", path);

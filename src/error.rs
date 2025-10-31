@@ -1,13 +1,13 @@
-//! Error types for the Sage library.
+//! Error types for the Yatagarasu library.
 
 use std::io;
 
 use anyhow;
 use thiserror::Error;
 
-/// The main error type for Sage operations.
+/// The main error type for Yatagarasu operations.
 #[derive(Error, Debug)]
-pub enum SageError {
+pub enum YatagarasuError {
     /// I/O errors (file operations, network, etc.)
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
@@ -81,89 +81,89 @@ pub enum SageError {
     ML(String),
 }
 
-/// Result type alias for operations that may fail with SageError.
-pub type Result<T> = std::result::Result<T, SageError>;
+/// Result type alias for operations that may fail with YatagarasuError.
+pub type Result<T> = std::result::Result<T, YatagarasuError>;
 
-/// Implement `From<MLError>` for SageError
-impl From<crate::ml::MLError> for SageError {
+/// Implement `From<MLError>` for YatagarasuError
+impl From<crate::ml::MLError> for YatagarasuError {
     fn from(err: crate::ml::MLError) -> Self {
-        SageError::ML(err.to_string())
+        YatagarasuError::ML(err.to_string())
     }
 }
-impl SageError {
+impl YatagarasuError {
     /// Create a new index error.
     pub fn index<S: Into<String>>(msg: S) -> Self {
-        SageError::Index(msg.into())
+        YatagarasuError::Index(msg.into())
     }
 
     /// Create a new schema error.
     pub fn schema<S: Into<String>>(msg: S) -> Self {
-        SageError::Schema(msg.into())
+        YatagarasuError::Schema(msg.into())
     }
 
     /// Create a new analysis error.
     pub fn analysis<S: Into<String>>(msg: S) -> Self {
-        SageError::Analysis(msg.into())
+        YatagarasuError::Analysis(msg.into())
     }
 
     /// Create a new query error.
     pub fn query<S: Into<String>>(msg: S) -> Self {
-        SageError::Query(msg.into())
+        YatagarasuError::Query(msg.into())
     }
 
     /// Create a new parse error.
     pub fn parse<S: Into<String>>(msg: S) -> Self {
-        SageError::Query(msg.into()) // Parse errors are treated as query errors
+        YatagarasuError::Query(msg.into()) // Parse errors are treated as query errors
     }
 
     /// Create a new storage error.
     pub fn storage<S: Into<String>>(msg: S) -> Self {
-        SageError::Storage(msg.into())
+        YatagarasuError::Storage(msg.into())
     }
 
     /// Create a new field error.
     pub fn field<S: Into<String>>(msg: S) -> Self {
-        SageError::Field(msg.into())
+        YatagarasuError::Field(msg.into())
     }
 
     /// Create a new ML error.
     pub fn ml<S: Into<String>>(msg: S) -> Self {
-        SageError::ML(msg.into())
+        YatagarasuError::ML(msg.into())
     }
 
     /// Create a new generic error.
     pub fn other<S: Into<String>>(msg: S) -> Self {
-        SageError::Other(msg.into())
+        YatagarasuError::Other(msg.into())
     }
 
     /// Create a new timeout error.
     pub fn timeout<S: Into<String>>(msg: S) -> Self {
-        SageError::Other(format!("Timeout: {}", msg.into()))
+        YatagarasuError::Other(format!("Timeout: {}", msg.into()))
     }
 
     /// Create a new invalid config error.
     pub fn invalid_config<S: Into<String>>(msg: S) -> Self {
-        SageError::Other(format!("Invalid configuration: {}", msg.into()))
+        YatagarasuError::Other(format!("Invalid configuration: {}", msg.into()))
     }
 
     /// Create a new invalid argument error.
     pub fn invalid_argument<S: Into<String>>(msg: S) -> Self {
-        SageError::Other(format!("Invalid argument: {}", msg.into()))
+        YatagarasuError::Other(format!("Invalid argument: {}", msg.into()))
     }
 
     /// Create a new internal error.
     pub fn internal<S: Into<String>>(msg: S) -> Self {
-        SageError::Other(format!("Internal error: {}", msg.into()))
+        YatagarasuError::Other(format!("Internal error: {}", msg.into()))
     }
 
     /// Create a new not found error.
     pub fn not_found<S: Into<String>>(msg: S) -> Self {
-        SageError::Other(format!("Not found: {}", msg.into()))
+        YatagarasuError::Other(format!("Not found: {}", msg.into()))
     }
 
     /// Create a new cancelled error.
     pub fn cancelled<S: Into<String>>(msg: S) -> Self {
-        SageError::OperationCancelled(msg.into())
+        YatagarasuError::OperationCancelled(msg.into())
     }
 }
 
@@ -173,23 +173,23 @@ mod tests {
 
     #[test]
     fn test_error_construction() {
-        let error = SageError::index("Test index error");
+        let error = YatagarasuError::index("Test index error");
         assert_eq!(error.to_string(), "Index error: Test index error");
 
-        let error = SageError::schema("Test schema error");
+        let error = YatagarasuError::schema("Test schema error");
         assert_eq!(error.to_string(), "Schema error: Test schema error");
 
-        let error = SageError::analysis("Test analysis error");
+        let error = YatagarasuError::analysis("Test analysis error");
         assert_eq!(error.to_string(), "Analysis error: Test analysis error");
     }
 
     #[test]
     fn test_io_error_conversion() {
         let io_error = io::Error::new(io::ErrorKind::NotFound, "File not found");
-        let sage_error = SageError::from(io_error);
+        let yatagarasu_error = YatagarasuError::from(io_error);
 
-        match sage_error {
-            SageError::Io(_) => {} // Expected
+        match yatagarasu_error {
+            YatagarasuError::Io(_) => {} // Expected
             _ => panic!("Expected IO error variant"),
         }
     }

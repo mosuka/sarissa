@@ -7,7 +7,7 @@ pub mod writer;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::index::ivf::writer::IvfIndexWriter;
 use crate::vector::index::{IvfIndexConfig, VectorIndex, VectorIndexStats};
@@ -80,7 +80,7 @@ impl IvfIndex {
     /// Open an existing IVF index from storage.
     pub fn open(storage: Arc<dyn Storage>, config: IvfIndexConfig) -> Result<Self> {
         if !storage.file_exists("metadata.json") {
-            return Err(SageError::index("Index does not exist"));
+            return Err(YatagarasuError::index("Index does not exist"));
         }
 
         let metadata = Self::read_metadata(storage.as_ref())?;
@@ -114,7 +114,7 @@ impl IvfIndex {
     /// Write metadata to storage.
     fn write_metadata(&self) -> Result<()> {
         let metadata_json = serde_json::to_string_pretty(&self.metadata)
-            .map_err(|e| SageError::index(format!("Failed to serialize metadata: {e}")))?;
+            .map_err(|e| YatagarasuError::index(format!("Failed to serialize metadata: {e}")))?;
 
         let mut output = self.storage.create_output("metadata.json")?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
@@ -127,7 +127,7 @@ impl IvfIndex {
     fn read_metadata(storage: &dyn Storage) -> Result<IndexMetadata> {
         let input = storage.open_input("metadata.json")?;
         let metadata: IndexMetadata = serde_json::from_reader(input)
-            .map_err(|e| SageError::index(format!("Failed to deserialize metadata: {e}")))?;
+            .map_err(|e| YatagarasuError::index(format!("Failed to deserialize metadata: {e}")))?;
         Ok(metadata)
     }
 
@@ -143,7 +143,7 @@ impl IvfIndex {
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            return Err(SageError::InvalidOperation("Index is closed".to_string()));
+            return Err(YatagarasuError::InvalidOperation("Index is closed".to_string()));
         }
         Ok(())
     }

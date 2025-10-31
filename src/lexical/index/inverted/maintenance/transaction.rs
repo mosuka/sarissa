@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use uuid::Uuid;
 
 use crate::document::document::Document;
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::inverted::maintenance::deletion::{
     DeletionManager, GlobalDeletionState,
 };
@@ -113,7 +113,7 @@ impl Transaction {
     /// Add an operation to this transaction.
     pub fn add_operation(&mut self, operation: TransactionOperation) -> Result<()> {
         if self.state != TransactionState::Active {
-            return Err(SageError::index(
+            return Err(YatagarasuError::index(
                 "Cannot add operations to inactive transaction",
             ));
         }
@@ -124,7 +124,7 @@ impl Transaction {
     /// Mark transaction as preparing for commit.
     pub fn prepare(&mut self) -> Result<()> {
         if self.state != TransactionState::Active {
-            return Err(SageError::index("Cannot prepare inactive transaction"));
+            return Err(YatagarasuError::index("Cannot prepare inactive transaction"));
         }
         self.state = TransactionState::Preparing;
         Ok(())
@@ -133,7 +133,7 @@ impl Transaction {
     /// Mark transaction as committed.
     pub fn commit(&mut self) -> Result<()> {
         if self.state != TransactionState::Preparing {
-            return Err(SageError::index("Cannot commit unprepared transaction"));
+            return Err(YatagarasuError::index("Cannot commit unprepared transaction"));
         }
         self.state = TransactionState::Committed;
         Ok(())
@@ -142,7 +142,7 @@ impl Transaction {
     /// Mark transaction as aborted.
     pub fn abort(&mut self) -> Result<()> {
         if self.state == TransactionState::Committed {
-            return Err(SageError::index("Cannot abort committed transaction"));
+            return Err(YatagarasuError::index("Cannot abort committed transaction"));
         }
         self.state = TransactionState::Aborted;
         Ok(())

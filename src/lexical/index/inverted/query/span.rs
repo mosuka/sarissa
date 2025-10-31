@@ -466,14 +466,14 @@ impl SpanQueryWrapper {
 impl Query for SpanQueryWrapper {
     fn matcher(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
         // In a real implementation, this would create a SpanMatcher
-        Err(crate::error::SageError::query(
+        Err(crate::error::YatagarasuError::query(
             "SpanQueryWrapper matcher not implemented",
         ))
     }
 
     fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
         // In a real implementation, this would create a SpanScorer
-        Err(crate::error::SageError::query(
+        Err(crate::error::YatagarasuError::query(
             "SpanQueryWrapper scorer not implemented",
         ))
     }

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
@@ -23,7 +23,7 @@ pub struct IvfIndexReader {
 impl IvfIndexReader {
     /// Create a reader from serialized bytes.
     pub fn from_bytes(_data: &[u8]) -> Result<Self> {
-        Err(SageError::InvalidOperation(
+        Err(YatagarasuError::InvalidOperation(
             "from_bytes is deprecated, use load() instead".to_string(),
         ))
     }

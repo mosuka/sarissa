@@ -18,7 +18,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document converter for CSV format.
@@ -138,7 +138,7 @@ impl Iterator for CsvDocumentIterator {
         let record = match self.reader.records().next()? {
             Ok(record) => record,
             Err(e) => {
-                return Some(Err(SageError::parse(format!(
+                return Some(Err(YatagarasuError::parse(format!(
                     "Failed to read CSV record: {}",
                     e
                 ))));
@@ -146,7 +146,7 @@ impl Iterator for CsvDocumentIterator {
         };
 
         if !self.converter.flexible && record.len() != self.headers.len() {
-            return Some(Err(SageError::parse(format!(
+            return Some(Err(YatagarasuError::parse(format!(
                 "CSV field count mismatch: expected {} fields, found {}",
                 self.headers.len(),
                 record.len()
@@ -210,7 +210,7 @@ impl DocumentConverter for CsvDocumentConverter {
 
     fn convert<P: AsRef<Path>>(&self, path: P) -> Result<Self::Iter> {
         let file = File::open(path.as_ref())
-            .map_err(|e| SageError::parse(format!("Failed to open CSV file: {}", e)))?;
+            .map_err(|e| YatagarasuError::parse(format!("Failed to open CSV file: {}", e)))?;
 
         let mut reader = ReaderBuilder::new()
             .delimiter(self.delimiter)
@@ -221,11 +221,11 @@ impl DocumentConverter for CsvDocumentConverter {
         // Get headers
         let headers = reader
             .headers()
-            .map_err(|e| SageError::parse(format!("Failed to read CSV headers: {}", e)))?
+            .map_err(|e| YatagarasuError::parse(format!("Failed to read CSV headers: {}", e)))?
             .clone();
 
         if headers.is_empty() {
-            return Err(SageError::parse("CSV header is empty"));
+            return Err(YatagarasuError::parse("CSV header is empty"));
         }
 
         Ok(CsvDocumentIterator {

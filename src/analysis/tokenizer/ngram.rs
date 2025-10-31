@@ -2,7 +2,7 @@
 
 use crate::analysis::token::{Token, TokenStream};
 use crate::analysis::tokenizer::Tokenizer;
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 
 /// A tokenizer that generates character n-grams.
 ///
@@ -62,12 +62,12 @@ impl NgramTokenizer {
     /// - `max_gram` is less than `min_gram`
     pub fn new(min_gram: usize, max_gram: usize) -> Result<Self> {
         if min_gram == 0 {
-            return Err(SageError::analysis(
+            return Err(YatagarasuError::analysis(
                 "min_gram must be at least 1".to_string(),
             ));
         }
         if max_gram < min_gram {
-            return Err(SageError::analysis(format!(
+            return Err(YatagarasuError::analysis(format!(
                 "max_gram ({}) must be >= min_gram ({})",
                 max_gram, min_gram
             )));

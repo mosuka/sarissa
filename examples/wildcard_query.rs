@@ -4,32 +4,46 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::config::InvertedIndexConfig;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::index::inverted::query::Query;
 use yatagarasu::lexical::index::inverted::query::wildcard::WildcardQuery;
 use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::StorageConfig;
+use yatagarasu::storage::StorageFactory;
 use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== WildcardQuery Example - Pattern Matching with Wildcards ===\n");
 
-    // Create a temporary directory for the index
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("Creating index in: {:?}", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    // Create a search engine
-    let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Add documents with various patterns for wildcard matching
     let documents = vec![
@@ -103,7 +117,9 @@ fn main() -> Result<()> {
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    engine.add_documents(documents)?;
+    lexical_engine.add_documents(documents)?;
+
+    lexical_engine.commit()?;
 
     println!("\n=== WildcardQuery Examples ===\n");
 
@@ -111,7 +127,7 @@ fn main() -> Result<()> {
     println!("1. Files starting with 'java' using 'java*' pattern:");
     let query = WildcardQuery::new("filename", "java*")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -133,7 +149,7 @@ fn main() -> Result<()> {
     println!("\n2. Files ending with '.pdf' using '*.pdf' pattern:");
     let query = WildcardQuery::new("filename", "*.pdf")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -155,7 +171,7 @@ fn main() -> Result<()> {
     println!("\n3. Files with 'web' followed by anything ending in '.txt' using 'web*.txt':");
     let query = WildcardQuery::new("filename", "web*.txt")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -177,7 +193,7 @@ fn main() -> Result<()> {
     println!("\n4. Extensions with pattern '?sx' (jsx, tsx, etc.):");
     let query = WildcardQuery::new("extension", "?sx")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -199,7 +215,7 @@ fn main() -> Result<()> {
     println!("\n5. Categories starting with 'prog' and ending with 'ing' using 'prog*ing':");
     let query = WildcardQuery::new("category", "prog*ing")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -221,7 +237,7 @@ fn main() -> Result<()> {
     println!("\n6. Filenames with pattern '*_*.????' (underscore and 4-char extension):");
     let query = WildcardQuery::new("filename", "*_*.????")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -243,7 +259,7 @@ fn main() -> Result<()> {
     println!("\n7. Titles containing 'Development' using '*Development*':");
     let query = WildcardQuery::new("title", "*Development*")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -265,7 +281,7 @@ fn main() -> Result<()> {
     println!("\n8. Extensions with exactly 3 characters using '???':");
     let query = WildcardQuery::new("extension", "???")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -287,7 +303,7 @@ fn main() -> Result<()> {
     println!("\n9. All files with any extension using '*.*':");
     let query = WildcardQuery::new("filename", "*.*")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -309,17 +325,17 @@ fn main() -> Result<()> {
     println!("\n10. Pattern with no matches using 'xyz*abc':");
     let query = WildcardQuery::new("filename", "xyz*abc")?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
     // Example 11: Count matching documents
     println!("\n11. Counting files with 'data' in filename using '*data*':");
     let query = WildcardQuery::new("filename", "*data*")?;
-    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("    Count: {count} files");
 
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\nWildcardQuery example completed successfully!");
 
     Ok(())

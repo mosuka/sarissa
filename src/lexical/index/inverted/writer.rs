@@ -13,7 +13,7 @@ use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
 use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};
@@ -696,7 +696,7 @@ impl InvertedIndexWriter {
         let json_file = format!("{segment_name}.json");
         let mut output = self.storage.create_output(&json_file)?;
         let segment_data = serde_json::to_string_pretty(&documents)
-            .map_err(|e| SageError::index(format!("Failed to serialize segment: {e}")))?;
+            .map_err(|e| YatagarasuError::index(format!("Failed to serialize segment: {e}")))?;
         std::io::Write::write_all(&mut output, segment_data.as_bytes())?;
         output.close()?;
 
@@ -719,7 +719,7 @@ impl InvertedIndexWriter {
         // Write as JSON for compatibility with InvertedIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
         let json_data = serde_json::to_string_pretty(&segment_info)
-            .map_err(|e| SageError::index(format!("Failed to serialize segment metadata: {e}")))?;
+            .map_err(|e| YatagarasuError::index(format!("Failed to serialize segment metadata: {e}")))?;
 
         let mut output = self.storage.create_output(&meta_file)?;
         std::io::Write::write_all(&mut output, json_data.as_bytes())?;
@@ -791,7 +791,7 @@ impl InvertedIndexWriter {
     /// Check if the writer is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            Err(SageError::index("Writer is closed"))
+            Err(YatagarasuError::index("Writer is closed"))
         } else {
             Ok(())
         }

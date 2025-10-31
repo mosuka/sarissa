@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::Vector;
 use crate::vector::index::HnswIndexConfig;
@@ -84,7 +84,7 @@ impl HnswIndexWriter {
         let _ef_construction = u32::from_le_bytes(ef_construction_buf) as usize;
 
         if dimension != index_config.dimension {
-            return Err(SageError::InvalidOperation(format!(
+            return Err(YatagarasuError::InvalidOperation(format!(
                 "Dimension mismatch: expected {}, found {}",
                 index_config.dimension, dimension
             )));
@@ -151,7 +151,7 @@ impl HnswIndexWriter {
 
         for (doc_id, vector) in vectors {
             if vector.dimension() != self.index_config.dimension {
-                return Err(SageError::InvalidOperation(format!(
+                return Err(YatagarasuError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
                     doc_id,
                     vector.dimension(),
@@ -160,7 +160,7 @@ impl HnswIndexWriter {
             }
 
             if !vector.is_valid() {
-                return Err(SageError::InvalidOperation(format!(
+                return Err(YatagarasuError::InvalidOperation(format!(
                     "Vector {doc_id} contains invalid values (NaN or infinity)"
                 )));
             }
@@ -214,7 +214,7 @@ impl HnswIndexWriter {
         if let Some(limit) = self.writer_config.memory_limit {
             let current_usage = self.estimated_memory_usage();
             if current_usage > limit {
-                return Err(SageError::ResourceExhausted(format!(
+                return Err(YatagarasuError::ResourceExhausted(format!(
                     "Memory usage {current_usage} bytes exceeds limit {limit} bytes"
                 )));
             }
@@ -236,7 +236,7 @@ impl HnswIndexWriter {
 impl VectorIndexWriter for HnswIndexWriter {
     fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
             ));
         }
@@ -253,7 +253,7 @@ impl VectorIndexWriter for HnswIndexWriter {
 
     fn add_vectors(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
             ));
         }
@@ -321,7 +321,7 @@ impl VectorIndexWriter for HnswIndexWriter {
 
     fn optimize(&mut self) -> Result<()> {
         if !self.is_finalized {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Index must be finalized before optimization".to_string(),
             ));
         }
@@ -347,7 +347,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         use std::io::Write;
 
         if !self.is_finalized {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Index must be finalized before writing".to_string(),
             ));
         }
@@ -355,7 +355,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         let storage = self
             .storage
             .as_ref()
-            .ok_or_else(|| SageError::InvalidOperation("No storage configured".to_string()))?;
+            .ok_or_else(|| YatagarasuError::InvalidOperation("No storage configured".to_string()))?;
 
         // Create the index file
         let file_name = format!("{}.hnsw", path);

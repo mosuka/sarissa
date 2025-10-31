@@ -4,32 +4,46 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::config::InvertedIndexConfig;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::index::inverted::query::Query;
 use yatagarasu::lexical::index::inverted::query::term::TermQuery;
 use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::StorageConfig;
+use yatagarasu::storage::StorageFactory;
 use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== TermQuery Example - Single Term Exact Matching ===\n");
 
-    // Create a temporary directory for the index
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("Creating index in: {:?}", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    // Create a search engine
-    let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Add documents with various terms
     let documents = vec![
@@ -41,6 +55,7 @@ fn main() -> Result<()> {
             )
             .add_text("author", "Steve Klabnik")
             .add_text("category", "programming")
+            .add_text("id", "doc1")
             .build(),
         Document::builder()
             .add_text("title", "Python for Beginners")
@@ -50,6 +65,7 @@ fn main() -> Result<()> {
             )
             .add_text("author", "John Smith")
             .add_text("category", "programming")
+            .add_text("id", "doc2")
             .build(),
         Document::builder()
             .add_text("title", "JavaScript Essentials")
@@ -59,6 +75,7 @@ fn main() -> Result<()> {
             )
             .add_text("author", "Jane Doe")
             .add_text("category", "web-development")
+            .add_text("id", "doc3")
             .build(),
         Document::builder()
             .add_text("title", "Machine Learning Fundamentals")
@@ -68,6 +85,7 @@ fn main() -> Result<()> {
             )
             .add_text("author", "Alice Johnson")
             .add_text("category", "data-science")
+            .add_text("id", "doc4")
             .build(),
         Document::builder()
             .add_text("title", "Data Structures in C++")
@@ -77,11 +95,14 @@ fn main() -> Result<()> {
             )
             .add_text("author", "Bob Wilson")
             .add_text("category", "programming")
+            .add_text("id", "doc5")
             .build(),
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    engine.add_documents(documents)?;
+    lexical_engine.add_documents(documents)?;
+
+    lexical_engine.commit()?;
 
     println!("\n=== TermQuery Examples ===\n");
 
@@ -89,7 +110,7 @@ fn main() -> Result<()> {
     println!("1. Searching for 'Rust' in title field:");
     let query = TermQuery::new("title", "Rust");
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -111,7 +132,7 @@ fn main() -> Result<()> {
     println!("\n2. Searching for 'language' in body field:");
     let query = TermQuery::new("body", "language");
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -133,7 +154,7 @@ fn main() -> Result<()> {
     println!("\n3. Searching for 'programming' in category field:");
     let query = TermQuery::new("category", "programming");
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -155,7 +176,7 @@ fn main() -> Result<()> {
     println!("\n4. Searching for non-existent term 'golang':");
     let query = TermQuery::new("title", "golang");
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
@@ -163,7 +184,7 @@ fn main() -> Result<()> {
     println!("\n5. Case sensitivity - searching for 'rust' (lowercase):");
     let query = TermQuery::new("title", "rust");
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     println!("   Note: TermQuery is case-sensitive by default");
@@ -172,7 +193,7 @@ fn main() -> Result<()> {
     println!("\n6. Searching for exact author 'John Smith':");
     let query = TermQuery::new("author", "John Smith");
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -199,10 +220,10 @@ fn main() -> Result<()> {
     // Example 7: Count matching documents
     println!("\n7. Counting documents containing 'programming':");
     let query = TermQuery::new("body", "programming");
-    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("   Count: {count} documents");
 
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\nTermQuery example completed successfully!");
 
     Ok(())
