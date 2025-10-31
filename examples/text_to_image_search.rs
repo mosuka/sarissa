@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
     // Build the index using VectorEngine
     println!("Building HNSW index...");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let index = yatagarasu::vector::index::VectorIndexFactory::create(storage, config)?;
+    let index = yatagarasu::vector::index::factory::VectorIndexFactory::create(storage, config)?;
     let mut engine = VectorEngine::new(index)?;
     engine.add_vectors(doc_vectors)?;
     engine.commit()?;

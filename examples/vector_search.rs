@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
     // Step 5: Build the vector index using VectorEngine
     println!("Building vector index...");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let index = yatagarasu::vector::index::VectorIndexFactory::create(storage, vector_config)?;
+    let index = yatagarasu::vector::index::factory::VectorIndexFactory::create(storage, vector_config)?;
     let mut engine = VectorEngine::new(index)?;
 
     // Add document vectors to the index
