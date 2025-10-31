@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::query::geo::GeoPoint;
+use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// Numeric type for numeric range queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -16,7 +16,7 @@ use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
-use crate::lexical::core::posting::{InvertedIndex as PostingInvertedIndex, Posting};
+use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};
 use crate::lexical::writer::IndexWriter;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
@@ -129,7 +129,7 @@ pub struct InvertedIndexWriter {
     config: InvertedIndexWriterConfig,
 
     /// In-memory inverted index being built.
-    inverted_index: PostingInvertedIndex,
+    inverted_index: TermPostingIndex,
 
     /// Buffered analyzed documents.
     buffered_docs: Vec<AnalyzedDocument>,
@@ -173,7 +173,7 @@ impl InvertedIndexWriter {
         Ok(InvertedIndexWriter {
             storage,
             config,
-            inverted_index: PostingInvertedIndex::new(),
+            inverted_index: TermPostingIndex::new(),
             buffered_docs: Vec::new(),
             doc_values_writer,
             next_doc_id: 0,
@@ -461,7 +461,7 @@ impl InvertedIndexWriter {
 
         // Clear buffers
         self.buffered_docs.clear();
-        self.inverted_index = PostingInvertedIndex::new();
+        self.inverted_index = TermPostingIndex::new();
 
         // Reset DocValuesWriter for next segment
         let next_segment_name = format!(
@@ -705,7 +705,7 @@ impl InvertedIndexWriter {
 
     /// Write segment metadata.
     fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
-        use crate::lexical::index::inverted::types::SegmentInfo;
+        use crate::lexical::index::inverted::segment::types::SegmentInfo;
 
         // Create SegmentInfo
         let segment_info = SegmentInfo {
@@ -769,7 +769,7 @@ impl InvertedIndexWriter {
 
         // Clear all buffers
         self.buffered_docs.clear();
-        self.inverted_index = PostingInvertedIndex::new();
+        self.inverted_index = TermPostingIndex::new();
 
         Ok(())
     }

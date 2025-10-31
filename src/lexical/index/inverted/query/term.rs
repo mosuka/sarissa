@@ -1,10 +1,10 @@
 //! Term query implementation for exact term matching.
 
 use crate::error::Result;
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::matcher::{EmptyMatcher, Matcher, PostingMatcher};
+use crate::lexical::index::inverted::query::scorer::{BM25Scorer, Scorer};
 use crate::lexical::reader::IndexReader;
-use crate::query::matcher::{EmptyMatcher, Matcher, PostingMatcher};
-use crate::query::query::Query;
-use crate::query::scorer::{BM25Scorer, Scorer};
 
 /// A query that matches documents containing a specific term.
 #[derive(Debug, Clone)]

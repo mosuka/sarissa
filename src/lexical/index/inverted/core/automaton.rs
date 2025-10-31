@@ -3,7 +3,7 @@
 //! This module provides Levenshtein automaton for efficient fuzzy matching.
 
 use crate::error::Result;
-use crate::lexical::core::terms::{TermStats, TermsEnum};
+use crate::lexical::index::inverted::core::terms::{TermStats, TermsEnum};
 use crate::spelling::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
 
 /// A simple Levenshtein automaton for fuzzy string matching.

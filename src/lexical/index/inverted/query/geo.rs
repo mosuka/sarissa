@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::matcher::Matcher;
+use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::reader::IndexReader;
-use crate::query::matcher::Matcher;
-use crate::query::query::Query;
-use crate::query::scorer::Scorer;
 
 /// A geographical point with latitude and longitude.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -879,7 +879,7 @@ impl GeoQuery {
     ///
     /// # Example
     /// ```rust
-    /// use yatagarasu::query::geo::GeoQuery;
+    /// use yatagarasu::lexical::index::inverted::query::geo::GeoQuery;
     ///
     /// let query = GeoQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
     /// ```
@@ -906,7 +906,7 @@ impl GeoQuery {
     ///
     /// # Example
     /// ```rust
-    /// use yatagarasu::query::geo::GeoQuery;
+    /// use yatagarasu::lexical::index::inverted::query::geo::GeoQuery;
     ///
     /// let query = GeoQuery::within_bounding_box("location", 40.0, -75.0, 41.0, -74.0).unwrap();
     /// ```

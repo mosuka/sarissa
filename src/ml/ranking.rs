@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::document::Document;
 use crate::error::Result;
+use crate::lexical::index::inverted::query::SearchResults;
 use crate::ml::features::{FeatureContext, FeatureExtractor, QueryDocumentFeatures};
 use crate::ml::models::{GBDTRanker, LabeledExample, RankingModel, TrainingStats};
 use crate::ml::{FeedbackSignal, FeedbackType, MLError};
-use crate::query::SearchResults;
 
 /// Configuration for Learning to Rank system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

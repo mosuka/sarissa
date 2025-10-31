@@ -7,9 +7,13 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{Result, SageError};
-use crate::lexical::index::maintenance::deletion::DeletionManager;
-use crate::lexical::index::segment::manager::{ManagedSegmentInfo, MergeStrategy, SegmentManager};
-use crate::lexical::index::segment::merge_engine::{MergeConfig, MergeEngine, MergeResult};
+use crate::lexical::index::inverted::maintenance::deletion::DeletionManager;
+use crate::lexical::index::inverted::segment::manager::{
+    ManagedSegmentInfo, MergeStrategy, SegmentManager,
+};
+use crate::lexical::index::inverted::segment::merge_engine::{
+    MergeConfig, MergeEngine, MergeResult,
+};
 use crate::storage::Storage;
 
 /// Optimization strategy types.
@@ -378,7 +382,7 @@ impl IndexOptimizer {
 
         let estimated_size = segments.iter().map(|s| s.size_bytes).sum();
 
-        let merge_candidate = crate::lexical::index::segment::manager::MergeCandidate {
+        let merge_candidate = crate::lexical::index::inverted::segment::manager::MergeCandidate {
             segments: segment_ids.clone(),
             priority: 1.0,
             strategy,
@@ -529,8 +533,8 @@ pub enum RecommendationPriority {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::maintenance::deletion::DeletionConfig;
-    use crate::lexical::index::segment::manager::SegmentManagerConfig;
+    use crate::lexical::index::inverted::maintenance::deletion::DeletionConfig;
+    use crate::lexical::index::inverted::segment::manager::SegmentManagerConfig;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;

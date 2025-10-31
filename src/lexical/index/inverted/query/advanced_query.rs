@@ -5,12 +5,12 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::QueryResult;
+use crate::lexical::index::inverted::query::boolean::{BooleanQuery, Occur};
+use crate::lexical::index::inverted::query::matcher::Matcher;
+use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::reader::IndexReader;
-use crate::query::QueryResult;
-use crate::query::boolean::{BooleanQuery, Occur};
-use crate::query::matcher::Matcher;
-use crate::query::query::Query;
-use crate::query::scorer::Scorer;
 
 /// Configuration for advanced query execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -464,8 +464,10 @@ impl Query for MultiFieldQuery {
             MultiFieldQueryType::BestFields | MultiFieldQueryType::Boolean => {
                 // Add each field as a should clause
                 for field in self.fields.keys() {
-                    let term_query =
-                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
+                    let term_query = crate::lexical::index::inverted::query::term::TermQuery::new(
+                        field.clone(),
+                        self.query_text.clone(),
+                    );
                     boolean_builder =
                         boolean_builder.add_clause(Box::new(term_query), Occur::Should);
                 }
@@ -473,8 +475,10 @@ impl Query for MultiFieldQuery {
             MultiFieldQueryType::MostFields => {
                 // All fields should match
                 for field in self.fields.keys() {
-                    let term_query =
-                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
+                    let term_query = crate::lexical::index::inverted::query::term::TermQuery::new(
+                        field.clone(),
+                        self.query_text.clone(),
+                    );
                     boolean_builder = boolean_builder.add_clause(Box::new(term_query), Occur::Must);
                 }
             }
@@ -482,8 +486,10 @@ impl Query for MultiFieldQuery {
                 // Create phrase query across fields (simplified)
                 let mut combined_query = BooleanQuery::new();
                 for field in self.fields.keys() {
-                    let term_query =
-                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
+                    let term_query = crate::lexical::index::inverted::query::term::TermQuery::new(
+                        field.clone(),
+                        self.query_text.clone(),
+                    );
                     combined_query.add_should(Box::new(term_query));
                 }
                 return combined_query.matcher(reader);
@@ -500,24 +506,30 @@ impl Query for MultiFieldQuery {
         match self.query_type {
             MultiFieldQueryType::BestFields | MultiFieldQueryType::Boolean => {
                 for field in self.fields.keys() {
-                    let term_query =
-                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
+                    let term_query = crate::lexical::index::inverted::query::term::TermQuery::new(
+                        field.clone(),
+                        self.query_text.clone(),
+                    );
                     boolean_builder =
                         boolean_builder.add_clause(Box::new(term_query), Occur::Should);
                 }
             }
             MultiFieldQueryType::MostFields => {
                 for field in self.fields.keys() {
-                    let term_query =
-                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
+                    let term_query = crate::lexical::index::inverted::query::term::TermQuery::new(
+                        field.clone(),
+                        self.query_text.clone(),
+                    );
                     boolean_builder = boolean_builder.add_clause(Box::new(term_query), Occur::Must);
                 }
             }
             MultiFieldQueryType::CrossFields => {
                 let mut combined_query = BooleanQuery::new();
                 for field in self.fields.keys() {
-                    let term_query =
-                        crate::query::term::TermQuery::new(field.clone(), self.query_text.clone());
+                    let term_query = crate::lexical::index::inverted::query::term::TermQuery::new(
+                        field.clone(),
+                        self.query_text.clone(),
+                    );
                     combined_query.add_should(Box::new(term_query));
                 }
                 return combined_query.scorer(reader);
@@ -564,7 +576,7 @@ impl Query for MultiFieldQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::term::TermQuery;
+    use crate::lexical::index::inverted::query::term::TermQuery;
 
     #[allow(dead_code)]
     #[test]

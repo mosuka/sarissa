@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::query::query::Query;
+use crate::lexical::index::inverted::query::Query;
 
 /// Sort order for search results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,7 +123,9 @@ impl LexicalSearchQuery {
     ) -> crate::error::Result<Box<dyn Query>> {
         match self {
             LexicalSearchQuery::Dsl(dsl_string) => {
-                let parser = crate::query::parser::QueryParser::new(analyzer.clone());
+                let parser = crate::lexical::index::inverted::query::parser::QueryParser::new(
+                    analyzer.clone(),
+                );
                 parser.parse(&dsl_string)
             }
             LexicalSearchQuery::Obj(query) => Ok(query),

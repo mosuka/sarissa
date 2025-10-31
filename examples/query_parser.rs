@@ -20,7 +20,7 @@ use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::query::parser::QueryParser;
+use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
 

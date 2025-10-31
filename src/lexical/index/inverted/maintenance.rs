@@ -1,6 +1,6 @@
-//! Index maintenance operations.
+//! Index maintenance operations for inverted indexes.
 //!
-//! This module provides maintenance functionality for indexes:
+//! This module provides maintenance functionality for inverted indexes:
 //! - Background tasks for async operations
 //! - Deletion management
 //! - Optimization strategies

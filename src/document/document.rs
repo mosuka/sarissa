@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::document::field_value::FieldValue;
-use crate::query::geo::GeoPoint;
+use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document represents a single item to be indexed.
 ///

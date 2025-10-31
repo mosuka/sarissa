@@ -10,8 +10,8 @@ use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::query::phrase::PhraseQuery;
-use yatagarasu::query::query::Query;
+use yatagarasu::lexical::index::inverted::query::phrase::PhraseQuery;
+use yatagarasu::lexical::index::inverted::query::Query;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
 

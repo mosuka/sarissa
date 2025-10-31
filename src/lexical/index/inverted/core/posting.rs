@@ -362,9 +362,13 @@ impl Iterator for PostingIterator {
     }
 }
 
-/// An inverted index mapping terms to posting lists.
+/// An in-memory index mapping terms to posting lists.
+///
+/// This is a lightweight data structure used for building segments.
+/// It maintains a hash map from terms to their posting lists and provides
+/// efficient methods for adding postings and serializing to storage.
 #[derive(Debug)]
-pub struct InvertedIndex {
+pub struct TermPostingIndex {
     /// Term dictionary mapping terms to posting lists.
     terms: AHashMap<String, PostingList>,
     /// Total number of documents indexed.
@@ -373,10 +377,10 @@ pub struct InvertedIndex {
     term_count: u64,
 }
 
-impl InvertedIndex {
-    /// Create a new empty inverted index.
+impl TermPostingIndex {
+    /// Create a new empty term posting index.
     pub fn new() -> Self {
-        InvertedIndex {
+        TermPostingIndex {
             terms: AHashMap::new(),
             doc_count: 0,
             term_count: 0,
@@ -491,7 +495,7 @@ impl InvertedIndex {
             terms.insert(posting_list.term.clone(), posting_list);
         }
 
-        Ok(InvertedIndex {
+        Ok(TermPostingIndex {
             terms,
             doc_count,
             term_count,
@@ -499,7 +503,7 @@ impl InvertedIndex {
     }
 }
 
-impl Default for InvertedIndex {
+impl Default for TermPostingIndex {
     fn default() -> Self {
         Self::new()
     }
@@ -520,7 +524,7 @@ pub struct PostingStats {
     pub compressed_size: usize,
 }
 
-impl InvertedIndex {
+impl TermPostingIndex {
     /// Get statistics about the inverted index.
     pub fn stats(&self) -> PostingStats {
         let posting_list_count = self.terms.len();
@@ -618,7 +622,7 @@ mod tests {
 
     #[test]
     fn test_inverted_index() {
-        let mut index = InvertedIndex::new();
+        let mut index = TermPostingIndex::new();
 
         // Add document 1: "hello world"
         index.add_document(
@@ -698,7 +702,7 @@ mod tests {
     fn test_inverted_index_serialization() {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let mut original_index = InvertedIndex::new();
+        let mut original_index = TermPostingIndex::new();
         original_index.add_document(
             1,
             vec![
@@ -726,7 +730,7 @@ mod tests {
         {
             let input = storage.open_input("test_index.bin").unwrap();
             let mut reader = StructReader::new(input).unwrap();
-            let loaded_index = InvertedIndex::read_from_storage(&mut reader).unwrap();
+            let loaded_index = TermPostingIndex::read_from_storage(&mut reader).unwrap();
 
             assert_eq!(loaded_index.doc_count(), original_index.doc_count());
             assert_eq!(loaded_index.term_count(), original_index.term_count());
@@ -750,7 +754,7 @@ mod tests {
 
     #[test]
     fn test_posting_stats() {
-        let mut index = InvertedIndex::new();
+        let mut index = TermPostingIndex::new();
 
         // Add several documents
         for doc_id in 0..100 {
