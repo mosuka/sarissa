@@ -1,4 +1,25 @@
 //! Lowercase filter implementation.
+//!
+//! This module provides a filter that converts all token text to lowercase,
+//! which is essential for case-insensitive search. The filter uses SIMD
+//! optimizations for ASCII text to provide better performance.
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::token_filter::Filter;
+//! use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
+//! use yatagarasu::analysis::token::Token;
+//!
+//! let filter = LowercaseFilter::new();
+//! let tokens = vec![Token::new("Hello", 0), Token::new("WORLD", 1)];
+//! let filtered: Vec<_> = filter.filter(Box::new(tokens.into_iter()))
+//!     .unwrap()
+//!     .collect();
+//!
+//! assert_eq!(filtered[0].text, "hello");
+//! assert_eq!(filtered[1].text, "world");
+//! ```
 
 use crate::analysis::token::TokenStream;
 use crate::analysis::token_filter::Filter;
@@ -6,6 +27,40 @@ use crate::error::Result;
 use crate::util::simd;
 
 /// A filter that converts tokens to lowercase.
+///
+/// This filter normalizes text casing to enable case-insensitive matching.
+/// It uses SIMD-accelerated lowercasing for ASCII text and falls back to
+/// Unicode-aware lowercasing for other text.
+///
+/// # Behavior
+///
+/// - Converts all characters to lowercase
+/// - Skips tokens marked as stopped
+/// - Preserves token positions and offsets
+/// - Uses SIMD optimization for ASCII text
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::analysis::token_filter::Filter;
+/// use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
+/// use yatagarasu::analysis::token::Token;
+///
+/// let filter = LowercaseFilter::new();
+/// let tokens = vec![
+///     Token::new("The", 0),
+///     Token::new("QUICK", 1),
+///     Token::new("Brown", 2)
+/// ];
+///
+/// let result: Vec<_> = filter.filter(Box::new(tokens.into_iter()))
+///     .unwrap()
+///     .collect();
+///
+/// assert_eq!(result[0].text, "the");
+/// assert_eq!(result[1].text, "quick");
+/// assert_eq!(result[2].text, "brown");
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct LowercaseFilter;
 

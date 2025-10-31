@@ -1,3 +1,30 @@
+//! Lindera-based morphological tokenizer.
+//!
+//! This module provides a tokenizer using the Lindera library for
+//! morphological analysis of CJK (Chinese, Japanese, Korean) languages.
+//! Lindera performs dictionary-based word segmentation, which is essential
+//! for languages that don't use spaces to separate words.
+//!
+//! # Supported Languages
+//!
+//! - **Japanese**: Using UniDic dictionary (`embedded://unidic`)
+//! - **Korean**: Using KO-DIC dictionary (`embedded://ko-dic`)
+//! - **Chinese**: Using CC-CEDICT dictionary (`embedded://cc-cedict`)
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::tokenizer::lindera::LinderaTokenizer;
+//! use yatagarasu::analysis::tokenizer::Tokenizer;
+//!
+//! // Japanese tokenization
+//! let tokenizer = LinderaTokenizer::new("normal", "embedded://unidic", None).unwrap();
+//! let tokens: Vec<_> = tokenizer.tokenize("日本語の解析").unwrap().collect();
+//!
+//! // Tokens: ["日本", "語", "の", "解析"]
+//! assert!(tokens.len() > 0);
+//! ```
+
 use std::borrow::Cow;
 use std::str::FromStr;
 
@@ -9,6 +36,32 @@ use crate::analysis::token::{Token, TokenStream, TokenType};
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::{Result, YatagarasuError};
 
+/// A tokenizer that uses Lindera for morphological analysis.
+///
+/// This tokenizer performs dictionary-based word segmentation for CJK languages,
+/// breaking text into meaningful morphemes (words, particles, suffixes, etc.).
+/// It supports multiple dictionaries and segmentation modes.
+///
+/// # Segmentation Modes
+///
+/// - `"normal"`: Standard segmentation
+/// - `"search"`: Optimized for search (generates more tokens)
+/// - `"decompose"`: Decomposes compound words
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::analysis::tokenizer::lindera::LinderaTokenizer;
+/// use yatagarasu::analysis::tokenizer::Tokenizer;
+///
+/// // Japanese with UniDic
+/// let tokenizer = LinderaTokenizer::new("normal", "embedded://unidic", None).unwrap();
+/// let tokens: Vec<_> = tokenizer.tokenize("形態素解析").unwrap().collect();
+///
+/// // Korean with KO-DIC
+/// let tokenizer = LinderaTokenizer::new("normal", "embedded://ko-dic", None).unwrap();
+/// let tokens: Vec<_> = tokenizer.tokenize("한국어").unwrap().collect();
+/// ```
 pub struct LinderaTokenizer {
     // Add any necessary fields for the tokenizer
     inner: Segmenter,
@@ -16,6 +69,43 @@ pub struct LinderaTokenizer {
 
 impl LinderaTokenizer {
     /// Create a new Lindera tokenizer.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode_str` - Segmentation mode: "normal", "search", or "decompose"
+    /// * `dict_uri` - Dictionary URI (e.g., "embedded://unidic", "embedded://ko-dic")
+    /// * `user_dict_uri` - Optional user dictionary URI for custom words
+    ///
+    /// # Returns
+    ///
+    /// A new `LinderaTokenizer` instance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The mode string is invalid
+    /// - The dictionary cannot be loaded
+    /// - The user dictionary cannot be loaded
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::analysis::tokenizer::lindera::LinderaTokenizer;
+    ///
+    /// // Japanese tokenizer
+    /// let tokenizer = LinderaTokenizer::new(
+    ///     "normal",
+    ///     "embedded://unidic",
+    ///     None
+    /// ).unwrap();
+    ///
+    /// // With user dictionary
+    /// // let tokenizer = LinderaTokenizer::new(
+    /// //     "normal",
+    /// //     "embedded://unidic",
+    /// //     Some("/path/to/user_dict.csv")
+    /// // ).unwrap();
+    /// ```
     pub fn new(mode_str: &str, dict_uri: &str, user_dict_uri: Option<&str>) -> Result<Self> {
         let mode = Mode::from_str(mode_str)
             .map_err(|e| YatagarasuError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
@@ -33,7 +123,17 @@ impl LinderaTokenizer {
         Ok(Self { inner })
     }
 
-    /// Detect token type based on the content.
+    /// Detect token type based on character content.
+    ///
+    /// Analyzes the token text to determine its type:
+    /// - All numeric → Num
+    /// - All Hiragana → Hiragana
+    /// - All Katakana → Katakana
+    /// - Contains Hangul → Hangul
+    /// - Contains CJK → Cjk
+    /// - ASCII alphanumeric → Alphanum
+    /// - All punctuation → Punctuation
+    /// - Otherwise → Other
     fn detect_token_type(text: &str) -> TokenType {
         if text.is_empty() {
             return TokenType::Other;

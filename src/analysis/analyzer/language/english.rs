@@ -1,3 +1,30 @@
+//! English language analyzer implementation.
+//!
+//! This analyzer provides English-specific text analysis with regex-based
+//! tokenization and English stop word filtering.
+//!
+//! # Pipeline
+//!
+//! 1. RegexTokenizer (Unicode word boundaries)
+//! 2. LowercaseFilter
+//! 3. StopFilter (33 common English stop words)
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::language::english::EnglishAnalyzer;
+//!
+//! let analyzer = EnglishAnalyzer::new().unwrap();
+//! let tokens: Vec<_> = analyzer.analyze("Hello the world and test").unwrap().collect();
+//!
+//! // "the" and "and" are filtered out
+//! assert_eq!(tokens.len(), 3);
+//! assert_eq!(tokens[0].text, "hello");
+//! assert_eq!(tokens[1].text, "world");
+//! assert_eq!(tokens[2].text, "test");
+//! ```
+
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;

@@ -1,4 +1,39 @@
 //! Pipeline analyzer that combines tokenizers and filters.
+//!
+//! This is the main building block for custom analyzers. It allows you to
+//! combine a tokenizer with any number of token filters to create a custom
+//! analysis pipeline.
+//!
+//! # Architecture
+//!
+//! The PipelineAnalyzer applies processing in this order:
+//! 1. Tokenizer: Splits text into tokens
+//! 2. Filters: Applied sequentially in the order they were added
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::pipeline::PipelineAnalyzer;
+//! use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+//! use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
+//! use yatagarasu::analysis::token_filter::stop::StopFilter;
+//! use std::sync::Arc;
+//!
+//! // Create a custom analyzer with tokenizer + filters
+//! let tokenizer = Arc::new(RegexTokenizer::new().unwrap());
+//! let analyzer = PipelineAnalyzer::new(tokenizer)
+//!     .add_filter(Arc::new(LowercaseFilter::new()))
+//!     .add_filter(Arc::new(StopFilter::from_words(vec!["the", "and"])))
+//!     .with_name("my_custom_analyzer".to_string());
+//!
+//! let tokens: Vec<_> = analyzer.analyze("Hello THE world AND test").unwrap().collect();
+//!
+//! assert_eq!(tokens.len(), 3);
+//! assert_eq!(tokens[0].text, "hello");
+//! assert_eq!(tokens[1].text, "world");
+//! assert_eq!(tokens[2].text, "test");
+//! ```
 
 use std::sync::Arc;
 

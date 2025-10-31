@@ -1,4 +1,26 @@
 //! Identity stemmer implementation.
+//!
+//! This stemmer performs no stemming at all, returning words unchanged.
+//! It's useful when you want to use the StemFilter infrastructure but
+//! don't want any actual stemming to occur.
+//!
+//! # Use Cases
+//!
+//! - Testing and comparison purposes
+//! - Languages or scenarios where stemming is not desired
+//! - Placeholder when stem filter is required but not used
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::token_filter::stem::Stemmer;
+//! use yatagarasu::analysis::token_filter::stem::identity::IdentityStemmer;
+//!
+//! let stemmer = IdentityStemmer::new();
+//!
+//! assert_eq!(stemmer.stem("running"), "running");
+//! assert_eq!(stemmer.stem("flies"), "flies");
+//! ```
 
 use crate::analysis::token_filter::stem::Stemmer;
 

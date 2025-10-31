@@ -1,4 +1,28 @@
 //! Regex-based tokenizer implementation.
+//!
+//! This module provides a flexible tokenizer that uses regular expressions to
+//! identify tokens. It supports both matching mode (extract matches) and gaps
+//! mode (extract text between matches).
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::tokenizer::Tokenizer;
+//! use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+//!
+//! // Extract word characters
+//! let tokenizer = RegexTokenizer::new().unwrap();
+//! let tokens: Vec<_> = tokenizer.tokenize("hello-world").unwrap().collect();
+//! assert_eq!(tokens.len(), 2);
+//! assert_eq!(tokens[0].text, "hello");
+//! assert_eq!(tokens[1].text, "world");
+//!
+//! // Extract gaps (text between whitespace)
+//! let tokenizer = RegexTokenizer::with_gaps(r"\s+").unwrap();
+//! let tokens: Vec<_> = tokenizer.tokenize("hello world").unwrap().collect();
+//! assert_eq!(tokens[0].text, "hello");
+//! assert_eq!(tokens[1].text, "world");
+//! ```
 
 use std::sync::Arc;
 
@@ -11,6 +35,52 @@ use crate::error::{Result, YatagarasuError};
 /// A regex-based tokenizer that extracts tokens using regular expressions.
 ///
 /// This is the default tokenizer and is equivalent to Whoosh's RegexTokenizer.
+/// It supports two modes:
+///
+/// - **Matching mode** (default): Extracts text that matches the pattern
+/// - **Gaps mode**: Extracts text between pattern matches
+///
+/// # Default Pattern
+///
+/// The default pattern is `r"\w+"`, which matches sequences of word characters
+/// (letters, digits, and underscores).
+///
+/// # Examples
+///
+/// ## Basic Usage
+///
+/// ```
+/// use yatagarasu::analysis::tokenizer::Tokenizer;
+/// use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+///
+/// let tokenizer = RegexTokenizer::new().unwrap();
+/// let tokens: Vec<_> = tokenizer.tokenize("hello world").unwrap().collect();
+/// assert_eq!(tokens.len(), 2);
+/// ```
+///
+/// ## Custom Pattern
+///
+/// ```
+/// use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+/// use yatagarasu::analysis::tokenizer::Tokenizer;
+///
+/// // Extract email-like tokens
+/// let tokenizer = RegexTokenizer::with_pattern(r"\w+@\w+\.\w+").unwrap();
+/// let tokens: Vec<_> = tokenizer.tokenize("contact user@example.com").unwrap().collect();
+/// assert_eq!(tokens[0].text, "user@example.com");
+/// ```
+///
+/// ## Gaps Mode
+///
+/// ```
+/// use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+/// use yatagarasu::analysis::tokenizer::Tokenizer;
+///
+/// // Extract text between punctuation
+/// let tokenizer = RegexTokenizer::with_gaps(r"[,.]").unwrap();
+/// let tokens: Vec<_> = tokenizer.tokenize("one,two.three").unwrap().collect();
+/// assert_eq!(tokens.len(), 3);
+/// ```
 #[derive(Clone, Debug)]
 pub struct RegexTokenizer {
     /// The regex pattern used to extract tokens

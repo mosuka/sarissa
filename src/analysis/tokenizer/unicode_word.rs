@@ -1,4 +1,22 @@
 //! Unicode word tokenizer implementation.
+//!
+//! This module provides a tokenizer that splits text using Unicode word boundary
+//! rules (UAX #29). It properly handles international text and filters out non-word
+//! segments like punctuation and whitespace.
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::tokenizer::Tokenizer;
+//! use yatagarasu::analysis::tokenizer::unicode_word::UnicodeWordTokenizer;
+//!
+//! let tokenizer = UnicodeWordTokenizer::new();
+//! let tokens: Vec<_> = tokenizer.tokenize("Hello, world! 你好世界").unwrap().collect();
+//!
+//! // Punctuation and whitespace are automatically filtered out
+//! assert_eq!(tokens[0].text, "Hello");
+//! assert_eq!(tokens[1].text, "world");
+//! ```
 
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -7,6 +25,30 @@ use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
 
 /// A tokenizer that splits text on Unicode word boundaries.
+///
+/// This tokenizer uses the Unicode Text Segmentation algorithm (UAX #29) to
+/// identify word boundaries. It automatically filters out non-word segments
+/// like punctuation and whitespace, keeping only alphanumeric tokens.
+///
+/// # Features
+///
+/// - Proper handling of international text (CJK, Arabic, etc.)
+/// - Automatic filtering of punctuation and whitespace
+/// - Token type detection for different character scripts
+/// - Compliant with Unicode Standard Annex #29
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::analysis::tokenizer::Tokenizer;
+/// use yatagarasu::analysis::tokenizer::unicode_word::UnicodeWordTokenizer;
+///
+/// let tokenizer = UnicodeWordTokenizer::new();
+/// let tokens: Vec<_> = tokenizer.tokenize("café résumé").unwrap().collect();
+/// assert_eq!(tokens.len(), 2);
+/// assert_eq!(tokens[0].text, "café");
+/// assert_eq!(tokens[1].text, "résumé");
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct UnicodeWordTokenizer;
 
@@ -16,7 +58,17 @@ impl UnicodeWordTokenizer {
         UnicodeWordTokenizer
     }
 
-    /// Detect token type based on the content.
+    /// Detect token type based on character content.
+    ///
+    /// Analyzes the word's characters to determine the appropriate token type:
+    /// - All numeric → Num
+    /// - All Hiragana → Hiragana
+    /// - All Katakana → Katakana
+    /// - Contains Hangul → Hangul
+    /// - Contains CJK → Cjk
+    /// - ASCII alphanumeric → Alphanum
+    /// - All punctuation → Punctuation
+    /// - Otherwise → Other
     fn detect_token_type(word: &str) -> TokenType {
         if word.is_empty() {
             return TokenType::Other;

@@ -1,4 +1,34 @@
 //! Stemming token filter and stemmer implementations.
+//!
+//! This module provides stemming functionality to reduce words to their root forms,
+//! improving recall by matching different word forms (e.g., "running" and "run").
+//!
+//! # Available Stemmers
+//!
+//! - [`porter::PorterStemmer`] - Porter stemming algorithm (default)
+//! - [`simple::SimpleStemmer`] - Simple suffix removal
+//! - [`identity::IdentityStemmer`] - No stemming (pass-through)
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::token_filter::Filter;
+//! use yatagarasu::analysis::token_filter::stem::StemFilter;
+//! use yatagarasu::analysis::token::Token;
+//!
+//! let filter = StemFilter::new(); // Uses Porter stemmer by default
+//! let tokens = vec![
+//!     Token::new("running", 0),
+//!     Token::new("flies", 1),
+//! ];
+//!
+//! let result: Vec<_> = filter.filter(Box::new(tokens.into_iter()))
+//!     .unwrap()
+//!     .collect();
+//!
+//! assert_eq!(result[0].text, "run");
+//! assert_eq!(result[1].text, "fli");
+//! ```
 
 use crate::analysis::token::TokenStream;
 use crate::analysis::token_filter::Filter;

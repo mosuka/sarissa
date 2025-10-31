@@ -1,11 +1,60 @@
 //! Whitespace tokenizer implementation.
+//!
+//! This module provides a tokenizer that splits text on whitespace characters
+//! (spaces, tabs, newlines, etc.). It includes SIMD-optimized processing for
+//! ASCII text and automatic token type detection.
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::tokenizer::Tokenizer;
+//! use yatagarasu::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+//!
+//! let tokenizer = WhitespaceTokenizer::new();
+//! let tokens: Vec<_> = tokenizer.tokenize("Hello   world\ttest").unwrap().collect();
+//!
+//! assert_eq!(tokens.len(), 3);
+//! assert_eq!(tokens[0].text, "Hello");
+//! assert_eq!(tokens[1].text, "world");
+//! assert_eq!(tokens[2].text, "test");
+//! ```
 
 use crate::analysis::token::{Token, TokenStream, TokenType};
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::Result;
 use crate::util::simd;
 
-/// A tokenizer that splits text on whitespace.
+/// A tokenizer that splits text on whitespace characters.
+///
+/// This tokenizer uses SIMD-optimized processing for ASCII text longer than
+/// 32 bytes, providing improved performance for large documents. It also
+/// automatically detects token types (alphanumeric, numeric, CJK, etc.) based
+/// on character content.
+///
+/// # Performance
+///
+/// - ASCII text ≥32 bytes: Uses SIMD-optimized path
+/// - Other text: Falls back to standard Unicode processing
+///
+/// # Token Types Detected
+///
+/// - Numeric values
+/// - CJK characters
+/// - Katakana/Hiragana (Japanese)
+/// - Hangul (Korean)
+/// - Alphanumeric ASCII
+/// - Punctuation
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::analysis::tokenizer::Tokenizer;
+/// use yatagarasu::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+///
+/// let tokenizer = WhitespaceTokenizer::new();
+/// let tokens: Vec<_> = tokenizer.tokenize("hello world").unwrap().collect();
+/// assert_eq!(tokens.len(), 2);
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct WhitespaceTokenizer;
 
@@ -33,6 +82,16 @@ impl Tokenizer for WhitespaceTokenizer {
 
 impl WhitespaceTokenizer {
     /// Detect token type based on the content of the word.
+    ///
+    /// Analyzes the characters in the word to determine its type:
+    /// - All digits → Num
+    /// - Contains CJK characters → Cjk
+    /// - All Katakana → Katakana
+    /// - All Hiragana → Hiragana
+    /// - Contains Hangul → Hangul
+    /// - ASCII alphanumeric → Alphanum
+    /// - All punctuation → Punctuation
+    /// - Otherwise → Other
     fn detect_token_type(word: &str) -> TokenType {
         if word.is_empty() {
             return TokenType::Other;
@@ -93,6 +152,13 @@ impl WhitespaceTokenizer {
     }
 
     /// SIMD-optimized tokenization for ASCII text.
+    ///
+    /// Uses SIMD instructions to quickly find whitespace boundaries in ASCII text,
+    /// providing significant performance improvements for large documents.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The input text (must be ASCII)
     fn tokenize_simd(&self, text: &str) -> Result<TokenStream> {
         let bytes = text.as_bytes();
         let mut tokens = Vec::new();
@@ -132,6 +198,13 @@ impl WhitespaceTokenizer {
     }
 
     /// Fallback implementation for non-ASCII or short text.
+    ///
+    /// Uses standard Unicode string splitting for text that doesn't meet
+    /// the criteria for SIMD optimization.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The input text
     fn tokenize_fallback(&self, text: &str) -> Result<TokenStream> {
         let tokens: Vec<Token> = text
             .split_whitespace()

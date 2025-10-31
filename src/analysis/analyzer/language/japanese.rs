@@ -1,3 +1,27 @@
+//! Japanese language analyzer implementation.
+//!
+//! This module provides a specialized analyzer for Japanese text that uses
+//! Lindera for morphological analysis and includes Japanese-specific stop words.
+//!
+//! # Pipeline
+//!
+//! 1. Lindera tokenizer (UniDic dictionary)
+//! 2. Lowercase filter
+//! 3. Japanese stop word filter
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+//!
+//! let analyzer = JapaneseAnalyzer::new().unwrap();
+//! let tokens: Vec<_> = analyzer.analyze("日本語のテキスト").unwrap().collect();
+//!
+//! // Properly segmented Japanese tokens
+//! assert!(tokens.len() > 0);
+//! ```
+
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -10,11 +34,55 @@ use crate::analysis::token_filter::stop::{DEFAULT_JAPANESE_STOP_WORDS_SET, StopF
 use crate::analysis::tokenizer::lindera::LinderaTokenizer;
 use crate::error::Result;
 
+/// Analyzer optimized for Japanese language text.
+///
+/// This analyzer uses Lindera for morphological analysis to properly segment
+/// Japanese text (which doesn't use spaces between words) and applies
+/// Japanese-specific stop word filtering.
+///
+/// # Components
+///
+/// - **Tokenizer**: LinderaTokenizer with UniDic dictionary
+/// - **Filters**: Lowercase + Japanese stop words (127 common particles/auxiliaries)
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::analysis::analyzer::Analyzer;
+/// use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+///
+/// let analyzer = JapaneseAnalyzer::new().unwrap();
+/// let tokens: Vec<_> = analyzer.analyze("日本語の形態素解析").unwrap().collect();
+///
+/// // Tokens are properly segmented
+/// assert!(tokens.len() >= 3);
+/// ```
 pub struct JapaneseAnalyzer {
     inner: PipelineAnalyzer,
 }
 impl JapaneseAnalyzer {
     /// Create a new Japanese analyzer with default settings.
+    ///
+    /// # Returns
+    ///
+    /// A new `JapaneseAnalyzer` instance configured with:
+    /// - LinderaTokenizer (UniDic dictionary)
+    /// - LowercaseFilter
+    /// - StopFilter with Japanese stop words
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the LinderaTokenizer cannot be initialized
+    /// (e.g., dictionary loading fails).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+    ///
+    /// let analyzer = JapaneseAnalyzer::new().unwrap();
+    /// assert_eq!(analyzer.name(), "japanese");
+    /// ```
     pub fn new() -> Result<Self> {
         let tokenizer = Arc::new(LinderaTokenizer::new("normal", "embedded://unidic", None)?);
         let analyzer = PipelineAnalyzer::new(tokenizer)

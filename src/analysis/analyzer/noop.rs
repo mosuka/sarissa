@@ -1,4 +1,28 @@
 //! No-op analyzer that performs no analysis.
+//!
+//! This analyzer returns an empty token stream for any input, effectively
+//! performing no analysis at all. It's useful for stored-only fields that
+//! don't need to be indexed or searched.
+//!
+//! # Use Cases
+//!
+//! - Stored-only fields that should not be indexed
+//! - Fields that are only used for display purposes
+//! - Testing scenarios where you need an analyzer that does nothing
+//! - Placeholder in configurations where an analyzer is required but not used
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::noop::NoOpAnalyzer;
+//!
+//! let analyzer = NoOpAnalyzer::new();
+//! let tokens: Vec<_> = analyzer.analyze("any text here").unwrap().collect();
+//!
+//! // Always returns empty token stream
+//! assert_eq!(tokens.len(), 0);
+//! ```
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::token::TokenStream;

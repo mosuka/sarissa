@@ -1,4 +1,37 @@
 //! Analyzer implementations that combine tokenizers and filters.
+//!
+//! This module provides complete text analysis pipelines that combine tokenizers
+//! and token filters to process text for indexing and searching. Analyzers are
+//! the main entry point for text analysis in Yatagarasu.
+//!
+//! # Available Analyzers
+//!
+//! - [`standard::StandardAnalyzer`] - General-purpose analyzer with whitespace tokenization
+//! - [`simple::SimpleAnalyzer`] - Simple lowercase + letter tokenization
+//! - [`keyword::KeywordAnalyzer`] - Treats entire input as single token (for IDs, tags)
+//! - [`noop::NoopAnalyzer`] - No-op analyzer for testing
+//! - [`pipeline::PipelineAnalyzer`] - Customizable analyzer with filter chain
+//! - [`per_field::PerFieldAnalyzer`] - Different analyzers per field
+//! - [`language`] - Language-specific analyzers (English, Japanese, etc.)
+//!
+//! # Architecture
+//!
+//! ```text
+//! Text → Tokenizer → Token Filters → Analyzed Tokens
+//! ```
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//!
+//! let analyzer = StandardAnalyzer::new();
+//! let tokens: Vec<_> = analyzer.analyze("Hello World!").unwrap().collect();
+//!
+//! // Tokens: ["hello", "world"]
+//! assert_eq!(tokens.len(), 2);
+//! ```
 
 #[allow(clippy::module_inception)]
 pub mod analyzer;

@@ -1,4 +1,30 @@
 //! Keyword analyzer that treats the entire input as a single token.
+//!
+//! This analyzer uses the WholeTokenizer to treat the entire input text as a
+//! single token without any splitting or filtering. It's ideal for fields that
+//! should be matched exactly as provided.
+//!
+//! # Use Cases
+//!
+//! - ID fields (user IDs, product codes, etc.)
+//! - Tag fields where exact matching is required
+//! - Category fields
+//! - Email addresses or URLs that should be treated atomically
+//! - Any field where you want exact string matching
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+//!
+//! let analyzer = KeywordAnalyzer::new();
+//! let tokens: Vec<_> = analyzer.analyze("user-123-abc").unwrap().collect();
+//!
+//! // Entire input is a single token
+//! assert_eq!(tokens.len(), 1);
+//! assert_eq!(tokens[0].text, "user-123-abc");
+//! ```
 
 use std::sync::Arc;
 

@@ -1,4 +1,24 @@
 //! Error types for the Yatagarasu library.
+//!
+//! This module provides comprehensive error handling for all Yatagarasu operations.
+//! All errors are represented by the [`YatagarasuError`] enum, which provides
+//! detailed information about what went wrong.
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::error::{YatagarasuError, Result};
+//!
+//! fn example_operation() -> Result<()> {
+//!     // Return an error
+//!     Err(YatagarasuError::invalid_argument("Invalid input"))
+//! }
+//!
+//! match example_operation() {
+//!     Ok(_) => println!("Success"),
+//!     Err(e) => eprintln!("Error: {}", e),
+//! }
+//! ```
 
 use std::io;
 
@@ -6,6 +26,10 @@ use anyhow;
 use thiserror::Error;
 
 /// The main error type for Yatagarasu operations.
+///
+/// This enum represents all possible errors that can occur in the Yatagarasu library.
+/// It uses the `thiserror` crate for automatic `Error` trait implementation and
+/// provides convenient constructor methods for creating specific error types.
 #[derive(Error, Debug)]
 pub enum YatagarasuError {
     /// I/O errors (file operations, network, etc.)

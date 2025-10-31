@@ -1,4 +1,69 @@
 //! Token types and utilities for text analysis.
+//!
+//! This module defines the core data structures for representing text tokens,
+//! which are the fundamental units that flow through the analysis pipeline.
+//!
+//! # Core Types
+//!
+//! - [`Token`] - A single analyzed token with text, position, and metadata
+//! - [`TokenType`] - Classification of token content (alphanumeric, CJK, etc.)
+//! - [`TokenMetadata`] - Additional metadata attached to tokens
+//! - [`TokenStream`] - Type alias for boxed iterator of tokens
+//!
+//! # Token Graphs
+//!
+//! Tokens support graph structures through `position_increment` and `position_length`
+//! fields, enabling proper handling of synonyms and multi-word phrases:
+//!
+//! ```text
+//! Input: "machine learning"
+//! With synonym: "ml"
+//!
+//! Token Graph:
+//!   Position 0: "machine" (pos_inc=1, pos_len=1)
+//!   Position 0: "ml"      (pos_inc=0, pos_len=2)  ← same position, spans 2
+//!   Position 1: "learning"(pos_inc=1, pos_len=1)
+//! ```
+//!
+//! # Examples
+//!
+//! Creating a simple token:
+//!
+//! ```
+//! use yatagarasu::analysis::token::Token;
+//!
+//! let token = Token::new("hello", 0);
+//! assert_eq!(token.text, "hello");
+//! assert_eq!(token.position, 0);
+//! assert_eq!(token.boost, 1.0);
+//! ```
+//!
+//! Creating a token with offsets:
+//!
+//! ```
+//! use yatagarasu::analysis::token::Token;
+//!
+//! let token = Token::with_offsets("world", 1, 6, 11);
+//! assert_eq!(token.text, "world");
+//! assert_eq!(token.start_offset, 6);
+//! assert_eq!(token.end_offset, 11);
+//! ```
+//!
+//! Working with token metadata:
+//!
+//! ```
+//! use yatagarasu::analysis::token::{Token, TokenType};
+//!
+//! let token = Token::new("hello", 0)
+//!     .with_token_type(TokenType::Alphanum)
+//!     .with_boost(1.5);
+//!
+//! assert_eq!(token.boost, 1.5);
+//! assert_eq!(
+//!     token.metadata.as_ref().unwrap().token_type,
+//!     Some(TokenType::Alphanum)
+//! );
+//! ```
 
 use std::fmt;
 
@@ -8,6 +73,36 @@ use serde::{Deserialize, Serialize};
 ///
 /// This is the fundamental unit that flows through the analysis pipeline.
 /// It contains the text content, position information, and metadata.
+///
+/// # Fields
+///
+/// - `text` - The token's text content
+/// - `position` - Position in the token stream (0-based)
+/// - `start_offset` / `end_offset` - Byte offsets in original text
+/// - `boost` - Scoring weight multiplier (default: 1.0)
+/// - `stopped` - Whether the token was marked for removal
+/// - `position_increment` - Position relative to previous token (default: 1)
+/// - `position_length` - Number of positions this token spans (default: 1)
+/// - `metadata` - Optional additional metadata
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::analysis::token::Token;
+///
+/// // Simple token
+/// let mut token = Token::new("search", 0);
+/// assert_eq!(token.text, "search");
+/// assert_eq!(token.position, 0);
+///
+/// // Token with boost
+/// token = token.with_boost(2.0);
+/// assert_eq!(token.boost, 2.0);
+///
+/// // Mark token as stopped
+/// token = token.stop();
+/// assert!(token.is_stopped());
+/// ```
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Token {
     /// The text content of the token

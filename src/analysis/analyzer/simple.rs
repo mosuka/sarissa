@@ -1,4 +1,33 @@
 //! Simple analyzer that performs tokenization without filtering.
+//!
+//! This analyzer applies only tokenization without any token filtering.
+//! It's useful when you want complete control over the tokenization process
+//! or when you need to preserve all tokens without any modifications.
+//!
+//! # Use Cases
+//!
+//! - Custom analysis pipelines where you want to apply filters manually
+//! - Testing and debugging tokenizers
+//! - Cases where no filtering is desired (e.g., exact matching scenarios)
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::simple::SimpleAnalyzer;
+//! use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+//! use std::sync::Arc;
+//!
+//! let tokenizer = Arc::new(RegexTokenizer::new().unwrap());
+//! let analyzer = SimpleAnalyzer::new(tokenizer);
+//!
+//! let tokens: Vec<_> = analyzer.analyze("Hello World").unwrap().collect();
+//!
+//! // No filtering applied - original case preserved
+//! assert_eq!(tokens.len(), 2);
+//! assert_eq!(tokens[0].text, "Hello");
+//! assert_eq!(tokens[1].text, "World");
+//! ```
 
 use std::sync::Arc;
 

@@ -1,4 +1,29 @@
 //! Porter stemming algorithm implementation.
+//!
+//! This module provides an implementation of the Porter stemming algorithm,
+//! a widely-used algorithm for reducing English words to their stems.
+//!
+//! # Algorithm
+//!
+//! The Porter stemmer applies a series of rewrite rules in five steps:
+//! 1. Plurals and -ed/-ing suffixes
+//! 2. -ational → -ate, -tional → -tion, etc.
+//! 3. -icate → -ic, -ative → "", etc.
+//! 4. Remove -al, -ance, -ence, etc.
+//! 5. Remove final -e and -ll
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::token_filter::stem::Stemmer;
+//! use yatagarasu::analysis::token_filter::stem::porter::PorterStemmer;
+//!
+//! let stemmer = PorterStemmer::new();
+//!
+//! assert_eq!(stemmer.stem("running"), "run");
+//! assert_eq!(stemmer.stem("flies"), "fli");
+//! assert_eq!(stemmer.stem("traditional"), "tradit");
+//! ```
 
 use std::collections::HashMap;
 

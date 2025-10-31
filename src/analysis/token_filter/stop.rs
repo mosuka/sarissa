@@ -1,4 +1,32 @@
 //! Stop filter implementation.
+//!
+//! This module provides a filter that removes common words (stop words) that
+//! typically don't contribute to search relevance. Includes default stop word
+//! lists for English and Japanese, with support for custom word lists.
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::token_filter::Filter;
+//! use yatagarasu::analysis::token_filter::stop::StopFilter;
+//! use yatagarasu::analysis::token::Token;
+//!
+//! let filter = StopFilter::new(); // Uses default English stop words
+//! let tokens = vec![
+//!     Token::new("the", 0),
+//!     Token::new("quick", 1),
+//!     Token::new("brown", 2)
+//! ];
+//!
+//! let result: Vec<_> = filter.filter(Box::new(tokens.into_iter()))
+//!     .unwrap()
+//!     .collect();
+//!
+//! // "the" is removed as a stop word
+//! assert_eq!(result.len(), 2);
+//! assert_eq!(result[0].text, "quick");
+//! assert_eq!(result[1].text, "brown");
+//! ```
 
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
@@ -8,6 +36,8 @@ use crate::analysis::token_filter::Filter;
 use crate::error::Result;
 
 /// Default English stop words list.
+///
+/// Common English words that are typically filtered out during indexing.
 const DEFAULT_ENGLISH_STOP_WORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it",
     "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these",
@@ -143,6 +173,69 @@ pub static DEFAULT_JAPANESE_STOP_WORDS_SET: LazyLock<HashSet<String>> = LazyLock
 });
 
 /// A filter that removes stop words from the token stream.
+///
+/// Stop words are common words (like "the", "is", "at") that are often
+/// filtered out during text analysis because they typically don't contribute
+/// to search relevance. This filter can either remove stop words entirely
+/// or mark them as stopped while keeping them in the stream.
+///
+/// # Default Stop Word Lists
+///
+/// - English: 33 common words (articles, prepositions, conjunctions)
+/// - Japanese: 127 common particles and auxiliary verbs
+///
+/// # Examples
+///
+/// ## Basic Usage
+///
+/// ```
+/// use yatagarasu::analysis::token_filter::Filter;
+/// use yatagarasu::analysis::token_filter::stop::StopFilter;
+/// use yatagarasu::analysis::token::Token;
+///
+/// let filter = StopFilter::new();
+/// let tokens = vec![
+///     Token::new("this", 0),
+///     Token::new("is", 1),
+///     Token::new("test", 2)
+/// ];
+///
+/// let result: Vec<_> = filter.filter(Box::new(tokens.into_iter()))
+///     .unwrap()
+///     .collect();
+///
+/// // Only "test" remains
+/// assert_eq!(result.len(), 1);
+/// assert_eq!(result[0].text, "test");
+/// ```
+///
+/// ## Custom Stop Words
+///
+/// ```
+/// use yatagarasu::analysis::token_filter::stop::StopFilter;
+///
+/// let filter = StopFilter::from_words(vec!["custom", "words", "list"]);
+/// ```
+///
+/// ## Preserve Stopped Tokens
+///
+/// ```
+/// use yatagarasu::analysis::token_filter::Filter;
+/// use yatagarasu::analysis::token_filter::stop::StopFilter;
+/// use yatagarasu::analysis::token::Token;
+///
+/// // Mark as stopped but don't remove
+/// let filter = StopFilter::from_words(vec!["the"]).remove_stopped(false);
+/// let tokens = vec![Token::new("the", 0), Token::new("quick", 1)];
+///
+/// let result: Vec<_> = filter.filter(Box::new(tokens.into_iter()))
+///     .unwrap()
+///     .collect();
+///
+/// assert_eq!(result.len(), 2);
+/// assert!(result[0].is_stopped());  // Marked as stopped
+/// assert!(!result[1].is_stopped());
+/// ```
 #[derive(Clone, Debug)]
 pub struct StopFilter {
     /// The set of stop words to remove
@@ -153,11 +246,39 @@ pub struct StopFilter {
 
 impl StopFilter {
     /// Create a new stop filter with the default English stop words.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::analysis::token_filter::stop::StopFilter;
+    ///
+    /// let filter = StopFilter::new();
+    /// assert!(filter.is_stop_word("the"));
+    /// assert!(!filter.is_stop_word("hello"));
+    /// ```
     pub fn new() -> Self {
         Self::with_stop_words(DEFAULT_ENGLISH_STOP_WORDS_SET.clone())
     }
 
     /// Create a new stop filter with custom stop words.
+    ///
+    /// # Arguments
+    ///
+    /// * `stop_words` - A set of words to filter out
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::HashSet;
+    /// use yatagarasu::analysis::token_filter::stop::StopFilter;
+    ///
+    /// let mut words = HashSet::new();
+    /// words.insert("custom".to_string());
+    /// words.insert("stop".to_string());
+    ///
+    /// let filter = StopFilter::with_stop_words(words);
+    /// assert!(filter.is_stop_word("custom"));
+    /// ```
     pub fn with_stop_words(stop_words: HashSet<String>) -> Self {
         StopFilter {
             stop_words: Arc::new(stop_words),
@@ -166,6 +287,19 @@ impl StopFilter {
     }
 
     /// Create a new stop filter from a list of stop words.
+    ///
+    /// # Arguments
+    ///
+    /// * `words` - An iterator of words to filter out
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::analysis::token_filter::stop::StopFilter;
+    ///
+    /// let filter = StopFilter::from_words(vec!["foo", "bar", "baz"]);
+    /// assert_eq!(filter.len(), 3);
+    /// ```
     pub fn from_words<I, S>(words: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -176,12 +310,33 @@ impl StopFilter {
     }
 
     /// Set whether to remove stopped tokens entirely or just mark them as stopped.
+    ///
+    /// # Arguments
+    ///
+    /// * `remove` - If `true`, remove stopped tokens; if `false`, mark them as stopped
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::analysis::token_filter::stop::StopFilter;
+    ///
+    /// // Keep stopped tokens but mark them
+    /// let filter = StopFilter::new().remove_stopped(false);
+    /// ```
     pub fn remove_stopped(mut self, remove: bool) -> Self {
         self.remove_stopped = remove;
         self
     }
 
     /// Check if a word is a stop word.
+    ///
+    /// # Arguments
+    ///
+    /// * `word` - The word to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the word is in the stop word set, `false` otherwise
     pub fn is_stop_word(&self, word: &str) -> bool {
         self.stop_words.contains(word)
     }

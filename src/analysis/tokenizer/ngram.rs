@@ -1,10 +1,32 @@
 //! N-gram tokenizer implementation.
+//!
+//! This module provides a tokenizer that generates character-level n-grams
+//! from input text. N-grams are particularly useful for CJK languages,
+//! substring matching, and fuzzy search applications.
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::tokenizer::Tokenizer;
+//! use yatagarasu::analysis::tokenizer::ngram::NgramTokenizer;
+//!
+//! // Create a bigram tokenizer (n=2)
+//! let tokenizer = NgramTokenizer::bigram();
+//! let tokens: Vec<_> = tokenizer.tokenize("hello").unwrap()
+//!     .map(|t| t.text.to_string())
+//!     .collect();
+//! assert_eq!(tokens, vec!["he", "el", "ll", "lo"]);
+//! ```
 
 use crate::analysis::token::{Token, TokenStream};
 use crate::analysis::tokenizer::Tokenizer;
 use crate::error::{Result, YatagarasuError};
 
 /// A tokenizer that generates character n-grams.
+///
+/// Character n-grams are contiguous sequences of n characters from text.
+/// This tokenizer supports both fixed-size n-grams (e.g., bigrams) and
+/// variable-size ranges (e.g., 2-3 character grams).
 ///
 /// N-grams are useful for:
 /// - CJK (Chinese, Japanese, Korean) language processing
@@ -76,6 +98,8 @@ impl NgramTokenizer {
     }
 
     /// Create a bigram tokenizer (n=2).
+    ///
+    /// Convenience constructor for 2-character n-grams.
     pub fn bigram() -> Self {
         Self {
             min_gram: 2,
@@ -84,6 +108,8 @@ impl NgramTokenizer {
     }
 
     /// Create a trigram tokenizer (n=3).
+    ///
+    /// Convenience constructor for 3-character n-grams.
     pub fn trigram() -> Self {
         Self {
             min_gram: 3,

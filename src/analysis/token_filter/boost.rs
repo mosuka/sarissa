@@ -1,10 +1,62 @@
 //! Boost filter implementation.
+//!
+//! This module provides a filter that multiplies token boost factors,
+//! allowing you to increase or decrease the scoring weight of tokens.
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::token_filter::Filter;
+//! use yatagarasu::analysis::token_filter::boost::BoostFilter;
+//! use yatagarasu::analysis::token::Token;
+//!
+//! let filter = BoostFilter::new(2.0);
+//! let tokens = vec![Token::new("important", 0)];
+//! let result: Vec<_> = filter.filter(Box::new(tokens.into_iter()))
+//!     .unwrap()
+//!     .collect();
+//!
+//! // Token boost multiplied by 2.0
+//! assert_eq!(result[0].boost, 2.0);
+//! ```
 
 use crate::analysis::token::TokenStream;
 use crate::analysis::token_filter::Filter;
 use crate::error::Result;
 
-/// A filter that applies a boost to all tokens.
+/// A filter that applies a boost multiplier to all tokens.
+///
+/// This filter multiplies each token's boost factor by a constant value,
+/// allowing you to increase or decrease the scoring importance of tokens
+/// from a particular field or analysis stage.
+///
+/// # Use Cases
+///
+/// - Boosting title field tokens vs body field tokens
+/// - Emphasizing or de-emphasizing certain token sources
+/// - Implementing field-level relevance weighting
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::analysis::token_filter::Filter;
+/// use yatagarasu::analysis::token_filter::boost::BoostFilter;
+/// use yatagarasu::analysis::token::Token;
+///
+/// // Double the weight of all tokens
+/// let filter = BoostFilter::new(2.0);
+/// let tokens = vec![
+///     Token::new("word", 0),
+///     Token::new("another", 1).with_boost(1.5)
+/// ];
+///
+/// let result: Vec<_> = filter.filter(Box::new(tokens.into_iter()))
+///     .unwrap()
+///     .collect();
+///
+/// assert_eq!(result[0].boost, 2.0);    // 1.0 * 2.0
+/// assert_eq!(result[1].boost, 3.0);    // 1.5 * 2.0
+/// ```
 #[derive(Clone, Debug)]
 pub struct BoostFilter {
     boost: f32,
@@ -12,6 +64,19 @@ pub struct BoostFilter {
 
 impl BoostFilter {
     /// Create a new boost filter with the given boost factor.
+    ///
+    /// # Arguments
+    ///
+    /// * `boost` - The multiplier to apply to token boosts
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::analysis::token_filter::boost::BoostFilter;
+    ///
+    /// let filter = BoostFilter::new(1.5);
+    /// assert_eq!(filter.boost(), 1.5);
+    /// ```
     pub fn new(boost: f32) -> Self {
         BoostFilter { boost }
     }

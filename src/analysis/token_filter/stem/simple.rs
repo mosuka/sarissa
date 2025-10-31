@@ -1,4 +1,29 @@
 //! Simple stemmer implementation.
+//!
+//! This stemmer performs basic suffix removal without the complexity of
+//! the Porter algorithm. It simply removes common English suffixes if
+//! the resulting stem is long enough.
+//!
+//! # Suffixes Removed
+//!
+//! - ing, ed, er, est, ly
+//! - s, es, ies, ied
+//! - tion, sion
+//! - able, ible
+//! - ment, ness, ful
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::analysis::token_filter::stem::Stemmer;
+//! use yatagarasu::analysis::token_filter::stem::simple::SimpleStemmer;
+//!
+//! let stemmer = SimpleStemmer::new();
+//!
+//! assert_eq!(stemmer.stem("running"), "runn");
+//! assert_eq!(stemmer.stem("beautiful"), "beauti");
+//! assert_eq!(stemmer.stem("agreement"), "agree");
+//! ```
 
 use crate::analysis::token_filter::stem::Stemmer;
 
