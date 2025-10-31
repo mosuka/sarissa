@@ -14,11 +14,11 @@ use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::query::boolean::BooleanQuery;
-use yatagarasu::query::phrase::PhraseQuery;
-use yatagarasu::query::query::Query;
-use yatagarasu::query::range::NumericRangeQuery;
-use yatagarasu::query::term::TermQuery;
+use yatagarasu::lexical::index::inverted::query::boolean::BooleanQuery;
+use yatagarasu::lexical::index::inverted::query::phrase::PhraseQuery;
+use yatagarasu::lexical::index::inverted::query::Query;
+use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
+use yatagarasu::lexical::index::inverted::query::term::TermQuery;
 use yatagarasu::storage::file::FileStorageConfig;
 use yatagarasu::storage::{StorageConfig, StorageFactory};
 

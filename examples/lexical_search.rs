@@ -28,14 +28,14 @@ use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::query::boolean::BooleanQuery;
-use yatagarasu::query::fuzzy::FuzzyQuery;
-use yatagarasu::query::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint};
-use yatagarasu::query::phrase::PhraseQuery;
-use yatagarasu::query::query::Query;
-use yatagarasu::query::range::NumericRangeQuery;
-use yatagarasu::query::term::TermQuery;
-use yatagarasu::query::wildcard::WildcardQuery;
+use yatagarasu::lexical::index::inverted::query::boolean::BooleanQuery;
+use yatagarasu::lexical::index::inverted::query::fuzzy::FuzzyQuery;
+use yatagarasu::lexical::index::inverted::query::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint};
+use yatagarasu::lexical::index::inverted::query::phrase::PhraseQuery;
+use yatagarasu::lexical::index::inverted::query::Query;
+use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
+use yatagarasu::lexical::index::inverted::query::term::TermQuery;
+use yatagarasu::lexical::index::inverted::query::wildcard::WildcardQuery;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
 
@@ -504,7 +504,7 @@ fn main() -> Result<()> {
 }
 
 /// Helper function to display search results in a formatted way
-fn display_results(results: &yatagarasu::query::SearchResults) {
+fn display_results(results: &yatagarasu::lexical::index::inverted::query::SearchResults) {
     for (i, hit) in results.hits.iter().enumerate() {
         println!("  {}. Score: {:.4}", i + 1, hit.score);
 

@@ -4,9 +4,9 @@
 //! similar to Lucene's MultiTermQuery.
 
 use crate::error::Result;
-use crate::lexical::core::terms::TermsEnum;
+use crate::lexical::index::inverted::core::terms::TermsEnum;
+use crate::lexical::index::inverted::query::Query;
 use crate::lexical::reader::IndexReader;
-use crate::query::query::Query;
 
 /// A query that matches multiple terms based on some pattern or criteria.
 ///
@@ -29,8 +29,8 @@ use crate::query::query::Query;
 /// # Example (conceptual - not fully implemented yet)
 ///
 /// ```ignore
-/// use yatagarasu::query::multi_term::MultiTermQuery;
-/// use yatagarasu::query::fuzzy::FuzzyQuery;
+/// use yatagarasu::lexical::index::inverted::query::multi_term::MultiTermQuery;
+/// use yatagarasu::lexical::index::inverted::query::fuzzy::FuzzyQuery;
 ///
 /// let fuzzy_query = FuzzyQuery::new("content", "hello").max_edits(2);
 ///

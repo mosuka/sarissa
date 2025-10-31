@@ -119,7 +119,7 @@ fn main() -> Result<()> {
     let query_str = "category:programming";
     println!("Query: {query_str}");
 
-    use yatagarasu::query::parser::QueryParser;
+    use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
     let parser = QueryParser::new(analyzer.clone());
     let query = parser.parse(query_str)?;
 

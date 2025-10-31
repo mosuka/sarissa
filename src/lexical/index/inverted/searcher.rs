@@ -9,16 +9,18 @@ use rayon::prelude::*;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::boolean::BooleanQuery;
+use crate::lexical::index::inverted::query::collector::{
+    Collector, CountCollector, TopDocsCollector, TopFieldCollector,
+};
+use crate::lexical::index::inverted::query::parser::QueryParser;
+use crate::lexical::index::inverted::query::{SearchHit, SearchResults};
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
 use crate::lexical::types::{
     LexicalSearchParams, LexicalSearchQuery, LexicalSearchRequest, SortField, SortOrder,
 };
-use crate::query::boolean::BooleanQuery;
-use crate::query::collector::{Collector, CountCollector, TopDocsCollector, TopFieldCollector};
-use crate::query::parser::QueryParser;
-use crate::query::query::Query;
-use crate::query::{SearchHit, SearchResults};
 
 /// A searcher that executes queries against an index reader.
 #[derive(Debug)]
@@ -517,9 +519,9 @@ impl InvertedIndexSearcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lexical::index::inverted::query::boolean::{BooleanQuery, BooleanQueryBuilder};
+    use crate::lexical::index::inverted::query::term::TermQuery;
     use crate::lexical::index::inverted::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
-    use crate::query::boolean::{BooleanQuery, BooleanQueryBuilder};
-    use crate::query::term::TermQuery;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;

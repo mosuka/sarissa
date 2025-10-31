@@ -1,13 +1,13 @@
 //! Boolean query implementation for combining multiple queries.
 
 use crate::error::Result;
-use crate::lexical::reader::IndexReader;
-use crate::query::matcher::{
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::matcher::{
     AllMatcher, ConjunctionMatcher, ConjunctionNotMatcher, DisjunctionMatcher, EmptyMatcher,
     Matcher, NotMatcher,
 };
-use crate::query::query::Query;
-use crate::query::scorer::{BM25Scorer, Scorer};
+use crate::lexical::index::inverted::query::scorer::{BM25Scorer, Scorer};
+use crate::lexical::reader::IndexReader;
 
 /// Occurrence requirements for boolean clauses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -488,8 +488,8 @@ impl Default for BooleanQueryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lexical::index::inverted::query::term::TermQuery;
     use crate::lexical::index::inverted::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
-    use crate::query::term::TermQuery;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;

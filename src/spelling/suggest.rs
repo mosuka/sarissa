@@ -315,6 +315,13 @@ impl SuggestionEngine {
         self.dictionary.contains(word)
     }
 
+    /// Add a word to the dictionary with the given frequency.
+    ///
+    /// This allows the suggestion engine to learn new words dynamically.
+    pub fn add_word(&mut self, word: &str, frequency: u32) {
+        self.dictionary.add_word(word.to_string(), frequency);
+    }
+
     /// Get the frequency of a word in the dictionary.
     pub fn word_frequency(&self, word: &str) -> u32 {
         self.dictionary.frequency(word)

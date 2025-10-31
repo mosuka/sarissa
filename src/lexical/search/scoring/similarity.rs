@@ -9,10 +9,10 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::matcher::Matcher;
+use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::reader::IndexReader;
-use crate::query::matcher::Matcher;
-use crate::query::query::Query;
-use crate::query::scorer::Scorer;
 
 /// Configuration for similarity search.
 #[derive(Debug, Clone)]

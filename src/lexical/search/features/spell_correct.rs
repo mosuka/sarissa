@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::lexical::engine::LexicalEngine;
+use crate::lexical::index::inverted::query::SearchResults;
 use crate::lexical::types::LexicalSearchRequest;
-use crate::query::SearchResults;
 use crate::spelling::corrector::{
     CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector,
 };
@@ -150,7 +150,7 @@ impl SpellCorrectedSearchEngine {
         query_str: &str,
         default_field: &str,
     ) -> Result<SpellCorrectedSearchResults> {
-        use crate::query::parser::QueryParser;
+        use crate::lexical::index::inverted::query::parser::QueryParser;
 
         // Get analyzer from engine
         let analyzer = self.engine.analyzer()?;
@@ -205,7 +205,7 @@ impl SpellCorrectedSearchEngine {
         field: &str,
         query_str: &str,
     ) -> Result<SpellCorrectedSearchResults> {
-        use crate::query::parser::QueryParser;
+        use crate::lexical::index::inverted::query::parser::QueryParser;
 
         // Get analyzer from engine
         let analyzer = self.engine.analyzer()?;
@@ -265,9 +265,36 @@ impl SpellCorrectedSearchEngine {
     }
 
     /// Learn from the index terms to improve spelling correction.
+    ///
+    /// This method extracts terms from the search index and adds them to the
+    /// spelling correction dictionary. This allows the corrector to prioritize
+    /// terms that actually exist in the index when making suggestions.
+    ///
+    /// # Implementation Note
+    ///
+    /// Currently this is a placeholder. To implement this functionality:
+    ///
+    /// ```ignore
+    /// // 1. Get the index reader
+    /// let reader = self.engine.reader()?;
+    ///
+    /// // 2. Enumerate all terms from all fields
+    /// for field in ["title", "content", "tags"] {
+    ///     if let Some(terms) = reader.terms(field)? {
+    ///         let mut iter = terms.iterator()?;
+    ///         let term_pairs = std::iter::from_fn(|| {
+    ///             iter.next().ok().flatten().map(|stats| {
+    ///                 (stats.term, stats.doc_freq as u32)
+    ///             })
+    ///         });
+    ///         self.corrector.learn_from_terms(term_pairs)?;
+    ///     }
+    /// }
+    /// ```
     pub fn learn_from_index(&mut self) -> Result<()> {
-        // Cannot access private field index directly - use public method if available
-        // For now, return a simplified implementation
+        // TODO: Implement term enumeration from the index
+        // This requires access to IndexReader.terms() API which returns
+        // an iterator over all terms in a field.
         Ok(())
     }
 
@@ -493,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_spell_corrected_results() {
-        use crate::query::SearchResults;
+        use crate::lexical::index::inverted::query::SearchResults;
 
         let results = SearchResults {
             hits: vec![],

@@ -1,8 +1,8 @@
 //! Searcher trait for lexical search execution.
 
 use crate::error::Result;
+use crate::lexical::index::inverted::query::SearchResults;
 use crate::lexical::types::{LexicalSearchQuery, LexicalSearchRequest};
-use crate::query::SearchResults;
 
 /// Trait for lexical search implementations.
 ///

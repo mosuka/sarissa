@@ -10,7 +10,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::error::Result;
-use crate::query::query::Query;
+use crate::lexical::index::inverted::query::Query;
 
 /// Configuration for text highlighting.
 #[derive(Debug, Clone)]
@@ -628,7 +628,7 @@ impl SimpleHighlighter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::term::TermQuery;
+    use crate::lexical::index::inverted::query::term::TermQuery;
 
     #[test]
     fn test_highlight_config() {

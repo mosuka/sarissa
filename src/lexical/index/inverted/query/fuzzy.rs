@@ -5,13 +5,13 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::lexical::core::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
-use crate::lexical::core::terms::{TermDictionaryAccess, TermsEnum as _};
+use crate::lexical::index::inverted::core::automaton::{AutomatonTermsEnum, LevenshteinAutomaton};
+use crate::lexical::index::inverted::core::terms::{TermDictionaryAccess, TermsEnum as _};
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::matcher::Matcher;
+use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
-use crate::query::matcher::Matcher;
-use crate::query::query::Query;
-use crate::query::scorer::Scorer;
 use crate::spelling::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
 
 /// A fuzzy query for approximate string matching.
@@ -224,7 +224,7 @@ impl Query for FuzzyQuery {
     }
 
     fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
-        use crate::query::scorer::BM25Scorer;
+        use crate::lexical::index::inverted::query::scorer::BM25Scorer;
 
         // Try efficient implementation first, fall back to old implementation
         let matches = self.find_matches(reader)?;

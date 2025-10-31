@@ -12,10 +12,12 @@ use crate::document::document::Document;
 use crate::error::{Result, SageError};
 use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
-use crate::lexical::core::posting::InvertedIndex;
+use crate::lexical::index::inverted::core::posting::TermPostingIndex;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
-use crate::lexical::index::inverted::types::SegmentInfo;
-use crate::lexical::index::segment::manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
+use crate::lexical::index::inverted::segment::manager::{
+    ManagedSegmentInfo, MergeCandidate, MergeStrategy,
+};
+use crate::lexical::index::inverted::segment::types::SegmentInfo;
 use crate::lexical::reader::IndexReader;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
@@ -270,7 +272,7 @@ impl MergeEngine {
         };
 
         // Create merged inverted index
-        let mut merged_index = InvertedIndex::new();
+        let mut merged_index = TermPostingIndex::new();
         let mut all_documents = Vec::new();
         let deleted_doc_ids = AHashSet::<u64>::new();
         let mut next_doc_id = 0u64;
@@ -382,7 +384,7 @@ impl MergeEngine {
     /// Process a batch of documents for indexing.
     fn process_document_batch(
         &self,
-        merged_index: &mut InvertedIndex,
+        merged_index: &mut TermPostingIndex,
         documents: &mut [(u64, Document)],
     ) -> Result<()> {
         for (doc_id, document) in documents {
@@ -404,7 +406,7 @@ impl MergeEngine {
     fn write_merged_segment(
         &self,
         segment_info: &SegmentInfo,
-        merged_index: &InvertedIndex,
+        merged_index: &TermPostingIndex,
         documents: &[(u64, Document)],
     ) -> Result<Vec<String>> {
         let mut file_paths = Vec::new();
@@ -510,8 +512,8 @@ impl MergeEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::index::inverted::types::SegmentInfo;
-    use crate::lexical::index::segment::manager::ManagedSegmentInfo;
+    use crate::lexical::index::inverted::segment::manager::ManagedSegmentInfo;
+    use crate::lexical::index::inverted::segment::types::SegmentInfo;
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;

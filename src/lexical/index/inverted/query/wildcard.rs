@@ -6,10 +6,10 @@ use std::sync::Arc;
 use regex::Regex;
 
 use crate::error::Result;
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::matcher::{EmptyMatcher, Matcher};
+use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::reader::IndexReader;
-use crate::query::matcher::{EmptyMatcher, Matcher};
-use crate::query::query::Query;
-use crate::query::scorer::Scorer;
 
 /// A query that matches documents containing terms that match a wildcard pattern.
 ///
@@ -183,9 +183,11 @@ impl Query for WildcardQuery {
         if matching_doc_ids.is_empty() {
             Ok(Box::new(EmptyMatcher::new()))
         } else {
-            Ok(Box::new(crate::query::matcher::PreComputedMatcher::new(
-                matching_doc_ids,
-            )))
+            Ok(Box::new(
+                crate::lexical::index::inverted::query::matcher::PreComputedMatcher::new(
+                    matching_doc_ids,
+                ),
+            ))
         }
     }
 
@@ -356,7 +358,7 @@ impl WildcardScorer {
     }
 }
 
-impl crate::query::scorer::Scorer for WildcardScorer {
+impl crate::lexical::index::inverted::query::scorer::Scorer for WildcardScorer {
     fn score(&self, _doc_id: u64, term_freq: f32, _field_length: Option<f32>) -> f32 {
         if self.doc_freq == 0 || self.total_docs == 0 {
             return 0.0;

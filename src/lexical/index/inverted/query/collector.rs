@@ -5,7 +5,7 @@ use std::collections::BinaryHeap;
 use std::fmt::Debug;
 
 use crate::error::Result;
-use crate::query::SearchHit;
+use crate::lexical::index::inverted::query::SearchHit;
 
 /// Trait for collecting search results.
 pub trait Collector: Send + Debug {

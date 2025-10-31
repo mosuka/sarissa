@@ -1,18 +1,14 @@
 //! Lexical indexing module for building and maintaining lexical indexes.
 //!
-//! This module handles all lexical index construction, maintenance, and optimization:
+//! This module handles all lexical index construction:
 //! - Building inverted indexes
 //! - Document indexing and analysis
-//! - Segment management and merging
-//! - Index optimization and maintenance
 //!
 //! # Module Structure
 //!
 //! - `config`: Index configuration
 //! - `factory`: Index factory for creating and opening indexes
-//! - `inverted`: Inverted index implementation
-//! - `segment`: Segment management
-//! - `maintenance`: Index maintenance operations
+//! - `inverted`: Inverted index implementation (including segments and maintenance)
 
 use std::sync::Arc;
 
@@ -68,5 +64,3 @@ pub mod config;
 pub mod factory;
 
 pub mod inverted;
-pub mod maintenance;
-pub mod segment;
