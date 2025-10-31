@@ -14,8 +14,8 @@ use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::query::term::TermQuery;
+use yatagarasu::lexical::index::inverted::query::term::TermQuery;
+use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 use yatagarasu::storage::file::FileStorageConfig;
 use yatagarasu::storage::{StorageConfig, StorageFactory};
 
@@ -128,10 +128,9 @@ fn main() -> Result<()> {
 
     // Example 2: Search by author with document loading
     println!("\n2. Search by author with document details (author:Orwell):");
-    let request =
-        LexicalSearchRequest::new(Box::new(TermQuery::new("author", "orwell"))
-            as Box<dyn yatagarasu::query::query::Query>)
-        .load_documents(true);
+    let request = LexicalSearchRequest::new(Box::new(TermQuery::new("author", "orwell"))
+        as Box<dyn yatagarasu::lexical::index::inverted::query::Query>)
+    .load_documents(true);
     let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -174,9 +173,8 @@ fn main() -> Result<()> {
 
     // Example 4: Search in tags field
     println!("\n4. Search in tags field (tags:british):");
-    let request = LexicalSearchRequest::new(
-        Box::new(TermQuery::new("tags", "british")) as Box<dyn yatagarasu::query::query::Query>
-    )
+    let request = LexicalSearchRequest::new(Box::new(TermQuery::new("tags", "british"))
+        as Box<dyn yatagarasu::lexical::index::inverted::query::Query>)
     .load_documents(true);
     let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);

@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::QueryResult;
 use crate::lexical::reader::IndexReader;
 use crate::lexical::search::features::facet::{FacetCollector, FacetResults};
 use crate::lexical::search::features::highlight::{HighlightConfig, Highlighter};
-use crate::query::QueryResult;
-use crate::query::query::Query;
 
 /// Configuration for result processing.
 #[derive(Debug, Clone, Serialize, Deserialize)]

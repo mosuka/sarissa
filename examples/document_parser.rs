@@ -22,10 +22,12 @@ use yatagarasu::document::document::Document;
 use yatagarasu::document::parser::DocumentParser;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::inverted::index::{InvertedIndexWriter, LexicalIndexWriterConfig};
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::lexical::index::inverted::writer::{
+    InvertedIndexWriter, InvertedIndexWriterConfig,
+};
+use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
 
@@ -54,7 +56,7 @@ fn main() -> Result<()> {
 
     // Get storage for creating custom writer (already have it)
     let storage = storage.clone();
-    let config = LexicalIndexWriterConfig {
+    let config = InvertedIndexWriterConfig {
         analyzer: analyzer.clone(),
         ..Default::default()
     };
@@ -117,7 +119,7 @@ fn main() -> Result<()> {
     let query_str = "category:programming";
     println!("Query: {query_str}");
 
-    use yatagarasu::query::parser::QueryParser;
+    use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
     let parser = QueryParser::new(analyzer.clone());
     let query = parser.parse(query_str)?;
 

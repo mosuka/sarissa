@@ -6,7 +6,8 @@ use std::collections::{BinaryHeap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::spelling::dictionary::SpellingDictionary;
-use crate::spelling::levenshtein::{LevenshteinMatcher, TypoPatterns};
+use crate::spelling::typo_patterns::TypoPatterns;
+use crate::util::levenshtein::LevenshteinMatcher;
 
 /// A spelling suggestion with a score indicating confidence.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -313,6 +314,13 @@ impl SuggestionEngine {
     /// Check if a word exists in the dictionary.
     pub fn is_correct(&self, word: &str) -> bool {
         self.dictionary.contains(word)
+    }
+
+    /// Add a word to the dictionary with the given frequency.
+    ///
+    /// This allows the suggestion engine to learn new words dynamically.
+    pub fn add_word(&mut self, word: &str, frequency: u32) {
+        self.dictionary.add_word(word.to_string(), frequency);
     }
 
     /// Get the frequency of a word in the dictionary.

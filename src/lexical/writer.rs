@@ -14,14 +14,14 @@ use crate::error::Result;
 /// # Example
 ///
 /// ```rust,no_run
-/// use yatagarasu::lexical::index::inverted::index::{InvertedIndexWriter, LexicalIndexWriterConfig};
+/// use yatagarasu::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 /// use yatagarasu::lexical::writer::IndexWriter;
 /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use yatagarasu::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-/// let config = LexicalIndexWriterConfig::default();
+/// let config = InvertedIndexWriterConfig::default();
 /// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
 ///
 /// // Use IndexWriter trait methods
@@ -38,7 +38,7 @@ pub trait IndexWriter: Send + std::fmt::Debug {
     /// using DocumentParser or from external tokenization systems.
     fn add_analyzed_document(
         &mut self,
-        doc: crate::lexical::index::inverted::index::AnalyzedDocument,
+        doc: crate::lexical::index::inverted::writer::AnalyzedDocument,
     ) -> Result<()>;
 
     /// Delete documents matching the given term.

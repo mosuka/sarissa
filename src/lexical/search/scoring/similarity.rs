@@ -9,10 +9,10 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
+use crate::lexical::index::inverted::query::Query;
+use crate::lexical::index::inverted::query::matcher::Matcher;
+use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::reader::IndexReader;
-use crate::query::matcher::Matcher;
-use crate::query::query::Query;
-use crate::query::scorer::Scorer;
 
 /// Configuration for similarity search.
 #[derive(Debug, Clone)]
@@ -1124,7 +1124,7 @@ mod tests {
             &self,
             _field: &str,
             _term: &str,
-        ) -> Result<Option<crate::lexical::types::ReaderTermInfo>> {
+        ) -> Result<Option<crate::lexical::reader::ReaderTermInfo>> {
             Ok(None)
         }
         fn postings(
@@ -1134,7 +1134,7 @@ mod tests {
         ) -> Result<Option<Box<dyn crate::lexical::reader::PostingIterator>>> {
             Ok(None)
         }
-        fn field_stats(&self, _field: &str) -> Result<Option<crate::lexical::types::FieldStats>> {
+        fn field_stats(&self, _field: &str) -> Result<Option<crate::lexical::reader::FieldStats>> {
             Ok(None)
         }
         fn is_closed(&self) -> bool {

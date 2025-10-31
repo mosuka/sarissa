@@ -11,9 +11,9 @@ use std::collections::{HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::lexical::index::inverted::query::SearchResults;
 use crate::ml::anomaly::AnomalyEvent;
 use crate::ml::{FeedbackSignal, MLContext};
-use crate::query::SearchResults;
 
 /// Configuration for auto-optimization system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

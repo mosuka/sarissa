@@ -21,7 +21,7 @@
 //! use yatagarasu::lexical::index::config::LexicalIndexConfig;
 //! use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 //! use yatagarasu::lexical::types::LexicalSearchRequest;
-//! use yatagarasu::query::term::TermQuery;
+//! use yatagarasu::lexical::index::inverted::query::term::TermQuery;
 //! use yatagarasu::storage::{StorageConfig, StorageFactory};
 //! use yatagarasu::storage::memory::MemoryStorageConfig;
 //! use std::sync::Arc;
@@ -56,14 +56,15 @@ use std::sync::Arc;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::document::Document;
 use crate::error::{Result, SageError};
+use crate::lexical::index::LexicalIndex;
+use crate::lexical::index::inverted::InvertedIndexStats;
+use crate::lexical::index::inverted::query::SearchResults;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
-use crate::lexical::index::traits::{InvertedIndexStats, LexicalIndex};
+use crate::lexical::index::inverted::searcher::InvertedIndexSearcher;
 use crate::lexical::reader::IndexReader;
 use crate::lexical::search::searcher::LexicalSearcher;
-use crate::lexical::index::inverted::searcher::InvertedIndexSearcher;
-use crate::lexical::types::{LexicalSearchQuery, LexicalSearchRequest};
+use crate::lexical::search::searcher::{LexicalSearchQuery, LexicalSearchRequest};
 use crate::lexical::writer::IndexWriter;
-use crate::query::SearchResults;
 use crate::storage::Storage;
 
 /// A high-level lexical search engine that provides both indexing and searching capabilities.
@@ -93,7 +94,7 @@ use crate::storage::Storage;
 /// use yatagarasu::lexical::index::config::LexicalIndexConfig;
 /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 /// use yatagarasu::lexical::types::LexicalSearchRequest;
-/// use yatagarasu::query::term::TermQuery;
+/// use yatagarasu::lexical::index::inverted::query::term::TermQuery;
 /// use yatagarasu::storage::{StorageConfig, StorageFactory};
 /// use yatagarasu::storage::memory::MemoryStorageConfig;
 /// use std::sync::Arc;
@@ -156,7 +157,7 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use yatagarasu::lexical::engine::LexicalEngine;
     /// use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// use std::sync::Arc;
@@ -172,7 +173,7 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use yatagarasu::lexical::engine::LexicalEngine;
     /// use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::file::FileStorageConfig;
     /// use std::sync::Arc;
@@ -276,7 +277,7 @@ impl LexicalEngine {
     /// use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
     /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -351,7 +352,7 @@ impl LexicalEngine {
     /// use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
     /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -407,7 +408,7 @@ impl LexicalEngine {
     /// use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
     /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -473,10 +474,10 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use yatagarasu::document::document::Document;
     /// use yatagarasu::lexical::types::LexicalSearchRequest;
-    /// use yatagarasu::query::term::TermQuery;
+    /// use yatagarasu::lexical::index::inverted::query::term::TermQuery;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
     /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -503,12 +504,12 @@ impl LexicalEngine {
     /// # Example with QueryParser
     ///
     /// ```rust,no_run
-    /// use yatagarasu::query::parser::QueryParser;
+    /// use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
     /// use yatagarasu::lexical::types::LexicalSearchRequest;
     /// # use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
     /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
     /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
@@ -609,8 +610,8 @@ mod tests {
     use super::*;
     use crate::lexical::index::config::LexicalIndexConfig;
     use crate::lexical::index::factory::LexicalIndexFactory;
-    use crate::query::query::Query;
-    use crate::query::term::TermQuery;
+    use crate::lexical::index::inverted::query::Query;
+    use crate::lexical::index::inverted::query::term::TermQuery;
     use crate::storage::file::{FileStorage, FileStorageConfig};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use std::sync::Arc;
@@ -907,7 +908,7 @@ mod tests {
         engine.commit().unwrap();
 
         // Search with QueryParser (Lucene style)
-        use crate::query::parser::QueryParser;
+        use crate::lexical::index::inverted::query::parser::QueryParser;
         let parser = QueryParser::with_standard_analyzer()
             .unwrap()
             .with_default_field("title");
@@ -935,7 +936,7 @@ mod tests {
 
         // Search specific field
         use crate::analysis::analyzer::standard::StandardAnalyzer;
-        use crate::query::parser::QueryParser;
+        use crate::lexical::index::inverted::query::parser::QueryParser;
         let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
         let parser = QueryParser::new(analyzer);
         let query = parser.parse_field("title", "hello world").unwrap();
@@ -961,7 +962,7 @@ mod tests {
         let _engine = LexicalEngine::new(index).unwrap();
 
         use crate::analysis::analyzer::standard::StandardAnalyzer;
-        use crate::query::parser::QueryParser;
+        use crate::lexical::index::inverted::query::parser::QueryParser;
         let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
         let parser = QueryParser::new(analyzer.clone());
         assert!(parser.default_field().is_none());
@@ -983,7 +984,7 @@ mod tests {
 
         // Test complex query parsing
         use crate::analysis::analyzer::standard::StandardAnalyzer;
-        use crate::query::parser::QueryParser;
+        use crate::lexical::index::inverted::query::parser::QueryParser;
         let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
         let parser = QueryParser::new(analyzer).with_default_field("title");
         let query = parser.parse("title:hello AND body:world").unwrap();

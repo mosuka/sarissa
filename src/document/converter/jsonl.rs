@@ -17,7 +17,7 @@ use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, SageError};
-use crate::query::geo::GeoPoint;
+use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document converter for JSONL format.
 #[derive(Clone)]

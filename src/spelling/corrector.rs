@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::lexical::reader::IndexReader;
 use crate::spelling::dictionary::{BuiltinDictionary, SpellingDictionary};
 use crate::spelling::suggest::{Suggestion, SuggestionConfig, SuggestionEngine};
 
@@ -236,15 +235,38 @@ impl SpellingCorrector {
         self.engine.is_correct(word)
     }
 
-    /// Add terms from an index to the dictionary.
-    pub fn learn_from_index(&mut self, _reader: &dyn IndexReader) -> Result<()> {
+    /// Add terms to the dictionary from an iterator.
+    ///
+    /// This method allows learning from any source of terms (index, corpus, etc.)
+    /// by accepting an iterator of (term, frequency) pairs.
+    ///
+    /// # Arguments
+    ///
+    /// * `terms` - Iterator yielding (term, frequency) pairs
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let terms = vec![
+    ///     ("hello".to_string(), 100),
+    ///     ("world".to_string(), 50),
+    /// ];
+    /// corrector.learn_from_terms(terms.into_iter())?;
+    /// ```
+    pub fn learn_from_terms<I>(&mut self, terms: I) -> Result<()>
+    where
+        I: IntoIterator<Item = (String, u32)>,
+    {
         if !self.config.use_index_terms {
             return Ok(());
         }
 
-        // TODO: Extract terms from the index and add them to the dictionary
-        // This would require implementing term enumeration in the IndexReader
-        // For now, this is a placeholder
+        for (term, frequency) in terms {
+            // Only learn terms that look valid (alphabetic, reasonable length)
+            if term.len() >= 2 && term.chars().all(|c| c.is_alphabetic() || c == '-') {
+                self.engine.add_word(&term, frequency);
+            }
+        }
 
         Ok(())
     }

@@ -18,11 +18,13 @@ use crate::error::{Result, SageError};
 use crate::lexical::core::dictionary::HybridTermDictionary;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::core::doc_values::DocValuesReader;
-use crate::lexical::index::traits::SegmentInfo;
-use crate::lexical::core::posting::{Posting, PostingList};
+use crate::lexical::index::inverted::core::posting::{Posting, PostingList};
+use crate::lexical::index::inverted::core::terms::{
+    InvertedIndexTerms, TermDictionaryAccess, Terms,
+};
+use crate::lexical::index::inverted::segment::SegmentInfo;
+use crate::lexical::reader::FieldStats;
 use crate::lexical::reader::PostingIterator;
-use crate::lexical::core::terms::{InvertedIndexTerms, TermDictionaryAccess, Terms};
-use crate::lexical::types::FieldStats;
 use crate::storage::Storage;
 use crate::storage::structured::StructReader;
 
@@ -105,7 +107,7 @@ impl Default for InvertedIndexReaderConfig {
 #[derive(Debug)]
 pub struct InvertedIndexPostingIterator {
     /// The posting data.
-    postings: Vec<crate::lexical::core::posting::Posting>,
+    postings: Vec<crate::lexical::index::inverted::core::posting::Posting>,
 
     /// Current position in the posting list.
     position: usize,
@@ -302,7 +304,7 @@ pub struct SegmentReader {
     field_lengths: RwLock<Option<BTreeMap<u64, AHashMap<String, u32>>>>,
 
     /// Cached field statistics: field_name -> FieldStats.
-    field_stats: RwLock<Option<AHashMap<String, crate::lexical::types::FieldStats>>>,
+    field_stats: RwLock<Option<AHashMap<String, crate::lexical::reader::FieldStats>>>,
 
     /// DocValues reader for this segment.
     doc_values: RwLock<Option<Arc<DocValuesReader>>>,
@@ -458,7 +460,10 @@ impl SegmentReader {
                             // Geo
                             let lat = reader.read_f64()?;
                             let lon = reader.read_f64()?;
-                            FieldValue::Geo(crate::query::geo::GeoPoint { lat, lon })
+                            FieldValue::Geo(crate::lexical::index::inverted::query::geo::GeoPoint {
+                                lat,
+                                lon,
+                            })
                         }
                         7 => {
                             // Null
@@ -592,7 +597,7 @@ impl SegmentReader {
 
             all_field_stats.insert(
                 field_name.clone(),
-                crate::lexical::types::FieldStats {
+                crate::lexical::reader::FieldStats {
                     field: field_name,
                     unique_terms: 0, // Not stored, not needed for BM25
                     total_terms: 0,  // Not stored, not needed for BM25
@@ -779,7 +784,8 @@ pub struct CacheManager {
 
     /// Posting list cache.
     #[allow(dead_code)]
-    posting_cache: RwLock<AHashMap<String, Arc<Vec<crate::lexical::core::posting::Posting>>>>,
+    posting_cache:
+        RwLock<AHashMap<String, Arc<Vec<crate::lexical::index::inverted::core::posting::Posting>>>>,
 
     /// Current memory usage.
     memory_usage: AtomicUsize,
@@ -999,14 +1005,14 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
         &self,
         field: &str,
         term: &str,
-    ) -> Result<Option<crate::lexical::types::ReaderTermInfo>> {
+    ) -> Result<Option<crate::lexical::reader::ReaderTermInfo>> {
         self.check_closed()?;
 
         let cache_key = format!("{field}:{term}");
 
         // Check cache first
         if let Some(cached_info) = self.cache_manager.get_term_info(&cache_key) {
-            return Ok(Some(crate::lexical::types::ReaderTermInfo {
+            return Ok(Some(crate::lexical::reader::ReaderTermInfo {
                 field: field.to_string(),
                 term: term.to_string(),
                 doc_freq: cached_info.doc_frequency,
@@ -1031,7 +1037,7 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
         }
 
         if found {
-            let reader_info = crate::lexical::types::ReaderTermInfo {
+            let reader_info = crate::lexical::reader::ReaderTermInfo {
                 field: field.to_string(),
                 term: term.to_string(),
                 doc_freq: total_doc_freq,
@@ -1085,7 +1091,7 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
         }
     }
 
-    fn field_stats(&self, field: &str) -> Result<Option<crate::lexical::types::FieldStats>> {
+    fn field_stats(&self, field: &str) -> Result<Option<crate::lexical::reader::FieldStats>> {
         self.check_closed()?;
 
         let mut total_doc_count = 0u64;
@@ -1110,7 +1116,7 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
         }
 
         if found {
-            Ok(Some(crate::lexical::types::FieldStats {
+            Ok(Some(crate::lexical::reader::FieldStats {
                 field: field.to_string(),
                 unique_terms: 0, // Not aggregated
                 total_terms: 0,  // Not aggregated
@@ -1204,31 +1210,31 @@ mod tests {
     #[test]
     fn test_advanced_posting_iterator() {
         let postings = vec![
-            crate::lexical::core::posting::Posting {
+            crate::lexical::index::inverted::core::posting::Posting {
                 doc_id: 1,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::lexical::core::posting::Posting {
+            crate::lexical::index::inverted::core::posting::Posting {
                 doc_id: 3,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::lexical::core::posting::Posting {
+            crate::lexical::index::inverted::core::posting::Posting {
                 doc_id: 5,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::lexical::core::posting::Posting {
+            crate::lexical::index::inverted::core::posting::Posting {
                 doc_id: 7,
                 frequency: 1,
                 positions: Some(vec![0]),
                 weight: 1.0,
             },
-            crate::lexical::core::posting::Posting {
+            crate::lexical::index::inverted::core::posting::Posting {
                 doc_id: 9,
                 frequency: 1,
                 positions: Some(vec![0]),

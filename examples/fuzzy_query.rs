@@ -13,9 +13,9 @@ use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::query::fuzzy::FuzzyQuery;
-use yatagarasu::query::query::Query;
+use yatagarasu::lexical::index::inverted::query::Query;
+use yatagarasu::lexical::index::inverted::query::fuzzy::FuzzyQuery;
+use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 use yatagarasu::storage::file::FileStorageConfig;
 use yatagarasu::storage::{StorageConfig, StorageFactory};
 
