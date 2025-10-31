@@ -18,7 +18,7 @@ use crate::lexical::index::inverted::query::parser::QueryParser;
 use crate::lexical::index::inverted::query::{SearchHit, SearchResults};
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::reader::IndexReader;
-use crate::lexical::types::{
+use crate::lexical::search::searcher::{
     LexicalSearchParams, LexicalSearchQuery, LexicalSearchRequest, SortField, SortOrder,
 };
 
@@ -690,7 +690,7 @@ impl crate::lexical::search::searcher::LexicalSearcher for InvertedIndexSearcher
         InvertedIndexSearcher::search(self, request)
     }
 
-    fn count(&self, query: crate::lexical::types::LexicalSearchQuery) -> Result<u64> {
+    fn count(&self, query: crate::lexical::search::searcher::LexicalSearchQuery) -> Result<u64> {
         InvertedIndexSearcher::count(self, query)
     }
 }

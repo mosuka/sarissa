@@ -27,7 +27,7 @@ use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 use yatagarasu::lexical::index::inverted::query::boolean::BooleanQuery;
 use yatagarasu::lexical::index::inverted::query::fuzzy::FuzzyQuery;
 use yatagarasu::lexical::index::inverted::query::geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint};

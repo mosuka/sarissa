@@ -13,7 +13,7 @@ use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 use yatagarasu::lexical::index::inverted::query::fuzzy::FuzzyQuery;
 use yatagarasu::lexical::index::inverted::query::Query;
 use yatagarasu::storage::file::FileStorageConfig;

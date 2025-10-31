@@ -60,10 +60,10 @@ use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::inverted::query::SearchResults;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::index::inverted::searcher::InvertedIndexSearcher;
-use crate::lexical::index::inverted::types::InvertedIndexStats;
+use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::reader::IndexReader;
 use crate::lexical::search::searcher::LexicalSearcher;
-use crate::lexical::types::{LexicalSearchQuery, LexicalSearchRequest};
+use crate::lexical::search::searcher::{LexicalSearchQuery, LexicalSearchRequest};
 use crate::lexical::writer::IndexWriter;
 use crate::storage::Storage;
 

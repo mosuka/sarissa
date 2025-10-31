@@ -27,7 +27,7 @@ use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::index::inverted::writer::{
     InvertedIndexWriter, InvertedIndexWriterConfig,
 };
-use yatagarasu::lexical::types::LexicalSearchRequest;
+use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
 
