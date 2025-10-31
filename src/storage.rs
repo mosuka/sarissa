@@ -42,7 +42,7 @@
 use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 
 pub mod column;
 pub mod file;
@@ -82,7 +82,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageInput>)` - A reader for accessing the file contents
-    /// * `Err(SageError)` - If the file doesn't exist or cannot be opened
+    /// * `Err(YatagarasuError)` - If the file doesn't exist or cannot be opened
     ///
     /// # Example
     ///
@@ -121,7 +121,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageOutput>)` - A writer for writing data to the file
-    /// * `Err(SageError)` - If the file cannot be created
+    /// * `Err(YatagarasuError)` - If the file cannot be created
     ///
     /// # Example
     ///
@@ -155,7 +155,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageOutput>)` - A writer positioned at the end of the file
-    /// * `Err(SageError)` - If the file cannot be opened or created
+    /// * `Err(YatagarasuError)` - If the file cannot be opened or created
     ///
     /// # Example
     ///
@@ -236,7 +236,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the file was successfully deleted
-    /// * `Err(SageError)` - If the file cannot be deleted (e.g., permission denied)
+    /// * `Err(YatagarasuError)` - If the file cannot be deleted (e.g., permission denied)
     ///
     /// # Example
     ///
@@ -273,7 +273,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Vec<String>)` - A list of all file names in the storage
-    /// * `Err(SageError)` - If the storage cannot be read
+    /// * `Err(YatagarasuError)` - If the storage cannot be read
     ///
     /// # Example
     ///
@@ -316,7 +316,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(u64)` - The size of the file in bytes
-    /// * `Err(SageError)` - If the file doesn't exist or cannot be accessed
+    /// * `Err(YatagarasuError)` - If the file doesn't exist or cannot be accessed
     ///
     /// # Example
     ///
@@ -354,7 +354,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(FileMetadata)` - Metadata structure with file information
-    /// * `Err(SageError)` - If the file doesn't exist or cannot be accessed
+    /// * `Err(YatagarasuError)` - If the file doesn't exist or cannot be accessed
     ///
     /// # Example
     ///
@@ -394,7 +394,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the file was successfully renamed
-    /// * `Err(SageError)` - If the source file doesn't exist, destination exists,
+    /// * `Err(YatagarasuError)` - If the source file doesn't exist, destination exists,
     ///   or the operation fails
     ///
     /// # Example
@@ -436,7 +436,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// * `Ok((String, Box<dyn StorageOutput>))` - A tuple of (filename, writer)
     ///   where filename is the unique generated name
-    /// * `Err(SageError)` - If the temporary file cannot be created
+    /// * `Err(YatagarasuError)` - If the temporary file cannot be created
     ///
     /// # Example
     ///
@@ -473,7 +473,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If all pending writes were successfully synced
-    /// * `Err(SageError)` - If the sync operation fails
+    /// * `Err(YatagarasuError)` - If the sync operation fails
     ///
     /// # Example
     ///
@@ -506,7 +506,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the storage was successfully closed
-    /// * `Err(SageError)` - If errors occur during cleanup (though resources
+    /// * `Err(YatagarasuError)` - If errors occur during cleanup (though resources
     ///   should still be released as much as possible)
     ///
     /// # Example
@@ -757,9 +757,9 @@ impl std::fmt::Display for StorageError {
 
 impl std::error::Error for StorageError {}
 
-impl From<StorageError> for SageError {
+impl From<StorageError> for YatagarasuError {
     fn from(err: StorageError) -> Self {
-        SageError::storage(err.to_string())
+        YatagarasuError::storage(err.to_string())
     }
 }
 

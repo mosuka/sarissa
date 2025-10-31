@@ -14,31 +14,45 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::config::InvertedIndexConfig;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
 use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::StorageConfig;
+use yatagarasu::storage::StorageFactory;
 use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== Query Parser - Complete Feature Demonstration ===\n");
 
-    // Create a temporary directory for the index
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("Creating index in: {:?}\n", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    // Create a search engine
-    let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Add sample documents
     let documents = vec![
@@ -47,36 +61,41 @@ fn main() -> Result<()> {
             .add_text("body", "In my younger and more vulnerable years my father gave me some advice")
             .add_text("author", "F. Scott Fitzgerald")
             .add_numeric("year", 1925.0)
+            .add_text("id", "doc001")
             .build(),
         Document::builder()
             .add_text("title", "To Kill a Mockingbird")
             .add_text("body", "When I was almost six years old, I heard my brother arguing with my father")
             .add_text("author", "Harper Lee")
             .add_numeric("year", 1960.0)
+            .add_text("id", "doc002")
             .build(),
         Document::builder()
             .add_text("title", "1984")
             .add_text("body", "It was a bright cold day in April, and the clocks were striking thirteen")
             .add_text("author", "George Orwell")
             .add_numeric("year", 1949.0)
+            .add_text("id", "doc003")
             .build(),
         Document::builder()
             .add_text("title", "Pride and Prejudice")
             .add_text("body", "It is a truth universally acknowledged, that a single man in possession of a good fortune")
             .add_text("author", "Jane Austen")
             .add_numeric("year", 1813.0)
+            .add_text("id", "doc004")
             .build(),
         Document::builder()
             .add_text("title", "The Catcher in the Rye")
             .add_text("body", "If you really want to hear about it, the first thing you'll probably want to know")
             .add_text("author", "J.D. Salinger")
             .add_numeric("year", 1951.0)
+            .add_text("id", "doc005")
             .build(),
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    engine.add_documents(documents)?;
-    engine.commit()?;
+    lexical_engine.add_documents(documents)?;
+    lexical_engine.commit()?;
 
     // Create parser with standard analyzer
     let parser = QueryParser::with_standard_analyzer()?.with_default_field("title");
@@ -91,7 +110,7 @@ fn main() -> Result<()> {
     println!("PART 2: Search Examples (With Results)");
     println!("{}", "=".repeat(80));
 
-    demo_search(&mut engine, &parser)?;
+    demo_search(&mut lexical_engine, &parser)?;
 
     println!("\n{}", "=".repeat(80));
     println!("PART 3: Nested Boolean Queries");
@@ -99,7 +118,7 @@ fn main() -> Result<()> {
 
     demo_nested_queries(&parser);
 
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\n✓ Example completed successfully!");
 
     Ok(())

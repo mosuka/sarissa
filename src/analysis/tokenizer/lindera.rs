@@ -7,7 +7,7 @@ use lindera::segmenter::Segmenter;
 
 use crate::analysis::token::{Token, TokenStream, TokenType};
 use crate::analysis::tokenizer::Tokenizer;
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 
 pub struct LinderaTokenizer {
     // Add any necessary fields for the tokenizer
@@ -18,13 +18,13 @@ impl LinderaTokenizer {
     /// Create a new Lindera tokenizer.
     pub fn new(mode_str: &str, dict_uri: &str, user_dict_uri: Option<&str>) -> Result<Self> {
         let mode = Mode::from_str(mode_str)
-            .map_err(|e| SageError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
+            .map_err(|e| YatagarasuError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
         let dict = load_dictionary(dict_uri)
-            .map_err(|e| SageError::analysis(format!("Failed to load dictionary: {}", e)))?;
+            .map_err(|e| YatagarasuError::analysis(format!("Failed to load dictionary: {}", e)))?;
         let metadata = &dict.metadata;
         let user_dict = match user_dict_uri {
             Some(uri) => Some(load_user_dictionary(uri, metadata).map_err(|e| {
-                SageError::analysis(format!("Failed to load user dictionary: {}", e))
+                YatagarasuError::analysis(format!("Failed to load user dictionary: {}", e))
             })?),
             None => None,
         };
@@ -100,7 +100,7 @@ impl Tokenizer for LinderaTokenizer {
         for token in self
             .inner
             .segment(Cow::Borrowed(text))
-            .map_err(|e| SageError::analysis(format!("Failed to segment text: {}", e)))?
+            .map_err(|e| YatagarasuError::analysis(format!("Failed to segment text: {}", e)))?
         {
             let token_type = Self::detect_token_type(&token.surface);
             tokens.push(

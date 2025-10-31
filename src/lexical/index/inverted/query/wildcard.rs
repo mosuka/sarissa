@@ -114,7 +114,7 @@ impl WildcardQuery {
         regex_pattern.push('$'); // Match to the end
 
         Regex::new(&regex_pattern).map_err(|e| {
-            crate::error::SageError::analysis(format!("Invalid wildcard pattern: {e}"))
+            crate::error::YatagarasuError::analysis(format!("Invalid wildcard pattern: {e}"))
         })
     }
 

@@ -6,19 +6,47 @@
 
 use std::sync::Arc;
 
+use tempfile::TempDir;
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::document::field_value::FieldValue;
-use yatagarasu::lexical::index::inverted::writer::{
-    InvertedIndexWriter, InvertedIndexWriterConfig,
-};
-use yatagarasu::storage::memory::MemoryStorage;
-use yatagarasu::storage::memory::MemoryStorageConfig;
+use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+use yatagarasu::storage::file::FileStorageConfig;
+use yatagarasu::storage::{StorageConfig, StorageFactory};
 
 fn main() -> yatagarasu::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");
+
+    // Create a storage backend
+    let temp_dir = TempDir::new().unwrap();
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
+
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+    per_field_analyzer.add_analyzer("category", Arc::clone(&keyword_analyzer));
+    per_field_analyzer.add_analyzer("isbn", Arc::clone(&keyword_analyzer));
+    per_field_analyzer.add_analyzer("user_id", Arc::clone(&keyword_analyzer));
+    per_field_analyzer.add_analyzer("email", Arc::clone(&keyword_analyzer));
+    per_field_analyzer.add_analyzer("post_id", Arc::clone(&keyword_analyzer));
+
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Configure per-field analyzers using PerFieldAnalyzer (Lucene-style)
     let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new()?));
@@ -29,16 +57,7 @@ fn main() -> yatagarasu::error::Result<()> {
     per_field_analyzer.add_analyzer("email", Arc::new(KeywordAnalyzer::new()));
     per_field_analyzer.add_analyzer("post_id", Arc::new(KeywordAnalyzer::new()));
 
-    // Create storage and writer configuration
-    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let config = InvertedIndexWriterConfig {
-        analyzer: Arc::new(per_field_analyzer),
-        ..Default::default()
-    };
-
-    // Create writer in schema-less mode (no schema required!)
-    let mut writer = InvertedIndexWriter::new(storage, config)?;
-    println!("✓ Created schema-less IndexWriter with PerFieldAnalyzer");
+    println!("✓ Created schema-less LexicalEngine with PerFieldAnalyzer");
 
     println!("\n=== Adding E-commerce Product Documents ===");
 
@@ -57,7 +76,7 @@ fn main() -> yatagarasu::error::Result<()> {
     product1.add_field("price", FieldValue::Float(199.99));
     product1.add_field("in_stock", FieldValue::Boolean(true));
 
-    writer.add_document(product1)?;
+    lexical_engine.add_document(product1)?;
     println!("✓ Added electronics product");
 
     // Product 2: Book (different fields structure)
@@ -76,7 +95,7 @@ fn main() -> yatagarasu::error::Result<()> {
     product2.add_field("price", FieldValue::Float(39.99));
     product2.add_field("pages", FieldValue::Integer(552));
 
-    writer.add_document(product2)?;
+    lexical_engine.add_document(product2)?;
     println!("✓ Added book product");
 
     // User 1: Customer profile (completely different structure)
@@ -96,7 +115,7 @@ fn main() -> yatagarasu::error::Result<()> {
     user1.add_field("age", FieldValue::Integer(28));
     user1.add_field("premium_member", FieldValue::Boolean(true));
 
-    writer.add_document(user1)?;
+    lexical_engine.add_document(user1)?;
     println!("✓ Added user profile");
 
     println!("\n=== Using DocumentBuilder ===");
@@ -113,11 +132,11 @@ fn main() -> yatagarasu::error::Result<()> {
         .add_text("author", "Jane Smith")
         .build();
 
-    writer.add_document(blog_post)?;
+    lexical_engine.add_document(blog_post)?;
     println!("✓ Added blog post using DocumentBuilder");
 
     // Commit all documents
-    writer.commit()?;
+    lexical_engine.commit()?;
     println!("\n✓ Committed all documents to index");
 
     Ok(())

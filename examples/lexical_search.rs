@@ -20,12 +20,16 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::converter::DocumentConverter;
 use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
 use yatagarasu::document::field_value::FieldValue;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::LexicalIndexConfig;
+use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::index::inverted::query::Query;
 use yatagarasu::lexical::index::inverted::query::boolean::BooleanQuery;
@@ -38,25 +42,34 @@ use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
 use yatagarasu::lexical::index::inverted::query::term::TermQuery;
 use yatagarasu::lexical::index::inverted::query::wildcard::WildcardQuery;
 use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorage;
 use yatagarasu::storage::file::FileStorageConfig;
+use yatagarasu::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== Comprehensive Lexical Search Example ===\n");
     println!("This example demonstrates ALL query types available in Sage's lexical search\n");
 
     // Step 1: Create a lexical search index
-    println!("Step 1: Creating lexical search index...");
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("  Index location: {:?}\n", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Step 2: Load documents from JSONL file
     println!("Step 2: Loading documents from resources/documents.jsonl...");
@@ -68,13 +81,13 @@ fn main() -> Result<()> {
     // is efficient and doesn't create a new writer each time
     let mut count = 0;
     for doc_result in doc_iter {
-        engine.add_document(doc_result?)?;
+        lexical_engine.add_document(doc_result?)?;
         count += 1;
     }
     println!("  Loaded {} documents from JSONL file", count);
 
     // Commit the changes to make them searchable
-    engine.commit()?;
+    lexical_engine.commit()?;
     println!("  Documents committed to index\n");
 
     // Step 3: Demonstrate all query types
@@ -89,7 +102,7 @@ fn main() -> Result<()> {
     let query = TermQuery::new("title", "rust");
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -101,7 +114,7 @@ fn main() -> Result<()> {
     let query = PhraseQuery::new("body", vec!["machine".to_string(), "learning".to_string()]);
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -115,7 +128,7 @@ fn main() -> Result<()> {
     query.add_must(Box::new(TermQuery::new("body", "programming")));
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -129,7 +142,7 @@ fn main() -> Result<()> {
     query.add_should(Box::new(TermQuery::new("body", "javascript")));
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -144,7 +157,7 @@ fn main() -> Result<()> {
     query.add_must_not(Box::new(TermQuery::new("body", "python")));
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -156,7 +169,7 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::i64_range("year", Some(2023), None);
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
@@ -179,7 +192,7 @@ fn main() -> Result<()> {
     let query = NumericRangeQuery::i64_range("rating", Some(4), Some(5));
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
@@ -202,7 +215,7 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("tags", "rust").max_edits(2);
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!(
         "\nResults: Found {} matching documents (including typos)",
         results.total_hits
@@ -217,7 +230,7 @@ fn main() -> Result<()> {
     let query = FuzzyQuery::new("tags", "python").max_edits(2);
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -229,7 +242,7 @@ fn main() -> Result<()> {
     let query = WildcardQuery::new("tags", "web*")?;
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -241,7 +254,7 @@ fn main() -> Result<()> {
     let query = WildcardQuery::new("tags", "ru?t")?;
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -254,7 +267,7 @@ fn main() -> Result<()> {
     let query = GeoDistanceQuery::new("location", tokyo, 50.0); // 50km radius
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!(
         "\nResults: Found {} matching documents within 50km",
         results.total_hits
@@ -281,7 +294,7 @@ fn main() -> Result<()> {
     let query = GeoDistanceQuery::new("location", tokyo, 2000.0); // 2000km radius
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!(
         "\nResults: Found {} matching documents within 2000km",
         results.total_hits
@@ -311,7 +324,7 @@ fn main() -> Result<()> {
     let query = GeoBoundingBoxQuery::new("location", bbox);
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!(
         "\nResults: Found {} matching documents in Europe",
         results.total_hits
@@ -350,7 +363,7 @@ fn main() -> Result<()> {
     let query = query.with_minimum_should_match(1); // At least one of the should clauses must match
     println!("Query Debug Output:\n{:#?}", query);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!("\nResults: Found {} matching documents", results.total_hits);
     display_results(&results);
 
@@ -367,7 +380,7 @@ fn main() -> Result<()> {
         .load_documents(true)
         .sort_by_field_desc("year")
         .max_docs(20);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!(
         "\nResults: Found {} matching documents (sorted by year desc)",
         results.total_hits
@@ -397,7 +410,7 @@ fn main() -> Result<()> {
         .load_documents(true)
         .sort_by_field_asc("rating")
         .max_docs(20);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!(
         "\nResults: Found {} matching documents (sorted by rating asc)",
         results.total_hits
@@ -427,7 +440,7 @@ fn main() -> Result<()> {
         .load_documents(true)
         .sort_by_field_asc("author")
         .max_docs(10);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!(
         "\nResults: Found {} matching documents (sorted by author asc)",
         results.total_hits
@@ -457,7 +470,7 @@ fn main() -> Result<()> {
         .load_documents(true)
         .sort_by_field_desc("author")
         .max_docs(10);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
     println!(
         "\nResults: Found {} matching documents (sorted by author desc)",
         results.total_hits
@@ -499,7 +512,7 @@ fn main() -> Result<()> {
     println!("\nAll query types and sorting features demonstrated successfully!");
 
     // Clean up
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\nFull-text search example completed successfully!");
 
     Ok(())

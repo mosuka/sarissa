@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "embeddings-openai")]
 use crate::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-openai")]
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 #[cfg(feature = "embeddings-openai")]
 use crate::vector::Vector;
 
@@ -22,6 +22,8 @@ use crate::vector::Vector;
 struct EmbeddingRequest {
     model: String,
     input: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dimensions: Option<usize>,
 }
 
 #[cfg(feature = "embeddings-openai")]
@@ -128,18 +130,19 @@ impl OpenAITextEmbedder {
     /// # }
     /// ```
     pub fn new(api_key: String, model: String) -> Result<Self> {
-        let dimension = match model.as_str() {
-            "text-embedding-3-small" => 1536,
-            "text-embedding-3-large" => 3072,
-            "text-embedding-ada-002" => 1536,
+        // Validate model
+        match model.as_str() {
+            "text-embedding-3-small" | "text-embedding-3-large" | "text-embedding-ada-002" => {}
             _ => {
-                return Err(SageError::InvalidOperation(format!(
+                return Err(YatagarasuError::InvalidOperation(format!(
                     "Unknown OpenAI embedding model: {}. Supported models: \
                      text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002",
                     model
                 )));
             }
-        };
+        }
+
+        let dimension = Self::default_dimension(&model);
 
         Ok(Self {
             client: Client::new(),
@@ -182,15 +185,32 @@ impl OpenAITextEmbedder {
             dimension,
         })
     }
+
+    /// Get the default dimension for a given model.
+    fn default_dimension(model: &str) -> usize {
+        match model {
+            "text-embedding-3-small" => 1536,
+            "text-embedding-3-large" => 3072,
+            "text-embedding-ada-002" => 1536,
+            _ => 1536, // fallback
+        }
+    }
 }
 
 #[cfg(feature = "embeddings-openai")]
 #[async_trait]
 impl TextEmbedder for OpenAITextEmbedder {
     async fn embed(&self, text: &str) -> Result<Vector> {
+        let dimensions = if self.dimension == Self::default_dimension(&self.model) {
+            None
+        } else {
+            Some(self.dimension)
+        };
+
         let request = EmbeddingRequest {
             model: self.model.clone(),
             input: vec![text.to_string()],
+            dimensions,
         };
 
         let http_response = self
@@ -202,23 +222,23 @@ impl TextEmbedder for OpenAITextEmbedder {
             .send()
             .await
             .map_err(|e| {
-                SageError::InvalidOperation(format!("OpenAI API request failed: {}", e))
+                YatagarasuError::InvalidOperation(format!("OpenAI API request failed: {}", e))
             })?;
 
         let status = http_response.status();
         let response_text = http_response.text().await.map_err(|e| {
-            SageError::InvalidOperation(format!("Failed to read response text: {}", e))
+            YatagarasuError::InvalidOperation(format!("Failed to read response text: {}", e))
         })?;
 
         if !status.is_success() {
-            return Err(SageError::InvalidOperation(format!(
+            return Err(YatagarasuError::InvalidOperation(format!(
                 "OpenAI API error (status {}): {}",
                 status, response_text
             )));
         }
 
         let response: EmbeddingResponse = serde_json::from_str(&response_text).map_err(|e| {
-            SageError::InvalidOperation(format!(
+            YatagarasuError::InvalidOperation(format!(
                 "Failed to parse OpenAI response: {}. Response text: {}",
                 e, response_text
             ))
@@ -228,7 +248,7 @@ impl TextEmbedder for OpenAITextEmbedder {
             .data
             .into_iter()
             .next()
-            .ok_or_else(|| SageError::InvalidOperation("No embedding in response".to_string()))?
+            .ok_or_else(|| YatagarasuError::InvalidOperation("No embedding in response".to_string()))?
             .embedding;
 
         Ok(Vector::new(embedding))
@@ -239,9 +259,16 @@ impl TextEmbedder for OpenAITextEmbedder {
             return Ok(Vec::new());
         }
 
+        let dimensions = if self.dimension == Self::default_dimension(&self.model) {
+            None
+        } else {
+            Some(self.dimension)
+        };
+
         let request = EmbeddingRequest {
             model: self.model.clone(),
             input: texts.iter().map(|s| s.to_string()).collect(),
+            dimensions,
         };
 
         let http_response = self
@@ -253,23 +280,23 @@ impl TextEmbedder for OpenAITextEmbedder {
             .send()
             .await
             .map_err(|e| {
-                SageError::InvalidOperation(format!("OpenAI API request failed: {}", e))
+                YatagarasuError::InvalidOperation(format!("OpenAI API request failed: {}", e))
             })?;
 
         let status = http_response.status();
         let response_text = http_response.text().await.map_err(|e| {
-            SageError::InvalidOperation(format!("Failed to read response text: {}", e))
+            YatagarasuError::InvalidOperation(format!("Failed to read response text: {}", e))
         })?;
 
         if !status.is_success() {
-            return Err(SageError::InvalidOperation(format!(
+            return Err(YatagarasuError::InvalidOperation(format!(
                 "OpenAI API error (status {}): {}",
                 status, response_text
             )));
         }
 
         let response: EmbeddingResponse = serde_json::from_str(&response_text).map_err(|e| {
-            SageError::InvalidOperation(format!(
+            YatagarasuError::InvalidOperation(format!(
                 "Failed to parse OpenAI response: {}. Response text: {}",
                 e, response_text
             ))

@@ -305,7 +305,7 @@ impl VectorIndexReaderFactory {
                 let reader = IvfIndexReader::from_bytes(index_data)?;
                 Ok(Arc::new(reader))
             }
-            _ => Err(crate::error::SageError::InvalidOperation(format!(
+            _ => Err(crate::error::YatagarasuError::InvalidOperation(format!(
                 "Unknown index type: {index_type}"
             ))),
         }

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 
 /// A dense vector representation for similarity search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,7 +81,7 @@ impl Vector {
     /// Validate that this vector has the expected dimension.
     pub fn validate_dimension(&self, expected_dim: usize) -> Result<()> {
         if self.data.len() != expected_dim {
-            return Err(SageError::InvalidOperation(format!(
+            return Err(YatagarasuError::InvalidOperation(format!(
                 "Vector dimension mismatch: expected {}, got {}",
                 expected_dim,
                 self.data.len()
@@ -152,7 +152,7 @@ impl DistanceMetric {
     /// Calculate the distance between two vectors using this metric.
     pub fn distance(&self, a: &[f32], b: &[f32]) -> Result<f32> {
         if a.len() != b.len() {
-            return Err(SageError::InvalidOperation(
+            return Err(YatagarasuError::InvalidOperation(
                 "Vector dimensions must match for distance calculation".to_string(),
             ));
         }
@@ -228,7 +228,7 @@ impl DistanceMetric {
             "manhattan" | "l1" => Ok(DistanceMetric::Manhattan),
             "dot_product" | "dot" => Ok(DistanceMetric::DotProduct),
             "angular" => Ok(DistanceMetric::Angular),
-            _ => Err(SageError::InvalidOperation(format!(
+            _ => Err(YatagarasuError::InvalidOperation(format!(
                 "Unknown distance metric: {s}"
             ))),
         }

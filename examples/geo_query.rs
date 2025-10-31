@@ -4,32 +4,46 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::config::InvertedIndexConfig;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::index::inverted::query::Query;
 use yatagarasu::lexical::index::inverted::query::geo::GeoQuery;
 use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::StorageConfig;
+use yatagarasu::storage::StorageFactory;
 use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== GeoQuery Example - Geographic Location-Based Search ===\n");
 
-    // Create a temporary directory for the index
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("Creating index in: {:?}", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    // Create a search engine
-    let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Add documents with geographic coordinates
     // Using famous locations around the world
@@ -110,7 +124,10 @@ fn main() -> Result<()> {
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    engine.add_documents(documents)?;
+    lexical_engine.add_documents(documents)?;
+
+    // Commit changes to engine
+    lexical_engine.commit()?;
 
     println!("\n=== GeoQuery Examples ===\n");
 
@@ -118,7 +135,7 @@ fn main() -> Result<()> {
     println!("1. Locations within 5km of Times Square (40.7580° N, 73.9855° W):");
     let query = GeoQuery::within_radius("location", 40.7580, -73.9855, 5.0)?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -146,7 +163,7 @@ fn main() -> Result<()> {
     println!("\n2. Locations within 10km of downtown San Francisco (37.7749° N, 122.4194° W):");
     let query = GeoQuery::within_radius("location", 37.7749, -122.4194, 10.0)?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -175,7 +192,7 @@ fn main() -> Result<()> {
     println!("   (33.9° N, 118.6° W) to (34.3° N, 118.1° W)");
     let query = GeoQuery::within_bounding_box("location", 33.9, -118.6, 34.3, -118.1)?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -203,7 +220,7 @@ fn main() -> Result<()> {
     println!("\n4. All West Coast locations within 1000km of San Francisco:");
     let query = GeoQuery::within_radius("location", 37.7749, -122.4194, 1000.0)?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -231,7 +248,7 @@ fn main() -> Result<()> {
     println!("\n5. Locations within 2km of downtown Seattle (47.6062° N, 122.3321° W):");
     let query = GeoQuery::within_radius("location", 47.6062, -122.3321, 2.0)?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -259,7 +276,7 @@ fn main() -> Result<()> {
     println!("\n6. Locations within 1km of a specific point in the ocean:");
     let query = GeoQuery::within_radius("location", 36.0, -125.0, 1.0)?; // Pacific Ocean
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
@@ -268,7 +285,7 @@ fn main() -> Result<()> {
     println!("   (25° N, 125° W) to (49° N, 66° W)");
     let query = GeoQuery::within_bounding_box("location", 25.0, -125.0, 49.0, -66.0)?;
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -295,10 +312,10 @@ fn main() -> Result<()> {
     // Example 8: Count locations within a specific area
     println!("\n8. Counting locations within 50km of Los Angeles center:");
     let query = GeoQuery::within_radius("location", 34.0522, -118.2437, 50.0)?;
-    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("   Count: {count} locations");
 
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\nGeoQuery example completed successfully!");
 
     Ok(())

@@ -4,34 +4,46 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
+use yatagarasu::lexical::index::config::InvertedIndexConfig;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
 use yatagarasu::lexical::index::inverted::query::Query;
 use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
 use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorage;
+use yatagarasu::storage::StorageConfig;
+use yatagarasu::storage::StorageFactory;
 use yatagarasu::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== RangeQuery Example - Numeric and Date Range Search ===\n");
 
-    // Create a temporary directory for the index
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
-    println!("Creating index in: {:?}", temp_dir.path());
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
 
-    // Create a schema with numeric fields
+    // Create an analyzer
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
 
-    // Create a search engine
-    let config = LexicalIndexConfig::default();
-    let storage = Arc::new(FileStorage::new(
-        temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    // Create a lexical index
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
+
+    // Create a lexical engine
+    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
 
     // Add documents with various numeric values
     let documents = vec![
@@ -101,8 +113,8 @@ fn main() -> Result<()> {
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    engine.add_documents(documents)?;
-    engine.commit()?;
+    lexical_engine.add_documents(documents)?;
+    lexical_engine.commit()?;
 
     println!("\n=== RangeQuery Examples ===\n");
 
@@ -110,7 +122,7 @@ fn main() -> Result<()> {
     println!("1. Books with price between $50.00 and $70.00:");
     let query = NumericRangeQuery::f64_range("price", Some(50.0), Some(70.0));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -138,7 +150,7 @@ fn main() -> Result<()> {
     println!("\n2. Books with rating 4.5 or higher:");
     let query = NumericRangeQuery::f64_range("rating", Some(4.5), None);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -166,7 +178,7 @@ fn main() -> Result<()> {
     println!("\n3. Books published after 2010:");
     let query = NumericRangeQuery::i64_range("year", Some(2010), None);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -194,7 +206,7 @@ fn main() -> Result<()> {
     println!("\n4. Books with 400 pages or fewer:");
     let query = NumericRangeQuery::i64_range("pages", None, Some(400));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -222,7 +234,7 @@ fn main() -> Result<()> {
     println!("\n5. Books published between 2008 and 2009:");
     let query = NumericRangeQuery::i64_range("year", Some(2008), Some(2009));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -250,7 +262,7 @@ fn main() -> Result<()> {
     println!("\n6. Budget-friendly books (price under $50.00):");
     let query = NumericRangeQuery::f64_range_exclusive_upper("price", None, Some(50.0));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -278,7 +290,7 @@ fn main() -> Result<()> {
     println!("\n7. Large books (more than 500 pages):");
     let query = NumericRangeQuery::i64_range("pages", Some(500), None);
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>).load_documents(true);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
     for (i, hit) in results.hits.iter().enumerate() {
@@ -305,18 +317,18 @@ fn main() -> Result<()> {
     // Example 8: Count books in price range
     println!("\n8. Counting books with price between $40.00 and $80.00:");
     let query = NumericRangeQuery::f64_range("price", Some(40.0), Some(80.0));
-    let count = engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
     println!("   Count: {count} books");
 
     // Example 9: Empty range (no results expected)
     println!("\n9. Books with impossible price range ($200-$300):");
     let query = NumericRangeQuery::f64_range("price", Some(200.0), Some(300.0));
     let request = LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>);
-    let results = engine.search(request)?;
+    let results = lexical_engine.search(request)?;
 
     println!("   Found {} results", results.total_hits);
 
-    engine.close()?;
+    lexical_engine.close()?;
     println!("\nRangeQuery example completed successfully!");
 
     Ok(())

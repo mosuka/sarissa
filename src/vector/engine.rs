@@ -6,7 +6,7 @@
 use std::cell::{RefCell, RefMut};
 use std::sync::Arc;
 
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::index::flat::reader::FlatVectorIndexReader;
 use crate::vector::index::flat::searcher::FlatVectorSearcher;
@@ -190,7 +190,7 @@ impl VectorEngine {
                     } else if reader.as_any().is::<IvfIndexReader>() {
                         Box::new(IvfSearcher::new(reader.clone())?)
                     } else {
-                        return Err(SageError::InvalidOperation(
+                        return Err(YatagarasuError::InvalidOperation(
                             "Unknown vector index reader type".to_string(),
                         ));
                     };

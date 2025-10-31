@@ -55,7 +55,7 @@ use std::sync::Arc;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::document::Document;
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::SearchResults;
@@ -241,7 +241,7 @@ impl LexicalEngine {
                         inverted_reader.clone(),
                     )))
                 } else {
-                    return Err(SageError::index("Unknown lexical index reader type"));
+                    return Err(YatagarasuError::index("Unknown lexical index reader type"));
                 };
 
                 *searcher_ref = Some(searcher);

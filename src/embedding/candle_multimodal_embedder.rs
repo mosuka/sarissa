@@ -22,7 +22,7 @@ use crate::embedding::image_embedder::ImageEmbedder;
 #[cfg(feature = "embeddings-multimodal")]
 use crate::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-multimodal")]
-use crate::error::{Result, SageError};
+use crate::error::{Result, YatagarasuError};
 #[cfg(feature = "embeddings-multimodal")]
 use crate::vector::Vector;
 
@@ -146,7 +146,7 @@ impl CandleMultimodalEmbedder {
     pub fn new(model_name: &str) -> Result<Self> {
         // Setup device (prefer GPU if available)
         let device = Device::cuda_if_available(0)
-            .map_err(|e| SageError::InvalidOperation(format!("Device setup failed: {}", e)))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Device setup failed: {}", e)))?;
 
         // Download model from HuggingFace Hub
         let cache_dir = std::env::var("HF_HOME")
@@ -157,7 +157,7 @@ impl CandleMultimodalEmbedder {
             .with_cache_dir(cache_dir.into())
             .build()
             .map_err(|e| {
-                SageError::InvalidOperation(format!("HF API initialization failed: {}", e))
+                YatagarasuError::InvalidOperation(format!("HF API initialization failed: {}", e))
             })?;
         let repo = api.model(model_name.to_string());
 
@@ -170,18 +170,18 @@ impl CandleMultimodalEmbedder {
         let weights_filename = repo
             .get("model.safetensors")
             .or_else(|_| repo.get("pytorch_model.bin"))
-            .map_err(|e| SageError::InvalidOperation(format!("Weights download failed: {}", e)))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Weights download failed: {}", e)))?;
 
         let vb = if weights_filename.to_string_lossy().ends_with(".safetensors") {
             unsafe {
                 VarBuilder::from_mmaped_safetensors(&[weights_filename], DType::F32, &device)
                     .map_err(|e| {
-                        SageError::InvalidOperation(format!("VarBuilder creation failed: {}", e))
+                        YatagarasuError::InvalidOperation(format!("VarBuilder creation failed: {}", e))
                     })?
             }
         } else {
             VarBuilder::from_pth(&weights_filename, DType::F32, &device).map_err(|e| {
-                SageError::InvalidOperation(format!("VarBuilder creation failed: {}", e))
+                YatagarasuError::InvalidOperation(format!("VarBuilder creation failed: {}", e))
             })?
         };
 
@@ -189,7 +189,7 @@ impl CandleMultimodalEmbedder {
         let text_model =
             clip::text_model::ClipTextTransformer::new(vb.pp("text_model"), &config.text_config)
                 .map_err(|e| {
-                    SageError::InvalidOperation(format!("Text model load failed: {}", e))
+                    YatagarasuError::InvalidOperation(format!("Text model load failed: {}", e))
                 })?;
 
         // Load vision model
@@ -197,7 +197,7 @@ impl CandleMultimodalEmbedder {
             vb.pp("vision_model"),
             &config.vision_config,
         )
-        .map_err(|e| SageError::InvalidOperation(format!("Vision model load failed: {}", e)))?;
+        .map_err(|e| YatagarasuError::InvalidOperation(format!("Vision model load failed: {}", e)))?;
 
         // Load projection layers
         let projection_dim = config.text_config.projection_dim;
@@ -208,7 +208,7 @@ impl CandleMultimodalEmbedder {
             projection_dim,
             vb.pp("text_projection"),
         )
-        .map_err(|e| SageError::InvalidOperation(format!("Text projection load failed: {}", e)))?;
+        .map_err(|e| YatagarasuError::InvalidOperation(format!("Text projection load failed: {}", e)))?;
 
         let vision_projection = candle_nn::linear_no_bias(
             config.vision_config.embed_dim,
@@ -216,15 +216,15 @@ impl CandleMultimodalEmbedder {
             vb.pp("visual_projection"),
         )
         .map_err(|e| {
-            SageError::InvalidOperation(format!("Vision projection load failed: {}", e))
+            YatagarasuError::InvalidOperation(format!("Vision projection load failed: {}", e))
         })?;
 
         // Load tokenizer
         let tokenizer_filename = repo.get("tokenizer.json").map_err(|e| {
-            SageError::InvalidOperation(format!("Tokenizer download failed: {}", e))
+            YatagarasuError::InvalidOperation(format!("Tokenizer download failed: {}", e))
         })?;
         let tokenizer = Tokenizer::from_file(tokenizer_filename)
-            .map_err(|e| SageError::InvalidOperation(format!("Tokenizer load failed: {}", e)))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tokenizer load failed: {}", e)))?;
 
         let dimension = projection_dim;
         let image_size = config.vision_config.image_size;
@@ -248,9 +248,9 @@ impl CandleMultimodalEmbedder {
 
         // Load image
         let img = ImageReader::open(image_path)
-            .map_err(|e| SageError::InvalidOperation(format!("Image open failed: {}", e)))?
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Image open failed: {}", e)))?
             .decode()
-            .map_err(|e| SageError::InvalidOperation(format!("Image decode failed: {}", e)))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Image decode failed: {}", e)))?;
 
         // Resize to model's expected size
         let img = img.resize_exact(
@@ -272,36 +272,36 @@ impl CandleMultimodalEmbedder {
             (self.image_size, self.image_size, 3),
             &self.device,
         )
-        .map_err(|e| SageError::InvalidOperation(format!("Tensor creation failed: {}", e)))?;
+        .map_err(|e| YatagarasuError::InvalidOperation(format!("Tensor creation failed: {}", e)))?;
 
         // Normalize: (pixel / 255.0 - mean) / std
         // CLIP uses ImageNet normalization
         let mean = Tensor::new(&[0.48145466f32, 0.4578275, 0.40821073], &self.device)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .reshape((1, 1, 3))
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
         let std = Tensor::new(&[0.2686295_f32, 0.2613026, 0.2757771], &self.device)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .reshape((1, 1, 3))
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
         // Scale to [0, 1] and normalize
         let normalized = img_tensor
             .to_dtype(DType::F32)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .affine(1.0 / 255.0, 0.0)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .broadcast_sub(&mean)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .broadcast_div(&std)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
         // Permute to (C, H, W)
         let normalized = normalized
             .permute((2, 0, 1))
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .unsqueeze(0)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
         Ok(normalized)
     }
@@ -310,15 +310,15 @@ impl CandleMultimodalEmbedder {
     fn normalize(&self, tensor: &Tensor) -> Result<Tensor> {
         let norm = tensor
             .sqr()
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .sum_keepdim(1)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .sqrt()
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
         tensor
             .broadcast_div(&norm)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))
     }
 }
 
@@ -330,26 +330,26 @@ impl TextEmbedder for CandleMultimodalEmbedder {
         let encoding = self
             .tokenizer
             .encode(text, true)
-            .map_err(|e| SageError::InvalidOperation(format!("Tokenization failed: {}", e)))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tokenization failed: {}", e)))?;
 
         let token_ids = encoding.get_ids();
 
         // Convert to tensor
         let token_ids_tensor = Tensor::new(token_ids, &self.device)
-            .map_err(|e| SageError::InvalidOperation(format!("Tensor creation failed: {}", e)))?
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tensor creation failed: {}", e)))?
             .unsqueeze(0)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
         // Forward pass through text model
         let text_features = self.text_model.forward(&token_ids_tensor).map_err(|e| {
-            SageError::InvalidOperation(format!("Text model forward failed: {}", e))
+            YatagarasuError::InvalidOperation(format!("Text model forward failed: {}", e))
         })?;
 
         // Project to common embedding space
         let projected = self
             .text_projection
             .forward(&text_features)
-            .map_err(|e| SageError::InvalidOperation(format!("Text projection failed: {}", e)))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Text projection failed: {}", e)))?;
 
         // Normalize
         let normalized = self.normalize(&projected)?;
@@ -357,9 +357,9 @@ impl TextEmbedder for CandleMultimodalEmbedder {
         // Convert to Vector
         let vector_data: Vec<f32> = normalized
             .squeeze(0)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .to_vec1()
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
         Ok(Vector::new(vector_data))
     }
@@ -382,14 +382,14 @@ impl ImageEmbedder for CandleMultimodalEmbedder {
 
         // Forward pass through vision model
         let vision_features = self.vision_model.forward(&image_tensor).map_err(|e| {
-            SageError::InvalidOperation(format!("Vision model forward failed: {}", e))
+            YatagarasuError::InvalidOperation(format!("Vision model forward failed: {}", e))
         })?;
 
         // Project to common embedding space
         let projected = self
             .vision_projection
             .forward(&vision_features)
-            .map_err(|e| SageError::InvalidOperation(format!("Vision projection failed: {}", e)))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(format!("Vision projection failed: {}", e)))?;
 
         // Normalize
         let normalized = self.normalize(&projected)?;
@@ -397,9 +397,9 @@ impl ImageEmbedder for CandleMultimodalEmbedder {
         // Convert to Vector
         let vector_data: Vec<f32> = normalized
             .squeeze(0)
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?
             .to_vec1()
-            .map_err(|e| SageError::InvalidOperation(e.to_string()))?;
+            .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
         Ok(Vector::new(vector_data))
     }
