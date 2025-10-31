@@ -13,7 +13,7 @@ use crate::error::{Result, SageError};
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::InvertedIndexConfig;
 use crate::lexical::index::inverted::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
-use crate::lexical::index::inverted::segment::types::SegmentInfo;
+use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::inverted::types::InvertedIndexStats;
 use crate::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use crate::lexical::reader::IndexReader;

@@ -705,7 +705,7 @@ impl InvertedIndexWriter {
 
     /// Write segment metadata.
     fn write_segment_metadata(&self, segment_name: &str) -> Result<()> {
-        use crate::lexical::index::inverted::segment::types::SegmentInfo;
+        use crate::lexical::index::inverted::segment::SegmentInfo;
 
         // Create SegmentInfo
         let segment_info = SegmentInfo {
