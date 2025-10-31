@@ -20,7 +20,7 @@
 //! use yatagarasu::lexical::engine::LexicalEngine;
 //! use yatagarasu::lexical::index::config::LexicalIndexConfig;
 //! use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-//! use yatagarasu::lexical::types::LexicalSearchRequest;
+//! use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 //! use yatagarasu::lexical::index::inverted::query::term::TermQuery;
 //! use yatagarasu::storage::{StorageConfig, StorageFactory};
 //! use yatagarasu::storage::memory::MemoryStorageConfig;
@@ -93,7 +93,7 @@ use crate::storage::Storage;
 /// use yatagarasu::lexical::engine::LexicalEngine;
 /// use yatagarasu::lexical::index::config::LexicalIndexConfig;
 /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-/// use yatagarasu::lexical::types::LexicalSearchRequest;
+/// use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 /// use yatagarasu::lexical::index::inverted::query::term::TermQuery;
 /// use yatagarasu::storage::{StorageConfig, StorageFactory};
 /// use yatagarasu::storage::memory::MemoryStorageConfig;
@@ -473,7 +473,7 @@ impl LexicalEngine {
     ///
     /// ```rust,no_run
     /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::lexical::types::LexicalSearchRequest;
+    /// use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
     /// use yatagarasu::lexical::index::inverted::query::term::TermQuery;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
     /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
@@ -505,7 +505,7 @@ impl LexicalEngine {
     ///
     /// ```rust,no_run
     /// use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
-    /// use yatagarasu::lexical::types::LexicalSearchRequest;
+    /// use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
     /// # use yatagarasu::document::document::Document;
     /// # use yatagarasu::lexical::engine::LexicalEngine;
     /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::vector::types::VectorSearchParams;
+use crate::vector::search::searcher::VectorSearchParams;
 
 /// Configuration for hybrid search combining keyword and vector search.
 #[derive(Debug, Clone, Serialize, Deserialize)]

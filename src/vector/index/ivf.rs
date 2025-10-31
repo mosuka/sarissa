@@ -1,11 +1,15 @@
 //! IVF vector index implementation.
 
+pub mod reader;
+pub mod searcher;
+pub mod writer;
+
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::{Result, SageError};
 use crate::storage::Storage;
-use crate::vector::index::writer::ivf::IvfIndexWriter;
+use crate::vector::index::ivf::writer::IvfIndexWriter;
 use crate::vector::index::{IvfIndexConfig, VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
@@ -149,7 +153,7 @@ impl VectorIndex for IvfIndex {
     fn reader(&self) -> Result<Arc<dyn VectorIndexReader>> {
         self.check_closed()?;
 
-        use crate::vector::index::reader::ivf::IvfIndexReader;
+        use crate::vector::index::ivf::reader::IvfIndexReader;
 
         let reader = IvfIndexReader::load(
             self.storage.clone(),

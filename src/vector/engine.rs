@@ -8,16 +8,16 @@ use std::sync::Arc;
 
 use crate::error::{Result, SageError};
 use crate::storage::Storage;
-use crate::vector::index::reader::flat::FlatVectorIndexReader;
-use crate::vector::index::reader::hnsw::HnswIndexReader;
-use crate::vector::index::reader::ivf::IvfIndexReader;
+use crate::vector::index::flat::reader::FlatVectorIndexReader;
+use crate::vector::index::flat::searcher::FlatVectorSearcher;
+use crate::vector::index::hnsw::reader::HnswIndexReader;
+use crate::vector::index::hnsw::searcher::HnswSearcher;
+use crate::vector::index::ivf::reader::IvfIndexReader;
+use crate::vector::index::ivf::searcher::IvfSearcher;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
-use crate::vector::search::searcher::flat::FlatVectorSearcher;
-use crate::vector::search::searcher::hnsw::HnswSearcher;
-use crate::vector::search::searcher::ivf::IvfSearcher;
-use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
+use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 use crate::vector::{DistanceMetric, Vector};
 
 /// A high-level unified vector engine that provides both indexing and searching capabilities.
@@ -29,7 +29,7 @@ use crate::vector::{DistanceMetric, Vector};
 /// use yatagarasu::vector::engine::VectorEngine;
 /// use yatagarasu::vector::index::{VectorIndexConfig, VectorIndexFactory, FlatIndexConfig};
 /// use yatagarasu::vector::{Vector, DistanceMetric};
-/// use yatagarasu::vector::types::VectorSearchRequest;
+/// use yatagarasu::vector::search::searcher::VectorSearchRequest;
 /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use yatagarasu::storage::StorageConfig;
 /// use std::sync::Arc;

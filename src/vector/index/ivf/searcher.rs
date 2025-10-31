@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::vector::Vector;
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
-use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
+use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 
 /// IVF (Inverted File) vector searcher that performs memory-efficient approximate search.
 pub struct IvfSearcher {
@@ -91,7 +91,7 @@ impl VectorSearcher for IvfSearcher {
 
             results
                 .results
-                .push(crate::vector::types::VectorSearchResult {
+                .push(crate::vector::search::searcher::VectorSearchResult {
                     doc_id,
                     similarity,
                     distance,

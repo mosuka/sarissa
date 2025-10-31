@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
-use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
+use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 
 /// Flat vector searcher that performs exact (brute force) search.
 pub struct FlatVectorSearcher {
@@ -63,7 +63,7 @@ impl VectorSearcher for FlatVectorSearcher {
 
             results
                 .results
-                .push(crate::vector::types::VectorSearchResult {
+                .push(crate::vector::search::searcher::VectorSearchResult {
                     doc_id,
                     similarity,
                     distance,

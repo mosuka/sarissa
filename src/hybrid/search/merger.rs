@@ -7,7 +7,7 @@ use crate::hybrid::config::HybridSearchConfig;
 use crate::hybrid::search::scorer::ScoreNormalizer;
 use crate::hybrid::types::{HybridSearchResult, HybridSearchResults};
 use crate::lexical::index::inverted::query::SearchResults;
-use crate::vector::types::VectorSearchResults;
+use crate::vector::search::searcher::VectorSearchResults;
 
 /// Result merger for combining keyword and vector search results.
 pub struct ResultMerger {

@@ -6,17 +6,12 @@
 //! - Vector quantization and compression
 //! - Index optimization and maintenance
 
-pub mod deletion;
+pub mod config;
 pub mod flat;
 pub mod hnsw;
 pub mod ivf;
-pub mod merge_engine;
-pub mod merge_policy;
-pub mod optimization;
+pub mod maintenance;
 pub mod quantization;
-pub mod reader;
-pub mod segment_manager;
-pub mod writer;
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
@@ -423,7 +418,7 @@ impl ManagedVectorIndex {
         let builder: Box<dyn VectorIndexWriter> = match &config {
             VectorIndexConfig::Flat(flat_config) => {
                 let writer_config = Self::default_writer_config();
-                Box::new(writer::flat::FlatIndexWriter::with_storage(
+                Box::new(flat::writer::FlatIndexWriter::with_storage(
                     flat_config.clone(),
                     writer_config,
                     storage.clone(),
@@ -431,7 +426,7 @@ impl ManagedVectorIndex {
             }
             VectorIndexConfig::HNSW(hnsw_config) => {
                 let writer_config = Self::default_writer_config();
-                Box::new(writer::hnsw::HnswIndexWriter::with_storage(
+                Box::new(hnsw::writer::HnswIndexWriter::with_storage(
                     hnsw_config.clone(),
                     writer_config,
                     storage.clone(),
@@ -439,7 +434,7 @@ impl ManagedVectorIndex {
             }
             VectorIndexConfig::IVF(ivf_config) => {
                 let writer_config = Self::default_writer_config();
-                Box::new(writer::ivf::IvfIndexWriter::with_storage(
+                Box::new(ivf::writer::IvfIndexWriter::with_storage(
                     ivf_config.clone(),
                     writer_config,
                     storage.clone(),

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector::types::VectorSearchResults;
+use crate::vector::search::searcher::VectorSearchResults;
 
 /// Configuration for result ranking.
 #[derive(Debug, Clone, Serialize, Deserialize)]

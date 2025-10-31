@@ -64,7 +64,7 @@ impl Default for VectorIndexWriterConfig {
 /// # Example
 ///
 /// ```rust,no_run
-/// use yatagarasu::vector::index::writer::hnsw::HnswIndexWriter;
+/// use yatagarasu::vector::index::hnsw::writer::HnswIndexWriter;
 /// use yatagarasu::vector::index::HnswIndexConfig;
 /// use yatagarasu::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};

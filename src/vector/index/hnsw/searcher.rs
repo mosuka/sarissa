@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
-use crate::vector::types::{VectorSearchRequest, VectorSearchResults};
+use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 
 /// HNSW vector searcher that performs approximate nearest neighbor search.
 pub struct HnswSearcher {
@@ -71,7 +71,7 @@ impl VectorSearcher for HnswSearcher {
 
             results
                 .results
-                .push(crate::vector::types::VectorSearchResult {
+                .push(crate::vector::search::searcher::VectorSearchResult {
                     doc_id,
                     similarity,
                     distance,
