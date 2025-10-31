@@ -10,7 +10,6 @@
 //! - `index`: Index management (config, factory, traits, inverted, segment, maintenance)
 //! - `search`: Search execution (scoring, features, result processing)
 //! - `engine`: High-level engine interface
-//! - `types`: Type definitions
 //! - `reader`: Index reader trait
 //! - `writer`: Index writer trait
 
@@ -20,5 +19,4 @@ pub mod search;
 
 pub mod engine;
 pub mod reader;
-pub mod types;
 pub mod writer;

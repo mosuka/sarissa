@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::lexical::engine::LexicalEngine;
 use crate::lexical::index::inverted::query::SearchResults;
-use crate::lexical::types::LexicalSearchRequest;
+use crate::lexical::search::searcher::LexicalSearchRequest;
 use crate::spelling::corrector::{
     CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector,
 };

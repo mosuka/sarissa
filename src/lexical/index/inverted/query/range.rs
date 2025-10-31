@@ -1434,7 +1434,7 @@ mod tests {
             &self,
             _field: &str,
             _term: &str,
-        ) -> crate::error::Result<Option<crate::lexical::types::ReaderTermInfo>> {
+        ) -> crate::error::Result<Option<crate::lexical::reader::ReaderTermInfo>> {
             Ok(None)
         }
         fn postings(
@@ -1448,7 +1448,7 @@ mod tests {
         fn field_stats(
             &self,
             _field: &str,
-        ) -> crate::error::Result<Option<crate::lexical::types::FieldStats>> {
+        ) -> crate::error::Result<Option<crate::lexical::reader::FieldStats>> {
             Ok(None)
         }
         fn close(&mut self) -> crate::error::Result<()> {

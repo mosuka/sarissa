@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::lexical::index::inverted::types::InvertedIndexStats;
+use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::reader::IndexReader;
 use crate::lexical::writer::IndexWriter;
 use crate::storage::Storage;

@@ -22,7 +22,7 @@ use crate::lexical::index::inverted::core::posting::{Posting, PostingList};
 use crate::lexical::index::inverted::core::terms::{InvertedIndexTerms, TermDictionaryAccess, Terms};
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::reader::PostingIterator;
-use crate::lexical::types::FieldStats;
+use crate::lexical::reader::FieldStats;
 use crate::storage::Storage;
 use crate::storage::structured::StructReader;
 
@@ -302,7 +302,7 @@ pub struct SegmentReader {
     field_lengths: RwLock<Option<BTreeMap<u64, AHashMap<String, u32>>>>,
 
     /// Cached field statistics: field_name -> FieldStats.
-    field_stats: RwLock<Option<AHashMap<String, crate::lexical::types::FieldStats>>>,
+    field_stats: RwLock<Option<AHashMap<String, crate::lexical::reader::FieldStats>>>,
 
     /// DocValues reader for this segment.
     doc_values: RwLock<Option<Arc<DocValuesReader>>>,
@@ -595,7 +595,7 @@ impl SegmentReader {
 
             all_field_stats.insert(
                 field_name.clone(),
-                crate::lexical::types::FieldStats {
+                crate::lexical::reader::FieldStats {
                     field: field_name,
                     unique_terms: 0, // Not stored, not needed for BM25
                     total_terms: 0,  // Not stored, not needed for BM25
@@ -1002,14 +1002,14 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
         &self,
         field: &str,
         term: &str,
-    ) -> Result<Option<crate::lexical::types::ReaderTermInfo>> {
+    ) -> Result<Option<crate::lexical::reader::ReaderTermInfo>> {
         self.check_closed()?;
 
         let cache_key = format!("{field}:{term}");
 
         // Check cache first
         if let Some(cached_info) = self.cache_manager.get_term_info(&cache_key) {
-            return Ok(Some(crate::lexical::types::ReaderTermInfo {
+            return Ok(Some(crate::lexical::reader::ReaderTermInfo {
                 field: field.to_string(),
                 term: term.to_string(),
                 doc_freq: cached_info.doc_frequency,
@@ -1034,7 +1034,7 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
         }
 
         if found {
-            let reader_info = crate::lexical::types::ReaderTermInfo {
+            let reader_info = crate::lexical::reader::ReaderTermInfo {
                 field: field.to_string(),
                 term: term.to_string(),
                 doc_freq: total_doc_freq,
@@ -1088,7 +1088,7 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
         }
     }
 
-    fn field_stats(&self, field: &str) -> Result<Option<crate::lexical::types::FieldStats>> {
+    fn field_stats(&self, field: &str) -> Result<Option<crate::lexical::reader::FieldStats>> {
         self.check_closed()?;
 
         let mut total_doc_count = 0u64;
@@ -1113,7 +1113,7 @@ impl crate::lexical::reader::IndexReader for InvertedIndexReader {
         }
 
         if found {
-            Ok(Some(crate::lexical::types::FieldStats {
+            Ok(Some(crate::lexical::reader::FieldStats {
                 field: field.to_string(),
                 unique_terms: 0, // Not aggregated
                 total_terms: 0,  // Not aggregated
