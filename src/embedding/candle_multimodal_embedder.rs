@@ -464,7 +464,7 @@ impl ImageEmbedder for CandleMultimodalEmbedder {
     /// Returns an error if:
     /// - Image file cannot be opened or decoded
     /// - Model forward pass fails
-    async fn embed_image(&self, image_path: &str) -> Result<Vector> {
+    async fn embed(&self, image_path: &str) -> Result<Vector> {
         // Preprocess image
         let image_tensor = self.preprocess_image(image_path)?;
 

@@ -23,7 +23,7 @@ use crate::vector::Vector;
 ///     "openai/clip-vit-base-patch32"
 /// )?;
 ///
-/// let vector = embedder.embed_image("path/to/image.jpg").await?;
+/// let vector = embedder.embed("path/to/image.jpg").await?;
 /// println!("Dimension: {}", ImageEmbedder::dimension(&embedder));
 /// # Ok(())
 /// # }
@@ -43,7 +43,7 @@ use crate::vector::Vector;
 ///
 /// #[async_trait]
 /// impl ImageEmbedder for MyCustomImageEmbedder {
-///     async fn embed_image(&self, image_path: &str) -> Result<Vector> {
+///     async fn embed(&self, image_path: &str) -> Result<Vector> {
 ///         // Your custom implementation
 ///         let embedding = vec![0.0; self.dimension];
 ///         Ok(Vector::new(embedding))
@@ -65,11 +65,11 @@ pub trait ImageEmbedder: Send + Sync {
     /// # Returns
     ///
     /// A vector representation of the input image
-    async fn embed_image(&self, image_path: &str) -> Result<Vector>;
+    async fn embed(&self, image_path: &str) -> Result<Vector>;
 
     /// Generate embeddings for multiple images in batch.
     ///
-    /// The default implementation calls `embed_image` sequentially.
+    /// The default implementation calls `embed` sequentially.
     /// Override this method for better performance with batch processing.
     ///
     /// # Arguments
@@ -79,10 +79,10 @@ pub trait ImageEmbedder: Send + Sync {
     /// # Returns
     ///
     /// A vector of embeddings, one for each input image
-    async fn embed_image_batch(&self, image_paths: &[&str]) -> Result<Vec<Vector>> {
+    async fn embed_batch(&self, image_paths: &[&str]) -> Result<Vec<Vector>> {
         let mut results = Vec::with_capacity(image_paths.len());
         for path in image_paths {
-            results.push(self.embed_image(path).await?);
+            results.push(self.embed(path).await?);
         }
         Ok(results)
     }

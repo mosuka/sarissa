@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
                 println!("  Indexing: {}", path_str);
 
                 // Generate image embedding
-                let vector = embedder.embed_image(&path_str).await?;
+                let vector = embedder.embed(&path_str).await?;
 
                 // Store metadata
                 image_metadata.insert(doc_id, path_str.to_string());
@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
     println!("\n=== Searching for Similar Images ===");
     println!("Query image: {}\n", query_image_path);
     println!("Generating embedding for query image...");
-    let query_vector = embedder.embed_image(query_image_path).await?;
+    let query_vector = embedder.embed(query_image_path).await?;
 
     // Search for similar images
     println!("Searching for similar images...\n");
