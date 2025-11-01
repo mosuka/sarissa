@@ -29,12 +29,28 @@ impl ResultProcessor {
     /// Set the minimum score threshold.
     ///
     /// Results with scores below this threshold will be filtered out.
+    ///
+    /// # Arguments
+    ///
+    /// * `min_score` - Minimum hybrid score threshold
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
     pub fn with_min_score(mut self, min_score: f32) -> Self {
         self.min_score = Some(min_score);
         self
     }
 
     /// Set the maximum number of results.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_results` - Maximum number of results to return
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
     pub fn with_max_results(mut self, max_results: usize) -> Self {
         self.max_results = Some(max_results);
         self
@@ -64,6 +80,12 @@ impl ResultProcessor {
     }
 
     /// Normalize scores to 0-1 range.
+    ///
+    /// Applies min-max normalization to bring all hybrid scores to [0, 1] scale.
+    ///
+    /// # Arguments
+    ///
+    /// * `results` - Mutable reference to search results
     pub fn normalize_scores(&self, results: &mut HybridSearchResults) {
         if results.results.is_empty() {
             return;

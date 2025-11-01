@@ -376,6 +376,16 @@ impl RankingModel for GBDTRanker {
 
 impl GBDTRanker {
     /// Calculate gradients (residuals) for gradient boosting.
+    ///
+    /// In gradient boosting for regression, the gradients are simply the residuals:
+    /// gradient = label - prediction. These gradients are used to fit the next tree.
+    ///
+    /// # Arguments
+    /// * `predictions` - Current model predictions
+    /// * `training_data` - Training examples with labels
+    ///
+    /// # Returns
+    /// Vector of gradients (residuals) for each training example
     fn calculate_gradients(
         &self,
         predictions: &[f64],
@@ -389,6 +399,16 @@ impl GBDTRanker {
     }
 
     /// Fit a decision tree to gradients.
+    ///
+    /// Creates a new decision tree that fits the gradient (residual) values,
+    /// using the configured maximum depth and minimum samples per split.
+    ///
+    /// # Arguments
+    /// * `gradients` - Gradient values to fit
+    /// * `training_data` - Training examples (features used for splitting)
+    ///
+    /// # Returns
+    /// Fitted decision tree
     fn fit_tree(
         &self,
         gradients: &[f64],
@@ -403,6 +423,15 @@ impl GBDTRanker {
     }
 
     /// Calculate mean squared error loss.
+    ///
+    /// Computes MSE = mean((prediction - label)²) to measure model accuracy.
+    ///
+    /// # Arguments
+    /// * `predictions` - Model predictions
+    /// * `data` - Training/validation data with true labels
+    ///
+    /// # Returns
+    /// Mean squared error
     fn calculate_loss(
         &self,
         predictions: &[f64],
@@ -500,6 +529,23 @@ impl DecisionTree {
     }
 
     /// Recursively build the decision tree.
+    ///
+    /// Creates a tree by recursively finding the best split at each node.
+    /// Stops splitting when:
+    /// - Maximum depth is reached
+    /// - Too few samples to split
+    /// - No good split is found
+    ///
+    /// # Arguments
+    /// * `gradients` - Gradient values to fit
+    /// * `training_data` - Training examples
+    /// * `indices` - Indices of samples in current node
+    /// * `depth` - Current depth in the tree
+    /// * `max_depth` - Maximum allowed depth
+    /// * `min_samples_split` - Minimum samples required to split
+    ///
+    /// # Returns
+    /// Tree node (internal split node or leaf)
     fn build_tree(
         gradients: &[f64],
         training_data: &[LabeledExample<QueryDocumentFeatures, f64>],
@@ -565,6 +611,14 @@ impl DecisionTree {
     }
 
     /// Find the best split for the current node.
+    ///
+    /// Evaluates all possible feature splits to find the one that maximizes
+    /// variance reduction in the gradient values. Uses a greedy approach
+    /// trying different threshold values for each feature.
+    ///
+    /// # Arguments
+    /// * `gradients` - Gradient values to split
+    /// * `training_data` - Training examples for feature values
     fn find_best_split(
         gradients: &[f64],
         training_data: &[LabeledExample<QueryDocumentFeatures, f64>],

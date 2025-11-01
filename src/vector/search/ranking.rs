@@ -40,17 +40,44 @@ pub enum RankingMethod {
 }
 
 /// Vector result ranker.
+///
+/// Provides functionality to rank and reorder vector search results
+/// using different ranking strategies and score normalization.
 pub struct VectorRanker {
+    /// Ranking configuration.
     config: RankingConfig,
 }
 
 impl VectorRanker {
     /// Create a new vector ranker.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration specifying ranking behavior
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::vector::search::ranking::{VectorRanker, RankingConfig};
+    ///
+    /// let config = RankingConfig::default();
+    /// let ranker = VectorRanker::new(config);
+    /// ```
     pub fn new(config: RankingConfig) -> Self {
         Self { config }
     }
 
     /// Rank and reorder search results.
+    ///
+    /// Applies the configured ranking method and optionally normalizes scores.
+    ///
+    /// # Arguments
+    ///
+    /// * `results` - Mutable reference to search results to be ranked
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if ranking succeeds
     pub fn rank_results(&self, results: &mut VectorSearchResults) -> Result<()> {
         match self.config.method {
             RankingMethod::Similarity => {
@@ -75,6 +102,16 @@ impl VectorRanker {
     }
 
     /// Apply weighted ranking based on multiple factors.
+    ///
+    /// Adjusts similarity scores using boost factors from metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `results` - Mutable reference to search results
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if weighting succeeds
     fn apply_weighted_ranking(&self, results: &mut VectorSearchResults) -> Result<()> {
         for result in &mut results.results {
             let mut weighted_score = result.similarity;
@@ -94,12 +131,32 @@ impl VectorRanker {
     }
 
     /// Apply custom ranking logic.
+    ///
+    /// Placeholder for user-defined custom ranking implementations.
+    ///
+    /// # Arguments
+    ///
+    /// * `_results` - Mutable reference to search results
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` - Currently a no-op placeholder
     fn apply_custom_ranking(&self, _results: &mut VectorSearchResults) -> Result<()> {
         // Placeholder for custom ranking implementation
         Ok(())
     }
 
     /// Normalize scores to 0-1 range.
+    ///
+    /// Applies min-max normalization to bring all scores to a [0, 1] scale.
+    ///
+    /// # Arguments
+    ///
+    /// * `results` - Mutable reference to search results
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if normalization succeeds
     fn normalize_scores(&self, results: &mut VectorSearchResults) -> Result<()> {
         if results.results.is_empty() {
             return Ok(());
@@ -129,6 +186,10 @@ impl VectorRanker {
     }
 
     /// Get the ranking configuration.
+    ///
+    /// # Returns
+    ///
+    /// Reference to the current ranking configuration
     pub fn config(&self) -> &RankingConfig {
         &self.config
     }

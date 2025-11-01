@@ -11,7 +11,14 @@ use crate::ml::intent_classifier::types::QueryIntent;
 
 /// Keyword-based intent classifier.
 ///
-/// Uses simple keyword matching to determine query intent.
+/// Uses simple keyword matching to determine query intent. The classifier
+/// tokenizes the query using the provided analyzer, then counts keyword matches
+/// for each intent category. The intent with the highest match count is selected.
+///
+/// # Algorithm
+/// 1. Tokenize query using analyzer
+/// 2. Count matches in each keyword set (informational, navigational, transactional)
+/// 3. Return intent with highest match count, or `Unknown` if no matches
 pub struct KeywordBasedIntentClassifier {
     informational_keywords: HashSet<String>,
     navigational_keywords: HashSet<String>,
@@ -32,6 +39,18 @@ impl std::fmt::Debug for KeywordBasedIntentClassifier {
 
 impl KeywordBasedIntentClassifier {
     /// Create a new keyword-based intent classifier.
+    ///
+    /// # Arguments
+    /// * `informational_keywords` - Set of keywords indicating informational queries
+    ///   (e.g., "what", "how", "why", "explain", "define")
+    /// * `navigational_keywords` - Set of keywords indicating navigational queries
+    ///   (e.g., "homepage", "login", "site", "website", "page")
+    /// * `transactional_keywords` - Set of keywords indicating transactional queries
+    ///   (e.g., "buy", "download", "purchase", "install", "order")
+    /// * `analyzer` - Text analyzer for tokenizing queries
+    ///
+    /// # Returns
+    /// New keyword-based intent classifier instance
     pub fn new(
         informational_keywords: HashSet<String>,
         navigational_keywords: HashSet<String>,

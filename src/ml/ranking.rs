@@ -444,6 +444,17 @@ impl LearningToRank {
 
     // Private helper methods
 
+    /// Combine original search score with ML-based ranking score.
+    ///
+    /// Uses weighted combination with exponential scaling to amplify score differences
+    /// and ensure diverse ranking results. Applies higher weight (0.9) to ML score.
+    ///
+    /// # Arguments
+    /// * `original_score` - Original retrieval score from search engine
+    /// * `ml_score` - ML model's predicted relevance score
+    ///
+    /// # Returns
+    /// Combined final score for ranking
     fn combine_scores(&self, original_score: f32, ml_score: f64) -> f32 {
         // Enhanced weighted combination designed for score diversity
         let alpha = 0.9; // Much higher weight for ML score to ensure diversity
@@ -463,6 +474,14 @@ impl LearningToRank {
             as f32
     }
 
+    /// Check if model should be retrained based on time or feedback volume.
+    ///
+    /// Retraining is triggered when:
+    /// 1. Enough time has passed since last retrain (based on config interval)
+    /// 2. Sufficient feedback signals have accumulated (based on min threshold)
+    ///
+    /// # Returns
+    /// `true` if retraining should be performed
     fn should_retrain(&self) -> bool {
         // Check time-based retraining
         let last_retrain = *self.last_retrain.read().unwrap();
@@ -477,6 +496,18 @@ impl LearningToRank {
         buffer.len() >= self.config.min_feedback_for_retrain
     }
 
+    /// Retrain the ranking model using accumulated user feedback.
+    ///
+    /// Converts feedback signals (clicks, dwell time, etc.) into training examples,
+    /// combines them with existing training data, and retrains the model.
+    /// Clears feedback buffer and updates last retrain timestamp upon completion.
+    ///
+    /// # Returns
+    /// Ok if retraining succeeded, Err otherwise
+    ///
+    /// # Note
+    /// Currently simplified - a full implementation would need to store
+    /// query-document features alongside feedback for proper training.
     fn retrain_from_feedback(&self) -> Result<()> {
         // Convert feedback to training examples
         let buffer = self.feedback_buffer.read().unwrap();
@@ -510,6 +541,20 @@ impl LearningToRank {
         Ok(())
     }
 
+    /// Convert user feedback signal to a relevance score for training.
+    ///
+    /// Maps different feedback types to numerical relevance scores:
+    /// - Click: 1.0 (positive signal)
+    /// - DwellTime: 0.0-4.0 based on duration (longer = more relevant)
+    /// - Explicit: User-provided score
+    /// - Skip: 0.0 (neutral/negative)
+    /// - Bounce: -0.5 (negative signal)
+    ///
+    /// # Arguments
+    /// * `feedback` - User feedback signal to convert
+    ///
+    /// # Returns
+    /// Relevance score for use in model training
     fn feedback_to_relevance_score(&self, feedback: &FeedbackSignal) -> f64 {
         match feedback.feedback_type {
             FeedbackType::Click => 1.0,

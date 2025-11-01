@@ -81,8 +81,21 @@ pub struct CollectionStats {
 }
 
 /// Advanced scoring function trait.
+///
+/// Defines the interface for pluggable scoring algorithms.
 pub trait ScoringFunction: Send + Sync + std::fmt::Debug {
     /// Calculate score for a document given query and statistics.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_terms` - Terms from the query
+    /// * `doc_stats` - Statistics for the document being scored
+    /// * `collection_stats` - Collection-wide statistics
+    /// * `config` - Scoring configuration parameters
+    ///
+    /// # Returns
+    ///
+    /// Relevance score for the document
     fn score(
         &self,
         query_terms: &[String],
@@ -92,9 +105,17 @@ pub trait ScoringFunction: Send + Sync + std::fmt::Debug {
     ) -> Result<f32>;
 
     /// Get function name.
+    ///
+    /// # Returns
+    ///
+    /// String identifier for this scoring function
     fn name(&self) -> &str;
 
     /// Get function description.
+    ///
+    /// # Returns
+    ///
+    /// Human-readable description of the algorithm
     fn description(&self) -> &str;
 }
 
@@ -259,6 +280,8 @@ impl ScoringFunction for VectorSpaceScoringFunction {
 }
 
 /// Custom scoring function that allows user-defined scoring logic.
+///
+/// Wraps a user-provided closure to create a custom scoring algorithm.
 pub struct CustomScoringFunction {
     /// Function name.
     name: String,
@@ -287,6 +310,16 @@ impl std::fmt::Debug for CustomScoringFunction {
 
 impl CustomScoringFunction {
     /// Create a new custom scoring function.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Identifier for this scoring function
+    /// * `description` - Human-readable description
+    /// * `scorer` - Closure implementing the scoring logic
+    ///
+    /// # Returns
+    ///
+    /// A new custom scoring function
     pub fn new<F>(name: String, description: String, scorer: F) -> Self
     where
         F: Fn(&[String], &DocumentStats, &CollectionStats, &ScoringConfig) -> Result<f32>
@@ -323,6 +356,9 @@ impl ScoringFunction for CustomScoringFunction {
 }
 
 /// Advanced scorer that uses pluggable scoring functions.
+///
+/// Applies configurable scoring algorithms with field boosts and
+/// coordination factors.
 #[derive(Debug)]
 pub struct AdvancedScorer {
     /// Scoring function to use.
@@ -340,6 +376,17 @@ pub struct AdvancedScorer {
 
 impl AdvancedScorer {
     /// Create a new advanced scorer.
+    ///
+    /// # Arguments
+    ///
+    /// * `scoring_function` - The scoring algorithm to use
+    /// * `config` - Configuration for scoring behavior
+    /// * `collection_stats` - Collection-wide statistics
+    /// * `query_terms` - Terms from the search query
+    ///
+    /// # Returns
+    ///
+    /// A new advanced scorer instance
     pub fn new(
         scoring_function: Box<dyn ScoringFunction>,
         config: ScoringConfig,
@@ -355,6 +402,16 @@ impl AdvancedScorer {
     }
 
     /// Score a document.
+    ///
+    /// Computes relevance score with optional field boosts and coordination factor.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_stats` - Statistics for the document to score
+    ///
+    /// # Returns
+    ///
+    /// Final relevance score for the document
     pub fn score_document(&self, doc_stats: &DocumentStats) -> Result<f32> {
         let mut base_score = self.scoring_function.score(
             &self.query_terms,
@@ -375,6 +432,17 @@ impl AdvancedScorer {
     }
 
     /// Apply field boosts to the score.
+    ///
+    /// Adjusts score based on which fields contain matching terms.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_score` - Base relevance score
+    /// * `doc_stats` - Document statistics
+    ///
+    /// # Returns
+    ///
+    /// Boosted score
     fn apply_field_boosts(&self, base_score: f32, doc_stats: &DocumentStats) -> Result<f32> {
         if self.config.field_boosts.is_empty() {
             return Ok(base_score);
@@ -401,6 +469,17 @@ impl AdvancedScorer {
     }
 
     /// Apply coordination factor (ratio of matched terms to total query terms).
+    ///
+    /// Rewards documents that match more query terms.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_score` - Base relevance score
+    /// * `doc_stats` - Document statistics
+    ///
+    /// # Returns
+    ///
+    /// Score adjusted by coordination factor
     fn apply_coordination_factor(&self, base_score: f32, doc_stats: &DocumentStats) -> Result<f32> {
         let matched_terms = self
             .query_terms
@@ -419,6 +498,8 @@ impl AdvancedScorer {
 }
 
 /// Scoring function registry for managing different scoring algorithms.
+///
+/// Provides a centralized registry of available scoring functions.
 #[derive(Debug)]
 pub struct ScoringRegistry {
     /// Registered scoring functions.
@@ -427,6 +508,12 @@ pub struct ScoringRegistry {
 
 impl ScoringRegistry {
     /// Create a new scoring registry with default functions.
+    ///
+    /// Registers BM25, TF-IDF, and Vector Space scoring functions.
+    ///
+    /// # Returns
+    ///
+    /// Registry pre-populated with default scoring functions
     pub fn new() -> Self {
         let mut registry = ScoringRegistry {
             functions: HashMap::new(),
@@ -441,16 +528,33 @@ impl ScoringRegistry {
     }
 
     /// Register a scoring function.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Identifier for the scoring function
+    /// * `function` - Boxed scoring function implementation
     pub fn register(&mut self, name: &str, function: Box<dyn ScoringFunction>) {
         self.functions.insert(name.to_string(), function);
     }
 
     /// Get a scoring function by name.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the scoring function to retrieve
+    ///
+    /// # Returns
+    ///
+    /// Reference to the scoring function, or None if not found
     pub fn get(&self, name: &str) -> Option<&dyn ScoringFunction> {
         self.functions.get(name).map(|f| f.as_ref())
     }
 
     /// List available scoring functions.
+    ///
+    /// # Returns
+    ///
+    /// Vector of (name, description) tuples for all registered functions
     pub fn list_functions(&self) -> Vec<(&str, &str)> {
         self.functions
             .iter()

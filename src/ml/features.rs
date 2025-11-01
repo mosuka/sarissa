@@ -287,15 +287,43 @@ impl FeatureExtractor {
         })
     }
 
-    /// Helper methods
+    /// Tokenize a query string into lowercase terms.
+    ///
+    /// Splits the query by whitespace and converts each term to lowercase
+    /// for case-insensitive matching.
+    ///
+    /// # Arguments
+    /// * `query` - The query string to tokenize
+    ///
+    /// # Returns
+    /// Vector of lowercase query terms
     fn tokenize_query(&self, query: &str) -> Vec<String> {
         query.split_whitespace().map(|s| s.to_lowercase()).collect()
     }
 
+    /// Tokenize a document text into lowercase terms.
+    ///
+    /// Splits the document text by whitespace and converts each term to lowercase.
+    ///
+    /// # Arguments
+    /// * `text` - The document text to tokenize
+    ///
+    /// # Returns
+    /// Vector of lowercase document terms
     fn tokenize_document(&self, text: &str) -> Vec<String> {
         text.split_whitespace().map(|s| s.to_lowercase()).collect()
     }
 
+    /// Extract all text content from a document.
+    ///
+    /// Iterates through all document fields and concatenates text values
+    /// into a single string for feature extraction.
+    ///
+    /// # Arguments
+    /// * `document` - The document to extract text from
+    ///
+    /// # Returns
+    /// Concatenated text from all text fields
     fn extract_document_text(&self, document: &Document) -> String {
         // Extract text from all text fields
         let mut text_parts = Vec::new();
@@ -311,10 +339,30 @@ impl FeatureExtractor {
         text_parts.join(" ")
     }
 
+    /// Calculate term frequency for a specific term in document.
+    ///
+    /// Counts how many times a term appears in the document's token list.
+    ///
+    /// # Arguments
+    /// * `term` - The term to count
+    /// * `doc_terms` - List of document terms
+    ///
+    /// # Returns
+    /// Number of occurrences of the term
     fn term_frequency(&self, term: &str, doc_terms: &[String]) -> usize {
         doc_terms.iter().filter(|t| *t == term).count()
     }
 
+    /// Calculate variance of term frequencies in a document.
+    ///
+    /// Measures the distribution of term frequencies, which can indicate
+    /// document diversity and information density.
+    ///
+    /// # Arguments
+    /// * `doc_terms` - List of document terms
+    ///
+    /// # Returns
+    /// Variance of term frequencies
     fn calculate_tf_variance(&self, doc_terms: &[String]) -> f64 {
         let term_counts: HashMap<&String, usize> =
             doc_terms.iter().fold(HashMap::new(), |mut acc, term| {
@@ -334,6 +382,17 @@ impl FeatureExtractor {
             / term_counts.len() as f64
     }
 
+    /// Check if two strings share a common prefix of minimum length.
+    ///
+    /// Used for detecting partial matches between query and document terms.
+    ///
+    /// # Arguments
+    /// * `s1` - First string
+    /// * `s2` - Second string
+    /// * `min_length` - Minimum prefix length to consider
+    ///
+    /// # Returns
+    /// `true` if both strings share a prefix of at least `min_length` characters
     fn has_common_prefix(&self, s1: &str, s2: &str, min_length: usize) -> bool {
         if s1.len() < min_length || s2.len() < min_length {
             return false;
@@ -345,6 +404,16 @@ impl FeatureExtractor {
             .all(|(c1, c2)| c1 == c2)
     }
 
+    /// Check if query terms appear in the same sentence.
+    ///
+    /// Uses a heuristic that terms within 20 words are likely in the same sentence.
+    ///
+    /// # Arguments
+    /// * `positions` - Word positions of query terms in document
+    /// * `_doc_text` - Document text (unused in current implementation)
+    ///
+    /// # Returns
+    /// `true` if all terms are within 20 words of each other
     fn terms_in_same_sentence(&self, positions: &[usize], _doc_text: &str) -> bool {
         // Simple heuristic: check if all positions are within 20 words
         if positions.len() < 2 {
@@ -357,6 +426,16 @@ impl FeatureExtractor {
         max_pos - min_pos <= 20
     }
 
+    /// Check if query terms appear in the same paragraph.
+    ///
+    /// Uses a heuristic that terms within 100 words are likely in the same paragraph.
+    ///
+    /// # Arguments
+    /// * `positions` - Word positions of query terms in document
+    /// * `_doc_text` - Document text (unused in current implementation)
+    ///
+    /// # Returns
+    /// `true` if all terms are within 100 words of each other
     fn terms_in_same_paragraph(&self, positions: &[usize], _doc_text: &str) -> bool {
         // Simple heuristic: check if all positions are within 100 words
         if positions.len() < 2 {
@@ -369,13 +448,32 @@ impl FeatureExtractor {
         max_pos - min_pos <= 100
     }
 
+    /// Normalize timestamp to time of day as a value between 0.0 and 1.0.
+    ///
+    /// Converts hours and minutes to a fraction of the day for use as a feature.
+    ///
+    /// # Arguments
+    /// * `timestamp` - UTC timestamp
+    ///
+    /// # Returns
+    /// Normalized time of day (0.0 = midnight, 0.5 = noon, 1.0 = next midnight)
     fn normalize_time_of_day(&self, timestamp: chrono::DateTime<chrono::Utc>) -> f64 {
         let hour = timestamp.hour() as f64;
         let minute = timestamp.minute() as f64;
         (hour + minute / 60.0) / 24.0
     }
 
-    // Placeholder implementations for statistics methods
+    /// Calculate match score for query terms in document title.
+    ///
+    /// Would check if query terms appear in the title field, which typically
+    /// has higher importance for relevance.
+    ///
+    /// # Arguments
+    /// * `_query_terms` - Query terms to match
+    /// * `_document` - Document to check
+    ///
+    /// # Returns
+    /// Title match score (currently returns 0.0 as placeholder)
     fn calculate_title_match_score(
         &self,
         _query_terms: &[String],
@@ -385,6 +483,17 @@ impl FeatureExtractor {
         Ok(0.0)
     }
 
+    /// Calculate match scores for query terms across document fields.
+    ///
+    /// Would compute relevance scores for each field in the document,
+    /// allowing field-specific weighting in ranking.
+    ///
+    /// # Arguments
+    /// * `_query_terms` - Query terms to match
+    /// * `_document` - Document to analyze
+    ///
+    /// # Returns
+    /// Map of field names to match scores (currently returns empty map as placeholder)
     fn calculate_field_match_scores(
         &self,
         _query_terms: &[String],
@@ -394,6 +503,16 @@ impl FeatureExtractor {
         Ok(HashMap::new())
     }
 
+    /// Calculate sum of IDF values for query terms.
+    ///
+    /// Higher IDF sum indicates query contains more distinctive terms,
+    /// which can be useful for ranking.
+    ///
+    /// # Arguments
+    /// * `query_terms` - Query terms to sum IDF values for
+    ///
+    /// # Returns
+    /// Sum of inverse document frequencies
     fn calculate_idf_sum(&self, query_terms: &[String]) -> Result<f64> {
         let mut sum = 0.0;
         for term in query_terms {
@@ -402,19 +521,57 @@ impl FeatureExtractor {
         Ok(sum)
     }
 
+    /// Get click-through rate for a document.
+    ///
+    /// CTR is a key popularity signal indicating user engagement.
+    ///
+    /// # Arguments
+    /// * `document_id` - Document identifier
+    ///
+    /// # Returns
+    /// Click-through rate (clicks / impressions)
     fn get_click_through_rate(&self, document_id: &str) -> Result<f64> {
         Ok(self.click_stats.get_ctr(document_id))
     }
 
+    /// Calculate document age in days.
+    ///
+    /// Would extract the creation timestamp from the document and compute
+    /// age, which can be used for freshness-based ranking.
+    ///
+    /// # Arguments
+    /// * `_document` - Document to check
+    ///
+    /// # Returns
+    /// Age in days (currently returns 0 as placeholder)
     fn calculate_document_age_days(&self, _document: &Document) -> Result<u32> {
         // Implementation would extract creation date from document
         Ok(0)
     }
 
+    /// Get popularity score for a document.
+    ///
+    /// Popularity scores aggregate various signals like views, shares, etc.
+    ///
+    /// # Arguments
+    /// * `document_id` - Document identifier
+    ///
+    /// # Returns
+    /// Popularity score between 0.0 and 1.0
     fn get_document_popularity(&self, document_id: &str) -> Result<f64> {
         Ok(self.popularity_stats.get_popularity(document_id))
     }
 
+    /// Get frequency count for a query string.
+    ///
+    /// Query frequency indicates how often users search for this query,
+    /// which can help identify popular search intents.
+    ///
+    /// # Arguments
+    /// * `query` - Query string
+    ///
+    /// # Returns
+    /// Number of times this query has been searched
     fn get_query_frequency(&self, query: &str) -> Result<u64> {
         Ok(self.term_stats.query_frequency(query))
     }
@@ -431,6 +588,9 @@ pub struct FeatureContext {
 }
 
 /// Term statistics for IDF calculation.
+///
+/// Maintains corpus-level statistics used for information retrieval metrics
+/// like IDF (Inverse Document Frequency) and query frequency tracking.
 #[derive(Debug)]
 pub struct TermStatistics {
     term_document_counts: HashMap<String, u64>,
@@ -446,6 +606,7 @@ impl Default for TermStatistics {
 }
 
 impl TermStatistics {
+    /// Create a new empty term statistics instance.
     pub fn new() -> Self {
         Self {
             term_document_counts: HashMap::new(),
@@ -455,6 +616,10 @@ impl TermStatistics {
         }
     }
 
+    /// Create a term statistics instance with demo data for testing.
+    ///
+    /// Includes common programming-related terms with sample frequencies
+    /// and query statistics.
     pub fn with_demo_data() -> Self {
         let mut term_counts = HashMap::new();
 
@@ -499,21 +664,43 @@ impl TermStatistics {
         }
     }
 
+    /// Calculate inverse document frequency for a term.
+    ///
+    /// IDF measures how distinctive a term is across the corpus.
+    /// Uses natural logarithm of (total_documents / document_frequency).
+    ///
+    /// # Arguments
+    /// * `term` - The term to calculate IDF for
+    ///
+    /// # Returns
+    /// Inverse document frequency value
     pub fn inverse_document_frequency(&self, term: &str) -> Result<f64> {
         let doc_count = self.term_document_counts.get(term).copied().unwrap_or(1);
         Ok((self.total_documents as f64 / doc_count as f64).ln())
     }
 
+    /// Get the average document length in the corpus.
+    ///
+    /// Used for length normalization in BM25 and other ranking algorithms.
     pub fn average_document_length(&self) -> f64 {
         self.average_doc_length
     }
 
+    /// Get the frequency count for a query string.
+    ///
+    /// # Arguments
+    /// * `query` - The query string to look up
+    ///
+    /// # Returns
+    /// Number of times this query has been searched
     pub fn query_frequency(&self, query: &str) -> u64 {
         self.query_frequencies.get(query).copied().unwrap_or(0)
     }
 }
 
 /// Click-through rate statistics.
+///
+/// Tracks user engagement metrics for documents through click and impression counts.
 #[derive(Debug)]
 pub struct ClickStatistics {
     document_clicks: HashMap<String, u64>,
@@ -527,6 +714,7 @@ impl Default for ClickStatistics {
 }
 
 impl ClickStatistics {
+    /// Create a new empty click statistics instance.
     pub fn new() -> Self {
         Self {
             document_clicks: HashMap::new(),
@@ -534,6 +722,9 @@ impl ClickStatistics {
         }
     }
 
+    /// Create a click statistics instance with demo data for testing.
+    ///
+    /// Includes sample click and impression data for several documents.
     pub fn with_demo_data() -> Self {
         let mut clicks = HashMap::new();
         let mut impressions = HashMap::new();
@@ -558,6 +749,15 @@ impl ClickStatistics {
         }
     }
 
+    /// Calculate click-through rate for a document.
+    ///
+    /// CTR = clicks / impressions. Returns 0.0 if there are no impressions.
+    ///
+    /// # Arguments
+    /// * `document_id` - Document identifier
+    ///
+    /// # Returns
+    /// Click-through rate between 0.0 and 1.0
     pub fn get_ctr(&self, document_id: &str) -> f64 {
         let clicks = self.document_clicks.get(document_id).copied().unwrap_or(0);
         let impressions = self
@@ -575,6 +775,9 @@ impl ClickStatistics {
 }
 
 /// Document popularity statistics.
+///
+/// Maintains aggregated popularity scores for documents based on various signals
+/// such as views, shares, bookmarks, etc.
 #[derive(Debug)]
 pub struct PopularityStatistics {
     popularity_scores: HashMap<String, f64>,
@@ -587,12 +790,16 @@ impl Default for PopularityStatistics {
 }
 
 impl PopularityStatistics {
+    /// Create a new empty popularity statistics instance.
     pub fn new() -> Self {
         Self {
             popularity_scores: HashMap::new(),
         }
     }
 
+    /// Create a popularity statistics instance with demo data for testing.
+    ///
+    /// Includes sample popularity scores for several documents.
     pub fn with_demo_data() -> Self {
         let mut scores = HashMap::new();
 
@@ -609,6 +816,13 @@ impl PopularityStatistics {
         }
     }
 
+    /// Get popularity score for a document.
+    ///
+    /// # Arguments
+    /// * `document_id` - Document identifier
+    ///
+    /// # Returns
+    /// Popularity score between 0.0 and 1.0, or 0.0 if document is unknown
     pub fn get_popularity(&self, document_id: &str) -> f64 {
         self.popularity_scores
             .get(document_id)
@@ -618,6 +832,17 @@ impl PopularityStatistics {
 }
 
 /// Calculate edit distance between two character sequences.
+///
+/// Uses dynamic programming to compute the Levenshtein distance,
+/// which measures the minimum number of single-character edits
+/// (insertions, deletions, substitutions) needed to transform one sequence into another.
+///
+/// # Arguments
+/// * `s1` - First character sequence
+/// * `s2` - Second character sequence
+///
+/// # Returns
+/// Edit distance between the two sequences
 fn edit_distance(s1: &[char], s2: &[char]) -> usize {
     let len1 = s1.len();
     let len2 = s2.len();

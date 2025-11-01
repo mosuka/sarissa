@@ -230,6 +230,15 @@ pub struct ResultProcessor {
 
 impl ResultProcessor {
     /// Create a new result processor.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration for result processing behavior
+    /// * `reader` - Index reader for document retrieval
+    ///
+    /// # Returns
+    ///
+    /// Result containing the new processor instance
     pub fn new(config: ResultProcessorConfig, reader: Arc<dyn IndexReader>) -> Result<Self> {
         let highlighter = if config.enable_highlighting {
             Some(Highlighter::new(HighlightConfig::default()))
@@ -256,6 +265,17 @@ impl ResultProcessor {
     }
 
     /// Process raw query results into enriched results.
+    ///
+    /// Applies highlighting, faceting, snippets, and other enhancements.
+    ///
+    /// # Arguments
+    ///
+    /// * `raw_results` - Raw search results from query execution
+    /// * `query` - Query object for highlighting
+    ///
+    /// # Returns
+    ///
+    /// Enriched search results with highlights, facets, aggregations, etc.
     pub fn process_results<Q: Query>(
         &mut self,
         raw_results: Vec<QueryResult>,

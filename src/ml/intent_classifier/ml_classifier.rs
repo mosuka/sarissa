@@ -11,6 +11,16 @@ use crate::ml::intent_classifier::tfidf::TfIdfVectorizer;
 use crate::ml::intent_classifier::types::{IntentSample, QueryIntent};
 
 /// Machine learning-based intent classifier.
+///
+/// Uses TF-IDF vectorization and cosine similarity to classify query intent.
+/// Training samples are vectorized and stored as prototypes for each intent category.
+/// During prediction, the query is vectorized and compared to all prototypes using
+/// cosine similarity, with the intent having the highest average similarity selected.
+///
+/// # Algorithm
+/// 1. Training: Vectorize all samples using TF-IDF and group by intent
+/// 2. Prediction: Vectorize query, compute cosine similarity to all prototypes
+/// 3. Return intent with highest average similarity across its prototypes
 #[derive(Debug)]
 pub struct MLBasedIntentClassifier {
     /// TF-IDF vectorizer.
@@ -21,6 +31,16 @@ pub struct MLBasedIntentClassifier {
 
 impl MLBasedIntentClassifier {
     /// Create a new ML intent classifier and train it from samples with a specified analyzer.
+    ///
+    /// # Arguments
+    /// * `samples` - Training samples with query-intent pairs
+    /// * `analyzer` - Text analyzer for tokenizing queries
+    ///
+    /// # Returns
+    /// Trained ML-based intent classifier
+    ///
+    /// # Errors
+    /// Returns an error if training samples are empty
     pub fn new(samples: Vec<IntentSample>, analyzer: Arc<dyn Analyzer>) -> Result<Self> {
         if samples.is_empty() {
             anyhow::bail!("Training samples cannot be empty");
@@ -50,6 +70,15 @@ impl MLBasedIntentClassifier {
     }
 
     /// Predict the intent for a given query using cosine similarity.
+    ///
+    /// Vectorizes the query and computes average cosine similarity to each
+    /// intent's prototype vectors. Returns the intent with highest similarity.
+    ///
+    /// # Arguments
+    /// * `query` - Query string to classify
+    ///
+    /// # Returns
+    /// Predicted query intent
     fn predict_impl(&self, query: &str) -> Result<QueryIntent> {
         let query_features = self.vectorizer.transform(query)?;
 
@@ -76,6 +105,16 @@ impl MLBasedIntentClassifier {
     }
 
     /// Calculate cosine similarity between two vectors.
+    ///
+    /// Computes the dot product divided by the product of magnitudes.
+    /// Returns 0.0 if vectors have different lengths or zero magnitude.
+    ///
+    /// # Arguments
+    /// * `a` - First feature vector
+    /// * `b` - Second feature vector
+    ///
+    /// # Returns
+    /// Cosine similarity value between 0.0 and 1.0
     fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
         if a.len() != b.len() {
             return 0.0;
@@ -93,6 +132,15 @@ impl MLBasedIntentClassifier {
     }
 
     /// Parse intent string to QueryIntent enum.
+    ///
+    /// Converts string labels to `QueryIntent` enum values.
+    /// Unrecognized intents are mapped to `Unknown`.
+    ///
+    /// # Arguments
+    /// * `intent` - Intent label string
+    ///
+    /// # Returns
+    /// Corresponding `QueryIntent` enum value
     fn parse_intent(intent: &str) -> Result<QueryIntent> {
         match intent {
             "Informational" => Ok(QueryIntent::Informational),

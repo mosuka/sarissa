@@ -22,6 +22,22 @@ pub enum AdvancedSimilarityMetric {
 
 impl AdvancedSimilarityMetric {
     /// Calculate advanced similarity between two vectors.
+    ///
+    /// Computes similarity using the configured metric, with optional weighting.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector
+    /// * `b` - Second vector
+    /// * `weights` - Optional weight vector for weighted metrics
+    ///
+    /// # Returns
+    ///
+    /// Similarity score clamped to [0, 1] range
+    ///
+    /// # Errors
+    ///
+    /// Returns error if vector dimensions don't match
     pub fn similarity(&self, a: &Vector, b: &Vector, weights: Option<&[f32]>) -> Result<f32> {
         if a.dimension() != b.dimension() {
             return Err(crate::error::YatagarasuError::InvalidOperation(
@@ -43,6 +59,22 @@ impl AdvancedSimilarityMetric {
     }
 
     /// Calculate weighted cosine similarity.
+    ///
+    /// Computes cosine similarity with per-dimension weights.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector data
+    /// * `b` - Second vector data
+    /// * `weights` - Optional per-dimension weight vector
+    ///
+    /// # Returns
+    ///
+    /// Weighted cosine similarity score
+    ///
+    /// # Errors
+    ///
+    /// Returns error if weight vector dimension doesn't match
     fn weighted_cosine_similarity(
         &self,
         a: &[f32],
@@ -79,6 +111,17 @@ impl AdvancedSimilarityMetric {
     }
 
     /// Calculate Jaccard similarity for binary vectors.
+    ///
+    /// Treats non-zero values as 1, zero values as 0, then computes Jaccard index.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector data
+    /// * `b` - Second vector data
+    ///
+    /// # Returns
+    ///
+    /// Jaccard similarity: intersection/union ratio
     fn jaccard_similarity(&self, a: &[f32], b: &[f32]) -> Result<f32> {
         let mut intersection = 0;
         let mut union = 0;
@@ -99,6 +142,18 @@ impl AdvancedSimilarityMetric {
     }
 
     /// Calculate Tanimoto similarity.
+    ///
+    /// Also known as extended Jaccard, handles continuous values.
+    /// Formula: (a·b) / (||a||² + ||b||² - a·b)
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector data
+    /// * `b` - Second vector data
+    ///
+    /// # Returns
+    ///
+    /// Tanimoto similarity coefficient
     fn tanimoto_similarity(&self, a: &[f32], b: &[f32]) -> Result<f32> {
         let mut dot_product = 0.0;
         let mut norm_a = 0.0;
@@ -119,6 +174,17 @@ impl AdvancedSimilarityMetric {
     }
 
     /// Calculate Pearson correlation coefficient.
+    ///
+    /// Measures linear correlation between vectors, normalized to [0, 1].
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector data
+    /// * `b` - Second vector data
+    ///
+    /// # Returns
+    ///
+    /// Pearson correlation normalized from [-1, 1] to [0, 1]
     fn pearson_correlation(&self, a: &[f32], b: &[f32]) -> Result<f32> {
         let n = a.len() as f32;
 
@@ -147,6 +213,17 @@ impl AdvancedSimilarityMetric {
     }
 
     /// Calculate Spearman rank correlation.
+    ///
+    /// Non-parametric measure of rank correlation.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector data
+    /// * `b` - Second vector data
+    ///
+    /// # Returns
+    ///
+    /// Spearman correlation coefficient
     fn spearman_correlation(&self, a: &[f32], b: &[f32]) -> Result<f32> {
         // Convert to ranks
         let ranks_a = self.convert_to_ranks(a);
@@ -157,6 +234,16 @@ impl AdvancedSimilarityMetric {
     }
 
     /// Convert values to ranks.
+    ///
+    /// Maps each value to its position in sorted order.
+    ///
+    /// # Arguments
+    ///
+    /// * `values` - Values to convert to ranks
+    ///
+    /// # Returns
+    ///
+    /// Vector of rank positions
     fn convert_to_ranks(&self, values: &[f32]) -> Vec<f32> {
         let mut indexed_values: Vec<(f32, usize)> =
             values.iter().enumerate().map(|(i, &v)| (v, i)).collect();
@@ -173,13 +260,22 @@ impl AdvancedSimilarityMetric {
 }
 
 /// Aggregator for combining multiple similarity scores.
+///
+/// Allows combining results from different distance metrics with
+/// configurable weighting for each metric.
 pub struct SimilarityAggregator {
+    /// Weights for each metric.
     weights: Vec<f32>,
+    /// Distance metrics to aggregate.
     metrics: Vec<DistanceMetric>,
 }
 
 impl SimilarityAggregator {
     /// Create a new similarity aggregator.
+    ///
+    /// Creates an empty aggregator. Use [`add_metric`] to add metrics.
+    ///
+    /// [`add_metric`]: Self::add_metric
     pub fn new() -> Self {
         Self {
             weights: Vec::new(),
@@ -188,12 +284,28 @@ impl SimilarityAggregator {
     }
 
     /// Add a metric with its weight.
+    ///
+    /// # Arguments
+    ///
+    /// * `metric` - Distance metric to include in aggregation
+    /// * `weight` - Weight for this metric in final calculation
     pub fn add_metric(&mut self, metric: DistanceMetric, weight: f32) {
         self.metrics.push(metric);
         self.weights.push(weight);
     }
 
     /// Calculate aggregated similarity.
+    ///
+    /// Computes weighted average of similarities from all added metrics.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - First vector
+    /// * `b` - Second vector
+    ///
+    /// # Returns
+    ///
+    /// Weighted average similarity score
     pub fn aggregate_similarity(&self, a: &Vector, b: &Vector) -> Result<f32> {
         if self.metrics.is_empty() {
             return Ok(0.0);
