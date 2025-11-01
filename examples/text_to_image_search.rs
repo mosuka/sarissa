@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
                 println!("  Indexing: {}", path_str);
 
                 // Generate image embedding
-                let vector = embedder.embed_image(&path_str).await?;
+                let vector = ImageEmbedder::embed(&embedder, &path_str).await?;
 
                 // Store metadata
                 image_metadata.insert(doc_id, path_str.to_string());
@@ -134,7 +134,7 @@ async fn main() -> Result<()> {
         println!("Query: \"{}\"", query_text);
 
         // Generate text embedding
-        let query_vector = embedder.embed(query_text).await?;
+        let query_vector = TextEmbedder::embed(&embedder, query_text).await?;
 
         // Perform search using VectorEngine
         let request = VectorSearchRequest::new(query_vector).top_k(max_results);
