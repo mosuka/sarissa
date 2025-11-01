@@ -1,8 +1,9 @@
 //! Vector Search using CandleTextEmbedder
 //!
 //! This example demonstrates:
+//! - Creating a VectorEngine from VectorIndexFactory
 //! - Using CandleTextEmbedder to generate text embeddings
-//! - Building a vector index with real semantic embeddings
+//! - Adding document vectors to the engine
 //! - Performing semantic similarity search on text documents
 //! - Comparing search results across different query types
 //!
@@ -12,7 +13,7 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
-use std::sync::Arc;
+use tempfile::TempDir;
 
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
@@ -21,15 +22,17 @@ use yatagarasu::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::error::Result;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::storage::memory::MemoryStorage;
+use yatagarasu::storage::file::FileStorageConfig;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::storage::memory::MemoryStorageConfig;
+use yatagarasu::storage::{StorageConfig, StorageFactory};
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::Vector;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::engine::VectorEngine;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::index::factory::VectorIndexFactory;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::index::{FlatIndexConfig, VectorIndexConfig};
 #[cfg(feature = "embeddings-candle")]
@@ -41,15 +44,40 @@ async fn main() -> Result<()> {
     println!("=== Vector Search with CandleTextEmbedder ===\n");
 
     // Step 1: Initialize the embedder
-    println!("Loading embedding model: sentence-transformers/all-MiniLM-L6-v2");
+    println!("Step 1: Loading embedding model: sentence-transformers/all-MiniLM-L6-v2");
     let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
-    let dimension = embedder.dimension();
 
-    println!("Model loaded successfully!");
-    println!("Model name: {}", embedder.name());
-    println!("Embedding dimension: {}\n", dimension);
+    println!("  Model loaded successfully!");
+    println!("  Model name: {}", embedder.name());
+    println!("  Embedding dimension: {}\n", embedder.dimension());
 
-    // Step 2: Prepare sample documents
+    // Step 2: Create storage backend
+    println!("Step 2: Creating storage backend...");
+    let temp_dir = TempDir::new().unwrap();
+    let storage =
+        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
+    println!("  Storage backend created\n");
+
+    // Step 3: Create vector index configuration
+    println!("Step 3: Creating vector index configuration...");
+    let vector_index_config = VectorIndexConfig::Flat(FlatIndexConfig {
+        dimension: embedder.dimension(),
+        distance_metric: DistanceMetric::Cosine,
+        normalize_vectors: true,
+        ..Default::default()
+    });
+    println!("  Configuration:");
+    println!("    Dimension: {}", embedder.dimension());
+    println!("    Distance metric: Cosine");
+    println!("    Normalize vectors: true\n");
+
+    // Step 4: Build the vector index using VectorIndexFactory and VectorEngine
+    println!("Step 4: Building vector index...");
+    let vector_index = VectorIndexFactory::create(storage, vector_index_config)?;
+
+    let mut vector_engine = VectorEngine::new(vector_index)?;
+
+    // Step 5: Prepare sample documents
     let documents = vec![
         (
             1,
@@ -82,63 +110,54 @@ async fn main() -> Result<()> {
         ),
     ];
 
-    println!("=== Sample Documents ===");
+    println!("Step 5: Sample Documents");
     for (id, text) in &documents {
-        println!("Doc {}: {}", id, text);
+        println!("  Doc {}: {}", id, text);
     }
     println!();
 
-    // Step 3: Generate embeddings for all documents
-    println!("Generating embeddings for {} documents...", documents.len());
+    // Step 6: Generate embeddings for all documents
+    println!(
+        "Step 6: Generating embeddings for {} documents...",
+        documents.len()
+    );
     let texts: Vec<&str> = documents.iter().map(|(_, text)| *text).collect();
     let vectors = embedder.embed_batch(&texts).await?;
-    println!("Embeddings generated successfully!\n");
+    println!("  Embeddings generated successfully!\n");
 
-    // Step 4: Create vector index configuration
-    let vector_config = VectorIndexConfig::Flat(FlatIndexConfig {
-        dimension,
-        distance_metric: DistanceMetric::Cosine,
-        normalize_vectors: true,
-        ..Default::default()
-    });
-
-    // Step 5: Build the vector index using VectorEngine
-    println!("Building vector index...");
-    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let index = yatagarasu::vector::index::factory::VectorIndexFactory::create(storage, vector_config)?;
-    let mut engine = VectorEngine::new(index)?;
-
-    // Add document vectors to the index
-    let doc_vectors: Vec<(u64, yatagarasu::vector::Vector)> = documents
+    // Add document vectors to the engine
+    let doc_vectors: Vec<(u64, Vector)> = documents
         .iter()
         .zip(vectors.iter())
         .map(|((id, _), vector)| (*id, vector.clone()))
         .collect();
 
-    engine.add_vectors(doc_vectors)?;
-    engine.commit()?;
-    engine.optimize()?;
+    vector_engine.add_vectors(doc_vectors)?;
+    vector_engine.commit()?;
+    vector_engine.optimize()?;
 
-    println!("Vector index built successfully!");
-    println!("Build progress: {:.1}%", engine.progress() * 100.0);
+    println!("  Vector index built successfully!");
+    println!("  Build progress: {:.1}%", vector_engine.progress() * 100.0);
     println!(
-        "Estimated memory usage: {} bytes\n",
-        engine.estimated_memory_usage()
+        "  Estimated memory usage: {} bytes\n",
+        vector_engine.estimated_memory_usage()
     );
 
-    // Step 6: Perform semantic searches
-    println!("=== Semantic Search Examples ===\n");
+    // Step 7: Perform semantic searches
+    println!("Step 7: Demonstrating semantic search...\n");
+    println!("{}", "=".repeat(80));
 
     // Search 1: Programming language query
-    println!("--- Search 1: Programming Languages ---");
+    println!("\n[1] Programming Languages Search");
+    println!("{}", "-".repeat(80));
     let query1 = "programming language features";
     println!("Query: \"{}\"", query1);
 
     let query_vector1 = embedder.embed(query1).await?;
     let request1 = VectorSearchRequest::new(query_vector1).top_k(3);
-    let results1 = engine.search(request1)?;
+    let results1 = vector_engine.search(request1)?;
 
-    println!("Top 3 results:");
+    println!("\nTop 3 results:");
     for (rank, result) in results1.results.iter().enumerate() {
         if let Some((text, _)) = documents.iter().find(|(id, _)| *id == result.doc_id) {
             println!(
@@ -150,18 +169,18 @@ async fn main() -> Result<()> {
             );
         }
     }
-    println!();
 
     // Search 2: AI and machine learning query
-    println!("--- Search 2: Artificial Intelligence ---");
+    println!("\n[2] Artificial Intelligence Search");
+    println!("{}", "-".repeat(80));
     let query2 = "artificial intelligence and neural networks";
     println!("Query: \"{}\"", query2);
 
     let query_vector2 = embedder.embed(query2).await?;
     let request2 = VectorSearchRequest::new(query_vector2).top_k(3);
-    let results2 = engine.search(request2)?;
+    let results2 = vector_engine.search(request2)?;
 
-    println!("Top 3 results:");
+    println!("\nTop 3 results:");
     for (rank, result) in results2.results.iter().enumerate() {
         if let Some((text, _)) = documents.iter().find(|(id, _)| *id == result.doc_id) {
             println!(
@@ -173,18 +192,18 @@ async fn main() -> Result<()> {
             );
         }
     }
-    println!();
 
     // Search 3: Food and culture query
-    println!("--- Search 3: Food and Culture ---");
+    println!("\n[3] Food and Culture Search");
+    println!("{}", "-".repeat(80));
     let query3 = "traditional food and cuisine";
     println!("Query: \"{}\"", query3);
 
     let query_vector3 = embedder.embed(query3).await?;
     let request3 = VectorSearchRequest::new(query_vector3).top_k(3);
-    let results3 = engine.search(request3)?;
+    let results3 = vector_engine.search(request3)?;
 
-    println!("Top 3 results:");
+    println!("\nTop 3 results:");
     for (rank, result) in results3.results.iter().enumerate() {
         if let Some((text, _)) = documents.iter().find(|(id, _)| *id == result.doc_id) {
             println!(
@@ -196,11 +215,12 @@ async fn main() -> Result<()> {
             );
         }
     }
-    println!();
 
-    // Step 7: Demonstrate search configuration with builder pattern
-    println!("=== Vector Search Configuration ===");
-    let demo_query = Vector::new(vec![0.0; dimension]);
+    // Step 8: Demonstrate search configuration with builder pattern
+    println!("\n{}", "=".repeat(80));
+    println!("\n[Advanced] Vector Search Configuration");
+    println!("{}", "-".repeat(80));
+    let demo_query = Vector::new(vec![0.0; embedder.dimension()]);
     let search_request = VectorSearchRequest::new(demo_query)
         .top_k(3)
         .min_similarity(0.3)
@@ -218,6 +238,7 @@ async fn main() -> Result<()> {
     );
     println!("  Timeout: {:?} ms", search_request.params.timeout_ms);
 
+    println!("\n{}", "=".repeat(80));
     println!("\n=== Example completed successfully! ===");
     Ok(())
 }
