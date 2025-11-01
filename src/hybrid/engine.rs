@@ -36,11 +36,39 @@ impl HybridSearchEngine {
     }
 
     /// Get the search configuration.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the hybrid search configuration
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::hybrid::config::HybridSearchConfig;
+    /// use yatagarasu::hybrid::engine::HybridSearchEngine;
+    ///
+    /// # fn example() -> yatagarasu::error::Result<()> {
+    /// let config = HybridSearchConfig::default();
+    /// let engine = HybridSearchEngine::new(config)?;
+    ///
+    /// let config_ref = engine.config();
+    /// println!("Keyword weight: {}", config_ref.keyword_weight);
+    /// println!("Vector weight: {}", config_ref.vector_weight);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn config(&self) -> &HybridSearchConfig {
         &self.config
     }
 
     /// Get a reference to the result merger.
+    ///
+    /// The result merger is responsible for combining keyword and vector
+    /// search results according to the configured strategy.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the internal `ResultMerger`
     pub fn merger(&self) -> &ResultMerger {
         &self.merger
     }

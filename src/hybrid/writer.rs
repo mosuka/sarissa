@@ -44,6 +44,28 @@ impl HybridIndexWriter {
     ///
     /// This method ensures both the lexical and vector indexes are properly
     /// finalized and ready for search operations.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if finalization succeeds
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if vector index finalization fails
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use yatagarasu::hybrid::writer::HybridIndexWriter;
+    /// # use yatagarasu::lexical::writer::IndexWriter;
+    /// # use yatagarasu::vector::writer::VectorIndexWriter;
+    /// # fn example(lexical: Box<dyn IndexWriter>, vector: Box<dyn VectorIndexWriter>) -> yatagarasu::error::Result<()> {
+    /// let mut writer = HybridIndexWriter::new(lexical, vector);
+    /// // ... write documents ...
+    /// writer.finalize()?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn finalize(&mut self) -> Result<()> {
         self.vector_writer.finalize()?;
         // Lexical writer finalization is handled separately
@@ -51,6 +73,15 @@ impl HybridIndexWriter {
     }
 
     /// Build a hybrid index from the written data.
+    ///
+    /// # Returns
+    ///
+    /// A fully constructed hybrid index ready for search operations
+    ///
+    /// # Note
+    ///
+    /// This is currently a placeholder. Full implementation will construct
+    /// the indexes from the writers.
     pub fn build(self) -> Result<HybridIndex> {
         // This is a placeholder - actual implementation would need to
         // construct the indexes from the writers

@@ -1,4 +1,7 @@
 //! Result merging functionality for hybrid search.
+//!
+//! This module provides the `ResultMerger` for combining keyword and vector
+//! search results into unified hybrid search results.
 
 use std::collections::HashMap;
 
@@ -10,19 +13,53 @@ use crate::lexical::index::inverted::query::SearchResults;
 use crate::vector::search::searcher::VectorSearchResults;
 
 /// Result merger for combining keyword and vector search results.
+///
+/// This structure merges results from lexical (keyword) and vector (semantic)
+/// search, applying normalization and weighting to produce unified hybrid scores.
 pub struct ResultMerger {
+    /// Configuration for merging behavior.
     config: HybridSearchConfig,
+    /// Score normalizer for bringing scores to common scale.
     normalizer: ScoreNormalizer,
 }
 
 impl ResultMerger {
     /// Create a new result merger.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration for hybrid search merging
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::hybrid::config::HybridSearchConfig;
+    /// use yatagarasu::hybrid::search::merger::ResultMerger;
+    ///
+    /// let config = HybridSearchConfig::default();
+    /// let merger = ResultMerger::new(config);
+    /// ```
     pub fn new(config: HybridSearchConfig) -> Self {
         let normalizer = ScoreNormalizer::new(config.normalization);
         Self { config, normalizer }
     }
 
     /// Merge keyword and vector search results into hybrid results.
+    ///
+    /// Combines results from both search types, normalizes scores, and
+    /// calculates final hybrid scores using configured weights.
+    ///
+    /// # Arguments
+    ///
+    /// * `keyword_results` - Results from lexical (keyword) search
+    /// * `vector_results` - Optional results from vector (semantic) search
+    /// * `query_text` - The original query text
+    /// * `query_time_ms` - Time taken for the query in milliseconds
+    /// * `document_store` - Document storage for retrieving full content
+    ///
+    /// # Returns
+    ///
+    /// Unified hybrid search results with combined scores
     pub async fn merge_results(
         &self,
         keyword_results: SearchResults,
@@ -109,6 +146,13 @@ impl ResultMerger {
     }
 
     /// Add document content to results.
+    ///
+    /// Enriches search results with full document content from storage.
+    ///
+    /// # Arguments
+    ///
+    /// * `results` - Map of results to enrich
+    /// * `document_store` - Document storage to retrieve content from
     async fn add_document_content(
         &self,
         results: &mut HashMap<u64, HybridSearchResult>,

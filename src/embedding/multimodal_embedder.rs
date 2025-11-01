@@ -62,7 +62,14 @@ pub trait MultimodalEmbedder: TextEmbedder + ImageEmbedder {
     /// Verify that text and image embeddings have the same dimension.
     ///
     /// This method is automatically implemented and will always return true
-    /// for valid multimodal embedders.
+    /// for valid multimodal embedders. It exists as a sanity check to confirm
+    /// that both text and image embeddings are in the same vector space.
+    ///
+    /// # Returns
+    ///
+    /// Always `true` for valid implementations, since the trait bounds ensure
+    /// that `TextEmbedder::dimension()` and `ImageEmbedder::dimension()` must
+    /// be the same method.
     fn is_compatible(&self) -> bool {
         // Both traits require the same dimension() method
         // The compiler ensures they return the same value
@@ -70,6 +77,9 @@ pub trait MultimodalEmbedder: TextEmbedder + ImageEmbedder {
     }
 }
 
-// Blanket implementation: any type that implements both TextEmbedder and ImageEmbedder
-// is automatically a MultimodalEmbedder
+/// Blanket implementation: any type that implements both TextEmbedder and ImageEmbedder
+/// is automatically a MultimodalEmbedder.
+///
+/// This enables any embedder that can handle both text and images to be used
+/// for cross-modal search without additional implementation work.
 impl<T> MultimodalEmbedder for T where T: TextEmbedder + ImageEmbedder {}

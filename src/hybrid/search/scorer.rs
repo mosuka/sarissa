@@ -1,4 +1,7 @@
 //! Score normalization for hybrid search.
+//!
+//! This module provides score normalization functionality for combining
+//! keyword and vector search scores with different scales.
 
 use std::collections::HashMap;
 
@@ -7,17 +10,47 @@ use crate::hybrid::config::ScoreNormalization;
 use crate::hybrid::types::HybridSearchResult;
 
 /// Score normalizer for hybrid search results.
+///
+/// Normalizes keyword and vector scores to a common scale before
+/// combining them into hybrid scores.
 pub struct ScoreNormalizer {
+    /// The normalization strategy to use.
     strategy: ScoreNormalization,
 }
 
 impl ScoreNormalizer {
     /// Create a new score normalizer.
+    ///
+    /// # Arguments
+    ///
+    /// * `strategy` - The normalization strategy to apply
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::hybrid::config::ScoreNormalization;
+    /// use yatagarasu::hybrid::search::scorer::ScoreNormalizer;
+    ///
+    /// let normalizer = ScoreNormalizer::new(ScoreNormalization::MinMax);
+    /// ```
     pub fn new(strategy: ScoreNormalization) -> Self {
         Self { strategy }
     }
 
     /// Normalize scores based on the configured normalization strategy.
+    ///
+    /// Applies the configured normalization to both keyword and vector scores
+    /// to bring them to a common scale.
+    ///
+    /// # Arguments
+    ///
+    /// * `results` - Map of document IDs to hybrid search results to normalize
+    /// * `keyword_scores` - All keyword scores for statistical normalization
+    /// * `vector_similarities` - All vector scores for statistical normalization
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if normalization succeeds
     pub fn normalize_scores(
         &self,
         results: &mut HashMap<u64, HybridSearchResult>,
@@ -43,6 +76,14 @@ impl ScoreNormalizer {
     }
 
     /// Min-max normalization to [0, 1] range.
+    ///
+    /// Scales scores linearly using: `(score - min) / (max - min)`.
+    ///
+    /// # Arguments
+    ///
+    /// * `results` - Results to normalize
+    /// * `keyword_scores` - All keyword scores
+    /// * `vector_similarities` - All vector scores
     fn normalize_min_max(
         &self,
         results: &mut HashMap<u64, HybridSearchResult>,

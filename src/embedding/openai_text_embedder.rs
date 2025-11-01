@@ -17,24 +17,32 @@ use crate::error::{Result, YatagarasuError};
 #[cfg(feature = "embeddings-openai")]
 use crate::vector::Vector;
 
+/// Request structure for OpenAI Embeddings API.
 #[cfg(feature = "embeddings-openai")]
 #[derive(Debug, Serialize)]
 struct EmbeddingRequest {
+    /// Model identifier to use for embeddings.
     model: String,
+    /// Input texts to embed (batch).
     input: Vec<String>,
+    /// Optional custom dimension (only for newer models).
     #[serde(skip_serializing_if = "Option::is_none")]
     dimensions: Option<usize>,
 }
 
+/// Response structure from OpenAI Embeddings API.
 #[cfg(feature = "embeddings-openai")]
 #[derive(Debug, Deserialize)]
 struct EmbeddingResponse {
+    /// List of embedding data objects.
     data: Vec<EmbeddingData>,
 }
 
+/// Individual embedding data from API response.
 #[cfg(feature = "embeddings-openai")]
 #[derive(Debug, Deserialize)]
 struct EmbeddingData {
+    /// The embedding vector.
     embedding: Vec<f32>,
 }
 
@@ -80,9 +88,13 @@ struct EmbeddingData {
 /// ```
 #[cfg(feature = "embeddings-openai")]
 pub struct OpenAITextEmbedder {
+    /// HTTP client for making API requests.
     client: Client,
+    /// OpenAI API key for authentication.
     api_key: String,
+    /// OpenAI model name (e.g., "text-embedding-3-small").
     model: String,
+    /// Dimension of the output embeddings.
     dimension: usize,
 }
 
@@ -187,6 +199,16 @@ impl OpenAITextEmbedder {
     }
 
     /// Get the default dimension for a given model.
+    ///
+    /// Returns the standard embedding dimension for each OpenAI model.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The model name
+    ///
+    /// # Returns
+    ///
+    /// Default dimension: 1536 for small/ada-002, 3072 for large
     fn default_dimension(model: &str) -> usize {
         match model {
             "text-embedding-3-small" => 1536,
@@ -200,6 +222,24 @@ impl OpenAITextEmbedder {
 #[cfg(feature = "embeddings-openai")]
 #[async_trait]
 impl TextEmbedder for OpenAITextEmbedder {
+    /// Generate an embedding vector for the given text using OpenAI API.
+    ///
+    /// Makes a single API request to OpenAI's embeddings endpoint.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The text to embed
+    ///
+    /// # Returns
+    ///
+    /// A vector representation from OpenAI's model
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - API request fails
+    /// - Authentication fails
+    /// - Response parsing fails
     async fn embed(&self, text: &str) -> Result<Vector> {
         let dimensions = if self.dimension == Self::default_dimension(&self.model) {
             None
@@ -254,6 +294,25 @@ impl TextEmbedder for OpenAITextEmbedder {
         Ok(Vector::new(embedding))
     }
 
+    /// Generate embeddings for multiple texts in a single batch request.
+    ///
+    /// This is more efficient than calling `embed` multiple times, as it makes
+    /// a single API request for all texts.
+    ///
+    /// # Arguments
+    ///
+    /// * `texts` - A slice of text strings to embed
+    ///
+    /// # Returns
+    ///
+    /// A vector of embeddings, one for each input text
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - API request fails
+    /// - Authentication fails
+    /// - Response parsing fails
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vector>> {
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -309,10 +368,25 @@ impl TextEmbedder for OpenAITextEmbedder {
             .collect())
     }
 
+    /// Get the dimension of generated embeddings.
+    ///
+    /// Returns the configured dimension for this embedder, which may be
+    /// customized using `with_dimension` or defaults to the model's standard size.
+    ///
+    /// # Returns
+    ///
+    /// The number of dimensions in the embedding vectors
     fn dimension(&self) -> usize {
         self.dimension
     }
 
+    /// Get the name/identifier of this embedder.
+    ///
+    /// Returns the OpenAI model identifier.
+    ///
+    /// # Returns
+    ///
+    /// The model name (e.g., "text-embedding-3-small")
     fn name(&self) -> &str {
         &self.model
     }

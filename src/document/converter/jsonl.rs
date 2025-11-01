@@ -1,10 +1,91 @@
 //! JSONL format document converter.
 //!
-//! Converts JSONL (JSON Lines) files into Documents.
-//! Each line in the file should be a single JSON object:
+//! This module provides [`JsonlDocumentConverter`] for converting JSONL (JSON Lines)
+//! files into [`Document`] objects. JSONL is a line-delimited JSON format where
+//! each line contains a complete, self-contained JSON object.
+//!
+//! # Format Requirements
+//!
+//! - One JSON object per line
+//! - Empty lines are skipped
+//! - Each object becomes a separate document
+//! - Automatic type mapping from JSON to field values
+//!
+//! # JSONL Format Example
+//!
 //! ```jsonl
 //! {"title": "Rust Programming", "body": "This is a tutorial", "year": 2024}
 //! {"title": "Python Basics", "body": "Learn Python", "year": 2023}
+//! ```
+//!
+//! # Type Mapping
+//!
+//! JSON types are automatically mapped to field values:
+//! - **JSON String** → `FieldValue::Text` (with type inference for numbers/booleans)
+//! - **JSON Number (integer)** → `FieldValue::Integer`
+//! - **JSON Number (float)** → `FieldValue::Float`
+//! - **JSON Boolean** → `FieldValue::Boolean`
+//! - **JSON Object with lat/lon** → `FieldValue::Geo`
+//! - **Other JSON types** → `FieldValue::Text` (stringified)
+//!
+//! # Geographic Coordinates
+//!
+//! Geographic coordinates can be specified as nested objects:
+//!
+//! ```jsonl
+//! {"name": "Tokyo", "location": {"lat": 35.6762, "lon": 139.6503}}
+//! {"name": "Paris", "location": {"lat": 48.8584, "lon": 2.2945}}
+//! ```
+//!
+//! The converter automatically detects `{lat, lon}` objects and converts them
+//! to `GeoPoint` fields.
+//!
+//! # Examples
+//!
+//! Basic JSONL conversion:
+//!
+//! ```no_run
+//! use yatagarasu::document::converter::DocumentConverter;
+//! use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+//!
+//! let converter = JsonlDocumentConverter::new();
+//!
+//! for doc in converter.convert("documents.jsonl").unwrap() {
+//!     let doc = doc.unwrap();
+//!     println!("Document: {:?}", doc);
+//! }
+//! ```
+//!
+//! Collecting all documents:
+//!
+//! ```no_run
+//! use yatagarasu::document::converter::DocumentConverter;
+//! use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+//!
+//! let converter = JsonlDocumentConverter::new();
+//! let documents: Vec<_> = converter
+//!     .convert("products.jsonl")
+//!     .unwrap()
+//!     .filter_map(|r| r.ok())
+//!     .collect();
+//!
+//! println!("Loaded {} products", documents.len());
+//! ```
+//!
+//! With custom analyzer:
+//!
+//! ```no_run
+//! use yatagarasu::document::converter::DocumentConverter;
+//! use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//! use std::sync::Arc;
+//!
+//! let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+//! let converter = JsonlDocumentConverter::with_analyzer(analyzer);
+//!
+//! for doc in converter.convert("documents.jsonl").unwrap() {
+//!     // Documents ready for indexing with custom analyzer...
+//! }
 //! ```
 
 use std::fs::File;

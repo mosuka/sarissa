@@ -93,14 +93,23 @@ use crate::vector::Vector;
 /// ```
 #[cfg(feature = "embeddings-multimodal")]
 pub struct CandleMultimodalEmbedder {
+    /// CLIP text transformer model.
     text_model: clip::text_model::ClipTextTransformer,
+    /// CLIP vision transformer model.
     vision_model: clip::vision_model::ClipVisionTransformer,
+    /// Linear projection layer for text embeddings.
     text_projection: Linear,
+    /// Linear projection layer for vision embeddings.
     vision_projection: Linear,
+    /// Tokenizer for text input.
     tokenizer: Tokenizer,
+    /// Device to run models on (CPU or GPU).
     device: Device,
+    /// Dimension of the shared embedding space.
     dimension: usize,
+    /// Name of the HuggingFace CLIP model.
     model_name: String,
+    /// Expected image size (width/height in pixels).
     image_size: usize,
 }
 
@@ -243,6 +252,28 @@ impl CandleMultimodalEmbedder {
     }
 
     /// Preprocess image to the format expected by CLIP vision model.
+    ///
+    /// This method performs standard CLIP image preprocessing:
+    /// 1. Load image from file
+    /// 2. Resize to expected size (e.g., 224x224)
+    /// 3. Convert to RGB
+    /// 4. Normalize using ImageNet mean/std
+    /// 5. Convert to tensor format (C, H, W)
+    ///
+    /// # Arguments
+    ///
+    /// * `image_path` - Path to the image file
+    ///
+    /// # Returns
+    ///
+    /// Preprocessed image tensor ready for CLIP vision model
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Image file cannot be opened
+    /// - Image cannot be decoded
+    /// - Tensor creation fails
     fn preprocess_image(&self, image_path: &str) -> Result<Tensor> {
         use image::{DynamicImage, ImageReader};
 
@@ -307,6 +338,18 @@ impl CandleMultimodalEmbedder {
     }
 
     /// Normalize embeddings using L2 normalization.
+    ///
+    /// Divides each embedding vector by its L2 norm, ensuring all vectors
+    /// have unit length. This is standard for CLIP embeddings to enable
+    /// cosine similarity via dot product.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - Embeddings to normalize (shape: [batch_size, dimension])
+    ///
+    /// # Returns
+    ///
+    /// L2-normalized embeddings with the same shape
     fn normalize(&self, tensor: &Tensor) -> Result<Tensor> {
         let norm = tensor
             .sqr()
@@ -325,6 +368,18 @@ impl CandleMultimodalEmbedder {
 #[cfg(feature = "embeddings-multimodal")]
 #[async_trait]
 impl TextEmbedder for CandleMultimodalEmbedder {
+    /// Generate an embedding vector for the given text using CLIP text encoder.
+    ///
+    /// The resulting embedding is in the same vector space as image embeddings,
+    /// enabling cross-modal similarity search.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The text to embed
+    ///
+    /// # Returns
+    ///
+    /// A normalized vector representation in CLIP's shared embedding space
     async fn embed(&self, text: &str) -> Result<Vector> {
         // Tokenize
         let encoding = self
@@ -364,10 +419,25 @@ impl TextEmbedder for CandleMultimodalEmbedder {
         Ok(Vector::new(vector_data))
     }
 
+    /// Get the dimension of generated text embeddings.
+    ///
+    /// Returns the projection dimension of the CLIP model, which is the
+    /// dimension of the shared text-image embedding space.
+    ///
+    /// # Returns
+    ///
+    /// The number of dimensions in the embedding vectors
     fn dimension(&self) -> usize {
         self.dimension
     }
 
+    /// Get the name/identifier of this embedder.
+    ///
+    /// Returns the HuggingFace CLIP model identifier.
+    ///
+    /// # Returns
+    ///
+    /// The model name (e.g., "openai/clip-vit-base-patch32")
     fn name(&self) -> &str {
         &self.model_name
     }
@@ -376,6 +446,24 @@ impl TextEmbedder for CandleMultimodalEmbedder {
 #[cfg(feature = "embeddings-multimodal")]
 #[async_trait]
 impl ImageEmbedder for CandleMultimodalEmbedder {
+    /// Generate an embedding vector for the given image using CLIP vision encoder.
+    ///
+    /// The resulting embedding is in the same vector space as text embeddings,
+    /// enabling cross-modal similarity search.
+    ///
+    /// # Arguments
+    ///
+    /// * `image_path` - Path to the image file
+    ///
+    /// # Returns
+    ///
+    /// A normalized vector representation in CLIP's shared embedding space
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Image file cannot be opened or decoded
+    /// - Model forward pass fails
     async fn embed_image(&self, image_path: &str) -> Result<Vector> {
         // Preprocess image
         let image_tensor = self.preprocess_image(image_path)?;
@@ -404,10 +492,26 @@ impl ImageEmbedder for CandleMultimodalEmbedder {
         Ok(Vector::new(vector_data))
     }
 
+    /// Get the dimension of generated image embeddings.
+    ///
+    /// Returns the projection dimension of the CLIP model, which is the
+    /// dimension of the shared text-image embedding space. This is always
+    /// the same as the text embedding dimension.
+    ///
+    /// # Returns
+    ///
+    /// The number of dimensions in the embedding vectors
     fn dimension(&self) -> usize {
         self.dimension
     }
 
+    /// Get the name/identifier of this embedder.
+    ///
+    /// Returns the HuggingFace CLIP model identifier.
+    ///
+    /// # Returns
+    ///
+    /// The model name (e.g., "openai/clip-vit-base-patch32")
     fn name(&self) -> &str {
         &self.model_name
     }

@@ -1,7 +1,86 @@
 //! Document parser for converting documents into analyzed documents.
 //!
-//! This module provides DocumentParser that works similar to QueryParser,
-//! analyzing documents with PerFieldAnalyzerWrapper and producing AnalyzedDocument.
+//! This module provides [`DocumentParser`] that works similarly to QueryParser,
+//! analyzing document fields and producing tokenized, index-ready documents.
+//!
+//! # Overview
+//!
+//! The `DocumentParser` bridges the gap between raw documents and the inverted
+//! index by:
+//!
+//! 1. Analyzing text fields with configured analyzers (per-field or default)
+//! 2. Converting non-text fields (numbers, dates, geo) to indexable terms
+//! 3. Calculating term frequencies and positions
+//! 4. Preserving both indexed and stored field values
+//!
+//! # Architecture
+//!
+//! ```text
+//! Document → DocumentParser → AnalyzedDocument → Index
+//!              ↓
+//!        PerFieldAnalyzer
+//!              ↓
+//!        Tokenizer + Filters
+//! ```
+//!
+//! # Field Type Handling
+//!
+//! - **Text fields**: Analyzed with tokenizers and filters
+//! - **Integer/Float**: Converted to string representation for indexing
+//! - **Boolean**: Converted to "true"/"false" strings
+//! - **DateTime**: Converted to RFC3339 format
+//! - **Geo**: Converted to "lat,lon" format
+//! - **Binary**: Stored only, not indexed
+//! - **Null**: Stored only, not indexed
+//!
+//! # Examples
+//!
+//! Basic usage with default analyzer:
+//!
+//! ```
+//! use yatagarasu::document::document::Document;
+//! use yatagarasu::document::parser::DocumentParser;
+//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//! use std::sync::Arc;
+//!
+//! let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));
+//!
+//! let doc = Document::builder()
+//!     .add_text("title", "Rust Programming Language")
+//!     .add_integer("year", 2024)
+//!     .build();
+//!
+//! let analyzed = parser.parse(doc, 0).unwrap();
+//! assert_eq!(analyzed.doc_id, 0);
+//! assert!(analyzed.field_terms.contains_key("title"));
+//! assert!(analyzed.field_terms.contains_key("year"));
+//! ```
+//!
+//! With per-field analyzers:
+//!
+//! ```
+//! use yatagarasu::document::document::Document;
+//! use yatagarasu::document::parser::DocumentParser;
+//! use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//! use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+//! use std::sync::Arc;
+//!
+//! // Configure per-field analyzers
+//! let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));
+//! per_field.add_analyzer("id", Arc::new(KeywordAnalyzer::new()));
+//!
+//! let parser = DocumentParser::new(Arc::new(per_field));
+//!
+//! let doc = Document::builder()
+//!     .add_text("title", "Getting Started")  // Uses StandardAnalyzer
+//!     .add_text("id", "DOC-001")             // Uses KeywordAnalyzer
+//!     .build();
+//!
+//! let analyzed = parser.parse(doc, 1).unwrap();
+//! // "id" field is treated as a single keyword token
+//! assert_eq!(analyzed.field_terms.get("id").unwrap()[0].term, "DOC-001");
+//! ```
 
 use std::sync::Arc;
 

@@ -1,10 +1,87 @@
 //! CSV format document converter.
 //!
-//! Converts CSV files into Documents where the first row contains field names:
+//! This module provides [`CsvDocumentConverter`] for converting CSV (Comma-Separated Values)
+//! files into [`Document`] objects. The first row is treated as the header containing
+//! field names, and each subsequent row becomes a document.
+//!
+//! # Format Requirements
+//!
+//! - First row must contain field names (header)
+//! - Fields are separated by commas (configurable)
+//! - Empty fields are skipped
+//! - Automatic type inference for integers, floats, and booleans
+//!
+//! # CSV Format Example
+//!
 //! ```csv
 //! title,year,price,active
 //! Rust Programming,2024,19.99,true
 //! Python Basics,2023,15.50,false
+//! ```
+//!
+//! # Geographic Coordinates
+//!
+//! Geographic coordinates can be specified using dotted field names:
+//!
+//! ```csv
+//! name,location.lat,location.lon
+//! Tokyo Tower,35.6762,139.6503
+//! Eiffel Tower,48.8584,2.2945
+//! ```
+//!
+//! The converter will automatically combine `location.lat` and `location.lon`
+//! into a single `GeoPoint` field named `location`.
+//!
+//! # Type Inference
+//!
+//! Field values are automatically inferred:
+//! - **Boolean**: "true", "false", "yes", "no", "t", "f", "y", "n", "1", "0", "on", "off" (case-insensitive)
+//! - **Integer**: Valid i64 values (e.g., "42", "-100")
+//! - **Float**: Valid f64 values (e.g., "3.14", "-0.5")
+//! - **Text**: Everything else (default)
+//!
+//! # Examples
+//!
+//! Basic CSV conversion:
+//!
+//! ```no_run
+//! use yatagarasu::document::converter::DocumentConverter;
+//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//!
+//! let converter = CsvDocumentConverter::new();
+//!
+//! for doc in converter.convert("books.csv").unwrap() {
+//!     let doc = doc.unwrap();
+//!     println!("Title: {:?}", doc.get_field("title"));
+//! }
+//! ```
+//!
+//! Custom delimiter (TSV):
+//!
+//! ```no_run
+//! use yatagarasu::document::converter::DocumentConverter;
+//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//!
+//! let converter = CsvDocumentConverter::new()
+//!     .with_delimiter('\t');
+//!
+//! for doc in converter.convert("data.tsv").unwrap() {
+//!     // Process tab-separated document...
+//! }
+//! ```
+//!
+//! Flexible mode (allow varying field counts):
+//!
+//! ```no_run
+//! use yatagarasu::document::converter::DocumentConverter;
+//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//!
+//! let converter = CsvDocumentConverter::new()
+//!     .with_flexible(true);
+//!
+//! for doc in converter.convert("irregular.csv").unwrap() {
+//!     // Process documents with varying field counts...
+//! }
 //! ```
 
 use std::collections::HashMap;

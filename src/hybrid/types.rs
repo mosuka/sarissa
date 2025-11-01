@@ -27,6 +27,25 @@ pub struct HybridSearchResult {
 
 impl HybridSearchResult {
     /// Create a new hybrid search result.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` - The document ID
+    /// * `hybrid_score` - The combined hybrid score
+    ///
+    /// # Returns
+    ///
+    /// A new `HybridSearchResult` with the specified ID and score
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::hybrid::types::HybridSearchResult;
+    ///
+    /// let result = HybridSearchResult::new(42, 0.85);
+    /// assert_eq!(result.doc_id, 42);
+    /// assert_eq!(result.hybrid_score, 0.85);
+    /// ```
     pub fn new(doc_id: u64, hybrid_score: f32) -> Self {
         Self {
             doc_id,
@@ -40,30 +59,114 @@ impl HybridSearchResult {
     }
 
     /// Set keyword search score.
+    ///
+    /// This is a builder method that sets the keyword (BM25) score component.
+    ///
+    /// # Arguments
+    ///
+    /// * `score` - The keyword search score
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::hybrid::types::HybridSearchResult;
+    ///
+    /// let result = HybridSearchResult::new(1, 0.8)
+    ///     .with_keyword_score(0.75);
+    /// assert_eq!(result.keyword_score, Some(0.75));
+    /// ```
     pub fn with_keyword_score(mut self, score: f32) -> Self {
         self.keyword_score = Some(score);
         self
     }
 
     /// Set vector similarity score.
+    ///
+    /// This is a builder method that sets the vector search similarity component.
+    ///
+    /// # Arguments
+    ///
+    /// * `similarity` - The vector similarity score (typically cosine similarity)
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::hybrid::types::HybridSearchResult;
+    ///
+    /// let result = HybridSearchResult::new(1, 0.8)
+    ///     .with_vector_similarity(0.92);
+    /// assert_eq!(result.vector_similarity, Some(0.92));
+    /// ```
     pub fn with_vector_similarity(mut self, similarity: f32) -> Self {
         self.vector_similarity = Some(similarity);
         self
     }
 
     /// Add document content.
+    ///
+    /// Attaches the full document content to this result for convenient access.
+    ///
+    /// # Arguments
+    ///
+    /// * `document` - A map of field names to field values
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::hybrid::types::HybridSearchResult;
+    /// use std::collections::HashMap;
+    ///
+    /// let mut doc = HashMap::new();
+    /// doc.insert("title".to_string(), "Rust Guide".to_string());
+    ///
+    /// let result = HybridSearchResult::new(1, 0.8)
+    ///     .with_document(doc);
+    /// assert!(result.document.is_some());
+    /// ```
     pub fn with_document(mut self, document: HashMap<String, String>) -> Self {
         self.document = Some(document);
         self
     }
 
     /// Add vector data.
+    ///
+    /// Attaches the document's embedding vector to this result.
+    ///
+    /// # Arguments
+    ///
+    /// * `vector` - The document's embedding vector
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
     pub fn with_vector(mut self, vector: Vector) -> Self {
         self.vector = Some(vector);
         self
     }
 
     /// Add metadata.
+    ///
+    /// Sets additional metadata for this result.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - A map of metadata key-value pairs
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
     pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.metadata = metadata;
         self

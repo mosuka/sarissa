@@ -59,10 +59,15 @@ use crate::vector::Vector;
 /// ```
 #[cfg(feature = "embeddings-candle")]
 pub struct CandleTextEmbedder {
+    /// The BERT model for generating embeddings.
     model: BertModel,
+    /// Tokenizer for converting text to token IDs.
     tokenizer: Tokenizer,
+    /// Device to run the model on (CPU or GPU).
     device: Device,
+    /// Dimension of the output embeddings.
     dimension: usize,
+    /// Name of the HuggingFace model.
     model_name: String,
 }
 
@@ -166,7 +171,25 @@ impl CandleTextEmbedder {
 
     /// Perform mean pooling over token embeddings.
     ///
-    /// This averages the token embeddings using the attention mask to ignore padding tokens.
+    /// This method averages the token embeddings using the attention mask to ignore
+    /// padding tokens. Mean pooling is a common technique for generating sentence
+    /// embeddings from token-level BERT outputs.
+    ///
+    /// # Arguments
+    ///
+    /// * `embeddings` - Token embeddings from BERT model (shape: [batch_size, seq_len, hidden_dim])
+    /// * `attention_mask` - Attention mask indicating valid tokens (shape: [batch_size, seq_len])
+    ///
+    /// # Returns
+    ///
+    /// Mean-pooled embeddings (shape: [batch_size, hidden_dim])
+    ///
+    /// # How it works
+    ///
+    /// 1. Expand attention mask to match embedding dimensions
+    /// 2. Multiply embeddings by mask to zero out padding tokens
+    /// 3. Sum embeddings across sequence dimension
+    /// 4. Divide by sum of mask values to get mean
     fn mean_pool(&self, embeddings: &Tensor, attention_mask: &Tensor) -> Result<Tensor> {
         // Expand attention mask to match embedding dimensions
         let mask_expanded = attention_mask
@@ -204,6 +227,22 @@ impl CandleTextEmbedder {
 #[cfg(feature = "embeddings-candle")]
 #[async_trait]
 impl TextEmbedder for CandleTextEmbedder {
+    /// Generate an embedding vector for the given text.
+    ///
+    /// This method performs the following steps:
+    /// 1. Tokenize the input text
+    /// 2. Convert tokens to tensors
+    /// 3. Run BERT forward pass
+    /// 4. Apply mean pooling over token embeddings
+    /// 5. L2 normalize the result
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The text to embed
+    ///
+    /// # Returns
+    ///
+    /// A normalized vector representation of the input text
     async fn embed(&self, text: &str) -> Result<Vector> {
         // Tokenize
         let encoding = self
@@ -261,10 +300,25 @@ impl TextEmbedder for CandleTextEmbedder {
         Ok(Vector::new(vector_data))
     }
 
+    /// Get the dimension of generated embeddings.
+    ///
+    /// Returns the hidden size of the BERT model, which is typically
+    /// 384 for MiniLM models and 768 for base BERT models.
+    ///
+    /// # Returns
+    ///
+    /// The number of dimensions in the embedding vectors
     fn dimension(&self) -> usize {
         self.dimension
     }
 
+    /// Get the name/identifier of this embedder.
+    ///
+    /// Returns the HuggingFace model identifier used to create this embedder.
+    ///
+    /// # Returns
+    ///
+    /// The model name (e.g., "sentence-transformers/all-MiniLM-L6-v2")
     fn name(&self) -> &str {
         &self.model_name
     }

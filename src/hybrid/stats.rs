@@ -1,8 +1,31 @@
 //! Statistics and monitoring for hybrid search.
+//!
+//! This module provides structures for tracking and reporting statistics
+//! about hybrid search engine state and performance.
 
 use serde::{Deserialize, Serialize};
 
 /// Statistics for hybrid search engine.
+///
+/// Contains information about the current state of the hybrid search engine,
+/// including document counts, index sizes, and memory usage.
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::hybrid::stats::HybridSearchStats;
+///
+/// let stats = HybridSearchStats {
+///     total_documents: 1000,
+///     vector_index_size: 500,
+///     embedder_trained: true,
+///     embedding_dimension: 384,
+///     vector_memory_usage: 1024 * 1024,  // 1MB
+/// };
+///
+/// assert_eq!(stats.total_documents, 1000);
+/// assert_eq!(stats.embedding_dimension, 384);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSearchStats {
     /// Total number of documents indexed.

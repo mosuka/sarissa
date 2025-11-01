@@ -1,10 +1,60 @@
 //! Configuration for hybrid search.
+//!
+//! This module provides configuration structures for controlling how keyword
+//! and vector search results are combined in hybrid search operations.
+//!
+//! # Examples
+//!
+//! ```
+//! use yatagarasu::hybrid::config::{HybridSearchConfig, ScoreNormalization};
+//!
+//! // Use default configuration
+//! let config = HybridSearchConfig::default();
+//! assert_eq!(config.keyword_weight, 0.6);
+//! assert_eq!(config.vector_weight, 0.4);
+//!
+//! // Create custom configuration
+//! let mut custom_config = HybridSearchConfig::default();
+//! custom_config.keyword_weight = 0.8;  // Favor keyword search
+//! custom_config.vector_weight = 0.2;
+//! custom_config.normalization = ScoreNormalization::ZScore;
+//! custom_config.require_both = true;  // Require both matches
+//! ```
 
 use serde::{Deserialize, Serialize};
 
 use crate::vector::search::searcher::VectorSearchParams;
 
 /// Configuration for hybrid search combining keyword and vector search.
+///
+/// This structure defines how keyword (lexical) and vector (semantic) search
+/// results are combined and weighted. The weights should typically sum to 1.0
+/// for proper score normalization.
+///
+/// # Weight Guidelines
+///
+/// - **Keyword-focused** (0.7-0.8): Good for exact term matching
+/// - **Balanced** (0.5-0.6): Mix of exact and semantic matching
+/// - **Semantic-focused** (0.3-0.4): Emphasize meaning over exact terms
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::hybrid::config::{HybridSearchConfig, ScoreNormalization};
+///
+/// // Balanced search (default)
+/// let balanced = HybridSearchConfig::default();
+///
+/// // Keyword-focused search
+/// let mut keyword_focused = HybridSearchConfig::default();
+/// keyword_focused.keyword_weight = 0.8;
+/// keyword_focused.vector_weight = 0.2;
+///
+/// // Semantic-focused search
+/// let mut semantic_focused = HybridSearchConfig::default();
+/// semantic_focused.keyword_weight = 0.3;
+/// semantic_focused.vector_weight = 0.7;
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSearchConfig {
     /// Weight for keyword search results (0.0-1.0).
@@ -41,15 +91,49 @@ impl Default for HybridSearchConfig {
 }
 
 /// Score normalization strategies for combining keyword and vector scores.
+///
+/// Different normalization strategies are appropriate for different scenarios:
+///
+/// - **None**: Use raw scores directly (fastest, but may favor one type)
+/// - **MinMax**: Scale scores to [0,1] range (good for balanced weighting)
+/// - **ZScore**: Standardize using mean and std dev (robust to outliers)
+/// - **Rank**: Use relative ranking positions (ignores score magnitudes)
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::hybrid::config::ScoreNormalization;
+///
+/// let norm = ScoreNormalization::MinMax;
+/// assert_eq!(norm, ScoreNormalization::MinMax);
+///
+/// // Different strategies for different use cases
+/// let no_norm = ScoreNormalization::None;      // Fast, raw scores
+/// let minmax = ScoreNormalization::MinMax;     // Balanced weighting
+/// let zscore = ScoreNormalization::ZScore;     // Statistical normalization
+/// let rank = ScoreNormalization::Rank;         // Position-based
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScoreNormalization {
-    /// No normalization - use raw scores.
+    /// No normalization - use raw scores directly.
+    ///
+    /// This is the fastest option but may lead to imbalanced results
+    /// if keyword and vector scores have different scales.
     None,
     /// Min-max normalization to [0, 1] range.
+    ///
+    /// Scales scores linearly: `(score - min) / (max - min)`.
+    /// Good for balanced weighting when combining scores.
     MinMax,
-    /// Z-score normalization.
+    /// Z-score normalization (standardization).
+    ///
+    /// Transforms scores using: `(score - mean) / std_dev`.
+    /// More robust to outliers than min-max normalization.
     ZScore,
     /// Rank-based normalization.
+    ///
+    /// Uses relative ranking positions instead of score magnitudes.
+    /// Useful when score distributions are very different.
     Rank,
 }
 
