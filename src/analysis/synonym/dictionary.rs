@@ -138,16 +138,17 @@ impl SynonymDictionary {
             let synonyms = term_to_synonyms.remove(&term).unwrap();
             let index = synonym_lists.len() as u64;
             synonym_lists.push(synonyms);
-            builder
-                .insert(term.as_bytes(), index)
-                .map_err(|e| crate::error::YatagarasuError::parse(format!("FST build error: {}", e)))?;
+            builder.insert(term.as_bytes(), index).map_err(|e| {
+                crate::error::YatagarasuError::parse(format!("FST build error: {}", e))
+            })?;
         }
 
-        let fst_bytes = builder
-            .into_inner()
-            .map_err(|e| crate::error::YatagarasuError::parse(format!("FST finalize error: {}", e)))?;
-        let fst_map = Map::new(Arc::from(fst_bytes))
-            .map_err(|e| crate::error::YatagarasuError::parse(format!("FST creation error: {}", e)))?;
+        let fst_bytes = builder.into_inner().map_err(|e| {
+            crate::error::YatagarasuError::parse(format!("FST finalize error: {}", e))
+        })?;
+        let fst_map = Map::new(Arc::from(fst_bytes)).map_err(|e| {
+            crate::error::YatagarasuError::parse(format!("FST creation error: {}", e))
+        })?;
 
         Ok(Self {
             fst_map: Arc::new(fst_map),

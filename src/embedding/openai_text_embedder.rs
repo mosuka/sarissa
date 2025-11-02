@@ -288,7 +288,9 @@ impl TextEmbedder for OpenAITextEmbedder {
             .data
             .into_iter()
             .next()
-            .ok_or_else(|| YatagarasuError::InvalidOperation("No embedding in response".to_string()))?
+            .ok_or_else(|| {
+                YatagarasuError::InvalidOperation("No embedding in response".to_string())
+            })?
             .embedding;
 
         Ok(Vector::new(embedding))

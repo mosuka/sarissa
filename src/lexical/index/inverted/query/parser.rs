@@ -252,8 +252,8 @@ impl QueryParser {
                     field = Some(inner_pair.as_str().to_string());
                 }
                 Rule::field_value => {
-                    let field_name =
-                        field.ok_or_else(|| YatagarasuError::parse("Missing field name".to_string()))?;
+                    let field_name = field
+                        .ok_or_else(|| YatagarasuError::parse("Missing field name".to_string()))?;
                     return self.parse_field_value(inner_pair, Some(&field_name));
                 }
                 _ => {}
@@ -512,7 +512,9 @@ impl QueryParser {
         let terms = self.analyze_term(Some(field_name), &term)?;
 
         if terms.is_empty() {
-            return Err(YatagarasuError::parse("No terms after analysis".to_string()));
+            return Err(YatagarasuError::parse(
+                "No terms after analysis".to_string(),
+            ));
         }
 
         if terms.len() == 1 {

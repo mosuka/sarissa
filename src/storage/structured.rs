@@ -260,7 +260,8 @@ impl<R: StorageInput> StructReader<R> {
         self.update_checksum(&bytes);
         self.position += length as u64;
 
-        String::from_utf8(bytes).map_err(|e| YatagarasuError::storage(format!("Invalid UTF-8: {e}")))
+        String::from_utf8(bytes)
+            .map_err(|e| YatagarasuError::storage(format!("Invalid UTF-8: {e}")))
     }
 
     /// Read bytes with length prefix.

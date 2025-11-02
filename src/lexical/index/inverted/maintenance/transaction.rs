@@ -124,7 +124,9 @@ impl Transaction {
     /// Mark transaction as preparing for commit.
     pub fn prepare(&mut self) -> Result<()> {
         if self.state != TransactionState::Active {
-            return Err(YatagarasuError::index("Cannot prepare inactive transaction"));
+            return Err(YatagarasuError::index(
+                "Cannot prepare inactive transaction",
+            ));
         }
         self.state = TransactionState::Preparing;
         Ok(())
@@ -133,7 +135,9 @@ impl Transaction {
     /// Mark transaction as committed.
     pub fn commit(&mut self) -> Result<()> {
         if self.state != TransactionState::Preparing {
-            return Err(YatagarasuError::index("Cannot commit unprepared transaction"));
+            return Err(YatagarasuError::index(
+                "Cannot commit unprepared transaction",
+            ));
         }
         self.state = TransactionState::Committed;
         Ok(())

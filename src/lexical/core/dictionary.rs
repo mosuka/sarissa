@@ -152,7 +152,9 @@ impl SortedTermDictionary {
         let magic = reader.read_u32()?;
         if magic != 0x53544443 {
             // "STDC"
-            return Err(YatagarasuError::index("Invalid sorted dictionary magic number"));
+            return Err(YatagarasuError::index(
+                "Invalid sorted dictionary magic number",
+            ));
         }
 
         let version = reader.read_u32()?;
@@ -286,7 +288,9 @@ impl HashTermDictionary {
         let magic = reader.read_u32()?;
         if magic != 0x48544443 {
             // "HTDC"
-            return Err(YatagarasuError::index("Invalid hash dictionary magic number"));
+            return Err(YatagarasuError::index(
+                "Invalid hash dictionary magic number",
+            ));
         }
 
         // Read version

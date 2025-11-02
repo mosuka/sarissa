@@ -352,10 +352,9 @@ impl VectorIndexWriter for HnswIndexWriter {
             ));
         }
 
-        let storage = self
-            .storage
-            .as_ref()
-            .ok_or_else(|| YatagarasuError::InvalidOperation("No storage configured".to_string()))?;
+        let storage = self.storage.as_ref().ok_or_else(|| {
+            YatagarasuError::InvalidOperation("No storage configured".to_string())
+        })?;
 
         // Create the index file
         let file_name = format!("{}.hnsw", path);

@@ -112,8 +112,9 @@ impl CandleTextEmbedder {
     /// ```
     pub fn new(model_name: &str) -> Result<Self> {
         // Setup device (prefer GPU if available)
-        let device = Device::cuda_if_available(0)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Device setup failed: {}", e)))?;
+        let device = Device::cuda_if_available(0).map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Device setup failed: {}", e))
+        })?;
 
         // Download model from HuggingFace Hub with proper cache directory
         let cache_dir = std::env::var("HF_HOME")
@@ -129,18 +130,19 @@ impl CandleTextEmbedder {
         let repo = api.model(model_name.to_string());
 
         // Load config
-        let config_filename = repo
-            .get("config.json")
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Config download failed: {}", e)))?;
+        let config_filename = repo.get("config.json").map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Config download failed: {}", e))
+        })?;
         let config_str = std::fs::read_to_string(config_filename)
             .map_err(|e| YatagarasuError::InvalidOperation(format!("Config read failed: {}", e)))?;
-        let config: Config = serde_json::from_str(&config_str)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Config parse failed: {}", e)))?;
+        let config: Config = serde_json::from_str(&config_str).map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Config parse failed: {}", e))
+        })?;
 
         // Load weights
-        let weights_filename = repo
-            .get("model.safetensors")
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Weights download failed: {}", e)))?;
+        let weights_filename = repo.get("model.safetensors").map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Weights download failed: {}", e))
+        })?;
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_filename], DType::F32, &device).map_err(
                 |e| YatagarasuError::InvalidOperation(format!("VarBuilder creation failed: {}", e)),
@@ -155,8 +157,9 @@ impl CandleTextEmbedder {
         let tokenizer_filename = repo.get("tokenizer.json").map_err(|e| {
             YatagarasuError::InvalidOperation(format!("Tokenizer download failed: {}", e))
         })?;
-        let tokenizer = Tokenizer::from_file(tokenizer_filename)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tokenizer load failed: {}", e)))?;
+        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Tokenizer load failed: {}", e))
+        })?;
 
         let dimension = config.hidden_size;
 
@@ -245,17 +248,18 @@ impl TextEmbedder for CandleTextEmbedder {
     /// A normalized vector representation of the input text
     async fn embed(&self, text: &str) -> Result<Vector> {
         // Tokenize
-        let encoding = self
-            .tokenizer
-            .encode(text, true)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tokenization failed: {}", e)))?;
+        let encoding = self.tokenizer.encode(text, true).map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Tokenization failed: {}", e))
+        })?;
 
         let token_ids = encoding.get_ids();
         let attention_mask = encoding.get_attention_mask();
 
         // Convert to tensors
         let token_ids_tensor = Tensor::new(token_ids, &self.device)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tensor creation failed: {}", e)))?
+            .map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Tensor creation failed: {}", e))
+            })?
             .unsqueeze(0)
             .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
@@ -268,7 +272,9 @@ impl TextEmbedder for CandleTextEmbedder {
         let embeddings = self
             .model
             .forward(&token_ids_tensor, &attention_mask_tensor, None)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Model forward failed: {}", e)))?;
+            .map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Model forward failed: {}", e))
+            })?;
 
         // Mean pooling
         let pooled = self.mean_pool(&embeddings, &attention_mask_tensor)?;

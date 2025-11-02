@@ -197,8 +197,9 @@ impl FileStorage {
 
         // Create directory if it doesn't exist
         if !directory.exists() {
-            std::fs::create_dir_all(&directory)
-                .map_err(|e| YatagarasuError::storage(format!("Failed to create directory: {e}")))?;
+            std::fs::create_dir_all(&directory).map_err(|e| {
+                YatagarasuError::storage(format!("Failed to create directory: {e}"))
+            })?;
         }
 
         // Verify it's a directory
@@ -565,7 +566,9 @@ impl StorageInput for FileInput {
     fn clone_input(&self) -> Result<Box<dyn StorageInput>> {
         // For file inputs, we can't easily clone the underlying file
         // This would require reopening the file, which we'll implement later
-        Err(YatagarasuError::storage("Clone not supported for file inputs"))
+        Err(YatagarasuError::storage(
+            "Clone not supported for file inputs",
+        ))
     }
 
     fn close(&mut self) -> Result<()> {

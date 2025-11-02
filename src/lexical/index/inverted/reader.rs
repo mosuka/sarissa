@@ -388,8 +388,9 @@ impl SegmentReader {
             let mut json_data = String::new();
             std::io::Read::read_to_string(&mut input, &mut json_data)?;
 
-            let docs: Vec<Document> = serde_json::from_str(&json_data)
-                .map_err(|e| YatagarasuError::index(format!("Failed to parse JSON documents: {e}")))?;
+            let docs: Vec<Document> = serde_json::from_str(&json_data).map_err(|e| {
+                YatagarasuError::index(format!("Failed to parse JSON documents: {e}"))
+            })?;
 
             let mut documents = BTreeMap::new();
             for (idx, doc) in docs.into_iter().enumerate() {

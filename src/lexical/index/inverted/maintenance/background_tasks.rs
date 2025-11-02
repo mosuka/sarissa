@@ -314,7 +314,9 @@ impl BackgroundScheduler {
     /// Start the background scheduler.
     pub fn start(&self) -> Result<()> {
         if self.running.load(Ordering::Acquire) {
-            return Err(YatagarasuError::index("Background scheduler already running"));
+            return Err(YatagarasuError::index(
+                "Background scheduler already running",
+            ));
         }
 
         self.running.store(true, Ordering::Release);

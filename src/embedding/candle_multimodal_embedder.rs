@@ -154,8 +154,9 @@ impl CandleMultimodalEmbedder {
     /// ```
     pub fn new(model_name: &str) -> Result<Self> {
         // Setup device (prefer GPU if available)
-        let device = Device::cuda_if_available(0)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Device setup failed: {}", e)))?;
+        let device = Device::cuda_if_available(0).map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Device setup failed: {}", e))
+        })?;
 
         // Download model from HuggingFace Hub
         let cache_dir = std::env::var("HF_HOME")
@@ -179,13 +180,18 @@ impl CandleMultimodalEmbedder {
         let weights_filename = repo
             .get("model.safetensors")
             .or_else(|_| repo.get("pytorch_model.bin"))
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Weights download failed: {}", e)))?;
+            .map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Weights download failed: {}", e))
+            })?;
 
         let vb = if weights_filename.to_string_lossy().ends_with(".safetensors") {
             unsafe {
                 VarBuilder::from_mmaped_safetensors(&[weights_filename], DType::F32, &device)
                     .map_err(|e| {
-                        YatagarasuError::InvalidOperation(format!("VarBuilder creation failed: {}", e))
+                        YatagarasuError::InvalidOperation(format!(
+                            "VarBuilder creation failed: {}",
+                            e
+                        ))
                     })?
             }
         } else {
@@ -206,7 +212,9 @@ impl CandleMultimodalEmbedder {
             vb.pp("vision_model"),
             &config.vision_config,
         )
-        .map_err(|e| YatagarasuError::InvalidOperation(format!("Vision model load failed: {}", e)))?;
+        .map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Vision model load failed: {}", e))
+        })?;
 
         // Load projection layers
         let projection_dim = config.text_config.projection_dim;
@@ -217,7 +225,9 @@ impl CandleMultimodalEmbedder {
             projection_dim,
             vb.pp("text_projection"),
         )
-        .map_err(|e| YatagarasuError::InvalidOperation(format!("Text projection load failed: {}", e)))?;
+        .map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Text projection load failed: {}", e))
+        })?;
 
         let vision_projection = candle_nn::linear_no_bias(
             config.vision_config.embed_dim,
@@ -232,8 +242,9 @@ impl CandleMultimodalEmbedder {
         let tokenizer_filename = repo.get("tokenizer.json").map_err(|e| {
             YatagarasuError::InvalidOperation(format!("Tokenizer download failed: {}", e))
         })?;
-        let tokenizer = Tokenizer::from_file(tokenizer_filename)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tokenizer load failed: {}", e)))?;
+        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Tokenizer load failed: {}", e))
+        })?;
 
         let dimension = projection_dim;
         let image_size = config.vision_config.image_size;
@@ -281,7 +292,9 @@ impl CandleMultimodalEmbedder {
         let img = ImageReader::open(image_path)
             .map_err(|e| YatagarasuError::InvalidOperation(format!("Image open failed: {}", e)))?
             .decode()
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Image decode failed: {}", e)))?;
+            .map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Image decode failed: {}", e))
+            })?;
 
         // Resize to model's expected size
         let img = img.resize_exact(
@@ -382,16 +395,17 @@ impl TextEmbedder for CandleMultimodalEmbedder {
     /// A normalized vector representation in CLIP's shared embedding space
     async fn embed(&self, text: &str) -> Result<Vector> {
         // Tokenize
-        let encoding = self
-            .tokenizer
-            .encode(text, true)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tokenization failed: {}", e)))?;
+        let encoding = self.tokenizer.encode(text, true).map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Tokenization failed: {}", e))
+        })?;
 
         let token_ids = encoding.get_ids();
 
         // Convert to tensor
         let token_ids_tensor = Tensor::new(token_ids, &self.device)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Tensor creation failed: {}", e)))?
+            .map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Tensor creation failed: {}", e))
+            })?
             .unsqueeze(0)
             .map_err(|e| YatagarasuError::InvalidOperation(e.to_string()))?;
 
@@ -401,10 +415,9 @@ impl TextEmbedder for CandleMultimodalEmbedder {
         })?;
 
         // Project to common embedding space
-        let projected = self
-            .text_projection
-            .forward(&text_features)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Text projection failed: {}", e)))?;
+        let projected = self.text_projection.forward(&text_features).map_err(|e| {
+            YatagarasuError::InvalidOperation(format!("Text projection failed: {}", e))
+        })?;
 
         // Normalize
         let normalized = self.normalize(&projected)?;
@@ -477,7 +490,9 @@ impl ImageEmbedder for CandleMultimodalEmbedder {
         let projected = self
             .vision_projection
             .forward(&vision_features)
-            .map_err(|e| YatagarasuError::InvalidOperation(format!("Vision projection failed: {}", e)))?;
+            .map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Vision projection failed: {}", e))
+            })?;
 
         // Normalize
         let normalized = self.normalize(&projected)?;

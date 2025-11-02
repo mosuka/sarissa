@@ -235,7 +235,10 @@ impl Iterator for JsonlDocumentIterator {
                     return Some(self.converter.parse_json_line(line));
                 }
                 Err(e) => {
-                    return Some(Err(YatagarasuError::parse(format!("Failed to read line: {}", e))));
+                    return Some(Err(YatagarasuError::parse(format!(
+                        "Failed to read line: {}",
+                        e
+                    ))));
                 }
             }
         }

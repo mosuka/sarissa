@@ -718,8 +718,9 @@ impl InvertedIndexWriter {
 
         // Write as JSON for compatibility with InvertedIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
-        let json_data = serde_json::to_string_pretty(&segment_info)
-            .map_err(|e| YatagarasuError::index(format!("Failed to serialize segment metadata: {e}")))?;
+        let json_data = serde_json::to_string_pretty(&segment_info).map_err(|e| {
+            YatagarasuError::index(format!("Failed to serialize segment metadata: {e}"))
+        })?;
 
         let mut output = self.storage.create_output(&meta_file)?;
         std::io::Write::write_all(&mut output, json_data.as_bytes())?;
