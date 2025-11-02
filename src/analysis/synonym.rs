@@ -30,12 +30,12 @@
 //! ```
 //! use yatagarasu::analysis::synonym::dictionary::SynonymDictionary;
 //!
-//! let mut dict = SynonymDictionary::new();
-//! dict.add_synonym("quick", vec!["fast", "rapid"]);
-//! dict.add_synonym("big", vec!["large", "huge"]);
+//! let mut dict = SynonymDictionary::new(None).unwrap();
+//! dict.add_synonym_group(vec!["quick".to_string(), "fast".to_string(), "rapid".to_string()]);
+//! dict.add_synonym_group(vec!["big".to_string(), "large".to_string(), "huge".to_string()]);
 //!
 //! assert!(dict.get_synonyms("quick").is_some());
-//! assert_eq!(dict.len(), 2);
+//! assert!(dict.get_synonyms("big").is_some());
 //! ```
 
 pub mod dictionary;

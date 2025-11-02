@@ -10,7 +10,7 @@ use crate::lexical::index::inverted::query::QueryResult;
 use crate::lexical::index::inverted::query::boolean::{BooleanQuery, Occur};
 use crate::lexical::index::inverted::query::matcher::Matcher;
 use crate::lexical::index::inverted::query::scorer::Scorer;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// Configuration for advanced query execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,7 +166,7 @@ impl AdvancedQuery {
     }
 
     /// Execute the advanced query with optimization.
-    pub fn execute(&mut self, reader: &dyn IndexReader) -> Result<Vec<QueryResult>> {
+    pub fn execute(&mut self, reader: &dyn LexicalIndexReader) -> Result<Vec<QueryResult>> {
         // Optimize query first
         self.optimize()?;
 
@@ -223,7 +223,7 @@ impl AdvancedQuery {
         &self,
         _doc_id: u32,
         base_score: f32,
-        _reader: &dyn IndexReader,
+        _reader: &dyn LexicalIndexReader,
     ) -> Result<f32> {
         if self.field_boosts.is_empty() {
             return Ok(base_score);
@@ -235,7 +235,7 @@ impl AdvancedQuery {
     }
 
     /// Apply post filters to a document.
-    fn apply_post_filters(&self, doc_id: u32, reader: &dyn IndexReader) -> Result<bool> {
+    fn apply_post_filters(&self, doc_id: u32, reader: &dyn LexicalIndexReader) -> Result<bool> {
         for filter in &self.post_filters {
             let mut matcher = filter.matcher(reader)?;
             // Skip to the target document and check if it matches
@@ -248,11 +248,11 @@ impl AdvancedQuery {
 }
 
 impl Query for AdvancedQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         self.core_query.matcher(reader)
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         self.core_query.scorer(reader)
     }
 
@@ -272,11 +272,11 @@ impl Query for AdvancedQuery {
         )
     }
 
-    fn is_empty(&self, reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, reader: &dyn LexicalIndexReader) -> Result<bool> {
         self.core_query.is_empty(reader)
     }
 
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         let base_cost = self.core_query.cost(reader)?;
         let filter_cost = self
             .filters
@@ -456,7 +456,7 @@ impl MultiFieldQuery {
 }
 
 impl Query for MultiFieldQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         // Create boolean query based on type
         let mut boolean_builder = BooleanQueryBuilder::new();
 
@@ -499,7 +499,7 @@ impl Query for MultiFieldQuery {
         boolean_builder.build().matcher(reader)
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // Create boolean query and use its scorer
         let mut boolean_builder = BooleanQueryBuilder::new();
 
@@ -555,11 +555,11 @@ impl Query for MultiFieldQuery {
         )
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         Ok(self.query_text.is_empty() || self.fields.is_empty())
     }
 
-    fn cost(&self, _reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, _reader: &dyn LexicalIndexReader) -> Result<u64> {
         // Estimate cost based on number of fields
         Ok(self.fields.len() as u64 * 100)
     }

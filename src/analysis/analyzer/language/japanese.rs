@@ -12,7 +12,7 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 //! use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 //!
 //! let analyzer = JapaneseAnalyzer::new().unwrap();
@@ -48,7 +48,7 @@ use crate::error::Result;
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::analysis::analyzer::Analyzer;
+/// use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 /// use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 ///
 /// let analyzer = JapaneseAnalyzer::new().unwrap();
@@ -78,6 +78,7 @@ impl JapaneseAnalyzer {
     /// # Examples
     ///
     /// ```
+    /// use yatagarasu::analysis::analyzer::analyzer::Analyzer;
     /// use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
     ///
     /// let analyzer = JapaneseAnalyzer::new().unwrap();

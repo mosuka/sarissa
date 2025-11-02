@@ -14,7 +14,7 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 //! use yatagarasu::analysis::analyzer::noop::NoOpAnalyzer;
 //!
 //! let analyzer = NoOpAnalyzer::new();

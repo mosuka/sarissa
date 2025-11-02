@@ -91,7 +91,7 @@ fn main() -> Result<()> {
         println!("Analyzing document {doc_id}:");
 
         // Use DocumentParser to convert Document → AnalyzedDocument
-        let analyzed_doc = doc_parser.parse(doc, doc_id as u64)?;
+        let analyzed_doc = doc_parser.parse(doc)?;
 
         // Show what was analyzed
         for (field, terms) in &analyzed_doc.field_terms {

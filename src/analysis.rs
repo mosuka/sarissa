@@ -20,10 +20,10 @@
 //!
 //! ```
 //! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 //!
-//! let analyzer = StandardAnalyzer::new();
-//! let tokens = analyzer.analyze("Hello World!");
+//! let analyzer = StandardAnalyzer::new().unwrap();
+//! let tokens: Vec<_> = analyzer.analyze("Hello World!").unwrap().collect();
 //! // Tokens: ["hello", "world"]
 //! ```
 //!

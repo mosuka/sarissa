@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::{EmptyMatcher, Matcher};
 use crate::lexical::index::inverted::query::scorer::Scorer;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// A query that matches documents containing terms that match a wildcard pattern.
 ///
@@ -159,7 +159,7 @@ impl WildcardQuery {
 }
 
 impl Query for WildcardQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         // Schema-less: no field validation needed
         // All fields are treated as text fields for wildcard matching
         let mut matching_doc_ids = Vec::new();
@@ -191,7 +191,7 @@ impl Query for WildcardQuery {
         }
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // Calculate actual matching statistics for better scoring
         let total_docs = reader.doc_count();
         let mut actual_doc_freq = 0u64;
@@ -269,11 +269,11 @@ impl Query for WildcardQuery {
         Box::new(self.clone())
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         Ok(self.pattern.is_empty())
     }
 
-    fn cost(&self, _reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, _reader: &dyn LexicalIndexReader) -> Result<u64> {
         Ok(1000) // Wildcards are expensive
     }
 

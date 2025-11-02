@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::lexical::index::inverted::InvertedIndexStats;
-use crate::lexical::reader::IndexReader;
-use crate::lexical::writer::IndexWriter;
+use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 
 /// Trait for lexical index implementations.
@@ -27,12 +27,12 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Get a reader for this index.
     ///
     /// Returns a reader that can be used to query the index.
-    fn reader(&self) -> Result<Box<dyn IndexReader>>;
+    fn reader(&self) -> Result<Box<dyn LexicalIndexReader>>;
 
     /// Get a writer for this index.
     ///
     /// Returns a writer that can be used to add or update documents.
-    fn writer(&self) -> Result<Box<dyn IndexWriter>>;
+    fn writer(&self) -> Result<Box<dyn LexicalIndexWriter>>;
 
     /// Get the storage backend for this index.
     ///

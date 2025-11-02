@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::InvertedIndexConfig;
-use crate::lexical::reader::IndexReader;
-use crate::lexical::writer::IndexWriter;
+use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 use crate::storage::file::{FileStorage, FileStorageConfig};
 
@@ -256,7 +256,7 @@ impl InvertedIndex {
 }
 
 impl LexicalIndex for InvertedIndex {
-    fn reader(&self) -> Result<Box<dyn IndexReader>> {
+    fn reader(&self) -> Result<Box<dyn LexicalIndexReader>> {
         self.check_closed()?;
 
         let segments = self.load_segments()?;
@@ -271,7 +271,7 @@ impl LexicalIndex for InvertedIndex {
         Ok(Box::new(reader))
     }
 
-    fn writer(&self) -> Result<Box<dyn IndexWriter>> {
+    fn writer(&self) -> Result<Box<dyn LexicalIndexWriter>> {
         self.check_closed()?;
 
         // Use analyzer from index config

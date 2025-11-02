@@ -8,7 +8,7 @@ use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::Matcher;
 use crate::lexical::index::inverted::query::scorer::Scorer;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// A geographical point with latitude and longitude.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -187,7 +187,7 @@ impl GeoDistanceQuery {
     }
 
     /// Find matching documents and their distances using spatial indexing.
-    pub fn find_matches(&self, reader: &dyn IndexReader) -> Result<Vec<GeoMatch>> {
+    pub fn find_matches(&self, reader: &dyn LexicalIndexReader) -> Result<Vec<GeoMatch>> {
         let mut matches = Vec::new();
         let mut seen_docs = std::collections::HashSet::new();
 
@@ -267,7 +267,7 @@ impl GeoDistanceQuery {
     /// Get spatial candidates from the index within the bounding box.
     fn get_spatial_candidates(
         &self,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
         bounding_box: &GeoBoundingBox,
     ) -> Result<Vec<(u32, GeoPoint)>> {
         let mut candidates = Vec::new();
@@ -375,12 +375,12 @@ impl GeoDistanceQuery {
 }
 
 impl Query for GeoDistanceQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         let matches = self.find_matches(reader)?;
         Ok(Box::new(GeoMatcher::new(matches)))
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         let matches = self.find_matches(reader)?;
         Ok(Box::new(GeoScorer::new(matches, self.boost)))
     }
@@ -404,11 +404,11 @@ impl Query for GeoDistanceQuery {
         )
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         Ok(self.distance_km <= 0.0)
     }
 
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         // Geo queries can be expensive depending on the spatial index
         let doc_count = reader.doc_count() as u32;
         Ok(doc_count as u64 * 2) // Moderate cost
@@ -473,7 +473,7 @@ impl GeoBoundingBoxQuery {
     }
 
     /// Find matching documents within the bounding box.
-    pub fn find_matches(&self, reader: &dyn IndexReader) -> Result<Vec<GeoMatch>> {
+    pub fn find_matches(&self, reader: &dyn LexicalIndexReader) -> Result<Vec<GeoMatch>> {
         let mut matches = Vec::new();
         let mut seen_docs = std::collections::HashSet::new();
 
@@ -521,7 +521,10 @@ impl GeoBoundingBoxQuery {
     }
 
     /// Get candidate points that might be within the bounding box.
-    fn get_candidates_in_bounds(&self, reader: &dyn IndexReader) -> Result<Vec<(u32, GeoPoint)>> {
+    fn get_candidates_in_bounds(
+        &self,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<Vec<(u32, GeoPoint)>> {
         let mut candidates = Vec::new();
 
         // Get the maximum document ID to iterate through all documents
@@ -673,12 +676,12 @@ impl GeoBoundingBoxQuery {
 }
 
 impl Query for GeoBoundingBoxQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         let matches = self.find_matches(reader)?;
         Ok(Box::new(GeoMatcher::new(matches)))
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         let matches = self.find_matches(reader)?;
         Ok(Box::new(GeoScorer::new(matches, self.boost)))
     }
@@ -702,12 +705,12 @@ impl Query for GeoBoundingBoxQuery {
         )
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         let (width, height) = self.bounding_box.dimensions();
         Ok(width <= 0.0 || height <= 0.0)
     }
 
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         let doc_count = reader.doc_count() as u32;
         Ok(doc_count as u64)
     }
@@ -968,14 +971,14 @@ impl GeoQuery {
 }
 
 impl Query for GeoQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         match self {
             GeoQuery::Distance(query) => query.matcher(reader),
             GeoQuery::BoundingBox(query) => query.matcher(reader),
         }
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         match self {
             GeoQuery::Distance(query) => query.scorer(reader),
             GeoQuery::BoundingBox(query) => query.scorer(reader),
@@ -1007,14 +1010,14 @@ impl Query for GeoQuery {
         }
     }
 
-    fn is_empty(&self, reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, reader: &dyn LexicalIndexReader) -> Result<bool> {
         match self {
             GeoQuery::Distance(query) => query.is_empty(reader),
             GeoQuery::BoundingBox(query) => query.is_empty(reader),
         }
     }
 
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         match self {
             GeoQuery::Distance(query) => query.cost(reader),
             GeoQuery::BoundingBox(query) => query.cost(reader),

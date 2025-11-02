@@ -966,7 +966,7 @@ impl InvertedIndexReader {
     }
 }
 
-impl crate::lexical::reader::IndexReader for InvertedIndexReader {
+impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
     fn doc_count(&self) -> u64 {
         self.total_doc_count
     }

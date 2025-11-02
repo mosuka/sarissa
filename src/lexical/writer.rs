@@ -1,21 +1,22 @@
-//! Index writer trait and common types.
+//! Lexical index writer trait and common types.
 //!
-//! This module defines the `IndexWriter` trait which all index writer
+//! This module defines the `LexicalIndexWriter` trait which all lexical index writer
 //! implementations must follow. The primary implementation is `InvertedIndexWriter`.
 
+use crate::document::analyzed::AnalyzedDocument;
 use crate::document::document::Document;
 use crate::error::Result;
 
-/// Trait for index writers.
+/// Trait for lexical index writers.
 ///
-/// This trait defines the common interface that all index writer implementations
+/// This trait defines the common interface that all lexical index writer implementations
 /// must follow. The primary implementation is `InvertedIndexWriter`.
 ///
 /// # Example
 ///
 /// ```rust,no_run
 /// use yatagarasu::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
-/// use yatagarasu::lexical::writer::IndexWriter;
+/// use yatagarasu::lexical::writer::LexicalIndexWriter;
 /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use yatagarasu::storage::StorageConfig;
 /// use std::sync::Arc;
@@ -24,11 +25,11 @@ use crate::error::Result;
 /// let config = InvertedIndexWriterConfig::default();
 /// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
 ///
-/// // Use IndexWriter trait methods
+/// // Use LexicalIndexWriter trait methods
 /// // writer.add_document(doc).unwrap();
 /// // writer.commit().unwrap();
 /// ```
-pub trait IndexWriter: Send + std::fmt::Debug {
+pub trait LexicalIndexWriter: Send + std::fmt::Debug {
     /// Add a document to the index.
     fn add_document(&mut self, doc: Document) -> Result<()>;
 
@@ -36,10 +37,7 @@ pub trait IndexWriter: Send + std::fmt::Debug {
     ///
     /// This allows adding pre-analyzed documents that were processed
     /// using DocumentParser or from external tokenization systems.
-    fn add_analyzed_document(
-        &mut self,
-        doc: crate::lexical::index::inverted::writer::AnalyzedDocument,
-    ) -> Result<()>;
+    fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<()>;
 
     /// Delete documents matching the given term.
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64>;

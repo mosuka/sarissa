@@ -50,8 +50,7 @@
 //!     .add_integer("year", 2024)
 //!     .build();
 //!
-//! let analyzed = parser.parse(doc, 0).unwrap();
-//! assert_eq!(analyzed.doc_id, 0);
+//! let analyzed = parser.parse(doc).unwrap();
 //! assert!(analyzed.field_terms.contains_key("title"));
 //! assert!(analyzed.field_terms.contains_key("year"));
 //! ```
@@ -77,7 +76,7 @@
 //!     .add_text("id", "DOC-001")             // Uses KeywordAnalyzer
 //!     .build();
 //!
-//! let analyzed = parser.parse(doc, 1).unwrap();
+//! let analyzed = parser.parse(doc).unwrap();
 //! // "id" field is treated as a single keyword token
 //! assert_eq!(analyzed.field_terms.get("id").unwrap()[0].term, "DOC-001");
 //! ```
@@ -92,7 +91,7 @@ use crate::analysis::token::Token;
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::Result;
-use crate::lexical::index::inverted::writer::{AnalyzedDocument, AnalyzedTerm};
+use crate::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
 
 /// A document parser that converts Documents into AnalyzedDocuments.
 ///
@@ -120,7 +119,7 @@ use crate::lexical::index::inverted::writer::{AnalyzedDocument, AnalyzedTerm};
 ///     .add_text("id", "BOOK-001")
 ///     .build();
 ///
-/// let analyzed = parser.parse(doc, 0).unwrap();
+/// let analyzed = parser.parse(doc).unwrap();
 /// ```
 pub struct DocumentParser {
     /// Analyzer (typically PerFieldAnalyzerWrapper) for analyzing fields.
@@ -147,13 +146,13 @@ impl DocumentParser {
     /// Parse a document into an AnalyzedDocument.
     ///
     /// This converts text fields into tokenized terms with position information,
-    /// ready to be written to the inverted index.
+    /// ready to be written to the inverted index. The document ID will be assigned
+    /// automatically by the index writer when the document is added.
     ///
     /// # Arguments
     ///
     /// * `doc` - The document to parse
-    /// * `doc_id` - The document ID to assign
-    pub fn parse(&self, doc: Document, doc_id: u64) -> Result<AnalyzedDocument> {
+    pub fn parse(&self, doc: Document) -> Result<AnalyzedDocument> {
         let mut field_terms = AHashMap::new();
         let mut stored_fields = AHashMap::new();
 
@@ -264,7 +263,6 @@ impl DocumentParser {
         }
 
         Ok(AnalyzedDocument {
-            doc_id,
             field_terms,
             stored_fields,
             field_lengths,
@@ -319,9 +317,8 @@ mod tests {
             .add_text("body", "Learn Rust")
             .build();
 
-        let analyzed = parser.parse(doc, 0).unwrap();
+        let analyzed = parser.parse(doc).unwrap();
 
-        assert_eq!(analyzed.doc_id, 0);
         assert!(analyzed.field_terms.contains_key("title"));
         assert!(analyzed.field_terms.contains_key("body"));
     }
@@ -338,9 +335,8 @@ mod tests {
             .add_text("id", "BOOK-001")
             .build();
 
-        let analyzed = parser.parse(doc, 1).unwrap();
+        let analyzed = parser.parse(doc).unwrap();
 
-        assert_eq!(analyzed.doc_id, 1);
         // title should be tokenized
         assert!(!analyzed.field_terms.get("title").unwrap().is_empty());
         // id should be one token (KeywordAnalyzer)
@@ -359,9 +355,8 @@ mod tests {
             .add_boolean("active", true)
             .build();
 
-        let analyzed = parser.parse(doc, 2).unwrap();
+        let analyzed = parser.parse(doc).unwrap();
 
-        assert_eq!(analyzed.doc_id, 2);
         assert!(analyzed.field_terms.contains_key("year"));
         assert!(analyzed.field_terms.contains_key("price"));
         assert!(analyzed.field_terms.contains_key("active"));

@@ -13,7 +13,7 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 //! use yatagarasu::analysis::analyzer::pipeline::PipelineAnalyzer;
 //! use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
 //! use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;

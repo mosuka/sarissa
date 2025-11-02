@@ -290,10 +290,10 @@ impl SpellCorrectedSearchEngine {
     ///         self.corrector.learn_from_terms(term_pairs)?;
     ///     }
     /// }
-    /// ```
+    /// ```ignore
     pub fn learn_from_index(&mut self) -> Result<()> {
         // TODO: Implement term enumeration from the index
-        // This requires access to IndexReader.terms() API which returns
+        // This requires access to LexicalIndexReader.terms() API which returns
         // an iterator over all terms in a field.
         Ok(())
     }
@@ -339,17 +339,6 @@ impl SpellCorrectedSearchEngine {
         false
     }
 }
-
-// Delegate standard search methods to the underlying engine
-// impl Search for SpellCorrectedSearchEngine {
-//     fn search(&self, request: SearchRequest) -> Result<SearchResults> {
-//         self.engine.search(request)
-//     }
-
-//     fn count(&self, query: Box<dyn Query>) -> Result<u64> {
-//         self.engine.count(query)
-//     }
-// }
 
 /// Utility functions for spell-corrected search.
 pub struct SpellSearchUtils;

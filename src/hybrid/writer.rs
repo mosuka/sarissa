@@ -5,7 +5,7 @@
 
 use crate::error::Result;
 use crate::hybrid::index::HybridIndex;
-use crate::lexical::writer::IndexWriter as LexicalIndexWriter;
+use crate::lexical::writer::LexicalIndexWriter;
 use crate::vector::writer::VectorIndexWriter;
 
 /// Writer for building hybrid indexes.
@@ -57,9 +57,9 @@ impl HybridIndexWriter {
     ///
     /// ```no_run
     /// # use yatagarasu::hybrid::writer::HybridIndexWriter;
-    /// # use yatagarasu::lexical::writer::IndexWriter;
+    /// # use yatagarasu::lexical::writer::LexicalIndexWriter;
     /// # use yatagarasu::vector::writer::VectorIndexWriter;
-    /// # fn example(lexical: Box<dyn IndexWriter>, vector: Box<dyn VectorIndexWriter>) -> yatagarasu::error::Result<()> {
+    /// # fn example(lexical: Box<dyn LexicalIndexWriter>, vector: Box<dyn VectorIndexWriter>) -> yatagarasu::error::Result<()> {
     /// let mut writer = HybridIndexWriter::new(lexical, vector);
     /// // ... write documents ...
     /// writer.finalize()?;

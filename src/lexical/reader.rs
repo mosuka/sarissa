@@ -1,4 +1,4 @@
-//! Index reader traits for searching and retrieving documents.
+//! Lexical index reader traits for searching and retrieving documents.
 
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
@@ -65,8 +65,8 @@ pub struct FieldStatistics {
     pub total_terms: u64,
 }
 
-/// Trait for index readers.
-pub trait IndexReader: Send + Sync + std::fmt::Debug {
+/// Trait for lexical index readers.
+pub trait LexicalIndexReader: Send + Sync + std::fmt::Debug {
     /// Get the number of documents in the index.
     fn doc_count(&self) -> u64;
 

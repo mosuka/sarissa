@@ -18,7 +18,7 @@ use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::inverted::segment::manager::{
     ManagedSegmentInfo, MergeCandidate, MergeStrategy,
 };
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
 
@@ -370,7 +370,10 @@ impl MergeEngine {
     }
 
     /// Load a segment reader for the given segment.
-    fn load_segment_reader(&self, segment_info: &SegmentInfo) -> Result<Box<dyn IndexReader>> {
+    fn load_segment_reader(
+        &self,
+        segment_info: &SegmentInfo,
+    ) -> Result<Box<dyn LexicalIndexReader>> {
         // Create segment list with single segment
         let segments = vec![segment_info.clone()];
 
@@ -378,7 +381,7 @@ impl MergeEngine {
         let config = crate::lexical::index::inverted::reader::InvertedIndexReaderConfig::default();
 
         let reader = InvertedIndexReader::new(segments, self.storage.clone(), config)?;
-        Ok(Box::new(reader) as Box<dyn IndexReader>)
+        Ok(Box::new(reader) as Box<dyn LexicalIndexReader>)
     }
 
     /// Process a batch of documents for indexing.
