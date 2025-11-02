@@ -12,7 +12,7 @@ use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::Matcher;
 use crate::lexical::index::inverted::query::scorer::Scorer;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// Configuration for similarity search.
 #[derive(Debug, Clone)]
@@ -183,7 +183,7 @@ impl SimilaritySearchEngine {
     pub fn find_similar(
         &mut self,
         target_doc_id: u32,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<Vec<SimilarityResult>> {
         // Get or create vector for target document
         let target_vector = self.get_or_create_document_vector(target_doc_id, reader)?;
@@ -223,7 +223,7 @@ impl SimilaritySearchEngine {
     pub fn find_similar_to_text(
         &mut self,
         text: &str,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<Vec<SimilarityResult>> {
         // Create vector from input text
         let query_vector = self.create_vector_from_text(text, 0)?; // Use doc_id 0 for query
@@ -259,7 +259,7 @@ impl SimilaritySearchEngine {
     fn get_or_create_document_vector(
         &mut self,
         doc_id: u32,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<DocumentVector> {
         if let Some(vector) = self.document_vectors.get(&doc_id) {
             return Ok(vector.clone());
@@ -276,7 +276,7 @@ impl SimilaritySearchEngine {
     fn create_document_vector(
         &self,
         doc_id: u32,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<DocumentVector> {
         let mut vector = DocumentVector::new(doc_id);
 
@@ -330,7 +330,11 @@ impl SimilaritySearchEngine {
 
     /// Calculate TF-IDF weighted vector from document.
     #[allow(dead_code)]
-    fn create_tfidf_vector(&self, doc_id: u32, reader: &dyn IndexReader) -> Result<DocumentVector> {
+    fn create_tfidf_vector(
+        &self,
+        doc_id: u32,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<DocumentVector> {
         let mut vector = DocumentVector::new(doc_id);
 
         // Get document content
@@ -354,7 +358,7 @@ impl SimilaritySearchEngine {
         &self,
         vector: &mut DocumentVector,
         text: &str,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<()> {
         let tokens = self.analyzer.analyze(text)?;
         let mut term_counts: HashMap<String, f32> = HashMap::new();
@@ -392,7 +396,11 @@ impl SimilaritySearchEngine {
 
     /// Estimate document frequency for a term (simplified implementation).
     #[allow(dead_code)]
-    fn estimate_document_frequency(&self, term: &str, _reader: &dyn IndexReader) -> Result<f32> {
+    fn estimate_document_frequency(
+        &self,
+        term: &str,
+        _reader: &dyn LexicalIndexReader,
+    ) -> Result<f32> {
         // This is a simplified estimation
         // In a real implementation, we would query the index for exact document frequency
 
@@ -420,7 +428,7 @@ impl SimilaritySearchEngine {
         &self,
         doc_id: u32,
         field_name: &str,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<String> {
         // Try to get the stored document from the index
         match reader.document(doc_id as u64) {
@@ -453,7 +461,7 @@ impl SimilaritySearchEngine {
     }
 
     /// Get list of candidate documents for similarity search.
-    fn get_candidate_documents(&self, reader: &dyn IndexReader) -> Result<Vec<u32>> {
+    fn get_candidate_documents(&self, reader: &dyn LexicalIndexReader) -> Result<Vec<u32>> {
         // Try to get the actual document count from the reader
         let doc_count = reader.doc_count() as u32;
 
@@ -699,7 +707,7 @@ impl MoreLikeThisQuery {
     }
 
     /// Execute the More-Like-This query.
-    pub fn execute(&self, reader: &dyn IndexReader) -> Result<Vec<SimilarityResult>> {
+    pub fn execute(&self, reader: &dyn LexicalIndexReader) -> Result<Vec<SimilarityResult>> {
         let mut engine = SimilaritySearchEngine::new(self.config.clone());
 
         match &self.input {
@@ -749,13 +757,13 @@ impl MoreLikeThisQuery {
 }
 
 impl Query for MoreLikeThisQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         // Create a custom matcher for More-Like-This
         let results = self.execute(reader)?;
         Ok(Box::new(MoreLikeThisMatcher::new(results)))
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // Create a custom scorer for More-Like-This
         let results = self.execute(reader)?;
         Ok(Box::new(MoreLikeThisScorer::new(results)))
@@ -784,7 +792,7 @@ impl Query for MoreLikeThisQuery {
         }
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         match &self.input {
             MoreLikeThisInput::Text(text) => Ok(text.trim().is_empty()),
             MoreLikeThisInput::DocumentId(_) => Ok(false),
@@ -792,7 +800,7 @@ impl Query for MoreLikeThisQuery {
         }
     }
 
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         // Cost is proportional to the number of documents to compare
         let doc_count = reader.doc_count();
         Ok(doc_count * 10) // Similarity comparison is expensive
@@ -1103,11 +1111,11 @@ mod tests {
         );
     }
 
-    // Mock IndexReader for testing
+    // Mock LexicalIndexReader for testing
     #[derive(Debug)]
     struct MockIndexReader;
 
-    impl IndexReader for MockIndexReader {
+    impl LexicalIndexReader for MockIndexReader {
         fn doc_count(&self) -> u64 {
             1000
         }

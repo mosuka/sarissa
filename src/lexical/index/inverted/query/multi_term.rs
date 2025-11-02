@@ -6,7 +6,7 @@
 use crate::error::Result;
 use crate::lexical::index::inverted::core::terms::TermsEnum;
 use crate::lexical::index::inverted::query::Query;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// A query that matches multiple terms based on some pattern or criteria.
 ///
@@ -40,7 +40,7 @@ use crate::lexical::reader::IndexReader;
 ///
 /// // Results are limited by max_expansions (default 50)
 /// println!("Found {} matching terms", matching_terms.len());
-/// ```
+/// ```ignore
 pub trait MultiTermQuery: Query {
     /// Get the field name this query searches in.
     fn field(&self) -> &str;
@@ -69,7 +69,7 @@ pub trait MultiTermQuery: Query {
     ///
     /// Implementations should use efficient term dictionary enumeration rather than
     /// scanning all documents. See the `TermsEnum` trait for the proper API.
-    fn enumerate_terms(&self, reader: &dyn IndexReader) -> Result<Vec<(String, u64, f32)>>;
+    fn enumerate_terms(&self, reader: &dyn LexicalIndexReader) -> Result<Vec<(String, u64, f32)>>;
 
     /// Get the maximum number of terms this query will expand to.
     ///
@@ -89,13 +89,16 @@ pub trait MultiTermQuery: Query {
     ///
     /// ```ignore
     /// // For a FuzzyQuery:
-    /// fn get_terms_enum(&self, reader: &dyn IndexReader) -> Result<Box<dyn TermsEnum>> {
+    /// fn get_terms_enum(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn TermsEnum>> {
     ///     let terms = reader.terms(self.field)?;
     ///     let automaton = LevenshteinAutomaton::build(&self.term, self.max_edits);
     ///     Ok(Box::new(AutomatonTermsEnum::new(terms, automaton)))
     /// }
-    /// ```
-    fn get_terms_enum(&self, _reader: &dyn IndexReader) -> Result<Option<Box<dyn TermsEnum>>> {
+    /// ```ignore
+    fn get_terms_enum(
+        &self,
+        _reader: &dyn LexicalIndexReader,
+    ) -> Result<Option<Box<dyn TermsEnum>>> {
         // Default implementation returns None, indicating that enumerate_terms()
         // should be used instead. Implementations should override this for better performance.
         Ok(None)

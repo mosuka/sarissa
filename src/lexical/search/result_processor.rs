@@ -9,7 +9,7 @@ use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::QueryResult;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::features::facet::{FacetCollector, FacetResults};
 use crate::lexical::search::features::highlight::{HighlightConfig, Highlighter};
 
@@ -225,7 +225,7 @@ pub struct ResultProcessor {
     facet_collector: Option<FacetCollector>,
 
     /// Index reader for document retrieval.
-    reader: Arc<dyn IndexReader>,
+    reader: Arc<dyn LexicalIndexReader>,
 }
 
 impl ResultProcessor {
@@ -239,7 +239,7 @@ impl ResultProcessor {
     /// # Returns
     ///
     /// Result containing the new processor instance
-    pub fn new(config: ResultProcessorConfig, reader: Arc<dyn IndexReader>) -> Result<Self> {
+    pub fn new(config: ResultProcessorConfig, reader: Arc<dyn LexicalIndexReader>) -> Result<Self> {
         let highlighter = if config.enable_highlighting {
             Some(Highlighter::new(HighlightConfig::default()))
         } else {
@@ -486,7 +486,7 @@ impl ResultProcessor {
     fn collect_facets_static(
         collector: &mut FacetCollector,
         results: &[QueryResult],
-        reader: &Arc<dyn IndexReader>,
+        reader: &Arc<dyn LexicalIndexReader>,
     ) -> Result<FacetResults> {
         for result in results {
             collector.collect_doc(result.doc_id, reader.as_ref())?;
@@ -501,7 +501,7 @@ impl ResultProcessor {
     fn collect_facets_finalize(
         mut collector: FacetCollector,
         results: &[QueryResult],
-        reader: &Arc<dyn IndexReader>,
+        reader: &Arc<dyn LexicalIndexReader>,
     ) -> Result<FacetResults> {
         for result in results {
             collector.collect_doc(result.doc_id, reader.as_ref())?;

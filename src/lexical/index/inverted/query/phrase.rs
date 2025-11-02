@@ -7,7 +7,7 @@ use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::{EmptyMatcher, Matcher};
 use crate::lexical::index::inverted::query::scorer::{BM25Scorer, Scorer};
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// A matcher that finds documents containing phrase matches.
 #[derive(Debug)]
@@ -33,7 +33,12 @@ pub struct PhraseMatch {
 
 impl PhraseMatcher {
     /// Create a new phrase matcher.
-    pub fn new(reader: &dyn IndexReader, field: &str, terms: &[String], slop: u32) -> Result<Self> {
+    pub fn new(
+        reader: &dyn LexicalIndexReader,
+        field: &str,
+        terms: &[String],
+        slop: u32,
+    ) -> Result<Self> {
         let matches = Self::find_phrase_matches(reader, field, terms, slop)?;
 
         let current_doc_id = if matches.is_empty() {
@@ -51,7 +56,7 @@ impl PhraseMatcher {
 
     /// Find all documents containing the phrase.
     pub fn find_phrase_matches(
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
         field: &str,
         terms: &[String],
         slop: u32,
@@ -437,7 +442,7 @@ impl PhraseQuery {
 }
 
 impl Query for PhraseQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         if self.terms.is_empty() {
             return Ok(Box::new(EmptyMatcher::new()));
         }
@@ -447,7 +452,7 @@ impl Query for PhraseQuery {
         Ok(Box::new(phrase_matcher))
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         if self.terms.is_empty() {
             return Ok(Box::new(BM25Scorer::new(0, 0, 0, 1.0, 1, self.boost)));
         }
@@ -498,11 +503,11 @@ impl Query for PhraseQuery {
         Box::new(self.clone())
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         Ok(self.terms.is_empty())
     }
 
-    fn cost(&self, _reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, _reader: &dyn LexicalIndexReader) -> Result<u64> {
         Ok(self.terms.len() as u64 * 100) // Rough estimate
     }
 

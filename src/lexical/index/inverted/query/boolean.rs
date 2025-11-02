@@ -7,7 +7,7 @@ use crate::lexical::index::inverted::query::matcher::{
     Matcher, NotMatcher,
 };
 use crate::lexical::index::inverted::query::scorer::{BM25Scorer, Scorer};
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// Occurrence requirements for boolean clauses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,7 +158,7 @@ impl Clone for BooleanQuery {
 }
 
 impl Query for BooleanQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         if self.clauses.is_empty() {
             return Ok(Box::new(EmptyMatcher::new()));
         }
@@ -310,7 +310,7 @@ impl Query for BooleanQuery {
         }
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // For boolean queries, we combine the scores from child queries
         // For simplicity, we'll estimate based on the most restrictive clause
         let must_clauses = self.clauses_by_occur(Occur::Must);
@@ -399,7 +399,7 @@ impl Query for BooleanQuery {
         Box::new(self.clone())
     }
 
-    fn is_empty(&self, reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, reader: &dyn LexicalIndexReader) -> Result<bool> {
         if self.clauses.is_empty() {
             return Ok(true);
         }
@@ -414,7 +414,7 @@ impl Query for BooleanQuery {
         Ok(true)
     }
 
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         let mut total_cost = 0;
 
         for clause in &self.clauses {

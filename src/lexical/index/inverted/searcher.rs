@@ -17,7 +17,7 @@ use crate::lexical::index::inverted::query::collector::{
 use crate::lexical::index::inverted::query::parser::QueryParser;
 use crate::lexical::index::inverted::query::{SearchHit, SearchResults};
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::{
     LexicalSearchParams, LexicalSearchQuery, LexicalSearchRequest, SortField, SortOrder,
 };
@@ -26,24 +26,24 @@ use crate::lexical::search::searcher::{
 #[derive(Debug)]
 pub struct InvertedIndexSearcher {
     /// The index reader to search against.
-    reader: Arc<dyn IndexReader>,
+    reader: Arc<dyn LexicalIndexReader>,
 }
 
 impl InvertedIndexSearcher {
     /// Create a new searcher with the given index reader.
-    pub fn new(reader: Box<dyn IndexReader>) -> Self {
+    pub fn new(reader: Box<dyn LexicalIndexReader>) -> Self {
         InvertedIndexSearcher {
             reader: Arc::from(reader),
         }
     }
 
-    /// Create a new searcher with an `Arc<dyn IndexReader>`.
-    pub fn from_arc(reader: Arc<dyn IndexReader>) -> Self {
+    /// Create a new searcher with an `Arc<dyn LexicalIndexReader>`.
+    pub fn from_arc(reader: Arc<dyn LexicalIndexReader>) -> Self {
         InvertedIndexSearcher { reader }
     }
 
     /// Get the index reader.
-    pub fn reader(&self) -> &Arc<dyn IndexReader> {
+    pub fn reader(&self) -> &Arc<dyn LexicalIndexReader> {
         &self.reader
     }
 

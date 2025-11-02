@@ -11,13 +11,14 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
+use crate::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
 use crate::document::document::Document;
 use crate::document::field_value::FieldValue;
 use crate::error::{Result, YatagarasuError};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
 use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};
-use crate::lexical::writer::IndexWriter;
+use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
 
@@ -73,38 +74,6 @@ impl Default for InvertedIndexWriterConfig {
     }
 }
 
-/// A document with analyzed terms ready for indexing.
-///
-/// This structure represents a document after analysis (tokenization),
-/// ready to be written to the inverted index.
-#[derive(Debug, Clone)]
-pub struct AnalyzedDocument {
-    /// Original document ID.
-    pub doc_id: u64,
-    /// Field name to analyzed terms mapping.
-    pub field_terms: AHashMap<String, Vec<AnalyzedTerm>>,
-    /// Stored field values with original types preserved.
-    pub stored_fields: AHashMap<String, FieldValue>,
-    /// Field name to field length (number of tokens) mapping.
-    pub field_lengths: AHashMap<String, u32>,
-}
-
-/// An analyzed term with position and metadata.
-///
-/// This represents a single token after analysis, including
-/// position information for phrase queries and proximity searches.
-#[derive(Debug, Clone)]
-pub struct AnalyzedTerm {
-    /// The term text.
-    pub term: String,
-    /// Position in the field.
-    pub position: u32,
-    /// Term frequency in the document.
-    pub frequency: u32,
-    /// Offset in the original text.
-    pub offset: (usize, usize),
-}
-
 /// Statistics about the writing process.
 #[derive(Debug, Clone)]
 pub struct WriterStats {
@@ -131,8 +100,8 @@ pub struct InvertedIndexWriter {
     /// In-memory inverted index being built.
     inverted_index: TermPostingIndex,
 
-    /// Buffered analyzed documents.
-    buffered_docs: Vec<AnalyzedDocument>,
+    /// Buffered analyzed documents with their assigned doc IDs.
+    buffered_docs: Vec<(u64, AnalyzedDocument)>,
 
     /// DocValues writer for the current segment.
     doc_values_writer: DocValuesWriter,
@@ -234,28 +203,27 @@ impl InvertedIndexWriter {
     ///     .build();
     ///
     /// let doc_parser = DocumentParser::new(Arc::new(per_field));
-    /// let analyzed = doc_parser.parse(doc, 0).unwrap();
+    /// let analyzed = doc_parser.parse(doc).unwrap();
     /// writer.add_analyzed_document(analyzed).unwrap();
     /// ```
     pub fn add_analyzed_document(&mut self, analyzed_doc: AnalyzedDocument) -> Result<()> {
         self.check_closed()?;
 
-        // Update next_doc_id to ensure uniqueness
-        if analyzed_doc.doc_id >= self.next_doc_id {
-            self.next_doc_id = analyzed_doc.doc_id + 1;
-        }
+        // Assign document ID
+        let doc_id = self.next_doc_id;
+        self.next_doc_id += 1;
 
         // Add field values to DocValues
         for (field_name, value) in &analyzed_doc.stored_fields {
             self.doc_values_writer
-                .add_value(analyzed_doc.doc_id, field_name, value.clone());
+                .add_value(doc_id, field_name, value.clone());
         }
 
         // Add to inverted index
-        self.add_analyzed_document_to_index(&analyzed_doc)?;
+        self.add_analyzed_document_to_index(doc_id, &analyzed_doc)?;
 
-        // Buffer the document
-        self.buffered_docs.push(analyzed_doc);
+        // Buffer the document with its assigned ID
+        self.buffered_docs.push((doc_id, analyzed_doc));
         self.stats.docs_added += 1;
 
         // Check if we need to flush
@@ -268,9 +236,6 @@ impl InvertedIndexWriter {
 
     /// Analyze a document into terms.
     fn analyze_document(&mut self, doc: Document) -> Result<AnalyzedDocument> {
-        let doc_id = self.next_doc_id;
-        self.next_doc_id += 1;
-
         let mut field_terms = AHashMap::new();
         let mut stored_fields = AHashMap::new();
 
@@ -367,7 +332,6 @@ impl InvertedIndexWriter {
         }
 
         Ok(AnalyzedDocument {
-            doc_id,
             field_terms,
             stored_fields,
             field_lengths,
@@ -396,15 +360,15 @@ impl InvertedIndexWriter {
     }
 
     /// Add an analyzed document to the inverted index.
-    fn add_analyzed_document_to_index(&mut self, doc: &AnalyzedDocument) -> Result<()> {
+    fn add_analyzed_document_to_index(&mut self, doc_id: u64, doc: &AnalyzedDocument) -> Result<()> {
         for (field_name, terms) in &doc.field_terms {
             for analyzed_term in terms {
                 let full_term = format!("{field_name}:{}", analyzed_term.term);
 
                 let posting = if self.config.store_term_positions {
-                    Posting::with_positions(doc.doc_id, vec![analyzed_term.position])
+                    Posting::with_positions(doc_id, vec![analyzed_term.position])
                 } else {
-                    Posting::with_frequency(doc.doc_id, analyzed_term.frequency)
+                    Posting::with_frequency(doc_id, analyzed_term.frequency)
                 };
 
                 self.inverted_index.add_posting(full_term, posting);
@@ -535,8 +499,8 @@ impl InvertedIndexWriter {
         stored_writer.write_varint(self.buffered_docs.len() as u64)?;
 
         // Write each document
-        for doc in &self.buffered_docs {
-            stored_writer.write_u64(doc.doc_id)?;
+        for (doc_id, doc) in &self.buffered_docs {
+            stored_writer.write_u64(*doc_id)?;
             stored_writer.write_varint(doc.stored_fields.len() as u64)?;
 
             for (field_name, field_value) in &doc.stored_fields {
@@ -590,7 +554,7 @@ impl InvertedIndexWriter {
         // field_name -> (doc_count, total_length, min_length, max_length)
         let mut field_stats: AHashMap<String, (u64, u64, u64, u64)> = AHashMap::new();
 
-        for doc in &self.buffered_docs {
+        for (_doc_id, doc) in &self.buffered_docs {
             for (field_name, &length) in &doc.field_lengths {
                 let stats = field_stats
                     .entry(field_name.clone())
@@ -628,8 +592,8 @@ impl InvertedIndexWriter {
         lens_writer.write_varint(self.buffered_docs.len() as u64)?;
 
         // Write field lengths for each document
-        for doc in &self.buffered_docs {
-            lens_writer.write_u64(doc.doc_id)?;
+        for (doc_id, doc) in &self.buffered_docs {
+            lens_writer.write_u64(*doc_id)?;
             lens_writer.write_varint(doc.field_lengths.len() as u64)?;
 
             for (field_name, length) in &doc.field_lengths {
@@ -684,7 +648,7 @@ impl InvertedIndexWriter {
     fn write_json_documents(&self, segment_name: &str) -> Result<()> {
         // Convert analyzed documents back to Document format with preserved types
         let mut documents = Vec::new();
-        for analyzed_doc in &self.buffered_docs {
+        for (_doc_id, analyzed_doc) in &self.buffered_docs {
             let mut doc = Document::new();
             for (field_name, field_value) in &analyzed_doc.stored_fields {
                 doc.add_field(field_name, field_value.clone());
@@ -829,8 +793,8 @@ impl Drop for InvertedIndexWriter {
     }
 }
 
-// Implement IndexWriter trait for compatibility with existing code
-impl IndexWriter for InvertedIndexWriter {
+// Implement LexicalIndexWriter trait for compatibility with existing code
+impl LexicalIndexWriter for InvertedIndexWriter {
     fn add_document(&mut self, doc: Document) -> Result<()> {
         InvertedIndexWriter::add_document(self, doc)
     }

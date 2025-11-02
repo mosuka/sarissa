@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
 use crate::lexical::index::inverted::query::scorer::{BM25Scorer, Scorer};
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// Bound type for range queries.
 #[derive(Debug, Clone, PartialEq)]
@@ -138,11 +138,11 @@ impl RangeQuery {
 }
 
 impl Query for RangeQuery {
-    fn matcher(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, _reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         Ok(Box::new(EmptyMatcher::new()))
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // Range queries typically match fewer documents than term queries
         let total_docs = reader.doc_count();
         let estimated_doc_freq = total_docs / 10; // Estimate: 10% of docs might match a range
@@ -177,11 +177,11 @@ impl Query for RangeQuery {
         Box::new(self.clone())
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         Ok(false)
     }
 
-    fn cost(&self, _reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, _reader: &dyn LexicalIndexReader) -> Result<u64> {
         Ok(500) // Range queries are moderately expensive
     }
 
@@ -452,7 +452,7 @@ impl NumericRangeQuery {
     }
 
     /// Count the number of documents that match this range query.
-    pub fn count_matching_documents(&self, reader: &dyn IndexReader) -> Result<u64> {
+    pub fn count_matching_documents(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         let mut count = 0u64;
         let total_docs = reader.max_doc();
 
@@ -631,7 +631,7 @@ impl Scorer for RangeScorer {
 }
 
 impl Query for NumericRangeQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         // Try to use BKD Tree if available
         if let Some(bkd_tree) = reader.get_bkd_tree(&self.field)? {
             let min_value = self.min_f64();
@@ -668,7 +668,7 @@ impl Query for NumericRangeQuery {
         Ok(Box::new(PreComputedMatcher::new(matching_docs)))
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         let total_docs = reader.doc_count();
         if total_docs == 0 {
             return Ok(Box::new(BM25Scorer::new(0, 0, 0, 1.0, 1, self.boost)));
@@ -706,11 +706,11 @@ impl Query for NumericRangeQuery {
         Box::new(self.clone())
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         Ok(false)
     }
 
-    fn cost(&self, _reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, _reader: &dyn LexicalIndexReader) -> Result<u64> {
         Ok(100) // Numeric range queries are efficient
     }
 
@@ -828,12 +828,12 @@ pub struct NumericRangeFilterMatcher {
     /// The underlying AllMatcher.
     all_matcher: crate::lexical::index::inverted::query::matcher::AllMatcher,
     /// Reader reference for document access.
-    reader: Option<std::sync::Arc<dyn IndexReader>>,
+    reader: Option<std::sync::Arc<dyn LexicalIndexReader>>,
 }
 
 impl NumericRangeFilterMatcher {
     /// Create a new numeric range filter matcher.
-    pub fn new(query: NumericRangeQuery, reader: std::sync::Arc<dyn IndexReader>) -> Self {
+    pub fn new(query: NumericRangeQuery, reader: std::sync::Arc<dyn LexicalIndexReader>) -> Self {
         let max_doc = reader.max_doc();
         NumericRangeFilterMatcher {
             query,
@@ -1031,7 +1031,7 @@ impl DateTimeRangeQuery {
 }
 
 impl Query for DateTimeRangeQuery {
-    fn matcher(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, _reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         Ok(Box::new(DateTimeRangeMatcher::new(
             self.lower_bound,
             self.upper_bound,
@@ -1041,7 +1041,7 @@ impl Query for DateTimeRangeQuery {
         )))
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // Range queries typically match fewer documents than term queries
         let total_docs = reader.doc_count();
         let estimated_doc_freq = total_docs / 10; // Estimate: 10% of docs might match a range
@@ -1076,11 +1076,11 @@ impl Query for DateTimeRangeQuery {
         Box::new(self.clone())
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         Ok(false)
     }
 
-    fn cost(&self, _reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, _reader: &dyn LexicalIndexReader) -> Result<u64> {
         Ok(100) // DateTime range queries are efficient
     }
 
@@ -1414,7 +1414,7 @@ mod tests {
     #[derive(Debug)]
     struct EmptyReader;
 
-    impl IndexReader for EmptyReader {
+    impl LexicalIndexReader for EmptyReader {
         fn doc_count(&self) -> u64 {
             0
         }

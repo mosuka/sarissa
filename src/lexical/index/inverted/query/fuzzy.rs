@@ -11,7 +11,7 @@ use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::Matcher;
 use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 use crate::util::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
 
 /// A fuzzy query for approximate string matching.
@@ -118,7 +118,7 @@ impl FuzzyQuery {
     /// Falls back to legacy document scanning if Term Dictionary API is not available.
     ///
     /// Returns a vector of FuzzyMatch results, sorted by similarity score.
-    pub fn find_matches(&self, reader: &dyn IndexReader) -> Result<Vec<FuzzyMatch>> {
+    pub fn find_matches(&self, reader: &dyn LexicalIndexReader) -> Result<Vec<FuzzyMatch>> {
         let mut matches = Vec::new();
 
         // Try to downcast to InvertedIndexReader and use Term Dictionary API
@@ -194,7 +194,7 @@ impl FuzzyQuery {
 
     /// Estimate document frequency for a term.
     #[allow(dead_code)]
-    fn estimate_doc_frequency(&self, term: &str, _reader: &dyn IndexReader) -> Result<u32> {
+    fn estimate_doc_frequency(&self, term: &str, _reader: &dyn LexicalIndexReader) -> Result<u32> {
         // Simplified estimation based on term characteristics
         // In a real implementation, this would query the actual index
 
@@ -217,13 +217,13 @@ impl FuzzyQuery {
 }
 
 impl Query for FuzzyQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         // Try efficient implementation first, fall back to old implementation
         let matches = self.find_matches(reader)?;
         Ok(Box::new(FuzzyMatcher::new(matches, reader, &self.field)?))
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         use crate::lexical::index::inverted::query::scorer::BM25Scorer;
 
         // Try efficient implementation first, fall back to old implementation
@@ -286,11 +286,11 @@ impl Query for FuzzyQuery {
         )
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         Ok(self.term.is_empty())
     }
 
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         // Fuzzy queries are expensive due to edit distance calculations
         let doc_count = reader.doc_count() as u32;
         Ok(doc_count as u64 * (self.max_edits as u64 + 1) * 5)
@@ -334,7 +334,11 @@ impl FuzzyMatcher {
     }
 
     /// Create a new fuzzy matcher using actual document IDs from the index.
-    pub fn new(matches: Vec<FuzzyMatch>, reader: &dyn IndexReader, field: &str) -> Result<Self> {
+    pub fn new(
+        matches: Vec<FuzzyMatch>,
+        reader: &dyn LexicalIndexReader,
+        field: &str,
+    ) -> Result<Self> {
         let mut doc_scores = HashMap::new();
 
         // For each fuzzy match, find actual documents that contain the term

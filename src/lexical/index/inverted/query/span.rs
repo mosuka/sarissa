@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::Matcher;
 use crate::lexical::index::inverted::query::scorer::Scorer;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// A span represents a term occurrence with position information.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -58,7 +58,7 @@ impl Span {
 /// Base trait for span queries.
 pub trait SpanQuery: Send + Sync + std::fmt::Debug {
     /// Get spans for a document.
-    fn get_spans(&self, doc_id: u32, reader: &dyn IndexReader) -> Result<Vec<Span>>;
+    fn get_spans(&self, doc_id: u32, reader: &dyn LexicalIndexReader) -> Result<Vec<Span>>;
 
     /// Get the field name this span query operates on.
     fn field_name(&self) -> &str;
@@ -101,7 +101,7 @@ impl SpanTermQuery {
 }
 
 impl SpanQuery for SpanTermQuery {
-    fn get_spans(&self, _doc_id: u32, _reader: &dyn IndexReader) -> Result<Vec<Span>> {
+    fn get_spans(&self, _doc_id: u32, _reader: &dyn LexicalIndexReader) -> Result<Vec<Span>> {
         // In a real implementation, this would fetch term positions from the index
         // For now, we'll return a placeholder
         Ok(vec![Span::new(0, 1, self.term.clone())])
@@ -171,7 +171,7 @@ impl SpanNearQuery {
 }
 
 impl SpanQuery for SpanNearQuery {
-    fn get_spans(&self, doc_id: u32, reader: &dyn IndexReader) -> Result<Vec<Span>> {
+    fn get_spans(&self, doc_id: u32, reader: &dyn LexicalIndexReader) -> Result<Vec<Span>> {
         let mut all_clause_spans = Vec::new();
 
         // Get spans for each clause
@@ -322,7 +322,7 @@ impl SpanContainingQuery {
 }
 
 impl SpanQuery for SpanContainingQuery {
-    fn get_spans(&self, doc_id: u32, reader: &dyn IndexReader) -> Result<Vec<Span>> {
+    fn get_spans(&self, doc_id: u32, reader: &dyn LexicalIndexReader) -> Result<Vec<Span>> {
         let big_spans = self.big.get_spans(doc_id, reader)?;
         let little_spans = self.little.get_spans(doc_id, reader)?;
 
@@ -394,7 +394,7 @@ impl SpanWithinQuery {
 }
 
 impl SpanQuery for SpanWithinQuery {
-    fn get_spans(&self, doc_id: u32, reader: &dyn IndexReader) -> Result<Vec<Span>> {
+    fn get_spans(&self, doc_id: u32, reader: &dyn LexicalIndexReader) -> Result<Vec<Span>> {
         let include_spans = self.include.get_spans(doc_id, reader)?;
         let exclude_spans = self.exclude.get_spans(doc_id, reader)?;
 
@@ -464,14 +464,14 @@ impl SpanQueryWrapper {
 }
 
 impl Query for SpanQueryWrapper {
-    fn matcher(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, _reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         // In a real implementation, this would create a SpanMatcher
         Err(crate::error::YatagarasuError::query(
             "SpanQueryWrapper matcher not implemented",
         ))
     }
 
-    fn scorer(&self, _reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, _reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // In a real implementation, this would create a SpanScorer
         Err(crate::error::YatagarasuError::query(
             "SpanQueryWrapper scorer not implemented",
@@ -497,12 +497,12 @@ impl Query for SpanQueryWrapper {
         format!("SpanQueryWrapper({})", self.span_query.field_name())
     }
 
-    fn is_empty(&self, _reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
         // For now, assume span queries are never empty
         Ok(false)
     }
 
-    fn cost(&self, _reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, _reader: &dyn LexicalIndexReader) -> Result<u64> {
         // Return a default cost for now
         Ok(1)
     }

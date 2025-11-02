@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use crate::document::document::Document;
 use crate::error::Result;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 use self::matcher::Matcher;
 use self::scorer::Scorer;
@@ -74,10 +74,10 @@ pub struct QueryResult {
 /// Trait for search queries.
 pub trait Query: Send + Sync + Debug {
     /// Create a matcher for this query.
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>>;
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>>;
 
     /// Create a scorer for this query.
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>>;
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>>;
 
     /// Get the boost factor for this query.
     fn boost(&self) -> f32;
@@ -92,10 +92,10 @@ pub trait Query: Send + Sync + Debug {
     fn clone_box(&self) -> Box<dyn Query>;
 
     /// Check if this query matches any documents.
-    fn is_empty(&self, reader: &dyn IndexReader) -> Result<bool>;
+    fn is_empty(&self, reader: &dyn LexicalIndexReader) -> Result<bool>;
 
     /// Get the estimated cost of executing this query.
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64>;
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64>;
 
     /// Get this query as Any for downcasting.
     fn as_any(&self) -> &dyn Any;

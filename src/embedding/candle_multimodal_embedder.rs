@@ -62,11 +62,11 @@ use crate::vector::Vector;
 /// )?;
 ///
 /// // Embed text query
-/// let text_vec = embedder.embed("a photo of a cat").await?;
+/// let text_vec = TextEmbedder::embed(&embedder, "a photo of a cat").await?;
 ///
 /// // Embed images
-/// let img1 = embedder.embed_image("cat.jpg").await?;
-/// let img2 = embedder.embed_image("dog.jpg").await?;
+/// let img1 = ImageEmbedder::embed(&embedder, "cat.jpg").await?;
+/// let img2 = ImageEmbedder::embed(&embedder, "dog.jpg").await?;
 ///
 /// // Text and images are in the same vector space
 /// println!("Dimension: {}", ImageEmbedder::dimension(&embedder));
@@ -86,8 +86,8 @@ use crate::vector::Vector;
 /// )?;
 ///
 /// // Find similar images
-/// let query = embedder.embed_image("query.jpg").await?;
-/// let images = embedder.embed_image_batch(&["img1.jpg", "img2.jpg", "img3.jpg"]).await?;
+/// let query = ImageEmbedder::embed(&embedder, "query.jpg").await?;
+/// let images = ImageEmbedder::embed_batch(&embedder, &["img1.jpg", "img2.jpg", "img3.jpg"]).await?;
 /// # Ok(())
 /// # }
 /// ```

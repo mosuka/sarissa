@@ -35,7 +35,7 @@
 //! Using a built-in analyzer:
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 //! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 //!
 //! let analyzer = StandardAnalyzer::new().unwrap();
@@ -48,7 +48,7 @@
 //! Implementing a custom analyzer:
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 //! use yatagarasu::analysis::token::TokenStream;
 //! use yatagarasu::error::Result;
 //!
@@ -107,7 +107,7 @@ pub trait Analyzer: Send + Sync {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::analysis::analyzer::Analyzer;
+    /// use yatagarasu::analysis::analyzer::analyzer::Analyzer;
     /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
     ///
     /// let analyzer = StandardAnalyzer::new().unwrap();
@@ -131,7 +131,7 @@ pub trait Analyzer: Send + Sync {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::analysis::analyzer::Analyzer;
+    /// use yatagarasu::analysis::analyzer::analyzer::Analyzer;
     /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
     ///
     /// let analyzer = StandardAnalyzer::new().unwrap();
@@ -152,7 +152,7 @@ pub trait Analyzer: Send + Sync {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::analysis::analyzer::Analyzer;
+    /// use yatagarasu::analysis::analyzer::analyzer::Analyzer;
     /// use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
     /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
     /// use std::sync::Arc;

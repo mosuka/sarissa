@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::{EmptyMatcher, Matcher, PostingMatcher};
 use crate::lexical::index::inverted::query::scorer::{BM25Scorer, Scorer};
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// A query that matches documents containing a specific term.
 #[derive(Debug, Clone)]
@@ -53,7 +53,7 @@ impl TermQuery {
 }
 
 impl Query for TermQuery {
-    fn matcher(&self, reader: &dyn IndexReader) -> Result<Box<dyn Matcher>> {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         // Schema-less: no field validation needed
         // Try to get posting list for this term
         match reader.postings(&self.field, &self.term)? {
@@ -68,7 +68,7 @@ impl Query for TermQuery {
         }
     }
 
-    fn scorer(&self, reader: &dyn IndexReader) -> Result<Box<dyn Scorer>> {
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // Get term information for BM25 scoring
         let term_info = reader.term_info(&self.field, &self.term)?;
         let field_stats = reader.field_stats(&self.field)?;
@@ -113,7 +113,7 @@ impl Query for TermQuery {
         Box::new(self.clone())
     }
 
-    fn is_empty(&self, reader: &dyn IndexReader) -> Result<bool> {
+    fn is_empty(&self, reader: &dyn LexicalIndexReader) -> Result<bool> {
         // Schema-less: no field validation needed
         match reader.term_info(&self.field, &self.term)? {
             Some(term_info) => Ok(term_info.doc_freq == 0),
@@ -121,7 +121,7 @@ impl Query for TermQuery {
         }
     }
 
-    fn cost(&self, reader: &dyn IndexReader) -> Result<u64> {
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         match reader.term_info(&self.field, &self.term)? {
             Some(term_info) => Ok(term_info.doc_freq),
             None => Ok(0),

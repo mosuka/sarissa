@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 use crate::vector::reader::VectorIndexReader;
 
 /// Hybrid index that combines lexical and vector indexes.
@@ -16,7 +16,7 @@ use crate::vector::reader::VectorIndexReader;
 /// for hybrid search operations.
 pub struct HybridIndex {
     /// Lexical index reader for keyword-based search
-    pub lexical_index: Arc<dyn IndexReader>,
+    pub lexical_index: Arc<dyn LexicalIndexReader>,
     /// Vector index reader for semantic search
     pub vector_index: Arc<dyn VectorIndexReader>,
 }
@@ -33,7 +33,7 @@ impl HybridIndex {
     ///
     /// A new `HybridIndex` instance
     pub fn new(
-        lexical_index: Arc<dyn IndexReader>,
+        lexical_index: Arc<dyn LexicalIndexReader>,
         vector_index: Arc<dyn VectorIndexReader>,
     ) -> Self {
         Self {
@@ -47,7 +47,7 @@ impl HybridIndex {
     /// # Returns
     ///
     /// A reference to the underlying lexical (inverted) index reader for keyword search
-    pub fn lexical_index(&self) -> &dyn IndexReader {
+    pub fn lexical_index(&self) -> &dyn LexicalIndexReader {
         self.lexical_index.as_ref()
     }
 
@@ -72,10 +72,10 @@ impl HybridIndex {
     ///
     /// ```no_run
     /// # use yatagarasu::hybrid::index::HybridIndex;
-    /// # use yatagarasu::lexical::reader::IndexReader;
+    /// # use yatagarasu::lexical::reader::LexicalIndexReader;
     /// # use yatagarasu::vector::reader::VectorIndexReader;
     /// # use std::sync::Arc;
-    /// # fn example(lexical: Arc<dyn IndexReader>, vector: Arc<dyn VectorIndexReader>) -> yatagarasu::error::Result<()> {
+    /// # fn example(lexical: Arc<dyn LexicalIndexReader>, vector: Arc<dyn VectorIndexReader>) -> yatagarasu::error::Result<()> {
     /// let hybrid_index = HybridIndex::new(lexical, vector);
     /// let stats = hybrid_index.stats()?;
     /// println!("Lexical docs: {}", stats.lexical_doc_count);

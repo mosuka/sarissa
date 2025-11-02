@@ -56,8 +56,7 @@
 //!     .add_text("title", "Rust Programming")
 //!     .build();
 //!
-//! let analyzed = parser.parse(doc, 0).unwrap();
-//! assert_eq!(analyzed.doc_id, 0);
+//! let analyzed = parser.parse(doc).unwrap();
 //! ```
 //!
 //! Converting files to documents:
@@ -73,6 +72,7 @@
 //! }
 //! ```
 
+pub mod analyzed;
 pub mod converter;
 #[allow(clippy::module_inception)]
 pub mod document;

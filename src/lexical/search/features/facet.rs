@@ -9,7 +9,7 @@ use crate::document::field_value::FieldValue;
 use crate::error::Result;
 use crate::lexical::index::inverted::query::Hit;
 use crate::lexical::index::inverted::query::Query;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 
 /// Represents a facet field and its hierarchical structure.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -175,7 +175,7 @@ impl FacetCollector {
     }
 
     /// Add a document to the facet counts.
-    pub fn collect_doc(&mut self, doc_id: u32, reader: &dyn IndexReader) -> Result<()> {
+    pub fn collect_doc(&mut self, doc_id: u32, reader: &dyn LexicalIndexReader) -> Result<()> {
         for field_name in &self.facet_fields {
             // Get facet values for this document
             let facet_values = self.get_doc_facet_values(doc_id, field_name, reader)?;
@@ -201,7 +201,7 @@ impl FacetCollector {
         &self,
         doc_id: u32,
         field_name: &str,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<Vec<FacetPath>> {
         let mut facet_paths = Vec::new();
 
@@ -435,7 +435,7 @@ impl FacetedSearchEngine {
         query: Q,
         facet_fields: Vec<String>,
         facet_filter: Option<FacetFilter>,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<FacetedSearchResults> {
         // Execute the base query
         let _matcher = query.matcher(reader)?;
@@ -486,7 +486,7 @@ impl FacetedSearchEngine {
     fn get_document_facets(
         &self,
         _doc_id: u32,
-        _reader: &dyn IndexReader,
+        _reader: &dyn LexicalIndexReader,
     ) -> Result<Vec<FacetPath>> {
         // This is a simplified implementation
         // In a real implementation, we would:
@@ -686,7 +686,7 @@ impl GroupedSearchEngine {
     pub fn search<Q: Query>(
         &self,
         query: Q,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<GroupedSearchResults> {
         let _matcher = query.matcher(reader)?;
         let scorer = query.scorer(reader)?;
@@ -748,7 +748,11 @@ impl GroupedSearchEngine {
     }
 
     /// Get the group key for a document.
-    fn get_document_group_key(&self, doc_id: u32, reader: &dyn IndexReader) -> Result<String> {
+    fn get_document_group_key(
+        &self,
+        doc_id: u32,
+        reader: &dyn LexicalIndexReader,
+    ) -> Result<String> {
         // Try to get the document and extract the group field value
         match reader.document(doc_id as u64) {
             Ok(Some(document)) => {
@@ -775,7 +779,7 @@ impl GroupedSearchEngine {
     fn load_document_fields(
         &self,
         doc_id: u32,
-        reader: &dyn IndexReader,
+        reader: &dyn LexicalIndexReader,
     ) -> Result<HashMap<String, String>> {
         let mut fields = HashMap::new();
 

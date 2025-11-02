@@ -23,10 +23,10 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 //! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 //!
-//! let analyzer = StandardAnalyzer::new();
+//! let analyzer = StandardAnalyzer::new().unwrap();
 //! let tokens: Vec<_> = analyzer.analyze("Hello World!").unwrap().collect();
 //!
 //! // Tokens: ["hello", "world"]

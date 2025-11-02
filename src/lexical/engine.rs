@@ -61,10 +61,10 @@ use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::SearchResults;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::index::inverted::searcher::InvertedIndexSearcher;
-use crate::lexical::reader::IndexReader;
+use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::search::searcher::{LexicalSearchQuery, LexicalSearchRequest};
-use crate::lexical::writer::IndexWriter;
+use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 
 /// A high-level lexical search engine that provides both indexing and searching capabilities.
@@ -119,9 +119,9 @@ pub struct LexicalEngine {
     /// The underlying lexical index.
     index: Box<dyn LexicalIndex>,
     /// The reader for executing queries (cached for efficiency).
-    reader: RefCell<Option<Box<dyn IndexReader>>>,
+    reader: RefCell<Option<Box<dyn LexicalIndexReader>>>,
     /// The writer for adding/updating documents (cached for efficiency).
-    writer: RefCell<Option<Box<dyn IndexWriter>>>,
+    writer: RefCell<Option<Box<dyn LexicalIndexWriter>>>,
     /// The searcher for executing searches (cached for efficiency).
     searcher: RefCell<Option<Box<dyn crate::lexical::search::searcher::LexicalSearcher>>>,
 }
@@ -194,7 +194,7 @@ impl LexicalEngine {
 
     /// Get or create a reader for this engine.
     #[allow(dead_code)]
-    fn get_or_create_reader(&self) -> Result<RefMut<'_, Box<dyn IndexReader>>> {
+    fn get_or_create_reader(&self) -> Result<RefMut<'_, Box<dyn LexicalIndexReader>>> {
         {
             let mut reader_ref = self.reader.borrow_mut();
             if reader_ref.is_none() {
@@ -209,7 +209,7 @@ impl LexicalEngine {
     }
 
     /// Get or create a writer for this engine.
-    fn get_or_create_writer(&self) -> Result<RefMut<'_, Box<dyn IndexWriter>>> {
+    fn get_or_create_writer(&self) -> Result<RefMut<'_, Box<dyn LexicalIndexWriter>>> {
         {
             let mut writer_ref = self.writer.borrow_mut();
             if writer_ref.is_none() {

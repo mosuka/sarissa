@@ -11,7 +11,7 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::Analyzer;
+//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 //! use yatagarasu::analysis::analyzer::language::english::EnglishAnalyzer;
 //!
 //! let analyzer = EnglishAnalyzer::new().unwrap();
