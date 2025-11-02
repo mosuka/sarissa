@@ -93,7 +93,7 @@ impl VectorEngine {
     /// ```rust,no_run
     /// use yatagarasu::vector::engine::VectorEngine;
     /// use yatagarasu::vector::index::VectorIndexConfig;
-/// use yatagarasu::vector::index::factory::VectorIndexFactory;
+    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
     /// use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::memory::MemoryStorageConfig;
     ///
@@ -111,7 +111,7 @@ impl VectorEngine {
     /// ```rust,no_run
     /// use yatagarasu::vector::engine::VectorEngine;
     /// use yatagarasu::vector::index::VectorIndexConfig;
-/// use yatagarasu::vector::index::factory::VectorIndexFactory;
+    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
     /// use yatagarasu::storage::{StorageConfig, StorageFactory};
     /// use yatagarasu::storage::file::FileStorageConfig;
     ///
@@ -226,7 +226,7 @@ impl VectorEngine {
     /// ```rust,no_run
     /// use yatagarasu::vector::engine::VectorEngine;
     /// use yatagarasu::vector::index::VectorIndexConfig;
-/// use yatagarasu::vector::index::factory::VectorIndexFactory;
+    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
     /// use yatagarasu::vector::Vector;
     /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use std::sync::Arc;
@@ -278,7 +278,7 @@ impl VectorEngine {
     /// ```rust,no_run
     /// use yatagarasu::vector::engine::VectorEngine;
     /// use yatagarasu::vector::index::VectorIndexConfig;
-/// use yatagarasu::vector::index::factory::VectorIndexFactory;
+    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
     /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use std::sync::Arc;
     ///
@@ -381,8 +381,8 @@ mod tests {
     use super::*;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
-    use crate::vector::index::{FlatIndexConfig, VectorIndexConfig};
     use crate::vector::index::factory::VectorIndexFactory;
+    use crate::vector::index::{FlatIndexConfig, VectorIndexConfig};
     use std::sync::Arc;
 
     #[test]

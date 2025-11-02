@@ -47,9 +47,10 @@ use yatagarasu::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== Comprehensive Lexical Search Example ===\n");
-    println!("This example demonstrates ALL query types available in Sage's lexical search\n");
 
     // Step 1: Create a lexical search index
+    println!("Step 1: Create a lexical search index...");
+
     // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
     let storage =
@@ -70,6 +71,7 @@ fn main() -> Result<()> {
 
     // Create a lexical engine
     let mut lexical_engine = LexicalEngine::new(lexical_index)?;
+    println!();
 
     // Step 2: Load documents from JSONL file
     println!("Step 2: Loading documents from resources/documents.jsonl...");
@@ -84,7 +86,7 @@ fn main() -> Result<()> {
         lexical_engine.add_document(doc_result?)?;
         count += 1;
     }
-    println!("  Loaded {} documents from JSONL file", count);
+    println!("  Added {} documents from JSONL file", count);
 
     // Commit the changes to make them searchable
     lexical_engine.commit()?;

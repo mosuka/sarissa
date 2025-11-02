@@ -44,40 +44,33 @@ async fn main() -> Result<()> {
     println!("=== Vector Search with CandleTextEmbedder ===\n");
 
     // Step 1: Initialize the embedder
-    println!("Step 1: Loading embedding model: sentence-transformers/all-MiniLM-L6-v2");
+    println!("Step 1: Loading embedding model: sentence-transformers/all-MiniLM-L6-v2...");
     let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
+    println!();
 
-    println!("  Model loaded successfully!");
-    println!("  Model name: {}", embedder.name());
-    println!("  Embedding dimension: {}\n", embedder.dimension());
+    // Step 2: Create a vector search engine
+    println!("Step 2: Create a vector search engine...");
 
-    // Step 2: Create storage backend
-    println!("Step 2: Creating storage backend...");
+    // Create a storage backend
     let temp_dir = TempDir::new().unwrap();
     let storage =
         StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
-    println!("  Storage backend created\n");
 
-    // Step 3: Create vector index configuration
-    println!("Step 3: Creating vector index configuration...");
+    // Create vector index
     let vector_index_config = VectorIndexConfig::Flat(FlatIndexConfig {
         dimension: embedder.dimension(),
         distance_metric: DistanceMetric::Cosine,
         normalize_vectors: true,
         ..Default::default()
     });
-    println!("  Configuration:");
-    println!("    Dimension: {}", embedder.dimension());
-    println!("    Distance metric: Cosine");
-    println!("    Normalize vectors: true\n");
-
-    // Step 4: Build the vector index using VectorIndexFactory and VectorEngine
-    println!("Step 4: Building vector index...");
     let vector_index = VectorIndexFactory::create(storage, vector_index_config)?;
 
+    // Create a vector engine
     let mut vector_engine = VectorEngine::new(vector_index)?;
+    println!();
 
-    // Step 5: Prepare sample documents
+    // Step 3: Prepare documents
+    println!("Step 3: Prepare documents...");
     let documents = vec![
         (
             1,
@@ -109,29 +102,27 @@ async fn main() -> Result<()> {
             "Climate change affects global weather patterns and ecosystems",
         ),
     ];
-
-    println!("Step 5: Sample Documents");
     for (id, text) in &documents {
         println!("  Doc {}: {}", id, text);
     }
     println!();
 
-    // Step 6: Generate embeddings for all documents
+    // Step 4: Generate embeddings for all documents
     println!(
-        "Step 6: Generating embeddings for {} documents...",
+        "Step 4: Generating embeddings for {} documents...",
         documents.len()
     );
     let texts: Vec<&str> = documents.iter().map(|(_, text)| *text).collect();
     let vectors = embedder.embed_batch(&texts).await?;
-    println!("  Embeddings generated successfully!\n");
+    println!();
 
+    println!("Step 5: Add document vectors to the engine...");
     // Add document vectors to the engine
     let doc_vectors: Vec<(u64, Vector)> = documents
         .iter()
         .zip(vectors.iter())
         .map(|((id, _), vector)| (*id, vector.clone()))
         .collect();
-
     vector_engine.add_vectors(doc_vectors)?;
     vector_engine.commit()?;
     vector_engine.optimize()?;
@@ -143,8 +134,8 @@ async fn main() -> Result<()> {
         vector_engine.estimated_memory_usage()
     );
 
-    // Step 7: Perform semantic searches
-    println!("Step 7: Demonstrating semantic search...\n");
+    // Step 6: Perform semantic searches
+    println!("Step 6: Demonstrating semantic search...\n");
     println!("{}", "=".repeat(80));
 
     // Search 1: Programming language query
@@ -216,7 +207,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Step 8: Demonstrate search configuration with builder pattern
+    // Step 7: Demonstrate search configuration with builder pattern
     println!("\n{}", "=".repeat(80));
     println!("\n[Advanced] Vector Search Configuration");
     println!("{}", "-".repeat(80));

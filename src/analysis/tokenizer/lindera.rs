@@ -107,8 +107,9 @@ impl LinderaTokenizer {
     /// // ).unwrap();
     /// ```
     pub fn new(mode_str: &str, dict_uri: &str, user_dict_uri: Option<&str>) -> Result<Self> {
-        let mode = Mode::from_str(mode_str)
-            .map_err(|e| YatagarasuError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
+        let mode = Mode::from_str(mode_str).map_err(|e| {
+            YatagarasuError::analysis(format!("Invalid mode '{}': {}", mode_str, e))
+        })?;
         let dict = load_dictionary(dict_uri)
             .map_err(|e| YatagarasuError::analysis(format!("Failed to load dictionary: {}", e)))?;
         let metadata = &dict.metadata;

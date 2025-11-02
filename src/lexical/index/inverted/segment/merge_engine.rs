@@ -492,7 +492,9 @@ impl MergeEngine {
 
         // Check document count matches
         if reader.doc_count() != segment.segment_info.doc_count {
-            return Err(YatagarasuError::index("Document count mismatch after merge"));
+            return Err(YatagarasuError::index(
+                "Document count mismatch after merge",
+            ));
         }
 
         // TODO: Add more verification checks

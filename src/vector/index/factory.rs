@@ -145,7 +145,9 @@ mod tests {
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;
-    use crate::vector::index::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig};
+    use crate::vector::index::{
+        FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig,
+    };
 
     #[test]
     fn test_vector_index_creation() {

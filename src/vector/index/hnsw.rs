@@ -143,7 +143,9 @@ impl HnswIndex {
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            return Err(YatagarasuError::InvalidOperation("Index is closed".to_string()));
+            return Err(YatagarasuError::InvalidOperation(
+                "Index is closed".to_string(),
+            ));
         }
         Ok(())
     }
