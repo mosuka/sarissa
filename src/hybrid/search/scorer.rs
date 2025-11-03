@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use crate::error::Result;
-use crate::hybrid::config::ScoreNormalization;
-use crate::hybrid::types::HybridSearchResult;
+use crate::hybrid::search::searcher::ScoreNormalization;
+use crate::hybrid::search::searcher::HybridSearchResult;
 
 /// Score normalizer for hybrid search results.
 ///
@@ -28,7 +28,7 @@ impl ScoreNormalizer {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::hybrid::config::ScoreNormalization;
+    /// use yatagarasu::hybrid::search::searcher::ScoreNormalization;
     /// use yatagarasu::hybrid::search::scorer::ScoreNormalizer;
     ///
     /// let normalizer = ScoreNormalizer::new(ScoreNormalization::MinMax);
