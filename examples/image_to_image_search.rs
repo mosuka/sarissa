@@ -148,27 +148,23 @@ async fn main() -> Result<()> {
     let score_threshold = 0.25;
     let max_results = 10;
 
-    // Perform search using VectorEngine
-    let request = VectorSearchRequest::new(query_vector).top_k(max_results);
+    // Perform search using VectorEngine with minimum similarity threshold
+    // The filtering is done efficiently inside the searcher
+    // Note: The query image itself will have similarity ~1.0 and should be first
+    let request = VectorSearchRequest::new(query_vector)
+        .top_k(max_results)
+        .min_similarity(score_threshold);
     let search_results = engine.search(request)?;
 
-    // Filter by threshold
-    // Note: The query image itself will have similarity ~1.0 and should be first
-    let filtered_results: Vec<_> = search_results
-        .results
-        .iter()
-        .filter(|result| result.similarity >= score_threshold)
-        .collect();
-
-    if filtered_results.is_empty() {
+    if search_results.is_empty() {
         println!("No results above threshold ({:.2})", score_threshold);
     } else {
         println!(
             "Found {} similar images above threshold ({:.2}):",
-            filtered_results.len(),
+            search_results.len(),
             score_threshold
         );
-        for (i, result) in filtered_results.iter().enumerate() {
+        for (i, result) in search_results.results.iter().enumerate() {
             if let Some(path) = image_metadata.get(&result.doc_id) {
                 let filename = Path::new(path).file_name().unwrap().to_string_lossy();
                 println!(
