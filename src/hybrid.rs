@@ -17,25 +17,27 @@
 //!
 //! # Example
 //!
-//! ```rust
-//! use yatagarasu::hybrid::config::HybridSearchConfig;
-//! use yatagarasu::hybrid::engine::HybridSearchEngine;
+//! ```no_run
+//! use yatagarasu::hybrid::engine::HybridEngine;
+//! use yatagarasu::hybrid::search::searcher::HybridSearchRequest;
+//! use yatagarasu::lexical::engine::LexicalEngine;
+//! use yatagarasu::vector::engine::VectorEngine;
 //! use yatagarasu::error::Result;
 //!
-//! fn example() -> Result<()> {
-//!     // Create hybrid search configuration
-//!     let config = HybridSearchConfig::default();
-//!
+//! fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> Result<()> {
 //!     // Create hybrid search engine
-//!     let engine = HybridSearchEngine::new(config)?;
+//!     let engine = HybridEngine::new(lexical_engine, vector_engine)?;
 //!
-//!     // Access configuration
-//!     println!("Keyword weight: {}", engine.config().keyword_weight);
-//!     println!("Vector weight: {}", engine.config().vector_weight);
+//!     // Create search request
+//!     let request = HybridSearchRequest::new("rust programming")
+//!         .keyword_weight(0.6)
+//!         .vector_weight(0.4);
+//!
+//!     // Execute search
+//!     let results = engine.search(request)?;
 //!
 //!     Ok(())
 //! }
-//! # example().unwrap();
 //! ```
 //!
 //! For a complete working example, see `examples/hybrid_search.rs`.
@@ -44,13 +46,11 @@
 pub mod index; // Core hybrid index combining lexical and vector indexes
 
 // Configuration and types
-pub mod config;
 pub mod stats;
-pub mod types;
 
 // High-level interface
 pub mod engine;
 
 // Writer and search modules
-pub mod search;
-pub mod writer; // Index writer // Search execution submodule
+pub mod search; // Search execution submodule (contains request, params, results)
+pub mod writer; // Index writer

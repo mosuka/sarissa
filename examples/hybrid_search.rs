@@ -18,9 +18,10 @@
 use std::collections::HashMap;
 
 use yatagarasu::error::Result;
-use yatagarasu::hybrid::config::{HybridSearchConfig, ScoreNormalization};
-use yatagarasu::hybrid::engine::HybridSearchEngine;
-use yatagarasu::hybrid::types::{HybridSearchResult, HybridSearchResults};
+use yatagarasu::hybrid::search::searcher::{
+    HybridSearchParams, HybridSearchRequest, HybridSearchResult, HybridSearchResults,
+    ScoreNormalization,
+};
 
 fn main() -> Result<()> {
     println!("=== Hybrid Search Configuration Example ===\n");
@@ -34,7 +35,7 @@ fn main() -> Result<()> {
 
     // Configuration 1: Balanced approach
     println!("--- Configuration 1: Balanced (Default) ---");
-    let config_balanced = HybridSearchConfig::default();
+    let config_balanced = HybridSearchParams::default();
     println!("  Keyword weight: {}", config_balanced.keyword_weight);
     println!("  Vector weight: {}", config_balanced.vector_weight);
     println!("  Min keyword score: {}", config_balanced.min_keyword_score);
@@ -48,7 +49,7 @@ fn main() -> Result<()> {
 
     // Configuration 2: Keyword-focused
     println!("--- Configuration 2: Keyword-Focused ---");
-    let config_keyword_focused = HybridSearchConfig {
+    let config_keyword_focused = HybridSearchParams {
         keyword_weight: 0.8,
         vector_weight: 0.2,
         min_keyword_score: 0.5,
@@ -73,7 +74,7 @@ fn main() -> Result<()> {
 
     // Configuration 3: Semantic-focused
     println!("--- Configuration 3: Semantic-Focused ---");
-    let config_semantic_focused = HybridSearchConfig {
+    let config_semantic_focused = HybridSearchParams {
         keyword_weight: 0.3,
         vector_weight: 0.7,
         min_keyword_score: 0.0,
@@ -96,7 +97,7 @@ fn main() -> Result<()> {
 
     // Configuration 4: Strict matching
     println!("--- Configuration 4: Strict Matching ---");
-    let config_strict = HybridSearchConfig {
+    let config_strict = HybridSearchParams {
         keyword_weight: 0.5,
         vector_weight: 0.5,
         min_keyword_score: 0.7,
@@ -248,16 +249,25 @@ fn main() -> Result<()> {
     results.limit(2);
     println!("Limited to {} results", results.len());
 
-    // Step 5: Create hybrid search engine
+    // Step 5: Create hybrid search request
     println!("\n{}", "=".repeat(80));
-    println!("\nStep 5: Creating Hybrid Search Engine\n");
+    println!("\nStep 5: Creating Hybrid Search Request\n");
 
-    let engine = HybridSearchEngine::new(config_balanced)?;
-    println!("Hybrid search engine created successfully!");
+    let request = HybridSearchRequest::new("rust programming")
+        .keyword_weight(config_balanced.keyword_weight)
+        .vector_weight(config_balanced.vector_weight)
+        .min_keyword_score(config_balanced.min_keyword_score)
+        .min_vector_similarity(config_balanced.min_vector_similarity)
+        .max_results(config_balanced.max_results)
+        .require_both(config_balanced.require_both)
+        .normalization(config_balanced.normalization);
+
+    println!("Hybrid search request created successfully!");
+    println!("Query: \"{}\"", request.text_query);
     println!("Configuration:");
-    println!("  Keyword weight: {}", engine.config().keyword_weight);
-    println!("  Vector weight: {}", engine.config().vector_weight);
-    println!("  Normalization: {:?}", engine.config().normalization);
+    println!("  Keyword weight: {}", request.params.keyword_weight);
+    println!("  Vector weight: {}", request.params.vector_weight);
+    println!("  Normalization: {:?}", request.params.normalization);
 
     // Summary
     println!("\n{}", "=".repeat(80));

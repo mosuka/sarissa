@@ -4,7 +4,7 @@
 //! including re-ranking, filtering, and result formatting.
 
 use crate::error::Result;
-use crate::hybrid::types::HybridSearchResults;
+use crate::hybrid::search::searcher::HybridSearchResults;
 
 /// Processes and enhances hybrid search results.
 ///

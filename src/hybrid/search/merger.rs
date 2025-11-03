@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 
 use crate::error::Result;
-use crate::hybrid::config::HybridSearchConfig;
+use crate::hybrid::search::searcher::HybridSearchParams;
 use crate::hybrid::search::scorer::ScoreNormalizer;
-use crate::hybrid::types::{HybridSearchResult, HybridSearchResults};
+use crate::hybrid::search::searcher::{HybridSearchResult, HybridSearchResults};
 use crate::lexical::index::inverted::query::SearchResults;
 use crate::vector::search::searcher::VectorSearchResults;
 
@@ -18,7 +18,7 @@ use crate::vector::search::searcher::VectorSearchResults;
 /// search, applying normalization and weighting to produce unified hybrid scores.
 pub struct ResultMerger {
     /// Configuration for merging behavior.
-    config: HybridSearchConfig,
+    config: HybridSearchParams,
     /// Score normalizer for bringing scores to common scale.
     normalizer: ScoreNormalizer,
 }
@@ -33,13 +33,13 @@ impl ResultMerger {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::hybrid::config::HybridSearchConfig;
+    /// use yatagarasu::hybrid::search::searcher::HybridSearchConfig;
     /// use yatagarasu::hybrid::search::merger::ResultMerger;
     ///
     /// let config = HybridSearchConfig::default();
     /// let merger = ResultMerger::new(config);
     /// ```
-    pub fn new(config: HybridSearchConfig) -> Self {
+    pub fn new(config: HybridSearchParams) -> Self {
         let normalizer = ScoreNormalizer::new(config.normalization);
         Self { config, normalizer }
     }
