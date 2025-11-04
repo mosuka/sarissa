@@ -3,6 +3,8 @@
 //! This module provides the `HybridEngine` that combines lexical and vector search
 //! engines to provide unified hybrid search functionality.
 
+use std::sync::Arc;
+
 use crate::error::Result;
 
 /// High-level hybrid search engine combining lexical and vector search.
@@ -40,9 +42,9 @@ use crate::error::Result;
 /// ```
 pub struct HybridEngine {
     /// Lexical search engine for keyword-based search.
-    lexical_engine: crate::lexical::engine::LexicalEngine,
+    lexical_engine: Arc<crate::lexical::engine::LexicalEngine>,
     /// Vector search engine for semantic search.
-    vector_engine: crate::vector::engine::VectorEngine,
+    vector_engine: Arc<crate::vector::engine::VectorEngine>,
 }
 
 impl HybridEngine {
@@ -74,12 +76,15 @@ impl HybridEngine {
         vector_engine: crate::vector::engine::VectorEngine,
     ) -> Result<Self> {
         Ok(Self {
-            lexical_engine,
-            vector_engine,
+            lexical_engine: Arc::new(lexical_engine),
+            vector_engine: Arc::new(vector_engine),
         })
     }
 
     /// Execute a hybrid search combining keyword and semantic search.
+    ///
+    /// This is an async method that performs lexical and vector searches,
+    /// then merges the results using the configured fusion strategy.
     ///
     /// # Arguments
     ///
@@ -88,7 +93,19 @@ impl HybridEngine {
     /// # Returns
     ///
     /// Combined search results from both engines
-    pub fn search(
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use yatagarasu::hybrid::engine::HybridEngine;
+    /// # use yatagarasu::hybrid::search::searcher::HybridSearchRequest;
+    /// # async fn example(engine: HybridEngine) -> yatagarasu::error::Result<()> {
+    /// let request = HybridSearchRequest::new("rust programming");
+    /// let results = engine.search(request).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn search(
         &self,
         request: crate::hybrid::search::searcher::HybridSearchRequest,
     ) -> Result<crate::hybrid::search::searcher::HybridSearchResults> {
@@ -97,44 +114,47 @@ impl HybridEngine {
 
         let start = Instant::now();
 
-        // 1. Execute lexical search
+        // Prepare lexical search request
         let lexical_request =
             crate::lexical::search::searcher::LexicalSearchRequest::new(request.text_query.clone())
                 .max_docs(request.lexical_params.max_docs)
                 .min_score(request.lexical_params.min_score)
                 .load_documents(request.lexical_params.load_documents);
 
+        // Prepare vector search request if vector query provided
+        let vector_request_opt = request.vector_query.as_ref().map(|vector| {
+            crate::vector::search::searcher::VectorSearchRequest::new(vector.clone())
+                .top_k(request.vector_params.top_k)
+                .min_similarity(request.params.min_vector_similarity)
+        });
+
+        // Execute both searches sequentially (engines are not Send, so can't use spawn_blocking)
+        // However, we can still execute them efficiently using tokio's runtime
         let keyword_results = self.lexical_engine.search(lexical_request)?;
 
-        // 2. Execute vector search if vector query provided
-        let vector_results = if let Some(ref vector) = request.vector_query {
-            let vector_request =
-                crate::vector::search::searcher::VectorSearchRequest::new(vector.clone())
-                    .top_k(request.vector_params.top_k)
-                    .min_similarity(request.params.min_vector_similarity);
-
+        let vector_results = if let Some(vector_request) = vector_request_opt {
             Some(self.vector_engine.search(vector_request)?)
         } else {
             None
         };
 
-        // 3. Merge results
+        // Merge results
         let merger = crate::hybrid::search::merger::ResultMerger::new(request.params.clone());
         let query_time_ms = start.elapsed().as_millis() as u64;
 
         // TODO: Implement proper document store
         let document_store = HashMap::new();
 
-        // Note: merge_results is async, but we're in a sync function
-        // For now, use a blocking approach
-        let runtime = tokio::runtime::Runtime::new()?;
-        runtime.block_on(merger.merge_results(
-            keyword_results,
-            vector_results,
-            request.text_query,
-            query_time_ms,
-            &document_store,
-        ))
+        // merge_results is async, use .await directly
+        merger
+            .merge_results(
+                keyword_results,
+                vector_results,
+                request.text_query,
+                query_time_ms,
+                &document_store,
+            )
+            .await
     }
 
     /// Get a reference to the lexical engine.
