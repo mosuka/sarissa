@@ -205,7 +205,23 @@ impl VectorEngine {
         }))
     }
 
-    /// Add vectors to the index.
+    /// Add a single vector to the index with automatic ID assignment.
+    /// Returns the assigned vector ID.
+    pub fn add_vector(&mut self, vector: Vector) -> Result<u64> {
+        let mut writer = self.get_or_create_writer()?;
+        let vec_id = writer.next_vector_id();
+        writer.add_vectors(vec![(vec_id, vector)])?;
+        Ok(vec_id)
+    }
+
+    /// Add a single vector to the index with a specific ID.
+    pub fn add_vector_with_id(&mut self, vec_id: u64, vector: Vector) -> Result<()> {
+        let mut writer = self.get_or_create_writer()?;
+        writer.add_vectors(vec![(vec_id, vector)])?;
+        Ok(())
+    }
+
+    /// Add multiple vectors to the index (with user-specified IDs).
     pub fn add_vectors(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()> {
         let mut writer = self.get_or_create_writer()?;
         writer.add_vectors(vectors)?;

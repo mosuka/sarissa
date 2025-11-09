@@ -1,306 +1,350 @@
 //! Hybrid Search Example - combining lexical and vector search
 //!
 //! This example demonstrates:
-//! - Creating a hybrid search configuration
-//! - Understanding hybrid search result types and scoring
-//! - Configuring score normalization strategies
-//! - Setting up weights for keyword vs. vector search components
-//!
-//! Note: This example shows the hybrid search configuration and types.
-//! Full hybrid search functionality requires integration with both lexical
-//! and vector indexes, which is currently under development.
+//! - Creating a hybrid search engine with both LexicalEngine and VectorEngine
+//! - Adding documents to both indexes
+//! - Performing actual hybrid searches that combine keyword and semantic matching
+//! - Configuring different hybrid search strategies (balanced, keyword-focused, semantic-focused)
+//! - Understanding score normalization and result fusion
 //!
 //! To run this example:
 //! ```bash
-//! cargo run --example hybrid_search
+//! cargo run --example hybrid_search --features embeddings-candle
 //! ```
 
-use std::collections::HashMap;
+#[cfg(feature = "embeddings-candle")]
+use std::sync::Arc;
 
+#[cfg(feature = "embeddings-candle")]
+use tempfile::TempDir;
+
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::document::converter::DocumentConverter;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::document::field_value::FieldValue;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::embedding::text_embedder::TextEmbedder;
+#[cfg(feature = "embeddings-candle")]
 use yatagarasu::error::Result;
-use yatagarasu::hybrid::search::searcher::{
-    HybridSearchParams, HybridSearchRequest, HybridSearchResult, HybridSearchResults,
-    ScoreNormalization,
-};
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::hybrid::engine::HybridEngine;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::hybrid::search::searcher::{HybridSearchRequest, ScoreNormalization};
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::lexical::engine::LexicalEngine;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::storage::file::FileStorageConfig;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::storage::{StorageConfig, StorageFactory};
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::DistanceMetric;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::engine::VectorEngine;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::index::factory::VectorIndexFactory;
+#[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::index::{FlatIndexConfig, VectorIndexConfig};
 
-fn main() -> Result<()> {
-    println!("=== Hybrid Search Configuration Example ===\n");
-    println!(
-        "This example demonstrates hybrid search configuration and result types.\n\
-         Full end-to-end hybrid search is under development.\n"
-    );
+#[cfg(feature = "embeddings-candle")]
+#[tokio::main]
+async fn main() -> Result<()> {
+    println!("=== Hybrid Search Example - Combining Lexical and Vector Search ===\n");
 
-    // Step 1: Create different hybrid search configurations
-    println!("Step 1: Creating hybrid search configurations...\n");
+    // Step 1: Initialize the embedder for vector search
+    println!("Step 1: Loading embedding model: sentence-transformers/all-MiniLM-L6-v2...");
+    let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
+    println!("  Embedding dimension: {}\n", embedder.dimension());
 
-    // Configuration 1: Balanced approach
-    println!("--- Configuration 1: Balanced (Default) ---");
-    let config_balanced = HybridSearchParams::default();
-    println!("  Keyword weight: {}", config_balanced.keyword_weight);
-    println!("  Vector weight: {}", config_balanced.vector_weight);
-    println!("  Min keyword score: {}", config_balanced.min_keyword_score);
-    println!(
-        "  Min vector similarity: {}",
-        config_balanced.min_vector_similarity
-    );
-    println!("  Max results: {}", config_balanced.max_results);
-    println!("  Require both matches: {}", config_balanced.require_both);
-    println!("  Normalization: {:?}\n", config_balanced.normalization);
+    // Step 2: Create LexicalEngine
+    println!("Step 2: Creating LexicalEngine...");
+    let lexical_temp_dir = TempDir::new().unwrap();
+    let lexical_storage = StorageFactory::create(StorageConfig::File(FileStorageConfig::new(
+        lexical_temp_dir.path(),
+    )))?;
 
-    // Configuration 2: Keyword-focused
-    println!("--- Configuration 2: Keyword-Focused ---");
-    let config_keyword_focused = HybridSearchParams {
-        keyword_weight: 0.8,
-        vector_weight: 0.2,
-        min_keyword_score: 0.5,
-        min_vector_similarity: 0.3,
-        max_results: 20,
-        require_both: false,
-        normalization: ScoreNormalization::MinMax,
+    let standard_analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let keyword_analyzer: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+    let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
+    per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
+
+    let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::new(per_field_analyzer.clone()),
+        ..InvertedIndexConfig::default()
+    });
+    let lexical_index = LexicalIndexFactory::create(lexical_storage, lexical_index_config)?;
+    let lexical_engine = LexicalEngine::new(lexical_index)?;
+    println!("  LexicalEngine created\n");
+
+    // Step 3: Create VectorEngine
+    println!("Step 3: Creating VectorEngine...");
+    let vector_temp_dir = TempDir::new().unwrap();
+    let vector_storage = StorageFactory::create(StorageConfig::File(FileStorageConfig::new(
+        vector_temp_dir.path(),
+    )))?;
+
+    let vector_index_config = VectorIndexConfig::Flat(FlatIndexConfig {
+        dimension: embedder.dimension(),
+        distance_metric: DistanceMetric::Cosine,
+        normalize_vectors: true,
         ..Default::default()
-    };
-    println!(
-        "  Keyword weight: {}",
-        config_keyword_focused.keyword_weight
-    );
-    println!("  Vector weight: {}", config_keyword_focused.vector_weight);
-    println!(
-        "  Min keyword score: {}",
-        config_keyword_focused.min_keyword_score
-    );
-    println!(
-        "  Description: Emphasizes exact keyword matching (80%) over semantic similarity (20%)\n"
-    );
+    });
+    let vector_index = VectorIndexFactory::create(vector_storage, vector_index_config)?;
+    let vector_engine = VectorEngine::new(vector_index)?;
+    println!("  VectorEngine created\n");
 
-    // Configuration 3: Semantic-focused
-    println!("--- Configuration 3: Semantic-Focused ---");
-    let config_semantic_focused = HybridSearchParams {
-        keyword_weight: 0.3,
-        vector_weight: 0.7,
-        min_keyword_score: 0.0,
-        min_vector_similarity: 0.5,
-        max_results: 20,
-        require_both: false,
-        normalization: ScoreNormalization::MinMax,
-        ..Default::default()
-    };
-    println!(
-        "  Keyword weight: {}",
-        config_semantic_focused.keyword_weight
-    );
-    println!("  Vector weight: {}", config_semantic_focused.vector_weight);
-    println!(
-        "  Min vector similarity: {}",
-        config_semantic_focused.min_vector_similarity
-    );
-    println!("  Description: Emphasizes semantic similarity (70%) over exact keywords (30%)\n");
+    // Step 4: Load documents from JSONL file
+    println!("Step 4: Loading documents from resources/documents.jsonl...");
+    let converter = JsonlDocumentConverter::new();
+    let doc_iter = converter.convert("resources/documents.jsonl")?;
 
-    // Configuration 4: Strict matching
-    println!("--- Configuration 4: Strict Matching ---");
-    let config_strict = HybridSearchParams {
-        keyword_weight: 0.5,
-        vector_weight: 0.5,
-        min_keyword_score: 0.7,
-        min_vector_similarity: 0.7,
-        max_results: 10,
-        require_both: true, // Both keyword and vector must match
-        normalization: ScoreNormalization::MinMax,
-        ..Default::default()
-    };
-    println!("  Keyword weight: {}", config_strict.keyword_weight);
-    println!("  Vector weight: {}", config_strict.vector_weight);
-    println!("  Min keyword score: {}", config_strict.min_keyword_score);
-    println!(
-        "  Min vector similarity: {}",
-        config_strict.min_vector_similarity
-    );
-    println!("  Require both matches: {}", config_strict.require_both);
-    println!("  Description: Requires both keyword and vector matches with high thresholds\n");
+    // Collect documents for both indexing and embedding
+    let mut documents = Vec::new();
+    for doc_result in doc_iter {
+        let doc = doc_result?;
+        documents.push(doc);
+    }
+    println!("  Loaded {} documents\n", documents.len());
 
-    // Step 2: Demonstrate score normalization strategies
-    println!("{}", "=".repeat(80));
-    println!("\nStep 2: Score Normalization Strategies\n");
+    // Step 5: Create HybridEngine
+    println!("Step 5: Creating HybridEngine...");
+    let mut hybrid_engine = HybridEngine::new(lexical_engine, vector_engine)?;
+    println!("  HybridEngine created successfully!\n");
 
-    println!("--- Normalization Strategy: None ---");
-    println!("  Uses raw scores from both search types");
-    println!("  Pros: Preserves original score magnitudes");
-    println!("  Cons: May favor one search type if score ranges differ significantly\n");
-
-    println!("--- Normalization Strategy: MinMax ---");
-    println!("  Normalizes scores to [0, 1] range");
-    println!("  Formula: (score - min) / (max - min)");
-    println!("  Pros: Puts both score types on equal footing");
-    println!("  Cons: Sensitive to outliers\n");
-
-    println!("--- Normalization Strategy: ZScore ---");
-    println!("  Normalizes using mean and standard deviation");
-    println!("  Formula: (score - mean) / std_dev");
-    println!("  Pros: Accounts for score distribution");
-    println!("  Cons: Requires sufficient data for meaningful statistics\n");
-
-    println!("--- Normalization Strategy: Rank ---");
-    println!("  Uses rank positions instead of scores");
-    println!("  Formula: 1.0 / (rank + k)  (Reciprocal Rank Fusion)");
-    println!("  Pros: Robust to score scale differences");
-    println!("  Cons: Loses information about score magnitudes\n");
-
-    // Step 3: Create sample hybrid search results
-    println!("{}", "=".repeat(80));
-    println!("\nStep 3: Hybrid Search Result Types\n");
-
-    // Create sample results
-    let mut sample_results = Vec::new();
-
-    // Result 1: Strong in both keyword and vector
-    let mut doc1_fields = HashMap::new();
-    doc1_fields.insert("title".to_string(), "Rust Programming Guide".to_string());
-    doc1_fields.insert("category".to_string(), "programming".to_string());
-
-    let result1 = HybridSearchResult::new(1, 0.85)
-        .with_keyword_score(0.8)
-        .with_vector_similarity(0.9)
-        .with_document(doc1_fields);
-    sample_results.push(result1);
-
-    // Result 2: Strong in keyword, weak in vector
-    let mut doc2_fields = HashMap::new();
-    doc2_fields.insert("title".to_string(), "Web Development with Rust".to_string());
-    doc2_fields.insert("category".to_string(), "web-development".to_string());
-
-    let result2 = HybridSearchResult::new(2, 0.72)
-        .with_keyword_score(0.9)
-        .with_vector_similarity(0.6)
-        .with_document(doc2_fields);
-    sample_results.push(result2);
-
-    // Result 3: Weak in keyword, strong in vector
-    let mut doc3_fields = HashMap::new();
-    doc3_fields.insert(
-        "title".to_string(),
-        "Systems Programming Concepts".to_string(),
-    );
-    doc3_fields.insert("category".to_string(), "programming".to_string());
-
-    let result3 = HybridSearchResult::new(3, 0.68)
-        .with_keyword_score(0.5)
-        .with_vector_similarity(0.85)
-        .with_document(doc3_fields);
-    sample_results.push(result3);
-
-    // Create hybrid search results collection
-    let mut results = HybridSearchResults::new(
-        sample_results,
-        100,                            // total_searched
-        25,                             // keyword_matches
-        30,                             // vector_matches
-        150,                            // query_time_ms
-        "rust programming".to_string(), // query_text
-    );
-
-    println!("--- Sample Hybrid Search Results ---");
-    println!("Query: \"{}\"", results.query_text);
-    println!("Total documents searched: {}", results.total_searched);
-    println!("Keyword matches: {}", results.keyword_matches);
-    println!("Vector matches: {}", results.vector_matches);
-    println!("Query time: {} ms", results.query_time_ms);
-    println!("Results returned: {}\n", results.len());
-
-    println!("Individual Results:");
-    for (i, result) in results.results.iter().enumerate() {
-        println!("\n  Result {}:", i + 1);
-        println!("    Doc ID: {}", result.doc_id);
-        println!("    Hybrid Score: {:.4}", result.hybrid_score);
-        if let Some(kw_score) = result.keyword_score {
-            println!("    Keyword Score: {:.4}", kw_score);
+    // Step 6: Index documents using HybridEngine (ensures ID synchronization)
+    println!("Step 6: Indexing documents with synchronized IDs...");
+    for doc in documents.iter() {
+        // Prepare combined text for embedding
+        let mut text_parts = Vec::new();
+        if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            text_parts.push(title.as_str());
         }
-        if let Some(vec_sim) = result.vector_similarity {
-            println!("    Vector Similarity: {:.4}", vec_sim);
+        if let Some(FieldValue::Text(body)) = doc.get_field("body") {
+            text_parts.push(body.as_str());
         }
-        if let Some(doc) = &result.document {
-            if let Some(title) = doc.get("title") {
-                println!("    Title: {}", title);
-            }
-            if let Some(category) = doc.get("category") {
-                println!("    Category: {}", category);
-            }
-        }
+        let combined_text = text_parts.join(" ");
+
+        // Generate embedding
+        let vector = embedder.embed(&combined_text).await?;
+
+        // Add to HybridEngine (automatically assigns and synchronizes IDs)
+        let doc_id = hybrid_engine.add_document(doc.clone(), vector)?;
+        println!("  Added document {}", doc_id);
     }
 
-    // Step 4: Demonstrate result operations
-    println!("\n{}", "=".repeat(80));
-    println!("\nStep 4: Result Operations\n");
+    // Commit and optimize both indexes
+    hybrid_engine.commit()?;
+    hybrid_engine.optimize()?;
 
-    println!("--- Best Result ---");
-    if let Some(best) = results.best_result() {
-        println!("Doc ID: {}", best.doc_id);
-        println!("Hybrid Score: {:.4}", best.hybrid_score);
+    println!("  Indexing completed for {} documents\n", documents.len());
+
+    // Step 7: Perform various hybrid searches
+    println!("{}", "=".repeat(80));
+    println!("Step 7: Demonstrating Hybrid Search Strategies\n");
+
+    // Search 1: Balanced hybrid search
+    println!("\n[1] Balanced Hybrid Search");
+    println!("{}", "-".repeat(80));
+    let query1_text = "rust programming";
+    let query1 = "body:rust body:programming"; // DSL query with field specification
+    println!("Query: \"{}\"", query1_text);
+    println!("Strategy: Balanced (50% keyword, 50% semantic)");
+
+    let query_vector1 = embedder.embed(query1_text).await?;
+    let request1 = HybridSearchRequest::new(query1)
+        .with_vector(query_vector1)
+        .keyword_weight(0.5)
+        .vector_weight(0.5)
+        .normalization(ScoreNormalization::MinMax)
+        .max_results(5);
+
+    let results1 = hybrid_engine.search(request1).await?;
+    println!("\nResults:");
+    println!("  Total matches: {}", results1.len());
+    println!("  Keyword matches: {}", results1.keyword_matches);
+    println!("  Vector matches: {}", results1.vector_matches);
+    println!("  Query time: {} ms\n", results1.query_time_ms);
+
+    display_hybrid_results(&results1);
+
+    // Search 2: Keyword-focused search
+    println!("\n[2] Keyword-Focused Hybrid Search");
+    println!("{}", "-".repeat(80));
+    let query2_text = "web development";
+    let query2 = "body:web body:development"; // DSL query with field specification
+    println!("Query: \"{}\"", query2_text);
+    println!("Strategy: Keyword-focused (80% keyword, 20% semantic)");
+
+    let query_vector2 = embedder.embed(query2_text).await?;
+    let request2 = HybridSearchRequest::new(query2)
+        .with_vector(query_vector2)
+        .keyword_weight(0.8)
+        .vector_weight(0.2)
+        .normalization(ScoreNormalization::MinMax)
+        .max_results(5);
+
+    let results2 = hybrid_engine.search(request2).await?;
+    println!("\nResults:");
+    println!("  Total matches: {}", results2.len());
+    println!("  Keyword matches: {}", results2.keyword_matches);
+    println!("  Vector matches: {}", results2.vector_matches);
+    println!("  Query time: {} ms\n", results2.query_time_ms);
+
+    display_hybrid_results(&results2);
+
+    // Search 3: Semantic-focused search
+    println!("\n[3] Semantic-Focused Hybrid Search");
+    println!("{}", "-".repeat(80));
+    let query3_text = "machine learning algorithms";
+    let query3 = "body:machine body:learning body:algorithms"; // DSL query with field specification
+    println!("Query: \"{}\"", query3_text);
+    println!("Strategy: Semantic-focused (30% keyword, 70% semantic)");
+
+    let query_vector3 = embedder.embed(query3_text).await?;
+    let request3 = HybridSearchRequest::new(query3)
+        .with_vector(query_vector3)
+        .keyword_weight(0.3)
+        .vector_weight(0.7)
+        .normalization(ScoreNormalization::MinMax)
+        .max_results(5);
+
+    let results3 = hybrid_engine.search(request3).await?;
+    println!("\nResults:");
+    println!("  Total matches: {}", results3.len());
+    println!("  Keyword matches: {}", results3.keyword_matches);
+    println!("  Vector matches: {}", results3.vector_matches);
+    println!("  Query time: {} ms\n", results3.query_time_ms);
+
+    display_hybrid_results(&results3);
+
+    // Search 4: Strict matching (require both)
+    println!("\n[4] Strict Hybrid Search (Require Both Matches)");
+    println!("{}", "-".repeat(80));
+    let query4_text = "python programming";
+    let query4 = "body:python body:programming"; // DSL query with field specification
+    println!("Query: \"{}\"", query4_text);
+    println!("Strategy: Strict (50/50, requires both keyword and vector matches)");
+
+    let query_vector4 = embedder.embed(query4_text).await?;
+    let request4 = HybridSearchRequest::new(query4)
+        .with_vector(query_vector4)
+        .keyword_weight(0.5)
+        .vector_weight(0.5)
+        .min_keyword_score(0.1)
+        .min_vector_similarity(0.3)
+        .require_both(true)
+        .normalization(ScoreNormalization::MinMax)
+        .max_results(5);
+
+    let results4 = hybrid_engine.search(request4).await?;
+    println!("\nResults:");
+    println!("  Total matches: {}", results4.len());
+    println!("  Keyword matches: {}", results4.keyword_matches);
+    println!("  Vector matches: {}", results4.vector_matches);
+    println!("  Query time: {} ms\n", results4.query_time_ms);
+
+    display_hybrid_results(&results4);
+
+    // Step 8: Compare different normalization strategies
+    println!("\n{}", "=".repeat(80));
+    println!("\nStep 8: Comparing Normalization Strategies\n");
+
+    let comparison_query_text = "database systems";
+    let comparison_query = "body:database body:systems"; // DSL query with field specification
+    println!("Query: \"{}\"", comparison_query_text);
+    println!("Strategy: Testing different score normalization methods\n");
+
+    let comparison_vector = embedder.embed(comparison_query_text).await?;
+
+    for (name, norm_strategy) in [
+        ("None", ScoreNormalization::None),
+        ("MinMax", ScoreNormalization::MinMax),
+        ("ZScore", ScoreNormalization::ZScore),
+        ("Rank", ScoreNormalization::Rank),
+    ] {
+        println!("--- {} Normalization ---", name);
+        let request = HybridSearchRequest::new(comparison_query)
+            .with_vector(comparison_vector.clone())
+            .keyword_weight(0.5)
+            .vector_weight(0.5)
+            .normalization(norm_strategy)
+            .max_results(3);
+
+        let results = hybrid_engine.search(request).await?;
+        println!("Top 3 results:");
+        for (i, result) in results.results.iter().take(3).enumerate() {
+            println!(
+                "  {}. Doc {} - Hybrid: {:.4}, Keyword: {:.4}, Vector: {:.4}",
+                i + 1,
+                result.doc_id,
+                result.hybrid_score,
+                result.keyword_score.unwrap_or(0.0),
+                result.vector_similarity.unwrap_or(0.0)
+            );
+        }
+        println!();
     }
-
-    println!("\n--- Filtering by Score (>= 0.7) ---");
-    let original_len = results.len();
-    results.filter_by_score(0.7);
-    println!(
-        "Filtered from {} to {} results",
-        original_len,
-        results.len()
-    );
-
-    println!("\n--- Limiting Results (top 2) ---");
-    results.limit(2);
-    println!("Limited to {} results", results.len());
-
-    // Step 5: Create hybrid search request
-    println!("\n{}", "=".repeat(80));
-    println!("\nStep 5: Creating Hybrid Search Request\n");
-
-    let request = HybridSearchRequest::new("rust programming")
-        .keyword_weight(config_balanced.keyword_weight)
-        .vector_weight(config_balanced.vector_weight)
-        .min_keyword_score(config_balanced.min_keyword_score)
-        .min_vector_similarity(config_balanced.min_vector_similarity)
-        .max_results(config_balanced.max_results)
-        .require_both(config_balanced.require_both)
-        .normalization(config_balanced.normalization);
-
-    println!("Hybrid search request created successfully!");
-    println!("Query: \"{}\"", request.text_query);
-    println!("Configuration:");
-    println!("  Keyword weight: {}", request.params.keyword_weight);
-    println!("  Vector weight: {}", request.params.vector_weight);
-    println!("  Normalization: {:?}", request.params.normalization);
-
-    // Summary
-    println!("\n{}", "=".repeat(80));
-    println!("\n=== Summary ===");
-    println!("\nHybrid Search combines two powerful search approaches:");
-    println!("  1. Lexical/Keyword Search:");
-    println!("     - Exact term matching with BM25 scoring");
-    println!("     - Good for precise queries with known terms");
-    println!("     - Example: \"rust programming language\"");
-    println!("\n  2. Vector/Semantic Search:");
-    println!("     - Similarity based on embeddings");
-    println!("     - Good for conceptual queries");
-    println!("     - Example: \"concurrent systems programming\"");
-    println!("\nConfiguration Options:");
-    println!("  - Adjustable weights for keyword vs. vector components");
-    println!("  - Multiple score normalization strategies");
-    println!("  - Minimum score thresholds for filtering");
-    println!("  - Option to require matches from both search types");
-    println!("\nResult Types:");
-    println!("  - HybridSearchResult: Individual result with combined scoring");
-    println!("  - HybridSearchResults: Collection with metadata and operations");
-    println!("\nExample completed successfully!");
 
     Ok(())
 }
 
+#[cfg(feature = "embeddings-candle")]
+fn display_hybrid_results(results: &yatagarasu::hybrid::search::searcher::HybridSearchResults) {
+    for (i, result) in results.results.iter().enumerate() {
+        println!(
+            "  {}. Doc {} - Hybrid Score: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.hybrid_score
+        );
+
+        if let Some(kw_score) = result.keyword_score {
+            println!("     Keyword Score: {:.4}", kw_score);
+        }
+        if let Some(vec_sim) = result.vector_similarity {
+            println!("     Vector Similarity: {:.4}", vec_sim);
+        }
+
+        if let Some(doc) = &result.document {
+            if let Some(title) = doc.get("title") {
+                println!("     Title: {}", title);
+            }
+            if let Some(category) = doc.get("category") {
+                println!("     Category: {}", category);
+            }
+        }
+        println!();
+    }
+}
+
+#[cfg(not(feature = "embeddings-candle"))]
+fn main() {
+    eprintln!("This example requires the 'embeddings-candle' feature.");
+    eprintln!("Please run with: cargo run --example hybrid_search --features embeddings-candle");
+    std::process::exit(1);
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_hybrid_search_example() {
-        let result = main();
+    #[cfg(feature = "embeddings-candle")]
+    #[tokio::test]
+    async fn test_hybrid_search_example() {
+        let result = super::main().await;
         assert!(result.is_ok());
     }
 }

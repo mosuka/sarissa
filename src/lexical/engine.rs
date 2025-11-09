@@ -290,26 +290,36 @@ impl LexicalEngine {
     ///     .add_text("title", "Hello World")
     ///     .add_text("body", "This is a test")
     ///     .build();
-    /// engine.add_document(doc).unwrap();
+    /// let doc_id = engine.add_document(doc).unwrap();
     /// engine.commit().unwrap();  // Don't forget to commit!
     /// ```
-    pub fn add_document(&mut self, doc: Document) -> Result<()> {
+    pub fn add_document(&mut self, doc: Document) -> Result<u64> {
         let mut writer = self.get_or_create_writer()?;
-        writer.add_document(doc)?;
+        let doc_id = writer.add_document(doc)?;
+        Ok(doc_id)
+    }
 
+    /// Add a document to the index with a specific document ID.
+    /// Note: You must call `commit()` to persist the changes.
+    pub fn add_document_with_id(&mut self, doc_id: u64, doc: Document) -> Result<()> {
+        let mut writer = self.get_or_create_writer()?;
+        writer.add_document_with_id(doc_id, doc)?;
         Ok(())
     }
 
     /// Add multiple documents to the index.
+    /// Returns a vector of assigned document IDs.
     /// Note: You must call `commit()` to persist the changes.
-    pub fn add_documents(&mut self, docs: Vec<Document>) -> Result<()> {
+    pub fn add_documents(&mut self, docs: Vec<Document>) -> Result<Vec<u64>> {
         let mut writer = self.get_or_create_writer()?;
+        let mut doc_ids = Vec::new();
 
         for doc in docs {
-            writer.add_document(doc)?;
+            let doc_id = writer.add_document(doc)?;
+            doc_ids.push(doc_id);
         }
 
-        Ok(())
+        Ok(doc_ids)
     }
 
     /// Delete documents matching the given term.
