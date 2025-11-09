@@ -53,13 +53,13 @@ use yatagarasu::storage::file::FileStorageConfig;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::storage::{StorageConfig, StorageFactory};
 #[cfg(feature = "embeddings-candle")]
+use yatagarasu::vector::DistanceMetric;
+#[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::index::factory::VectorIndexFactory;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::index::{FlatIndexConfig, VectorIndexConfig};
-#[cfg(feature = "embeddings-candle")]
-use yatagarasu::vector::DistanceMetric;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
         ..InvertedIndexConfig::default()
     });
     let lexical_index = LexicalIndexFactory::create(lexical_storage, lexical_index_config)?;
-    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
+    let lexical_engine = LexicalEngine::new(lexical_index)?;
     println!("  LexicalEngine created\n");
 
     // Step 3: Create VectorEngine
@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
         ..Default::default()
     });
     let vector_index = VectorIndexFactory::create(vector_storage, vector_index_config)?;
-    let mut vector_engine = VectorEngine::new(vector_index)?;
+    let vector_engine = VectorEngine::new(vector_index)?;
     println!("  VectorEngine created\n");
 
     // Step 4: Load documents from JSONL file
@@ -121,19 +121,15 @@ async fn main() -> Result<()> {
     }
     println!("  Loaded {} documents\n", documents.len());
 
-    // Step 5 & 6: Index documents in both LexicalEngine and VectorEngine
-    // Note: We use sequential indexing to ensure document IDs match between engines.
-    // LexicalEngine assigns IDs 0, 1, 2, ... internally, so we use the same IDs for VectorEngine.
-    println!("Step 5 & 6: Indexing documents in both engines...");
+    // Step 5: Create HybridEngine
+    println!("Step 5: Creating HybridEngine...");
+    let mut hybrid_engine = HybridEngine::new(lexical_engine, vector_engine)?;
+    println!("  HybridEngine created successfully!\n");
 
-    let mut doc_vectors = Vec::new();
-    for (idx, doc) in documents.iter().enumerate() {
-        let doc_id = idx as u64;
-
-        // Add to LexicalEngine (internally assigns doc_id = 0, 1, 2, ...)
-        lexical_engine.add_document(doc.clone())?;
-
-        // Prepare for VectorEngine with the same doc_id
+    // Step 6: Index documents using HybridEngine (ensures ID synchronization)
+    println!("Step 6: Indexing documents with synchronized IDs...");
+    for doc in documents.iter() {
+        // Prepare combined text for embedding
         let mut text_parts = Vec::new();
         if let Some(FieldValue::Text(title)) = doc.get_field("title") {
             text_parts.push(title.as_str());
@@ -145,33 +141,27 @@ async fn main() -> Result<()> {
 
         // Generate embedding
         let vector = embedder.embed(&combined_text).await?;
-        doc_vectors.push((doc_id, vector));
+
+        // Add to HybridEngine (automatically assigns and synchronizes IDs)
+        let doc_id = hybrid_engine.add_document(doc.clone(), vector)?;
+        println!("  Added document {}", doc_id);
     }
 
-    // Commit lexical index
-    lexical_engine.commit()?;
-
-    // Add vectors and commit
-    vector_engine.add_vectors(doc_vectors)?;
-    vector_engine.commit()?;
-    vector_engine.optimize()?;
+    // Commit and optimize both indexes
+    hybrid_engine.commit()?;
+    hybrid_engine.optimize()?;
 
     println!("  Indexing completed for {} documents\n", documents.len());
 
-    // Step 7: Create HybridEngine
-    println!("Step 7: Creating HybridEngine...");
-    let hybrid_engine = HybridEngine::new(lexical_engine, vector_engine)?;
-    println!("  HybridEngine created successfully!\n");
-
-    // Step 8: Perform various hybrid searches
+    // Step 7: Perform various hybrid searches
     println!("{}", "=".repeat(80));
-    println!("Step 8: Demonstrating Hybrid Search Strategies\n");
+    println!("Step 7: Demonstrating Hybrid Search Strategies\n");
 
     // Search 1: Balanced hybrid search
     println!("\n[1] Balanced Hybrid Search");
     println!("{}", "-".repeat(80));
     let query1_text = "rust programming";
-    let query1 = "body:rust body:programming";  // DSL query with field specification
+    let query1 = "body:rust body:programming"; // DSL query with field specification
     println!("Query: \"{}\"", query1_text);
     println!("Strategy: Balanced (50% keyword, 50% semantic)");
 
@@ -196,7 +186,7 @@ async fn main() -> Result<()> {
     println!("\n[2] Keyword-Focused Hybrid Search");
     println!("{}", "-".repeat(80));
     let query2_text = "web development";
-    let query2 = "body:web body:development";  // DSL query with field specification
+    let query2 = "body:web body:development"; // DSL query with field specification
     println!("Query: \"{}\"", query2_text);
     println!("Strategy: Keyword-focused (80% keyword, 20% semantic)");
 
@@ -221,7 +211,7 @@ async fn main() -> Result<()> {
     println!("\n[3] Semantic-Focused Hybrid Search");
     println!("{}", "-".repeat(80));
     let query3_text = "machine learning algorithms";
-    let query3 = "body:machine body:learning body:algorithms";  // DSL query with field specification
+    let query3 = "body:machine body:learning body:algorithms"; // DSL query with field specification
     println!("Query: \"{}\"", query3_text);
     println!("Strategy: Semantic-focused (30% keyword, 70% semantic)");
 
@@ -246,7 +236,7 @@ async fn main() -> Result<()> {
     println!("\n[4] Strict Hybrid Search (Require Both Matches)");
     println!("{}", "-".repeat(80));
     let query4_text = "python programming";
-    let query4 = "body:python body:programming";  // DSL query with field specification
+    let query4 = "body:python body:programming"; // DSL query with field specification
     println!("Query: \"{}\"", query4_text);
     println!("Strategy: Strict (50/50, requires both keyword and vector matches)");
 
@@ -270,12 +260,12 @@ async fn main() -> Result<()> {
 
     display_hybrid_results(&results4);
 
-    // Step 9: Compare different normalization strategies
+    // Step 8: Compare different normalization strategies
     println!("\n{}", "=".repeat(80));
-    println!("\nStep 9: Comparing Normalization Strategies\n");
+    println!("\nStep 8: Comparing Normalization Strategies\n");
 
     let comparison_query_text = "database systems";
-    let comparison_query = "body:database body:systems";  // DSL query with field specification
+    let comparison_query = "body:database body:systems"; // DSL query with field specification
     println!("Query: \"{}\"", comparison_query_text);
     println!("Strategy: Testing different score normalization methods\n");
 
@@ -310,32 +300,18 @@ async fn main() -> Result<()> {
         println!();
     }
 
-    // Summary
-    println!("{}", "=".repeat(80));
-    println!("\n=== Summary ===\n");
-    println!("This example demonstrated:");
-    println!("  ✓ Creating a HybridEngine with LexicalEngine and VectorEngine");
-    println!("  ✓ Indexing documents in both lexical and vector indexes");
-    println!("  ✓ Performing actual hybrid searches with different strategies:");
-    println!("    - Balanced: Equal weight for keyword and semantic");
-    println!("    - Keyword-focused: Emphasizes exact matching");
-    println!("    - Semantic-focused: Emphasizes conceptual similarity");
-    println!("    - Strict: Requires matches from both search types");
-    println!("  ✓ Comparing different score normalization strategies:");
-    println!("    - None: Raw scores");
-    println!("    - MinMax: Normalized to [0, 1]");
-    println!("    - ZScore: Statistical normalization");
-    println!("    - Rank: Reciprocal rank fusion");
-    println!("\nHybrid search successfully combines the best of both worlds!");
-    println!("Use keyword search for precise matching and vector search for semantic understanding.\n");
-
     Ok(())
 }
 
 #[cfg(feature = "embeddings-candle")]
 fn display_hybrid_results(results: &yatagarasu::hybrid::search::searcher::HybridSearchResults) {
     for (i, result) in results.results.iter().enumerate() {
-        println!("  {}. Doc {} - Hybrid Score: {:.4}", i + 1, result.doc_id, result.hybrid_score);
+        println!(
+            "  {}. Doc {} - Hybrid Score: {:.4}",
+            i + 1,
+            result.doc_id,
+            result.hybrid_score
+        );
 
         if let Some(kw_score) = result.keyword_score {
             println!("     Keyword Score: {:.4}", kw_score);

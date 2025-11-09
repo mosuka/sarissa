@@ -18,6 +18,7 @@ pub struct FlatIndexWriter {
     vectors: Vec<(u64, Vector)>,
     is_finalized: bool,
     total_vectors_to_add: Option<usize>,
+    next_vec_id: u64,
 }
 
 impl FlatIndexWriter {
@@ -33,6 +34,7 @@ impl FlatIndexWriter {
             vectors: Vec::new(),
             is_finalized: false,
             total_vectors_to_add: None,
+            next_vec_id: 0,
         })
     }
 
@@ -49,6 +51,7 @@ impl FlatIndexWriter {
             vectors: Vec::new(),
             is_finalized: false,
             total_vectors_to_add: None,
+            next_vec_id: 0,
         })
     }
 
@@ -98,6 +101,10 @@ impl FlatIndexWriter {
             vectors.push((doc_id, Vector::new(values)));
         }
 
+        // Calculate next_vec_id from loaded vectors
+        let max_id = vectors.iter().map(|(id, _)| *id).max().unwrap_or(0);
+        let next_vec_id = if num_vectors > 0 { max_id + 1 } else { 0 };
+
         Ok(Self {
             index_config,
             writer_config,
@@ -105,6 +112,7 @@ impl FlatIndexWriter {
             vectors,
             is_finalized: true,
             total_vectors_to_add: Some(num_vectors),
+            next_vec_id,
         })
     }
 
@@ -214,6 +222,10 @@ impl FlatIndexWriter {
 }
 
 impl VectorIndexWriter for FlatIndexWriter {
+    fn next_vector_id(&self) -> u64 {
+        self.next_vec_id
+    }
+
     fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(YatagarasuError::InvalidOperation(
@@ -223,6 +235,13 @@ impl VectorIndexWriter for FlatIndexWriter {
 
         self.validate_vectors(&vectors)?;
         self.normalize_vectors(&mut vectors);
+
+        // Update next_vec_id
+        if let Some(max_id) = vectors.iter().map(|(id, _)| *id).max() {
+            if max_id >= self.next_vec_id {
+                self.next_vec_id = max_id + 1;
+            }
+        }
 
         self.vectors = vectors;
         self.total_vectors_to_add = Some(self.vectors.len());
@@ -240,6 +259,13 @@ impl VectorIndexWriter for FlatIndexWriter {
 
         self.validate_vectors(&vectors)?;
         self.normalize_vectors(&mut vectors);
+
+        // Update next_vec_id
+        if let Some(max_id) = vectors.iter().map(|(id, _)| *id).max() {
+            if max_id >= self.next_vec_id {
+                self.next_vec_id = max_id + 1;
+            }
+        }
 
         self.vectors.extend(vectors);
         self.check_memory_limit()?;

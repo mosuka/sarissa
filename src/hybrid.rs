@@ -24,7 +24,7 @@
 //! use yatagarasu::vector::engine::VectorEngine;
 //! use yatagarasu::error::Result;
 //!
-//! fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> Result<()> {
+//! async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> Result<()> {
 //!     // Create hybrid search engine
 //!     let engine = HybridEngine::new(lexical_engine, vector_engine)?;
 //!
@@ -34,7 +34,7 @@
 //!         .vector_weight(0.4);
 //!
 //!     // Execute search
-//!     let results = engine.search(request)?;
+//!     let results = engine.search(request).await?;
 //!
 //!     Ok(())
 //! }

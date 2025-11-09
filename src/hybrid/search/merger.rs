@@ -33,10 +33,10 @@ impl ResultMerger {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::hybrid::search::searcher::HybridSearchConfig;
+    /// use yatagarasu::hybrid::search::searcher::HybridSearchParams;
     /// use yatagarasu::hybrid::search::merger::ResultMerger;
     ///
-    /// let config = HybridSearchConfig::default();
+    /// let config = HybridSearchParams::default();
     /// let merger = ResultMerger::new(config);
     /// ```
     pub fn new(config: HybridSearchParams) -> Self {

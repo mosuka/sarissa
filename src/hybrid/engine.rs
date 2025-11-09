@@ -3,8 +3,6 @@
 //! This module provides the `HybridEngine` that combines lexical and vector search
 //! engines to provide unified hybrid search functionality.
 
-use std::sync::Arc;
-
 use crate::error::Result;
 
 /// High-level hybrid search engine combining lexical and vector search.
@@ -22,13 +20,13 @@ use crate::error::Result;
 /// use yatagarasu::vector::engine::VectorEngine;
 /// use yatagarasu::vector::Vector;
 ///
-/// # fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> yatagarasu::error::Result<()> {
+/// # async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> yatagarasu::error::Result<()> {
 /// // Create hybrid engine from existing engines
 /// let engine = HybridEngine::new(lexical_engine, vector_engine)?;
 ///
 /// // Text-only search
 /// let request = HybridSearchRequest::new("rust programming");
-/// let results = engine.search(request)?;
+/// let results = engine.search(request).await?;
 ///
 /// // Hybrid search with vector
 /// let vector = Vector::new(vec![1.0, 2.0, 3.0]);
@@ -36,15 +34,17 @@ use crate::error::Result;
 ///     .with_vector(vector)
 ///     .keyword_weight(0.7)
 ///     .vector_weight(0.3);
-/// let results = engine.search(request)?;
+/// let results = engine.search(request).await?;
 /// # Ok(())
 /// # }
 /// ```
 pub struct HybridEngine {
     /// Lexical search engine for keyword-based search.
-    lexical_engine: Arc<crate::lexical::engine::LexicalEngine>,
+    lexical_engine: crate::lexical::engine::LexicalEngine,
     /// Vector search engine for semantic search.
-    vector_engine: Arc<crate::vector::engine::VectorEngine>,
+    vector_engine: crate::vector::engine::VectorEngine,
+    /// Next document ID counter for synchronized ID assignment.
+    next_doc_id: u64,
 }
 
 impl HybridEngine {
@@ -76,9 +76,73 @@ impl HybridEngine {
         vector_engine: crate::vector::engine::VectorEngine,
     ) -> Result<Self> {
         Ok(Self {
-            lexical_engine: Arc::new(lexical_engine),
-            vector_engine: Arc::new(vector_engine),
+            lexical_engine,
+            vector_engine,
+            next_doc_id: 0,
         })
+    }
+
+    /// Add a document with a vector to both lexical and vector indexes.
+    /// Returns the assigned document ID.
+    ///
+    /// This method ensures that the same document ID is used in both indexes.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc` - The document to add to the lexical index
+    /// * `vector` - The vector representation to add to the vector index
+    ///
+    /// # Returns
+    ///
+    /// The assigned document ID
+    pub fn add_document(
+        &mut self,
+        doc: crate::document::document::Document,
+        vector: crate::vector::Vector,
+    ) -> Result<u64> {
+        let doc_id = self.next_doc_id;
+        self.lexical_engine.add_document_with_id(doc_id, doc)?;
+        self.vector_engine.add_vector_with_id(doc_id, vector)?;
+        self.next_doc_id += 1;
+        Ok(doc_id)
+    }
+
+    /// Add a document with a vector using a specific document ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` - The document ID to use
+    /// * `doc` - The document to add to the lexical index
+    /// * `vector` - The vector representation to add to the vector index
+    pub fn add_document_with_id(
+        &mut self,
+        doc_id: u64,
+        doc: crate::document::document::Document,
+        vector: crate::vector::Vector,
+    ) -> Result<()> {
+        self.lexical_engine.add_document_with_id(doc_id, doc)?;
+        self.vector_engine.add_vector_with_id(doc_id, vector)?;
+
+        // Update next_doc_id if necessary
+        if doc_id >= self.next_doc_id {
+            self.next_doc_id = doc_id + 1;
+        }
+
+        Ok(())
+    }
+
+    /// Commit changes to both lexical and vector indexes.
+    pub fn commit(&mut self) -> Result<()> {
+        self.lexical_engine.commit()?;
+        self.vector_engine.commit()?;
+        Ok(())
+    }
+
+    /// Optimize both indexes.
+    pub fn optimize(&mut self) -> Result<()> {
+        self.lexical_engine.optimize()?;
+        self.vector_engine.optimize()?;
+        Ok(())
     }
 
     /// Execute a hybrid search combining keyword and semantic search.

@@ -158,19 +158,66 @@ impl InvertedIndexWriter {
         })
     }
 
-    /// Add a document to the index.
-    pub fn add_document(&mut self, doc: Document) -> Result<()> {
+    /// Add a document to the index with automatic ID assignment.
+    /// Returns the assigned document ID.
+    pub fn add_document(&mut self, doc: Document) -> Result<u64> {
         self.check_closed()?;
 
         // Schema-less mode: no validation needed
         // Analyze the document
         let analyzed_doc = self.analyze_document(doc)?;
 
-        // Add the analyzed document
+        // Add the analyzed document and return the assigned ID
         self.add_analyzed_document(analyzed_doc)
     }
 
-    /// Add an already analyzed document to the index.
+    /// Add a document to the index with a specific document ID.
+    pub fn add_document_with_id(&mut self, doc_id: u64, doc: Document) -> Result<()> {
+        self.check_closed()?;
+
+        // Analyze the document
+        let analyzed_doc = self.analyze_document(doc)?;
+
+        // Add the analyzed document with the specified ID
+        self.add_analyzed_document_with_id(doc_id, analyzed_doc)
+    }
+
+    /// Add an already analyzed document to the index with a specific document ID.
+    pub fn add_analyzed_document_with_id(
+        &mut self,
+        doc_id: u64,
+        analyzed_doc: AnalyzedDocument,
+    ) -> Result<()> {
+        self.check_closed()?;
+
+        // Update next_doc_id if necessary to avoid ID collisions
+        if doc_id >= self.next_doc_id {
+            self.next_doc_id = doc_id + 1;
+        }
+
+        // Add field values to DocValues
+        for (field_name, value) in &analyzed_doc.stored_fields {
+            self.doc_values_writer
+                .add_value(doc_id, field_name, value.clone());
+        }
+
+        // Add to inverted index
+        self.add_analyzed_document_to_index(doc_id, &analyzed_doc)?;
+
+        // Buffer the document with its assigned ID
+        self.buffered_docs.push((doc_id, analyzed_doc));
+        self.stats.docs_added += 1;
+
+        // Check if we need to flush
+        if self.should_flush() {
+            self.flush_segment()?;
+        }
+
+        Ok(())
+    }
+
+    /// Add an already analyzed document to the index with automatic ID assignment.
+    /// Returns the assigned document ID.
     ///
     /// This method allows you to add pre-analyzed documents directly,
     /// bypassing the internal document analysis step. This is useful when:
@@ -204,34 +251,19 @@ impl InvertedIndexWriter {
     ///
     /// let doc_parser = DocumentParser::new(Arc::new(per_field));
     /// let analyzed = doc_parser.parse(doc).unwrap();
-    /// writer.add_analyzed_document(analyzed).unwrap();
+    /// let doc_id = writer.add_analyzed_document(analyzed).unwrap();
     /// ```
-    pub fn add_analyzed_document(&mut self, analyzed_doc: AnalyzedDocument) -> Result<()> {
+    pub fn add_analyzed_document(&mut self, analyzed_doc: AnalyzedDocument) -> Result<u64> {
         self.check_closed()?;
 
         // Assign document ID
         let doc_id = self.next_doc_id;
         self.next_doc_id += 1;
 
-        // Add field values to DocValues
-        for (field_name, value) in &analyzed_doc.stored_fields {
-            self.doc_values_writer
-                .add_value(doc_id, field_name, value.clone());
-        }
+        // Add the analyzed document with the assigned ID
+        self.add_analyzed_document_with_id(doc_id, analyzed_doc)?;
 
-        // Add to inverted index
-        self.add_analyzed_document_to_index(doc_id, &analyzed_doc)?;
-
-        // Buffer the document with its assigned ID
-        self.buffered_docs.push((doc_id, analyzed_doc));
-        self.stats.docs_added += 1;
-
-        // Check if we need to flush
-        if self.should_flush() {
-            self.flush_segment()?;
-        }
-
-        Ok(())
+        Ok(doc_id)
     }
 
     /// Analyze a document into terms.
@@ -795,12 +827,20 @@ impl Drop for InvertedIndexWriter {
 
 // Implement LexicalIndexWriter trait for compatibility with existing code
 impl LexicalIndexWriter for InvertedIndexWriter {
-    fn add_document(&mut self, doc: Document) -> Result<()> {
+    fn add_document(&mut self, doc: Document) -> Result<u64> {
         InvertedIndexWriter::add_document(self, doc)
     }
 
-    fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<()> {
+    fn add_document_with_id(&mut self, doc_id: u64, doc: Document) -> Result<()> {
+        InvertedIndexWriter::add_document_with_id(self, doc_id, doc)
+    }
+
+    fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<u64> {
         InvertedIndexWriter::add_analyzed_document(self, doc)
+    }
+
+    fn add_analyzed_document_with_id(&mut self, doc_id: u64, doc: AnalyzedDocument) -> Result<()> {
+        InvertedIndexWriter::add_analyzed_document_with_id(self, doc_id, doc)
     }
 
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {

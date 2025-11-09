@@ -82,6 +82,9 @@ impl Default for VectorIndexWriterConfig {
 /// // writer.write("my_index").unwrap();
 /// ```
 pub trait VectorIndexWriter: Send + Sync {
+    /// Get the next available vector ID (for automatic ID assignment).
+    fn next_vector_id(&self) -> u64;
+
     /// Build an index from a collection of vectors.
     fn build(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()>;
 
