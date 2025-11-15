@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::Result;
+use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization;
-use crate::vector::core::{DistanceMetric, Vector};
+use crate::vector::core::vector::Vector;
 
 /// Vector normalization methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,7 +60,7 @@ impl std::error::Error for VectorValidationError {}
 /// Helper functions for vector operations.
 pub mod utils {
     use super::*;
-    use crate::vector::core::DistanceMetric;
+    use crate::vector::core::distance::DistanceMetric;
 
     /// Validate a vector against requirements.
     pub fn validate_vector(vector: &Vector, expected_dimension: Option<usize>) -> Result<()> {
@@ -165,7 +166,7 @@ pub mod utils {
 ///
 /// ```rust
 /// use yatagarasu::vector::index::config::{VectorIndexConfig, HnswIndexConfig};
-/// use yatagarasu::vector::core::DistanceMetric;
+/// use yatagarasu::vector::core::distance::DistanceMetric;
 ///
 /// let hnsw_config = HnswIndexConfig {
 ///     dimension: 384,

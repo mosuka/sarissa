@@ -24,7 +24,7 @@ use crate::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-multimodal")]
 use crate::error::{Result, YatagarasuError};
 #[cfg(feature = "embeddings-multimodal")]
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 
 /// Candle-based multimodal embedder using CLIP models from HuggingFace.
 ///

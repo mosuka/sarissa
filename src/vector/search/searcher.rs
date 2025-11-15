@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector::core::Vector;
+use crate::vector::core::vector::Vector;
 
 /// Vector search request combining query vector and configuration.
 #[derive(Debug, Clone)]
@@ -106,7 +106,7 @@ pub struct VectorSearchResult {
     /// Distance score (lower is more similar).
     pub distance: f32,
     /// Optional vector data.
-    pub vector: Option<crate::vector::Vector>,
+    pub vector: Option<Vector>,
     /// Result metadata.
     pub metadata: std::collections::HashMap<String, String>,
 }

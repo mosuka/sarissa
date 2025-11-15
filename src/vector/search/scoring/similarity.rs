@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector::{DistanceMetric, Vector};
+use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::vector::Vector;
 
 /// Advanced similarity metrics beyond basic distance functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

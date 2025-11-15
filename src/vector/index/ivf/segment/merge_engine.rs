@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::storage::Storage;
-use crate::vector::core::Vector;
+use crate::vector::core::vector::Vector;
 
 use super::manager::ManagedSegmentInfo;
 

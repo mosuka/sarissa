@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
+use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::vector::Vector;
 use crate::vector::index::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::index::reader::{VectorIndexReader, VectorIterator};
-use crate::vector::{DistanceMetric, Vector};
 
 /// Reader for IVF (Inverted File) vector indexes.
 #[derive(Debug)]

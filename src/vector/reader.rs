@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::vector::{DistanceMetric, Vector};
+use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::vector::Vector;
 
 /// Statistics about a vector index.
 #[derive(Debug, Clone)]

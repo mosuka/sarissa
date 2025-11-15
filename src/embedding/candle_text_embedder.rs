@@ -21,7 +21,7 @@ use crate::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use crate::error::{Result, YatagarasuError};
 #[cfg(feature = "embeddings-candle")]
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 
 /// Candle-based text embedder using BERT models from HuggingFace.
 ///

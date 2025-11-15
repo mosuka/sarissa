@@ -12,13 +12,12 @@ pub mod flat;
 pub mod hnsw;
 pub mod ivf;
 pub mod reader;
-pub mod reader_factory;
 
 use std::sync::{Arc, RwLock};
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
-use crate::vector::core::Vector;
+use crate::vector::core::vector::Vector;
 use crate::vector::index::config::{
     FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig,
 };

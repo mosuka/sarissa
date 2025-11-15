@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
+use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::vector::Vector;
 use crate::vector::index::flat::reader::FlatVectorIndexReader;
 use crate::vector::index::flat::searcher::FlatVectorSearcher;
 use crate::vector::index::hnsw::reader::HnswIndexReader;
@@ -18,7 +20,6 @@ use crate::vector::index::reader::VectorIndexReader;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
-use crate::vector::{DistanceMetric, Vector};
 
 /// A high-level unified vector engine that provides both indexing and searching capabilities.
 /// This is similar to the lexical SearchEngine but for vector search.
@@ -29,7 +30,8 @@ use crate::vector::{DistanceMetric, Vector};
 /// use yatagarasu::vector::engine::VectorEngine;
 /// use yatagarasu::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
 /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-/// use yatagarasu::vector::{Vector, DistanceMetric};
+/// use yatagarasu::vector::core::distance::DistanceMetric;
+/// use yatagarasu::vector::core::vector::Vector;
 /// use yatagarasu::vector::search::searcher::VectorSearchRequest;
 /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use yatagarasu::document::document::Document;
@@ -526,7 +528,7 @@ mod tests {
     use super::*;
     use crate::document::field::{TextOption, VectorOption};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    use crate::vector::core::DistanceMetric;
+    use crate::vector::core::distance::DistanceMetric;
     use crate::vector::index::config::{FlatIndexConfig, VectorIndexConfig};
     use crate::vector::index::factory::VectorIndexFactory;
     use std::sync::Arc;

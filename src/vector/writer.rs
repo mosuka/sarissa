@@ -7,7 +7,7 @@
 //! - `IvfIndexWriter` in the `ivf` module for memory-efficient search
 
 use crate::error::Result;
-use crate::vector::core::Vector;
+use crate::vector::core::vector::Vector;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for vector index writers common to all index types.

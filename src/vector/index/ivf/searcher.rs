@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::vector::core::Vector;
+use crate::vector::core::vector::Vector;
 use crate::vector::index::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
@@ -71,7 +71,7 @@ impl VectorSearcher for IvfSearcher {
         };
 
         // Calculate similarities for all vectors
-        let mut candidates: Vec<(u64, String, f32, f32, crate::vector::Vector)> =
+        let mut candidates: Vec<(u64, String, f32, f32, Vector)> =
             Vec::with_capacity(vector_ids.len());
 
         for (doc_id, field_name) in vector_ids {

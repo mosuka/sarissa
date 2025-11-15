@@ -7,8 +7,3 @@
 pub mod distance;
 pub mod quantization;
 pub mod vector;
-
-// Re-export commonly used types
-pub use distance::DistanceMetric;
-pub use quantization::QuantizationMethod;
-pub use vector::Vector;

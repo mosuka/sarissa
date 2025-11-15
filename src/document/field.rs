@@ -58,7 +58,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::lexical::index::inverted::query::geo::GeoPoint;
-use crate::vector::DistanceMetric;
+use crate::vector::core::distance::DistanceMetric;
 
 /// A field combines a value with indexing options.
 ///

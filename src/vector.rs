@@ -18,6 +18,3 @@ pub mod search;
 
 pub mod engine;
 pub mod writer;
-
-// Re-export commonly used types from core
-pub use core::{DistanceMetric, Vector};

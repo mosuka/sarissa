@@ -1,9 +1,11 @@
 //! Vector index reader traits and implementations.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::error::Result;
-use crate::vector::{DistanceMetric, Vector};
+use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::vector::Vector;
 
 /// Statistics about a vector index.
 #[derive(Debug, Clone)]
@@ -321,5 +323,32 @@ impl VectorIterator for SimpleVectorIterator {
     fn reset(&mut self) -> Result<()> {
         self.position = 0;
         Ok(())
+    }
+}
+
+/// Factory for creating vector index readers.
+///
+/// This provides a single entry point for constructing concrete reader
+/// implementations (Flat, HNSW, IVF) from serialized index data.
+pub struct VectorIndexReaderFactory;
+
+impl VectorIndexReaderFactory {
+    /// Create a reader for a specific index type from serialized bytes.
+    pub fn create_reader(
+        index_type: &str,
+        index_data: &[u8],
+    ) -> Result<Arc<dyn VectorIndexReader>> {
+        use crate::vector::index::flat::reader::FlatVectorIndexReader;
+        use crate::vector::index::hnsw::reader::HnswIndexReader;
+        use crate::vector::index::ivf::reader::IvfIndexReader;
+
+        match index_type.to_lowercase().as_str() {
+            "flat" => Ok(Arc::new(FlatVectorIndexReader::from_bytes(index_data)?)),
+            "hnsw" => Ok(Arc::new(HnswIndexReader::from_bytes(index_data)?)),
+            "ivf" => Ok(Arc::new(IvfIndexReader::from_bytes(index_data)?)),
+            _ => Err(crate::error::YatagarasuError::InvalidOperation(format!(
+                "Unknown index type: {index_type}"
+            ))),
+        }
     }
 }

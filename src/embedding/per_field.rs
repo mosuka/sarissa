@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::Result;
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 
 /// A per-field embedder that applies different embedders to different fields.
 ///

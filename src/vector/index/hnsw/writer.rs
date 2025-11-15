@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
-use crate::vector::core::Vector;
+use crate::vector::core::vector::Vector;
 use crate::vector::index::HnswIndexConfig;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
