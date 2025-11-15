@@ -50,7 +50,7 @@ pub struct ValidationReport {
 }
 
 /// Trait for reading vector indexes (similar to IndexReader for inverted indexes).
-pub trait VectorIndexReader: Send + Sync {
+pub trait VectorIndexReader: Send + Sync + std::fmt::Debug {
     /// Cast to Any for downcasting to concrete types.
     fn as_any(&self) -> &dyn std::any::Any;
 
@@ -121,6 +121,7 @@ pub trait VectorIterator: Send {
 
 /// Simple in-memory vector reader for basic use cases.
 /// This is a lightweight reader that holds vectors in memory.
+#[derive(Debug)]
 pub struct SimpleVectorReader {
     vectors: HashMap<(u64, String), Vector>,
     vector_ids: Vec<(u64, String)>,

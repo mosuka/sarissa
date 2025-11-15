@@ -10,6 +10,7 @@ use crate::vector::reader::{VectorIndexReader, VectorIterator};
 use crate::vector::{DistanceMetric, Vector};
 
 /// Reader for IVF (Inverted File) vector indexes.
+#[derive(Debug)]
 pub struct IvfIndexReader {
     vectors: HashMap<(u64, String), Vector>,
     vector_ids: Vec<(u64, String)>,

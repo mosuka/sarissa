@@ -437,6 +437,15 @@ impl VectorEngine {
         searcher.search(&request)
     }
 
+    /// Count the number of vectors matching the request.
+    ///
+    /// This method counts vectors that match the field filter in the request.
+    /// It's more efficient than searching when you only need the count.
+    pub fn count(&self, request: VectorSearchRequest) -> Result<u64> {
+        let searcher = self.get_or_create_searcher()?;
+        searcher.count(request)
+    }
+
     /// Get build progress (0.0 to 1.0).
     pub fn progress(&self) -> f32 {
         self.writer

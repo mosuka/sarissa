@@ -9,6 +9,7 @@ use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 
 /// IVF (Inverted File) vector searcher that performs memory-efficient approximate search.
+#[derive(Debug)]
 pub struct IvfSearcher {
     index_reader: Arc<dyn VectorIndexReader>,
     n_probe: usize, // Number of clusters to search
@@ -119,5 +120,17 @@ impl VectorSearcher for IvfSearcher {
         results.search_time_ms = start.elapsed().as_secs_f64() * 1000.0;
         results.candidates_examined = candidates_len;
         Ok(results)
+    }
+
+    fn count(&self, request: VectorSearchRequest) -> Result<u64> {
+        // Get all vector IDs with field names
+        let vector_ids = self.index_reader.vector_ids()?;
+
+        // Filter by field_name if specified
+        if let Some(ref field_name) = request.field_name {
+            Ok(vector_ids.iter().filter(|(_, f)| f == field_name).count() as u64)
+        } else {
+            Ok(vector_ids.len() as u64)
+        }
     }
 }

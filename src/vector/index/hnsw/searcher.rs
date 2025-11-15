@@ -8,6 +8,7 @@ use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 
 /// HNSW vector searcher that performs approximate nearest neighbor search.
+#[derive(Debug)]
 pub struct HnswSearcher {
     index_reader: Arc<dyn VectorIndexReader>,
     ef_search: usize,
@@ -94,5 +95,17 @@ impl VectorSearcher for HnswSearcher {
 
         results.search_time_ms = start.elapsed().as_secs_f64() * 1000.0;
         Ok(results)
+    }
+
+    fn count(&self, request: VectorSearchRequest) -> Result<u64> {
+        // Get all vector IDs with field names
+        let vector_ids = self.index_reader.vector_ids()?;
+
+        // Filter by field_name if specified
+        if let Some(ref field_name) = request.field_name {
+            Ok(vector_ids.iter().filter(|(_, f)| f == field_name).count() as u64)
+        } else {
+            Ok(vector_ids.len() as u64)
+        }
     }
 }

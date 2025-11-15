@@ -82,7 +82,7 @@ impl Default for VectorIndexWriterConfig {
 /// // writer.write("my_index").unwrap();
 /// ```
 #[async_trait::async_trait]
-pub trait VectorIndexWriter: Send + Sync {
+pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     /// Get the next available vector ID (for automatic ID assignment).
     fn next_vector_id(&self) -> u64;
 
@@ -171,7 +171,7 @@ pub trait VectorIndexWriter: Send + Sync {
     fn rollback(&mut self) -> Result<()>;
 
     /// Get the number of pending documents not yet committed.
-    fn pending_docs(&self) -> usize;
+    fn pending_docs(&self) -> u64;
 
     /// Close the writer and release resources.
     fn close(&mut self) -> Result<()>;

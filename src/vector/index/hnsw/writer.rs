@@ -9,6 +9,7 @@ use crate::vector::index::HnswIndexConfig;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Builder for HNSW vector indexes (approximate search).
+#[derive(Debug)]
 pub struct HnswIndexWriter {
     index_config: HnswIndexConfig,
     writer_config: VectorIndexWriterConfig,
@@ -217,7 +218,7 @@ impl HnswIndexWriter {
         // 3. Insert vector and create connections using greedy search
         // 4. Maintain M connections per layer with pruning
 
-        println!("Building HNSW graph with {} vectors", self.vectors.len());
+        println!("Building HNSW graph with {} vectors", self.vectors.len() as u64);
         println!(
             "Parameters: M={}, efConstruction={}",
             self.index_config.m, self.index_config.ef_construction
@@ -399,7 +400,7 @@ impl VectorIndexWriter for HnswIndexWriter {
             if total == 0 {
                 if self.is_finalized { 1.0 } else { 0.0 }
             } else {
-                let current = self.vectors.len() as f32;
+                let current = self.vectors.len() as u64 as f32;
                 let progress = current / total as f32;
                 if self.is_finalized {
                     1.0
@@ -477,7 +478,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         let mut output = storage.create_output(&file_name)?;
 
         // Write metadata
-        output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
+        output.write_all(&(self.vectors.len() as u64 as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.dimension as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.m as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.ef_construction as u32).to_le_bytes())?;
@@ -531,11 +532,11 @@ impl VectorIndexWriter for HnswIndexWriter {
         Ok(())
     }
 
-    fn pending_docs(&self) -> usize {
+    fn pending_docs(&self) -> u64 {
         if self.is_finalized {
             0
         } else {
-            self.vectors.len()
+            self.vectors.len() as u64
         }
     }
 

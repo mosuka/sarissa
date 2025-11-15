@@ -10,6 +10,7 @@ use crate::vector::core::Vector;
 use crate::vector::index::IvfIndexConfig;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
+#[derive(Debug)]
 /// Builder for IVF vector indexes (memory-efficient search).
 pub struct IvfIndexWriter {
     index_config: IvfIndexConfig,
@@ -252,7 +253,7 @@ impl IvfIndexWriter {
             return Err(YatagarasuError::InvalidOperation(format!(
                 "Cannot create {} clusters from {} vectors",
                 self.index_config.n_clusters,
-                self.vectors.len()
+                self.vectors.len() as u64
             )));
         }
 
@@ -346,7 +347,7 @@ impl IvfIndexWriter {
 
     /// Assign each vector to its nearest cluster.
     fn assign_vectors_to_clusters(&self) -> Vec<usize> {
-        if self.writer_config.parallel_build && self.vectors.len() > 1000 {
+        if self.writer_config.parallel_build && self.vectors.len() as u64 > 1000 {
             self.vectors
                 .par_iter()
                 .map(|(_, _, vector)| self.find_nearest_centroid(vector))
@@ -647,7 +648,7 @@ impl VectorIndexWriter for IvfIndexWriter {
             if total == 0 {
                 if self.is_finalized { 1.0 } else { 0.0 }
             } else {
-                let current = self.vectors.len() as f32;
+                let current = self.vectors.len() as u64 as f32;
                 let progress = current / total as f32;
                 if self.is_finalized {
                     1.0
@@ -730,7 +731,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         let mut output = storage.create_output(&file_name)?;
 
         // Write metadata
-        output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
+        output.write_all(&(self.vectors.len() as u64 as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.dimension as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.n_clusters as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.n_probe as u32).to_le_bytes())?;
@@ -794,11 +795,11 @@ impl VectorIndexWriter for IvfIndexWriter {
         Ok(())
     }
 
-    fn pending_docs(&self) -> usize {
+    fn pending_docs(&self) -> u64 {
         if self.is_finalized {
             0
         } else {
-            self.vectors.len()
+            self.vectors.len() as u64
         }
     }
 

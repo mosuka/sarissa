@@ -27,11 +27,11 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Get a reader for this index.
     ///
     /// Returns a reader that can be used to query the index.
-    fn reader(&self) -> Result<Box<dyn LexicalIndexReader>>;
+    fn reader(&self) -> Result<Arc<dyn LexicalIndexReader>>;
 
     /// Get a writer for this index.
     ///
-    /// Returns a writer that can be used to add or update documents.
+    /// Returns a writer that can be used to add documents to the index.
     fn writer(&self) -> Result<Box<dyn LexicalIndexWriter>>;
 
     /// Get the storage backend for this index.

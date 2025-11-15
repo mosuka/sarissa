@@ -10,6 +10,7 @@ use crate::vector::reader::{VectorIndexReader, VectorIterator};
 use crate::vector::{DistanceMetric, Vector};
 
 /// Reader for HNSW (Hierarchical Navigable Small World) vector indexes.
+#[derive(Debug)]
 pub struct HnswIndexReader {
     vectors: HashMap<(u64, String), Vector>,
     vector_ids: Vec<(u64, String)>,

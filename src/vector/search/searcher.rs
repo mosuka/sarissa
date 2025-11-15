@@ -193,9 +193,12 @@ impl Default for VectorSearchResults {
 }
 
 /// Trait for vector searchers.
-pub trait VectorSearcher: Send + Sync {
+pub trait VectorSearcher: Send + Sync + std::fmt::Debug {
     /// Execute a vector similarity search.
     fn search(&self, request: &VectorSearchRequest) -> Result<VectorSearchResults>;
+
+    /// Count the number of vectors matching the query.
+    fn count(&self, request: VectorSearchRequest) -> Result<u64>;
 
     /// Warm up the searcher (pre-load data, etc.).
     fn warmup(&mut self) -> Result<()> {

@@ -256,7 +256,7 @@ impl InvertedIndex {
 }
 
 impl LexicalIndex for InvertedIndex {
-    fn reader(&self) -> Result<Box<dyn LexicalIndexReader>> {
+    fn reader(&self) -> Result<Arc<dyn LexicalIndexReader>> {
         self.check_closed()?;
 
         let segments = self.load_segments()?;
@@ -268,7 +268,7 @@ impl LexicalIndex for InvertedIndex {
         };
 
         let reader = InvertedIndexReader::new(segments, self.storage.clone(), reader_config)?;
-        Ok(Box::new(reader))
+        Ok(Arc::new(reader))
     }
 
     fn writer(&self) -> Result<Box<dyn LexicalIndexWriter>> {

@@ -119,7 +119,7 @@ pub struct LexicalEngine {
     /// The underlying lexical index.
     index: Box<dyn LexicalIndex>,
     /// The reader for executing queries (cached for efficiency).
-    reader: RefCell<Option<Box<dyn LexicalIndexReader>>>,
+    reader: RefCell<Option<Arc<dyn LexicalIndexReader>>>,
     /// The writer for adding/updating documents (cached for efficiency).
     writer: RefCell<Option<Box<dyn LexicalIndexWriter>>>,
     /// The searcher for executing searches (cached for efficiency).
@@ -194,7 +194,7 @@ impl LexicalEngine {
 
     /// Get or create a reader for this engine.
     #[allow(dead_code)]
-    fn get_or_create_reader(&self) -> Result<RefMut<'_, Box<dyn LexicalIndexReader>>> {
+    fn get_or_create_reader(&self) -> Result<RefMut<'_, Arc<dyn LexicalIndexReader>>> {
         {
             let mut reader_ref = self.reader.borrow_mut();
             if reader_ref.is_none() {

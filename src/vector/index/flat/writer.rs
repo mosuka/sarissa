@@ -11,6 +11,7 @@ use crate::vector::index::FlatIndexConfig;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Builder for flat vector indexes (exact search).
+#[derive(Debug)]
 pub struct FlatIndexWriter {
     index_config: FlatIndexConfig,
     writer_config: VectorIndexWriterConfig,
@@ -197,7 +198,7 @@ impl FlatIndexWriter {
 
     /// Sort vectors by document ID and field name for better cache locality.
     fn sort_vectors(&mut self) {
-        if self.writer_config.parallel_build && self.vectors.len() > 10000 {
+        if self.writer_config.parallel_build && self.vectors.len() as u64 > 10000 {
             self.vectors
                 .par_sort_by(|(doc_id_a, field_a, _), (doc_id_b, field_b, _)| {
                     doc_id_a.cmp(doc_id_b).then_with(|| field_a.cmp(field_b))
@@ -386,7 +387,7 @@ impl VectorIndexWriter for FlatIndexWriter {
             if total == 0 {
                 if self.is_finalized { 1.0 } else { 0.0 }
             } else {
-                let current = self.vectors.len() as f32;
+                let current = self.vectors.len() as u64 as f32;
                 let progress = current / total as f32;
                 if self.is_finalized {
                     1.0
@@ -453,7 +454,7 @@ impl VectorIndexWriter for FlatIndexWriter {
         let mut output = storage.create_output(&file_name)?;
 
         // Write metadata
-        output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
+        output.write_all(&(self.vectors.len() as u64 as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.dimension as u32).to_le_bytes())?;
 
         // Write vectors with field names
@@ -512,11 +513,11 @@ impl VectorIndexWriter for FlatIndexWriter {
         Ok(())
     }
 
-    fn pending_docs(&self) -> usize {
+    fn pending_docs(&self) -> u64 {
         if self.is_finalized {
             0
         } else {
-            self.vectors.len()
+            self.vectors.len() as u64
         }
     }
 

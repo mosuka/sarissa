@@ -10,6 +10,7 @@ use crate::vector::reader::{VectorIndexReader, VectorIterator};
 use crate::vector::{DistanceMetric, Vector};
 
 /// Reader for flat (brute-force) vector indexes.
+#[derive(Debug)]
 pub struct FlatVectorIndexReader {
     vectors: HashMap<(u64, String), Vector>,
     vector_ids: Vec<(u64, String)>,
