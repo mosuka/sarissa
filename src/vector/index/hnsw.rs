@@ -1,6 +1,8 @@
 //! HNSW vector index implementation.
 
 pub mod reader;
+pub mod segment;
+pub mod maintenance;
 pub mod searcher;
 pub mod writer;
 
@@ -9,8 +11,9 @@ use std::sync::Arc;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
+use crate::vector::index::config::HnswIndexConfig;
 use crate::vector::index::hnsw::writer::HnswIndexWriter;
-use crate::vector::index::{HnswIndexConfig, VectorIndex, VectorIndexStats};
+use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 

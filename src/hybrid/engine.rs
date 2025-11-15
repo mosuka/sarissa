@@ -82,48 +82,43 @@ impl HybridEngine {
         })
     }
 
-    /// Add a document with a vector to both lexical and vector indexes.
+    /// Add a document to both lexical and vector indexes.
     /// Returns the assigned document ID.
     ///
     /// This method ensures that the same document ID is used in both indexes.
+    /// The document should contain both text fields (for lexical indexing) and
+    /// vector fields (for vector indexing).
     ///
     /// # Arguments
     ///
-    /// * `doc` - The document to add to the lexical index
-    /// * `vector` - The vector representation to add to the vector index
+    /// * `doc` - The document to add (containing both text and vector fields)
     ///
     /// # Returns
     ///
     /// The assigned document ID
-    pub fn add_document(
+    pub async fn add_document(
         &mut self,
         doc: crate::document::document::Document,
-        vector: crate::vector::Vector,
     ) -> Result<u64> {
         let doc_id = self.next_doc_id;
-        self.lexical_engine.add_document_with_id(doc_id, doc)?;
-        self.vector_engine
-            .add_vector_with_id(doc_id, "embedding".to_string(), vector)?;
-        self.next_doc_id += 1;
+        self.add_document_with_id(doc_id, doc).await?;
         Ok(doc_id)
     }
 
-    /// Add a document with a vector using a specific document ID.
+    /// Add a document using a specific document ID.
     ///
     /// # Arguments
     ///
     /// * `doc_id` - The document ID to use
-    /// * `doc` - The document to add to the lexical index
-    /// * `vector` - The vector representation to add to the vector index
-    pub fn add_document_with_id(
+    /// * `doc` - The document to add (containing both text and vector fields)
+    pub async fn add_document_with_id(
         &mut self,
         doc_id: u64,
         doc: crate::document::document::Document,
-        vector: crate::vector::Vector,
     ) -> Result<()> {
-        self.lexical_engine.add_document_with_id(doc_id, doc)?;
-        self.vector_engine
-            .add_vector_with_id(doc_id, "embedding".to_string(), vector)?;
+        // Clone the document for both indexes since they'll process different fields
+        self.lexical_engine.add_document_with_id(doc_id, doc.clone())?;
+        self.vector_engine.add_document_with_id(doc_id, doc).await?;
 
         // Update next_doc_id if necessary
         if doc_id >= self.next_doc_id {

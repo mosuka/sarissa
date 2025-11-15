@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector::Vector;
+use crate::vector::core::Vector;
 
 /// Vector search request combining query vector and configuration.
 #[derive(Debug, Clone)]
@@ -78,7 +78,7 @@ pub struct VectorSearchParams {
     /// Search timeout in milliseconds.
     pub timeout_ms: Option<u64>,
     /// Reranking configuration.
-    pub reranking: Option<crate::vector::search::ranking::RankingConfig>,
+    pub reranking: Option<crate::vector::search::scoring::ranking::RankingConfig>,
 }
 
 impl Default for VectorSearchParams {

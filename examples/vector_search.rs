@@ -33,9 +33,9 @@ use yatagarasu::storage::{StorageConfig, StorageFactory};
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::vector::index::factory::VectorIndexFactory;
+use yatagarasu::vector::index::config::{FlatIndexConfig, VectorIndexConfig};
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::vector::index::{FlatIndexConfig, VectorIndexConfig};
+use yatagarasu::vector::index::factory::VectorIndexFactory;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::vector::search::searcher::VectorSearchRequest;
 
@@ -61,6 +61,7 @@ async fn main() -> Result<()> {
 
     let flat_config = FlatIndexConfig {
         dimension: embedding_dim,
+        embedder: Arc::clone(&embedder_arc),
         ..Default::default()
     };
     let config = VectorIndexConfig::Flat(flat_config);
@@ -103,7 +104,7 @@ async fn main() -> Result<()> {
 
         // Add document to engine (async - converts text to vectors internally)
         vector_engine
-            .add_document_with_id(doc_id as u64, doc, Arc::clone(&embedder_arc))
+            .add_document_with_id(doc_id as u64, doc)
             .await?;
         println!("  Added document {}: {}", doc_id, title);
         println!("    - title_embedding: \"{}\"", title);

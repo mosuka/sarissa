@@ -1,6 +1,8 @@
 //! IVF vector index implementation.
 
 pub mod reader;
+pub mod segment;
+pub mod maintenance;
 pub mod searcher;
 pub mod writer;
 
@@ -9,8 +11,9 @@ use std::sync::Arc;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
+use crate::vector::index::config::IvfIndexConfig;
 use crate::vector::index::ivf::writer::IvfIndexWriter;
-use crate::vector::index::{IvfIndexConfig, VectorIndex, VectorIndexStats};
+use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 

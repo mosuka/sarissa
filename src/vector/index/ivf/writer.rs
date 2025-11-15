@@ -6,7 +6,7 @@ use rayon::prelude::*;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
-use crate::vector::Vector;
+use crate::vector::core::Vector;
 use crate::vector::index::IvfIndexConfig;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
@@ -488,9 +488,86 @@ impl IvfIndexWriter {
     }
 }
 
+#[async_trait::async_trait]
 impl VectorIndexWriter for IvfIndexWriter {
     fn next_vector_id(&self) -> u64 {
         self.next_vec_id
+    }
+
+    async fn add_document(
+        &mut self,
+        doc: crate::document::document::Document,
+    ) -> Result<u64> {
+        use crate::document::field::FieldValue;
+        use crate::embedding::per_field::PerFieldEmbedder;
+
+        let doc_id = self.next_vec_id;
+        let mut vectors = Vec::new();
+
+        for (field_name, field_value) in doc.fields().iter() {
+            if let FieldValue::Vector(text) = field_value {
+                // Check if embedder is PerFieldEmbedder for field-specific embedding
+                let vector = if let Some(per_field) = self
+                    .index_config
+                    .embedder
+                    .as_any()
+                    .downcast_ref::<PerFieldEmbedder>()
+                {
+                    per_field.embed_field(field_name, text.as_str()).await?
+                } else {
+                    self.index_config.embedder.embed(text.as_str()).await?
+                };
+
+                vectors.push((doc_id, field_name.clone(), vector));
+            }
+        }
+
+        if !vectors.is_empty() {
+            self.add_vectors(vectors)?;
+        }
+
+        self.next_vec_id += 1;
+        Ok(doc_id)
+    }
+
+    async fn add_document_with_id(
+        &mut self,
+        doc_id: u64,
+        doc: crate::document::document::Document,
+    ) -> Result<()> {
+        use crate::document::field::FieldValue;
+        use crate::embedding::per_field::PerFieldEmbedder;
+
+        let mut vectors = Vec::new();
+
+        for (field_name, field_value) in doc.fields().iter() {
+            if let FieldValue::Vector(text) = field_value {
+                // Check if embedder is PerFieldEmbedder for field-specific embedding
+                let vector = if let Some(per_field) = self
+                    .index_config
+                    .embedder
+                    .as_any()
+                    .downcast_ref::<PerFieldEmbedder>()
+                {
+                    per_field.embed_field(field_name, text.as_str()).await?
+                } else {
+                    self.index_config.embedder.embed(text.as_str()).await?
+                };
+
+                vectors.push((doc_id, field_name.clone(), vector));
+            }
+        }
+
+        if !vectors.is_empty() {
+            self.add_vectors(vectors)?;
+        }
+
+        // Update next_vec_id if necessary
+        if doc_id >= self.next_vec_id {
+            self.next_vec_id = doc_id + 1;
+        }
+
+        Ok(())
     }
 
     fn build(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
@@ -689,5 +766,49 @@ impl VectorIndexWriter for IvfIndexWriter {
 
     fn has_storage(&self) -> bool {
         self.storage.is_some()
+    }
+
+    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
+        // Simplified implementation - returns 0
+        // TODO: Implement proper deletion with metadata storage
+        let _field = field;
+        let _value = value;
+        Ok(0)
+    }
+
+    async fn update_document(
+        &mut self,
+        field: &str,
+        value: &str,
+        doc: crate::document::document::Document,
+    ) -> Result<()> {
+        self.delete_documents(field, value)?;
+        self.add_document(doc).await?;
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        self.vectors.clear();
+        self.is_finalized = false;
+        self.next_vec_id = 0;
+        Ok(())
+    }
+
+    fn pending_docs(&self) -> usize {
+        if self.is_finalized {
+            0
+        } else {
+            self.vectors.len()
+        }
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.vectors.clear();
+        self.is_finalized = true;
+        Ok(())
+    }
+
+    fn is_closed(&self) -> bool {
+        self.is_finalized && self.vectors.is_empty()
     }
 }

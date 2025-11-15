@@ -1,7 +1,9 @@
 //! Flat vector index implementation.
 
+pub mod maintenance;
 pub mod reader;
 pub mod searcher;
+pub mod segment;
 pub mod writer;
 
 use std::path::Path;
@@ -9,8 +11,9 @@ use std::sync::Arc;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
+use crate::vector::index::config::FlatIndexConfig;
 use crate::vector::index::flat::writer::FlatIndexWriter;
-use crate::vector::index::{FlatIndexConfig, VectorIndex, VectorIndexStats};
+use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 

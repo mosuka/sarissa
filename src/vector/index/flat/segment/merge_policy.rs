@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::segment_manager::{ManagedSegmentInfo, SegmentManagerConfig};
+use super::manager::{ManagedSegmentInfo, SegmentManagerConfig};
 
 /// Merge policy configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
