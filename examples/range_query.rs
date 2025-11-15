@@ -52,9 +52,8 @@ fn main() -> Result<()> {
             .add_text("title", "Introduction to Algorithms", TextOption::default())
             .add_text(
                 "description",
-                "Comprehensive guide to algorithms and data structures"
-            ,
-                TextOption::default()
+                "Comprehensive guide to algorithms and data structures",
+                TextOption::default(),
             )
             .add_float("price", 89.99, FloatOption::default())
             .add_float("rating", 4.8, FloatOption::default())
@@ -66,9 +65,8 @@ fn main() -> Result<()> {
             .add_text("title", "Clean Code", TextOption::default())
             .add_text(
                 "description",
-                "A handbook of agile software craftsmanship"
-            ,
-                TextOption::default()
+                "A handbook of agile software craftsmanship",
+                TextOption::default(),
             )
             .add_float("price", 45.50, FloatOption::default())
             .add_float("rating", 4.6, FloatOption::default())
@@ -80,9 +78,8 @@ fn main() -> Result<()> {
             .add_text("title", "Design Patterns", TextOption::default())
             .add_text(
                 "description",
-                "Elements of reusable object-oriented software"
-            ,
-                TextOption::default()
+                "Elements of reusable object-oriented software",
+                TextOption::default(),
             )
             .add_float("price", 62.95, FloatOption::default())
             .add_float("rating", 4.5, FloatOption::default())
@@ -94,9 +91,8 @@ fn main() -> Result<()> {
             .add_text("title", "The Pragmatic Programmer", TextOption::default())
             .add_text(
                 "description",
-                "Your journey to mastery"
-            ,
-                TextOption::default()
+                "Your journey to mastery",
+                TextOption::default(),
             )
             .add_float("price", 52.99, FloatOption::default())
             .add_float("rating", 4.7, FloatOption::default())
@@ -108,9 +104,8 @@ fn main() -> Result<()> {
             .add_text("title", "Refactoring", TextOption::default())
             .add_text(
                 "description",
-                "Improving the design of existing code"
-            ,
-                TextOption::default()
+                "Improving the design of existing code",
+                TextOption::default(),
             )
             .add_float("price", 58.75, FloatOption::default())
             .add_float("rating", 4.4, FloatOption::default())
@@ -122,9 +117,8 @@ fn main() -> Result<()> {
             .add_text("title", "Code Complete", TextOption::default())
             .add_text(
                 "description",
-                "A practical handbook of software construction"
-            ,
-                TextOption::default()
+                "A practical handbook of software construction",
+                TextOption::default(),
             )
             .add_float("price", 73.99, FloatOption::default())
             .add_float("rating", 4.9, FloatOption::default())

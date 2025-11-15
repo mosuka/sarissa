@@ -10,7 +10,6 @@
 //! - `index`: Index management (config, factory, traits, flat, hnsw, ivf)
 //! - `search`: Search execution (similarity, ranking, result processing)
 //! - `engine`: High-level engine interface
-//! - `reader`: Index reader trait
 //! - `writer`: Index writer trait
 
 pub mod core;
@@ -18,7 +17,6 @@ pub mod index;
 pub mod search;
 
 pub mod engine;
-pub mod reader;
 pub mod writer;
 
 // Re-export commonly used types from core

@@ -54,7 +54,7 @@ fn main() -> Result<()> {
             .add_text(
                 "description",
                 "Large public park in Manhattan, New York City",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("category", "park", TextOption::default())
             .add_geo("location", 40.7829, -73.9654, GeoOption::default()) // Central Park, NYC
@@ -66,7 +66,7 @@ fn main() -> Result<()> {
             .add_text(
                 "description",
                 "Iconic statue on Liberty Island",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("category", "monument", TextOption::default())
             .add_geo("location", 40.6892, -74.0445, GeoOption::default()) // Statue of Liberty, NYC
@@ -78,7 +78,7 @@ fn main() -> Result<()> {
             .add_text(
                 "description",
                 "Suspension bridge in San Francisco",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("category", "bridge", TextOption::default())
             .add_geo("location", 37.8199, -122.4783, GeoOption::default()) // Golden Gate Bridge, SF
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
             .add_text(
                 "description",
                 "Former federal prison on island in San Francisco Bay",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("category", "historical", TextOption::default())
             .add_geo("location", 37.8267, -122.4233, GeoOption::default()) // Alcatraz Island, SF
@@ -102,7 +102,7 @@ fn main() -> Result<()> {
             .add_text(
                 "description",
                 "Landmark sign in Hollywood Hills",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("category", "landmark", TextOption::default())
             .add_geo("location", 34.1341, -118.3215, GeoOption::default()) // Hollywood Sign, LA
@@ -114,7 +114,7 @@ fn main() -> Result<()> {
             .add_text(
                 "description",
                 "Amusement park and pier on Santa Monica Beach",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("category", "entertainment", TextOption::default())
             .add_geo("location", 34.0084, -118.4966, GeoOption::default()) // Santa Monica Pier, LA
@@ -126,7 +126,7 @@ fn main() -> Result<()> {
             .add_text(
                 "description",
                 "Observation tower in Seattle Center",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("category", "tower", TextOption::default())
             .add_geo("location", 47.6205, -122.3493, GeoOption::default()) // Space Needle, Seattle
@@ -138,7 +138,7 @@ fn main() -> Result<()> {
             .add_text(
                 "description",
                 "Public market overlooking Elliott Bay",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("category", "market", TextOption::default())
             .add_geo("location", 47.6101, -122.3421, GeoOption::default()) // Pike Place Market, Seattle

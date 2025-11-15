@@ -53,7 +53,7 @@ fn main() -> Result<()> {
             .add_text(
                 "body",
                 "Rust is a systems programming language focused on safety, speed, and concurrency",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("author", "Steve Klabnik", TextOption::default())
             .add_text("category", "programming", TextOption::default())
@@ -64,7 +64,7 @@ fn main() -> Result<()> {
             .add_text(
                 "body",
                 "Python is a versatile and easy-to-learn programming language",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("author", "John Smith", TextOption::default())
             .add_text("category", "programming", TextOption::default())
@@ -75,7 +75,7 @@ fn main() -> Result<()> {
             .add_text(
                 "body",
                 "JavaScript is the language of the web, used for frontend and backend development",
-                TextOption::default()
+                TextOption::default(),
             )
             .add_text("author", "Jane Doe", TextOption::default())
             .add_text("category", "web-development", TextOption::default())
@@ -84,15 +84,13 @@ fn main() -> Result<()> {
         Document::builder()
             .add_text(
                 "title",
-                "Machine Learning Fundamentals"
-            ,
-                TextOption::default()
+                "Machine Learning Fundamentals",
+                TextOption::default(),
             )
             .add_text(
                 "body",
-                "Machine learning is a subset of artificial intelligence focused on algorithms"
-            ,
-                TextOption::default()
+                "Machine learning is a subset of artificial intelligence focused on algorithms",
+                TextOption::default(),
             )
             .add_text("author", "Alice Johnson", TextOption::default())
             .add_text("category", "data-science", TextOption::default())
@@ -102,9 +100,8 @@ fn main() -> Result<()> {
             .add_text("title", "Data Structures in C++", TextOption::default())
             .add_text(
                 "body",
-                "Understanding data structures is crucial for efficient programming"
-            ,
-                TextOption::default()
+                "Understanding data structures is crucial for efficient programming",
+                TextOption::default(),
             )
             .add_text("author", "Bob Wilson", TextOption::default())
             .add_text("category", "programming", TextOption::default())

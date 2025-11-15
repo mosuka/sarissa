@@ -51,16 +51,14 @@ fn main() -> Result<()> {
         Document::builder()
             .add_text(
                 "title",
-                "JavaScript Tutorial for Beginners"
-            ,
-                TextOption::default()
+                "JavaScript Tutorial for Beginners",
+                TextOption::default(),
             )
             .add_text("filename", "javascript_tutorial.pdf", TextOption::default())
             .add_text(
                 "description",
-                "Complete JavaScript programming guide"
-            ,
-                TextOption::default()
+                "Complete JavaScript programming guide",
+                TextOption::default(),
             )
             .add_text("category", "programming", TextOption::default())
             .add_text("extension", "pdf", TextOption::default())
@@ -69,16 +67,14 @@ fn main() -> Result<()> {
         Document::builder()
             .add_text(
                 "title",
-                "Python Programming Reference"
-            ,
-                TextOption::default()
+                "Python Programming Reference",
+                TextOption::default(),
             )
             .add_text("filename", "python_reference.html", TextOption::default())
             .add_text(
                 "description",
-                "Comprehensive Python programming reference"
-            ,
-                TextOption::default()
+                "Comprehensive Python programming reference",
+                TextOption::default(),
             )
             .add_text("category", "programming", TextOption::default())
             .add_text("extension", "html", TextOption::default())
@@ -87,16 +83,14 @@ fn main() -> Result<()> {
         Document::builder()
             .add_text(
                 "title",
-                "Machine Learning Algorithms"
-            ,
-                TextOption::default()
+                "Machine Learning Algorithms",
+                TextOption::default(),
             )
             .add_text("filename", "ml_algorithms.docx", TextOption::default())
             .add_text(
                 "description",
-                "Understanding machine learning techniques"
-            ,
-                TextOption::default()
+                "Understanding machine learning techniques",
+                TextOption::default(),
             )
             .add_text("category", "data-science", TextOption::default())
             .add_text("extension", "docx", TextOption::default())
@@ -107,9 +101,8 @@ fn main() -> Result<()> {
             .add_text("filename", "database_design.pptx", TextOption::default())
             .add_text(
                 "description",
-                "Principles of good database design"
-            ,
-                TextOption::default()
+                "Principles of good database design",
+                TextOption::default(),
             )
             .add_text("category", "database", TextOption::default())
             .add_text("extension", "pptx", TextOption::default())
@@ -118,16 +111,14 @@ fn main() -> Result<()> {
         Document::builder()
             .add_text(
                 "title",
-                "Web Development Best Practices"
-            ,
-                TextOption::default()
+                "Web Development Best Practices",
+                TextOption::default(),
             )
             .add_text("filename", "web_dev_practices.txt", TextOption::default())
             .add_text(
                 "description",
-                "Best practices for web development"
-            ,
-                TextOption::default()
+                "Best practices for web development",
+                TextOption::default(),
             )
             .add_text("category", "web-development", TextOption::default())
             .add_text("extension", "txt", TextOption::default())
@@ -138,9 +129,8 @@ fn main() -> Result<()> {
             .add_text("filename", "react_patterns.jsx", TextOption::default())
             .add_text(
                 "description",
-                "Common patterns in React component development"
-            ,
-                TextOption::default()
+                "Common patterns in React component development",
+                TextOption::default(),
             )
             .add_text("category", "frontend", TextOption::default())
             .add_text("extension", "jsx", TextOption::default())
@@ -151,9 +141,8 @@ fn main() -> Result<()> {
             .add_text("filename", "api_docs_template.md", TextOption::default())
             .add_text(
                 "description",
-                "Template for creating API documentation"
-            ,
-                TextOption::default()
+                "Template for creating API documentation",
+                TextOption::default(),
             )
             .add_text("category", "documentation", TextOption::default())
             .add_text("extension", "md", TextOption::default())
@@ -164,9 +153,8 @@ fn main() -> Result<()> {
             .add_text("filename", "app_config.json", TextOption::default())
             .add_text(
                 "description",
-                "Application configuration file"
-            ,
-                TextOption::default()
+                "Application configuration file",
+                TextOption::default(),
             )
             .add_text("category", "configuration", TextOption::default())
             .add_text("extension", "json", TextOption::default())

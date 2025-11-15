@@ -14,8 +14,8 @@ use crate::vector::index::hnsw::reader::HnswIndexReader;
 use crate::vector::index::hnsw::searcher::HnswSearcher;
 use crate::vector::index::ivf::reader::IvfIndexReader;
 use crate::vector::index::ivf::searcher::IvfSearcher;
+use crate::vector::index::reader::VectorIndexReader;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
-use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 use crate::vector::{DistanceMetric, Vector};
@@ -72,7 +72,7 @@ pub struct VectorEngine {
     /// The underlying index.
     index: Box<dyn VectorIndex>,
     /// The reader for executing queries (cached for efficiency).
-    reader: RefCell<Option<Arc<dyn crate::vector::reader::VectorIndexReader>>>,
+    reader: RefCell<Option<Arc<dyn crate::vector::index::reader::VectorIndexReader>>>,
     /// The writer for adding/updating vectors (cached for efficiency).
     writer: RefCell<Option<Box<dyn crate::vector::writer::VectorIndexWriter>>>,
     /// The searcher for executing searches (cached for efficiency).
@@ -658,7 +658,11 @@ mod tests {
         // Create document with vector field
         let doc = Document::builder()
             .add_text("title", "Machine Learning", TextOption::default())
-            .add_vector("title_embedding", "Machine Learning", VectorOption::default())
+            .add_vector(
+                "title_embedding",
+                "Machine Learning",
+                VectorOption::default(),
+            )
             .build();
 
         // Add document

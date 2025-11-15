@@ -13,8 +13,8 @@ use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::index::config::HnswIndexConfig;
 use crate::vector::index::hnsw::writer::HnswIndexWriter;
+use crate::vector::index::reader::VectorIndexReader;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
-use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Metadata for the HNSW index.

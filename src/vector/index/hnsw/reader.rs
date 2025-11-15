@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
-use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
-use crate::vector::reader::{VectorIndexReader, VectorIterator};
+use crate::vector::index::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
+use crate::vector::index::reader::{VectorIndexReader, VectorIterator};
 use crate::vector::{DistanceMetric, Vector};
 
 /// Reader for HNSW (Hierarchical Navigable Small World) vector indexes.

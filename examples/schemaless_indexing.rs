@@ -170,12 +170,12 @@ fn main() -> yatagarasu::error::Result<()> {
         .add_text(
             "title",
             "Getting Started with Schema-less Search",
-            TextOption::default()
+            TextOption::default(),
         )
         .add_text(
             "content",
             "Schema-less search engines provide incredible flexibility...",
-            TextOption::default()
+            TextOption::default(),
         )
         .add_text("tags", "rust,search,tutorial", TextOption::default())
         .add_text("author", "Jane Smith", TextOption::default())

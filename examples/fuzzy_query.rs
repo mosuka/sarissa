@@ -49,37 +49,32 @@ fn main() -> Result<()> {
         Document::builder()
             .add_text(
                 "title",
-                "JavaScript Programming Guide"
-            ,
-                TextOption::default()
+                "JavaScript Programming Guide",
+                TextOption::default(),
             )
             .add_text(
                 "body",
-                "Comprehensive guide to JavaScript development and programming techniques"
-            ,
-                TextOption::default()
+                "Comprehensive guide to JavaScript development and programming techniques",
+                TextOption::default(),
             )
             .add_text("author", "John Smith", TextOption::default())
             .add_text(
                 "tags",
-                "javascript programming tutorial"
-            ,
-                TextOption::default()
+                "javascript programming tutorial",
+                TextOption::default(),
             )
             .add_text("id", "doc001", TextOption::default())
             .build(),
         Document::builder()
             .add_text(
                 "title",
-                "Python Programming Fundamentals"
-            ,
-                TextOption::default()
+                "Python Programming Fundamentals",
+                TextOption::default(),
             )
             .add_text(
                 "body",
-                "Learn Python programming language from scratch with practical examples"
-            ,
-                TextOption::default()
+                "Learn Python programming language from scratch with practical examples",
+                TextOption::default(),
             )
             .add_text("author", "Alice Johnson", TextOption::default())
             .add_text("tags", "python programming beginner", TextOption::default())
@@ -88,37 +83,32 @@ fn main() -> Result<()> {
         Document::builder()
             .add_text(
                 "title",
-                "Machine Learning Algorithms"
-            ,
-                TextOption::default()
+                "Machine Learning Algorithms",
+                TextOption::default(),
             )
             .add_text(
                 "body",
-                "Understanding algorithms used in machine learning and artificial intelligence"
-            ,
-                TextOption::default()
+                "Understanding algorithms used in machine learning and artificial intelligence",
+                TextOption::default(),
             )
             .add_text("author", "Bob Wilson", TextOption::default())
             .add_text(
                 "tags",
-                "machine-learning algorithms ai"
-            ,
-                TextOption::default()
+                "machine-learning algorithms ai",
+                TextOption::default(),
             )
             .add_text("id", "doc003", TextOption::default())
             .build(),
         Document::builder()
             .add_text(
                 "title",
-                "Database Management Systems"
-            ,
-                TextOption::default()
+                "Database Management Systems",
+                TextOption::default(),
             )
             .add_text(
                 "body",
-                "Introduction to database systems, SQL, and data management principles"
-            ,
-                TextOption::default()
+                "Introduction to database systems, SQL, and data management principles",
+                TextOption::default(),
             )
             .add_text("author", "Carol Davis", TextOption::default())
             .add_text("tags", "database sql management", TextOption::default())
@@ -128,60 +118,52 @@ fn main() -> Result<()> {
             .add_text("title", "Web Development with React", TextOption::default())
             .add_text(
                 "body",
-                "Building modern web applications using React framework and components"
-            ,
-                TextOption::default()
+                "Building modern web applications using React framework and components",
+                TextOption::default(),
             )
             .add_text("author", "David Brown", TextOption::default())
             .add_text(
                 "tags",
-                "react web-development frontend"
-            ,
-                TextOption::default()
+                "react web-development frontend",
+                TextOption::default(),
             )
             .add_text("id", "doc005", TextOption::default())
             .build(),
         Document::builder()
             .add_text(
                 "title",
-                "Artificial Intelligence Overview"
-            ,
-                TextOption::default()
+                "Artificial Intelligence Overview",
+                TextOption::default(),
             )
             .add_text(
                 "body",
-                "Introduction to artificial intelligence concepts, applications, and algorithms"
-            ,
-                TextOption::default()
+                "Introduction to artificial intelligence concepts, applications, and algorithms",
+                TextOption::default(),
             )
             .add_text("author", "Eva Martinez", TextOption::default())
             .add_text(
                 "tags",
-                "artificial-intelligence overview concepts"
-            ,
-                TextOption::default()
+                "artificial-intelligence overview concepts",
+                TextOption::default(),
             )
             .add_text("id", "doc006", TextOption::default())
             .build(),
         Document::builder()
             .add_text(
                 "title",
-                "Software Engineering Principles"
-            ,
-                TextOption::default()
+                "Software Engineering Principles",
+                TextOption::default(),
             )
             .add_text(
                 "body",
-                "Best practices in software engineering, design patterns, and development"
-            ,
-                TextOption::default()
+                "Best practices in software engineering, design patterns, and development",
+                TextOption::default(),
             )
             .add_text("author", "Frank Miller", TextOption::default())
             .add_text(
                 "tags",
-                "software engineering principles"
-            ,
-                TextOption::default()
+                "software engineering principles",
+                TextOption::default(),
             )
             .add_text("id", "doc007", TextOption::default())
             .build(),

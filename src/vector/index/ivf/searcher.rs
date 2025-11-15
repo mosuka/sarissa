@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::vector::core::Vector;
-use crate::vector::reader::VectorIndexReader;
+use crate::vector::index::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 

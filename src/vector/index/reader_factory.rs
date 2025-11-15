@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::vector::index::flat::reader::FlatVectorIndexReader;
 use crate::vector::index::hnsw::reader::HnswIndexReader;
 use crate::vector::index::ivf::reader::IvfIndexReader;
-use crate::vector::reader::VectorIndexReader;
+use crate::vector::index::reader::VectorIndexReader;
 
 /// Factory for creating vector index readers.
 pub struct VectorIndexReaderFactory;

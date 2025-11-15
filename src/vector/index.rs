@@ -11,6 +11,8 @@ pub mod factory;
 pub mod flat;
 pub mod hnsw;
 pub mod ivf;
+pub mod reader;
+pub mod reader_factory;
 
 use std::sync::{Arc, RwLock};
 
@@ -20,7 +22,7 @@ use crate::vector::core::Vector;
 use crate::vector::index::config::{
     FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig,
 };
-use crate::vector::reader::VectorIndexReader;
+use crate::vector::index::reader::VectorIndexReader;
 use crate::vector::writer::VectorIndexWriter;
 
 /// Trait for vector index implementations.
@@ -241,7 +243,7 @@ impl ManagedVectorIndex {
 
     /// Create a reader for this index.
     /// Returns a boxed VectorIndexReader that can be used for searching.
-    pub fn reader(&self) -> Result<Arc<dyn crate::vector::reader::VectorIndexReader>> {
+    pub fn reader(&self) -> Result<Arc<dyn crate::vector::index::reader::VectorIndexReader>> {
         let finalized = *self.is_finalized.read().unwrap();
         if !finalized {
             return Err(YatagarasuError::InvalidOperation(
@@ -260,7 +262,7 @@ impl ManagedVectorIndex {
 
         // Otherwise, create from in-memory vectors
         let vectors = self.vectors()?;
-        let reader = crate::vector::reader::SimpleVectorReader::new(
+        let reader = crate::vector::index::reader::SimpleVectorReader::new(
             vectors,
             self.config.dimension(),
             self.config.distance_metric(),
