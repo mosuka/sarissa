@@ -17,7 +17,9 @@ use std::sync::{Arc, RwLock};
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::core::Vector;
-use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig};
+use crate::vector::index::config::{
+    FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig,
+};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::VectorIndexWriter;
 

@@ -29,13 +29,14 @@
 //!
 //! ```
 //! use yatagarasu::document::document::Document;
+//! use yatagarasu::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
 //!
 //! let doc = Document::builder()
-//!     .add_text("title", "Rust Programming Guide")
-//!     .add_text("author", "Jane Doe")
-//!     .add_integer("year", 2024)
-//!     .add_float("price", 39.99)
-//!     .add_boolean("in_stock", true)
+//!     .add_text("title", "Rust Programming Guide", TextOption::default())
+//!     .add_text("author", "Jane Doe", TextOption::default())
+//!     .add_integer("year", 2024, IntegerOption::default())
+//!     .add_float("price", 39.99, FloatOption::default())
+//!     .add_boolean("in_stock", true, BooleanOption::default())
 //!     .build();
 //!
 //! assert_eq!(doc.len(), 5);
@@ -47,13 +48,14 @@
 //! ```
 //! use yatagarasu::document::document::Document;
 //! use yatagarasu::document::parser::DocumentParser;
+//! use yatagarasu::document::field::TextOption;
 //! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));
 //!
 //! let doc = Document::builder()
-//!     .add_text("title", "Rust Programming")
+//!     .add_text("title", "Rust Programming", TextOption::default())
 //!     .build();
 //!
 //! let analyzed = parser.parse(doc).unwrap();

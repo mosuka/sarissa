@@ -1,9 +1,9 @@
 //! IVF vector index implementation.
 
-pub mod reader;
-pub mod segment;
 pub mod maintenance;
+pub mod reader;
 pub mod searcher;
+pub mod segment;
 pub mod writer;
 
 use std::path::Path;

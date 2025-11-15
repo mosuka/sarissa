@@ -49,11 +49,12 @@ use crate::vector::{DistanceMetric, Vector};
 /// let mut engine = VectorEngine::new(index)?;
 ///
 /// // Add documents with vector fields
+/// use yatagarasu::document::field::VectorOption;
 /// let doc1 = Document::builder()
-///     .add_vector("embedding", "Machine Learning")
+///     .add_vector("embedding", "Machine Learning", VectorOption::default())
 ///     .build();
 /// let doc2 = Document::builder()
-///     .add_vector("embedding", "Deep Learning")
+///     .add_vector("embedding", "Deep Learning", VectorOption::default())
 ///     .build();
 ///
 /// engine.add_document(doc1).await?;
@@ -266,9 +267,10 @@ impl VectorEngine {
     /// let index = VectorIndexFactory::create(storage, config)?;
     /// let mut engine = VectorEngine::new(index)?;
     ///
+    /// use yatagarasu::document::field::{TextOption, VectorOption};
     /// let doc = Document::builder()
-    ///     .add_text("title", "Machine Learning")
-    ///     .add_vector("title_embedding", "Machine Learning")
+    ///     .add_text("title", "Machine Learning", TextOption::default())
+    ///     .add_vector("title_embedding", "Machine Learning", VectorOption::default())
     ///     .build();
     ///
     /// let doc_id = engine.add_document(doc).await?;
@@ -302,7 +304,10 @@ impl VectorEngine {
     ///
     /// Returns a vector of assigned document IDs.
     /// Note: You must call `commit()` to persist the changes.
-    pub async fn add_documents(&mut self, docs: Vec<crate::document::document::Document>) -> Result<Vec<u64>> {
+    pub async fn add_documents(
+        &mut self,
+        docs: Vec<crate::document::document::Document>,
+    ) -> Result<Vec<u64>> {
         let mut doc_ids = Vec::new();
         for doc in docs {
             let doc_id = self.add_document(doc).await?;
@@ -325,7 +330,12 @@ impl VectorEngine {
     /// This is a convenience method that deletes documents matching the field/value
     /// and adds the new document.
     /// Note: You must call `commit()` to persist the changes.
-    pub async fn update_document(&mut self, field: &str, value: &str, doc: crate::document::document::Document) -> Result<()> {
+    pub async fn update_document(
+        &mut self,
+        field: &str,
+        value: &str,
+        doc: crate::document::document::Document,
+    ) -> Result<()> {
         let mut writer = self.get_or_create_writer()?;
         writer.update_document(field, value, doc).await
     }
@@ -362,8 +372,9 @@ impl VectorEngine {
     /// let mut engine = VectorEngine::new(index)?;
     ///
     /// // Add documents with vector fields
+    /// use yatagarasu::document::field::VectorOption;
     /// let doc = Document::builder()
-    ///     .add_vector("embedding", "Sample text")
+    ///     .add_vector("embedding", "Sample text", VectorOption::default())
     ///     .build();
     /// engine.add_document(doc).await?;
     ///
@@ -513,6 +524,7 @@ impl VectorEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::field::{TextOption, VectorOption};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::core::DistanceMetric;
     use crate::vector::index::config::{FlatIndexConfig, VectorIndexConfig};
@@ -573,13 +585,13 @@ mod tests {
 
         // Add documents with vector fields
         let doc1 = Document::builder()
-            .add_vector("embedding", "Machine Learning")
+            .add_vector("embedding", "Machine Learning", VectorOption::default())
             .build();
         let doc2 = Document::builder()
-            .add_vector("embedding", "Deep Learning")
+            .add_vector("embedding", "Deep Learning", VectorOption::default())
             .build();
         let doc3 = Document::builder()
-            .add_vector("embedding", "Neural Network")
+            .add_vector("embedding", "Neural Network", VectorOption::default())
             .build();
 
         engine.add_document(doc1).await?;
@@ -645,8 +657,8 @@ mod tests {
 
         // Create document with vector field
         let doc = Document::builder()
-            .add_text("title", "Machine Learning")
-            .add_vector("title_embedding", "Machine Learning")
+            .add_text("title", "Machine Learning", TextOption::default())
+            .add_vector("title_embedding", "Machine Learning", VectorOption::default())
             .build();
 
         // Add document

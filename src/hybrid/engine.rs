@@ -96,10 +96,7 @@ impl HybridEngine {
     /// # Returns
     ///
     /// The assigned document ID
-    pub async fn add_document(
-        &mut self,
-        doc: crate::document::document::Document,
-    ) -> Result<u64> {
+    pub async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64> {
         let doc_id = self.next_doc_id;
         self.add_document_with_id(doc_id, doc).await?;
         Ok(doc_id)
@@ -117,7 +114,8 @@ impl HybridEngine {
         doc: crate::document::document::Document,
     ) -> Result<()> {
         // Clone the document for both indexes since they'll process different fields
-        self.lexical_engine.add_document_with_id(doc_id, doc.clone())?;
+        self.lexical_engine
+            .add_document_with_id(doc_id, doc.clone())?;
         self.vector_engine.add_document_with_id(doc_id, doc).await?;
 
         // Update next_doc_id if necessary

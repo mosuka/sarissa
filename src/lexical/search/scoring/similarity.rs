@@ -435,7 +435,7 @@ impl SimilaritySearchEngine {
             Ok(Some(document)) => {
                 // Extract the field value
                 if let Some(field_value) = document.get_field(field_name) {
-                    match field_value {
+                    match &field_value.value {
                         FieldValue::Text(text) => Ok(text.clone()),
                         FieldValue::Integer(value) => Ok(value.to_string()),
                         FieldValue::Float(value) => Ok(value.to_string()),

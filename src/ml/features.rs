@@ -330,7 +330,7 @@ impl FeatureExtractor {
 
         for field_name in document.field_names() {
             if let Some(field_value) = document.get_field(field_name)
-                && let Some(text) = field_value.as_text()
+                && let Some(text) = field_value.value.as_text()
             {
                 text_parts.push(text);
             }

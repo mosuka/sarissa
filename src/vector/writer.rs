@@ -91,10 +91,7 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     ///
     /// This method processes the document's vector fields, uses the configured embedder
     /// to convert text to vectors, and adds them to the index.
-    async fn add_document(
-        &mut self,
-        doc: crate::document::document::Document,
-    ) -> Result<u64>;
+    async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64>;
 
     /// Add a document with a specific ID, converting text fields to vectors.
     ///

@@ -245,8 +245,9 @@ impl InvertedIndexWriter {
     /// };
     /// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
     ///
+    /// use yatagarasu::document::field::TextOption;
     /// let doc = Document::builder()
-    ///     .add_text("title", "Rust Programming")
+    ///     .add_text("title", "Rust Programming", TextOption::default())
     ///     .build();
     ///
     /// let doc_parser = DocumentParser::new(Arc::new(per_field));
@@ -272,91 +273,125 @@ impl InvertedIndexWriter {
         let mut stored_fields = AHashMap::new();
 
         // Process each field in the document (schema-less mode)
-        for (field_name, field_value) in doc.fields() {
-            use crate::document::field::FieldValue;
+        for (field_name, field) in doc.fields() {
+            use crate::document::field::{FieldOption, FieldValue};
 
-            match field_value {
-                FieldValue::Text(text) => {
-                    // Use analyzer from config (can be PerFieldAnalyzer for field-specific analysis)
-                    let tokens = if let Some(per_field) = self
-                        .config
-                        .analyzer
-                        .as_any()
-                        .downcast_ref::<PerFieldAnalyzer>()
-                    {
-                        per_field.analyze_field(field_name, text)?
-                    } else {
-                        self.config.analyzer.analyze(text)?
-                    };
-                    let token_vec: Vec<Token> = tokens.collect();
-                    let analyzed_terms = self.tokens_to_analyzed_terms(token_vec);
+            // Check field option to determine indexing and storage behavior
+            let should_index = match &field.option {
+                FieldOption::Text(opt) => opt.indexed,
+                FieldOption::Integer(opt) => opt.indexed,
+                FieldOption::Float(opt) => opt.indexed,
+                FieldOption::Boolean(opt) => opt.indexed,
+                FieldOption::DateTime(opt) => opt.indexed,
+                FieldOption::Geo(opt) => opt.indexed,
+                FieldOption::Binary(_) | FieldOption::Vector(_) => false,
+            };
 
-                    field_terms.insert(field_name.clone(), analyzed_terms);
-                    stored_fields.insert(field_name.clone(), FieldValue::Text(text.to_string()));
+            let should_store = match &field.option {
+                FieldOption::Text(opt) => opt.stored,
+                FieldOption::Integer(opt) => opt.stored,
+                FieldOption::Float(opt) => opt.stored,
+                FieldOption::Boolean(opt) => opt.stored,
+                FieldOption::DateTime(opt) => opt.stored,
+                FieldOption::Geo(opt) => opt.stored,
+                FieldOption::Binary(opt) => opt.stored,
+                FieldOption::Vector(_) => true, // Vector fields are always stored for embedding
+            };
+
+            // Index the field if enabled
+            if should_index {
+                match &field.value {
+                    FieldValue::Text(text) => {
+                        // Use analyzer from config (can be PerFieldAnalyzer for field-specific analysis)
+                        let tokens = if let Some(per_field) = self
+                            .config
+                            .analyzer
+                            .as_any()
+                            .downcast_ref::<PerFieldAnalyzer>()
+                        {
+                            per_field.analyze_field(field_name, text)?
+                        } else {
+                            self.config.analyzer.analyze(text)?
+                        };
+                        let token_vec: Vec<Token> = tokens.collect();
+                        let analyzed_terms = self.tokens_to_analyzed_terms(token_vec);
+
+                        field_terms.insert(field_name.clone(), analyzed_terms);
+                    }
+                    FieldValue::Integer(num) => {
+                        // Convert integer to text for indexing
+                        let text = num.to_string();
+
+                        let analyzed_term = AnalyzedTerm {
+                            term: text.clone(),
+                            position: 0,
+                            frequency: 1,
+                            offset: (0, text.len()),
+                        };
+
+                        field_terms.insert(field_name.clone(), vec![analyzed_term]);
+                    }
+                    FieldValue::Float(num) => {
+                        // Convert float to text for indexing
+                        let text = num.to_string();
+
+                        let analyzed_term = AnalyzedTerm {
+                            term: text.clone(),
+                            position: 0,
+                            frequency: 1,
+                            offset: (0, text.len()),
+                        };
+
+                        field_terms.insert(field_name.clone(), vec![analyzed_term]);
+                    }
+                    FieldValue::Boolean(boolean) => {
+                        // Convert boolean to text
+                        let text = boolean.to_string();
+
+                        let analyzed_term = AnalyzedTerm {
+                            term: text.clone(),
+                            position: 0,
+                            frequency: 1,
+                            offset: (0, text.len()),
+                        };
+
+                        field_terms.insert(field_name.clone(), vec![analyzed_term]);
+                    }
+                    FieldValue::DateTime(dt) => {
+                        // Handle DateTime field
+                        let text = dt.to_rfc3339();
+
+                        let analyzed_term = AnalyzedTerm {
+                            term: text.clone(),
+                            position: 0,
+                            frequency: 1,
+                            offset: (0, text.len()),
+                        };
+
+                        field_terms.insert(field_name.clone(), vec![analyzed_term]);
+                    }
+                    FieldValue::Geo(geo) => {
+                        // Index geo field as "lat,lon" for basic text search
+                        let text = format!("{},{}", geo.lat, geo.lon);
+
+                        let analyzed_term = AnalyzedTerm {
+                            term: text.clone(),
+                            position: 0,
+                            frequency: 1,
+                            offset: (0, text.len()),
+                        };
+
+                        field_terms.insert(field_name.clone(), vec![analyzed_term]);
+                    }
+                    FieldValue::Binary(_) | FieldValue::Vector(_) | FieldValue::Null => {
+                        // These types are not indexed in lexical index
+                    }
                 }
-                FieldValue::Integer(num) => {
-                    // Convert integer to text for indexing
-                    let text = num.to_string();
+            }
 
-                    let analyzed_term = AnalyzedTerm {
-                        term: text.clone(),
-                        position: 0,
-                        frequency: 1,
-                        offset: (0, text.len()),
-                    };
-
-                    field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), FieldValue::Integer(*num));
-                }
-                FieldValue::Float(num) => {
-                    // Convert float to text for indexing
-                    let text = num.to_string();
-
-                    let analyzed_term = AnalyzedTerm {
-                        term: text.clone(),
-                        position: 0,
-                        frequency: 1,
-                        offset: (0, text.len()),
-                    };
-
-                    field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), FieldValue::Float(*num));
-                }
-                FieldValue::Boolean(boolean) => {
-                    // Convert boolean to text
-                    let text = boolean.to_string();
-
-                    let analyzed_term = AnalyzedTerm {
-                        term: text.clone(),
-                        position: 0,
-                        frequency: 1,
-                        offset: (0, text.len()),
-                    };
-
-                    field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), FieldValue::Boolean(*boolean));
-                }
-                FieldValue::DateTime(dt) => {
-                    // Handle DateTime field
-                    let text = dt.to_rfc3339();
-
-                    let analyzed_term = AnalyzedTerm {
-                        term: text.clone(),
-                        position: 0,
-                        frequency: 1,
-                        offset: (0, text.len()),
-                    };
-
-                    field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), FieldValue::DateTime(*dt));
-                }
-                FieldValue::Binary(_)
-                | FieldValue::Geo(_)
-                | FieldValue::Vector(_)
-                | FieldValue::Null => {
-                    // For Binary, Geo, Vector, and Null types, only store but don't index
-                    stored_fields.insert(field_name.clone(), field_value.clone());
-                }
+            // Store the field if enabled
+            if should_store {
+                stored_fields.insert(field_name.clone(), field.value.clone());
             }
         }
 
@@ -694,7 +729,10 @@ impl InvertedIndexWriter {
         for (_doc_id, analyzed_doc) in &self.buffered_docs {
             let mut doc = Document::new();
             for (field_name, field_value) in &analyzed_doc.stored_fields {
-                doc.add_field(field_name, field_value.clone());
+                doc.add_field(
+                    field_name,
+                    crate::document::field::Field::with_default_option(field_value.clone()),
+                );
             }
             documents.push(doc);
         }

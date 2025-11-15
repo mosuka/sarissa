@@ -9,6 +9,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::TextOption;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
@@ -46,74 +47,143 @@ fn main() -> Result<()> {
     // Add documents with various spellings and terms for fuzzy matching
     let documents = vec![
         Document::builder()
-            .add_text("title", "JavaScript Programming Guide")
+            .add_text(
+                "title",
+                "JavaScript Programming Guide"
+            ,
+                TextOption::default()
+            )
             .add_text(
                 "body",
-                "Comprehensive guide to JavaScript development and programming techniques",
+                "Comprehensive guide to JavaScript development and programming techniques"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "John Smith")
-            .add_text("tags", "javascript programming tutorial")
-            .add_text("id", "doc001")
+            .add_text("author", "John Smith", TextOption::default())
+            .add_text(
+                "tags",
+                "javascript programming tutorial"
+            ,
+                TextOption::default()
+            )
+            .add_text("id", "doc001", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Python Programming Fundamentals")
+            .add_text(
+                "title",
+                "Python Programming Fundamentals"
+            ,
+                TextOption::default()
+            )
             .add_text(
                 "body",
-                "Learn Python programming language from scratch with practical examples",
+                "Learn Python programming language from scratch with practical examples"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "Alice Johnson")
-            .add_text("tags", "python programming beginner")
-            .add_text("id", "doc002")
+            .add_text("author", "Alice Johnson", TextOption::default())
+            .add_text("tags", "python programming beginner", TextOption::default())
+            .add_text("id", "doc002", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Machine Learning Algorithms")
+            .add_text(
+                "title",
+                "Machine Learning Algorithms"
+            ,
+                TextOption::default()
+            )
             .add_text(
                 "body",
-                "Understanding algorithms used in machine learning and artificial intelligence",
+                "Understanding algorithms used in machine learning and artificial intelligence"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "Bob Wilson")
-            .add_text("tags", "machine-learning algorithms ai")
-            .add_text("id", "doc003")
+            .add_text("author", "Bob Wilson", TextOption::default())
+            .add_text(
+                "tags",
+                "machine-learning algorithms ai"
+            ,
+                TextOption::default()
+            )
+            .add_text("id", "doc003", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Database Management Systems")
+            .add_text(
+                "title",
+                "Database Management Systems"
+            ,
+                TextOption::default()
+            )
             .add_text(
                 "body",
-                "Introduction to database systems, SQL, and data management principles",
+                "Introduction to database systems, SQL, and data management principles"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "Carol Davis")
-            .add_text("tags", "database sql management")
-            .add_text("id", "doc004")
+            .add_text("author", "Carol Davis", TextOption::default())
+            .add_text("tags", "database sql management", TextOption::default())
+            .add_text("id", "doc004", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Web Development with React")
+            .add_text("title", "Web Development with React", TextOption::default())
             .add_text(
                 "body",
-                "Building modern web applications using React framework and components",
+                "Building modern web applications using React framework and components"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "David Brown")
-            .add_text("tags", "react web-development frontend")
-            .add_text("id", "doc005")
+            .add_text("author", "David Brown", TextOption::default())
+            .add_text(
+                "tags",
+                "react web-development frontend"
+            ,
+                TextOption::default()
+            )
+            .add_text("id", "doc005", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Artificial Intelligence Overview")
+            .add_text(
+                "title",
+                "Artificial Intelligence Overview"
+            ,
+                TextOption::default()
+            )
             .add_text(
                 "body",
-                "Introduction to artificial intelligence concepts, applications, and algorithms",
+                "Introduction to artificial intelligence concepts, applications, and algorithms"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "Eva Martinez")
-            .add_text("tags", "artificial-intelligence overview concepts")
-            .add_text("id", "doc006")
+            .add_text("author", "Eva Martinez", TextOption::default())
+            .add_text(
+                "tags",
+                "artificial-intelligence overview concepts"
+            ,
+                TextOption::default()
+            )
+            .add_text("id", "doc006", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Software Engineering Principles")
+            .add_text(
+                "title",
+                "Software Engineering Principles"
+            ,
+                TextOption::default()
+            )
             .add_text(
                 "body",
-                "Best practices in software engineering, design patterns, and development",
+                "Best practices in software engineering, design patterns, and development"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "Frank Miller")
-            .add_text("tags", "software engineering principles")
-            .add_text("id", "doc007")
+            .add_text("author", "Frank Miller", TextOption::default())
+            .add_text(
+                "tags",
+                "software engineering principles"
+            ,
+                TextOption::default()
+            )
+            .add_text("id", "doc007", TextOption::default())
             .build(),
     ];
 
@@ -143,7 +213,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -165,7 +235,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -187,7 +257,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -209,12 +279,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
             if let Some(field_value) = doc.get_field("author")
-                && let Some(author) = field_value.as_text()
+                && let Some(author) = field_value.value.as_text()
             {
                 println!("      Author: {author}");
             }
@@ -237,7 +307,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -259,7 +329,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -281,7 +351,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -303,7 +373,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }

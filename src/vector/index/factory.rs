@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::storage::Storage;
+use crate::vector::index::VectorIndex;
 use crate::vector::index::config::VectorIndexConfig;
 use crate::vector::index::flat::FlatIndex;
 use crate::vector::index::hnsw::HnswIndex;
 use crate::vector::index::ivf::IvfIndex;
-use crate::vector::index::VectorIndex;
 
 /// Factory for creating vector index instances.
 ///

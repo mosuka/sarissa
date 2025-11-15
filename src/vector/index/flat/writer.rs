@@ -247,18 +247,29 @@ impl VectorIndexWriter for FlatIndexWriter {
         self.next_vec_id
     }
 
-    async fn add_document(
-        &mut self,
-        doc: crate::document::document::Document,
-    ) -> Result<u64> {
-        use crate::document::field::FieldValue;
+    async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64> {
+        use crate::document::field::{FieldOption, FieldValue};
         use crate::embedding::per_field::PerFieldEmbedder;
 
         let doc_id = self.next_vec_id;
         let mut vectors = Vec::new();
 
-        for (field_name, field_value) in doc.fields().iter() {
-            if let FieldValue::Vector(text) = field_value {
+        for (field_name, field) in doc.fields().iter() {
+            // Check if this is a vector field and if it should be indexed
+            if let FieldValue::Vector(text) = &field.value {
+                // Check FieldOption to determine if this vector should be indexed
+                let should_index = match &field.option {
+                    FieldOption::Vector(opt) => {
+                        // Check if flat, hnsw, or ivf indexing is enabled
+                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some()
+                    }
+                    _ => false,
+                };
+
+                if !should_index {
+                    continue;
+                }
+
                 // Check if embedder is PerFieldEmbedder for field-specific embedding
                 let vector = if let Some(per_field) = self
                     .index_config
@@ -288,13 +299,27 @@ impl VectorIndexWriter for FlatIndexWriter {
         doc_id: u64,
         doc: crate::document::document::Document,
     ) -> Result<()> {
-        use crate::document::field::FieldValue;
+        use crate::document::field::{FieldOption, FieldValue};
         use crate::embedding::per_field::PerFieldEmbedder;
 
         let mut vectors = Vec::new();
 
-        for (field_name, field_value) in doc.fields().iter() {
-            if let FieldValue::Vector(text) = field_value {
+        for (field_name, field) in doc.fields().iter() {
+            // Check if this is a vector field and if it should be indexed
+            if let FieldValue::Vector(text) = &field.value {
+                // Check FieldOption to determine if this vector should be indexed
+                let should_index = match &field.option {
+                    FieldOption::Vector(opt) => {
+                        // Check if flat, hnsw, or ivf indexing is enabled
+                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some()
+                    }
+                    _ => false,
+                };
+
+                if !should_index {
+                    continue;
+                }
+
                 // Check if embedder is PerFieldEmbedder for field-specific embedding
                 let vector = if let Some(per_field) = self
                     .index_config

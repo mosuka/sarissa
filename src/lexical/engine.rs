@@ -17,6 +17,7 @@
 //!
 //! ```rust,no_run
 //! use yatagarasu::document::document::Document;
+//! use yatagarasu::document::field::TextOption;
 //! use yatagarasu::lexical::engine::LexicalEngine;
 //! use yatagarasu::lexical::index::config::LexicalIndexConfig;
 //! use yatagarasu::lexical::index::factory::LexicalIndexFactory;
@@ -39,8 +40,8 @@
 //!
 //! // Add documents
 //! let doc = Document::builder()
-//!     .add_text("title", "Hello World")
-//!     .add_text("body", "This is a test document")
+//!     .add_text("title", "Hello World", TextOption::default())
+//!     .add_text("body", "This is a test document", TextOption::default())
 //!     .build();
 //! engine.add_document(doc).unwrap();
 //! engine.commit().unwrap();
@@ -106,8 +107,9 @@ use crate::storage::Storage;
 /// let mut engine = LexicalEngine::new(index).unwrap();
 ///
 /// // Add documents
+/// use yatagarasu::document::field::TextOption;
 /// let doc = Document::builder()
-///     .add_text("title", "Rust Programming")
+///     .add_text("title", "Rust Programming", TextOption::default())
 ///     .build();
 /// engine.add_document(doc).unwrap();
 /// engine.commit().unwrap();
@@ -286,9 +288,10 @@ impl LexicalEngine {
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
+    /// use yatagarasu::document::field::TextOption;
     /// let doc = Document::builder()
-    ///     .add_text("title", "Hello World")
-    ///     .add_text("body", "This is a test")
+    ///     .add_text("title", "Hello World", TextOption::default())
+    ///     .add_text("body", "This is a test", TextOption::default())
     ///     .build();
     /// let doc_id = engine.add_document(doc).unwrap();
     /// engine.commit().unwrap();  // Don't forget to commit!
@@ -372,10 +375,11 @@ impl LexicalEngine {
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
     /// // Add multiple documents
+    /// use yatagarasu::document::field::TextOption;
     /// for i in 0..10 {
     ///     let doc = Document::builder()
-    ///         .add_text("id", &i.to_string())
-    ///         .add_text("title", &format!("Document {}", i))
+    ///         .add_text("id", &i.to_string(), TextOption::default())
+    ///         .add_text("title", &format!("Document {}", i), TextOption::default())
     ///         .build();
     ///     engine.add_document(doc).unwrap();
     /// }
@@ -428,9 +432,10 @@ impl LexicalEngine {
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
     /// // Add and commit many documents
+    /// use yatagarasu::document::field::TextOption;
     /// for i in 0..1000 {
     ///     let doc = Document::builder()
-    ///         .add_text("id", &i.to_string())
+    ///         .add_text("id", &i.to_string(), TextOption::default())
     ///         .build();
     ///     engine.add_document(doc).unwrap();
     /// }
@@ -495,7 +500,8 @@ impl LexicalEngine {
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
-    /// # let doc = Document::builder().add_text("title", "hello world").build();
+    /// # use yatagarasu::document::field::TextOption;
+    /// # let doc = Document::builder().add_text("title", "hello world", TextOption::default()).build();
     /// # engine.add_document(doc).unwrap();
     /// # engine.commit().unwrap();
     ///
@@ -618,6 +624,7 @@ impl LexicalEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::field::TextOption;
     use crate::lexical::index::config::LexicalIndexConfig;
     use crate::lexical::index::factory::LexicalIndexFactory;
     use crate::lexical::index::inverted::query::Query;
@@ -630,8 +637,8 @@ mod tests {
     #[allow(dead_code)]
     fn create_test_document(title: &str, body: &str) -> Document {
         Document::builder()
-            .add_text("title", title)
-            .add_text("body", body)
+            .add_text("title", title, TextOption::default())
+            .add_text("body", body, TextOption::default())
             .build()
     }
 

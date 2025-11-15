@@ -9,6 +9,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::{IntegerOption, TextOption};
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
@@ -46,58 +47,58 @@ fn main() -> Result<()> {
     // Prepare documents
     let documents = vec![
         Document::builder()
-            .add_text("title", "The Great Gatsby")
-            .add_text("body", "In my younger and more vulnerable years my father gave me some advice")
-            .add_text("author", "F. Scott Fitzgerald")
-            .add_text("category", "classic")
-            .add_integer("year", 1925)
-            .add_text("tags", "american jazz-age tragedy")
-            .add_text("id", "book001")
+            .add_text("title", "The Great Gatsby", TextOption::default())
+            .add_text("body", "In my younger and more vulnerable years my father gave me some advice", TextOption::default())
+            .add_text("author", "F. Scott Fitzgerald", TextOption::default())
+            .add_text("category", "classic", TextOption::default())
+            .add_integer("year", 1925, IntegerOption::default())
+            .add_text("tags", "american jazz-age tragedy", TextOption::default())
+            .add_text("id", "book001", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "To Kill a Mockingbird")
-            .add_text("body", "When I was almost six years old, I heard my brother arguing with my father")
-            .add_text("author", "Harper Lee")
-            .add_text("category", "classic")
-            .add_integer("year", 1960)
-            .add_text("tags", "american southern racism")
-            .add_text("id", "book002")
+            .add_text("title", "To Kill a Mockingbird", TextOption::default())
+            .add_text("body", "When I was almost six years old, I heard my brother arguing with my father", TextOption::default())
+            .add_text("author", "Harper Lee", TextOption::default())
+            .add_text("category", "classic", TextOption::default())
+            .add_integer("year", 1960, IntegerOption::default())
+            .add_text("tags", "american southern racism", TextOption::default())
+            .add_text("id", "book002", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "1984")
-            .add_text("body", "It was a bright cold day in April, and the clocks were striking thirteen")
-            .add_text("author", "George Orwell")
-            .add_text("category", "dystopian")
-            .add_integer("year", 1949)
-            .add_text("tags", "british totalitarian surveillance")
-            .add_text("id", "book003")
+            .add_text("title", "1984", TextOption::default())
+            .add_text("body", "It was a bright cold day in April, and the clocks were striking thirteen", TextOption::default())
+            .add_text("author", "George Orwell", TextOption::default())
+            .add_text("category", "dystopian", TextOption::default())
+            .add_integer("year", 1949, IntegerOption::default())
+            .add_text("tags", "british totalitarian surveillance", TextOption::default())
+            .add_text("id", "book003", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Animal Farm")
-            .add_text("body", "Mr Jones of Manor Farm, had locked the hen houses for the night")
-            .add_text("author", "George Orwell")
-            .add_text("category", "satire")
-            .add_integer("year", 1945)
-            .add_text("tags", "british allegory political")
-            .add_text("id", "book004")
+            .add_text("title", "Animal Farm", TextOption::default())
+            .add_text("body", "Mr Jones of Manor Farm, had locked the hen houses for the night", TextOption::default())
+            .add_text("author", "George Orwell", TextOption::default())
+            .add_text("category", "satire", TextOption::default())
+            .add_integer("year", 1945, IntegerOption::default())
+            .add_text("tags", "british allegory political", TextOption::default())
+            .add_text("id", "book004", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Pride and Prejudice")
-            .add_text("body", "It is a truth universally acknowledged, that a single man in possession of a good fortune")
-            .add_text("author", "Jane Austen")
-            .add_text("category", "romance")
-            .add_integer("year", 1813)
-            .add_text("tags", "british regency society")
-            .add_text("id", "book005")
+            .add_text("title", "Pride and Prejudice", TextOption::default())
+            .add_text("body", "It is a truth universally acknowledged, that a single man in possession of a good fortune", TextOption::default())
+            .add_text("author", "Jane Austen", TextOption::default())
+            .add_text("category", "romance", TextOption::default())
+            .add_integer("year", 1813, IntegerOption::default())
+            .add_text("tags", "british regency society", TextOption::default())
+            .add_text("id", "book005", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "The Catcher in the Rye")
-            .add_text("body", "If you really want to hear about it, the first thing you'll probably want to know")
-            .add_text("author", "J.D. Salinger")
-            .add_text("category", "coming-of-age")
-            .add_integer("year", 1951)
-            .add_text("tags", "american teenage rebellion")
-            .add_text("id", "book006")
+            .add_text("title", "The Catcher in the Rye", TextOption::default())
+            .add_text("body", "If you really want to hear about it, the first thing you'll probably want to know", TextOption::default())
+            .add_text("author", "J.D. Salinger", TextOption::default())
+            .add_text("category", "coming-of-age", TextOption::default())
+            .add_integer("year", 1951, IntegerOption::default())
+            .add_text("tags", "american teenage rebellion", TextOption::default())
+            .add_text("id", "book006", TextOption::default())
             .build(),
     ];
 
@@ -143,17 +144,17 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
             if let Some(field_value) = doc.get_field("category")
-                && let Some(category) = field_value.as_text()
+                && let Some(category) = field_value.value.as_text()
             {
                 println!("      Category: {category}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Integer(year)) =
-                doc.get_field("year")
+            if let Some(field) = doc.get_field("year")
+                && let yatagarasu::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -190,17 +191,17 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
             if let Some(field_value) = doc.get_field("author")
-                && let Some(author) = field_value.as_text()
+                && let Some(author) = field_value.value.as_text()
             {
                 println!("      Author: {author}");
             }
             if let Some(field_value) = doc.get_field("tags")
-                && let Some(tags) = field_value.as_text()
+                && let Some(tags) = field_value.value.as_text()
             {
                 println!("      Tags: {tags}");
             }
@@ -271,17 +272,17 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
             if let Some(field_value) = doc.get_field("author")
-                && let Some(author) = field_value.as_text()
+                && let Some(author) = field_value.value.as_text()
             {
                 println!("      Author: {author}");
             }
             if let Some(field_value) = doc.get_field("category")
-                && let Some(category) = field_value.as_text()
+                && let Some(category) = field_value.value.as_text()
             {
                 println!("      Category: {category}");
             }

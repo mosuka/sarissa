@@ -21,6 +21,8 @@ use tempfile::TempDir;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::document::document::Document;
 #[cfg(feature = "embeddings-candle")]
+use yatagarasu::document::field::VectorOption;
+#[cfg(feature = "embeddings-candle")]
 use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use yatagarasu::embedding::text_embedder::TextEmbedder;
@@ -98,8 +100,8 @@ async fn main() -> Result<()> {
     for (doc_id, (title, content)) in sample_docs.iter().enumerate() {
         // Create document with TWO separate vector fields: title_embedding and content_embedding
         let doc = Document::builder()
-            .add_vector("title_embedding", *title)
-            .add_vector("content_embedding", *content)
+            .add_vector("title_embedding", *title, VectorOption::default())
+            .add_vector("content_embedding", *content, VectorOption::default())
             .build();
 
         // Add document to engine (async - converts text to vectors internally)
@@ -108,7 +110,10 @@ async fn main() -> Result<()> {
             .await?;
         println!("  Added document {}: {}", doc_id, title);
         println!("    - title_embedding: \"{}\"", title);
-        println!("    - content_embedding: \"{}...\"", &content[..50.min(content.len())]);
+        println!(
+            "    - content_embedding: \"{}...\"",
+            &content[..50.min(content.len())]
+        );
     }
 
     // Commit and optimize
@@ -189,10 +194,12 @@ fn display_results(
     docs: &[(&str, &str)],
     field_info: &str,
 ) {
-    println!("Results ({}): {} matches in {} ms",
-             field_info,
-             results.results.len(),
-             results.search_time_ms);
+    println!(
+        "Results ({}): {} matches in {} ms",
+        field_info,
+        results.results.len(),
+        results.search_time_ms
+    );
 
     for (rank, result) in results.results.iter().enumerate() {
         if let Some((title, content)) = docs.get(result.doc_id as usize) {

@@ -9,6 +9,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::TextOption;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::InvertedIndexConfig;
@@ -48,54 +49,66 @@ fn main() -> Result<()> {
     // Add documents with various terms
     let documents = vec![
         Document::builder()
-            .add_text("title", "Rust Programming Language")
+            .add_text("title", "Rust Programming Language", TextOption::default())
             .add_text(
                 "body",
                 "Rust is a systems programming language focused on safety, speed, and concurrency",
+                TextOption::default()
             )
-            .add_text("author", "Steve Klabnik")
-            .add_text("category", "programming")
-            .add_text("id", "doc1")
+            .add_text("author", "Steve Klabnik", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
+            .add_text("id", "doc1", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Python for Beginners")
+            .add_text("title", "Python for Beginners", TextOption::default())
             .add_text(
                 "body",
                 "Python is a versatile and easy-to-learn programming language",
+                TextOption::default()
             )
-            .add_text("author", "John Smith")
-            .add_text("category", "programming")
-            .add_text("id", "doc2")
+            .add_text("author", "John Smith", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
+            .add_text("id", "doc2", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "JavaScript Essentials")
+            .add_text("title", "JavaScript Essentials", TextOption::default())
             .add_text(
                 "body",
                 "JavaScript is the language of the web, used for frontend and backend development",
+                TextOption::default()
             )
-            .add_text("author", "Jane Doe")
-            .add_text("category", "web-development")
-            .add_text("id", "doc3")
+            .add_text("author", "Jane Doe", TextOption::default())
+            .add_text("category", "web-development", TextOption::default())
+            .add_text("id", "doc3", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Machine Learning Fundamentals")
+            .add_text(
+                "title",
+                "Machine Learning Fundamentals"
+            ,
+                TextOption::default()
+            )
             .add_text(
                 "body",
-                "Machine learning is a subset of artificial intelligence focused on algorithms",
+                "Machine learning is a subset of artificial intelligence focused on algorithms"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "Alice Johnson")
-            .add_text("category", "data-science")
-            .add_text("id", "doc4")
+            .add_text("author", "Alice Johnson", TextOption::default())
+            .add_text("category", "data-science", TextOption::default())
+            .add_text("id", "doc4", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Data Structures in C++")
+            .add_text("title", "Data Structures in C++", TextOption::default())
             .add_text(
                 "body",
-                "Understanding data structures is crucial for efficient programming",
+                "Understanding data structures is crucial for efficient programming"
+            ,
+                TextOption::default()
             )
-            .add_text("author", "Bob Wilson")
-            .add_text("category", "programming")
-            .add_text("id", "doc5")
+            .add_text("author", "Bob Wilson", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
+            .add_text("id", "doc5", TextOption::default())
             .build(),
     ];
 
@@ -124,7 +137,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -146,7 +159,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -168,7 +181,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -207,12 +220,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
             if let Some(field_value) = doc.get_field("author")
-                && let Some(author) = field_value.as_text()
+                && let Some(author) = field_value.value.as_text()
             {
                 println!("      Author: {author}");
             }

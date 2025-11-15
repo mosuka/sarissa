@@ -19,6 +19,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::TextOption;
 use yatagarasu::document::parser::DocumentParser;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
@@ -70,19 +71,19 @@ fn main() -> Result<()> {
     // Create documents
     let docs = vec![
         Document::builder()
-            .add_text("id", "BOOK-001")
-            .add_text("title", "Rust Programming Language")
-            .add_text("category", "programming")
+            .add_text("id", "BOOK-001", TextOption::default())
+            .add_text("title", "Rust Programming Language", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("id", "BOOK-002")
-            .add_text("title", "Learning Rust")
-            .add_text("category", "programming")
+            .add_text("id", "BOOK-002", TextOption::default())
+            .add_text("title", "Learning Rust", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("id", "ARTICLE-001")
-            .add_text("title", "Introduction to Python")
-            .add_text("category", "tutorial")
+            .add_text("id", "ARTICLE-001", TextOption::default())
+            .add_text("title", "Introduction to Python", TextOption::default())
+            .add_text("category", "tutorial", TextOption::default())
             .build(),
     ];
 
@@ -131,12 +132,12 @@ fn main() -> Result<()> {
         println!("  {}. Doc {} (score: {:.4})", i + 1, hit.doc_id, hit.score);
         if let Some(doc) = &hit.document {
             if let Some(title) = doc.get_field("title")
-                && let Some(title_text) = title.as_text()
+                && let Some(title_text) = title.value.as_text()
             {
                 println!("     Title: {title_text}");
             }
             if let Some(id) = doc.get_field("id")
-                && let Some(id_text) = id.as_text()
+                && let Some(id_text) = id.value.as_text()
             {
                 println!("     ID: {id_text}");
             }

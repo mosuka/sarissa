@@ -9,6 +9,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::TextOption;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::InvertedIndexConfig;
@@ -48,39 +49,39 @@ fn main() -> Result<()> {
     // Add documents with various phrases
     let documents = vec![
         Document::builder()
-            .add_text("title", "Machine Learning Basics")
-            .add_text("body", "Machine learning is a powerful tool for data analysis and artificial intelligence applications")
-            .add_text("author", "Dr. Smith")
-            .add_text("description", "An introduction to machine learning concepts and algorithms")
-            .add_text("id", "001")
+            .add_text("title", "Machine Learning Basics", TextOption::default())
+            .add_text("body", "Machine learning is a powerful tool for data analysis and artificial intelligence applications", TextOption::default())
+            .add_text("author", "Dr. Smith", TextOption::default())
+            .add_text("description", "An introduction to machine learning concepts and algorithms", TextOption::default())
+            .add_text("id", "001", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Deep Learning Networks")
-            .add_text("body", "Deep learning networks use artificial neural networks with multiple layers for complex pattern recognition")
-            .add_text("author", "Prof. Johnson")
-            .add_text("description", "Advanced techniques in deep learning and neural network architectures")
-            .add_text("id", "002")
+            .add_text("title", "Deep Learning Networks", TextOption::default())
+            .add_text("body", "Deep learning networks use artificial neural networks with multiple layers for complex pattern recognition", TextOption::default())
+            .add_text("author", "Prof. Johnson", TextOption::default())
+            .add_text("description", "Advanced techniques in deep learning and neural network architectures", TextOption::default())
+            .add_text("id", "002", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Natural Language Processing")
-            .add_text("body", "Natural language processing combines computational linguistics with machine learning and artificial intelligence")
-            .add_text("author", "Dr. Wilson")
-            .add_text("description", "Processing and understanding human language using computational methods")
-            .add_text("id", "003")
+            .add_text("title", "Natural Language Processing", TextOption::default())
+            .add_text("body", "Natural language processing combines computational linguistics with machine learning and artificial intelligence", TextOption::default())
+            .add_text("author", "Dr. Wilson", TextOption::default())
+            .add_text("description", "Processing and understanding human language using computational methods", TextOption::default())
+            .add_text("id", "003", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Computer Vision Applications")
-            .add_text("body", "Computer vision applications include image recognition, object detection, and visual pattern analysis")
-            .add_text("author", "Prof. Davis")
-            .add_text("description", "Practical applications of computer vision in various industries")
-            .add_text("id", "004")
+            .add_text("title", "Computer Vision Applications", TextOption::default())
+            .add_text("body", "Computer vision applications include image recognition, object detection, and visual pattern analysis", TextOption::default())
+            .add_text("author", "Prof. Davis", TextOption::default())
+            .add_text("description", "Practical applications of computer vision in various industries", TextOption::default())
+            .add_text("id", "004", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Data Science Fundamentals")
-            .add_text("body", "Data science combines statistics, programming, and domain expertise to extract insights from data")
-            .add_text("author", "Dr. Brown")
-            .add_text("description", "Essential concepts and tools for data science practitioners")
-            .add_text("id", "005")
+            .add_text("title", "Data Science Fundamentals", TextOption::default())
+            .add_text("body", "Data science combines statistics, programming, and domain expertise to extract insights from data", TextOption::default())
+            .add_text("author", "Dr. Brown", TextOption::default())
+            .add_text("description", "Essential concepts and tools for data science practitioners", TextOption::default())
+            .add_text("id", "005", TextOption::default())
             .build(),
     ];
 
@@ -109,7 +110,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -138,7 +139,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -160,7 +161,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -185,7 +186,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -215,7 +216,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -245,7 +246,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }

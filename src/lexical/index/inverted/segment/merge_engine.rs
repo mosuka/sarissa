@@ -463,7 +463,7 @@ impl MergeEngine {
                 writer.write_varint(document.fields().len() as u64)?;
                 for (field_name, field_value) in document.fields() {
                     writer.write_string(field_name)?;
-                    let field_str = match field_value {
+                    let field_str = match &field_value.value {
                         crate::document::field::FieldValue::Text(s) => s.clone(),
                         crate::document::field::FieldValue::Integer(i) => i.to_string(),
                         crate::document::field::FieldValue::Float(f) => f.to_string(),

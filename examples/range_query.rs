@@ -9,6 +9,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::{FloatOption, IntegerOption, TextOption};
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::InvertedIndexConfig;
@@ -48,67 +49,88 @@ fn main() -> Result<()> {
     // Add documents with various numeric values
     let documents = vec![
         Document::builder()
-            .add_text("title", "Introduction to Algorithms")
+            .add_text("title", "Introduction to Algorithms", TextOption::default())
             .add_text(
                 "description",
-                "Comprehensive guide to algorithms and data structures",
+                "Comprehensive guide to algorithms and data structures"
+            ,
+                TextOption::default()
             )
-            .add_float("price", 89.99)
-            .add_float("rating", 4.8)
-            .add_integer("year", 2009)
-            .add_integer("pages", 1312)
-            .add_text("id", "book001")
+            .add_float("price", 89.99, FloatOption::default())
+            .add_float("rating", 4.8, FloatOption::default())
+            .add_integer("year", 2009, IntegerOption::default())
+            .add_integer("pages", 1312, IntegerOption::default())
+            .add_text("id", "book001", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Clean Code")
-            .add_text("description", "A handbook of agile software craftsmanship")
-            .add_float("price", 45.50)
-            .add_float("rating", 4.6)
-            .add_integer("year", 2008)
-            .add_integer("pages", 464)
-            .add_text("id", "book002")
-            .build(),
-        Document::builder()
-            .add_text("title", "Design Patterns")
+            .add_text("title", "Clean Code", TextOption::default())
             .add_text(
                 "description",
-                "Elements of reusable object-oriented software",
+                "A handbook of agile software craftsmanship"
+            ,
+                TextOption::default()
             )
-            .add_float("price", 62.95)
-            .add_float("rating", 4.5)
-            .add_integer("year", 1994)
-            .add_integer("pages", 395)
-            .add_text("id", "book003")
+            .add_float("price", 45.50, FloatOption::default())
+            .add_float("rating", 4.6, FloatOption::default())
+            .add_integer("year", 2008, IntegerOption::default())
+            .add_integer("pages", 464, IntegerOption::default())
+            .add_text("id", "book002", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "The Pragmatic Programmer")
-            .add_text("description", "Your journey to mastery")
-            .add_float("price", 52.99)
-            .add_float("rating", 4.7)
-            .add_integer("year", 2019)
-            .add_integer("pages", 352)
-            .add_text("id", "book004")
-            .build(),
-        Document::builder()
-            .add_text("title", "Refactoring")
-            .add_text("description", "Improving the design of existing code")
-            .add_float("price", 58.75)
-            .add_float("rating", 4.4)
-            .add_integer("year", 2018)
-            .add_integer("pages", 448)
-            .add_text("id", "book005")
-            .build(),
-        Document::builder()
-            .add_text("title", "Code Complete")
+            .add_text("title", "Design Patterns", TextOption::default())
             .add_text(
                 "description",
-                "A practical handbook of software construction",
+                "Elements of reusable object-oriented software"
+            ,
+                TextOption::default()
             )
-            .add_float("price", 73.99)
-            .add_float("rating", 4.9)
-            .add_integer("year", 2004)
-            .add_integer("pages", 914)
-            .add_text("id", "book006")
+            .add_float("price", 62.95, FloatOption::default())
+            .add_float("rating", 4.5, FloatOption::default())
+            .add_integer("year", 1994, IntegerOption::default())
+            .add_integer("pages", 395, IntegerOption::default())
+            .add_text("id", "book003", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("title", "The Pragmatic Programmer", TextOption::default())
+            .add_text(
+                "description",
+                "Your journey to mastery"
+            ,
+                TextOption::default()
+            )
+            .add_float("price", 52.99, FloatOption::default())
+            .add_float("rating", 4.7, FloatOption::default())
+            .add_integer("year", 2019, IntegerOption::default())
+            .add_integer("pages", 352, IntegerOption::default())
+            .add_text("id", "book004", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("title", "Refactoring", TextOption::default())
+            .add_text(
+                "description",
+                "Improving the design of existing code"
+            ,
+                TextOption::default()
+            )
+            .add_float("price", 58.75, FloatOption::default())
+            .add_float("rating", 4.4, FloatOption::default())
+            .add_integer("year", 2018, IntegerOption::default())
+            .add_integer("pages", 448, IntegerOption::default())
+            .add_text("id", "book005", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("title", "Code Complete", TextOption::default())
+            .add_text(
+                "description",
+                "A practical handbook of software construction"
+            ,
+                TextOption::default()
+            )
+            .add_float("price", 73.99, FloatOption::default())
+            .add_float("rating", 4.9, FloatOption::default())
+            .add_integer("year", 2004, IntegerOption::default())
+            .add_integer("pages", 914, IntegerOption::default())
+            .add_text("id", "book006", TextOption::default())
             .build(),
     ];
 
@@ -136,12 +158,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
-                doc.get_field("price")
+            if let Some(field) = doc.get_field("price")
+                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -164,12 +186,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(rating)) =
-                doc.get_field("rating")
+            if let Some(field) = doc.get_field("rating")
+                && let yatagarasu::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -192,12 +214,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Integer(year)) =
-                doc.get_field("year")
+            if let Some(field) = doc.get_field("year")
+                && let yatagarasu::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -220,12 +242,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Integer(pages)) =
-                doc.get_field("pages")
+            if let Some(field) = doc.get_field("pages")
+                && let yatagarasu::document::field::FieldValue::Integer(pages) = &field.value
             {
                 println!("      Pages: {pages}");
             }
@@ -248,12 +270,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Integer(year)) =
-                doc.get_field("year")
+            if let Some(field) = doc.get_field("year")
+                && let yatagarasu::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -276,12 +298,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
-                doc.get_field("price")
+            if let Some(field) = doc.get_field("price")
+                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -304,12 +326,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Integer(pages)) =
-                doc.get_field("pages")
+            if let Some(field) = doc.get_field("pages")
+                && let yatagarasu::document::field::FieldValue::Integer(pages) = &field.value
             {
                 println!("      Pages: {pages}");
             }

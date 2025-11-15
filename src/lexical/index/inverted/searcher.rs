@@ -425,7 +425,7 @@ impl InvertedIndexSearcher {
             .and_then(|doc| doc.get_field(field_name));
 
         match (val_a, val_b) {
-            (Some(a_val), Some(b_val)) => self.compare_values(a_val, b_val),
+            (Some(a_val), Some(b_val)) => self.compare_values(&a_val.value, &b_val.value),
             (Some(_), None) => Ordering::Less, // Documents with value come first
             (None, Some(_)) => Ordering::Greater, // Documents without value come last
             (None, None) => Ordering::Equal,

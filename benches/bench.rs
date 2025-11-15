@@ -14,7 +14,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::spelling::corrector::SpellingCorrector;
-use yatagarasu::vector::index::HnswIndexConfig;
+use yatagarasu::vector::index::config::HnswIndexConfig;
 use yatagarasu::vector::index::hnsw::writer::HnswIndexWriter;
 use yatagarasu::vector::writer::VectorIndexWriter;
 use yatagarasu::vector::{DistanceMetric, Vector};
@@ -142,11 +142,12 @@ fn bench_vector_search(c: &mut Criterion) {
                 HnswIndexWriter::new(index_config, writer_config).unwrap()
             },
             |mut builder| {
-                let indexed_vectors: Vec<(u64, Vector)> = vectors
+                let field_name = "default".to_string();
+                let indexed_vectors: Vec<(u64, String, Vector)> = vectors
                     .iter()
                     .take(100)
                     .enumerate()
-                    .map(|(i, v)| (i as u64, v.clone()))
+                    .map(|(i, v)| (i as u64, field_name.clone(), v.clone()))
                     .collect();
                 let _ = builder.build(indexed_vectors);
                 black_box(builder);
@@ -339,10 +340,11 @@ fn bench_scalability(c: &mut Criterion) {
                         HnswIndexWriter::new(index_config, writer_config).unwrap()
                     },
                     |mut builder| {
-                        let indexed_vectors: Vec<(u64, Vector)> = vectors
+                        let field_name = "default".to_string();
+                        let indexed_vectors: Vec<(u64, String, Vector)> = vectors
                             .iter()
                             .enumerate()
-                            .map(|(i, v)| (i as u64, v.clone()))
+                            .map(|(i, v)| (i as u64, field_name.clone(), v.clone()))
                             .collect();
                         let _ = builder.build(indexed_vectors);
                         black_box(builder);

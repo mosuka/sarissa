@@ -9,6 +9,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::TextOption;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::InvertedIndexConfig;
@@ -48,71 +49,128 @@ fn main() -> Result<()> {
     // Add documents with various patterns for wildcard matching
     let documents = vec![
         Document::builder()
-            .add_text("title", "JavaScript Tutorial for Beginners")
-            .add_text("filename", "javascript_tutorial.pdf")
-            .add_text("description", "Complete JavaScript programming guide")
-            .add_text("category", "programming")
-            .add_text("extension", "pdf")
-            .add_text("id", "file001")
-            .build(),
-        Document::builder()
-            .add_text("title", "Python Programming Reference")
-            .add_text("filename", "python_reference.html")
-            .add_text("description", "Comprehensive Python programming reference")
-            .add_text("category", "programming")
-            .add_text("extension", "html")
-            .add_text("id", "file002")
-            .build(),
-        Document::builder()
-            .add_text("title", "Machine Learning Algorithms")
-            .add_text("filename", "ml_algorithms.docx")
-            .add_text("description", "Understanding machine learning techniques")
-            .add_text("category", "data-science")
-            .add_text("extension", "docx")
-            .add_text("id", "file003")
-            .build(),
-        Document::builder()
-            .add_text("title", "Database Design Principles")
-            .add_text("filename", "database_design.pptx")
-            .add_text("description", "Principles of good database design")
-            .add_text("category", "database")
-            .add_text("extension", "pptx")
-            .add_text("id", "file004")
-            .build(),
-        Document::builder()
-            .add_text("title", "Web Development Best Practices")
-            .add_text("filename", "web_dev_practices.txt")
-            .add_text("description", "Best practices for web development")
-            .add_text("category", "web-development")
-            .add_text("extension", "txt")
-            .add_text("id", "file005")
-            .build(),
-        Document::builder()
-            .add_text("title", "React Component Patterns")
-            .add_text("filename", "react_patterns.jsx")
+            .add_text(
+                "title",
+                "JavaScript Tutorial for Beginners"
+            ,
+                TextOption::default()
+            )
+            .add_text("filename", "javascript_tutorial.pdf", TextOption::default())
             .add_text(
                 "description",
-                "Common patterns in React component development",
+                "Complete JavaScript programming guide"
+            ,
+                TextOption::default()
             )
-            .add_text("category", "frontend")
-            .add_text("extension", "jsx")
-            .add_text("id", "file006")
+            .add_text("category", "programming", TextOption::default())
+            .add_text("extension", "pdf", TextOption::default())
+            .add_text("id", "file001", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "API Documentation Template")
-            .add_text("filename", "api_docs_template.md")
-            .add_text("description", "Template for creating API documentation")
-            .add_text("category", "documentation")
-            .add_text("extension", "md")
-            .add_text("id", "file007")
+            .add_text(
+                "title",
+                "Python Programming Reference"
+            ,
+                TextOption::default()
+            )
+            .add_text("filename", "python_reference.html", TextOption::default())
+            .add_text(
+                "description",
+                "Comprehensive Python programming reference"
+            ,
+                TextOption::default()
+            )
+            .add_text("category", "programming", TextOption::default())
+            .add_text("extension", "html", TextOption::default())
+            .add_text("id", "file002", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Configuration Settings")
-            .add_text("filename", "app_config.json")
-            .add_text("description", "Application configuration file")
-            .add_text("category", "configuration")
-            .add_text("extension", "json")
-            .add_text("id", "file008")
+            .add_text(
+                "title",
+                "Machine Learning Algorithms"
+            ,
+                TextOption::default()
+            )
+            .add_text("filename", "ml_algorithms.docx", TextOption::default())
+            .add_text(
+                "description",
+                "Understanding machine learning techniques"
+            ,
+                TextOption::default()
+            )
+            .add_text("category", "data-science", TextOption::default())
+            .add_text("extension", "docx", TextOption::default())
+            .add_text("id", "file003", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("title", "Database Design Principles", TextOption::default())
+            .add_text("filename", "database_design.pptx", TextOption::default())
+            .add_text(
+                "description",
+                "Principles of good database design"
+            ,
+                TextOption::default()
+            )
+            .add_text("category", "database", TextOption::default())
+            .add_text("extension", "pptx", TextOption::default())
+            .add_text("id", "file004", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text(
+                "title",
+                "Web Development Best Practices"
+            ,
+                TextOption::default()
+            )
+            .add_text("filename", "web_dev_practices.txt", TextOption::default())
+            .add_text(
+                "description",
+                "Best practices for web development"
+            ,
+                TextOption::default()
+            )
+            .add_text("category", "web-development", TextOption::default())
+            .add_text("extension", "txt", TextOption::default())
+            .add_text("id", "file005", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("title", "React Component Patterns", TextOption::default())
+            .add_text("filename", "react_patterns.jsx", TextOption::default())
+            .add_text(
+                "description",
+                "Common patterns in React component development"
+            ,
+                TextOption::default()
+            )
+            .add_text("category", "frontend", TextOption::default())
+            .add_text("extension", "jsx", TextOption::default())
+            .add_text("id", "file006", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("title", "API Documentation Template", TextOption::default())
+            .add_text("filename", "api_docs_template.md", TextOption::default())
+            .add_text(
+                "description",
+                "Template for creating API documentation"
+            ,
+                TextOption::default()
+            )
+            .add_text("category", "documentation", TextOption::default())
+            .add_text("extension", "md", TextOption::default())
+            .add_text("id", "file007", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("title", "Configuration Settings", TextOption::default())
+            .add_text("filename", "app_config.json", TextOption::default())
+            .add_text(
+                "description",
+                "Application configuration file"
+            ,
+                TextOption::default()
+            )
+            .add_text("category", "configuration", TextOption::default())
+            .add_text("extension", "json", TextOption::default())
+            .add_text("id", "file008", TextOption::default())
             .build(),
     ];
 
@@ -141,7 +199,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("filename")
-            && let Some(filename) = field_value.as_text()
+            && let Some(filename) = field_value.value.as_text()
         {
             println!("      Filename: {filename}");
         }
@@ -163,7 +221,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("filename")
-            && let Some(filename) = field_value.as_text()
+            && let Some(filename) = field_value.value.as_text()
         {
             println!("      Filename: {filename}");
         }
@@ -185,7 +243,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("filename")
-            && let Some(filename) = field_value.as_text()
+            && let Some(filename) = field_value.value.as_text()
         {
             println!("      Filename: {filename}");
         }
@@ -207,7 +265,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("extension")
-            && let Some(ext) = field_value.as_text()
+            && let Some(ext) = field_value.value.as_text()
         {
             println!("      Extension: {ext}");
         }
@@ -229,7 +287,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("category")
-            && let Some(category) = field_value.as_text()
+            && let Some(category) = field_value.value.as_text()
         {
             println!("      Category: {category}");
         }
@@ -251,7 +309,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("filename")
-            && let Some(filename) = field_value.as_text()
+            && let Some(filename) = field_value.value.as_text()
         {
             println!("      Filename: {filename}");
         }
@@ -273,7 +331,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -295,7 +353,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("extension")
-            && let Some(ext) = field_value.as_text()
+            && let Some(ext) = field_value.value.as_text()
         {
             println!("      Extension: {ext}");
         }
@@ -317,7 +375,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("filename")
-            && let Some(filename) = field_value.as_text()
+            && let Some(filename) = field_value.value.as_text()
         {
             println!("      Filename: {filename}");
         }

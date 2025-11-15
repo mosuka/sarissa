@@ -1,12 +1,20 @@
-//! Field value types for documents.
+//! Field value types and field options for documents.
 //!
-//! This module defines the [`FieldValue`] enum which represents all possible
-//! types of values that can be stored in document fields. It supports a variety
-//! of data types for flexible schema-less indexing.
+//! This module defines:
+//! - [`Field`] - A struct combining a value and its indexing options
+//! - [`FieldValue`] - The value stored in a field (Text, Integer, etc.)
+//! - [`FieldOption`] - Type-specific indexing options (TextOption, VectorOption, etc.)
+//!
+//! # Field Structure
+//!
+//! Each field consists of:
+//! - **value**: The actual data (FieldValue)
+//! - **option**: How the field should be indexed (FieldOption)
 //!
 //! # Supported Types
 //!
 //! - **Text** - String data for full-text search
+//! - **Vector** - Embedding vectors for semantic search
 //! - **Integer** - 64-bit signed integers
 //! - **Float** - 64-bit floating-point numbers
 //! - **Boolean** - true/false values
@@ -51,6 +59,48 @@ use serde::{Deserialize, Serialize};
 
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 use crate::vector::DistanceMetric;
+
+/// A field combines a value with indexing options.
+///
+/// This struct represents a complete field in a document, containing both
+/// the data (value) and metadata about how it should be indexed (option).
+///
+/// # Examples
+///
+/// ```
+/// use yatagarasu::document::field::{Field, FieldValue, FieldOption, TextOption};
+///
+/// // Create a text field with custom options
+/// let field = Field {
+///     value: FieldValue::Text("Rust Programming".to_string()),
+///     option: FieldOption::Text(TextOption {
+///         indexed: true,
+///         stored: true,
+///         term_vectors: true,
+///     }),
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Field {
+    /// The field value.
+    pub value: FieldValue,
+
+    /// The field indexing options.
+    pub option: FieldOption,
+}
+
+impl Field {
+    /// Create a new field with a value and option.
+    pub fn new(value: FieldValue, option: FieldOption) -> Self {
+        Self { value, option }
+    }
+
+    /// Create a field with the option inferred from the value type.
+    pub fn with_default_option(value: FieldValue) -> Self {
+        let option = FieldOption::from_field_value(&value);
+        Self { value, option }
+    }
+}
 
 /// Numeric type classification for numeric range queries.
 ///

@@ -19,6 +19,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::{FloatOption, TextOption};
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::InvertedIndexConfig;
@@ -57,39 +58,39 @@ fn main() -> Result<()> {
     // Add sample documents
     let documents = vec![
         Document::builder()
-            .add_text("title", "The Great Gatsby")
-            .add_text("body", "In my younger and more vulnerable years my father gave me some advice")
-            .add_text("author", "F. Scott Fitzgerald")
-            .add_numeric("year", 1925.0)
-            .add_text("id", "doc001")
+            .add_text("title", "The Great Gatsby", TextOption::default())
+            .add_text("body", "In my younger and more vulnerable years my father gave me some advice", TextOption::default())
+            .add_text("author", "F. Scott Fitzgerald", TextOption::default())
+            .add_float("year", 1925.0, FloatOption::default())
+            .add_text("id", "doc001", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "To Kill a Mockingbird")
-            .add_text("body", "When I was almost six years old, I heard my brother arguing with my father")
-            .add_text("author", "Harper Lee")
-            .add_numeric("year", 1960.0)
-            .add_text("id", "doc002")
+            .add_text("title", "To Kill a Mockingbird", TextOption::default())
+            .add_text("body", "When I was almost six years old, I heard my brother arguing with my father", TextOption::default())
+            .add_text("author", "Harper Lee", TextOption::default())
+            .add_float("year", 1960.0, FloatOption::default())
+            .add_text("id", "doc002", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "1984")
-            .add_text("body", "It was a bright cold day in April, and the clocks were striking thirteen")
-            .add_text("author", "George Orwell")
-            .add_numeric("year", 1949.0)
-            .add_text("id", "doc003")
+            .add_text("title", "1984", TextOption::default())
+            .add_text("body", "It was a bright cold day in April, and the clocks were striking thirteen", TextOption::default())
+            .add_text("author", "George Orwell", TextOption::default())
+            .add_float("year", 1949.0, FloatOption::default())
+            .add_text("id", "doc003", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Pride and Prejudice")
-            .add_text("body", "It is a truth universally acknowledged, that a single man in possession of a good fortune")
-            .add_text("author", "Jane Austen")
-            .add_numeric("year", 1813.0)
-            .add_text("id", "doc004")
+            .add_text("title", "Pride and Prejudice", TextOption::default())
+            .add_text("body", "It is a truth universally acknowledged, that a single man in possession of a good fortune", TextOption::default())
+            .add_text("author", "Jane Austen", TextOption::default())
+            .add_float("year", 1813.0, FloatOption::default())
+            .add_text("id", "doc004", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "The Catcher in the Rye")
-            .add_text("body", "If you really want to hear about it, the first thing you'll probably want to know")
-            .add_text("author", "J.D. Salinger")
-            .add_numeric("year", 1951.0)
-            .add_text("id", "doc005")
+            .add_text("title", "The Catcher in the Rye", TextOption::default())
+            .add_text("body", "If you really want to hear about it, the first thing you'll probably want to know", TextOption::default())
+            .add_text("author", "J.D. Salinger", TextOption::default())
+            .add_float("year", 1951.0, FloatOption::default())
+            .add_text("id", "doc005", TextOption::default())
             .build(),
     ];
 
@@ -274,12 +275,12 @@ fn execute_search(engine: &mut LexicalEngine, parser: &QueryParser, query_str: &
         print!("  {}. Score: {:.4} ", i + 1, hit.score);
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 print!("- {title}");
             }
             if let Some(field_value) = doc.get_field("year")
-                && let Some(year) = field_value.as_numeric()
+                && let Some(year) = field_value.value.as_numeric()
                 && let Ok(year_num) = year.parse::<f64>()
             {
                 print!(" ({})", year_num as i32);

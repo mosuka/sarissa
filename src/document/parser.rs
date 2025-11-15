@@ -40,14 +40,15 @@
 //! ```
 //! use yatagarasu::document::document::Document;
 //! use yatagarasu::document::parser::DocumentParser;
+//! use yatagarasu::document::field::{TextOption, IntegerOption};
 //! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));
 //!
 //! let doc = Document::builder()
-//!     .add_text("title", "Rust Programming Language")
-//!     .add_integer("year", 2024)
+//!     .add_text("title", "Rust Programming Language", TextOption::default())
+//!     .add_integer("year", 2024, IntegerOption::default())
 //!     .build();
 //!
 //! let analyzed = parser.parse(doc).unwrap();
@@ -60,6 +61,7 @@
 //! ```
 //! use yatagarasu::document::document::Document;
 //! use yatagarasu::document::parser::DocumentParser;
+//! use yatagarasu::document::field::TextOption;
 //! use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 //! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 //! use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
@@ -72,8 +74,8 @@
 //! let parser = DocumentParser::new(Arc::new(per_field));
 //!
 //! let doc = Document::builder()
-//!     .add_text("title", "Getting Started")  // Uses StandardAnalyzer
-//!     .add_text("id", "DOC-001")             // Uses KeywordAnalyzer
+//!     .add_text("title", "Getting Started", TextOption::default())  // Uses StandardAnalyzer
+//!     .add_text("id", "DOC-001", TextOption::default())             // Uses KeywordAnalyzer
 //!     .build();
 //!
 //! let analyzed = parser.parse(doc).unwrap();
@@ -104,6 +106,7 @@ use crate::error::Result;
 /// ```
 /// use yatagarasu::document::document::Document;
 /// use yatagarasu::document::parser::DocumentParser;
+/// use yatagarasu::document::field::TextOption;
 /// use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 /// use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
@@ -115,8 +118,8 @@ use crate::error::Result;
 /// let parser = DocumentParser::new(Arc::new(per_field));
 ///
 /// let doc = Document::builder()
-///     .add_text("title", "Rust Programming")
-///     .add_text("id", "BOOK-001")
+///     .add_text("title", "Rust Programming", TextOption::default())
+///     .add_text("id", "BOOK-001", TextOption::default())
 ///     .build();
 ///
 /// let analyzed = parser.parse(doc).unwrap();
@@ -157,16 +160,16 @@ impl DocumentParser {
         let mut stored_fields = AHashMap::new();
 
         // Process each field in the document
-        for (field_name, field_value) in doc.fields() {
-            match field_value {
+        for (field_name, field) in doc.fields() {
+            match &field.value {
                 FieldValue::Text(text) => {
                     // Analyze text field with per-field analyzer
                     let tokens = if let Some(per_field) =
                         self.analyzer.as_any().downcast_ref::<PerFieldAnalyzer>()
                     {
-                        per_field.analyze_field(field_name, text)?
+                        per_field.analyze_field(field_name.as_str(), text.as_str())?
                     } else {
-                        self.analyzer.analyze(text)?
+                        self.analyzer.analyze(text.as_str())?
                     };
 
                     let token_vec: Vec<Token> = tokens.collect();
@@ -219,11 +222,11 @@ impl DocumentParser {
                 }
                 FieldValue::Binary(_) => {
                     // Binary fields are not indexed, only stored
-                    stored_fields.insert(field_name.clone(), field_value.clone());
+                    stored_fields.insert(field_name.clone(), field.value.clone());
                 }
                 FieldValue::Vector(_) => {
                     // Vector fields are not indexed in lexical engine, only stored
-                    stored_fields.insert(field_name.clone(), field_value.clone());
+                    stored_fields.insert(field_name.clone(), field.value.clone());
                 }
                 FieldValue::DateTime(dt) => {
                     // Convert datetime to RFC3339 string
@@ -311,14 +314,15 @@ mod tests {
     use super::*;
     use crate::analysis::analyzer::keyword::KeywordAnalyzer;
     use crate::analysis::analyzer::standard::StandardAnalyzer;
+    use crate::document::field::{BooleanOption, FloatOption, IntegerOption, TextOption};
 
     #[test]
     fn test_basic_parsing() {
         let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));
 
         let doc = Document::builder()
-            .add_text("title", "Rust Programming")
-            .add_text("body", "Learn Rust")
+            .add_text("title", "Rust Programming", TextOption::default())
+            .add_text("body", "Learn Rust", TextOption::default())
             .build();
 
         let analyzed = parser.parse(doc).unwrap();
@@ -335,8 +339,8 @@ mod tests {
         let parser = DocumentParser::new(Arc::new(per_field));
 
         let doc = Document::builder()
-            .add_text("title", "Rust Programming")
-            .add_text("id", "BOOK-001")
+            .add_text("title", "Rust Programming", TextOption::default())
+            .add_text("id", "BOOK-001", TextOption::default())
             .build();
 
         let analyzed = parser.parse(doc).unwrap();
@@ -353,10 +357,10 @@ mod tests {
         let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));
 
         let doc = Document::builder()
-            .add_text("title", "Test")
-            .add_integer("year", 2024)
-            .add_float("price", 19.99)
-            .add_boolean("active", true)
+            .add_text("title", "Test", TextOption::default())
+            .add_integer("year", 2024, IntegerOption::default())
+            .add_float("price", 19.99, FloatOption::default())
+            .add_boolean("active", true, BooleanOption::default())
             .build();
 
         let analyzed = parser.parse(doc).unwrap();

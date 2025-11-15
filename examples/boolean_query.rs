@@ -9,6 +9,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::{FloatOption, TextOption};
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
@@ -49,64 +50,64 @@ fn main() -> Result<()> {
     // Add documents for testing boolean queries
     let documents = vec![
         Document::builder()
-            .add_text("title", "Advanced Python Programming")
-            .add_text("body", "Learn advanced Python techniques including decorators, metaclasses, and async programming")
-            .add_text("author", "Alice Johnson")
-            .add_text("category", "programming")
-            .add_float("price", 59.99)
-            .add_float("rating", 4.7)
-            .add_text("tags", "python advanced programming")
-            .add_text("id", "book001")
+            .add_text("title", "Advanced Python Programming", TextOption::default())
+            .add_text("body", "Learn advanced Python techniques including decorators, metaclasses, and async programming", TextOption::default())
+            .add_text("author", "Alice Johnson", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
+            .add_float("price", 59.99, FloatOption::default())
+            .add_float("rating", 4.7, FloatOption::default())
+            .add_text("tags", "python advanced programming", TextOption::default())
+            .add_text("id", "book001", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "JavaScript for Web Development")
-            .add_text("body", "Modern JavaScript techniques for frontend and backend web development")
-            .add_text("author", "Bob Smith")
-            .add_text("category", "web-development")
-            .add_float("price", 45.50)
-            .add_float("rating", 4.3)
-            .add_text("tags", "javascript web frontend backend")
-            .add_text("id", "book002")
+            .add_text("title", "JavaScript for Web Development", TextOption::default())
+            .add_text("body", "Modern JavaScript techniques for frontend and backend web development", TextOption::default())
+            .add_text("author", "Bob Smith", TextOption::default())
+            .add_text("category", "web-development", TextOption::default())
+            .add_float("price", 45.50, FloatOption::default())
+            .add_float("rating", 4.3, FloatOption::default())
+            .add_text("tags", "javascript web frontend backend", TextOption::default())
+            .add_text("id", "book002", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Machine Learning with Python")
-            .add_text("body", "Practical machine learning algorithms implemented in Python")
-            .add_text("author", "Carol Davis")
-            .add_text("category", "data-science")
-            .add_float("price", 72.99)
-            .add_float("rating", 4.8)
-            .add_text("tags", "python machine-learning data-science")
-            .add_text("id", "book003")
+            .add_text("title", "Machine Learning with Python", TextOption::default())
+            .add_text("body", "Practical machine learning algorithms implemented in Python", TextOption::default())
+            .add_text("author", "Carol Davis", TextOption::default())
+            .add_text("category", "data-science", TextOption::default())
+            .add_float("price", 72.99, FloatOption::default())
+            .add_float("rating", 4.8, FloatOption::default())
+            .add_text("tags", "python machine-learning data-science", TextOption::default())
+            .add_text("id", "book003", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Web Design Fundamentals")
-            .add_text("body", "Learn the basics of web design including HTML, CSS, and responsive design")
-            .add_text("author", "David Brown")
-            .add_text("category", "web-development")
-            .add_float("price", 39.99)
-            .add_float("rating", 4.1)
-            .add_text("tags", "web design html css")
-            .add_text("id", "book004")
+            .add_text("title", "Web Design Fundamentals", TextOption::default())
+            .add_text("body", "Learn the basics of web design including HTML, CSS, and responsive design", TextOption::default())
+            .add_text("author", "David Brown", TextOption::default())
+            .add_text("category", "web-development", TextOption::default())
+            .add_float("price", 39.99, FloatOption::default())
+            .add_float("rating", 4.1, FloatOption::default())
+            .add_text("tags", "web design html css", TextOption::default())
+            .add_text("id", "book004", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Data Science with R")
-            .add_text("body", "Statistical computing and data analysis using the R programming language")
-            .add_text("author", "Eva Wilson")
-            .add_text("category", "data-science")
-            .add_float("price", 65.00)
-            .add_float("rating", 4.5)
-            .add_text("tags", "r data-science statistics")
-            .add_text("id", "book005")
+            .add_text("title", "Data Science with R", TextOption::default())
+            .add_text("body", "Statistical computing and data analysis using the R programming language", TextOption::default())
+            .add_text("author", "Eva Wilson", TextOption::default())
+            .add_text("category", "data-science", TextOption::default())
+            .add_float("price", 65.00, FloatOption::default())
+            .add_float("rating", 4.5, FloatOption::default())
+            .add_text("tags", "r data-science statistics", TextOption::default())
+            .add_text("id", "book005", TextOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Advanced JavaScript Patterns")
-            .add_text("body", "Design patterns and advanced programming techniques in JavaScript")
-            .add_text("author", "Frank Miller")
-            .add_text("category", "programming")
-            .add_float("price", 54.99)
-            .add_float("rating", 4.6)
-            .add_text("tags", "javascript advanced patterns")
-            .add_text("id", "book006")
+            .add_text("title", "Advanced JavaScript Patterns", TextOption::default())
+            .add_text("body", "Design patterns and advanced programming techniques in JavaScript", TextOption::default())
+            .add_text("author", "Frank Miller", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
+            .add_float("price", 54.99, FloatOption::default())
+            .add_float("rating", 4.6, FloatOption::default())
+            .add_text("tags", "javascript advanced patterns", TextOption::default())
+            .add_text("id", "book006", TextOption::default())
             .build(),
     ];
 
@@ -141,7 +142,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -165,7 +166,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -189,7 +190,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -222,17 +223,17 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
-                doc.get_field("price")
+            if let Some(field) = doc.get_field("price")
+                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(rating)) =
-                doc.get_field("rating")
+            if let Some(field) = doc.get_field("rating")
+                && let yatagarasu::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -260,7 +261,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -289,7 +290,7 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document
             && let Some(field_value) = doc.get_field("title")
-            && let Some(title) = field_value.as_text()
+            && let Some(title) = field_value.value.as_text()
         {
             println!("      Title: {title}");
         }
@@ -317,12 +318,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
-                doc.get_field("price")
+            if let Some(field) = doc.get_field("price")
+                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -352,12 +353,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(rating)) =
-                doc.get_field("rating")
+            if let Some(field) = doc.get_field("rating")
+                && let yatagarasu::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -408,17 +409,17 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
-                doc.get_field("price")
+            if let Some(field) = doc.get_field("price")
+                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(rating)) =
-                doc.get_field("rating")
+            if let Some(field) = doc.get_field("rating")
+                && let yatagarasu::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -468,12 +469,12 @@ fn main() -> Result<()> {
         );
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
-                doc.get_field("price")
+            if let Some(field) = doc.get_field("price")
+                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }

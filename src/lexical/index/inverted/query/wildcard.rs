@@ -168,7 +168,7 @@ impl Query for WildcardQuery {
         for doc_id in 0..reader.doc_count() {
             if let Ok(Some(doc)) = reader.document(doc_id)
                 && let Some(field_value) = doc.get_field(&self.field)
-                && let Some(text) = field_value.as_text()
+                && let Some(text) = field_value.value.as_text()
             {
                 // Schema-less: token-based matching for all text fields
                 let tokens: Vec<&str> = text.split_whitespace().collect();
@@ -203,7 +203,7 @@ impl Query for WildcardQuery {
         for doc_id in 0..total_docs {
             if let Ok(Some(doc)) = reader.document(doc_id)
                 && let Some(field_value) = doc.get_field(&self.field)
-                && let Some(text) = field_value.as_text()
+                && let Some(text) = field_value.value.as_text()
             {
                 // Token-based matching with count
                 let tokens: Vec<&str> = text.split_whitespace().collect();

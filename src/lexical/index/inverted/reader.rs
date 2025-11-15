@@ -482,7 +482,10 @@ impl SegmentReader {
                         }
                     };
 
-                    doc.add_field(field_name, field_value);
+                    doc.add_field(
+                        field_name,
+                        crate::document::field::Field::with_default_option(field_value),
+                    );
                 }
 
                 documents.insert(doc_id, doc);
@@ -740,7 +743,7 @@ impl SegmentReader {
 
             for (doc_id, doc) in documents.iter() {
                 if let Some(field_value) = doc.get_field(field)
-                    && let Some(text) = field_value.as_text()
+                    && let Some(text) = field_value.value.as_text()
                 {
                     // Use default analyzer (analyzers are configured at writer level)
                     let token_stream = default_analyzer.analyze(text)?;
