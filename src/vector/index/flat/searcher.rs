@@ -30,14 +30,25 @@ impl VectorSearcher for FlatVectorSearcher {
         let vector_count = self.index_reader.vector_count();
         results.candidates_examined = vector_count;
 
-        // Get all vector IDs
+        // Get all vector IDs with field names
         let vector_ids = self.index_reader.vector_ids()?;
 
+        // Filter by field_name if specified
+        let filtered_vector_ids: Vec<(u64, String)> =
+            if let Some(ref field_name) = request.field_name {
+                vector_ids
+                    .into_iter()
+                    .filter(|(_, f)| f == field_name)
+                    .collect()
+            } else {
+                vector_ids
+            };
+
         // Calculate similarities for all vectors
-        let mut candidates: Vec<(u64, f32, f32, crate::vector::Vector)> =
-            Vec::with_capacity(vector_count);
-        for doc_id in vector_ids {
-            if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id) {
+        let mut candidates: Vec<(u64, String, f32, f32, crate::vector::Vector)> =
+            Vec::with_capacity(filtered_vector_ids.len());
+        for (doc_id, field_name) in filtered_vector_ids {
+            if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, &field_name) {
                 let similarity = self
                     .index_reader
                     .distance_metric()
@@ -46,16 +57,17 @@ impl VectorSearcher for FlatVectorSearcher {
                     .index_reader
                     .distance_metric()
                     .distance(&request.query.data, &vector.data)?;
-                candidates.push((doc_id, similarity, distance, vector));
+                candidates.push((doc_id, field_name, similarity, distance, vector));
             }
         }
 
         // Sort by similarity (descending)
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take top_k results
         let top_k = request.params.top_k.min(candidates.len());
-        for (doc_id, similarity, distance, vector) in candidates.into_iter().take(top_k) {
+        for (doc_id, field_name, similarity, distance, vector) in candidates.into_iter().take(top_k)
+        {
             // Apply minimum similarity threshold
             if similarity < request.params.min_similarity {
                 break;
@@ -65,6 +77,7 @@ impl VectorSearcher for FlatVectorSearcher {
                 .results
                 .push(crate::vector::search::searcher::VectorSearchResult {
                     doc_id,
+                    field_name,
                     similarity,
                     distance,
                     vector: if request.params.include_vectors {

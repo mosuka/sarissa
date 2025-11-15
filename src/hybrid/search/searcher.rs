@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::lexical::search::searcher::LexicalSearchParams;
-use crate::vector::search::searcher::VectorSearchParams;
 use crate::vector::Vector;
+use crate::vector::search::searcher::VectorSearchParams;
 
 /// Hybrid search request combining text query, optional vector, and search parameters.
 ///

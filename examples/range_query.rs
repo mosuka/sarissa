@@ -113,7 +113,9 @@ fn main() -> Result<()> {
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    lexical_engine.add_documents(documents)?;
+    for doc in documents {
+        lexical_engine.add_document(doc)?;
+    }
     lexical_engine.commit()?;
 
     println!("\n=== RangeQuery Examples ===\n");
@@ -138,7 +140,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(price)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
                 doc.get_field("price")
             {
                 println!("      Price: ${price:.2}");
@@ -166,7 +168,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(rating)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(rating)) =
                 doc.get_field("rating")
             {
                 println!("      Rating: {rating:.1}");
@@ -194,7 +196,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Integer(year)) =
+            if let Some(yatagarasu::document::field::FieldValue::Integer(year)) =
                 doc.get_field("year")
             {
                 println!("      Year: {year}");
@@ -222,7 +224,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Integer(pages)) =
+            if let Some(yatagarasu::document::field::FieldValue::Integer(pages)) =
                 doc.get_field("pages")
             {
                 println!("      Pages: {pages}");
@@ -250,7 +252,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Integer(year)) =
+            if let Some(yatagarasu::document::field::FieldValue::Integer(year)) =
                 doc.get_field("year")
             {
                 println!("      Year: {year}");
@@ -278,7 +280,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(price)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
                 doc.get_field("price")
             {
                 println!("      Price: ${price:.2}");
@@ -306,7 +308,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Integer(pages)) =
+            if let Some(yatagarasu::document::field::FieldValue::Integer(pages)) =
                 doc.get_field("pages")
             {
                 println!("      Pages: {pages}");

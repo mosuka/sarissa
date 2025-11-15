@@ -13,7 +13,7 @@ use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
 use crate::document::document::Document;
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::{Result, YatagarasuError};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
@@ -273,7 +273,7 @@ impl InvertedIndexWriter {
 
         // Process each field in the document (schema-less mode)
         for (field_name, field_value) in doc.fields() {
-            use crate::document::field_value::FieldValue;
+            use crate::document::field::FieldValue;
 
             match field_value {
                 FieldValue::Text(text) => {
@@ -350,8 +350,11 @@ impl InvertedIndexWriter {
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
                     stored_fields.insert(field_name.clone(), FieldValue::DateTime(*dt));
                 }
-                FieldValue::Binary(_) | FieldValue::Geo(_) | FieldValue::Null => {
-                    // For Binary, Geo, and Null types, only store but don't index
+                FieldValue::Binary(_)
+                | FieldValue::Geo(_)
+                | FieldValue::Vector(_)
+                | FieldValue::Null => {
+                    // For Binary, Geo, Vector, and Null types, only store but don't index
                     stored_fields.insert(field_name.clone(), field_value.clone());
                 }
             }
@@ -392,7 +395,11 @@ impl InvertedIndexWriter {
     }
 
     /// Add an analyzed document to the inverted index.
-    fn add_analyzed_document_to_index(&mut self, doc_id: u64, doc: &AnalyzedDocument) -> Result<()> {
+    fn add_analyzed_document_to_index(
+        &mut self,
+        doc_id: u64,
+        doc: &AnalyzedDocument,
+    ) -> Result<()> {
         for (field_name, terms) in &doc.field_terms {
             for analyzed_term in terms {
                 let full_term = format!("{field_name}:{}", analyzed_term.term);
@@ -569,6 +576,10 @@ impl InvertedIndexWriter {
                         stored_writer.write_u8(6)?; // Type tag for Geo
                         stored_writer.write_f64(geo.lat)?;
                         stored_writer.write_f64(geo.lon)?;
+                    }
+                    FieldValue::Vector(text) => {
+                        stored_writer.write_u8(8)?; // Type tag for Vector
+                        stored_writer.write_string(text)?;
                     }
                     FieldValue::Null => {
                         stored_writer.write_u8(7)?; // Type tag for Null

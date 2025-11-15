@@ -12,6 +12,9 @@ pub struct VectorSearchRequest {
     pub query: Vector,
     /// Search configuration.
     pub params: VectorSearchParams,
+    /// Optional field name to filter search results.
+    /// If None, searches across all fields.
+    pub field_name: Option<String>,
 }
 
 impl VectorSearchRequest {
@@ -20,6 +23,7 @@ impl VectorSearchRequest {
         VectorSearchRequest {
             query,
             params: VectorSearchParams::default(),
+            field_name: None,
         }
     }
 
@@ -50,6 +54,12 @@ impl VectorSearchRequest {
     /// Set search timeout in milliseconds.
     pub fn timeout_ms(mut self, timeout: u64) -> Self {
         self.params.timeout_ms = Some(timeout);
+        self
+    }
+
+    /// Set field name to filter search results.
+    pub fn field_name(mut self, field_name: String) -> Self {
+        self.field_name = Some(field_name);
         self
     }
 }
@@ -89,6 +99,8 @@ impl Default for VectorSearchParams {
 pub struct VectorSearchResult {
     /// Document ID.
     pub doc_id: u64,
+    /// Field name of the matched vector.
+    pub field_name: String,
     /// Similarity score (higher is more similar).
     pub similarity: f32,
     /// Distance score (lower is more similar).

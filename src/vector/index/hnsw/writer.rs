@@ -14,7 +14,7 @@ pub struct HnswIndexWriter {
     writer_config: VectorIndexWriterConfig,
     storage: Option<Arc<dyn Storage>>,
     _ml: f64, // Level normalization factor
-    vectors: Vec<(u64, Vector)>,
+    vectors: Vec<(u64, String, Vector)>,
     is_finalized: bool,
     total_vectors_to_add: Option<usize>,
     next_vec_id: u64,
@@ -100,6 +100,18 @@ impl HnswIndexWriter {
             input.read_exact(&mut doc_id_buf)?;
             let doc_id = u64::from_le_bytes(doc_id_buf);
 
+            // Read field name
+            let mut field_name_len_buf = [0u8; 4];
+            input.read_exact(&mut field_name_len_buf)?;
+            let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+
+            let mut field_name_buf = vec![0u8; field_name_len];
+            input.read_exact(&mut field_name_buf)?;
+            let field_name = String::from_utf8(field_name_buf).map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+            })?;
+
+            // Read vector data
             let mut values = vec![0.0f32; dimension];
             for value in &mut values {
                 let mut value_buf = [0u8; 4];
@@ -107,11 +119,11 @@ impl HnswIndexWriter {
                 *value = f32::from_le_bytes(value_buf);
             }
 
-            vectors.push((doc_id, Vector::new(values)));
+            vectors.push((doc_id, field_name, Vector::new(values)));
         }
 
         // Calculate next_vec_id from loaded vectors
-        let max_id = vectors.iter().map(|(id, _)| *id).max().unwrap_or(0);
+        let max_id = vectors.iter().map(|(id, _, _)| *id).max().unwrap_or(0);
         let next_vec_id = if num_vectors > 0 { max_id + 1 } else { 0 };
 
         Ok(Self {
@@ -152,12 +164,12 @@ impl HnswIndexWriter {
     }
 
     /// Validate vectors before adding them.
-    fn validate_vectors(&self, vectors: &[(u64, Vector)]) -> Result<()> {
+    fn validate_vectors(&self, vectors: &[(u64, String, Vector)]) -> Result<()> {
         if vectors.is_empty() {
             return Ok(());
         }
 
-        for (doc_id, vector) in vectors {
+        for (doc_id, _field_name, vector) in vectors {
             if vector.dimension() != self.index_config.dimension {
                 return Err(YatagarasuError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
@@ -178,7 +190,7 @@ impl HnswIndexWriter {
     }
 
     /// Normalize vectors if configured to do so.
-    fn normalize_vectors(&self, vectors: &mut [(u64, Vector)]) {
+    fn normalize_vectors(&self, vectors: &mut [(u64, String, Vector)]) {
         if !self.index_config.normalize_vectors {
             return;
         }
@@ -186,11 +198,11 @@ impl HnswIndexWriter {
         use rayon::prelude::*;
 
         if self.writer_config.parallel_build && vectors.len() > 100 {
-            vectors.par_iter_mut().for_each(|(_, vector)| {
+            vectors.par_iter_mut().for_each(|(_, _, vector)| {
                 vector.normalize();
             });
         } else {
-            for (_, vector) in vectors {
+            for (_, _, vector) in vectors {
                 vector.normalize();
             }
         }
@@ -211,8 +223,9 @@ impl HnswIndexWriter {
             self.index_config.m, self.index_config.ef_construction
         );
 
-        // Placeholder: just sort vectors by ID for now
-        self.vectors.sort_by_key(|(doc_id, _)| *doc_id);
+        // Placeholder: just sort vectors by ID and field for now
+        self.vectors
+            .sort_by_key(|(doc_id, field, _)| (*doc_id, field.clone()));
 
         Ok(())
     }
@@ -231,7 +244,7 @@ impl HnswIndexWriter {
     }
 
     /// Get the stored vectors (for testing/debugging).
-    pub fn vectors(&self) -> &[(u64, Vector)] {
+    pub fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }
 
@@ -246,7 +259,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         self.next_vec_id
     }
 
-    fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
+    fn build(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(YatagarasuError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
@@ -257,10 +270,10 @@ impl VectorIndexWriter for HnswIndexWriter {
         self.normalize_vectors(&mut vectors);
 
         // Update next_vec_id
-        if let Some(max_id) = vectors.iter().map(|(id, _)| *id).max() {
-            if max_id >= self.next_vec_id {
-                self.next_vec_id = max_id + 1;
-            }
+        if let Some(max_id) = vectors.iter().map(|(id, _, _)| *id).max()
+            && max_id >= self.next_vec_id
+        {
+            self.next_vec_id = max_id + 1;
         }
 
         self.vectors = vectors;
@@ -270,7 +283,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         Ok(())
     }
 
-    fn add_vectors(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
+    fn add_vectors(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(YatagarasuError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
@@ -281,10 +294,10 @@ impl VectorIndexWriter for HnswIndexWriter {
         self.normalize_vectors(&mut vectors);
 
         // Update next_vec_id
-        if let Some(max_id) = vectors.iter().map(|(id, _)| *id).max() {
-            if max_id >= self.next_vec_id {
-                self.next_vec_id = max_id + 1;
-            }
+        if let Some(max_id) = vectors.iter().map(|(id, _, _)| *id).max()
+            && max_id >= self.next_vec_id
+        {
+            self.next_vec_id = max_id + 1;
         }
 
         self.vectors.extend(vectors);
@@ -365,7 +378,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         Ok(())
     }
 
-    fn vectors(&self) -> &[(u64, Vector)] {
+    fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }
 
@@ -392,9 +405,16 @@ impl VectorIndexWriter for HnswIndexWriter {
         output.write_all(&(self.index_config.m as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.ef_construction as u32).to_le_bytes())?;
 
-        // Write vectors
-        for (doc_id, vector) in &self.vectors {
+        // Write vectors with field names
+        for (doc_id, field_name, vector) in &self.vectors {
             output.write_all(&doc_id.to_le_bytes())?;
+
+            // Write field name length and field name
+            let field_name_bytes = field_name.as_bytes();
+            output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
+            output.write_all(field_name_bytes)?;
+
+            // Write vector data
             for value in &vector.data {
                 output.write_all(&value.to_le_bytes())?;
             }

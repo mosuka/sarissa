@@ -457,7 +457,7 @@ impl ManagedVectorIndex {
     }
 
     /// Add vectors to the index.
-    pub fn add_vectors(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()> {
+    pub fn add_vectors(&mut self, vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         let finalized = *self.is_finalized.read().unwrap();
         if finalized {
             return Err(YatagarasuError::InvalidOperation(
@@ -509,7 +509,7 @@ impl ManagedVectorIndex {
 
     /// Get vectors from this index.
     /// Returns a copy of all vectors stored in the index.
-    pub fn vectors(&self) -> Result<Vec<(u64, Vector)>> {
+    pub fn vectors(&self) -> Result<Vec<(u64, String, Vector)>> {
         let finalized = *self.is_finalized.read().unwrap();
         if !finalized {
             return Err(YatagarasuError::InvalidOperation(

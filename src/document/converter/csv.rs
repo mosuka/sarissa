@@ -91,10 +91,9 @@ use std::sync::Arc;
 
 use csv::{Reader, ReaderBuilder, StringRecord};
 
-use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
@@ -108,27 +107,14 @@ use crate::lexical::index::inverted::query::geo::GeoPoint;
 /// - Integer fields (auto-detected)
 /// - Float fields (auto-detected)
 /// - Boolean fields (true/false, auto-detected)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CsvDocumentConverter {
-    /// Analyzer to use for text fields (optional).
-    analyzer: Option<Arc<dyn Analyzer>>,
     /// CSV delimiter character (default: ',')
     delimiter: u8,
     /// Whether to trim whitespace from fields
     trim: bool,
     /// Whether to allow flexible field counts
     flexible: bool,
-}
-
-impl std::fmt::Debug for CsvDocumentConverter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CsvDocumentConverter")
-            .field("analyzer", &self.analyzer.as_ref().map(|_| "<Analyzer>"))
-            .field("delimiter", &(self.delimiter as char))
-            .field("trim", &self.trim)
-            .field("flexible", &self.flexible)
-            .finish()
-    }
 }
 
 impl Default for CsvDocumentConverter {
@@ -141,17 +127,6 @@ impl CsvDocumentConverter {
     /// Create a new CSV converter with comma delimiter.
     pub fn new() -> Self {
         CsvDocumentConverter {
-            analyzer: None,
-            delimiter: b',',
-            trim: true,
-            flexible: false,
-        }
-    }
-
-    /// Create a CSV converter with a custom analyzer.
-    pub fn with_analyzer(analyzer: Arc<dyn Analyzer>) -> Self {
-        CsvDocumentConverter {
-            analyzer: Some(analyzer),
             delimiter: b',',
             trim: true,
             flexible: false,

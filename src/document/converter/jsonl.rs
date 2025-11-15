@@ -71,67 +71,26 @@
 //!
 //! println!("Loaded {} products", documents.len());
 //! ```
-//!
-//! With custom analyzer:
-//!
-//! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
-//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-//! use std::sync::Arc;
-//!
-//! let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
-//! let converter = JsonlDocumentConverter::with_analyzer(analyzer);
-//!
-//! for doc in converter.convert("documents.jsonl").unwrap() {
-//!     // Documents ready for indexing with custom analyzer...
-//! }
-//! ```
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document converter for JSONL format.
-#[derive(Clone)]
-pub struct JsonlDocumentConverter {
-    /// Analyzer to use for text fields (optional).
-    analyzer: Option<Arc<dyn Analyzer>>,
-}
-
-impl std::fmt::Debug for JsonlDocumentConverter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JsonlDocumentConverter")
-            .field("analyzer", &self.analyzer.as_ref().map(|_| "<Analyzer>"))
-            .finish()
-    }
-}
-
-impl Default for JsonlDocumentConverter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+#[derive(Clone, Debug, Default)]
+pub struct JsonlDocumentConverter;
 
 impl JsonlDocumentConverter {
-    /// Create a new JSONL converter without an analyzer.
+    /// Create a new JSONL converter.
     pub fn new() -> Self {
-        JsonlDocumentConverter { analyzer: None }
-    }
-
-    /// Create a JSONL converter with a custom analyzer.
-    pub fn with_analyzer(analyzer: Arc<dyn Analyzer>) -> Self {
-        JsonlDocumentConverter {
-            analyzer: Some(analyzer),
-        }
+        JsonlDocumentConverter
     }
 
     /// Infer the field value type from a string.

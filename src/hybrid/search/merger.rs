@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use crate::error::Result;
-use crate::hybrid::search::searcher::HybridSearchParams;
 use crate::hybrid::search::scorer::ScoreNormalizer;
+use crate::hybrid::search::searcher::HybridSearchParams;
 use crate::hybrid::search::searcher::{HybridSearchResult, HybridSearchResults};
 use crate::lexical::index::inverted::query::SearchResults;
 use crate::vector::search::searcher::VectorSearchResults;

@@ -19,7 +19,7 @@
 //!
 //! ```
 //! use yatagarasu::document::document::Document;
-//! use yatagarasu::document::field_value::FieldValue;
+//! use yatagarasu::document::field::FieldValue;
 //!
 //! let mut doc = Document::new();
 //! doc.add_field("title", FieldValue::Text("Rust Book".to_string()));
@@ -62,7 +62,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document represents a single item to be indexed.
@@ -88,7 +88,7 @@ use crate::lexical::index::inverted::query::geo::GeoPoint;
 ///
 /// ```
 /// use yatagarasu::document::document::Document;
-/// use yatagarasu::document::field_value::FieldValue;
+/// use yatagarasu::document::field::FieldValue;
 ///
 /// let mut doc = Document::new();
 /// doc.add_field("title", FieldValue::Text("Getting Started with Rust".to_string()));
@@ -141,7 +141,7 @@ impl Document {
     ///
     /// ```
     /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::document::field_value::FieldValue;
+    /// use yatagarasu::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field("title", FieldValue::Text("Rust".to_string()));
@@ -165,7 +165,7 @@ impl Document {
     ///
     /// ```
     /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::document::field_value::FieldValue;
+    /// use yatagarasu::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field("title", FieldValue::Text("Rust".to_string()));
@@ -187,7 +187,7 @@ impl Document {
     ///
     /// ```
     /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::document::field_value::FieldValue;
+    /// use yatagarasu::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field("title", FieldValue::Text("Rust".to_string()));
@@ -211,7 +211,7 @@ impl Document {
     ///
     /// ```
     /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::document::field_value::FieldValue;
+    /// use yatagarasu::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field("title", FieldValue::Text("Rust".to_string()));
@@ -233,7 +233,7 @@ impl Document {
     ///
     /// ```
     /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::document::field_value::FieldValue;
+    /// use yatagarasu::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field("title", FieldValue::Text("Rust".to_string()));
@@ -256,7 +256,7 @@ impl Document {
     ///
     /// ```
     /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::document::field_value::FieldValue;
+    /// use yatagarasu::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field("title", FieldValue::Text("Rust".to_string()));
@@ -612,6 +612,35 @@ impl DocumentBuilder {
         self
     }
 
+    /// Add a vector field to the document.
+    ///
+    /// Vector fields store text that will be converted to embeddings when indexed
+    /// by a VectorEngine. The actual embedding conversion happens during indexing,
+    /// using the embedder configured for that field.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The field name
+    /// * `text` - The text to be embedded
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use yatagarasu::document::document::Document;
+    ///
+    /// let doc = Document::builder()
+    ///     .add_text("title", "Machine Learning Basics")
+    ///     .add_vector("title_embedding", "Machine Learning Basics")
+    ///     .build();
+    ///
+    /// assert!(doc.has_field("title_embedding"));
+    /// ```
+    pub fn add_vector<S: Into<String>, T: Into<String>>(mut self, name: S, text: T) -> Self {
+        self.document
+            .add_field(name, FieldValue::Vector(text.into()));
+        self
+    }
+
     /// Add a field with a generic value.
     ///
     /// This is a low-level method that accepts any `FieldValue` directly.
@@ -632,7 +661,7 @@ impl DocumentBuilder {
     ///
     /// ```
     /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::document::field_value::FieldValue;
+    /// use yatagarasu::document::field::FieldValue;
     ///
     /// let value = FieldValue::Text("Dynamic value".to_string());
     /// let doc = Document::builder()

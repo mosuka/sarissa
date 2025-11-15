@@ -11,7 +11,7 @@ use tempfile::{NamedTempFile, TempDir};
 use yatagarasu::document::converter::{
     DocumentConverter, csv::CsvDocumentConverter, jsonl::JsonlDocumentConverter,
 };
-use yatagarasu::document::field_value::FieldValue;
+use yatagarasu::document::field::FieldValue;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;

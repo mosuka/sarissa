@@ -88,10 +88,10 @@ use ahash::AHashMap;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::token::Token;
-use crate::document::document::Document;
-use crate::document::field_value::FieldValue;
-use crate::error::Result;
 use crate::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
+use crate::document::document::Document;
+use crate::document::field::FieldValue;
+use crate::error::Result;
 
 /// A document parser that converts Documents into AnalyzedDocuments.
 ///
@@ -219,6 +219,10 @@ impl DocumentParser {
                 }
                 FieldValue::Binary(_) => {
                     // Binary fields are not indexed, only stored
+                    stored_fields.insert(field_name.clone(), field_value.clone());
+                }
+                FieldValue::Vector(_) => {
+                    // Vector fields are not indexed in lexical engine, only stored
                     stored_fields.insert(field_name.clone(), field_value.clone());
                 }
                 FieldValue::DateTime(dt) => {

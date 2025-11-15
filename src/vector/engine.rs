@@ -25,17 +25,19 @@ use crate::vector::{DistanceMetric, Vector};
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run
 /// use yatagarasu::vector::engine::VectorEngine;
 /// use yatagarasu::vector::index::{VectorIndexConfig, FlatIndexConfig};
 /// use yatagarasu::vector::index::factory::VectorIndexFactory;
 /// use yatagarasu::vector::{Vector, DistanceMetric};
 /// use yatagarasu::vector::search::searcher::VectorSearchRequest;
 /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-/// use yatagarasu::storage::StorageConfig;
+/// use yatagarasu::document::document::Document;
+/// use yatagarasu::embedding::text_embedder::TextEmbedder;
 /// use std::sync::Arc;
 ///
-/// # fn main() -> yatagarasu::error::Result<()> {
+/// # async fn example() -> yatagarasu::error::Result<()> {
+/// # let embedder: Arc<dyn TextEmbedder> = todo!();
 /// // Create engine with flat index
 /// let config = VectorIndexConfig::Flat(FlatIndexConfig {
 ///     dimension: 3,
@@ -46,19 +48,22 @@ use crate::vector::{DistanceMetric, Vector};
 /// let index = VectorIndexFactory::create(storage, config)?;
 /// let mut engine = VectorEngine::new(index)?;
 ///
-/// // Add vectors
-/// let vectors = vec![
-///     (1, Vector::new(vec![1.0, 0.0, 0.0])),
-///     (2, Vector::new(vec![0.0, 1.0, 0.0])),
-/// ];
-/// engine.add_vectors(vectors)?;
+/// // Add documents with vector fields
+/// let doc1 = Document::builder()
+///     .add_vector("embedding", "Machine Learning")
+///     .build();
+/// let doc2 = Document::builder()
+///     .add_vector("embedding", "Deep Learning")
+///     .build();
+///
+/// engine.add_document(doc1, embedder.clone()).await?;
+/// engine.add_document(doc2, embedder).await?;
 /// engine.commit()?;
 ///
 /// // Search
 /// let query_vector = Vector::new(vec![1.0, 0.1, 0.0]);
 /// let request = VectorSearchRequest::new(query_vector).top_k(2);
 /// let results = engine.search(request)?;
-/// assert_eq!(results.results.len(), 2);
 /// # Ok(())
 /// # }
 /// ```
@@ -205,27 +210,119 @@ impl VectorEngine {
         }))
     }
 
-    /// Add a single vector to the index with automatic ID assignment.
-    /// Returns the assigned vector ID.
-    pub fn add_vector(&mut self, vector: Vector) -> Result<u64> {
-        let mut writer = self.get_or_create_writer()?;
-        let vec_id = writer.next_vector_id();
-        writer.add_vectors(vec![(vec_id, vector)])?;
-        Ok(vec_id)
-    }
-
-    /// Add a single vector to the index with a specific ID.
-    pub fn add_vector_with_id(&mut self, vec_id: u64, vector: Vector) -> Result<()> {
-        let mut writer = self.get_or_create_writer()?;
-        writer.add_vectors(vec![(vec_id, vector)])?;
-        Ok(())
-    }
-
-    /// Add multiple vectors to the index (with user-specified IDs).
-    pub fn add_vectors(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()> {
+    /// Add multiple vectors to the index (with user-specified IDs and field names).
+    /// This is an internal helper method. Use `add_document()` instead.
+    fn add_vectors(&mut self, vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         let mut writer = self.get_or_create_writer()?;
         writer.add_vectors(vectors)?;
         Ok(())
+    }
+
+    /// Add a single vector with a specific ID and field name (internal use only).
+    /// This is exposed for HybridEngine. Regular users should use `add_document()`.
+    #[doc(hidden)]
+    pub fn add_vector_with_id(
+        &mut self,
+        vec_id: u64,
+        field_name: String,
+        vector: Vector,
+    ) -> Result<()> {
+        self.add_vectors(vec![(vec_id, field_name, vector)])
+    }
+
+    /// Add a document to the index, converting vector fields to embeddings.
+    ///
+    /// This method processes all `FieldValue::Vector` fields in the document,
+    /// converts their text to embeddings using the provided embedder, and adds
+    /// the resulting vectors to the index.
+    ///
+    /// # Arguments
+    ///
+    /// * `document` - The document containing vector fields
+    /// * `embedder` - The embedder to use for converting text to vectors
+    ///
+    /// # Returns
+    ///
+    /// Returns the assigned document ID.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use yatagarasu::vector::engine::VectorEngine;
+    /// use yatagarasu::vector::index::VectorIndexConfig;
+    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
+    /// use yatagarasu::document::document::Document;
+    /// use yatagarasu::embedding::text_embedder::TextEmbedder;
+    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use std::sync::Arc;
+    ///
+    /// # async fn example() -> yatagarasu::error::Result<()> {
+    /// # let embedder: Arc<dyn TextEmbedder> = todo!();
+    /// let config = VectorIndexConfig::default();
+    /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    /// let index = VectorIndexFactory::create(storage, config)?;
+    /// let mut engine = VectorEngine::new(index)?;
+    ///
+    /// let doc = Document::builder()
+    ///     .add_text("title", "Machine Learning")
+    ///     .add_vector("title_embedding", "Machine Learning")
+    ///     .build();
+    ///
+    /// let doc_id = engine.add_document(doc, embedder).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn add_document(
+        &mut self,
+        document: crate::document::document::Document,
+        embedder: Arc<dyn crate::embedding::text_embedder::TextEmbedder>,
+    ) -> Result<u64> {
+        let doc_id = self.next_vector_id();
+        self.add_document_with_id(doc_id, document, embedder)
+            .await?;
+        Ok(doc_id)
+    }
+
+    /// Add a document with a specific ID, converting vector fields to embeddings.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` - The document ID to use
+    /// * `document` - The document containing vector fields
+    /// * `embedder` - The embedder to use for converting text to vectors
+    pub async fn add_document_with_id(
+        &mut self,
+        doc_id: u64,
+        document: crate::document::document::Document,
+        embedder: Arc<dyn crate::embedding::text_embedder::TextEmbedder>,
+    ) -> Result<()> {
+        use crate::document::field::FieldValue;
+
+        // Collect all vectors to add
+        let mut vectors = Vec::new();
+
+        for (field_name, field_value) in document.fields().iter() {
+            if let FieldValue::Vector(text) = field_value {
+                // Convert text to vector using embedder with field context
+                let vector = embedder.embed_with_field(text.as_str(), field_name).await?;
+
+                // Add to vectors list with field name (using doc_id as vector_id)
+                vectors.push((doc_id, field_name.clone(), vector));
+            }
+        }
+
+        // Add all vectors to the index
+        if !vectors.is_empty() {
+            self.add_vectors(vectors)?;
+        }
+
+        Ok(())
+    }
+
+    /// Get the next available vector ID.
+    fn next_vector_id(&self) -> u64 {
+        let writer = self.get_or_create_writer().unwrap();
+        writer.next_vector_id()
     }
 
     /// Commit any pending changes to the index.
@@ -243,18 +340,23 @@ impl VectorEngine {
     /// use yatagarasu::vector::engine::VectorEngine;
     /// use yatagarasu::vector::index::VectorIndexConfig;
     /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::vector::Vector;
+    /// use yatagarasu::document::document::Document;
+    /// use yatagarasu::embedding::text_embedder::TextEmbedder;
     /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # async fn example() -> yatagarasu::error::Result<()> {
+    /// # let embedder: Arc<dyn TextEmbedder> = todo!();
     /// let config = VectorIndexConfig::default();
     /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     /// let index = VectorIndexFactory::create(storage, config)?;
     /// let mut engine = VectorEngine::new(index)?;
     ///
-    /// // Add vectors
-    /// engine.add_vectors(vec![(1, Vector::new(vec![1.0, 0.0, 0.0]))])?;
+    /// // Add documents with vector fields
+    /// let doc = Document::builder()
+    ///     .add_vector("embedding", "Sample text")
+    ///     .build();
+    /// engine.add_document(doc, embedder).await?;
     ///
     /// // Commit changes
     /// engine.commit()?;
@@ -401,8 +503,42 @@ mod tests {
     use crate::vector::index::{FlatIndexConfig, VectorIndexConfig};
     use std::sync::Arc;
 
-    #[test]
-    fn test_vector_engine_basic() -> Result<()> {
+    #[tokio::test]
+    async fn test_vector_engine_basic() -> Result<()> {
+        use crate::document::document::Document;
+        use crate::embedding::text_embedder::TextEmbedder;
+        use async_trait::async_trait;
+
+        // Mock embedder for testing
+        #[derive(Debug)]
+        struct MockEmbedder {
+            dimension: usize,
+        }
+
+        #[async_trait]
+        impl TextEmbedder for MockEmbedder {
+            async fn embed(&self, text: &str) -> Result<Vector> {
+                // Simple mock: convert text to a deterministic vector
+                let bytes = text.as_bytes();
+                let mut values = vec![0.0; self.dimension];
+                for (i, &byte) in bytes.iter().enumerate() {
+                    if i >= self.dimension {
+                        break;
+                    }
+                    values[i] = (byte as f32) / 255.0;
+                }
+                Ok(Vector::new(values))
+            }
+
+            fn dimension(&self) -> usize {
+                self.dimension
+            }
+
+            fn name(&self) -> &str {
+                "mock"
+            }
+        }
+
         let config = VectorIndexConfig::Flat(FlatIndexConfig {
             dimension: 3,
             distance_metric: DistanceMetric::Cosine,
@@ -412,22 +548,88 @@ mod tests {
         let index = VectorIndexFactory::create(storage, config)?;
         let mut engine = VectorEngine::new(index)?;
 
-        // Add some vectors
-        let vectors = vec![
-            (1, Vector::new(vec![1.0, 0.0, 0.0])),
-            (2, Vector::new(vec![0.0, 1.0, 0.0])),
-            (3, Vector::new(vec![0.0, 0.0, 1.0])),
-        ];
+        let embedder: Arc<dyn TextEmbedder> = Arc::new(MockEmbedder { dimension: 3 });
 
-        engine.add_vectors(vectors)?;
+        // Add documents with vector fields
+        let doc1 = Document::builder()
+            .add_vector("embedding", "Machine Learning")
+            .build();
+        let doc2 = Document::builder()
+            .add_vector("embedding", "Deep Learning")
+            .build();
+        let doc3 = Document::builder()
+            .add_vector("embedding", "Neural Network")
+            .build();
+
+        engine.add_document(doc1, embedder.clone()).await?;
+        engine.add_document(doc2, embedder.clone()).await?;
+        engine.add_document(doc3, embedder).await?;
         engine.commit()?;
 
         // Search for similar vectors
-        let query = Vector::new(vec![1.0, 0.1, 0.0]);
+        let query = Vector::new(vec![0.5, 0.5, 0.5]);
         let request = VectorSearchRequest::new(query).top_k(2);
 
         let results = engine.search(request)?;
         assert_eq!(results.results.len(), 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_vector_engine_with_document() -> Result<()> {
+        use crate::document::document::Document;
+        use crate::embedding::text_embedder::TextEmbedder;
+        use async_trait::async_trait;
+
+        // Mock embedder for testing
+        #[derive(Debug)]
+        struct MockEmbedder {
+            dimension: usize,
+        }
+
+        #[async_trait]
+        impl TextEmbedder for MockEmbedder {
+            async fn embed(&self, text: &str) -> Result<Vector> {
+                // Simple mock: convert text length to a normalized vector
+                let len = text.len() as f32;
+                let val = (len % 100.0) / 100.0;
+                Ok(Vector::new(vec![val; self.dimension]))
+            }
+
+            fn dimension(&self) -> usize {
+                self.dimension
+            }
+
+            fn name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        let config = VectorIndexConfig::Flat(FlatIndexConfig {
+            dimension: 3,
+            distance_metric: DistanceMetric::Cosine,
+            ..Default::default()
+        });
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let index = VectorIndexFactory::create(storage, config)?;
+        let mut engine = VectorEngine::new(index)?;
+
+        let embedder: Arc<dyn TextEmbedder> = Arc::new(MockEmbedder { dimension: 3 });
+
+        // Create document with vector field
+        let doc = Document::builder()
+            .add_text("title", "Machine Learning")
+            .add_vector("title_embedding", "Machine Learning")
+            .build();
+
+        // Add document
+        let _doc_id = engine.add_document(doc, embedder).await?;
+        engine.commit()?;
+
+        // The important thing is that the document was accepted and committed without errors
+        // Stats can be queried without error
+        let _stats = engine.stats()?;
 
         Ok(())
     }

@@ -117,7 +117,9 @@ fn main() -> Result<()> {
     ];
 
     println!("Adding {} documents to the index...", documents.len());
-    lexical_engine.add_documents(documents)?;
+    for doc in documents {
+        lexical_engine.add_document(doc)?;
+    }
 
     lexical_engine.commit()?;
 

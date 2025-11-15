@@ -8,7 +8,7 @@
 //! # Core Components
 //!
 //! - [`document::Document`] - The main document structure with field-value pairs
-//! - [`field_value::FieldValue`] - Enum representing different field value types
+//! - [`field::FieldValue`] - Enum representing different field value types
 //! - [`parser::DocumentParser`] - Converts documents to analyzed tokens for indexing
 //! - [`converter`] - Utilities for converting files (CSV, JSONL) to documents
 //!
@@ -76,5 +76,5 @@ pub mod analyzed;
 pub mod converter;
 #[allow(clippy::module_inception)]
 pub mod document;
-pub mod field_value;
+pub mod field;
 pub mod parser;

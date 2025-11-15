@@ -102,7 +102,8 @@ impl HybridEngine {
     ) -> Result<u64> {
         let doc_id = self.next_doc_id;
         self.lexical_engine.add_document_with_id(doc_id, doc)?;
-        self.vector_engine.add_vector_with_id(doc_id, vector)?;
+        self.vector_engine
+            .add_vector_with_id(doc_id, "embedding".to_string(), vector)?;
         self.next_doc_id += 1;
         Ok(doc_id)
     }
@@ -121,7 +122,8 @@ impl HybridEngine {
         vector: crate::vector::Vector,
     ) -> Result<()> {
         self.lexical_engine.add_document_with_id(doc_id, doc)?;
-        self.vector_engine.add_vector_with_id(doc_id, vector)?;
+        self.vector_engine
+            .add_vector_with_id(doc_id, "embedding".to_string(), vector)?;
 
         // Update next_doc_id if necessary
         if doc_id >= self.next_doc_id {

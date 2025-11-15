@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::QueryResult;
@@ -415,6 +415,7 @@ impl ResultProcessor {
             FieldValue::Binary(_) => "[binary data]".to_string(),
             FieldValue::DateTime(dt) => dt.to_rfc3339(),
             FieldValue::Geo(point) => format!("{},{}", point.lat, point.lon),
+            FieldValue::Vector(text) => format!("[vector: {}]", text),
             FieldValue::Null => "null".to_string(),
         }
     }

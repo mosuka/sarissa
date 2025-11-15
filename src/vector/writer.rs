@@ -85,11 +85,14 @@ pub trait VectorIndexWriter: Send + Sync {
     /// Get the next available vector ID (for automatic ID assignment).
     fn next_vector_id(&self) -> u64;
 
-    /// Build an index from a collection of vectors.
-    fn build(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()>;
+    /// Build an index from a collection of vectors with field names.
+    /// Each vector is a tuple of (vec_id, field_name, Vector).
+    fn build(&mut self, vectors: Vec<(u64, String, Vector)>) -> Result<()>;
 
     /// Add vectors incrementally during construction.
-    fn add_vectors(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()>;
+    /// Each vector is a tuple of (vec_id, field_name, Vector).
+    /// This allows field-specific vector search similar to lexical field search.
+    fn add_vectors(&mut self, vectors: Vec<(u64, String, Vector)>) -> Result<()>;
 
     /// Finalize the index construction.
     fn finalize(&mut self) -> Result<()>;
@@ -103,9 +106,9 @@ pub trait VectorIndexWriter: Send + Sync {
     /// Optimize the built index.
     fn optimize(&mut self) -> Result<()>;
 
-    /// Get access to the stored vectors.
-    /// Returns a reference to the vectors stored in the writer.
-    fn vectors(&self) -> &[(u64, Vector)];
+    /// Get access to the stored vectors with field names.
+    /// Returns a reference to the vectors with their field names stored in the writer.
+    fn vectors(&self) -> &[(u64, String, Vector)];
 
     /// Write the index to storage.
     /// This method must be called after finalize() to persist the index.

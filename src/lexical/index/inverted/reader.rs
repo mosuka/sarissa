@@ -13,7 +13,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::document::document::Document;
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::{Result, YatagarasuError};
 use crate::lexical::core::dictionary::HybridTermDictionary;
 use crate::lexical::core::dictionary::TermInfo;
@@ -469,6 +469,11 @@ impl SegmentReader {
                         7 => {
                             // Null
                             FieldValue::Null
+                        }
+                        8 => {
+                            // Vector
+                            let text = reader.read_string()?;
+                            FieldValue::Vector(text)
                         }
                         _ => {
                             return Err(YatagarasuError::index(format!(

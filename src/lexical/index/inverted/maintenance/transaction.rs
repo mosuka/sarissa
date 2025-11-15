@@ -196,7 +196,7 @@ impl TransactionManager {
     )]
     pub fn with_schema(
         storage: Arc<dyn Storage>,
-        schema: Arc<crate::document::field_value::FieldValue>,
+        schema: Arc<crate::document::field::FieldValue>,
     ) -> Self {
         let _ = schema; // Ignore schema parameter
         Self::new(storage)

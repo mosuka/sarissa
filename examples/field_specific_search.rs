@@ -9,7 +9,6 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
-use yatagarasu::document::field_value::FieldValue;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
@@ -105,7 +104,9 @@ fn main() -> Result<()> {
     println!("Adding {} documents to the index...", documents.len());
 
     // Add documents to the lexical engine
-    lexical_engine.add_documents(documents)?;
+    for doc in documents {
+        lexical_engine.add_document(doc)?;
+    }
 
     // Commit changes to engine
     lexical_engine.commit()?;
@@ -151,7 +152,9 @@ fn main() -> Result<()> {
             {
                 println!("      Category: {category}");
             }
-            if let Some(FieldValue::Integer(year)) = doc.get_field("year") {
+            if let Some(yatagarasu::document::field::FieldValue::Integer(year)) =
+                doc.get_field("year")
+            {
                 println!("      Year: {year}");
             }
         }

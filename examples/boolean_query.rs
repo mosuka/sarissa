@@ -113,7 +113,9 @@ fn main() -> Result<()> {
     println!("Adding {} documents to the index...", documents.len());
 
     // Add documents to the lexical engine
-    lexical_engine.add_documents(documents)?;
+    for doc in documents {
+        lexical_engine.add_document(doc)?;
+    }
 
     // Commit changes to engine
     lexical_engine.commit()?;
@@ -224,12 +226,12 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(price)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
                 doc.get_field("price")
             {
                 println!("      Price: ${price:.2}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(rating)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(rating)) =
                 doc.get_field("rating")
             {
                 println!("      Rating: {rating:.1}");
@@ -319,7 +321,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(price)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
                 doc.get_field("price")
             {
                 println!("      Price: ${price:.2}");
@@ -354,7 +356,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(rating)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(rating)) =
                 doc.get_field("rating")
             {
                 println!("      Rating: {rating:.1}");
@@ -410,12 +412,12 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(price)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
                 doc.get_field("price")
             {
                 println!("      Price: ${price:.2}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(rating)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(rating)) =
                 doc.get_field("rating")
             {
                 println!("      Rating: {rating:.1}");
@@ -470,7 +472,7 @@ fn main() -> Result<()> {
             {
                 println!("      Title: {title}");
             }
-            if let Some(yatagarasu::document::field_value::FieldValue::Float(price)) =
+            if let Some(yatagarasu::document::field::FieldValue::Float(price)) =
                 doc.get_field("price")
             {
                 println!("      Price: ${price:.2}");

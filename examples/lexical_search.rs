@@ -26,7 +26,7 @@ use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::converter::DocumentConverter;
 use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
-use yatagarasu::document::field_value::FieldValue;
+use yatagarasu::document::field::FieldValue;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
