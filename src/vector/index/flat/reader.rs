@@ -7,8 +7,8 @@ use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
-use crate::vector::index::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
-use crate::vector::index::reader::{VectorIndexReader, VectorIterator};
+use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
+use crate::vector::reader::{VectorIndexReader, VectorIterator};
 
 /// Reader for flat (brute-force) vector indexes.
 #[derive(Debug)]

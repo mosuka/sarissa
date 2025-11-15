@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::lexical::reader::LexicalIndexReader;
-use crate::vector::index::reader::VectorIndexReader;
+use crate::vector::reader::VectorIndexReader;
 
 /// Hybrid index that combines lexical and vector indexes.
 ///
@@ -73,7 +73,7 @@ impl HybridIndex {
     /// ```no_run
     /// # use yatagarasu::hybrid::index::HybridIndex;
     /// # use yatagarasu::lexical::reader::LexicalIndexReader;
-    /// # use yatagarasu::vector::index::reader::VectorIndexReader;
+    /// # use yatagarasu::vector::reader::VectorIndexReader;
     /// # use std::sync::Arc;
     /// # fn example(lexical: Arc<dyn LexicalIndexReader>, vector: Arc<dyn VectorIndexReader>) -> yatagarasu::error::Result<()> {
     /// let hybrid_index = HybridIndex::new(lexical, vector);

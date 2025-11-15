@@ -328,21 +328,12 @@ impl VectorIterator for SimpleVectorIterator {
 
 /// Factory for creating vector index readers.
 ///
-/// This factory provides a centralized way to create readers for different
-/// vector index types (Flat, HNSW, IVF) from serialized index data.
+/// This provides a single entry point for constructing concrete reader
+/// implementations (Flat, HNSW, IVF) from serialized index data.
 pub struct VectorIndexReaderFactory;
 
 impl VectorIndexReaderFactory {
-    /// Create a reader for a specific index type from serialized data.
-    ///
-    /// # Arguments
-    ///
-    /// * `index_type` - The type of index ("flat", "hnsw", or "ivf")
-    /// * `index_data` - Serialized index data
-    ///
-    /// # Returns
-    ///
-    /// An `Arc<dyn VectorIndexReader>` that can be used to query the index.
+    /// Create a reader for a specific index type from serialized bytes.
     pub fn create_reader(
         index_type: &str,
         index_data: &[u8],
@@ -352,18 +343,9 @@ impl VectorIndexReaderFactory {
         use crate::vector::index::ivf::reader::IvfIndexReader;
 
         match index_type.to_lowercase().as_str() {
-            "flat" => {
-                let reader = FlatVectorIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
-            "hnsw" => {
-                let reader = HnswIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
-            "ivf" => {
-                let reader = IvfIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
+            "flat" => Ok(Arc::new(FlatVectorIndexReader::from_bytes(index_data)?)),
+            "hnsw" => Ok(Arc::new(HnswIndexReader::from_bytes(index_data)?)),
+            "ivf" => Ok(Arc::new(IvfIndexReader::from_bytes(index_data)?)),
             _ => Err(crate::error::YatagarasuError::InvalidOperation(format!(
                 "Unknown index type: {index_type}"
             ))),
