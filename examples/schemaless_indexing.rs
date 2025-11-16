@@ -1,8 +1,8 @@
-//! Example demonstrating schema-less indexing (Lucene-style)
+//! Schema-less indexing example using Yatagarasu's PerFieldAnalyzer pipeline.
 //!
-//! This example shows how to use Sage without predefined schemas,
-//! allowing maximum flexibility in document structure.
-//! Analyzers are configured at the writer level using PerFieldAnalyzer.
+//! Demonstrates how to ingest heterogeneous documents without predefined
+//! schemas. Analyzer selection happens per field at write time, mirroring
+//! Lucene's flexible approach.
 
 use std::sync::Arc;
 

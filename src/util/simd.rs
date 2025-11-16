@@ -1,4 +1,4 @@
-//! SIMD optimization utilities for Sage.
+//! SIMD-friendly helpers that power hot paths inside Yatagarasu.
 
 pub mod simd_wide;
 

@@ -1,11 +1,8 @@
-//! Text embedding support for vector search.
+//! Text and multimodal embedding support for Yatagarasu's vector search.
 //!
-//! This module provides a trait-based interface for converting text to vector embeddings.
-//! Sage does not include built-in embedding implementations by default to:
-//!
-//! - Keep dependencies minimal
-//! - Allow users to choose their preferred embedding method
-//! - Stay focused on search (not ML model management)
+//! The core traits live here while concrete embedders are compiled in via feature
+//! flags. Keeping implementations optional lets projects pick local Candle models,
+//! hosted OpenAI APIs, or custom logic without bloating default builds.
 //!
 //! # Feature Flags
 //!

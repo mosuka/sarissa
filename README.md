@@ -77,43 +77,59 @@ yatagarasu = "0.1"
 ### Basic Usage
 
 ```rust
+use std::sync::Arc;
+
+use tempfile::TempDir;
+use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::{IntegerOption, TextOption};
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::{LexicalIndexConfig, LexicalIndexFactory};
-use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::query::term::TermQuery;
-use yatagarasu::storage::file::FileStorage;
+use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use yatagarasu::lexical::index::factory::LexicalIndexFactory;
+use yatagarasu::lexical::index::inverted::query::term::TermQuery;
+use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
 use yatagarasu::storage::file::FileStorageConfig;
-use std::sync::Arc;
-use tempfile::TempDir;
+use yatagarasu::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
-    // Create a temporary directory for the index
+    // Create storage in a temporary directory
     let temp_dir = TempDir::new().unwrap();
-
-    // Create storage
-    let storage = Arc::new(FileStorage::new(
+    let storage = StorageFactory::create(StorageConfig::File(FileStorageConfig::new(
         temp_dir.path(),
-        FileStorageConfig::new(temp_dir.path()),
-    )?);
+    )))?;
 
-    // Create index using factory
-    let config = LexicalIndexConfig::default();
+    // Configure the inverted index with a StandardAnalyzer
+    let analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    let config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
+        analyzer: Arc::clone(&analyzer),
+        ..InvertedIndexConfig::default()
+    });
     let index = LexicalIndexFactory::create(storage, config)?;
 
     // Create a lexical search engine
     let mut engine = LexicalEngine::new(index)?;
 
-    // Add documents
+    // Add documents with explicit field options
     let documents = vec![
         Document::builder()
-            .add_text("title", "Rust Programming")
-            .add_text("content", "Rust is a systems programming language")
+            .add_text("title", "Rust Programming", TextOption::default())
+            .add_text(
+                "content",
+                "Rust is a systems programming language",
+                TextOption::default(),
+            )
+            .add_integer("year", 2024, IntegerOption::default())
             .build(),
         Document::builder()
-            .add_text("title", "Python Guide")
-            .add_text("content", "Python is a versatile programming language")
+            .add_text("title", "Python Guide", TextOption::default())
+            .add_text(
+                "content",
+                "Python is a versatile programming language",
+                TextOption::default(),
+            )
+            .add_integer("year", 2023, IntegerOption::default())
             .build(),
     ];
 
@@ -124,12 +140,19 @@ fn main() -> Result<()> {
 
     // Search documents
     let query = Box::new(TermQuery::new("content", "programming"));
-    let request = LexicalSearchRequest::new(query).max_docs(10);
+    let request = LexicalSearchRequest::new(query)
+        .load_documents(true)
+        .max_docs(10);
     let results = engine.search(request)?;
 
-    println!("Found {} matches", results.hits.len());
+    println!("Found {} matches", results.total_hits);
     for hit in results.hits {
-        println!("Score: {:.2}, Document ID: {}", hit.score, hit.doc_id);
+        if let Some(doc) = hit.document {
+            println!("Score: {:.2}, Doc ID: {}", hit.score, hit.doc_id);
+            if let Some(title) = doc.get_text("title") {
+                println!("  -> {}", title);
+            }
+        }
     }
 
     Ok(())
@@ -155,29 +178,37 @@ Yatagarasu is built with a modular architecture:
 Yatagarasu supports the following field value types through the `Document` builder API:
 
 ```rust
+use chrono::Utc;
 use yatagarasu::document::document::Document;
+use yatagarasu::document::field::{
+    BinaryOption, BooleanOption, DateTimeOption, FloatOption, GeoOption, IntegerOption,
+    TextOption, VectorOption,
+};
 
 let doc = Document::builder()
     // Text field for full-text search
-    .add_text("title", "Introduction to Rust")
+    .add_text("title", "Introduction to Rust", TextOption::default())
 
     // Integer field for numeric queries
-    .add_integer("year", 2024)
+    .add_integer("year", 2024, IntegerOption::default())
 
     // Float field for floating-point values
-    .add_float("price", 49.99)
+    .add_float("price", 49.99, FloatOption::default())
 
     // Boolean field for filtering
-    .add_boolean("published", true)
+    .add_boolean("published", true, BooleanOption::default())
 
     // DateTime field for temporal queries
-    .add_datetime("created_at", chrono::Utc::now())
+    .add_datetime("created_at", Utc::now(), DateTimeOption::default())
 
     // Geographic field for spatial queries
-    .add_geo("location", 35.6762, 139.6503) // latitude, longitude
+    .add_geo("location", 35.6762, 139.6503, GeoOption::default())
 
     // Binary field for arbitrary data
-    .add_binary("thumbnail", vec![0u8, 1, 2, 3])
+    .add_binary("thumbnail", vec![0u8, 1, 2, 3], BinaryOption::default())
+
+    // Vector field storing text that will be embedded during indexing
+    .add_vector("title_embedding", "Introduction to Rust", VectorOption::default())
 
     .build();
 ```
@@ -185,13 +216,15 @@ let doc = Document::builder()
 ### Query Types
 
 ```rust
-use yatagarasu::query::term::TermQuery;
-use yatagarasu::query::phrase::PhraseQuery;
-use yatagarasu::query::range::NumericRangeQuery;
-use yatagarasu::query::boolean::BooleanQuery;
-use yatagarasu::query::fuzzy::FuzzyQuery;
-use yatagarasu::query::wildcard::WildcardQuery;
-use yatagarasu::query::geo::{GeoDistanceQuery, GeoBoundingBoxQuery, GeoPoint, GeoBoundingBox};
+use yatagarasu::lexical::index::inverted::query::boolean::BooleanQuery;
+use yatagarasu::lexical::index::inverted::query::fuzzy::FuzzyQuery;
+use yatagarasu::lexical::index::inverted::query::geo::{
+    GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint,
+};
+use yatagarasu::lexical::index::inverted::query::phrase::PhraseQuery;
+use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
+use yatagarasu::lexical::index::inverted::query::term::TermQuery;
+use yatagarasu::lexical::index::inverted::query::wildcard::WildcardQuery;
 
 // Term query - simple keyword matching
 let query = Box::new(TermQuery::new("field", "term"));
@@ -435,9 +468,9 @@ cargo run --example image_to_image_search --features embeddings-multimodal -- qu
 ### Faceted Search
 
 ```rust
-use yatagarasu::lexical::search::facet::{FacetedSearchEngine, FacetConfig};
+use yatagarasu::lexical::index::inverted::query::term::TermQuery;
+use yatagarasu::lexical::search::facet::{FacetConfig, FacetedSearchEngine};
 use yatagarasu::lexical::types::LexicalSearchRequest;
-use yatagarasu::query::term::TermQuery;
 
 // Create faceted search engine
 let facet_config = FacetConfig {

@@ -1,7 +1,8 @@
-//! Transaction management for atomic operations in Sage.
+//! Transaction management for atomic lexical operations in Yatagarasu.
 //!
-//! This module provides transaction boundaries and atomic commit/rollback
-//! functionality to ensure data consistency during index operations.
+//! This module coordinates schema-less indexing, merges, and deletions with
+//! explicit commit/rollback hooks so concurrent writers keep inverted indexes
+//! consistent even under heavy ingestion workloads.
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};

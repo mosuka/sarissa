@@ -1,11 +1,12 @@
-//! Machine Learning integration for Sage search engine.
+//! Machine learning integrations for the Yatagarasu search engine.
 //!
-//! This module provides machine learning capabilities to enhance search quality
-//! through learning-to-rank, recommendations, and anomaly detection.
+//! This module wires personalization, anomaly detection, and ranking helpers
+//! into the core search pipeline so applications can layer adaptive behavior
+//! on top of lexical, vector, or hybrid results.
 //!
 //! # Note on Query Expansion
 //!
-//! Query expansion functionality has been moved to the analysis layer for better
+//! Query expansion functionality lives in the analysis layer for tighter
 //! integration with the token processing pipeline:
 //!
 //! - **Synonym expansion**: Use `SynonymGraphFilter` with `with_boost()`

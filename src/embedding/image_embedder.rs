@@ -1,4 +1,4 @@
-//! Image embedding trait for multimodal vector search.
+//! Image embedding trait for Yatagarasu's multimodal vector search.
 
 use async_trait::async_trait;
 
@@ -8,7 +8,8 @@ use crate::vector::core::vector::Vector;
 /// Trait for converting images to vector embeddings.
 ///
 /// This trait provides a common interface for various image embedding methods
-/// (neural models, API-based services, etc.) to work with Sage's vector search.
+/// (neural models, API-based services, etc.) to integrate with Yatagarasu's
+/// multimodal vector search pipeline.
 ///
 /// # Examples
 ///

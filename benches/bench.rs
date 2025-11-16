@@ -1,7 +1,7 @@
-//! Criterion benchmarks for Sage search engine.
+//! Criterion benchmarks for the Yatagarasu search engine.
 //!
-//! This module contains comprehensive benchmarks for all major components
-//! of the Sage search engine, including:
+//! This suite measures hotspots across analysis, lexical, and vector subsystems
+//! so regressions can be caught before release. Covered areas include:
 //! - Text analysis and tokenization
 //! - Vector similarity search (HNSW)
 //! - Spell correction

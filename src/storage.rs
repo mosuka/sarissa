@@ -1,13 +1,14 @@
-//! Storage abstraction layer for Sage.
+//! Storage abstraction layer for Yatagarasu.
 //!
-//! This module provides a pluggable storage system similar to Whoosh's storage architecture.
-//! It supports different storage backends (file system, memory) with a unified interface.
+//! This module exposes a pluggable storage facade shared by the lexical, vector,
+//! and hybrid engines. File and memory backends can be swapped without touching
+//! higher-level code, making it easy to move from prototyping to production.
 //!
 //! # Architecture
 //!
 //! - **Storage trait**: Unified interface for all storage backends
-//! - **StorageConfig enum**: Type-safe configuration for different storage types
-//! - **StorageFactory**: Factory pattern for creating storage instances
+//! - **StorageConfig enum**: Type-safe configuration for supported backends
+//! - **StorageFactory**: Helper for constructing concrete storage instances
 //!
 //! # Storage Types
 //!

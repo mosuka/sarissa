@@ -1,6 +1,7 @@
-//! Lexical search example - demonstrates comprehensive keyword-based search capabilities.
+//! Lexical search example demonstrating Yatagarasu's keyword tooling.
 //!
-//! This example showcases all query types available in Sage's lexical search including:
+//! This walkthrough exercises every built-in query type exposed by the
+//! `lexical::index::inverted::query` module, including:
 //! - TermQuery: Simple term searches
 //! - PhraseQuery: Exact phrase matching
 //! - BooleanQuery: Complex boolean combinations (AND, OR, NOT)

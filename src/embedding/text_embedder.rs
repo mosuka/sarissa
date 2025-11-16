@@ -1,4 +1,4 @@
-//! Text embedding trait for vector search integration.
+//! Text embedding trait for Yatagarasu's semantic search pipeline.
 
 use async_trait::async_trait;
 
@@ -8,7 +8,8 @@ use crate::vector::core::vector::Vector;
 /// Trait for converting text to vector embeddings.
 ///
 /// This trait provides a common interface for various embedding methods
-/// (neural models, API-based services, etc.) to work with Sage's vector search.
+/// (local neural models, API-based services, etc.) to plug into Yatagarasu's
+/// vector and hybrid search layers.
 ///
 /// # Examples
 ///

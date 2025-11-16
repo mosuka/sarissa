@@ -1,4 +1,4 @@
-//! Utility modules for Sage.
+//! Shared utility modules used across Yatagarasu components.
 
 pub mod levenshtein;
 pub mod simd;
