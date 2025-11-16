@@ -319,12 +319,6 @@ impl VectorEngine {
         writer.update_document(field, value, doc).await
     }
 
-    /// Get the next available vector ID.
-    fn next_vector_id(&self) -> u64 {
-        let writer = self.get_or_create_writer().unwrap();
-        writer.next_vector_id()
-    }
-
     /// Commit any pending changes to the index.
     ///
     /// This method finalizes the index and makes all changes visible to subsequent searches.
