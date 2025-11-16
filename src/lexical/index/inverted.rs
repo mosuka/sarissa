@@ -21,6 +21,7 @@ use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::InvertedIndexConfig;
 use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 use crate::storage::file::{FileStorage, FileStorageConfig};
@@ -34,6 +35,7 @@ pub mod segment;
 pub mod writer;
 
 use self::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
+use self::searcher::InvertedIndexSearcher;
 use self::segment::SegmentInfo;
 use self::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 
@@ -256,7 +258,7 @@ impl InvertedIndex {
 }
 
 impl LexicalIndex for InvertedIndex {
-    fn reader(&self) -> Result<Box<dyn LexicalIndexReader>> {
+    fn reader(&self) -> Result<Arc<dyn LexicalIndexReader>> {
         self.check_closed()?;
 
         let segments = self.load_segments()?;
@@ -268,7 +270,7 @@ impl LexicalIndex for InvertedIndex {
         };
 
         let reader = InvertedIndexReader::new(segments, self.storage.clone(), reader_config)?;
-        Ok(Box::new(reader))
+        Ok(Arc::new(reader))
     }
 
     fn writer(&self) -> Result<Box<dyn LexicalIndexWriter>> {
@@ -316,20 +318,27 @@ impl LexicalIndex for InvertedIndex {
         self.update_metadata()?;
         Ok(())
     }
+
+    fn searcher(&self) -> Result<Box<dyn LexicalSearcher>> {
+        self.check_closed()?;
+        let reader = self.reader()?;
+        Ok(Box::new(InvertedIndexSearcher::from_arc(reader)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::document::document::Document;
+    use crate::document::field::{FloatOption, TextOption};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use std::sync::Arc;
 
     #[allow(dead_code)]
     fn create_test_document(title: &str, body: &str) -> Document {
         Document::builder()
-            .add_text("title", title)
-            .add_text("body", body)
+            .add_text("title", title, TextOption::default())
+            .add_text("body", body, TextOption::default())
             .build()
     }
 
@@ -433,9 +442,9 @@ mod tests {
         let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
 
         let doc = Document::builder()
-            .add_text("title", "Test Document")
-            .add_text("id", "doc1")
-            .add_numeric("count", 42.0)
+            .add_text("title", "Test Document", TextOption::default())
+            .add_text("id", "doc1", TextOption::default())
+            .add_numeric("count", 42.0, FloatOption::default())
             .build();
 
         writer.add_document(doc).unwrap();

@@ -5,6 +5,5 @@
 //! - Advanced similarity metrics and ranking
 //! - Search result processing and filtering
 
-pub mod ranking;
+pub mod scoring;
 pub mod searcher;
-pub mod similarity;

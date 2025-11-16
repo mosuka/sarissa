@@ -453,7 +453,7 @@ impl RecommendationSystem {
         let mut all_text = String::new();
         for field_name in document.field_names() {
             if let Some(field_value) = document.get_field(field_name)
-                && let Some(text) = field_value.as_text()
+                && let Some(text) = field_value.value.as_text()
             {
                 all_text.push_str(text);
                 all_text.push(' ');

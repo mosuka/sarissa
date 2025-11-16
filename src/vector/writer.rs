@@ -7,7 +7,7 @@
 //! - `IvfIndexWriter` in the `ivf` module for memory-efficient search
 
 use crate::error::Result;
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for vector index writers common to all index types.
@@ -65,7 +65,7 @@ impl Default for VectorIndexWriterConfig {
 ///
 /// ```rust,no_run
 /// use yatagarasu::vector::index::hnsw::writer::HnswIndexWriter;
-/// use yatagarasu::vector::index::HnswIndexConfig;
+/// use yatagarasu::vector::index::config::HnswIndexConfig;
 /// use yatagarasu::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use yatagarasu::storage::StorageConfig;
@@ -81,15 +81,36 @@ impl Default for VectorIndexWriterConfig {
 /// // writer.finalize().unwrap();
 /// // writer.write("my_index").unwrap();
 /// ```
-pub trait VectorIndexWriter: Send + Sync {
+#[async_trait::async_trait]
+pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     /// Get the next available vector ID (for automatic ID assignment).
     fn next_vector_id(&self) -> u64;
 
-    /// Build an index from a collection of vectors.
-    fn build(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()>;
+    /// Add a document to the index, converting text fields to vectors.
+    /// Returns the assigned vector ID.
+    ///
+    /// This method processes the document's vector fields, uses the configured embedder
+    /// to convert text to vectors, and adds them to the index.
+    async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64>;
+
+    /// Add a document with a specific ID, converting text fields to vectors.
+    ///
+    /// This method processes the document's vector fields, uses the configured embedder
+    /// to convert text to vectors, and adds them to the index with the specified ID.
+    async fn add_document_with_id(
+        &mut self,
+        doc_id: u64,
+        doc: crate::document::document::Document,
+    ) -> Result<()>;
+
+    /// Build an index from a collection of vectors with field names.
+    /// Each vector is a tuple of (vec_id, field_name, Vector).
+    fn build(&mut self, vectors: Vec<(u64, String, Vector)>) -> Result<()>;
 
     /// Add vectors incrementally during construction.
-    fn add_vectors(&mut self, vectors: Vec<(u64, Vector)>) -> Result<()>;
+    /// Each vector is a tuple of (vec_id, field_name, Vector).
+    /// This allows field-specific vector search similar to lexical field search.
+    fn add_vectors(&mut self, vectors: Vec<(u64, String, Vector)>) -> Result<()>;
 
     /// Finalize the index construction.
     fn finalize(&mut self) -> Result<()>;
@@ -103,9 +124,9 @@ pub trait VectorIndexWriter: Send + Sync {
     /// Optimize the built index.
     fn optimize(&mut self) -> Result<()>;
 
-    /// Get access to the stored vectors.
-    /// Returns a reference to the vectors stored in the writer.
-    fn vectors(&self) -> &[(u64, Vector)];
+    /// Get access to the stored vectors with field names.
+    /// Returns a reference to the vectors with their field names stored in the writer.
+    fn vectors(&self) -> &[(u64, String, Vector)];
 
     /// Write the index to storage.
     /// This method must be called after finalize() to persist the index.
@@ -113,4 +134,45 @@ pub trait VectorIndexWriter: Send + Sync {
 
     /// Check if this writer has storage configured.
     fn has_storage(&self) -> bool;
+
+    /// Delete documents matching the given field and value.
+    /// Returns the number of documents deleted.
+    ///
+    /// This method marks documents for deletion based on field matching.
+    /// The actual deletion occurs during commit or optimize.
+    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64>;
+
+    /// Update a document (delete old, add new).
+    ///
+    /// This is a convenience method that deletes documents matching the field/value
+    /// and adds the new document.
+    async fn update_document(
+        &mut self,
+        field: &str,
+        value: &str,
+        doc: crate::document::document::Document,
+    ) -> Result<()>;
+
+    /// Commit pending changes to the index.
+    ///
+    /// This method finalizes the index and writes it to storage.
+    /// After commit, all changes are persisted and visible to readers.
+    fn commit(&mut self) -> Result<()> {
+        self.finalize()?;
+        self.write("default_index")
+    }
+
+    /// Rollback pending changes.
+    ///
+    /// This method discards all pending changes that haven't been committed.
+    fn rollback(&mut self) -> Result<()>;
+
+    /// Get the number of pending documents not yet committed.
+    fn pending_docs(&self) -> u64;
+
+    /// Close the writer and release resources.
+    fn close(&mut self) -> Result<()>;
+
+    /// Check if the writer is closed.
+    fn is_closed(&self) -> bool;
 }

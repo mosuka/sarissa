@@ -463,19 +463,20 @@ impl MergeEngine {
                 writer.write_varint(document.fields().len() as u64)?;
                 for (field_name, field_value) in document.fields() {
                     writer.write_string(field_name)?;
-                    let field_str = match field_value {
-                        crate::document::field_value::FieldValue::Text(s) => s.clone(),
-                        crate::document::field_value::FieldValue::Integer(i) => i.to_string(),
-                        crate::document::field_value::FieldValue::Float(f) => f.to_string(),
-                        crate::document::field_value::FieldValue::Boolean(b) => b.to_string(),
-                        crate::document::field_value::FieldValue::Binary(_) => {
-                            "[binary]".to_string()
-                        }
-                        crate::document::field_value::FieldValue::DateTime(dt) => dt.to_rfc3339(),
-                        crate::document::field_value::FieldValue::Geo(point) => {
+                    let field_str = match &field_value.value {
+                        crate::document::field::FieldValue::Text(s) => s.clone(),
+                        crate::document::field::FieldValue::Integer(i) => i.to_string(),
+                        crate::document::field::FieldValue::Float(f) => f.to_string(),
+                        crate::document::field::FieldValue::Boolean(b) => b.to_string(),
+                        crate::document::field::FieldValue::Binary(_) => "[binary]".to_string(),
+                        crate::document::field::FieldValue::DateTime(dt) => dt.to_rfc3339(),
+                        crate::document::field::FieldValue::Geo(point) => {
                             format!("{},{}", point.lat, point.lon)
                         }
-                        crate::document::field_value::FieldValue::Null => "null".to_string(),
+                        crate::document::field::FieldValue::Vector(text) => {
+                            format!("[vector: {}]", text)
+                        }
+                        crate::document::field::FieldValue::Null => "null".to_string(),
                     };
                     writer.write_string(&field_str)?;
                 }

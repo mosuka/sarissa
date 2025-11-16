@@ -17,6 +17,7 @@
 //!
 //! ```rust,no_run
 //! use yatagarasu::document::document::Document;
+//! use yatagarasu::document::field::TextOption;
 //! use yatagarasu::lexical::engine::LexicalEngine;
 //! use yatagarasu::lexical::index::config::LexicalIndexConfig;
 //! use yatagarasu::lexical::index::factory::LexicalIndexFactory;
@@ -39,8 +40,8 @@
 //!
 //! // Add documents
 //! let doc = Document::builder()
-//!     .add_text("title", "Hello World")
-//!     .add_text("body", "This is a test document")
+//!     .add_text("title", "Hello World", TextOption::default())
+//!     .add_text("body", "This is a test document", TextOption::default())
 //!     .build();
 //! engine.add_document(doc).unwrap();
 //! engine.commit().unwrap();
@@ -55,12 +56,10 @@ use std::sync::Arc;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::document::Document;
-use crate::error::{Result, YatagarasuError};
+use crate::error::Result;
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::SearchResults;
-use crate::lexical::index::inverted::reader::InvertedIndexReader;
-use crate::lexical::index::inverted::searcher::InvertedIndexSearcher;
 use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::search::searcher::{LexicalSearchQuery, LexicalSearchRequest};
@@ -106,8 +105,9 @@ use crate::storage::Storage;
 /// let mut engine = LexicalEngine::new(index).unwrap();
 ///
 /// // Add documents
+/// use yatagarasu::document::field::TextOption;
 /// let doc = Document::builder()
-///     .add_text("title", "Rust Programming")
+///     .add_text("title", "Rust Programming", TextOption::default())
 ///     .build();
 /// engine.add_document(doc).unwrap();
 /// engine.commit().unwrap();
@@ -119,7 +119,7 @@ pub struct LexicalEngine {
     /// The underlying lexical index.
     index: Box<dyn LexicalIndex>,
     /// The reader for executing queries (cached for efficiency).
-    reader: RefCell<Option<Box<dyn LexicalIndexReader>>>,
+    reader: RefCell<Option<Arc<dyn LexicalIndexReader>>>,
     /// The writer for adding/updating documents (cached for efficiency).
     writer: RefCell<Option<Box<dyn LexicalIndexWriter>>>,
     /// The searcher for executing searches (cached for efficiency).
@@ -194,7 +194,7 @@ impl LexicalEngine {
 
     /// Get or create a reader for this engine.
     #[allow(dead_code)]
-    fn get_or_create_reader(&self) -> Result<RefMut<'_, Box<dyn LexicalIndexReader>>> {
+    fn get_or_create_reader(&self) -> Result<RefMut<'_, Arc<dyn LexicalIndexReader>>> {
         {
             let mut reader_ref = self.reader.borrow_mut();
             if reader_ref.is_none() {
@@ -225,26 +225,12 @@ impl LexicalEngine {
 
     /// Get or create a searcher for this engine.
     ///
-    /// The searcher is created from the index reader and cached for efficiency.
+    /// The searcher is provided by the underlying index implementation and cached for efficiency.
     fn get_or_create_searcher(&self) -> Result<RefMut<'_, Box<dyn LexicalSearcher>>> {
         {
             let mut searcher_ref = self.searcher.borrow_mut();
             if searcher_ref.is_none() {
-                // Get a fresh reader from the index
-                let reader = self.index.reader()?;
-
-                // Downcast to InvertedIndexReader and create appropriate searcher
-                let searcher: Box<dyn LexicalSearcher> = if let Some(inverted_reader) =
-                    reader.as_any().downcast_ref::<InvertedIndexReader>()
-                {
-                    Box::new(InvertedIndexSearcher::new(Box::new(
-                        inverted_reader.clone(),
-                    )))
-                } else {
-                    return Err(YatagarasuError::index("Unknown lexical index reader type"));
-                };
-
-                *searcher_ref = Some(searcher);
+                *searcher_ref = Some(self.index.searcher()?);
             }
         }
 
@@ -286,9 +272,10 @@ impl LexicalEngine {
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
+    /// use yatagarasu::document::field::TextOption;
     /// let doc = Document::builder()
-    ///     .add_text("title", "Hello World")
-    ///     .add_text("body", "This is a test")
+    ///     .add_text("title", "Hello World", TextOption::default())
+    ///     .add_text("body", "This is a test", TextOption::default())
     ///     .build();
     /// let doc_id = engine.add_document(doc).unwrap();
     /// engine.commit().unwrap();  // Don't forget to commit!
@@ -372,10 +359,11 @@ impl LexicalEngine {
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
     /// // Add multiple documents
+    /// use yatagarasu::document::field::TextOption;
     /// for i in 0..10 {
     ///     let doc = Document::builder()
-    ///         .add_text("id", &i.to_string())
-    ///         .add_text("title", &format!("Document {}", i))
+    ///         .add_text("id", &i.to_string(), TextOption::default())
+    ///         .add_text("title", &format!("Document {}", i), TextOption::default())
     ///         .build();
     ///     engine.add_document(doc).unwrap();
     /// }
@@ -428,9 +416,10 @@ impl LexicalEngine {
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
     /// // Add and commit many documents
+    /// use yatagarasu::document::field::TextOption;
     /// for i in 0..1000 {
     ///     let doc = Document::builder()
-    ///         .add_text("id", &i.to_string())
+    ///         .add_text("id", &i.to_string(), TextOption::default())
     ///         .build();
     ///     engine.add_document(doc).unwrap();
     /// }
@@ -495,7 +484,8 @@ impl LexicalEngine {
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
-    /// # let doc = Document::builder().add_text("title", "hello world").build();
+    /// # use yatagarasu::document::field::TextOption;
+    /// # let doc = Document::builder().add_text("title", "hello world", TextOption::default()).build();
     /// # engine.add_document(doc).unwrap();
     /// # engine.commit().unwrap();
     ///
@@ -618,6 +608,7 @@ impl LexicalEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::field::TextOption;
     use crate::lexical::index::config::LexicalIndexConfig;
     use crate::lexical::index::factory::LexicalIndexFactory;
     use crate::lexical::index::inverted::query::Query;
@@ -630,8 +621,8 @@ mod tests {
     #[allow(dead_code)]
     fn create_test_document(title: &str, body: &str) -> Document {
         Document::builder()
-            .add_text("title", title)
-            .add_text("body", body)
+            .add_text("title", title, TextOption::default())
+            .add_text("body", body, TextOption::default())
             .build()
     }
 

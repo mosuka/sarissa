@@ -6,18 +6,19 @@ use rayon::prelude::*;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 use crate::vector::index::IvfIndexConfig;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
+#[derive(Debug)]
 /// Builder for IVF vector indexes (memory-efficient search).
 pub struct IvfIndexWriter {
     index_config: IvfIndexConfig,
     writer_config: VectorIndexWriterConfig,
     storage: Option<Arc<dyn Storage>>,
-    centroids: Vec<Vector>,                  // Cluster centroids
-    inverted_lists: Vec<Vec<(u64, Vector)>>, // Inverted lists for each cluster
-    vectors: Vec<(u64, Vector)>,             // All vectors (used during construction)
+    centroids: Vec<Vector>,                          // Cluster centroids
+    inverted_lists: Vec<Vec<(u64, String, Vector)>>, // Inverted lists for each cluster
+    vectors: Vec<(u64, String, Vector)>,             // All vectors (used during construction)
     is_finalized: bool,
     total_vectors_to_add: Option<usize>,
     next_vec_id: u64,
@@ -129,6 +130,18 @@ impl IvfIndexWriter {
                 input.read_exact(&mut doc_id_buf)?;
                 let doc_id = u64::from_le_bytes(doc_id_buf);
 
+                // Read field name
+                let mut field_name_len_buf = [0u8; 4];
+                input.read_exact(&mut field_name_len_buf)?;
+                let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+
+                let mut field_name_buf = vec![0u8; field_name_len];
+                input.read_exact(&mut field_name_buf)?;
+                let field_name = String::from_utf8(field_name_buf).map_err(|e| {
+                    YatagarasuError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+                })?;
+
+                // Read vector data
                 let mut values = vec![0.0f32; dimension];
                 for value in &mut values {
                     let mut value_buf = [0u8; 4];
@@ -136,7 +149,7 @@ impl IvfIndexWriter {
                     *value = f32::from_le_bytes(value_buf);
                 }
 
-                list.push((doc_id, Vector::new(values)));
+                list.push((doc_id, field_name, Vector::new(values)));
             }
         }
 
@@ -147,7 +160,7 @@ impl IvfIndexWriter {
         }
 
         // Calculate next_vec_id from loaded vectors
-        let max_id = vectors.iter().map(|(id, _)| *id).max().unwrap_or(0);
+        let max_id = vectors.iter().map(|(id, _, _)| *id).max().unwrap_or(0);
         let next_vec_id = if num_vectors > 0 { max_id + 1 } else { 0 };
 
         Ok(Self {
@@ -186,12 +199,12 @@ impl IvfIndexWriter {
     }
 
     /// Validate vectors before adding them.
-    fn validate_vectors(&self, vectors: &[(u64, Vector)]) -> Result<()> {
+    fn validate_vectors(&self, vectors: &[(u64, String, Vector)]) -> Result<()> {
         if vectors.is_empty() {
             return Ok(());
         }
 
-        for (doc_id, vector) in vectors {
+        for (doc_id, _field_name, vector) in vectors {
             if vector.dimension() != self.index_config.dimension {
                 return Err(YatagarasuError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
@@ -212,17 +225,17 @@ impl IvfIndexWriter {
     }
 
     /// Normalize vectors if configured to do so.
-    fn normalize_vectors(&self, vectors: &mut [(u64, Vector)]) {
+    fn normalize_vectors(&self, vectors: &mut [(u64, String, Vector)]) {
         if !self.index_config.normalize_vectors {
             return;
         }
 
         if self.writer_config.parallel_build && vectors.len() > 100 {
-            vectors.par_iter_mut().for_each(|(_, vector)| {
+            vectors.par_iter_mut().for_each(|(_, _, vector)| {
                 vector.normalize();
             });
         } else {
-            for (_, vector) in vectors {
+            for (_, _, vector) in vectors {
                 vector.normalize();
             }
         }
@@ -240,7 +253,7 @@ impl IvfIndexWriter {
             return Err(YatagarasuError::InvalidOperation(format!(
                 "Cannot create {} clusters from {} vectors",
                 self.index_config.n_clusters,
-                self.vectors.len()
+                self.vectors.len() as u64
             )));
         }
 
@@ -285,14 +298,14 @@ impl IvfIndexWriter {
 
         // Choose first centroid randomly
         let first_idx = rng.random_range(0..self.vectors.len());
-        self.centroids.push(self.vectors[first_idx].1.clone());
+        self.centroids.push(self.vectors[first_idx].2.clone());
 
         // Choose remaining centroids with probability proportional to squared distance
         for _ in 1..self.index_config.n_clusters {
             let mut distances = Vec::with_capacity(self.vectors.len());
             let mut total_weight = 0.0;
 
-            for (_, vector) in &self.vectors {
+            for (_, _, vector) in &self.vectors {
                 let min_dist = self
                     .centroids
                     .iter()
@@ -312,7 +325,7 @@ impl IvfIndexWriter {
             if total_weight == 0.0 {
                 // Fallback to random selection
                 let idx = rng.random_range(0..self.vectors.len());
-                self.centroids.push(self.vectors[idx].1.clone());
+                self.centroids.push(self.vectors[idx].2.clone());
                 continue;
             }
 
@@ -323,7 +336,7 @@ impl IvfIndexWriter {
             for (i, &weight) in distances.iter().enumerate() {
                 cumsum += weight;
                 if cumsum >= target {
-                    self.centroids.push(self.vectors[i].1.clone());
+                    self.centroids.push(self.vectors[i].2.clone());
                     break;
                 }
             }
@@ -334,15 +347,15 @@ impl IvfIndexWriter {
 
     /// Assign each vector to its nearest cluster.
     fn assign_vectors_to_clusters(&self) -> Vec<usize> {
-        if self.writer_config.parallel_build && self.vectors.len() > 1000 {
+        if self.writer_config.parallel_build && self.vectors.len() as u64 > 1000 {
             self.vectors
                 .par_iter()
-                .map(|(_, vector)| self.find_nearest_centroid(vector))
+                .map(|(_, _, vector)| self.find_nearest_centroid(vector))
                 .collect()
         } else {
             self.vectors
                 .iter()
-                .map(|(_, vector)| self.find_nearest_centroid(vector))
+                .map(|(_, _, vector)| self.find_nearest_centroid(vector))
                 .collect()
         }
     }
@@ -374,7 +387,7 @@ impl IvfIndexWriter {
         let mut cluster_counts = vec![0; self.index_config.n_clusters];
 
         // Sum vectors in each cluster
-        for (i, (_, vector)) in self.vectors.iter().enumerate() {
+        for (i, (_, _, vector)) in self.vectors.iter().enumerate() {
             let cluster = assignments[i];
             cluster_counts[cluster] += 1;
 
@@ -423,19 +436,19 @@ impl IvfIndexWriter {
     fn build_inverted_lists(&mut self) -> Result<()> {
         self.inverted_lists = vec![Vec::new(); self.index_config.n_clusters];
 
-        for (doc_id, vector) in &self.vectors {
+        for (doc_id, field_name, vector) in &self.vectors {
             let cluster = self.find_nearest_centroid(vector);
-            self.inverted_lists[cluster].push((*doc_id, vector.clone()));
+            self.inverted_lists[cluster].push((*doc_id, field_name.clone(), vector.clone()));
         }
 
         // Sort each inverted list by document ID
         if self.writer_config.parallel_build {
             self.inverted_lists.par_iter_mut().for_each(|list| {
-                list.sort_by_key(|(doc_id, _)| *doc_id);
+                list.sort_by_key(|(doc_id, _, _)| *doc_id);
             });
         } else {
             for list in &mut self.inverted_lists {
-                list.sort_by_key(|(doc_id, _)| *doc_id);
+                list.sort_by_key(|(doc_id, _, _)| *doc_id);
             }
         }
 
@@ -456,7 +469,7 @@ impl IvfIndexWriter {
     }
 
     /// Get the stored vectors (for testing/debugging).
-    pub fn vectors(&self) -> &[(u64, Vector)] {
+    pub fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }
 
@@ -471,17 +484,119 @@ impl IvfIndexWriter {
     }
 
     /// Get inverted lists.
-    pub fn inverted_lists(&self) -> &[Vec<(u64, Vector)>] {
+    pub fn inverted_lists(&self) -> &[Vec<(u64, String, Vector)>] {
         &self.inverted_lists
     }
 }
 
+#[async_trait::async_trait]
 impl VectorIndexWriter for IvfIndexWriter {
     fn next_vector_id(&self) -> u64 {
         self.next_vec_id
     }
 
-    fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
+    async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64> {
+        use crate::document::field::{FieldOption, FieldValue};
+        use crate::embedding::per_field::PerFieldEmbedder;
+
+        let doc_id = self.next_vec_id;
+        let mut vectors = Vec::new();
+
+        for (field_name, field) in doc.fields().iter() {
+            // Check if this is a vector field and if it should be indexed
+            if let FieldValue::Vector(text) = &field.value {
+                // Check FieldOption to determine if this vector should be indexed
+                let should_index = match &field.option {
+                    FieldOption::Vector(opt) => {
+                        // Check if flat, hnsw, or ivf indexing is enabled
+                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some()
+                    }
+                    _ => false,
+                };
+
+                if !should_index {
+                    continue;
+                }
+
+                // Check if embedder is PerFieldEmbedder for field-specific embedding
+                let vector = if let Some(per_field) = self
+                    .index_config
+                    .embedder
+                    .as_any()
+                    .downcast_ref::<PerFieldEmbedder>()
+                {
+                    per_field.embed_field(field_name, text.as_str()).await?
+                } else {
+                    self.index_config.embedder.embed(text.as_str()).await?
+                };
+
+                vectors.push((doc_id, field_name.clone(), vector));
+            }
+        }
+
+        if !vectors.is_empty() {
+            self.add_vectors(vectors)?;
+        }
+
+        self.next_vec_id += 1;
+        Ok(doc_id)
+    }
+
+    async fn add_document_with_id(
+        &mut self,
+        doc_id: u64,
+        doc: crate::document::document::Document,
+    ) -> Result<()> {
+        use crate::document::field::{FieldOption, FieldValue};
+        use crate::embedding::per_field::PerFieldEmbedder;
+
+        let mut vectors = Vec::new();
+
+        for (field_name, field) in doc.fields().iter() {
+            // Check if this is a vector field and if it should be indexed
+            if let FieldValue::Vector(text) = &field.value {
+                // Check FieldOption to determine if this vector should be indexed
+                let should_index = match &field.option {
+                    FieldOption::Vector(opt) => {
+                        // Check if flat, hnsw, or ivf indexing is enabled
+                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some()
+                    }
+                    _ => false,
+                };
+
+                if !should_index {
+                    continue;
+                }
+
+                // Check if embedder is PerFieldEmbedder for field-specific embedding
+                let vector = if let Some(per_field) = self
+                    .index_config
+                    .embedder
+                    .as_any()
+                    .downcast_ref::<PerFieldEmbedder>()
+                {
+                    per_field.embed_field(field_name, text.as_str()).await?
+                } else {
+                    self.index_config.embedder.embed(text.as_str()).await?
+                };
+
+                vectors.push((doc_id, field_name.clone(), vector));
+            }
+        }
+
+        if !vectors.is_empty() {
+            self.add_vectors(vectors)?;
+        }
+
+        // Update next_vec_id if necessary
+        if doc_id >= self.next_vec_id {
+            self.next_vec_id = doc_id + 1;
+        }
+
+        Ok(())
+    }
+
+    fn build(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(YatagarasuError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
@@ -492,10 +607,10 @@ impl VectorIndexWriter for IvfIndexWriter {
         self.normalize_vectors(&mut vectors);
 
         // Update next_vec_id
-        if let Some(max_id) = vectors.iter().map(|(id, _)| *id).max() {
-            if max_id >= self.next_vec_id {
-                self.next_vec_id = max_id + 1;
-            }
+        if let Some(max_id) = vectors.iter().map(|(id, _, _)| *id).max()
+            && max_id >= self.next_vec_id
+        {
+            self.next_vec_id = max_id + 1;
         }
 
         self.vectors = vectors;
@@ -510,7 +625,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         Ok(())
     }
 
-    fn add_vectors(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
+    fn add_vectors(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(YatagarasuError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
@@ -521,10 +636,10 @@ impl VectorIndexWriter for IvfIndexWriter {
         self.normalize_vectors(&mut vectors);
 
         // Update next_vec_id
-        if let Some(max_id) = vectors.iter().map(|(id, _)| *id).max() {
-            if max_id >= self.next_vec_id {
-                self.next_vec_id = max_id + 1;
-            }
+        if let Some(max_id) = vectors.iter().map(|(id, _, _)| *id).max()
+            && max_id >= self.next_vec_id
+        {
+            self.next_vec_id = max_id + 1;
         }
 
         self.vectors.extend(vectors);
@@ -558,7 +673,7 @@ impl VectorIndexWriter for IvfIndexWriter {
             if total == 0 {
                 if self.is_finalized { 1.0 } else { 0.0 }
             } else {
-                let current = self.vectors.len() as f32;
+                let current = self.vectors.len() as u64 as f32;
                 let progress = current / total as f32;
                 if self.is_finalized {
                     1.0
@@ -588,7 +703,7 @@ impl VectorIndexWriter for IvfIndexWriter {
 
         // Inverted list overhead (pointers and metadata)
         let inverted_list_memory =
-            self.inverted_lists.len() * (std::mem::size_of::<Vec<(u64, Vector)>>() + 64); // Rough estimate
+            self.inverted_lists.len() * (std::mem::size_of::<Vec<(u64, String, Vector)>>() + 64); // Rough estimate
 
         let metadata_memory = self.vectors.len() * 64;
 
@@ -619,7 +734,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         Ok(())
     }
 
-    fn vectors(&self) -> &[(u64, Vector)] {
+    fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }
 
@@ -641,7 +756,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         let mut output = storage.create_output(&file_name)?;
 
         // Write metadata
-        output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
+        output.write_all(&(self.vectors.len() as u64 as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.dimension as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.n_clusters as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.n_probe as u32).to_le_bytes())?;
@@ -656,8 +771,15 @@ impl VectorIndexWriter for IvfIndexWriter {
         // Write inverted lists
         for list in &self.inverted_lists {
             output.write_all(&(list.len() as u32).to_le_bytes())?;
-            for (doc_id, vector) in list {
+            for (doc_id, field_name, vector) in list {
                 output.write_all(&doc_id.to_le_bytes())?;
+
+                // Write field name length and field name
+                let field_name_bytes = field_name.as_bytes();
+                output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
+                output.write_all(field_name_bytes)?;
+
+                // Write vector data
                 for value in &vector.data {
                     output.write_all(&value.to_le_bytes())?;
                 }
@@ -670,5 +792,49 @@ impl VectorIndexWriter for IvfIndexWriter {
 
     fn has_storage(&self) -> bool {
         self.storage.is_some()
+    }
+
+    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
+        // Simplified implementation - returns 0
+        // TODO: Implement proper deletion with metadata storage
+        let _field = field;
+        let _value = value;
+        Ok(0)
+    }
+
+    async fn update_document(
+        &mut self,
+        field: &str,
+        value: &str,
+        doc: crate::document::document::Document,
+    ) -> Result<()> {
+        self.delete_documents(field, value)?;
+        self.add_document(doc).await?;
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        self.vectors.clear();
+        self.is_finalized = false;
+        self.next_vec_id = 0;
+        Ok(())
+    }
+
+    fn pending_docs(&self) -> u64 {
+        if self.is_finalized {
+            0
+        } else {
+            self.vectors.len() as u64
+        }
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.vectors.clear();
+        self.is_finalized = true;
+        Ok(())
+    }
+
+    fn is_closed(&self) -> bool {
+        self.is_finalized && self.vectors.is_empty()
     }
 }

@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::storage::Storage;
+use crate::vector::index::VectorIndex;
+use crate::vector::index::config::VectorIndexConfig;
 use crate::vector::index::flat::FlatIndex;
 use crate::vector::index::hnsw::HnswIndex;
 use crate::vector::index::ivf::IvfIndex;
-use crate::vector::index::{VectorIndex, VectorIndexConfig};
 
 /// Factory for creating vector index instances.
 ///
@@ -24,7 +25,7 @@ use crate::vector::index::{VectorIndex, VectorIndexConfig};
 ///
 /// ```
 /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-/// use yatagarasu::vector::index::VectorIndexConfig;
+/// use yatagarasu::vector::index::config::VectorIndexConfig;
 /// use yatagarasu::storage::{StorageFactory, StorageConfig};
 /// use yatagarasu::storage::memory::MemoryStorageConfig;
 ///
@@ -57,7 +58,7 @@ impl VectorIndexFactory {
     ///
     /// ```
     /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::vector::index::{VectorIndexConfig, FlatIndexConfig};
+    /// use yatagarasu::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
     /// use yatagarasu::storage::{StorageFactory, StorageConfig};
     /// use yatagarasu::storage::file::FileStorageConfig;
     ///
@@ -107,7 +108,7 @@ impl VectorIndexFactory {
     ///
     /// ```no_run
     /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::vector::index::{VectorIndexConfig, FlatIndexConfig};
+    /// use yatagarasu::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
     /// use yatagarasu::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
     ///
@@ -145,7 +146,7 @@ mod tests {
 
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;
-    use crate::vector::index::{
+    use crate::vector::index::config::{
         FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig,
     };
 

@@ -3,12 +3,13 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 
 /// IVF (Inverted File) vector searcher that performs memory-efficient approximate search.
+#[derive(Debug)]
 pub struct IvfSearcher {
     index_reader: Arc<dyn VectorIndexReader>,
     n_probe: usize, // Number of clusters to search
@@ -59,12 +60,22 @@ impl VectorSearcher for IvfSearcher {
         // Get all vector IDs (in a real IVF implementation, we'd only get IDs from selected clusters)
         let vector_ids = self.index_reader.vector_ids()?;
 
+        // Filter by field_name if specified
+        let vector_ids: Vec<(u64, String)> = if let Some(ref field_name) = request.field_name {
+            vector_ids
+                .into_iter()
+                .filter(|(_, field)| field == field_name)
+                .collect()
+        } else {
+            vector_ids
+        };
+
         // Calculate similarities for all vectors
-        let mut candidates: Vec<(u64, f32, f32, crate::vector::Vector)> =
+        let mut candidates: Vec<(u64, String, f32, f32, Vector)> =
             Vec::with_capacity(vector_ids.len());
 
-        for doc_id in vector_ids {
-            if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id) {
+        for (doc_id, field_name) in vector_ids {
+            if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, &field_name) {
                 let similarity = self
                     .index_reader
                     .distance_metric()
@@ -73,17 +84,18 @@ impl VectorSearcher for IvfSearcher {
                     .index_reader
                     .distance_metric()
                     .distance(&request.query.data, &vector.data)?;
-                candidates.push((doc_id, similarity, distance, vector));
+                candidates.push((doc_id, field_name, similarity, distance, vector));
             }
         }
 
         // Sort by similarity (descending)
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take top_k results
         let candidates_len = candidates.len();
         let top_k = request.params.top_k.min(candidates_len);
-        for (doc_id, similarity, distance, vector) in candidates.into_iter().take(top_k) {
+        for (doc_id, field_name, similarity, distance, vector) in candidates.into_iter().take(top_k)
+        {
             // Apply minimum similarity threshold
             if similarity < request.params.min_similarity {
                 break;
@@ -93,6 +105,7 @@ impl VectorSearcher for IvfSearcher {
                 .results
                 .push(crate::vector::search::searcher::VectorSearchResult {
                     doc_id,
+                    field_name,
                     similarity,
                     distance,
                     vector: if request.params.include_vectors {
@@ -107,5 +120,17 @@ impl VectorSearcher for IvfSearcher {
         results.search_time_ms = start.elapsed().as_secs_f64() * 1000.0;
         results.candidates_examined = candidates_len;
         Ok(results)
+    }
+
+    fn count(&self, request: VectorSearchRequest) -> Result<u64> {
+        // Get all vector IDs with field names
+        let vector_ids = self.index_reader.vector_ids()?;
+
+        // Filter by field_name if specified
+        if let Some(ref field_name) = request.field_name {
+            Ok(vector_ids.iter().filter(|(_, f)| f == field_name).count() as u64)
+        } else {
+            Ok(vector_ids.len() as u64)
+        }
     }
 }

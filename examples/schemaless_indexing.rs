@@ -12,7 +12,7 @@ use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
 use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::document::Document;
-use yatagarasu::document::field_value::FieldValue;
+use yatagarasu::document::field::{Field, FieldValue, TextOption};
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
 use yatagarasu::lexical::index::factory::LexicalIndexFactory;
@@ -63,57 +63,101 @@ fn main() -> yatagarasu::error::Result<()> {
 
     // Product 1: Electronics
     let mut product1 = Document::new();
-    product1.add_field("id", FieldValue::Text("ELEC-001".to_string()));
+    product1.add_field(
+        "id",
+        Field::with_default_option(FieldValue::Text("ELEC-001".to_string())),
+    );
     product1.add_field(
         "title",
-        FieldValue::Text("Wireless Bluetooth Headphones".to_string()),
+        Field::with_default_option(FieldValue::Text(
+            "Wireless Bluetooth Headphones".to_string(),
+        )),
     );
     product1.add_field(
         "description",
-        FieldValue::Text("High-quality wireless headphones with noise cancellation".to_string()),
+        Field::with_default_option(FieldValue::Text(
+            "High-quality wireless headphones with noise cancellation".to_string(),
+        )),
     );
-    product1.add_field("category", FieldValue::Text("electronics".to_string()));
-    product1.add_field("price", FieldValue::Float(199.99));
-    product1.add_field("in_stock", FieldValue::Boolean(true));
+    product1.add_field(
+        "category",
+        Field::with_default_option(FieldValue::Text("electronics".to_string())),
+    );
+    product1.add_field(
+        "price",
+        Field::with_default_option(FieldValue::Float(199.99)),
+    );
+    product1.add_field(
+        "in_stock",
+        Field::with_default_option(FieldValue::Boolean(true)),
+    );
 
     lexical_engine.add_document(product1)?;
     println!("✓ Added electronics product");
 
     // Product 2: Book (different fields structure)
     let mut product2 = Document::new();
-    product2.add_field("id", FieldValue::Text("BOOK-002".to_string()));
+    product2.add_field(
+        "id",
+        Field::with_default_option(FieldValue::Text("BOOK-002".to_string())),
+    );
     product2.add_field(
         "title",
-        FieldValue::Text("The Rust Programming Language".to_string()),
+        Field::with_default_option(FieldValue::Text(
+            "The Rust Programming Language".to_string(),
+        )),
     );
     product2.add_field(
         "author",
-        FieldValue::Text("Steve Klabnik and Carol Nichols".to_string()),
+        Field::with_default_option(FieldValue::Text(
+            "Steve Klabnik and Carol Nichols".to_string(),
+        )),
     );
-    product2.add_field("isbn", FieldValue::Text("978-1718500440".to_string()));
-    product2.add_field("category", FieldValue::Text("books".to_string()));
-    product2.add_field("price", FieldValue::Float(39.99));
-    product2.add_field("pages", FieldValue::Integer(552));
+    product2.add_field(
+        "isbn",
+        Field::with_default_option(FieldValue::Text("978-1718500440".to_string())),
+    );
+    product2.add_field(
+        "category",
+        Field::with_default_option(FieldValue::Text("books".to_string())),
+    );
+    product2.add_field(
+        "price",
+        Field::with_default_option(FieldValue::Float(39.99)),
+    );
+    product2.add_field(
+        "pages",
+        Field::with_default_option(FieldValue::Integer(552)),
+    );
 
     lexical_engine.add_document(product2)?;
     println!("✓ Added book product");
 
     // User 1: Customer profile (completely different structure)
     let mut user1 = Document::new();
-    user1.add_field("user_id", FieldValue::Text("USER-12345".to_string()));
+    user1.add_field(
+        "user_id",
+        Field::with_default_option(FieldValue::Text("USER-12345".to_string())),
+    );
     user1.add_field(
         "email",
-        FieldValue::Text("john.doe@example.com".to_string()),
+        Field::with_default_option(FieldValue::Text("john.doe@example.com".to_string())),
     );
-    user1.add_field("full_name", FieldValue::Text("John Doe".to_string()));
+    user1.add_field(
+        "full_name",
+        Field::with_default_option(FieldValue::Text("John Doe".to_string())),
+    );
     user1.add_field(
         "bio",
-        FieldValue::Text(
+        Field::with_default_option(FieldValue::Text(
             "Software engineer passionate about Rust and search technologies".to_string(),
-        ),
+        )),
     );
-    user1.add_field("age", FieldValue::Integer(28));
-    user1.add_field("premium_member", FieldValue::Boolean(true));
+    user1.add_field("age", Field::with_default_option(FieldValue::Integer(28)));
+    user1.add_field(
+        "premium_member",
+        Field::with_default_option(FieldValue::Boolean(true)),
+    );
 
     lexical_engine.add_document(user1)?;
     println!("✓ Added user profile");
@@ -122,14 +166,19 @@ fn main() -> yatagarasu::error::Result<()> {
 
     // Blog post using DocumentBuilder
     let blog_post = Document::builder()
-        .add_text("post_id", "POST-789")
-        .add_text("title", "Getting Started with Schema-less Search")
+        .add_text("post_id", "POST-789", TextOption::default())
+        .add_text(
+            "title",
+            "Getting Started with Schema-less Search",
+            TextOption::default(),
+        )
         .add_text(
             "content",
             "Schema-less search engines provide incredible flexibility...",
+            TextOption::default(),
         )
-        .add_text("tags", "rust,search,tutorial")
-        .add_text("author", "Jane Smith")
+        .add_text("tags", "rust,search,tutorial", TextOption::default())
+        .add_text("author", "Jane Smith", TextOption::default())
         .build();
 
     lexical_engine.add_document(blog_post)?;

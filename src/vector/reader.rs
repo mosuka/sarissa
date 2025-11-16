@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::vector::{DistanceMetric, Vector};
+use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::vector::Vector;
 
 /// Statistics about a vector index.
 #[derive(Debug, Clone)]
@@ -50,18 +51,21 @@ pub struct ValidationReport {
 }
 
 /// Trait for reading vector indexes (similar to IndexReader for inverted indexes).
-pub trait VectorIndexReader: Send + Sync {
+pub trait VectorIndexReader: Send + Sync + std::fmt::Debug {
     /// Cast to Any for downcasting to concrete types.
     fn as_any(&self) -> &dyn std::any::Any;
 
-    /// Get a vector by document ID.
-    fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>>;
+    /// Get a vector by document ID and field name.
+    fn get_vector(&self, doc_id: u64, field_name: &str) -> Result<Option<Vector>>;
 
-    /// Get multiple vectors by document IDs.
-    fn get_vectors(&self, doc_ids: &[u64]) -> Result<Vec<Option<Vector>>>;
+    /// Get all vectors for a document ID (all fields).
+    fn get_vectors_for_doc(&self, doc_id: u64) -> Result<Vec<(String, Vector)>>;
 
-    /// Get all vector IDs in the index.
-    fn vector_ids(&self) -> Result<Vec<u64>>;
+    /// Get multiple vectors by document IDs and field names.
+    fn get_vectors(&self, doc_ids: &[(u64, String)]) -> Result<Vec<Option<Vector>>>;
+
+    /// Get all vector IDs with their field names in the index.
+    fn vector_ids(&self) -> Result<Vec<(u64, String)>>;
 
     /// Get the total number of vectors.
     fn vector_count(&self) -> usize;
@@ -75,11 +79,21 @@ pub trait VectorIndexReader: Send + Sync {
     /// Get index statistics.
     fn stats(&self) -> VectorStats;
 
-    /// Check if a vector exists.
-    fn contains_vector(&self, doc_id: u64) -> bool;
+    /// Check if a vector exists for a specific field.
+    fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool;
 
-    /// Get vectors in a specific range.
-    fn get_vector_range(&self, start_doc_id: u64, end_doc_id: u64) -> Result<Vec<(u64, Vector)>>;
+    /// Get vectors in a specific range with field names.
+    fn get_vector_range(
+        &self,
+        start_doc_id: u64,
+        end_doc_id: u64,
+    ) -> Result<Vec<(u64, String, Vector)>>;
+
+    /// Get all vectors with a specific field name.
+    fn get_vectors_by_field(&self, field_name: &str) -> Result<Vec<(u64, Vector)>>;
+
+    /// Get all unique field names in the index.
+    fn field_names(&self) -> Result<Vec<String>>;
 
     /// Get an iterator over all vectors.
     fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>>;
@@ -93,14 +107,14 @@ pub trait VectorIndexReader: Send + Sync {
 
 /// Iterator over vectors in an index.
 pub trait VectorIterator: Send {
-    /// Get the next vector.
-    fn next(&mut self) -> Result<Option<(u64, Vector)>>;
+    /// Get the next vector with field name.
+    fn next(&mut self) -> Result<Option<(u64, String, Vector)>>;
 
-    /// Skip to a specific document ID.
-    fn skip_to(&mut self, doc_id: u64) -> Result<bool>;
+    /// Skip to a specific document ID and field.
+    fn skip_to(&mut self, doc_id: u64, field_name: &str) -> Result<bool>;
 
     /// Get the current position.
-    fn position(&self) -> u64;
+    fn position(&self) -> (u64, String);
 
     /// Reset to the beginning.
     fn reset(&mut self) -> Result<()>;
@@ -108,9 +122,10 @@ pub trait VectorIterator: Send {
 
 /// Simple in-memory vector reader for basic use cases.
 /// This is a lightweight reader that holds vectors in memory.
+#[derive(Debug)]
 pub struct SimpleVectorReader {
-    vectors: HashMap<u64, Vector>,
-    vector_ids: Vec<u64>,
+    vectors: HashMap<(u64, String), Vector>,
+    vector_ids: Vec<(u64, String)>,
     dimension: usize,
     distance_metric: DistanceMetric,
 }
@@ -118,12 +133,18 @@ pub struct SimpleVectorReader {
 impl SimpleVectorReader {
     /// Create a new simple vector reader.
     pub fn new(
-        vectors: Vec<(u64, Vector)>,
+        vectors: Vec<(u64, String, Vector)>,
         dimension: usize,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
-        let vector_ids: Vec<u64> = vectors.iter().map(|(id, _)| *id).collect();
-        let vectors: HashMap<u64, Vector> = vectors.into_iter().collect();
+        let vector_ids: Vec<(u64, String)> = vectors
+            .iter()
+            .map(|(id, field, _)| (*id, field.clone()))
+            .collect();
+        let vectors: HashMap<(u64, String), Vector> = vectors
+            .into_iter()
+            .map(|(id, field, vec)| ((id, field), vec))
+            .collect();
 
         Ok(Self {
             vectors,
@@ -139,18 +160,27 @@ impl VectorIndexReader for SimpleVectorReader {
         self
     }
 
-    fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>> {
-        Ok(self.vectors.get(&doc_id).cloned())
+    fn get_vector(&self, doc_id: u64, field_name: &str) -> Result<Option<Vector>> {
+        Ok(self.vectors.get(&(doc_id, field_name.to_string())).cloned())
     }
 
-    fn get_vectors(&self, doc_ids: &[u64]) -> Result<Vec<Option<Vector>>> {
-        Ok(doc_ids
+    fn get_vectors_for_doc(&self, doc_id: u64) -> Result<Vec<(String, Vector)>> {
+        Ok(self
+            .vectors
             .iter()
-            .map(|id| self.vectors.get(id).cloned())
+            .filter(|((id, _), _)| *id == doc_id)
+            .map(|((_, field), vec)| (field.clone(), vec.clone()))
             .collect())
     }
 
-    fn vector_ids(&self) -> Result<Vec<u64>> {
+    fn get_vectors(&self, doc_ids: &[(u64, String)]) -> Result<Vec<Option<Vector>>> {
+        Ok(doc_ids
+            .iter()
+            .map(|(id, field)| self.vectors.get(&(*id, field.clone())).cloned())
+            .collect())
+    }
+
+    fn vector_ids(&self) -> Result<Vec<(u64, String)>> {
         Ok(self.vector_ids.clone())
     }
 
@@ -176,24 +206,47 @@ impl VectorIndexReader for SimpleVectorReader {
         }
     }
 
-    fn contains_vector(&self, doc_id: u64) -> bool {
-        self.vectors.contains_key(&doc_id)
+    fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool {
+        self.vectors.contains_key(&(doc_id, field_name.to_string()))
     }
 
-    fn get_vector_range(&self, start_doc_id: u64, end_doc_id: u64) -> Result<Vec<(u64, Vector)>> {
+    fn get_vector_range(
+        &self,
+        start_doc_id: u64,
+        end_doc_id: u64,
+    ) -> Result<Vec<(u64, String, Vector)>> {
         Ok(self
             .vectors
             .iter()
-            .filter(|(id, _)| **id >= start_doc_id && **id <= end_doc_id)
-            .map(|(id, v)| (*id, v.clone()))
+            .filter(|((id, _), _)| *id >= start_doc_id && *id <= end_doc_id)
+            .map(|((id, field), v)| (*id, field.clone(), v.clone()))
             .collect())
+    }
+
+    fn get_vectors_by_field(&self, field_name: &str) -> Result<Vec<(u64, Vector)>> {
+        Ok(self
+            .vectors
+            .iter()
+            .filter(|((_, field), _)| field == field_name)
+            .map(|((id, _), vec)| (*id, vec.clone()))
+            .collect())
+    }
+
+    fn field_names(&self) -> Result<Vec<String>> {
+        use std::collections::HashSet;
+        let fields: HashSet<String> = self
+            .vectors
+            .keys()
+            .map(|(_, field)| field.clone())
+            .collect();
+        Ok(fields.into_iter().collect())
     }
 
     fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
         Ok(Box::new(SimpleVectorIterator::new(
             self.vectors
                 .iter()
-                .map(|(id, v)| (*id, v.clone()))
+                .map(|((id, field), v)| (*id, field.clone(), v.clone()))
                 .collect(),
         )))
     }
@@ -222,13 +275,13 @@ impl VectorIndexReader for SimpleVectorReader {
 
 /// Simple vector iterator.
 pub struct SimpleVectorIterator {
-    vectors: Vec<(u64, Vector)>,
+    vectors: Vec<(u64, String, Vector)>,
     position: usize,
 }
 
 impl SimpleVectorIterator {
     /// Create a new simple vector iterator.
-    pub fn new(vectors: Vec<(u64, Vector)>) -> Self {
+    pub fn new(vectors: Vec<(u64, String, Vector)>) -> Self {
         Self {
             vectors,
             position: 0,
@@ -237,7 +290,7 @@ impl SimpleVectorIterator {
 }
 
 impl VectorIterator for SimpleVectorIterator {
-    fn next(&mut self) -> Result<Option<(u64, Vector)>> {
+    fn next(&mut self) -> Result<Option<(u64, String, Vector)>> {
         if self.position < self.vectors.len() {
             let result = self.vectors[self.position].clone();
             self.position += 1;
@@ -247,9 +300,10 @@ impl VectorIterator for SimpleVectorIterator {
         }
     }
 
-    fn skip_to(&mut self, doc_id: u64) -> Result<bool> {
+    fn skip_to(&mut self, doc_id: u64, field_name: &str) -> Result<bool> {
         while self.position < self.vectors.len() {
-            if self.vectors[self.position].0 >= doc_id {
+            let (id, field, _) = &self.vectors[self.position];
+            if *id > doc_id || (*id == doc_id && field.as_str() >= field_name) {
                 return Ok(true);
             }
             self.position += 1;
@@ -257,8 +311,13 @@ impl VectorIterator for SimpleVectorIterator {
         Ok(false)
     }
 
-    fn position(&self) -> u64 {
-        self.position as u64
+    fn position(&self) -> (u64, String) {
+        if self.position < self.vectors.len() {
+            let (id, field, _) = &self.vectors[self.position];
+            (*id, field.clone())
+        } else {
+            (u64::MAX, String::new())
+        }
     }
 
     fn reset(&mut self) -> Result<()> {
@@ -269,21 +328,12 @@ impl VectorIterator for SimpleVectorIterator {
 
 /// Factory for creating vector index readers.
 ///
-/// This factory provides a centralized way to create readers for different
-/// vector index types (Flat, HNSW, IVF) from serialized index data.
+/// This provides a single entry point for constructing concrete reader
+/// implementations (Flat, HNSW, IVF) from serialized index data.
 pub struct VectorIndexReaderFactory;
 
 impl VectorIndexReaderFactory {
-    /// Create a reader for a specific index type from serialized data.
-    ///
-    /// # Arguments
-    ///
-    /// * `index_type` - The type of index ("flat", "hnsw", or "ivf")
-    /// * `index_data` - Serialized index data
-    ///
-    /// # Returns
-    ///
-    /// An `Arc<dyn VectorIndexReader>` that can be used to query the index.
+    /// Create a reader for a specific index type from serialized bytes.
     pub fn create_reader(
         index_type: &str,
         index_data: &[u8],
@@ -293,18 +343,9 @@ impl VectorIndexReaderFactory {
         use crate::vector::index::ivf::reader::IvfIndexReader;
 
         match index_type.to_lowercase().as_str() {
-            "flat" => {
-                let reader = FlatVectorIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
-            "hnsw" => {
-                let reader = HnswIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
-            "ivf" => {
-                let reader = IvfIndexReader::from_bytes(index_data)?;
-                Ok(Arc::new(reader))
-            }
+            "flat" => Ok(Arc::new(FlatVectorIndexReader::from_bytes(index_data)?)),
+            "hnsw" => Ok(Arc::new(HnswIndexReader::from_bytes(index_data)?)),
+            "ivf" => Ok(Arc::new(IvfIndexReader::from_bytes(index_data)?)),
             _ => Err(crate::error::YatagarasuError::InvalidOperation(format!(
                 "Unknown index type: {index_type}"
             ))),

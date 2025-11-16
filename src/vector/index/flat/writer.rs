@@ -6,16 +6,17 @@ use rayon::prelude::*;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 use crate::vector::index::FlatIndexConfig;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Builder for flat vector indexes (exact search).
+#[derive(Debug)]
 pub struct FlatIndexWriter {
     index_config: FlatIndexConfig,
     writer_config: VectorIndexWriterConfig,
     storage: Option<Arc<dyn Storage>>,
-    vectors: Vec<(u64, Vector)>,
+    vectors: Vec<(u64, String, Vector)>,
     is_finalized: bool,
     total_vectors_to_add: Option<usize>,
     next_vec_id: u64,
@@ -84,13 +85,25 @@ impl FlatIndexWriter {
             )));
         }
 
-        // Read vectors
+        // Read vectors with field names
         let mut vectors = Vec::with_capacity(num_vectors);
         for _ in 0..num_vectors {
             let mut doc_id_buf = [0u8; 8];
             input.read_exact(&mut doc_id_buf)?;
             let doc_id = u64::from_le_bytes(doc_id_buf);
 
+            // Read field name
+            let mut field_name_len_buf = [0u8; 4];
+            input.read_exact(&mut field_name_len_buf)?;
+            let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+
+            let mut field_name_buf = vec![0u8; field_name_len];
+            input.read_exact(&mut field_name_buf)?;
+            let field_name = String::from_utf8(field_name_buf).map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+            })?;
+
+            // Read vector data
             let mut values = vec![0.0f32; dimension];
             for value in &mut values {
                 let mut value_buf = [0u8; 4];
@@ -98,11 +111,11 @@ impl FlatIndexWriter {
                 *value = f32::from_le_bytes(value_buf);
             }
 
-            vectors.push((doc_id, Vector::new(values)));
+            vectors.push((doc_id, field_name, Vector::new(values)));
         }
 
         // Calculate next_vec_id from loaded vectors
-        let max_id = vectors.iter().map(|(id, _)| *id).max().unwrap_or(0);
+        let max_id = vectors.iter().map(|(id, _, _)| *id).max().unwrap_or(0);
         let next_vec_id = if num_vectors > 0 { max_id + 1 } else { 0 };
 
         Ok(Self {
@@ -122,18 +135,18 @@ impl FlatIndexWriter {
     }
 
     /// Get the stored vectors (for testing/debugging).
-    pub fn vectors(&self) -> &[(u64, Vector)] {
+    pub fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }
 
     /// Validate vectors before adding them.
-    fn validate_vectors(&self, vectors: &[(u64, Vector)]) -> Result<()> {
+    fn validate_vectors(&self, vectors: &[(u64, String, Vector)]) -> Result<()> {
         if vectors.is_empty() {
             return Ok(());
         }
 
         // Check dimensions
-        for (doc_id, vector) in vectors {
+        for (doc_id, _field_name, vector) in vectors {
             if vector.dimension() != self.index_config.dimension {
                 return Err(YatagarasuError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
@@ -154,17 +167,17 @@ impl FlatIndexWriter {
     }
 
     /// Normalize vectors if configured to do so.
-    fn normalize_vectors(&self, vectors: &mut [(u64, Vector)]) {
+    fn normalize_vectors(&self, vectors: &mut [(u64, String, Vector)]) {
         if !self.index_config.normalize_vectors {
             return;
         }
 
         if self.writer_config.parallel_build && vectors.len() > 100 {
-            vectors.par_iter_mut().for_each(|(_, vector)| {
+            vectors.par_iter_mut().for_each(|(_, _, vector)| {
                 vector.normalize();
             });
         } else {
-            for (_, vector) in vectors {
+            for (_, _, vector) in vectors {
                 vector.normalize();
             }
         }
@@ -183,12 +196,18 @@ impl FlatIndexWriter {
         Ok(())
     }
 
-    /// Sort vectors by document ID for better cache locality.
+    /// Sort vectors by document ID and field name for better cache locality.
     fn sort_vectors(&mut self) {
-        if self.writer_config.parallel_build && self.vectors.len() > 10000 {
-            self.vectors.par_sort_by_key(|(doc_id, _)| *doc_id);
+        if self.writer_config.parallel_build && self.vectors.len() as u64 > 10000 {
+            self.vectors
+                .par_sort_by(|(doc_id_a, field_a, _), (doc_id_b, field_b, _)| {
+                    doc_id_a.cmp(doc_id_b).then_with(|| field_a.cmp(field_b))
+                });
         } else {
-            self.vectors.sort_by_key(|(doc_id, _)| *doc_id);
+            self.vectors
+                .sort_by(|(doc_id_a, field_a, _), (doc_id_b, field_b, _)| {
+                    doc_id_a.cmp(doc_id_b).then_with(|| field_a.cmp(field_b))
+                });
         }
     }
 
@@ -203,15 +222,16 @@ impl FlatIndexWriter {
 
         // Remove duplicates, keeping the last occurrence
         let mut unique_vectors = Vec::new();
-        let mut last_doc_id: Option<u64> = None;
+        let mut last_key: Option<(u64, String)> = None;
 
-        for (doc_id, vector) in std::mem::take(&mut self.vectors) {
-            if last_doc_id != Some(doc_id) {
-                unique_vectors.push((doc_id, vector));
-                last_doc_id = Some(doc_id);
+        for (doc_id, field_name, vector) in std::mem::take(&mut self.vectors) {
+            let current_key = (doc_id, field_name.clone());
+            if last_key.as_ref() != Some(&current_key) {
+                unique_vectors.push((doc_id, field_name, vector));
+                last_key = Some(current_key);
             } else {
                 // Replace with newer vector
-                if let Some((_, last_vector)) = unique_vectors.last_mut() {
+                if let Some((_, _, last_vector)) = unique_vectors.last_mut() {
                     *last_vector = vector;
                 }
             }
@@ -221,12 +241,114 @@ impl FlatIndexWriter {
     }
 }
 
+#[async_trait::async_trait]
 impl VectorIndexWriter for FlatIndexWriter {
     fn next_vector_id(&self) -> u64 {
         self.next_vec_id
     }
 
-    fn build(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
+    async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64> {
+        use crate::document::field::{FieldOption, FieldValue};
+        use crate::embedding::per_field::PerFieldEmbedder;
+
+        let doc_id = self.next_vec_id;
+        let mut vectors = Vec::new();
+
+        for (field_name, field) in doc.fields().iter() {
+            // Check if this is a vector field and if it should be indexed
+            if let FieldValue::Vector(text) = &field.value {
+                // Check FieldOption to determine if this vector should be indexed
+                let should_index = match &field.option {
+                    FieldOption::Vector(opt) => {
+                        // Check if flat, hnsw, or ivf indexing is enabled
+                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some()
+                    }
+                    _ => false,
+                };
+
+                if !should_index {
+                    continue;
+                }
+
+                // Check if embedder is PerFieldEmbedder for field-specific embedding
+                let vector = if let Some(per_field) = self
+                    .index_config
+                    .embedder
+                    .as_any()
+                    .downcast_ref::<PerFieldEmbedder>()
+                {
+                    per_field.embed_field(field_name, text.as_str()).await?
+                } else {
+                    self.index_config.embedder.embed(text.as_str()).await?
+                };
+
+                vectors.push((doc_id, field_name.clone(), vector));
+            }
+        }
+
+        if !vectors.is_empty() {
+            self.add_vectors(vectors)?;
+        }
+
+        self.next_vec_id += 1;
+        Ok(doc_id)
+    }
+
+    async fn add_document_with_id(
+        &mut self,
+        doc_id: u64,
+        doc: crate::document::document::Document,
+    ) -> Result<()> {
+        use crate::document::field::{FieldOption, FieldValue};
+        use crate::embedding::per_field::PerFieldEmbedder;
+
+        let mut vectors = Vec::new();
+
+        for (field_name, field) in doc.fields().iter() {
+            // Check if this is a vector field and if it should be indexed
+            if let FieldValue::Vector(text) = &field.value {
+                // Check FieldOption to determine if this vector should be indexed
+                let should_index = match &field.option {
+                    FieldOption::Vector(opt) => {
+                        // Check if flat, hnsw, or ivf indexing is enabled
+                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some()
+                    }
+                    _ => false,
+                };
+
+                if !should_index {
+                    continue;
+                }
+
+                // Check if embedder is PerFieldEmbedder for field-specific embedding
+                let vector = if let Some(per_field) = self
+                    .index_config
+                    .embedder
+                    .as_any()
+                    .downcast_ref::<PerFieldEmbedder>()
+                {
+                    per_field.embed_field(field_name, text.as_str()).await?
+                } else {
+                    self.index_config.embedder.embed(text.as_str()).await?
+                };
+
+                vectors.push((doc_id, field_name.clone(), vector));
+            }
+        }
+
+        if !vectors.is_empty() {
+            self.add_vectors(vectors)?;
+        }
+
+        // Update next_vec_id if necessary
+        if doc_id >= self.next_vec_id {
+            self.next_vec_id = doc_id + 1;
+        }
+
+        Ok(())
+    }
+
+    fn build(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(YatagarasuError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
@@ -237,10 +359,10 @@ impl VectorIndexWriter for FlatIndexWriter {
         self.normalize_vectors(&mut vectors);
 
         // Update next_vec_id
-        if let Some(max_id) = vectors.iter().map(|(id, _)| *id).max() {
-            if max_id >= self.next_vec_id {
-                self.next_vec_id = max_id + 1;
-            }
+        if let Some(max_id) = vectors.iter().map(|(id, _, _)| *id).max()
+            && max_id >= self.next_vec_id
+        {
+            self.next_vec_id = max_id + 1;
         }
 
         self.vectors = vectors;
@@ -250,7 +372,7 @@ impl VectorIndexWriter for FlatIndexWriter {
         Ok(())
     }
 
-    fn add_vectors(&mut self, mut vectors: Vec<(u64, Vector)>) -> Result<()> {
+    fn add_vectors(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(YatagarasuError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
@@ -261,10 +383,10 @@ impl VectorIndexWriter for FlatIndexWriter {
         self.normalize_vectors(&mut vectors);
 
         // Update next_vec_id
-        if let Some(max_id) = vectors.iter().map(|(id, _)| *id).max() {
-            if max_id >= self.next_vec_id {
-                self.next_vec_id = max_id + 1;
-            }
+        if let Some(max_id) = vectors.iter().map(|(id, _, _)| *id).max()
+            && max_id >= self.next_vec_id
+        {
+            self.next_vec_id = max_id + 1;
         }
 
         self.vectors.extend(vectors);
@@ -290,7 +412,7 @@ impl VectorIndexWriter for FlatIndexWriter {
             if total == 0 {
                 if self.is_finalized { 1.0 } else { 0.0 }
             } else {
-                let current = self.vectors.len() as f32;
+                let current = self.vectors.len() as u64 as f32;
                 let progress = current / total as f32;
                 if self.is_finalized {
                     1.0
@@ -335,7 +457,7 @@ impl VectorIndexWriter for FlatIndexWriter {
         Ok(())
     }
 
-    fn vectors(&self) -> &[(u64, Vector)] {
+    fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }
 
@@ -357,12 +479,19 @@ impl VectorIndexWriter for FlatIndexWriter {
         let mut output = storage.create_output(&file_name)?;
 
         // Write metadata
-        output.write_all(&(self.vectors.len() as u32).to_le_bytes())?;
+        output.write_all(&(self.vectors.len() as u64 as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.dimension as u32).to_le_bytes())?;
 
-        // Write vectors
-        for (doc_id, vector) in &self.vectors {
+        // Write vectors with field names
+        for (doc_id, field_name, vector) in &self.vectors {
             output.write_all(&doc_id.to_le_bytes())?;
+
+            // Write field name length and field name
+            let field_name_bytes = field_name.as_bytes();
+            output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
+            output.write_all(field_name_bytes)?;
+
+            // Write vector data
             for value in &vector.data {
                 output.write_all(&value.to_le_bytes())?;
             }
@@ -374,5 +503,58 @@ impl VectorIndexWriter for FlatIndexWriter {
 
     fn has_storage(&self) -> bool {
         self.storage.is_some()
+    }
+
+    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
+        // For flat index, we match based on field name and vector similarity
+        // In practice, this would require metadata storage to match text values
+        // For now, return 0 as this is a simplified implementation
+        // TODO: Implement proper deletion with metadata storage
+        let _field = field;
+        let _value = value;
+        Ok(0)
+    }
+
+    async fn update_document(
+        &mut self,
+        field: &str,
+        value: &str,
+        doc: crate::document::document::Document,
+    ) -> Result<()> {
+        // Delete existing documents
+        self.delete_documents(field, value)?;
+
+        // Add new document
+        self.add_document(doc).await?;
+
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        // Clear pending vectors and reset state
+        self.vectors.clear();
+        self.is_finalized = false;
+        self.next_vec_id = 0;
+        Ok(())
+    }
+
+    fn pending_docs(&self) -> u64 {
+        if self.is_finalized {
+            0
+        } else {
+            self.vectors.len() as u64
+        }
+    }
+
+    fn close(&mut self) -> Result<()> {
+        // Clear all data and mark as closed
+        self.vectors.clear();
+        self.is_finalized = true;
+        Ok(())
+    }
+
+    fn is_closed(&self) -> bool {
+        // Consider closed if finalized and no pending vectors
+        self.is_finalized && self.vectors.is_empty()
     }
 }

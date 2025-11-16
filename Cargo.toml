@@ -84,14 +84,6 @@ name = "embedding_with_candle"
 required-features = ["embeddings-candle"]
 
 [[example]]
-name = "text_to_image_search"
-required-features = ["embeddings-multimodal"]
-
-[[example]]
-name = "image_to_image_search"
-required-features = ["embeddings-multimodal"]
-
-[[example]]
 name = "embedding_with_openai"
 required-features = ["embeddings-openai"]
 

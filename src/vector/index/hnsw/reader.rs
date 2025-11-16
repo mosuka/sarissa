@@ -5,14 +5,16 @@ use std::sync::Arc;
 
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
+use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::vector::Vector;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
-use crate::vector::{DistanceMetric, Vector};
 
 /// Reader for HNSW (Hierarchical Navigable Small World) vector indexes.
+#[derive(Debug)]
 pub struct HnswIndexReader {
-    vectors: HashMap<u64, Vector>,
-    vector_ids: Vec<u64>,
+    vectors: HashMap<(u64, String), Vector>,
+    vector_ids: Vec<(u64, String)>,
     dimension: usize,
     distance_metric: DistanceMetric,
     m: usize,
@@ -56,7 +58,7 @@ impl HnswIndexReader {
         input.read_exact(&mut ef_construction_buf)?;
         let ef_construction = u32::from_le_bytes(ef_construction_buf) as usize;
 
-        // Read vectors
+        // Read vectors with field names
         let mut vectors = HashMap::with_capacity(num_vectors);
         let mut vector_ids = Vec::with_capacity(num_vectors);
 
@@ -65,6 +67,18 @@ impl HnswIndexReader {
             input.read_exact(&mut doc_id_buf)?;
             let doc_id = u64::from_le_bytes(doc_id_buf);
 
+            // Read field name
+            let mut field_name_len_buf = [0u8; 4];
+            input.read_exact(&mut field_name_len_buf)?;
+            let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+
+            let mut field_name_buf = vec![0u8; field_name_len];
+            input.read_exact(&mut field_name_buf)?;
+            let field_name = String::from_utf8(field_name_buf).map_err(|e| {
+                YatagarasuError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+            })?;
+
+            // Read vector data
             let mut values = vec![0.0f32; dimension];
             for value in &mut values {
                 let mut value_buf = [0u8; 4];
@@ -72,8 +86,8 @@ impl HnswIndexReader {
                 *value = f32::from_le_bytes(value_buf);
             }
 
-            vector_ids.push(doc_id);
-            vectors.insert(doc_id, Vector::new(values));
+            vector_ids.push((doc_id, field_name.clone()));
+            vectors.insert((doc_id, field_name), Vector::new(values));
         }
 
         Ok(Self {
@@ -97,18 +111,27 @@ impl VectorIndexReader for HnswIndexReader {
         self
     }
 
-    fn get_vector(&self, doc_id: u64) -> Result<Option<Vector>> {
-        Ok(self.vectors.get(&doc_id).cloned())
+    fn get_vector(&self, doc_id: u64, field_name: &str) -> Result<Option<Vector>> {
+        Ok(self.vectors.get(&(doc_id, field_name.to_string())).cloned())
     }
 
-    fn get_vectors(&self, doc_ids: &[u64]) -> Result<Vec<Option<Vector>>> {
-        Ok(doc_ids
+    fn get_vectors_for_doc(&self, doc_id: u64) -> Result<Vec<(String, Vector)>> {
+        Ok(self
+            .vectors
             .iter()
-            .map(|id| self.vectors.get(id).cloned())
+            .filter(|((id, _), _)| *id == doc_id)
+            .map(|((_, field), vec)| (field.clone(), vec.clone()))
             .collect())
     }
 
-    fn vector_ids(&self) -> Result<Vec<u64>> {
+    fn get_vectors(&self, doc_ids: &[(u64, String)]) -> Result<Vec<Option<Vector>>> {
+        Ok(doc_ids
+            .iter()
+            .map(|(id, field)| self.vectors.get(&(*id, field.clone())).cloned())
+            .collect())
+    }
+
+    fn vector_ids(&self) -> Result<Vec<(u64, String)>> {
         Ok(self.vector_ids.clone())
     }
 
@@ -133,17 +156,44 @@ impl VectorIndexReader for HnswIndexReader {
         }
     }
 
-    fn contains_vector(&self, doc_id: u64) -> bool {
-        self.vectors.contains_key(&doc_id)
+    fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool {
+        self.vectors.contains_key(&(doc_id, field_name.to_string()))
     }
 
-    fn get_vector_range(&self, start_doc_id: u64, end_doc_id: u64) -> Result<Vec<(u64, Vector)>> {
+    fn get_vector_range(
+        &self,
+        start_doc_id: u64,
+        end_doc_id: u64,
+    ) -> Result<Vec<(u64, String, Vector)>> {
         Ok(self
             .vector_ids
             .iter()
-            .filter(|&&id| id >= start_doc_id && id < end_doc_id)
-            .filter_map(|&id| self.vectors.get(&id).map(|v| (id, v.clone())))
+            .filter(|(id, _)| *id >= start_doc_id && *id < end_doc_id)
+            .filter_map(|(id, field)| {
+                self.vectors
+                    .get(&(*id, field.clone()))
+                    .map(|v| (*id, field.clone(), v.clone()))
+            })
             .collect())
+    }
+
+    fn get_vectors_by_field(&self, field_name: &str) -> Result<Vec<(u64, Vector)>> {
+        Ok(self
+            .vectors
+            .iter()
+            .filter(|((_, field), _)| field == field_name)
+            .map(|((id, _), vec)| (*id, vec.clone()))
+            .collect())
+    }
+
+    fn field_names(&self) -> Result<Vec<String>> {
+        use std::collections::HashSet;
+        let fields: HashSet<String> = self
+            .vectors
+            .keys()
+            .map(|(_, field)| field.clone())
+            .collect();
+        Ok(fields.into_iter().collect())
     }
 
     fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
@@ -151,7 +201,11 @@ impl VectorIndexReader for HnswIndexReader {
             vectors: self
                 .vector_ids
                 .iter()
-                .filter_map(|&id| self.vectors.get(&id).map(|v| (id, v.clone())))
+                .filter_map(|(id, field)| {
+                    self.vectors
+                        .get(&(*id, field.clone()))
+                        .map(|v| (*id, field.clone(), v.clone()))
+                })
                 .collect(),
             current: 0,
         }))
@@ -182,11 +236,12 @@ impl VectorIndexReader for HnswIndexReader {
         }
 
         // Validate dimensions
-        for (id, vector) in &self.vectors {
+        for ((id, field), vector) in &self.vectors {
             if vector.dimension() != self.dimension {
                 errors.push(format!(
-                    "Vector {} has dimension {}, expected {}",
+                    "Vector {}:{} has dimension {}, expected {}",
                     id,
+                    field,
                     vector.dimension(),
                     self.dimension
                 ));
@@ -194,8 +249,8 @@ impl VectorIndexReader for HnswIndexReader {
 
             if !vector.is_valid() {
                 errors.push(format!(
-                    "Vector {} contains invalid values (NaN or infinity)",
-                    id
+                    "Vector {}:{} contains invalid values (NaN or infinity)",
+                    id, field
                 ));
             }
         }
@@ -222,12 +277,12 @@ impl VectorIndexReader for HnswIndexReader {
 
 /// Iterator for HNSW vector index.
 struct HnswVectorIterator {
-    vectors: Vec<(u64, Vector)>,
+    vectors: Vec<(u64, String, Vector)>,
     current: usize,
 }
 
 impl VectorIterator for HnswVectorIterator {
-    fn next(&mut self) -> Result<Option<(u64, Vector)>> {
+    fn next(&mut self) -> Result<Option<(u64, String, Vector)>> {
         if self.current < self.vectors.len() {
             let result = self.vectors[self.current].clone();
             self.current += 1;
@@ -237,9 +292,10 @@ impl VectorIterator for HnswVectorIterator {
         }
     }
 
-    fn skip_to(&mut self, doc_id: u64) -> Result<bool> {
+    fn skip_to(&mut self, doc_id: u64, field_name: &str) -> Result<bool> {
         while self.current < self.vectors.len() {
-            if self.vectors[self.current].0 >= doc_id {
+            let (id, field, _) = &self.vectors[self.current];
+            if *id > doc_id || (*id == doc_id && field.as_str() >= field_name) {
                 return Ok(true);
             }
             self.current += 1;
@@ -247,11 +303,12 @@ impl VectorIterator for HnswVectorIterator {
         Ok(false)
     }
 
-    fn position(&self) -> u64 {
+    fn position(&self) -> (u64, String) {
         if self.current < self.vectors.len() {
-            self.vectors[self.current].0
+            let (id, field, _) = &self.vectors[self.current];
+            (*id, field.clone())
         } else {
-            u64::MAX
+            (u64::MAX, String::new())
         }
     }
 

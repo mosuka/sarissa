@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use crate::error::Result;
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 
 /// Trait for converting images to vector embeddings.
 ///
@@ -35,7 +35,7 @@ use crate::vector::Vector;
 /// use async_trait::async_trait;
 /// use yatagarasu::embedding::image_embedder::ImageEmbedder;
 /// use yatagarasu::error::Result;
-/// use yatagarasu::vector::Vector;
+/// use yatagarasu::vector::core::vector::Vector;
 ///
 /// struct MyCustomImageEmbedder {
 ///     dimension: usize,

@@ -22,7 +22,7 @@
 //!
 //! ```
 //! use yatagarasu::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
-//! use yatagarasu::document::field_value::FieldValue;
+//! use yatagarasu::document::field::FieldValue;
 //! use ahash::AHashMap;
 //!
 //! let mut field_terms = AHashMap::new();
@@ -61,7 +61,7 @@
 
 use ahash::AHashMap;
 
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 
 /// A document with analyzed terms ready for indexing.
 ///

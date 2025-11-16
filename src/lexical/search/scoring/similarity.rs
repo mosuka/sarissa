@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::Matcher;
@@ -435,7 +435,7 @@ impl SimilaritySearchEngine {
             Ok(Some(document)) => {
                 // Extract the field value
                 if let Some(field_value) = document.get_field(field_name) {
-                    match field_value {
+                    match &field_value.value {
                         FieldValue::Text(text) => Ok(text.clone()),
                         FieldValue::Integer(value) => Ok(value.to_string()),
                         FieldValue::Float(value) => Ok(value.to_string()),
@@ -443,6 +443,7 @@ impl SimilaritySearchEngine {
                         FieldValue::Binary(_) => Ok(String::new()), // Binary data can't be converted to meaningful text
                         FieldValue::DateTime(dt) => Ok(dt.to_rfc3339()),
                         FieldValue::Geo(point) => Ok(format!("{},{}", point.lat, point.lon)),
+                        FieldValue::Vector(text) => Ok(text.clone()), // Vector fields store text
                         FieldValue::Null => Ok(String::new()),
                     }
                 } else {

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::Result;
 use crate::lexical::index::inverted::query::Hit;
 use crate::lexical::index::inverted::query::Query;
@@ -209,7 +209,7 @@ impl FacetCollector {
         match reader.document(doc_id as u64) {
             Ok(Some(document)) => {
                 if let Some(field_value) = document.get_field(field_name) {
-                    match field_value {
+                    match &field_value.value {
                         FieldValue::Text(value) => {
                             // Check if this is a hierarchical facet (contains delimiter)
                             if value.contains('/') {
@@ -757,7 +757,7 @@ impl GroupedSearchEngine {
         match reader.document(doc_id as u64) {
             Ok(Some(document)) => {
                 if let Some(field_value) = document.get_field(&self.group_config.group_field) {
-                    match field_value {
+                    match &field_value.value {
                         FieldValue::Text(value) => Ok(value.clone()),
                         FieldValue::Integer(value) => Ok(value.to_string()),
                         FieldValue::Float(value) => Ok(value.to_string()),
@@ -786,7 +786,7 @@ impl GroupedSearchEngine {
         match reader.document(doc_id as u64) {
             Ok(Some(document)) => {
                 for (field_name, field_value) in document.fields() {
-                    let value_str = match field_value {
+                    let value_str = match &field_value.value {
                         FieldValue::Text(value) => value.clone(),
                         FieldValue::Integer(value) => value.to_string(),
                         FieldValue::Float(value) => value.to_string(),

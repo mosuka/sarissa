@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::Result;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::QueryResult;
@@ -385,7 +385,7 @@ impl ResultProcessor {
             for (field_name, field_value) in document.fields() {
                 // Check if field should be retrieved
                 if self.should_retrieve_field(field_name) {
-                    let value_str = self.field_value_to_string(field_value);
+                    let value_str = self.field_value_to_string(&field_value.value);
                     fields.insert(field_name.clone(), value_str);
                 }
             }
@@ -415,6 +415,7 @@ impl ResultProcessor {
             FieldValue::Binary(_) => "[binary data]".to_string(),
             FieldValue::DateTime(dt) => dt.to_rfc3339(),
             FieldValue::Geo(point) => format!("{},{}", point.lat, point.lon),
+            FieldValue::Vector(text) => format!("[vector: {}]", text),
             FieldValue::Null => "null".to_string(),
         }
     }

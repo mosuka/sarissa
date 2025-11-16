@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::lexical::search::searcher::LexicalSearchParams;
+use crate::vector::core::vector::Vector;
 use crate::vector::search::searcher::VectorSearchParams;
-use crate::vector::Vector;
 
 /// Hybrid search request combining text query, optional vector, and search parameters.
 ///
@@ -20,7 +20,7 @@ use crate::vector::Vector;
 ///
 /// ```
 /// use yatagarasu::hybrid::search::searcher::HybridSearchRequest;
-/// use yatagarasu::vector::Vector;
+/// use yatagarasu::vector::core::vector::Vector;
 ///
 /// // Text-only search
 /// let request = HybridSearchRequest::new("rust programming");

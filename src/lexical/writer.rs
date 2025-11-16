@@ -29,7 +29,7 @@ use crate::error::Result;
 /// // writer.add_document(doc).unwrap();
 /// // writer.commit().unwrap();
 /// ```
-pub trait LexicalIndexWriter: Send + std::fmt::Debug {
+pub trait LexicalIndexWriter: Send + Sync + std::fmt::Debug {
     /// Add a document to the index with automatic ID assignment.
     /// Returns the assigned document ID.
     fn add_document(&mut self, doc: Document) -> Result<u64>;

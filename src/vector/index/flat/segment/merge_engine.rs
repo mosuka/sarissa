@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::storage::Storage;
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 
-use super::segment_manager::ManagedSegmentInfo;
+use super::manager::ManagedSegmentInfo;
 
 /// Configuration for merge operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]

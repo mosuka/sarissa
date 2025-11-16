@@ -198,7 +198,7 @@ impl LearningToRank {
                 // Extract title for content-based features
                 let title = document
                     .get_field("title")
-                    .and_then(|f| f.as_text())
+                    .and_then(|f| f.value.as_text())
                     .unwrap_or("");
 
                 // Create content-aware features with more granular scoring

@@ -131,6 +131,9 @@
 
 pub mod text_embedder;
 
+// Per-field embedder support
+pub mod per_field;
+
 // Candle implementation (requires feature flag)
 #[cfg(feature = "embeddings-candle")]
 pub mod candle_text_embedder;

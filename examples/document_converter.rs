@@ -11,7 +11,7 @@ use tempfile::{NamedTempFile, TempDir};
 use yatagarasu::document::converter::{
     DocumentConverter, csv::CsvDocumentConverter, jsonl::JsonlDocumentConverter,
 };
-use yatagarasu::document::field_value::FieldValue;
+use yatagarasu::document::field::FieldValue;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::LexicalIndexConfig;
@@ -65,9 +65,11 @@ fn main() -> Result<()> {
         let doc = result?;
         doc_count += 1;
 
-        if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
+        if let Some(title) = doc.get_field("title").and_then(|f| f.value.as_text()) {
             print!("  Loaded: {}", title);
-            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+            if let Some(field) = doc.get_field("location")
+                && let FieldValue::Geo(geo) = &field.value
+            {
                 println!(" at ({:.4}, {:.4})", geo.lat, geo.lon);
             } else {
                 println!();
@@ -99,9 +101,11 @@ fn main() -> Result<()> {
         let doc = result?;
         doc_count += 1;
 
-        if let Some(name) = doc.get_field("name").and_then(|f| f.as_text()) {
+        if let Some(name) = doc.get_field("name").and_then(|f| f.value.as_text()) {
             print!("  Loaded: {}", name);
-            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+            if let Some(field) = doc.get_field("location")
+                && let FieldValue::Geo(geo) = &field.value
+            {
                 println!(" at ({:.4}, {:.4})", geo.lat, geo.lon);
             } else {
                 println!();
@@ -168,12 +172,14 @@ fn main() -> Result<()> {
             let doc = result?;
             count += 1;
             if count <= 3 {
-                if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
+                if let Some(title) = doc.get_field("title").and_then(|f| f.value.as_text()) {
                     print!("  {}: {}", count, title);
-                    if let Some(city) = doc.get_field("city").and_then(|f| f.as_text()) {
+                    if let Some(city) = doc.get_field("city").and_then(|f| f.value.as_text()) {
                         print!(" ({})", city);
                     }
-                    if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                    if let Some(field) = doc.get_field("location")
+                        && let FieldValue::Geo(geo) = &field.value
+                    {
                         print!(" [{:.2}, {:.2}]", geo.lat, geo.lon);
                     }
                     println!();
@@ -192,12 +198,14 @@ fn main() -> Result<()> {
             let doc = result?;
             count += 1;
             if count <= 3 {
-                if let Some(title) = doc.get_field("title").and_then(|f| f.as_text()) {
+                if let Some(title) = doc.get_field("title").and_then(|f| f.value.as_text()) {
                     print!("  {}: {}", count, title);
-                    if let Some(city) = doc.get_field("city").and_then(|f| f.as_text()) {
+                    if let Some(city) = doc.get_field("city").and_then(|f| f.value.as_text()) {
                         print!(" ({})", city);
                     }
-                    if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+                    if let Some(field) = doc.get_field("location")
+                        && let FieldValue::Geo(geo) = &field.value
+                    {
                         print!(" [{:.2}, {:.2}]", geo.lat, geo.lon);
                     }
                     println!();

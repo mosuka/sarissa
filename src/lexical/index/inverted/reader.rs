@@ -13,7 +13,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::document::document::Document;
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::{Result, YatagarasuError};
 use crate::lexical::core::dictionary::HybridTermDictionary;
 use crate::lexical::core::dictionary::TermInfo;
@@ -470,6 +470,11 @@ impl SegmentReader {
                             // Null
                             FieldValue::Null
                         }
+                        8 => {
+                            // Vector
+                            let text = reader.read_string()?;
+                            FieldValue::Vector(text)
+                        }
                         _ => {
                             return Err(YatagarasuError::index(format!(
                                 "Unknown field type tag: {type_tag}"
@@ -477,7 +482,10 @@ impl SegmentReader {
                         }
                     };
 
-                    doc.add_field(field_name, field_value);
+                    doc.add_field(
+                        field_name,
+                        crate::document::field::Field::with_default_option(field_value),
+                    );
                 }
 
                 documents.insert(doc_id, doc);
@@ -735,7 +743,7 @@ impl SegmentReader {
 
             for (doc_id, doc) in documents.iter() {
                 if let Some(field_value) = doc.get_field(field)
-                    && let Some(text) = field_value.as_text()
+                    && let Some(text) = field_value.value.as_text()
                 {
                     // Use default analyzer (analyzers are configured at writer level)
                     let token_stream = default_analyzer.analyze(text)?;

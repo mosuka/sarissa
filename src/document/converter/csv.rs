@@ -91,10 +91,9 @@ use std::sync::Arc;
 
 use csv::{Reader, ReaderBuilder, StringRecord};
 
-use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
-use crate::document::field_value::FieldValue;
+use crate::document::field::FieldValue;
 use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
@@ -108,27 +107,14 @@ use crate::lexical::index::inverted::query::geo::GeoPoint;
 /// - Integer fields (auto-detected)
 /// - Float fields (auto-detected)
 /// - Boolean fields (true/false, auto-detected)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CsvDocumentConverter {
-    /// Analyzer to use for text fields (optional).
-    analyzer: Option<Arc<dyn Analyzer>>,
     /// CSV delimiter character (default: ',')
     delimiter: u8,
     /// Whether to trim whitespace from fields
     trim: bool,
     /// Whether to allow flexible field counts
     flexible: bool,
-}
-
-impl std::fmt::Debug for CsvDocumentConverter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CsvDocumentConverter")
-            .field("analyzer", &self.analyzer.as_ref().map(|_| "<Analyzer>"))
-            .field("delimiter", &(self.delimiter as char))
-            .field("trim", &self.trim)
-            .field("flexible", &self.flexible)
-            .finish()
-    }
 }
 
 impl Default for CsvDocumentConverter {
@@ -141,17 +127,6 @@ impl CsvDocumentConverter {
     /// Create a new CSV converter with comma delimiter.
     pub fn new() -> Self {
         CsvDocumentConverter {
-            analyzer: None,
-            delimiter: b',',
-            trim: true,
-            flexible: false,
-        }
-    }
-
-    /// Create a CSV converter with a custom analyzer.
-    pub fn with_analyzer(analyzer: Arc<dyn Analyzer>) -> Self {
-        CsvDocumentConverter {
-            analyzer: Some(analyzer),
             delimiter: b',',
             trim: true,
             flexible: false,
@@ -262,13 +237,13 @@ impl Iterator for CsvDocumentIterator {
 
             // Regular field
             let field_value = self.converter.infer_field_value(value);
-            doc.add_field(header, field_value);
+            doc.add_field_value(header, field_value);
         }
 
         // Second pass: create GeoPoint fields from collected lat/lon pairs
         for (base_name, (lat, lon)) in geo_fields {
             if let (Some(lat_val), Some(lon_val)) = (lat, lon) {
-                doc.add_field(
+                doc.add_field_value(
                     base_name,
                     FieldValue::Geo(GeoPoint {
                         lat: lat_val,
@@ -331,15 +306,15 @@ mod tests {
         let doc = iter.next().unwrap().unwrap();
 
         assert_eq!(
-            doc.get_field("title").unwrap().as_text().unwrap(),
+            doc.get_field("title").unwrap().value.as_text().unwrap(),
             "Rust Programming"
         );
         assert!(matches!(
-            doc.get_field("year").unwrap(),
+            &doc.get_field("year").unwrap().value,
             FieldValue::Integer(2024)
         ));
         assert!(matches!(
-            doc.get_field("price").unwrap(),
+            &doc.get_field("price").unwrap().value,
             FieldValue::Float(_)
         ));
     }
@@ -359,13 +334,13 @@ mod tests {
 
         let doc1 = docs[0].as_ref().unwrap();
         assert_eq!(
-            doc1.get_field("title").unwrap().as_text().unwrap(),
+            doc1.get_field("title").unwrap().value.as_text().unwrap(),
             "Rust Programming"
         );
 
         let doc2 = docs[1].as_ref().unwrap();
         assert_eq!(
-            doc2.get_field("title").unwrap().as_text().unwrap(),
+            doc2.get_field("title").unwrap().value.as_text().unwrap(),
             "Python Basics"
         );
     }
@@ -382,19 +357,19 @@ mod tests {
         let doc = iter.next().unwrap().unwrap();
 
         assert!(matches!(
-            doc.get_field("title").unwrap(),
+            &doc.get_field("title").unwrap().value,
             FieldValue::Text(_)
         ));
         assert!(matches!(
-            doc.get_field("year").unwrap(),
+            &doc.get_field("year").unwrap().value,
             FieldValue::Integer(2024)
         ));
         assert!(matches!(
-            doc.get_field("price").unwrap(),
+            &doc.get_field("price").unwrap().value,
             FieldValue::Float(_)
         ));
         assert!(matches!(
-            doc.get_field("active").unwrap(),
+            &doc.get_field("active").unwrap().value,
             FieldValue::Boolean(true)
         ));
     }
@@ -437,26 +412,26 @@ mod tests {
 
         let doc1 = docs[0].as_ref().unwrap();
         assert_eq!(
-            doc1.get_field("title").unwrap().as_text().unwrap(),
+            doc1.get_field("title").unwrap().value.as_text().unwrap(),
             "Tokyo Tower"
         );
         assert!(matches!(
-            doc1.get_field("location").unwrap(),
+            &doc1.get_field("location").unwrap().value,
             FieldValue::Geo(_)
         ));
 
-        if let FieldValue::Geo(geo) = doc1.get_field("location").unwrap() {
+        if let FieldValue::Geo(geo) = &doc1.get_field("location").unwrap().value {
             assert_eq!(geo.lat, 35.6762);
             assert_eq!(geo.lon, 139.6503);
         }
 
         let doc2 = docs[1].as_ref().unwrap();
         assert_eq!(
-            doc2.get_field("title").unwrap().as_text().unwrap(),
+            doc2.get_field("title").unwrap().value.as_text().unwrap(),
             "Eiffel Tower"
         );
         assert!(matches!(
-            doc2.get_field("location").unwrap(),
+            &doc2.get_field("location").unwrap().value,
             FieldValue::Geo(_)
         ));
     }
@@ -477,20 +452,20 @@ mod tests {
         let doc = iter.next().unwrap().unwrap();
 
         assert!(matches!(
-            doc.get_field("origin").unwrap(),
+            &doc.get_field("origin").unwrap().value,
             FieldValue::Geo(_)
         ));
         assert!(matches!(
-            doc.get_field("destination").unwrap(),
+            &doc.get_field("destination").unwrap().value,
             FieldValue::Geo(_)
         ));
 
-        if let FieldValue::Geo(origin) = doc.get_field("origin").unwrap() {
+        if let FieldValue::Geo(origin) = &doc.get_field("origin").unwrap().value {
             assert_eq!(origin.lat, 35.6762);
             assert_eq!(origin.lon, 139.6503);
         }
 
-        if let FieldValue::Geo(dest) = doc.get_field("destination").unwrap() {
+        if let FieldValue::Geo(dest) = &doc.get_field("destination").unwrap().value {
             assert_eq!(dest.lat, 51.5074);
             assert_eq!(dest.lon, -0.1278);
         }

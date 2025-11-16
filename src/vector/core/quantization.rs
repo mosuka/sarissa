@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, YatagarasuError};
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 
 /// Quantization methods for compressing vectors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

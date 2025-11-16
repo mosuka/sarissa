@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 
 /// Vector search request combining query vector and configuration.
 #[derive(Debug, Clone)]
@@ -12,6 +12,9 @@ pub struct VectorSearchRequest {
     pub query: Vector,
     /// Search configuration.
     pub params: VectorSearchParams,
+    /// Optional field name to filter search results.
+    /// If None, searches across all fields.
+    pub field_name: Option<String>,
 }
 
 impl VectorSearchRequest {
@@ -20,6 +23,7 @@ impl VectorSearchRequest {
         VectorSearchRequest {
             query,
             params: VectorSearchParams::default(),
+            field_name: None,
         }
     }
 
@@ -52,6 +56,12 @@ impl VectorSearchRequest {
         self.params.timeout_ms = Some(timeout);
         self
     }
+
+    /// Set field name to filter search results.
+    pub fn field_name(mut self, field_name: String) -> Self {
+        self.field_name = Some(field_name);
+        self
+    }
 }
 
 /// Configuration for vector search operations.
@@ -68,7 +78,7 @@ pub struct VectorSearchParams {
     /// Search timeout in milliseconds.
     pub timeout_ms: Option<u64>,
     /// Reranking configuration.
-    pub reranking: Option<crate::vector::search::ranking::RankingConfig>,
+    pub reranking: Option<crate::vector::search::scoring::ranking::RankingConfig>,
 }
 
 impl Default for VectorSearchParams {
@@ -89,12 +99,14 @@ impl Default for VectorSearchParams {
 pub struct VectorSearchResult {
     /// Document ID.
     pub doc_id: u64,
+    /// Field name of the matched vector.
+    pub field_name: String,
     /// Similarity score (higher is more similar).
     pub similarity: f32,
     /// Distance score (lower is more similar).
     pub distance: f32,
     /// Optional vector data.
-    pub vector: Option<crate::vector::Vector>,
+    pub vector: Option<Vector>,
     /// Result metadata.
     pub metadata: std::collections::HashMap<String, String>,
 }
@@ -181,9 +193,12 @@ impl Default for VectorSearchResults {
 }
 
 /// Trait for vector searchers.
-pub trait VectorSearcher: Send + Sync {
+pub trait VectorSearcher: Send + Sync + std::fmt::Debug {
     /// Execute a vector similarity search.
     fn search(&self, request: &VectorSearchRequest) -> Result<VectorSearchResults>;
+
+    /// Count the number of vectors matching the query.
+    fn count(&self, request: VectorSearchRequest) -> Result<u64>;
 
     /// Warm up the searcher (pre-load data, etc.).
     fn warmup(&mut self) -> Result<()> {

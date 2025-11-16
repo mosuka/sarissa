@@ -15,7 +15,7 @@ use crate::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-openai")]
 use crate::error::{Result, YatagarasuError};
 #[cfg(feature = "embeddings-openai")]
-use crate::vector::Vector;
+use crate::vector::core::vector::Vector;
 
 /// Request structure for OpenAI Embeddings API.
 #[cfg(feature = "embeddings-openai")]

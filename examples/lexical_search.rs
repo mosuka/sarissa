@@ -26,7 +26,7 @@ use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::document::converter::DocumentConverter;
 use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
-use yatagarasu::document::field_value::FieldValue;
+use yatagarasu::document::field::FieldValue;
 use yatagarasu::error::Result;
 use yatagarasu::lexical::engine::LexicalEngine;
 use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
@@ -176,10 +176,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. Score: {:.4} - ", i + 1, hit.score);
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!("Title: {}", title);
             }
-            if let Some(FieldValue::Integer(year)) = doc.get_field("year") {
+            if let Some(field) = doc.get_field("year")
+                && let FieldValue::Integer(year) = &field.value
+            {
                 print!(" (Year: {})", year);
             }
             println!();
@@ -199,10 +203,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. Score: {:.4} - ", i + 1, hit.score);
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!("Title: {}", title);
             }
-            if let Some(FieldValue::Integer(rating)) = doc.get_field("rating") {
+            if let Some(field) = doc.get_field("rating")
+                && let FieldValue::Integer(rating) = &field.value
+            {
                 print!(" (Rating: {})", rating);
             }
             println!();
@@ -277,10 +285,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. Score: {:.4} - ", i + 1, hit.score);
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!("Title: {}", title);
             }
-            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+            if let Some(field) = doc.get_field("location")
+                && let FieldValue::Geo(geo) = &field.value
+            {
                 let distance = tokyo.distance_to(&GeoPoint::new(geo.lat, geo.lon)?);
                 print!(" (Distance: {:.2}km)", distance);
             }
@@ -304,10 +316,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. Score: {:.4} - ", i + 1, hit.score);
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!("Title: {}", title);
             }
-            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+            if let Some(field) = doc.get_field("location")
+                && let FieldValue::Geo(geo) = &field.value
+            {
                 let distance = tokyo.distance_to(&GeoPoint::new(geo.lat, geo.lon)?);
                 print!(" (Distance: {:.2}km)", distance);
             }
@@ -334,10 +350,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. Score: {:.4} - ", i + 1, hit.score);
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!("Title: {}", title);
             }
-            if let Some(FieldValue::Geo(geo)) = doc.get_field("location") {
+            if let Some(field) = doc.get_field("location")
+                && let FieldValue::Geo(geo) = &field.value
+            {
                 print!(" (Location: {:.2}, {:.2})", geo.lat, geo.lon);
             }
             println!();
@@ -390,10 +410,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. ", i + 1);
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!("Title: {}", title);
             }
-            if let Some(FieldValue::Integer(year)) = doc.get_field("year") {
+            if let Some(field) = doc.get_field("year")
+                && let FieldValue::Integer(year) = &field.value
+            {
                 print!(" (Year: {})", year);
             }
             println!();
@@ -420,10 +444,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. ", i + 1);
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!("Title: {}", title);
             }
-            if let Some(FieldValue::Integer(rating)) = doc.get_field("rating") {
+            if let Some(field) = doc.get_field("rating")
+                && let FieldValue::Integer(rating) = &field.value
+            {
                 print!(" (Rating: {})", rating);
             }
             println!();
@@ -450,10 +478,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. ", i + 1);
-            if let Some(FieldValue::Text(author)) = doc.get_field("author") {
+            if let Some(field) = doc.get_field("author")
+                && let FieldValue::Text(author) = &field.value
+            {
                 print!("Author: {}", author);
             }
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!(" - Title: {}", title);
             }
             println!();
@@ -480,10 +512,14 @@ fn main() -> Result<()> {
     for (i, hit) in results.hits.iter().enumerate() {
         if let Some(doc) = &hit.document {
             print!("  {}. ", i + 1);
-            if let Some(FieldValue::Text(author)) = doc.get_field("author") {
+            if let Some(field) = doc.get_field("author")
+                && let FieldValue::Text(author) = &field.value
+            {
                 print!("Author: {}", author);
             }
-            if let Some(FieldValue::Text(title)) = doc.get_field("title") {
+            if let Some(field) = doc.get_field("title")
+                && let FieldValue::Text(title) = &field.value
+            {
                 print!(" - Title: {}", title);
             }
             println!();
@@ -527,31 +563,31 @@ fn display_results(results: &yatagarasu::lexical::index::inverted::query::Search
 
         if let Some(doc) = &hit.document {
             if let Some(field_value) = doc.get_field("id")
-                && let Some(id) = field_value.as_text()
+                && let Some(id) = field_value.value.as_text()
             {
                 println!("     ID: {}", id);
             }
 
             if let Some(field_value) = doc.get_field("title")
-                && let Some(title) = field_value.as_text()
+                && let Some(title) = field_value.value.as_text()
             {
                 println!("     Title: {}", title);
             }
 
             if let Some(field_value) = doc.get_field("author")
-                && let Some(author) = field_value.as_text()
+                && let Some(author) = field_value.value.as_text()
             {
                 println!("     Author: {}", author);
             }
 
             if let Some(field_value) = doc.get_field("category")
-                && let Some(category) = field_value.as_text()
+                && let Some(category) = field_value.value.as_text()
             {
                 println!("     Category: {}", category);
             }
 
             if let Some(field_value) = doc.get_field("body")
-                && let Some(body) = field_value.as_text()
+                && let Some(body) = field_value.value.as_text()
             {
                 // Display first 100 characters of body
                 let preview = if body.len() > 100 {

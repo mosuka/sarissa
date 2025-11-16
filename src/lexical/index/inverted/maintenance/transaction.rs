@@ -196,7 +196,7 @@ impl TransactionManager {
     )]
     pub fn with_schema(
         storage: Arc<dyn Storage>,
-        schema: Arc<crate::document::field_value::FieldValue>,
+        schema: Arc<crate::document::field::FieldValue>,
     ) -> Self {
         let _ = schema; // Ignore schema parameter
         Self::new(storage)
@@ -453,6 +453,7 @@ pub trait AtomicOperations {
 mod tests {
     use super::*;
 
+    use crate::document::field::TextOption;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;
 
@@ -489,7 +490,7 @@ mod tests {
         let mut txn = Transaction::new(IsolationLevel::ReadCommitted);
 
         let doc = crate::document::document::Document::builder()
-            .add_text("title", "Test")
+            .add_text("title", "Test", TextOption::default())
             .build();
 
         let op = TransactionOperation::AddDocument {
@@ -503,7 +504,7 @@ mod tests {
         // Cannot add operation to inactive transaction
         txn.state = TransactionState::Committed;
         let doc2 = crate::document::document::Document::builder()
-            .add_text("title", "Test2")
+            .add_text("title", "Test2", TextOption::default())
             .build();
         let op2 = TransactionOperation::AddDocument {
             document: doc2,
