@@ -2,7 +2,7 @@
 //!
 //! This module provides complete text analysis pipelines that combine tokenizers
 //! and token filters to process text for indexing and searching. Analyzers are
-//! the main entry point for text analysis in Yatagarasu.
+//! the main entry point for text analysis in Platypus.
 //!
 //! # Available Analyzers
 //!
@@ -23,8 +23,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//! use platypus::analysis::analyzer::analyzer::Analyzer;
+//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
 //!
 //! let analyzer = StandardAnalyzer::new().unwrap();
 //! let tokens: Vec<_> = analyzer.analyze("Hello World!").unwrap().collect();

@@ -3,6 +3,7 @@
 //! This module provides score normalization functionality for combining
 //! keyword and vector search scores with different scales.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::error::Result;
@@ -28,8 +29,8 @@ impl ScoreNormalizer {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::hybrid::search::searcher::ScoreNormalization;
-    /// use yatagarasu::hybrid::search::scorer::ScoreNormalizer;
+    /// use platypus::hybrid::search::searcher::ScoreNormalization;
+    /// use platypus::hybrid::search::scorer::ScoreNormalizer;
     ///
     /// let normalizer = ScoreNormalizer::new(ScoreNormalization::MinMax);
     /// ```
@@ -215,7 +216,7 @@ impl ScoreNormalizer {
     /// Create rank mapping for scores.
     fn create_rank_mapping(&self, scores: &[f32]) -> HashMap<i32, f32> {
         let mut unique_scores: Vec<f32> = scores.to_vec();
-        unique_scores.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+        unique_scores.sort_by(|a, b| b.partial_cmp(a).unwrap_or(Ordering::Equal));
         unique_scores.dedup();
 
         let mut rank_map = HashMap::new();

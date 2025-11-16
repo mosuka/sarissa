@@ -6,9 +6,9 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::token_filter::Filter;
-//! use yatagarasu::analysis::token_filter::remove_empty::RemoveEmptyFilter;
-//! use yatagarasu::analysis::token::Token;
+//! use platypus::analysis::token_filter::Filter;
+//! use platypus::analysis::token_filter::remove_empty::RemoveEmptyFilter;
+//! use platypus::analysis::token::Token;
 //!
 //! let filter = RemoveEmptyFilter::new();
 //! let tokens = vec![
@@ -42,9 +42,9 @@ use crate::error::Result;
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::analysis::token_filter::Filter;
-/// use yatagarasu::analysis::token_filter::remove_empty::RemoveEmptyFilter;
-/// use yatagarasu::analysis::token::Token;
+/// use platypus::analysis::token_filter::Filter;
+/// use platypus::analysis::token_filter::remove_empty::RemoveEmptyFilter;
+/// use platypus::analysis::token::Token;
 ///
 /// let filter = RemoveEmptyFilter::new();
 /// let tokens = vec![

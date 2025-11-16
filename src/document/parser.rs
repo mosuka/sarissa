@@ -38,10 +38,10 @@
 //! Basic usage with default analyzer:
 //!
 //! ```
-//! use yatagarasu::document::document::Document;
-//! use yatagarasu::document::parser::DocumentParser;
-//! use yatagarasu::document::field::{TextOption, IntegerOption};
-//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//! use platypus::document::document::Document;
+//! use platypus::document::parser::DocumentParser;
+//! use platypus::document::field::{TextOption, IntegerOption};
+//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));
@@ -59,12 +59,12 @@
 //! With per-field analyzers:
 //!
 //! ```
-//! use yatagarasu::document::document::Document;
-//! use yatagarasu::document::parser::DocumentParser;
-//! use yatagarasu::document::field::TextOption;
-//! use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-//! use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+//! use platypus::document::document::Document;
+//! use platypus::document::parser::DocumentParser;
+//! use platypus::document::field::TextOption;
+//! use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
+//! use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
 //! use std::sync::Arc;
 //!
 //! // Configure per-field analyzers
@@ -104,12 +104,12 @@ use crate::error::Result;
 /// # Example
 ///
 /// ```
-/// use yatagarasu::document::document::Document;
-/// use yatagarasu::document::parser::DocumentParser;
-/// use yatagarasu::document::field::TextOption;
-/// use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-/// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-/// use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
+/// use platypus::document::document::Document;
+/// use platypus::document::parser::DocumentParser;
+/// use platypus::document::field::TextOption;
+/// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use platypus::analysis::analyzer::standard::StandardAnalyzer;
+/// use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
 /// use std::sync::Arc;
 ///
 /// let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));

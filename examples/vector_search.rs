@@ -19,27 +19,27 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::document::document::Document;
+use platypus::document::document::Document;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::document::field::VectorOption;
+use platypus::document::field::VectorOption;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::text_embedder::TextEmbedder;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::error::Result;
+use platypus::error::Result;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::storage::file::FileStorageConfig;
+use platypus::storage::file::FileStorageConfig;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::storage::{StorageConfig, StorageFactory};
+use platypus::storage::{StorageConfig, StorageFactory};
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::vector::engine::VectorEngine;
+use platypus::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::vector::index::config::{FlatIndexConfig, VectorIndexConfig};
+use platypus::vector::index::config::{FlatIndexConfig, VectorIndexConfig};
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::vector::index::factory::VectorIndexFactory;
+use platypus::vector::index::factory::VectorIndexFactory;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::vector::search::searcher::VectorSearchRequest;
+use platypus::vector::search::searcher::VectorSearchRequest;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
@@ -190,7 +190,7 @@ async fn main() -> Result<()> {
 
 #[cfg(feature = "embeddings-candle")]
 fn display_results(
-    results: &yatagarasu::vector::search::searcher::VectorSearchResults,
+    results: &platypus::vector::search::searcher::VectorSearchResults,
     docs: &[(&str, &str)],
     field_info: &str,
 ) {

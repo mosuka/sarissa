@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::hybrid::stats::HybridSearchStats;
+/// use platypus::hybrid::stats::HybridSearchStats;
 ///
 /// let stats = HybridSearchStats {
 ///     total_documents: 1000,

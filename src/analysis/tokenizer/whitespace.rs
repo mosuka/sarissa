@@ -7,8 +7,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::tokenizer::Tokenizer;
-//! use yatagarasu::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+//! use platypus::analysis::tokenizer::Tokenizer;
+//! use platypus::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 //!
 //! let tokenizer = WhitespaceTokenizer::new();
 //! let tokens: Vec<_> = tokenizer.tokenize("Hello   world\ttest").unwrap().collect();
@@ -48,8 +48,8 @@ use crate::util::simd;
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::analysis::tokenizer::Tokenizer;
-/// use yatagarasu::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+/// use platypus::analysis::tokenizer::Tokenizer;
+/// use platypus::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 ///
 /// let tokenizer = WhitespaceTokenizer::new();
 /// let tokens: Vec<_> = tokenizer.tokenize("hello world").unwrap().collect();

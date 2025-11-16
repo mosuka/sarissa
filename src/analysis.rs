@@ -1,4 +1,4 @@
-//! Text analysis module for Yatagarasu.
+//! Text analysis module for Platypus.
 //!
 //! This module provides comprehensive text analysis functionality for processing
 //! and transforming text before indexing or searching. It includes:
@@ -19,8 +19,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
+//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
+//! use platypus::analysis::analyzer::analyzer::Analyzer;
 //!
 //! let analyzer = StandardAnalyzer::new().unwrap();
 //! let tokens: Vec<_> = analyzer.analyze("Hello World!").unwrap().collect();

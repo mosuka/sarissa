@@ -11,8 +11,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-//! use yatagarasu::analysis::analyzer::language::english::EnglishAnalyzer;
+//! use platypus::analysis::analyzer::analyzer::Analyzer;
+//! use platypus::analysis::analyzer::language::english::EnglishAnalyzer;
 //!
 //! let analyzer = EnglishAnalyzer::new().unwrap();
 //! let tokens: Vec<_> = analyzer.analyze("Hello the world").unwrap().collect();

@@ -1,4 +1,4 @@
-//! Storage abstraction layer for Yatagarasu.
+//! Storage abstraction layer for Platypus.
 //!
 //! This module exposes a pluggable storage facade shared by the lexical, vector,
 //! and hybrid engines. File and memory backends can be swapped without touching
@@ -24,11 +24,11 @@
 //! # Example
 //!
 //! ```
-//! use yatagarasu::storage::{StorageFactory, StorageConfig};
-//! use yatagarasu::storage::file::FileStorageConfig;
-//! use yatagarasu::storage::memory::MemoryStorageConfig;
+//! use platypus::storage::{StorageFactory, StorageConfig};
+//! use platypus::storage::file::FileStorageConfig;
+//! use platypus::storage::memory::MemoryStorageConfig;
 //!
-//! # fn main() -> yatagarasu::error::Result<()> {
+//! # fn main() -> platypus::error::Result<()> {
 //! // Create file storage with mmap enabled
 //! let mut file_config = FileStorageConfig::new("/tmp/test_index");
 //! file_config.use_mmap = true;
@@ -43,7 +43,7 @@
 use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 
 pub mod column;
 pub mod file;
@@ -83,16 +83,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageInput>)` - A reader for accessing the file contents
-    /// * `Err(YatagarasuError)` - If the file doesn't exist or cannot be opened
+    /// * `Err(PlatypusError)` - If the file doesn't exist or cannot be opened
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::{Read, Write};
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // First create a file
@@ -122,16 +122,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageOutput>)` - A writer for writing data to the file
-    /// * `Err(YatagarasuError)` - If the file cannot be created
+    /// * `Err(PlatypusError)` - If the file cannot be created
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// let mut output = storage.create_output("index.bin")?;
@@ -156,16 +156,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageOutput>)` - A writer positioned at the end of the file
-    /// * `Err(YatagarasuError)` - If the file cannot be opened or created
+    /// * `Err(PlatypusError)` - If the file cannot be opened or created
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::{Read, Write};
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create file with initial content
@@ -206,11 +206,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// assert!(!storage.file_exists("index.bin"));
@@ -237,16 +237,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the file was successfully deleted
-    /// * `Err(YatagarasuError)` - If the file cannot be deleted (e.g., permission denied)
+    /// * `Err(PlatypusError)` - If the file cannot be deleted (e.g., permission denied)
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file
@@ -274,16 +274,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Vec<String>)` - A list of all file names in the storage
-    /// * `Err(YatagarasuError)` - If the storage cannot be read
+    /// * `Err(PlatypusError)` - If the storage cannot be read
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create some files
@@ -317,16 +317,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(u64)` - The size of the file in bytes
-    /// * `Err(YatagarasuError)` - If the file doesn't exist or cannot be accessed
+    /// * `Err(PlatypusError)` - If the file doesn't exist or cannot be accessed
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file with known size
@@ -355,16 +355,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(FileMetadata)` - Metadata structure with file information
-    /// * `Err(YatagarasuError)` - If the file doesn't exist or cannot be accessed
+    /// * `Err(PlatypusError)` - If the file doesn't exist or cannot be accessed
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file
@@ -395,17 +395,17 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the file was successfully renamed
-    /// * `Err(YatagarasuError)` - If the source file doesn't exist, destination exists,
+    /// * `Err(PlatypusError)` - If the source file doesn't exist, destination exists,
     ///   or the operation fails
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a temp file
@@ -437,16 +437,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// * `Ok((String, Box<dyn StorageOutput>))` - A tuple of (filename, writer)
     ///   where filename is the unique generated name
-    /// * `Err(YatagarasuError)` - If the temporary file cannot be created
+    /// * `Err(PlatypusError)` - If the temporary file cannot be created
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a temp file with prefix
@@ -474,16 +474,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If all pending writes were successfully synced
-    /// * `Err(YatagarasuError)` - If the sync operation fails
+    /// * `Err(PlatypusError)` - If the sync operation fails
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Write some data
@@ -507,17 +507,17 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the storage was successfully closed
-    /// * `Err(YatagarasuError)` - If errors occur during cleanup (though resources
+    /// * `Err(PlatypusError)` - If errors occur during cleanup (though resources
     ///   should still be released as much as possible)
     ///
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::Storage;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let mut storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Use storage
@@ -630,9 +630,9 @@ pub trait StorageLock: Send + std::fmt::Debug {
 /// # Example
 ///
 /// ```
-/// use yatagarasu::storage::StorageConfig;
-/// use yatagarasu::storage::file::FileStorageConfig;
-/// use yatagarasu::storage::memory::MemoryStorageConfig;
+/// use platypus::storage::StorageConfig;
+/// use platypus::storage::file::FileStorageConfig;
+/// use platypus::storage::memory::MemoryStorageConfig;
 ///
 /// // File storage with custom settings
 /// let mut file_config = FileStorageConfig::new("/data/index");
@@ -678,11 +678,11 @@ impl StorageFactory {
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::storage::{StorageFactory, StorageConfig};
-    /// use yatagarasu::storage::file::FileStorageConfig;
-    /// use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// use platypus::storage::{StorageFactory, StorageConfig};
+    /// use platypus::storage::file::FileStorageConfig;
+    /// use platypus::storage::memory::MemoryStorageConfig;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// // Create memory storage
     /// let config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// let storage = StorageFactory::create(config)?;
@@ -758,9 +758,9 @@ impl std::fmt::Display for StorageError {
 
 impl std::error::Error for StorageError {}
 
-impl From<StorageError> for YatagarasuError {
+impl From<StorageError> for PlatypusError {
     fn from(err: StorageError) -> Self {
-        YatagarasuError::storage(err.to_string())
+        PlatypusError::storage(err.to_string())
     }
 }
 

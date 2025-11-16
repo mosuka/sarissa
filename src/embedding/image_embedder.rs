@@ -1,4 +1,4 @@
-//! Image embedding trait for Yatagarasu's multimodal vector search.
+//! Image embedding trait for Platypus's multimodal vector search.
 
 use async_trait::async_trait;
 
@@ -8,7 +8,7 @@ use crate::vector::core::vector::Vector;
 /// Trait for converting images to vector embeddings.
 ///
 /// This trait provides a common interface for various image embedding methods
-/// (neural models, API-based services, etc.) to integrate with Yatagarasu's
+/// (neural models, API-based services, etc.) to integrate with Platypus's
 /// multimodal vector search pipeline.
 ///
 /// # Examples
@@ -16,10 +16,10 @@ use crate::vector::core::vector::Vector;
 /// ## Using Candle CLIP embedder (requires `embeddings-multimodal` feature)
 ///
 /// ```no_run
-/// use yatagarasu::embedding::image_embedder::ImageEmbedder;
-/// use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use platypus::embedding::image_embedder::ImageEmbedder;
+/// use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
-/// # async fn example() -> yatagarasu::error::Result<()> {
+/// # async fn example() -> platypus::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
 ///     "openai/clip-vit-base-patch32"
 /// )?;
@@ -34,9 +34,9 @@ use crate::vector::core::vector::Vector;
 ///
 /// ```
 /// use async_trait::async_trait;
-/// use yatagarasu::embedding::image_embedder::ImageEmbedder;
-/// use yatagarasu::error::Result;
-/// use yatagarasu::vector::core::vector::Vector;
+/// use platypus::embedding::image_embedder::ImageEmbedder;
+/// use platypus::error::Result;
+/// use platypus::vector::core::vector::Vector;
 ///
 /// struct MyCustomImageEmbedder {
 ///     dimension: usize,

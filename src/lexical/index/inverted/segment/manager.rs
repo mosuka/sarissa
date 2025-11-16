@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{Storage, StorageInput};
@@ -318,13 +318,13 @@ impl SegmentManager {
         let magic = reader.read_u32()?;
         if magic != 0x53454753 {
             // "SEGS"
-            return Err(YatagarasuError::index("Invalid segment manifest format"));
+            return Err(PlatypusError::index("Invalid segment manifest format"));
         }
 
         // Read version
         let version = reader.read_u32()?;
         if version != 1 {
-            return Err(YatagarasuError::index(format!(
+            return Err(PlatypusError::index(format!(
                 "Unsupported manifest version: {version}"
             )));
         }

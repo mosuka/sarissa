@@ -13,11 +13,11 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-//! use yatagarasu::analysis::analyzer::pipeline::PipelineAnalyzer;
-//! use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
-//! use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
-//! use yatagarasu::analysis::token_filter::stop::StopFilter;
+//! use platypus::analysis::analyzer::analyzer::Analyzer;
+//! use platypus::analysis::analyzer::pipeline::PipelineAnalyzer;
+//! use platypus::analysis::tokenizer::regex::RegexTokenizer;
+//! use platypus::analysis::token_filter::lowercase::LowercaseFilter;
+//! use platypus::analysis::token_filter::stop::StopFilter;
 //! use std::sync::Arc;
 //!
 //! // Create a custom analyzer with tokenizer + filters

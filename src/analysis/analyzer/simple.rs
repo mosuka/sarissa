@@ -13,9 +13,9 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-//! use yatagarasu::analysis::analyzer::simple::SimpleAnalyzer;
-//! use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+//! use platypus::analysis::analyzer::analyzer::Analyzer;
+//! use platypus::analysis::analyzer::simple::SimpleAnalyzer;
+//! use platypus::analysis::tokenizer::regex::RegexTokenizer;
 //! use std::sync::Arc;
 //!
 //! let tokenizer = Arc::new(RegexTokenizer::new().unwrap());

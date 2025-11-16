@@ -1,4 +1,4 @@
-//! Machine learning integrations for the Yatagarasu search engine.
+//! Machine learning integrations for the Platypus search engine.
 //!
 //! This module wires personalization, anomaly detection, and ranking helpers
 //! into the core search pipeline so applications can layer adaptive behavior

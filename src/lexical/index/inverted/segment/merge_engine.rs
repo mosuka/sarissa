@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use ahash::AHashSet;
 
 use crate::document::document::Document;
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::index::inverted::core::posting::TermPostingIndex;
@@ -144,7 +144,7 @@ impl MergeEngine {
             .collect();
 
         if segments_to_merge.is_empty() {
-            return Err(YatagarasuError::index("No segments found to merge"));
+            return Err(PlatypusError::index("No segments found to merge"));
         }
 
         // Create new segment ID
@@ -496,7 +496,7 @@ impl MergeEngine {
 
         // Check document count matches
         if reader.doc_count() != segment.segment_info.doc_count {
-            return Err(YatagarasuError::index(
+            return Err(PlatypusError::index(
                 "Document count mismatch after merge",
             ));
         }

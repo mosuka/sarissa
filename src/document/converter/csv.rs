@@ -45,8 +45,8 @@
 //! Basic CSV conversion:
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::csv::CsvDocumentConverter;
 //!
 //! let converter = CsvDocumentConverter::new();
 //!
@@ -59,8 +59,8 @@
 //! Custom delimiter (TSV):
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::csv::CsvDocumentConverter;
 //!
 //! let converter = CsvDocumentConverter::new()
 //!     .with_delimiter('\t');
@@ -73,8 +73,8 @@
 //! Flexible mode (allow varying field counts):
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::csv::CsvDocumentConverter;
 //!
 //! let converter = CsvDocumentConverter::new()
 //!     .with_flexible(true);
@@ -94,7 +94,7 @@ use csv::{Reader, ReaderBuilder, StringRecord};
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
 use crate::document::field::FieldValue;
-use crate::error::{Result, YatagarasuError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document converter for CSV format.
@@ -190,7 +190,7 @@ impl Iterator for CsvDocumentIterator {
         let record = match self.reader.records().next()? {
             Ok(record) => record,
             Err(e) => {
-                return Some(Err(YatagarasuError::parse(format!(
+                return Some(Err(PlatypusError::parse(format!(
                     "Failed to read CSV record: {}",
                     e
                 ))));
@@ -198,7 +198,7 @@ impl Iterator for CsvDocumentIterator {
         };
 
         if !self.converter.flexible && record.len() != self.headers.len() {
-            return Some(Err(YatagarasuError::parse(format!(
+            return Some(Err(PlatypusError::parse(format!(
                 "CSV field count mismatch: expected {} fields, found {}",
                 self.headers.len(),
                 record.len()
@@ -262,7 +262,7 @@ impl DocumentConverter for CsvDocumentConverter {
 
     fn convert<P: AsRef<Path>>(&self, path: P) -> Result<Self::Iter> {
         let file = File::open(path.as_ref())
-            .map_err(|e| YatagarasuError::parse(format!("Failed to open CSV file: {}", e)))?;
+            .map_err(|e| PlatypusError::parse(format!("Failed to open CSV file: {}", e)))?;
 
         let mut reader = ReaderBuilder::new()
             .delimiter(self.delimiter)
@@ -273,11 +273,11 @@ impl DocumentConverter for CsvDocumentConverter {
         // Get headers
         let headers = reader
             .headers()
-            .map_err(|e| YatagarasuError::parse(format!("Failed to read CSV headers: {}", e)))?
+            .map_err(|e| PlatypusError::parse(format!("Failed to read CSV headers: {}", e)))?
             .clone();
 
         if headers.is_empty() {
-            return Err(YatagarasuError::parse("CSV header is empty"));
+            return Err(PlatypusError::parse("CSV header is empty"));
         }
 
         Ok(CsvDocumentIterator {

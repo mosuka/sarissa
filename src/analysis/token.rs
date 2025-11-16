@@ -30,7 +30,7 @@
 //! Creating a simple token:
 //!
 //! ```
-//! use yatagarasu::analysis::token::Token;
+//! use platypus::analysis::token::Token;
 //!
 //! let token = Token::new("hello", 0);
 //! assert_eq!(token.text, "hello");
@@ -41,7 +41,7 @@
 //! Creating a token with offsets:
 //!
 //! ```
-//! use yatagarasu::analysis::token::Token;
+//! use platypus::analysis::token::Token;
 //!
 //! let token = Token::with_offsets("world", 1, 6, 11);
 //! assert_eq!(token.text, "world");
@@ -52,7 +52,7 @@
 //! Working with token metadata:
 //!
 //! ```
-//! use yatagarasu::analysis::token::{Token, TokenType};
+//! use platypus::analysis::token::{Token, TokenType};
 //!
 //! let token = Token::new("hello", 0)
 //!     .with_token_type(TokenType::Alphanum)
@@ -88,7 +88,7 @@ use serde::{Deserialize, Serialize};
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::analysis::token::Token;
+/// use platypus::analysis::token::Token;
 ///
 /// // Simple token
 /// let mut token = Token::new("search", 0);

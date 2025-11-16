@@ -24,12 +24,12 @@ use crate::vector::core::vector::Vector;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
-/// use yatagarasu::embedding::per_field::PerFieldEmbedder;
-/// use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
-/// use yatagarasu::embedding::text_embedder::TextEmbedder;
+/// use platypus::embedding::per_field::PerFieldEmbedder;
+/// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use platypus::embedding::text_embedder::TextEmbedder;
 /// use std::sync::Arc;
 ///
-/// # fn example() -> yatagarasu::error::Result<()> {
+/// # fn example() -> platypus::error::Result<()> {
 /// // Default embedder for most fields
 /// let default_embedder: Arc<dyn TextEmbedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
@@ -92,12 +92,12 @@ impl PerFieldEmbedder {
     /// ```no_run
     /// # #[cfg(feature = "embeddings-candle")]
     /// # {
-    /// use yatagarasu::embedding::per_field::PerFieldEmbedder;
-    /// use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+    /// use platypus::embedding::per_field::PerFieldEmbedder;
+    /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
     /// use std::sync::Arc;
     ///
-    /// # fn example() -> yatagarasu::error::Result<()> {
-    /// let default_embedder: Arc<dyn yatagarasu::embedding::text_embedder::TextEmbedder> = Arc::new(
+    /// # fn example() -> platypus::error::Result<()> {
+    /// let default_embedder: Arc<dyn platypus::embedding::text_embedder::TextEmbedder> = Arc::new(
     ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
     /// );
     /// let mut per_field = PerFieldEmbedder::new(Arc::clone(&default_embedder));
@@ -148,12 +148,12 @@ impl PerFieldEmbedder {
     /// ```no_run
     /// # #[cfg(feature = "embeddings-candle")]
     /// # {
-    /// use yatagarasu::embedding::per_field::PerFieldEmbedder;
-    /// use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+    /// use platypus::embedding::per_field::PerFieldEmbedder;
+    /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
     /// use std::sync::Arc;
     ///
-    /// # async fn example() -> yatagarasu::error::Result<()> {
-    /// let default_embedder: Arc<dyn yatagarasu::embedding::text_embedder::TextEmbedder> = Arc::new(
+    /// # async fn example() -> platypus::error::Result<()> {
+    /// let default_embedder: Arc<dyn platypus::embedding::text_embedder::TextEmbedder> = Arc::new(
     ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
     /// );
     /// let per_field = PerFieldEmbedder::new(Arc::clone(&default_embedder));

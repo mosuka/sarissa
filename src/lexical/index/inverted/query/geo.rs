@@ -23,12 +23,12 @@ impl GeoPoint {
     /// Create a new geographical point.
     pub fn new(lat: f64, lon: f64) -> Result<Self> {
         if !(-90.0..=90.0).contains(&lat) {
-            return Err(crate::error::YatagarasuError::other(format!(
+            return Err(crate::error::PlatypusError::other(format!(
                 "Invalid latitude: {lat} (must be between -90 and 90)"
             )));
         }
         if !(-180.0..=180.0).contains(&lon) {
-            return Err(crate::error::YatagarasuError::other(format!(
+            return Err(crate::error::PlatypusError::other(format!(
                 "Invalid longitude: {lon} (must be between -180 and 180)"
             )));
         }
@@ -84,12 +84,12 @@ impl GeoBoundingBox {
     /// Create a new bounding box.
     pub fn new(top_left: GeoPoint, bottom_right: GeoPoint) -> Result<Self> {
         if top_left.lat < bottom_right.lat {
-            return Err(crate::error::YatagarasuError::other(
+            return Err(crate::error::PlatypusError::other(
                 "Top-left latitude must be greater than bottom-right latitude",
             ));
         }
         if top_left.lon > bottom_right.lon {
-            return Err(crate::error::YatagarasuError::other(
+            return Err(crate::error::PlatypusError::other(
                 "Top-left longitude must be less than bottom-right longitude",
             ));
         }
@@ -882,7 +882,7 @@ impl GeoQuery {
     ///
     /// # Example
     /// ```rust
-    /// use yatagarasu::lexical::index::inverted::query::geo::GeoQuery;
+    /// use platypus::lexical::index::inverted::query::geo::GeoQuery;
     ///
     /// let query = GeoQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
     /// ```
@@ -909,7 +909,7 @@ impl GeoQuery {
     ///
     /// # Example
     /// ```rust
-    /// use yatagarasu::lexical::index::inverted::query::geo::GeoQuery;
+    /// use platypus::lexical::index::inverted::query::geo::GeoQuery;
     ///
     /// let query = GeoQuery::within_bounding_box("location", 40.0, -75.0, 41.0, -74.0).unwrap();
     /// ```

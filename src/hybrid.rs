@@ -18,11 +18,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use yatagarasu::hybrid::engine::HybridEngine;
-//! use yatagarasu::hybrid::search::searcher::HybridSearchRequest;
-//! use yatagarasu::lexical::engine::LexicalEngine;
-//! use yatagarasu::vector::engine::VectorEngine;
-//! use yatagarasu::error::Result;
+//! use platypus::hybrid::engine::HybridEngine;
+//! use platypus::hybrid::search::searcher::HybridSearchRequest;
+//! use platypus::lexical::engine::LexicalEngine;
+//! use platypus::vector::engine::VectorEngine;
+//! use platypus::error::Result;
 //!
 //! async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> Result<()> {
 //!     // Create hybrid search engine

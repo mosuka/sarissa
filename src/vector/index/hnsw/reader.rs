@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
@@ -24,7 +24,7 @@ pub struct HnswIndexReader {
 impl HnswIndexReader {
     /// Create a reader from serialized bytes.
     pub fn from_bytes(_data: &[u8]) -> Result<Self> {
-        Err(YatagarasuError::InvalidOperation(
+        Err(PlatypusError::InvalidOperation(
             "from_bytes is deprecated, use load() instead".to_string(),
         ))
     }
@@ -75,7 +75,7 @@ impl HnswIndexReader {
             let mut field_name_buf = vec![0u8; field_name_len];
             input.read_exact(&mut field_name_buf)?;
             let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                YatagarasuError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+                PlatypusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
             })?;
 
             // Read vector data

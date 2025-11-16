@@ -133,7 +133,7 @@ pub trait Terms: Send + Sync {
 /// # Example (conceptual - not yet implemented)
 ///
 /// ```ignore
-/// use yatagarasu::lexical::terms::TermDictionaryAccess;
+/// use platypus::lexical::terms::TermDictionaryAccess;
 ///
 /// let reader = index.reader()?;
 /// let terms = reader.terms("content")?;

@@ -1,4 +1,4 @@
-//! Schema-less indexing example using Yatagarasu's PerFieldAnalyzer pipeline.
+//! Schema-less indexing example using Platypus's PerFieldAnalyzer pipeline.
 //!
 //! Demonstrates how to ingest heterogeneous documents without predefined
 //! schemas. Analyzer selection happens per field at write time, mirroring
@@ -7,19 +7,19 @@
 use std::sync::Arc;
 
 use tempfile::TempDir;
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
-use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::document::document::Document;
-use yatagarasu::document::field::{Field, FieldValue, TextOption};
-use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::storage::file::FileStorageConfig;
-use yatagarasu::storage::{StorageConfig, StorageFactory};
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::document::document::Document;
+use platypus::document::field::{Field, FieldValue, TextOption};
+use platypus::lexical::engine::LexicalEngine;
+use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use platypus::lexical::index::factory::LexicalIndexFactory;
+use platypus::storage::file::FileStorageConfig;
+use platypus::storage::{StorageConfig, StorageFactory};
 
-fn main() -> yatagarasu::error::Result<()> {
+fn main() -> platypus::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");
 
     // Create a storage backend

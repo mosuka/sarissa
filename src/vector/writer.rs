@@ -64,11 +64,11 @@ impl Default for VectorIndexWriterConfig {
 /// # Example
 ///
 /// ```rust,no_run
-/// use yatagarasu::vector::index::hnsw::writer::HnswIndexWriter;
-/// use yatagarasu::vector::index::config::HnswIndexConfig;
-/// use yatagarasu::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
-/// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-/// use yatagarasu::storage::StorageConfig;
+/// use platypus::vector::index::hnsw::writer::HnswIndexWriter;
+/// use platypus::vector::index::config::HnswIndexConfig;
+/// use platypus::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+/// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+/// use platypus::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

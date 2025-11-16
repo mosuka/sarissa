@@ -21,18 +21,18 @@ use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 /// # Example
 ///
 /// ```no_run
-/// use yatagarasu::vector::engine::VectorEngine;
-/// use yatagarasu::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
-/// use yatagarasu::vector::index::factory::VectorIndexFactory;
-/// use yatagarasu::vector::core::distance::DistanceMetric;
-/// use yatagarasu::vector::core::vector::Vector;
-/// use yatagarasu::vector::search::searcher::VectorSearchRequest;
-/// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-/// use yatagarasu::document::document::Document;
-/// use yatagarasu::embedding::text_embedder::TextEmbedder;
+/// use platypus::vector::engine::VectorEngine;
+/// use platypus::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
+/// use platypus::vector::index::factory::VectorIndexFactory;
+/// use platypus::vector::core::distance::DistanceMetric;
+/// use platypus::vector::core::vector::Vector;
+/// use platypus::vector::search::searcher::VectorSearchRequest;
+/// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+/// use platypus::document::document::Document;
+/// use platypus::embedding::text_embedder::TextEmbedder;
 /// use std::sync::Arc;
 ///
-/// # async fn example(embedder: Arc<dyn TextEmbedder>) -> yatagarasu::error::Result<()> {
+/// # async fn example(embedder: Arc<dyn TextEmbedder>) -> platypus::error::Result<()> {
 /// // Create engine with flat index
 /// let config = VectorIndexConfig::Flat(FlatIndexConfig {
 ///     dimension: 3,
@@ -45,7 +45,7 @@ use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 /// let mut engine = VectorEngine::new(index)?;
 ///
 /// // Add documents with vector fields
-/// use yatagarasu::document::field::VectorOption;
+/// use platypus::document::field::VectorOption;
 /// let doc1 = Document::builder()
 ///     .add_vector("embedding", "Machine Learning", VectorOption::default())
 ///     .build();
@@ -93,13 +93,13 @@ impl VectorEngine {
     /// # Example with Memory Storage
     ///
     /// ```rust,no_run
-    /// use yatagarasu::vector::engine::VectorEngine;
-    /// use yatagarasu::vector::index::config::VectorIndexConfig;
-    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// use platypus::vector::engine::VectorEngine;
+    /// use platypus::vector::index::config::VectorIndexConfig;
+    /// use platypus::vector::index::factory::VectorIndexFactory;
+    /// use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::memory::MemoryStorageConfig;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// let storage = StorageFactory::create(storage_config)?;
     /// let index = VectorIndexFactory::create(storage, VectorIndexConfig::default())?;
@@ -111,13 +111,13 @@ impl VectorEngine {
     /// # Example with File Storage
     ///
     /// ```rust,no_run
-    /// use yatagarasu::vector::engine::VectorEngine;
-    /// use yatagarasu::vector::index::config::VectorIndexConfig;
-    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::file::FileStorageConfig;
+    /// use platypus::vector::engine::VectorEngine;
+    /// use platypus::vector::index::config::VectorIndexConfig;
+    /// use platypus::vector::index::factory::VectorIndexFactory;
+    /// use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::file::FileStorageConfig;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/vector_index"));
     /// let storage = StorageFactory::create(storage_config)?;
     /// let index = VectorIndexFactory::create(storage, VectorIndexConfig::default())?;
@@ -228,15 +228,15 @@ impl VectorEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use yatagarasu::vector::engine::VectorEngine;
-    /// use yatagarasu::vector::index::config::VectorIndexConfig;
-    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::embedding::text_embedder::TextEmbedder;
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::vector::engine::VectorEngine;
+    /// use platypus::vector::index::config::VectorIndexConfig;
+    /// use platypus::vector::index::factory::VectorIndexFactory;
+    /// use platypus::document::document::Document;
+    /// use platypus::embedding::text_embedder::TextEmbedder;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # async fn example(embedder: Arc<dyn TextEmbedder>) -> yatagarasu::error::Result<()> {
+    /// # async fn example(embedder: Arc<dyn TextEmbedder>) -> platypus::error::Result<()> {
     /// let mut config = VectorIndexConfig::default();
     /// // Set embedder in config (assuming Flat variant)
     /// if let VectorIndexConfig::Flat(ref mut flat_config) = config {
@@ -246,7 +246,7 @@ impl VectorEngine {
     /// let index = VectorIndexFactory::create(storage, config)?;
     /// let mut engine = VectorEngine::new(index)?;
     ///
-    /// use yatagarasu::document::field::{TextOption, VectorOption};
+    /// use platypus::document::field::{TextOption, VectorOption};
     /// let doc = Document::builder()
     ///     .add_text("title", "Machine Learning", TextOption::default())
     ///     .add_vector("title_embedding", "Machine Learning", VectorOption::default())
@@ -331,21 +331,21 @@ impl VectorEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use yatagarasu::vector::engine::VectorEngine;
-    /// use yatagarasu::vector::index::config::VectorIndexConfig;
-    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::vector::engine::VectorEngine;
+    /// use platypus::vector::index::config::VectorIndexConfig;
+    /// use platypus::vector::index::factory::VectorIndexFactory;
+    /// use platypus::document::document::Document;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # async fn example() -> yatagarasu::error::Result<()> {
+    /// # async fn example() -> platypus::error::Result<()> {
     /// let config = VectorIndexConfig::default();
     /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     /// let index = VectorIndexFactory::create(storage, config)?;
     /// let mut engine = VectorEngine::new(index)?;
     ///
     /// // Add documents with vector fields
-    /// use yatagarasu::document::field::VectorOption;
+    /// use platypus::document::field::VectorOption;
     /// let doc = Document::builder()
     ///     .add_vector("embedding", "Sample text", VectorOption::default())
     ///     .build();
@@ -385,13 +385,13 @@ impl VectorEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use yatagarasu::vector::engine::VectorEngine;
-    /// use yatagarasu::vector::index::config::VectorIndexConfig;
-    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::vector::engine::VectorEngine;
+    /// use platypus::vector::index::config::VectorIndexConfig;
+    /// use platypus::vector::index::factory::VectorIndexFactory;
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let config = VectorIndexConfig::default();
     /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     /// let index = VectorIndexFactory::create(storage, config)?;

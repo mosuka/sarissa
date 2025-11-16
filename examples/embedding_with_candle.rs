@@ -11,13 +11,13 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(feature = "embeddings-candle")]
-use yatagarasu::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::text_embedder::TextEmbedder;
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
-async fn main() -> yatagarasu::error::Result<()> {
+async fn main() -> platypus::error::Result<()> {
     println!("=== Candle Text Embedder Example ===\n");
 
     // Create embedder with a sentence-transformers model

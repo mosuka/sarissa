@@ -7,8 +7,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::tokenizer::Tokenizer;
-//! use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+//! use platypus::analysis::tokenizer::Tokenizer;
+//! use platypus::analysis::tokenizer::regex::RegexTokenizer;
 //!
 //! // Extract word characters
 //! let tokenizer = RegexTokenizer::new().unwrap();
@@ -30,7 +30,7 @@ use regex::Regex;
 
 use crate::analysis::token::{Token, TokenStream};
 use crate::analysis::tokenizer::Tokenizer;
-use crate::error::{Result, YatagarasuError};
+use crate::error::{PlatypusError, Result};
 
 /// A regex-based tokenizer that extracts tokens using regular expressions.
 ///
@@ -50,8 +50,8 @@ use crate::error::{Result, YatagarasuError};
 /// ## Basic Usage
 ///
 /// ```
-/// use yatagarasu::analysis::tokenizer::Tokenizer;
-/// use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
+/// use platypus::analysis::tokenizer::Tokenizer;
+/// use platypus::analysis::tokenizer::regex::RegexTokenizer;
 ///
 /// let tokenizer = RegexTokenizer::new().unwrap();
 /// let tokens: Vec<_> = tokenizer.tokenize("hello world").unwrap().collect();
@@ -61,8 +61,8 @@ use crate::error::{Result, YatagarasuError};
 /// ## Custom Pattern
 ///
 /// ```
-/// use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
-/// use yatagarasu::analysis::tokenizer::Tokenizer;
+/// use platypus::analysis::tokenizer::regex::RegexTokenizer;
+/// use platypus::analysis::tokenizer::Tokenizer;
 ///
 /// // Extract email-like tokens
 /// let tokenizer = RegexTokenizer::with_pattern(r"\w+@\w+\.\w+").unwrap();
@@ -73,8 +73,8 @@ use crate::error::{Result, YatagarasuError};
 /// ## Gaps Mode
 ///
 /// ```
-/// use yatagarasu::analysis::tokenizer::regex::RegexTokenizer;
-/// use yatagarasu::analysis::tokenizer::Tokenizer;
+/// use platypus::analysis::tokenizer::regex::RegexTokenizer;
+/// use platypus::analysis::tokenizer::Tokenizer;
 ///
 /// // Extract text between punctuation
 /// let tokenizer = RegexTokenizer::with_gaps(r"[,.]").unwrap();
@@ -100,7 +100,7 @@ impl RegexTokenizer {
     /// Create a new regex tokenizer with a custom pattern.
     pub fn with_pattern(pattern: &str) -> Result<Self> {
         let regex = Regex::new(pattern)
-            .map_err(|e| YatagarasuError::analysis(format!("Invalid regex pattern: {e}")))?;
+            .map_err(|e| PlatypusError::analysis(format!("Invalid regex pattern: {e}")))?;
 
         Ok(RegexTokenizer {
             pattern: Arc::new(regex),
@@ -111,7 +111,7 @@ impl RegexTokenizer {
     /// Create a tokenizer that extracts gaps (text between matches) instead of matches.
     pub fn with_gaps(pattern: &str) -> Result<Self> {
         let regex = Regex::new(pattern)
-            .map_err(|e| YatagarasuError::analysis(format!("Invalid regex pattern: {e}")))?;
+            .map_err(|e| PlatypusError::analysis(format!("Invalid regex pattern: {e}")))?;
 
         Ok(RegexTokenizer {
             pattern: Arc::new(regex),

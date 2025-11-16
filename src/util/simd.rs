@@ -1,4 +1,4 @@
-//! SIMD-friendly helpers that power hot paths inside Yatagarasu.
+//! SIMD-friendly helpers that power hot paths inside Platypus.
 
 pub mod simd_wide;
 

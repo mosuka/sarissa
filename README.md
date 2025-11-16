@@ -1,23 +1,23 @@
-# Yatagarasu
+# Platypus
 
-[![Crates.io](https://img.shields.io/crates/v/yatagarasu.svg)](https://crates.io/crates/yatagarasu)
-[![Documentation](https://docs.rs/yatagarasu/badge.svg)](https://docs.rs/yatagarasu)
+[![Crates.io](https://img.shields.io/crates/v/platypus.svg)](https://crates.io/crates/platypus)
+[![Documentation](https://docs.rs/platypus/badge.svg)](https://docs.rs/platypus)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Yatagarasu (pronounced yah-tah-gah-rah-soo) is a Rust-based hybrid search engine that unifies Keyword Search, Semantic Search, and Multimodal Search into a single, extensible system.
+Platypus is a Rust-based hybrid search engine that unifies Keyword Search, Semantic Search, and Multimodal Search into a single, cohesive system.
 
-The name comes from Yatagarasu (八咫烏) — the three-legged crow of Japanese mythology that guided emperors through unknown lands.
-Each of its three legs symbolizes a distinct form of understanding:
+The name comes from the platypus — one of the most remarkable real-world creatures, known for combining traits from mammals, birds, and reptiles into a single organism.
+This unique fusion of distinct evolutionary features mirrors the three complementary forms of understanding in modern search:
 
-🐦‍⬛ Keyword Search — precise retrieval through lexical and linguistic matching.
+🦫 Keyword Search — precise retrieval through lexical, symbolic, and linguistic matching.
 
-🐦‍⬛ Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
+🦫 Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
 
-🐦‍⬛ Multimodal Search — bridging text, image, and other modalities through shared representations.
+🦫 Multimodal Search — bridging text, images, and other modalities through shared latent representations.
 
-Together, they form a unified search architecture that guides users toward knowledge hidden across all forms of data.
+Together, these capabilities form a unified hybrid search architecture — much like the platypus itself, where diverse traits work in harmony to navigate complex environments.
 
-Built in Rust for performance, safety, and extensibility, Yatagarasu is designed for both research exploration and production-grade search applications.
+Built in Rust for performance, safety, and extensibility, Platypus aims to provide a next-generation information retrieval platform that supports a broad range of use cases, from research exploration to production deployment.
 
 ## ✨ Features
 
@@ -67,11 +67,11 @@ Built in Rust for performance, safety, and extensibility, Yatagarasu is designed
 
 ## 🚀 Quick Start
 
-Add Yatagarasu to your `Cargo.toml`:
+Add Platypus to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-yatagarasu = "0.1"
+platypus = "0.1"
 ```
 
 ### Basic Usage
@@ -80,18 +80,18 @@ yatagarasu = "0.1"
 use std::sync::Arc;
 
 use tempfile::TempDir;
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::document::document::Document;
-use yatagarasu::document::field::{IntegerOption, TextOption};
-use yatagarasu::error::Result;
-use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorageConfig;
-use yatagarasu::storage::{StorageConfig, StorageFactory};
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::document::document::Document;
+use platypus::document::field::{IntegerOption, TextOption};
+use platypus::error::Result;
+use platypus::lexical::engine::LexicalEngine;
+use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use platypus::lexical::index::factory::LexicalIndexFactory;
+use platypus::lexical::index::inverted::query::term::TermQuery;
+use platypus::lexical::search::searcher::LexicalSearchRequest;
+use platypus::storage::file::FileStorageConfig;
+use platypus::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     // Create storage in a temporary directory
@@ -161,7 +161,7 @@ fn main() -> Result<()> {
 
 ## 🏗️ Architecture
 
-Yatagarasu is built with a modular architecture:
+Platypus is built with a modular architecture:
 
 ### Core Components
 
@@ -175,12 +175,12 @@ Yatagarasu is built with a modular architecture:
 
 ### Field Types
 
-Yatagarasu supports the following field value types through the `Document` builder API:
+Platypus supports the following field value types through the `Document` builder API:
 
 ```rust
 use chrono::Utc;
-use yatagarasu::document::document::Document;
-use yatagarasu::document::field::{
+use platypus::document::document::Document;
+use platypus::document::field::{
     BinaryOption, BooleanOption, DateTimeOption, FloatOption, GeoOption, IntegerOption,
     TextOption, VectorOption,
 };
@@ -216,15 +216,15 @@ let doc = Document::builder()
 ### Query Types
 
 ```rust
-use yatagarasu::lexical::index::inverted::query::boolean::BooleanQuery;
-use yatagarasu::lexical::index::inverted::query::fuzzy::FuzzyQuery;
-use yatagarasu::lexical::index::inverted::query::geo::{
+use platypus::lexical::index::inverted::query::boolean::BooleanQuery;
+use platypus::lexical::index::inverted::query::fuzzy::FuzzyQuery;
+use platypus::lexical::index::inverted::query::geo::{
     GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint,
 };
-use yatagarasu::lexical::index::inverted::query::phrase::PhraseQuery;
-use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
-use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-use yatagarasu::lexical::index::inverted::query::wildcard::WildcardQuery;
+use platypus::lexical::index::inverted::query::phrase::PhraseQuery;
+use platypus::lexical::index::inverted::query::range::NumericRangeQuery;
+use platypus::lexical::index::inverted::query::term::TermQuery;
+use platypus::lexical::index::inverted::query::wildcard::WildcardQuery;
 
 // Term query - simple keyword matching
 let query = Box::new(TermQuery::new("field", "term"));
@@ -268,27 +268,27 @@ let query = Box::new(GeoBoundingBoxQuery::new(
 
 ### Vector Search with Text Embeddings
 
-Yatagarasu supports semantic search using text embeddings. You can use local BERT models via Candle or OpenAI's API.
+Platypus supports semantic search using text embeddings. You can use local BERT models via Candle or OpenAI's API.
 
 #### Using Candle (Local BERT Models)
 
 ```toml
 [dependencies]
-yatagarasu = { version = "0.1", features = ["embeddings-candle"] }
+platypus = { version = "0.1", features = ["embeddings-candle"] }
 ```
 
 ```rust
-use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
-use yatagarasu::embedding::text_embedder::TextEmbedder;
-use yatagarasu::vector::DistanceMetric;
-use yatagarasu::vector::engine::VectorEngine;
-use yatagarasu::vector::index::{FlatIndexConfig, VectorIndexConfig, VectorIndexFactory};
-use yatagarasu::vector::types::VectorSearchRequest;
-use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+use platypus::embedding::text_embedder::TextEmbedder;
+use platypus::vector::DistanceMetric;
+use platypus::vector::engine::VectorEngine;
+use platypus::vector::index::{FlatIndexConfig, VectorIndexConfig, VectorIndexFactory};
+use platypus::vector::types::VectorSearchRequest;
+use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
 
 #[tokio::main]
-async fn main() -> yatagarasu::error::Result<()> {
+async fn main() -> platypus::error::Result<()> {
     // Initialize embedder with a sentence-transformers model
     let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
 
@@ -336,12 +336,12 @@ async fn main() -> yatagarasu::error::Result<()> {
 
 ```toml
 [dependencies]
-yatagarasu = { version = "0.1", features = ["embeddings-openai"] }
+platypus = { version = "0.1", features = ["embeddings-openai"] }
 ```
 
 ```rust
-use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
-use yatagarasu::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
+use platypus::embedding::text_embedder::TextEmbedder;
 
 // Initialize with API key
 let embedder = OpenAITextEmbedder::new(
@@ -355,7 +355,7 @@ let vector = embedder.embed("your text here").await?;
 
 ### Multimodal Search (Text + Images)
 
-Yatagarasu supports cross-modal search using CLIP (Contrastive Language-Image Pre-Training) models, enabling semantic search across text and images. This allows you to:
+Platypus supports cross-modal search using CLIP (Contrastive Language-Image Pre-Training) models, enabling semantic search across text and images. This allows you to:
 
 - **Text-to-Image Search**: Find images using natural language queries
 - **Image-to-Image Search**: Find visually similar images using an image query
@@ -367,24 +367,24 @@ Add the `embeddings-multimodal` feature to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-yatagarasu = { version = "0.1", features = ["embeddings-multimodal"] }
+platypus = { version = "0.1", features = ["embeddings-multimodal"] }
 ```
 
 #### Text-to-Image Search Example
 
 ```rust
-use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-use yatagarasu::embedding::text_embedder::TextEmbedder;
-use yatagarasu::embedding::image_embedder::ImageEmbedder;
-use yatagarasu::vector::engine::VectorEngine;
-use yatagarasu::vector::index::{HnswIndexConfig, VectorIndexConfig, VectorIndexFactory};
-use yatagarasu::vector::types::VectorSearchRequest;
-use yatagarasu::vector::DistanceMetric;
-use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use platypus::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::image_embedder::ImageEmbedder;
+use platypus::vector::engine::VectorEngine;
+use platypus::vector::index::{HnswIndexConfig, VectorIndexConfig, VectorIndexFactory};
+use platypus::vector::types::VectorSearchRequest;
+use platypus::vector::DistanceMetric;
+use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
 
 #[tokio::main]
-async fn main() -> yatagarasu::error::Result<()> {
+async fn main() -> platypus::error::Result<()> {
     // Initialize CLIP embedder (automatically downloads model from HuggingFace)
     let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 
@@ -468,9 +468,9 @@ cargo run --example image_to_image_search --features embeddings-multimodal -- qu
 ### Faceted Search
 
 ```rust
-use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-use yatagarasu::lexical::search::facet::{FacetConfig, FacetedSearchEngine};
-use yatagarasu::lexical::types::LexicalSearchRequest;
+use platypus::lexical::index::inverted::query::term::TermQuery;
+use platypus::lexical::search::facet::{FacetConfig, FacetedSearchEngine};
+use platypus::lexical::types::LexicalSearchRequest;
 
 // Create faceted search engine
 let facet_config = FacetConfig {
@@ -501,8 +501,8 @@ for facet in &results.facets {
 ### Spell Correction
 
 ```rust
-use yatagarasu::spelling::corrector::{SpellingCorrector, CorrectorConfig};
-use yatagarasu::spelling::dictionary::Dictionary;
+use platypus::spelling::corrector::{SpellingCorrector, CorrectorConfig};
+use platypus::spelling::dictionary::Dictionary;
 
 // Build a dictionary from your corpus
 let mut dictionary = Dictionary::new();
@@ -529,10 +529,10 @@ if let Some(correction) = corrector.correct("progamming") {
 ### Custom Analysis Pipeline
 
 ```rust
-use yatagarasu::analysis::analyzer::pipeline::PipelineAnalyzer;
-use yatagarasu::analysis::tokenizer::whitespace::WhitespaceTokenizer;
-use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
-use yatagarasu::analysis::token_filter::stop::StopWordFilter;
+use platypus::analysis::analyzer::pipeline::PipelineAnalyzer;
+use platypus::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+use platypus::analysis::token_filter::lowercase::LowercaseFilter;
+use platypus::analysis::token_filter::stop::StopWordFilter;
 
 // Create custom analyzer with multiple filters
 let mut analyzer = PipelineAnalyzer::new(Box::new(WhitespaceTokenizer));
@@ -551,8 +551,8 @@ for token in tokens {
 For language-specific tokenization (Japanese, Korean, Chinese):
 
 ```rust
-use yatagarasu::analysis::tokenizer::lindera::LinderaTokenizer;
-use yatagarasu::analysis::analyzer::pipeline::PipelineAnalyzer;
+use platypus::analysis::tokenizer::lindera::LinderaTokenizer;
+use platypus::analysis::analyzer::pipeline::PipelineAnalyzer;
 
 // Japanese tokenization with Lindera
 let tokenizer = LinderaTokenizer::japanese()?;
@@ -564,7 +564,7 @@ let tokens = analyzer.analyze(text)?;
 
 ## 📊 Performance
 
-Yatagarasu is designed for high performance:
+Platypus is designed for high performance:
 
 - **SIMD Acceleration** - Uses wide instruction sets for vector operations
 - **Memory-Mapped I/O** - Efficient file access with minimal memory overhead
@@ -576,8 +576,8 @@ Yatagarasu is designed for high performance:
 ### Building from Source
 
 ```bash
-git clone https://github.com/mosuka/yatagarasu.git
-cd yatagarasu
+git clone https://github.com/mosuka/platypus.git
+cd platypus
 cargo build --release
 ```
 
@@ -602,7 +602,7 @@ cargo fmt --check
 
 ## 📖 Examples
 
-Yatagarasu includes numerous examples demonstrating various features:
+Platypus includes numerous examples demonstrating various features:
 
 ### Lexical Search Examples
 
@@ -649,21 +649,21 @@ cargo run --example image_to_image_search --features embeddings-multimodal
 
 ## 🔧 Feature Flags
 
-Yatagarasu uses feature flags to enable optional functionality:
+Platypus uses feature flags to enable optional functionality:
 
 ```toml
 [dependencies]
 # Default features only
-yatagarasu = "0.1"
+platypus = "0.1"
 
 # With Candle embeddings (local BERT models)
-yatagarasu = { version = "0.1", features = ["embeddings-candle"] }
+platypus = { version = "0.1", features = ["embeddings-candle"] }
 
 # With OpenAI embeddings
-yatagarasu = { version = "0.1", features = ["embeddings-openai"] }
+platypus = { version = "0.1", features = ["embeddings-openai"] }
 
 # With all embedding features
-yatagarasu = { version = "0.1", features = ["embeddings-all"] }
+platypus = { version = "0.1", features = ["embeddings-all"] }
 ```
 
 Available features:
@@ -675,8 +675,8 @@ Available features:
 
 ## 📚 Documentation
 
-- [API Documentation](https://docs.rs/yatagarasu)
-- [User Guide](https://github.com/mosuka/yatagarasu/wiki)
+- [API Documentation](https://docs.rs/platypus)
+- [User Guide](https://github.com/mosuka/platypus/wiki)
 - [Examples](./examples/)
 
 ## 🤝 Contributing

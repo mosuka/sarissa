@@ -18,15 +18,15 @@
 use std::sync::Arc;
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
+use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use yatagarasu::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::text_embedder::TextEmbedder;
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 #[tokio::main]
-async fn main() -> yatagarasu::error::Result<()> {
+async fn main() -> platypus::error::Result<()> {
     println!("=== Dynamic Embedder Switching Example ===\n");
 
     // Create a vector to hold different embedders

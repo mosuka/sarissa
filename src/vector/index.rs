@@ -14,7 +14,7 @@ pub mod ivf;
 
 use std::sync::{Arc, RwLock};
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::storage::Storage;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::config::{
@@ -159,7 +159,7 @@ impl ManagedVectorIndex {
     pub fn add_vectors(&mut self, vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         let finalized = *self.is_finalized.read().unwrap();
         if finalized {
-            return Err(YatagarasuError::InvalidOperation(
+            return Err(PlatypusError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
             ));
         }
@@ -211,7 +211,7 @@ impl ManagedVectorIndex {
     pub fn vectors(&self) -> Result<Vec<(u64, String, Vector)>> {
         let finalized = *self.is_finalized.read().unwrap();
         if !finalized {
-            return Err(YatagarasuError::InvalidOperation(
+            return Err(PlatypusError::InvalidOperation(
                 "Index must be finalized before accessing vectors".to_string(),
             ));
         }
@@ -225,14 +225,14 @@ impl ManagedVectorIndex {
     pub fn write(&self, path: &str) -> Result<()> {
         let finalized = *self.is_finalized.read().unwrap();
         if !finalized {
-            return Err(YatagarasuError::InvalidOperation(
+            return Err(PlatypusError::InvalidOperation(
                 "Index must be finalized before writing".to_string(),
             ));
         }
 
         let builder = self.builder.read().unwrap();
         if !builder.has_storage() {
-            return Err(YatagarasuError::InvalidOperation(
+            return Err(PlatypusError::InvalidOperation(
                 "Index was not created with storage support".to_string(),
             ));
         }
@@ -250,7 +250,7 @@ impl ManagedVectorIndex {
     pub fn reader(&self) -> Result<Arc<dyn crate::vector::reader::VectorIndexReader>> {
         let finalized = *self.is_finalized.read().unwrap();
         if !finalized {
-            return Err(YatagarasuError::InvalidOperation(
+            return Err(PlatypusError::InvalidOperation(
                 "Index must be finalized before creating a reader".to_string(),
             ));
         }
@@ -259,7 +259,7 @@ impl ManagedVectorIndex {
         if self.storage.is_some() {
             // We need a path to load from - for now, we'll use a default
             // In a real implementation, this would be stored in the VectorIndex
-            return Err(YatagarasuError::InvalidOperation(
+            return Err(PlatypusError::InvalidOperation(
                 "Reader creation from storage not yet implemented. Use load() instead.".to_string(),
             ));
         }

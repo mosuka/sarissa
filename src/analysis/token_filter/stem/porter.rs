@@ -15,8 +15,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::token_filter::stem::Stemmer;
-//! use yatagarasu::analysis::token_filter::stem::porter::PorterStemmer;
+//! use platypus::analysis::token_filter::stem::Stemmer;
+//! use platypus::analysis::token_filter::stem::porter::PorterStemmer;
 //!
 //! let stemmer = PorterStemmer::new();
 //!

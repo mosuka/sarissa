@@ -3,6 +3,7 @@
 //! This module provides the `ResultMerger` for combining keyword and vector
 //! search results into unified hybrid search results.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::error::Result;
@@ -33,8 +34,8 @@ impl ResultMerger {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::hybrid::search::searcher::HybridSearchParams;
-    /// use yatagarasu::hybrid::search::merger::ResultMerger;
+    /// use platypus::hybrid::search::searcher::HybridSearchParams;
+    /// use platypus::hybrid::search::merger::ResultMerger;
     ///
     /// let config = HybridSearchParams::default();
     /// let merger = ResultMerger::new(config);
@@ -123,7 +124,7 @@ impl ResultMerger {
         results.sort_by(|a, b| {
             b.hybrid_score
                 .partial_cmp(&a.hybrid_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(Ordering::Equal)
         });
 
         // Limit results

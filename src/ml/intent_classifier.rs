@@ -15,9 +15,9 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use yatagarasu::ml::intent_classifier::types::IntentSample;
-//! use yatagarasu::ml::intent_classifier::core::new_ml_based;
-//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//! use platypus::ml::intent_classifier::types::IntentSample;
+//! use platypus::ml::intent_classifier::core::new_ml_based;
+//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -19,3 +19,6 @@ pub mod search;
 pub mod engine;
 pub mod reader;
 pub mod writer;
+
+pub use self::core::distance::DistanceMetric;
+pub use self::core::vector::Vector;

@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field::FieldValue;
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::boolean::BooleanQuery;
 use crate::lexical::index::inverted::query::collector::{
@@ -255,7 +255,7 @@ impl InvertedIndexSearcher {
 
         // Check if we exceeded timeout
         if start_time.elapsed() > timeout {
-            return Err(YatagarasuError::index("Search timeout exceeded"));
+            return Err(PlatypusError::index("Search timeout exceeded"));
         }
 
         // Load documents if requested

@@ -28,8 +28,8 @@
 //! Creating a document:
 //!
 //! ```
-//! use yatagarasu::document::document::Document;
-//! use yatagarasu::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
+//! use platypus::document::document::Document;
+//! use platypus::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
 //!
 //! let doc = Document::builder()
 //!     .add_text("title", "Rust Programming Guide", TextOption::default())
@@ -46,10 +46,10 @@
 //! Parsing documents for indexing:
 //!
 //! ```
-//! use yatagarasu::document::document::Document;
-//! use yatagarasu::document::parser::DocumentParser;
-//! use yatagarasu::document::field::TextOption;
-//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//! use platypus::document::document::Document;
+//! use platypus::document::parser::DocumentParser;
+//! use platypus::document::field::TextOption;
+//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));
@@ -64,8 +64,8 @@
 //! Converting files to documents:
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::csv::CsvDocumentConverter;
 //!
 //! let converter = CsvDocumentConverter::new();
 //! for doc in converter.convert("data.csv").unwrap() {

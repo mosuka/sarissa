@@ -1,4 +1,4 @@
-//! # Yatagarasu
+//! # Platypus
 //!
 //! A fast, featureful full-text search library for Rust, inspired by Whoosh.
 //!

@@ -1,4 +1,4 @@
-//! Text embedding trait for Yatagarasu's semantic search pipeline.
+//! Text embedding trait for Platypus's semantic search pipeline.
 
 use async_trait::async_trait;
 
@@ -8,7 +8,7 @@ use crate::vector::core::vector::Vector;
 /// Trait for converting text to vector embeddings.
 ///
 /// This trait provides a common interface for various embedding methods
-/// (local neural models, API-based services, etc.) to plug into Yatagarasu's
+/// (local neural models, API-based services, etc.) to plug into Platypus's
 /// vector and hybrid search layers.
 ///
 /// # Examples
@@ -18,10 +18,10 @@ use crate::vector::core::vector::Vector;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
-/// use yatagarasu::embedding::text_embedder::TextEmbedder;
-/// use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 ///
-/// # async fn example() -> yatagarasu::error::Result<()> {
+/// # async fn example() -> platypus::error::Result<()> {
 /// let embedder = CandleTextEmbedder::new(
 ///     "sentence-transformers/all-MiniLM-L6-v2"
 /// )?;
@@ -38,10 +38,10 @@ use crate::vector::core::vector::Vector;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-openai")]
 /// # {
-/// use yatagarasu::embedding::text_embedder::TextEmbedder;
-/// use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
+/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
 ///
-/// # async fn example() -> yatagarasu::error::Result<()> {
+/// # async fn example() -> platypus::error::Result<()> {
 /// let embedder = OpenAITextEmbedder::new(
 ///     "your-api-key".to_string(),
 ///     "text-embedding-3-small".to_string()
@@ -57,9 +57,9 @@ use crate::vector::core::vector::Vector;
 ///
 /// ```
 /// use async_trait::async_trait;
-/// use yatagarasu::embedding::text_embedder::TextEmbedder;
-/// use yatagarasu::error::Result;
-/// use yatagarasu::vector::core::vector::Vector;
+/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::error::Result;
+/// use platypus::vector::core::vector::Vector;
 ///
 /// struct MyCustomEmbedder {
 ///     dimension: usize,
