@@ -12,9 +12,11 @@ use std::sync::Arc;
 use crate::error::{Result, YatagarasuError};
 use crate::storage::Storage;
 use crate::vector::index::config::IvfIndexConfig;
+use crate::vector::index::ivf::searcher::IvfSearcher;
 use crate::vector::index::ivf::writer::IvfIndexWriter;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
+use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Metadata for the IVF index.
@@ -210,5 +212,12 @@ impl VectorIndex for IvfIndex {
         self.check_closed()?;
         self.update_metadata()?;
         Ok(())
+    }
+
+    fn searcher(&self) -> Result<Box<dyn VectorSearcher>> {
+        self.check_closed()?;
+        let reader = self.reader()?;
+        let searcher = IvfSearcher::new(reader)?;
+        Ok(Box::new(searcher))
     }
 }

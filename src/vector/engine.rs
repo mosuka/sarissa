@@ -6,16 +6,10 @@
 use std::cell::{RefCell, RefMut};
 use std::sync::Arc;
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::Result;
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
-use crate::vector::index::flat::reader::FlatVectorIndexReader;
-use crate::vector::index::flat::searcher::FlatVectorSearcher;
-use crate::vector::index::hnsw::reader::HnswIndexReader;
-use crate::vector::index::hnsw::searcher::HnswSearcher;
-use crate::vector::index::ivf::reader::IvfIndexReader;
-use crate::vector::index::ivf::searcher::IvfSearcher;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
@@ -181,29 +175,12 @@ impl VectorEngine {
 
     /// Get or create a searcher for this engine.
     ///
-    /// The searcher is created based on the reader type (Flat, HNSW, or IVF)
-    /// and cached for efficiency.
+    /// The searcher is created by the underlying index implementation.
     fn get_or_create_searcher(&self) -> Result<RefMut<'_, Box<dyn VectorSearcher>>> {
         {
             let mut searcher_ref = self.searcher.borrow_mut();
             if searcher_ref.is_none() {
-                let reader = self.get_or_create_reader()?;
-
-                // Try to downcast to specific reader types and create appropriate searcher
-                let searcher: Box<dyn VectorSearcher> =
-                    if reader.as_any().is::<FlatVectorIndexReader>() {
-                        Box::new(FlatVectorSearcher::new(reader.clone())?)
-                    } else if reader.as_any().is::<HnswIndexReader>() {
-                        Box::new(HnswSearcher::new(reader.clone())?)
-                    } else if reader.as_any().is::<IvfIndexReader>() {
-                        Box::new(IvfSearcher::new(reader.clone())?)
-                    } else {
-                        return Err(YatagarasuError::InvalidOperation(
-                            "Unknown vector index reader type".to_string(),
-                        ));
-                    };
-
-                *searcher_ref = Some(searcher);
+                *searcher_ref = Some(self.index.searcher()?);
             }
         }
 
@@ -485,13 +462,13 @@ impl VectorEngine {
 
     /// Get the dimension.
     pub fn dimension(&self) -> Result<usize> {
-        let reader = self.index.reader()?;
+        let reader = self.get_or_create_reader()?;
         Ok(reader.dimension())
     }
 
     /// Get the distance metric.
     pub fn distance_metric(&self) -> Result<DistanceMetric> {
-        let reader = self.index.reader()?;
+        let reader = self.get_or_create_reader()?;
         Ok(reader.distance_metric())
     }
 

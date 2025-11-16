@@ -15,6 +15,7 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 
@@ -58,6 +59,11 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     ///
     /// Performs index optimization such as merging segments to improve query performance.
     fn optimize(&mut self) -> Result<()>;
+
+    /// Create a searcher tailored for this index implementation.
+    ///
+    /// Returns a boxed [`LexicalSearcher`] capable of executing search/count operations.
+    fn searcher(&self) -> Result<Box<dyn LexicalSearcher>>;
 }
 
 pub mod config;

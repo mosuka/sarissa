@@ -21,6 +21,7 @@ use crate::error::{Result, YatagarasuError};
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::InvertedIndexConfig;
 use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 use crate::storage::file::{FileStorage, FileStorageConfig};
@@ -34,6 +35,7 @@ pub mod segment;
 pub mod writer;
 
 use self::reader::{InvertedIndexReader, InvertedIndexReaderConfig};
+use self::searcher::InvertedIndexSearcher;
 use self::segment::SegmentInfo;
 use self::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 
@@ -315,6 +317,12 @@ impl LexicalIndex for InvertedIndex {
         self.check_closed()?;
         self.update_metadata()?;
         Ok(())
+    }
+
+    fn searcher(&self) -> Result<Box<dyn LexicalSearcher>> {
+        self.check_closed()?;
+        let reader = self.reader()?;
+        Ok(Box::new(InvertedIndexSearcher::from_arc(reader)))
     }
 }
 

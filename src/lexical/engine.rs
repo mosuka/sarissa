@@ -56,12 +56,10 @@ use std::sync::Arc;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::document::document::Document;
-use crate::error::{Result, YatagarasuError};
+use crate::error::Result;
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::SearchResults;
-use crate::lexical::index::inverted::reader::InvertedIndexReader;
-use crate::lexical::index::inverted::searcher::InvertedIndexSearcher;
 use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::LexicalSearcher;
 use crate::lexical::search::searcher::{LexicalSearchQuery, LexicalSearchRequest};
@@ -227,26 +225,12 @@ impl LexicalEngine {
 
     /// Get or create a searcher for this engine.
     ///
-    /// The searcher is created from the index reader and cached for efficiency.
+    /// The searcher is provided by the underlying index implementation and cached for efficiency.
     fn get_or_create_searcher(&self) -> Result<RefMut<'_, Box<dyn LexicalSearcher>>> {
         {
             let mut searcher_ref = self.searcher.borrow_mut();
             if searcher_ref.is_none() {
-                // Get a fresh reader from the index
-                let reader = self.index.reader()?;
-
-                // Downcast to InvertedIndexReader and create appropriate searcher
-                let searcher: Box<dyn LexicalSearcher> = if let Some(inverted_reader) =
-                    reader.as_any().downcast_ref::<InvertedIndexReader>()
-                {
-                    Box::new(InvertedIndexSearcher::new(Box::new(
-                        inverted_reader.clone(),
-                    )))
-                } else {
-                    return Err(YatagarasuError::index("Unknown lexical index reader type"));
-                };
-
-                *searcher_ref = Some(searcher);
+                *searcher_ref = Some(self.index.searcher()?);
             }
         }
 
