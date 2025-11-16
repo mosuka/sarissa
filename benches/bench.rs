@@ -14,10 +14,11 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use yatagarasu::analysis::analyzer::analyzer::Analyzer;
 use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
 use yatagarasu::spelling::corrector::SpellingCorrector;
+use yatagarasu::vector::core::distance::DistanceMetric;
+use yatagarasu::vector::core::vector::Vector;
 use yatagarasu::vector::index::config::HnswIndexConfig;
 use yatagarasu::vector::index::hnsw::writer::HnswIndexWriter;
 use yatagarasu::vector::writer::VectorIndexWriter;
-use yatagarasu::vector::{DistanceMetric, Vector};
 
 /// Generate test documents for benchmarking.
 fn generate_test_documents(count: usize) -> Vec<String> {
