@@ -346,7 +346,7 @@ impl VectorIndexReaderFactory {
             "flat" => Ok(Arc::new(FlatVectorIndexReader::from_bytes(index_data)?)),
             "hnsw" => Ok(Arc::new(HnswIndexReader::from_bytes(index_data)?)),
             "ivf" => Ok(Arc::new(IvfIndexReader::from_bytes(index_data)?)),
-            _ => Err(crate::error::YatagarasuError::InvalidOperation(format!(
+            _ => Err(crate::error::PlatypusError::InvalidOperation(format!(
                 "Unknown index type: {index_type}"
             ))),
         }

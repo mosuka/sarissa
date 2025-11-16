@@ -14,22 +14,22 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
-use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::document::document::Document;
-use yatagarasu::document::field::{FloatOption, TextOption};
-use yatagarasu::error::Result;
-use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::InvertedIndexConfig;
-use yatagarasu::lexical::index::config::LexicalIndexConfig;
-use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
-use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::StorageConfig;
-use yatagarasu::storage::StorageFactory;
-use yatagarasu::storage::file::FileStorageConfig;
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::document::document::Document;
+use platypus::document::field::{FloatOption, TextOption};
+use platypus::error::Result;
+use platypus::lexical::engine::LexicalEngine;
+use platypus::lexical::index::config::InvertedIndexConfig;
+use platypus::lexical::index::config::LexicalIndexConfig;
+use platypus::lexical::index::factory::LexicalIndexFactory;
+use platypus::lexical::index::inverted::query::parser::QueryParser;
+use platypus::lexical::search::searcher::LexicalSearchRequest;
+use platypus::storage::StorageConfig;
+use platypus::storage::StorageFactory;
+use platypus::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== Query Parser - Complete Feature Demonstration ===\n");

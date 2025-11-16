@@ -14,23 +14,23 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
-use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::document::document::Document;
-use yatagarasu::document::field::TextOption;
-use yatagarasu::document::parser::DocumentParser;
-use yatagarasu::error::Result;
-use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::LexicalIndexConfig;
-use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::index::inverted::writer::{
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::document::document::Document;
+use platypus::document::field::TextOption;
+use platypus::document::parser::DocumentParser;
+use platypus::error::Result;
+use platypus::lexical::engine::LexicalEngine;
+use platypus::lexical::index::config::LexicalIndexConfig;
+use platypus::lexical::index::factory::LexicalIndexFactory;
+use platypus::lexical::index::inverted::writer::{
     InvertedIndexWriter, InvertedIndexWriterConfig,
 };
-use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorage;
-use yatagarasu::storage::file::FileStorageConfig;
+use platypus::lexical::search::searcher::LexicalSearchRequest;
+use platypus::storage::file::FileStorage;
+use platypus::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== Document Parser Example ===\n");
@@ -120,7 +120,7 @@ fn main() -> Result<()> {
     let query_str = "category:programming";
     println!("Query: {query_str}");
 
-    use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
+    use platypus::lexical::index::inverted::query::parser::QueryParser;
     let parser = QueryParser::new(analyzer.clone());
     let query = parser.parse(query_str)?;
 

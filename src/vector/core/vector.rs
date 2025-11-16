@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 
 /// A dense vector representation for similarity search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,7 +70,7 @@ impl Vector {
     /// Validate that this vector has the expected dimension.
     pub fn validate_dimension(&self, expected_dim: usize) -> Result<()> {
         if self.data.len() != expected_dim {
-            return Err(YatagarasuError::InvalidOperation(format!(
+            return Err(PlatypusError::InvalidOperation(format!(
                 "Vector dimension mismatch: expected {}, got {}",
                 expected_dim,
                 self.data.len()

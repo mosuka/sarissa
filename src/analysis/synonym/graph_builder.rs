@@ -59,8 +59,8 @@ impl SynonymGraphBuilder {
     ///
     /// # Example
     /// ```
-    /// use yatagarasu::analysis::synonym::dictionary::SynonymDictionary;
-    /// use yatagarasu::analysis::synonym::graph_builder::SynonymGraphBuilder;
+    /// use platypus::analysis::synonym::dictionary::SynonymDictionary;
+    /// use platypus::analysis::synonym::graph_builder::SynonymGraphBuilder;
     ///
     /// let mut dict = SynonymDictionary::new(None).unwrap();
     /// dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);

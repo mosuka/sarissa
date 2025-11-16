@@ -1,4 +1,4 @@
-//! Shared utility modules used across Yatagarasu components.
+//! Shared utility modules used across Platypus components.
 
 pub mod levenshtein;
 pub mod simd;

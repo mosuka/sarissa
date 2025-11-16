@@ -4,23 +4,23 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
-use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::document::document::Document;
-use yatagarasu::document::field::{FloatOption, IntegerOption, TextOption};
-use yatagarasu::error::Result;
-use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::InvertedIndexConfig;
-use yatagarasu::lexical::index::config::LexicalIndexConfig;
-use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::index::inverted::query::Query;
-use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
-use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::StorageConfig;
-use yatagarasu::storage::StorageFactory;
-use yatagarasu::storage::file::FileStorageConfig;
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::document::document::Document;
+use platypus::document::field::{FloatOption, IntegerOption, TextOption};
+use platypus::error::Result;
+use platypus::lexical::engine::LexicalEngine;
+use platypus::lexical::index::config::InvertedIndexConfig;
+use platypus::lexical::index::config::LexicalIndexConfig;
+use platypus::lexical::index::factory::LexicalIndexFactory;
+use platypus::lexical::index::inverted::query::Query;
+use platypus::lexical::index::inverted::query::range::NumericRangeQuery;
+use platypus::lexical::search::searcher::LexicalSearchRequest;
+use platypus::storage::StorageConfig;
+use platypus::storage::StorageFactory;
+use platypus::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== RangeQuery Example - Numeric and Date Range Search ===\n");
@@ -157,7 +157,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
+                && let platypus::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -185,7 +185,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("rating")
-                && let yatagarasu::document::field::FieldValue::Float(rating) = &field.value
+                && let platypus::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -213,7 +213,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("year")
-                && let yatagarasu::document::field::FieldValue::Integer(year) = &field.value
+                && let platypus::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -241,7 +241,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("pages")
-                && let yatagarasu::document::field::FieldValue::Integer(pages) = &field.value
+                && let platypus::document::field::FieldValue::Integer(pages) = &field.value
             {
                 println!("      Pages: {pages}");
             }
@@ -269,7 +269,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("year")
-                && let yatagarasu::document::field::FieldValue::Integer(year) = &field.value
+                && let platypus::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -297,7 +297,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
+                && let platypus::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -325,7 +325,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("pages")
-                && let yatagarasu::document::field::FieldValue::Integer(pages) = &field.value
+                && let platypus::document::field::FieldValue::Integer(pages) = &field.value
             {
                 println!("      Pages: {pages}");
             }

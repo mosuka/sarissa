@@ -14,8 +14,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-//! use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+//! use platypus::analysis::analyzer::analyzer::Analyzer;
+//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
 //!
 //! let analyzer = StandardAnalyzer::new().unwrap();
 //! let tokens: Vec<_> = analyzer.analyze("Hello the world and test").unwrap().collect();

@@ -7,8 +7,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::tokenizer::Tokenizer;
-//! use yatagarasu::analysis::tokenizer::ngram::NgramTokenizer;
+//! use platypus::analysis::tokenizer::Tokenizer;
+//! use platypus::analysis::tokenizer::ngram::NgramTokenizer;
 //!
 //! // Create a bigram tokenizer (n=2)
 //! let tokenizer = NgramTokenizer::bigram();
@@ -20,7 +20,7 @@
 
 use crate::analysis::token::{Token, TokenStream};
 use crate::analysis::tokenizer::Tokenizer;
-use crate::error::{Result, YatagarasuError};
+use crate::error::{PlatypusError, Result};
 
 /// A tokenizer that generates character n-grams.
 ///
@@ -37,8 +37,8 @@ use crate::error::{Result, YatagarasuError};
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::analysis::tokenizer::ngram::NgramTokenizer;
-/// use yatagarasu::analysis::tokenizer::Tokenizer;
+/// use platypus::analysis::tokenizer::ngram::NgramTokenizer;
+/// use platypus::analysis::tokenizer::Tokenizer;
 ///
 /// // Bigram (n=2)
 /// let tokenizer = NgramTokenizer::new(2, 2).unwrap();
@@ -84,12 +84,12 @@ impl NgramTokenizer {
     /// - `max_gram` is less than `min_gram`
     pub fn new(min_gram: usize, max_gram: usize) -> Result<Self> {
         if min_gram == 0 {
-            return Err(YatagarasuError::analysis(
+            return Err(PlatypusError::analysis(
                 "min_gram must be at least 1".to_string(),
             ));
         }
         if max_gram < min_gram {
-            return Err(YatagarasuError::analysis(format!(
+            return Err(PlatypusError::analysis(format!(
                 "max_gram ({}) must be >= min_gram ({})",
                 max_gram, min_gram
             )));

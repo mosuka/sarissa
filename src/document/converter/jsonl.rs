@@ -45,8 +45,8 @@
 //! Basic JSONL conversion:
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::jsonl::JsonlDocumentConverter;
 //!
 //! let converter = JsonlDocumentConverter::new();
 //!
@@ -59,8 +59,8 @@
 //! Collecting all documents:
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::jsonl::JsonlDocumentConverter;
 //!
 //! let converter = JsonlDocumentConverter::new();
 //! let documents: Vec<_> = converter
@@ -80,7 +80,7 @@ use std::sync::Arc;
 use crate::document::converter::DocumentConverter;
 use crate::document::document::Document;
 use crate::document::field::FieldValue;
-use crate::error::{Result, YatagarasuError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document converter for JSONL format.
@@ -122,7 +122,7 @@ impl JsonlDocumentConverter {
         use serde_json::Value;
 
         let value: Value = serde_json::from_str(line)
-            .map_err(|e| YatagarasuError::parse(format!("Failed to parse JSON: {e}")))?;
+            .map_err(|e| PlatypusError::parse(format!("Failed to parse JSON: {e}")))?;
 
         let mut doc = Document::new();
 
@@ -194,7 +194,7 @@ impl Iterator for JsonlDocumentIterator {
                     return Some(self.converter.parse_json_line(line));
                 }
                 Err(e) => {
-                    return Some(Err(YatagarasuError::parse(format!(
+                    return Some(Err(PlatypusError::parse(format!(
                         "Failed to read line: {}",
                         e
                     ))));
@@ -209,7 +209,7 @@ impl DocumentConverter for JsonlDocumentConverter {
 
     fn convert<P: AsRef<Path>>(&self, path: P) -> Result<Self::Iter> {
         let file = File::open(path.as_ref())
-            .map_err(|e| YatagarasuError::parse(format!("Failed to open JSONL file: {}", e)))?;
+            .map_err(|e| PlatypusError::parse(format!("Failed to open JSONL file: {}", e)))?;
 
         Ok(JsonlDocumentIterator {
             reader: BufReader::new(file),

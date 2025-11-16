@@ -9,7 +9,7 @@ pub mod writer;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::storage::Storage;
 use crate::vector::index::config::HnswIndexConfig;
 use crate::vector::index::hnsw::searcher::HnswSearcher;
@@ -85,7 +85,7 @@ impl HnswIndex {
     /// Open an existing HNSW index from storage.
     pub fn open(storage: Arc<dyn Storage>, config: HnswIndexConfig) -> Result<Self> {
         if !storage.file_exists("metadata.json") {
-            return Err(YatagarasuError::index("Index does not exist"));
+            return Err(PlatypusError::index("Index does not exist"));
         }
 
         let metadata = Self::read_metadata(storage.as_ref())?;
@@ -119,7 +119,7 @@ impl HnswIndex {
     /// Write metadata to storage.
     fn write_metadata(&self) -> Result<()> {
         let metadata_json = serde_json::to_string_pretty(&self.metadata)
-            .map_err(|e| YatagarasuError::index(format!("Failed to serialize metadata: {e}")))?;
+            .map_err(|e| PlatypusError::index(format!("Failed to serialize metadata: {e}")))?;
 
         let mut output = self.storage.create_output("metadata.json")?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
@@ -132,7 +132,7 @@ impl HnswIndex {
     fn read_metadata(storage: &dyn Storage) -> Result<IndexMetadata> {
         let input = storage.open_input("metadata.json")?;
         let metadata: IndexMetadata = serde_json::from_reader(input)
-            .map_err(|e| YatagarasuError::index(format!("Failed to deserialize metadata: {e}")))?;
+            .map_err(|e| PlatypusError::index(format!("Failed to deserialize metadata: {e}")))?;
         Ok(metadata)
     }
 
@@ -148,7 +148,7 @@ impl HnswIndex {
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            return Err(YatagarasuError::InvalidOperation(
+            return Err(PlatypusError::InvalidOperation(
                 "Index is closed".to_string(),
             ));
         }

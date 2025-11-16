@@ -6,9 +6,9 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::token_filter::Filter;
-//! use yatagarasu::analysis::token_filter::strip::StripFilter;
-//! use yatagarasu::analysis::token::Token;
+//! use platypus::analysis::token_filter::Filter;
+//! use platypus::analysis::token_filter::strip::StripFilter;
+//! use platypus::analysis::token::Token;
 //!
 //! let filter = StripFilter::new();
 //! let tokens = vec![Token::new("  hello  ", 0), Token::new("world", 1)];
@@ -39,9 +39,9 @@ use crate::error::Result;
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::analysis::token_filter::Filter;
-/// use yatagarasu::analysis::token_filter::strip::StripFilter;
-/// use yatagarasu::analysis::token::Token;
+/// use platypus::analysis::token_filter::Filter;
+/// use platypus::analysis::token_filter::strip::StripFilter;
+/// use platypus::analysis::token::Token;
 ///
 /// let filter = StripFilter::new();
 /// let tokens = vec![

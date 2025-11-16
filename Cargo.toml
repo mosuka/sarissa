@@ -1,11 +1,10 @@
 [package]
-name = "yatagarasu"
+name = "platypus"
 version = "0.1.0"
 edition = "2024"
 description = "A fast, featureful full-text search library for Rust"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/mosuka/yatagarasu"
-
+repository = "https://github.com/mosuka/platypus"
 
 [dependencies]
 ahash = "0.8.12"
@@ -28,7 +27,7 @@ lindera = { version = "1.4.1", features = [
     "embedded-cc-cedict",
 ] }
 log = "0.4.28"
-memmap2 = "0.9.8"
+memmap2 = "0.9.9"
 num_cpus = "1.17.0"
 parking_lot = "0.12.5"
 pest = "2.8.3"
@@ -38,13 +37,13 @@ rayon = "1.11.0"
 regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-smartcore = "0.4.5"
+smartcore = "0.4.6"
 thiserror = "2.0.17"
 tokio = { version = "1.48.0", features = ["full"] }
 unicode-segmentation = "1.12.0"
 unicode-normalization = "0.1.25"
 uuid = { version = "1.18.1", features = ["v4"] }
-wide = "0.8.1"
+wide = "0.8.3"
 
 # Optional embedding dependencies
 candle-core = { version = "0.9.1", optional = true }
@@ -53,7 +52,7 @@ candle-transformers = { version = "0.9.1", optional = true }
 hf-hub = { version = "0.4.3", optional = true }
 tokenizers = { version = "0.22.1", optional = true }
 reqwest = { version = "0.12.24", features = ["json"], optional = true }
-image = { version = "0.25.8", optional = true }
+image = { version = "0.25.9", optional = true }
 
 [features]
 default = []

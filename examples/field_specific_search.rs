@@ -4,20 +4,20 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
-use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::document::document::Document;
-use yatagarasu::document::field::{IntegerOption, TextOption};
-use yatagarasu::error::Result;
-use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorageConfig;
-use yatagarasu::storage::{StorageConfig, StorageFactory};
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::document::document::Document;
+use platypus::document::field::{IntegerOption, TextOption};
+use platypus::error::Result;
+use platypus::lexical::engine::LexicalEngine;
+use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use platypus::lexical::index::factory::LexicalIndexFactory;
+use platypus::lexical::index::inverted::query::term::TermQuery;
+use platypus::lexical::search::searcher::LexicalSearchRequest;
+use platypus::storage::file::FileStorageConfig;
+use platypus::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== Field-Specific Search Example ===\n");
@@ -131,7 +131,7 @@ fn main() -> Result<()> {
     // Example 2: Search by author with document loading
     println!("\n2. Search by author with document details (author:Orwell):");
     let request = LexicalSearchRequest::new(Box::new(TermQuery::new("author", "orwell"))
-        as Box<dyn yatagarasu::lexical::index::inverted::query::Query>)
+        as Box<dyn platypus::lexical::index::inverted::query::Query>)
     .load_documents(true);
     let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
@@ -154,7 +154,7 @@ fn main() -> Result<()> {
                 println!("      Category: {category}");
             }
             if let Some(field) = doc.get_field("year")
-                && let yatagarasu::document::field::FieldValue::Integer(year) = &field.value
+                && let platypus::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -178,7 +178,7 @@ fn main() -> Result<()> {
     // Example 4: Search in tags field
     println!("\n4. Search in tags field (tags:british):");
     let request = LexicalSearchRequest::new(Box::new(TermQuery::new("tags", "british"))
-        as Box<dyn yatagarasu::lexical::index::inverted::query::Query>)
+        as Box<dyn platypus::lexical::index::inverted::query::Query>)
     .load_documents(true);
     let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);

@@ -33,7 +33,7 @@ use crate::analysis::analyzer::standard::StandardAnalyzer;
 /// # Example
 ///
 /// ```no_run
-/// use yatagarasu::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
+/// use platypus::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
 ///
 /// // Use default inverted index
 /// let config = LexicalIndexConfig::default();

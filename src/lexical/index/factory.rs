@@ -22,12 +22,12 @@ use crate::storage::Storage;
 /// # Example with StorageFactory
 ///
 /// ```
-/// use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-/// use yatagarasu::storage::{StorageFactory, StorageConfig};
-/// use yatagarasu::storage::memory::MemoryStorageConfig;
+/// use platypus::lexical::index::config::LexicalIndexConfig;
+/// use platypus::lexical::index::factory::LexicalIndexFactory;
+/// use platypus::storage::{StorageFactory, StorageConfig};
+/// use platypus::storage::memory::MemoryStorageConfig;
 ///
-/// # fn main() -> yatagarasu::error::Result<()> {
+/// # fn main() -> platypus::error::Result<()> {
 /// // Create storage using factory
 /// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
 ///
@@ -55,12 +55,12 @@ impl LexicalIndexFactory {
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// use yatagarasu::storage::{StorageFactory, StorageConfig};
-    /// use yatagarasu::storage::file::FileStorageConfig;
+    /// use platypus::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// use platypus::storage::{StorageFactory, StorageConfig};
+    /// use platypus::storage::file::FileStorageConfig;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// // Create file storage
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
     /// let storage = StorageFactory::create(storage_config)?;
@@ -97,12 +97,12 @@ impl LexicalIndexFactory {
     /// # Example
     ///
     /// ```no_run
-    /// use yatagarasu::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// use yatagarasu::storage::file::{FileStorage, FileStorageConfig};
+    /// use platypus::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// use platypus::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
     /// let config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
     /// let index = LexicalIndexFactory::open(storage, config)?;

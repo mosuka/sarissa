@@ -14,7 +14,7 @@ use crate::analysis::token::Token;
 use crate::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
 use crate::document::document::Document;
 use crate::document::field::FieldValue;
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
 use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};
@@ -228,13 +228,13 @@ impl InvertedIndexWriter {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::document::parser::DocumentParser;
-    /// use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-    /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-    /// use yatagarasu::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
-    /// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use yatagarasu::storage::StorageConfig;
+    /// use platypus::document::document::Document;
+    /// use platypus::document::parser::DocumentParser;
+    /// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
+    /// use platypus::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
+    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use platypus::storage::StorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
@@ -245,7 +245,7 @@ impl InvertedIndexWriter {
     /// };
     /// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
     ///
-    /// use yatagarasu::document::field::TextOption;
+    /// use platypus::document::field::TextOption;
     /// let doc = Document::builder()
     ///     .add_text("title", "Rust Programming", TextOption::default())
     ///     .build();
@@ -741,7 +741,7 @@ impl InvertedIndexWriter {
         let json_file = format!("{segment_name}.json");
         let mut output = self.storage.create_output(&json_file)?;
         let segment_data = serde_json::to_string_pretty(&documents)
-            .map_err(|e| YatagarasuError::index(format!("Failed to serialize segment: {e}")))?;
+            .map_err(|e| PlatypusError::index(format!("Failed to serialize segment: {e}")))?;
         std::io::Write::write_all(&mut output, segment_data.as_bytes())?;
         output.close()?;
 
@@ -764,7 +764,7 @@ impl InvertedIndexWriter {
         // Write as JSON for compatibility with InvertedIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
         let json_data = serde_json::to_string_pretty(&segment_info).map_err(|e| {
-            YatagarasuError::index(format!("Failed to serialize segment metadata: {e}"))
+            PlatypusError::index(format!("Failed to serialize segment metadata: {e}"))
         })?;
 
         let mut output = self.storage.create_output(&meta_file)?;
@@ -837,7 +837,7 @@ impl InvertedIndexWriter {
     /// Check if the writer is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            Err(YatagarasuError::index("Writer is closed"))
+            Err(PlatypusError::index("Writer is closed"))
         } else {
             Ok(())
         }

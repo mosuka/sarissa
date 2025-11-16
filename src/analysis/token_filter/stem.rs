@@ -12,9 +12,9 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::token_filter::Filter;
-//! use yatagarasu::analysis::token_filter::stem::StemFilter;
-//! use yatagarasu::analysis::token::Token;
+//! use platypus::analysis::token_filter::Filter;
+//! use platypus::analysis::token_filter::stem::StemFilter;
+//! use platypus::analysis::token::Token;
 //!
 //! let filter = StemFilter::new(); // Uses Porter stemmer by default
 //! let tokens = vec![

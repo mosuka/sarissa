@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::InvertedIndexConfig;
 use crate::lexical::reader::LexicalIndexReader;
@@ -132,7 +132,7 @@ impl InvertedIndex {
     /// Open an existing index from storage.
     pub fn open(storage: Arc<dyn Storage>, config: InvertedIndexConfig) -> Result<Self> {
         if !storage.file_exists("metadata.json") {
-            return Err(YatagarasuError::index("Index does not exist"));
+            return Err(PlatypusError::index("Index does not exist"));
         }
 
         let metadata = Self::read_metadata(storage.as_ref())?;
@@ -162,7 +162,7 @@ impl InvertedIndex {
     /// Write metadata to storage.
     fn write_metadata(&self) -> Result<()> {
         let metadata_json = serde_json::to_string_pretty(&self.metadata)
-            .map_err(|e| YatagarasuError::index(format!("Failed to serialize metadata: {e}")))?;
+            .map_err(|e| PlatypusError::index(format!("Failed to serialize metadata: {e}")))?;
 
         let mut output = self.storage.create_output("metadata.json")?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
@@ -178,7 +178,7 @@ impl InvertedIndex {
         Read::read_to_string(&mut input, &mut metadata_json)?;
 
         let metadata: IndexMetadata = serde_json::from_str(&metadata_json)
-            .map_err(|e| YatagarasuError::index(format!("Failed to deserialize metadata: {e}")))?;
+            .map_err(|e| PlatypusError::index(format!("Failed to deserialize metadata: {e}")))?;
 
         Ok(metadata)
     }
@@ -203,7 +203,7 @@ impl InvertedIndex {
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            Err(YatagarasuError::index("Index is closed"))
+            Err(PlatypusError::index("Index is closed"))
         } else {
             Ok(())
         }
@@ -221,7 +221,7 @@ impl InvertedIndex {
                 Read::read_to_end(&mut input, &mut data)?;
 
                 let segment_info: SegmentInfo = serde_json::from_slice(&data).map_err(|e| {
-                    YatagarasuError::index(format!("Failed to parse segment metadata: {e}"))
+                    PlatypusError::index(format!("Failed to parse segment metadata: {e}"))
                 })?;
 
                 segments.push(segment_info);

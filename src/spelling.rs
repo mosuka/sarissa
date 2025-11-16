@@ -1,4 +1,4 @@
-//! Spelling correction and suggestion utilities for Yatagarasu.
+//! Spelling correction and suggestion utilities for Platypus.
 //!
 //! This module powers typo tolerance across the lexical pipeline by providing
 //! dictionary builders, edit-distance based correction, and "Did you mean?"

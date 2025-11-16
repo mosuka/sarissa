@@ -15,10 +15,10 @@ use crate::error::Result;
 /// # Example
 ///
 /// ```rust,no_run
-/// use yatagarasu::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
-/// use yatagarasu::lexical::writer::LexicalIndexWriter;
-/// use yatagarasu::storage::memory::{MemoryStorage, MemoryStorageConfig};
-/// use yatagarasu::storage::StorageConfig;
+/// use platypus::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
+/// use platypus::lexical::writer::LexicalIndexWriter;
+/// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+/// use platypus::storage::StorageConfig;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

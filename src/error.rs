@@ -1,17 +1,17 @@
-//! Error types for the Yatagarasu library.
+//! Error types for the Platypus library.
 //!
-//! This module provides comprehensive error handling for all Yatagarasu operations.
-//! All errors are represented by the [`YatagarasuError`] enum, which provides
+//! This module provides comprehensive error handling for all Platypus operations.
+//! All errors are represented by the [`PlatypusError`] enum, which provides
 //! detailed information about what went wrong.
 //!
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::error::{YatagarasuError, Result};
+//! use platypus::error::{PlatypusError, Result};
 //!
 //! fn example_operation() -> Result<()> {
 //!     // Return an error
-//!     Err(YatagarasuError::invalid_argument("Invalid input"))
+//!     Err(PlatypusError::invalid_argument("Invalid input"))
 //! }
 //!
 //! match example_operation() {
@@ -25,13 +25,13 @@ use std::io;
 use anyhow;
 use thiserror::Error;
 
-/// The main error type for Yatagarasu operations.
+/// The main error type for Platypus operations.
 ///
-/// This enum represents all possible errors that can occur in the Yatagarasu library.
+/// This enum represents all possible errors that can occur in the Platypus library.
 /// It uses the `thiserror` crate for automatic `Error` trait implementation and
 /// provides convenient constructor methods for creating specific error types.
 #[derive(Error, Debug)]
-pub enum YatagarasuError {
+pub enum PlatypusError {
     /// I/O errors (file operations, network, etc.)
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
@@ -105,89 +105,89 @@ pub enum YatagarasuError {
     ML(String),
 }
 
-/// Result type alias for operations that may fail with YatagarasuError.
-pub type Result<T> = std::result::Result<T, YatagarasuError>;
+/// Result type alias for operations that may fail with PlatypusError.
+pub type Result<T> = std::result::Result<T, PlatypusError>;
 
-/// Implement `From<MLError>` for YatagarasuError
-impl From<crate::ml::MLError> for YatagarasuError {
+/// Implement `From<MLError>` for PlatypusError
+impl From<crate::ml::MLError> for PlatypusError {
     fn from(err: crate::ml::MLError) -> Self {
-        YatagarasuError::ML(err.to_string())
+        PlatypusError::ML(err.to_string())
     }
 }
-impl YatagarasuError {
+impl PlatypusError {
     /// Create a new index error.
     pub fn index<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Index(msg.into())
+        PlatypusError::Index(msg.into())
     }
 
     /// Create a new schema error.
     pub fn schema<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Schema(msg.into())
+        PlatypusError::Schema(msg.into())
     }
 
     /// Create a new analysis error.
     pub fn analysis<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Analysis(msg.into())
+        PlatypusError::Analysis(msg.into())
     }
 
     /// Create a new query error.
     pub fn query<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Query(msg.into())
+        PlatypusError::Query(msg.into())
     }
 
     /// Create a new parse error.
     pub fn parse<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Query(msg.into()) // Parse errors are treated as query errors
+        PlatypusError::Query(msg.into()) // Parse errors are treated as query errors
     }
 
     /// Create a new storage error.
     pub fn storage<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Storage(msg.into())
+        PlatypusError::Storage(msg.into())
     }
 
     /// Create a new field error.
     pub fn field<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Field(msg.into())
+        PlatypusError::Field(msg.into())
     }
 
     /// Create a new ML error.
     pub fn ml<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::ML(msg.into())
+        PlatypusError::ML(msg.into())
     }
 
     /// Create a new generic error.
     pub fn other<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Other(msg.into())
+        PlatypusError::Other(msg.into())
     }
 
     /// Create a new timeout error.
     pub fn timeout<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Other(format!("Timeout: {}", msg.into()))
+        PlatypusError::Other(format!("Timeout: {}", msg.into()))
     }
 
     /// Create a new invalid config error.
     pub fn invalid_config<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Other(format!("Invalid configuration: {}", msg.into()))
+        PlatypusError::Other(format!("Invalid configuration: {}", msg.into()))
     }
 
     /// Create a new invalid argument error.
     pub fn invalid_argument<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Other(format!("Invalid argument: {}", msg.into()))
+        PlatypusError::Other(format!("Invalid argument: {}", msg.into()))
     }
 
     /// Create a new internal error.
     pub fn internal<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Other(format!("Internal error: {}", msg.into()))
+        PlatypusError::Other(format!("Internal error: {}", msg.into()))
     }
 
     /// Create a new not found error.
     pub fn not_found<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::Other(format!("Not found: {}", msg.into()))
+        PlatypusError::Other(format!("Not found: {}", msg.into()))
     }
 
     /// Create a new cancelled error.
     pub fn cancelled<S: Into<String>>(msg: S) -> Self {
-        YatagarasuError::OperationCancelled(msg.into())
+        PlatypusError::OperationCancelled(msg.into())
     }
 }
 
@@ -197,23 +197,23 @@ mod tests {
 
     #[test]
     fn test_error_construction() {
-        let error = YatagarasuError::index("Test index error");
+        let error = PlatypusError::index("Test index error");
         assert_eq!(error.to_string(), "Index error: Test index error");
 
-        let error = YatagarasuError::schema("Test schema error");
+        let error = PlatypusError::schema("Test schema error");
         assert_eq!(error.to_string(), "Schema error: Test schema error");
 
-        let error = YatagarasuError::analysis("Test analysis error");
+        let error = PlatypusError::analysis("Test analysis error");
         assert_eq!(error.to_string(), "Analysis error: Test analysis error");
     }
 
     #[test]
     fn test_io_error_conversion() {
         let io_error = io::Error::new(io::ErrorKind::NotFound, "File not found");
-        let yatagarasu_error = YatagarasuError::from(io_error);
+        let platypus_error = PlatypusError::from(io_error);
 
-        match yatagarasu_error {
-            YatagarasuError::Io(_) => {} // Expected
+        match platypus_error {
+            PlatypusError::Io(_) => {} // Expected
             _ => panic!("Expected IO error variant"),
         }
     }

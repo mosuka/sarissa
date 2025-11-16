@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use ahash::AHashMap;
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{StorageInput, StorageOutput};
 
@@ -152,14 +152,14 @@ impl SortedTermDictionary {
         let magic = reader.read_u32()?;
         if magic != 0x53544443 {
             // "STDC"
-            return Err(YatagarasuError::index(
+            return Err(PlatypusError::index(
                 "Invalid sorted dictionary magic number",
             ));
         }
 
         let version = reader.read_u32()?;
         if version != 1 {
-            return Err(YatagarasuError::index(format!(
+            return Err(PlatypusError::index(format!(
                 "Unsupported sorted dictionary version: {version}"
             )));
         }
@@ -288,7 +288,7 @@ impl HashTermDictionary {
         let magic = reader.read_u32()?;
         if magic != 0x48544443 {
             // "HTDC"
-            return Err(YatagarasuError::index(
+            return Err(PlatypusError::index(
                 "Invalid hash dictionary magic number",
             ));
         }
@@ -296,7 +296,7 @@ impl HashTermDictionary {
         // Read version
         let version = reader.read_u32()?;
         if version != 1 {
-            return Err(YatagarasuError::index(format!(
+            return Err(PlatypusError::index(format!(
                 "Unsupported hash dictionary version: {version}"
             )));
         }

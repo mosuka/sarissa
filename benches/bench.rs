@@ -1,4 +1,4 @@
-//! Criterion benchmarks for the Yatagarasu search engine.
+//! Criterion benchmarks for the Platypus search engine.
 //!
 //! This suite measures hotspots across analysis, lexical, and vector subsystems
 //! so regressions can be caught before release. Covered areas include:
@@ -11,14 +11,14 @@ use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::spelling::corrector::SpellingCorrector;
-use yatagarasu::vector::core::distance::DistanceMetric;
-use yatagarasu::vector::core::vector::Vector;
-use yatagarasu::vector::index::config::HnswIndexConfig;
-use yatagarasu::vector::index::hnsw::writer::HnswIndexWriter;
-use yatagarasu::vector::writer::VectorIndexWriter;
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::spelling::corrector::SpellingCorrector;
+use platypus::vector::core::distance::DistanceMetric;
+use platypus::vector::core::vector::Vector;
+use platypus::vector::index::config::HnswIndexConfig;
+use platypus::vector::index::hnsw::writer::HnswIndexWriter;
+use platypus::vector::writer::VectorIndexWriter;
 
 /// Generate test documents for benchmarking.
 fn generate_test_documents(count: usize) -> Vec<String> {
@@ -139,7 +139,7 @@ fn bench_vector_search(c: &mut Criterion) {
                     ef_construction: 200,
                     ..Default::default()
                 };
-                let writer_config = yatagarasu::vector::writer::VectorIndexWriterConfig::default();
+                let writer_config = platypus::vector::writer::VectorIndexWriterConfig::default();
                 HnswIndexWriter::new(index_config, writer_config).unwrap()
             },
             |mut builder| {
@@ -337,7 +337,7 @@ fn bench_scalability(c: &mut Criterion) {
                             ..Default::default()
                         };
                         let writer_config =
-                            yatagarasu::vector::writer::VectorIndexWriterConfig::default();
+                            platypus::vector::writer::VectorIndexWriterConfig::default();
                         HnswIndexWriter::new(index_config, writer_config).unwrap()
                     },
                     |mut builder| {
@@ -415,8 +415,8 @@ fn bench_synonym_dictionary(c: &mut Criterion) {
 /// Create a test dictionary with specified number of synonym groups.
 fn create_test_dictionary(
     num_groups: usize,
-) -> yatagarasu::analysis::synonym::dictionary::SynonymDictionary {
-    use yatagarasu::analysis::synonym::dictionary::SynonymDictionary;
+) -> platypus::analysis::synonym::dictionary::SynonymDictionary {
+    use platypus::analysis::synonym::dictionary::SynonymDictionary;
 
     let mut groups = Vec::new();
     for i in 0..num_groups {

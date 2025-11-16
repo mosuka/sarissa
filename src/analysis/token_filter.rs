@@ -19,9 +19,9 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::token_filter::Filter;
-//! use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
-//! use yatagarasu::analysis::token::Token;
+//! use platypus::analysis::token_filter::Filter;
+//! use platypus::analysis::token_filter::lowercase::LowercaseFilter;
+//! use platypus::analysis::token::Token;
 //!
 //! let filter = LowercaseFilter::new();
 //! let tokens = vec![Token::new("Hello", 0), Token::new("WORLD", 1)];
@@ -58,9 +58,9 @@ use crate::error::Result;
 /// Implementing a custom filter:
 ///
 /// ```
-/// use yatagarasu::analysis::token::{Token, TokenStream};
-/// use yatagarasu::analysis::token_filter::Filter;
-/// use yatagarasu::error::Result;
+/// use platypus::analysis::token::{Token, TokenStream};
+/// use platypus::analysis::token_filter::Filter;
+/// use platypus::error::Result;
 ///
 /// struct ReverseFilter;
 ///
@@ -94,9 +94,9 @@ pub trait Filter: Send + Sync {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::analysis::token_filter::Filter;
-    /// use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
-    /// use yatagarasu::analysis::token::Token;
+    /// use platypus::analysis::token_filter::Filter;
+    /// use platypus::analysis::token_filter::lowercase::LowercaseFilter;
+    /// use platypus::analysis::token::Token;
     ///
     /// let filter = LowercaseFilter::new();
     /// let tokens = vec![Token::new("HELLO", 0)];
@@ -116,8 +116,8 @@ pub trait Filter: Send + Sync {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::analysis::token_filter::Filter;
-    /// use yatagarasu::analysis::token_filter::lowercase::LowercaseFilter;
+    /// use platypus::analysis::token_filter::Filter;
+    /// use platypus::analysis::token_filter::lowercase::LowercaseFilter;
     ///
     /// let filter = LowercaseFilter::new();
     /// assert_eq!(filter.name(), "lowercase");

@@ -24,12 +24,12 @@ use crate::vector::index::ivf::IvfIndex;
 /// # Example with StorageFactory
 ///
 /// ```
-/// use yatagarasu::vector::index::factory::VectorIndexFactory;
-/// use yatagarasu::vector::index::config::VectorIndexConfig;
-/// use yatagarasu::storage::{StorageFactory, StorageConfig};
-/// use yatagarasu::storage::memory::MemoryStorageConfig;
+/// use platypus::vector::index::factory::VectorIndexFactory;
+/// use platypus::vector::index::config::VectorIndexConfig;
+/// use platypus::storage::{StorageFactory, StorageConfig};
+/// use platypus::storage::memory::MemoryStorageConfig;
 ///
-/// # fn main() -> yatagarasu::error::Result<()> {
+/// # fn main() -> platypus::error::Result<()> {
 /// // Create storage using factory
 /// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
 ///
@@ -57,12 +57,12 @@ impl VectorIndexFactory {
     /// # Example
     ///
     /// ```
-    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
-    /// use yatagarasu::storage::{StorageFactory, StorageConfig};
-    /// use yatagarasu::storage::file::FileStorageConfig;
+    /// use platypus::vector::index::factory::VectorIndexFactory;
+    /// use platypus::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
+    /// use platypus::storage::{StorageFactory, StorageConfig};
+    /// use platypus::storage::file::FileStorageConfig;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// // Create file storage
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
     /// let storage = StorageFactory::create(storage_config)?;
@@ -107,12 +107,12 @@ impl VectorIndexFactory {
     /// # Example
     ///
     /// ```no_run
-    /// use yatagarasu::vector::index::factory::VectorIndexFactory;
-    /// use yatagarasu::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
-    /// use yatagarasu::storage::file::{FileStorage, FileStorageConfig};
+    /// use platypus::vector::index::factory::VectorIndexFactory;
+    /// use platypus::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
+    /// use platypus::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> yatagarasu::error::Result<()> {
+    /// # fn main() -> platypus::error::Result<()> {
     /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
     /// let config = VectorIndexConfig::Flat(FlatIndexConfig::default());
     /// let index = VectorIndexFactory::open(storage, config)?;

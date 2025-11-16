@@ -16,15 +16,15 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use yatagarasu::document::document::Document;
-//! use yatagarasu::document::field::TextOption;
-//! use yatagarasu::lexical::engine::LexicalEngine;
-//! use yatagarasu::lexical::index::config::LexicalIndexConfig;
-//! use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-//! use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-//! use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-//! use yatagarasu::storage::{StorageConfig, StorageFactory};
-//! use yatagarasu::storage::memory::MemoryStorageConfig;
+//! use platypus::document::document::Document;
+//! use platypus::document::field::TextOption;
+//! use platypus::lexical::engine::LexicalEngine;
+//! use platypus::lexical::index::config::LexicalIndexConfig;
+//! use platypus::lexical::index::factory::LexicalIndexFactory;
+//! use platypus::lexical::search::searcher::LexicalSearchRequest;
+//! use platypus::lexical::index::inverted::query::term::TermQuery;
+//! use platypus::storage::{StorageConfig, StorageFactory};
+//! use platypus::storage::memory::MemoryStorageConfig;
 //! use std::sync::Arc;
 //!
 //! // Create storage using factory
@@ -88,14 +88,14 @@ use crate::storage::Storage;
 /// # Usage Example
 ///
 /// ```rust,no_run
-/// use yatagarasu::document::document::Document;
-/// use yatagarasu::lexical::engine::LexicalEngine;
-/// use yatagarasu::lexical::index::config::LexicalIndexConfig;
-/// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-/// use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-/// use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-/// use yatagarasu::storage::{StorageConfig, StorageFactory};
-/// use yatagarasu::storage::memory::MemoryStorageConfig;
+/// use platypus::document::document::Document;
+/// use platypus::lexical::engine::LexicalEngine;
+/// use platypus::lexical::index::config::LexicalIndexConfig;
+/// use platypus::lexical::index::factory::LexicalIndexFactory;
+/// use platypus::lexical::search::searcher::LexicalSearchRequest;
+/// use platypus::lexical::index::inverted::query::term::TermQuery;
+/// use platypus::storage::{StorageConfig, StorageFactory};
+/// use platypus::storage::memory::MemoryStorageConfig;
 /// use std::sync::Arc;
 ///
 /// // Setup
@@ -105,7 +105,7 @@ use crate::storage::Storage;
 /// let mut engine = LexicalEngine::new(index).unwrap();
 ///
 /// // Add documents
-/// use yatagarasu::document::field::TextOption;
+/// use platypus::document::field::TextOption;
 /// let doc = Document::builder()
 ///     .add_text("title", "Rust Programming", TextOption::default())
 ///     .build();
@@ -155,11 +155,11 @@ impl LexicalEngine {
     /// # Example with Memory Storage
     ///
     /// ```rust,no_run
-    /// use yatagarasu::lexical::engine::LexicalEngine;
-    /// use yatagarasu::lexical::index::config::LexicalIndexConfig;
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// use platypus::lexical::engine::LexicalEngine;
+    /// use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::memory::MemoryStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
@@ -171,11 +171,11 @@ impl LexicalEngine {
     /// # Example with File Storage
     ///
     /// ```rust,no_run
-    /// use yatagarasu::lexical::engine::LexicalEngine;
-    /// use yatagarasu::lexical::index::config::LexicalIndexConfig;
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::file::FileStorageConfig;
+    /// use platypus::lexical::engine::LexicalEngine;
+    /// use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::file::FileStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
@@ -260,19 +260,19 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use yatagarasu::document::document::Document;
-    /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// use platypus::document::document::Document;
+    /// # use platypus::lexical::engine::LexicalEngine;
+    /// # use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// # use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
-    /// use yatagarasu::document::field::TextOption;
+    /// use platypus::document::field::TextOption;
     /// let doc = Document::builder()
     ///     .add_text("title", "Hello World", TextOption::default())
     ///     .add_text("body", "This is a test", TextOption::default())
@@ -346,12 +346,12 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use yatagarasu::document::document::Document;
-    /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// use platypus::document::document::Document;
+    /// # use platypus::lexical::engine::LexicalEngine;
+    /// # use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// # use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
@@ -359,7 +359,7 @@ impl LexicalEngine {
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
     /// // Add multiple documents
-    /// use yatagarasu::document::field::TextOption;
+    /// use platypus::document::field::TextOption;
     /// for i in 0..10 {
     ///     let doc = Document::builder()
     ///         .add_text("id", &i.to_string(), TextOption::default())
@@ -403,12 +403,12 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use yatagarasu::document::document::Document;
-    /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// use platypus::document::document::Document;
+    /// # use platypus::lexical::engine::LexicalEngine;
+    /// # use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// # use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
@@ -416,7 +416,7 @@ impl LexicalEngine {
     /// # let mut engine = LexicalEngine::new(index).unwrap();
     ///
     /// // Add and commit many documents
-    /// use yatagarasu::document::field::TextOption;
+    /// use platypus::document::field::TextOption;
     /// for i in 0..1000 {
     ///     let doc = Document::builder()
     ///         .add_text("id", &i.to_string(), TextOption::default())
@@ -471,20 +471,20 @@ impl LexicalEngine {
     /// # Example with TermQuery
     ///
     /// ```rust,no_run
-    /// use yatagarasu::document::document::Document;
-    /// use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-    /// use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-    /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// use platypus::document::document::Document;
+    /// use platypus::lexical::search::searcher::LexicalSearchRequest;
+    /// use platypus::lexical::index::inverted::query::term::TermQuery;
+    /// # use platypus::lexical::engine::LexicalEngine;
+    /// # use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// # use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
     /// # let mut engine = LexicalEngine::new(index).unwrap();
-    /// # use yatagarasu::document::field::TextOption;
+    /// # use platypus::document::field::TextOption;
     /// # let doc = Document::builder().add_text("title", "hello world", TextOption::default()).build();
     /// # engine.add_document(doc).unwrap();
     /// # engine.commit().unwrap();
@@ -504,15 +504,15 @@ impl LexicalEngine {
     /// # Example with QueryParser
     ///
     /// ```rust,no_run
-    /// use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
-    /// use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-    /// # use yatagarasu::document::document::Document;
-    /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-    /// use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// # use yatagarasu::storage::{StorageConfig, StorageFactory};
-    /// use yatagarasu::storage::memory::MemoryStorageConfig;
-    /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
+    /// use platypus::lexical::index::inverted::query::parser::QueryParser;
+    /// use platypus::lexical::search::searcher::LexicalSearchRequest;
+    /// # use platypus::document::document::Document;
+    /// # use platypus::lexical::engine::LexicalEngine;
+    /// # use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// # use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::memory::MemoryStorageConfig;
+    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
@@ -541,11 +541,11 @@ impl LexicalEngine {
     /// # Examples
     ///
     /// ```no_run
-    /// # use yatagarasu::lexical::engine::LexicalEngine;
-    /// # use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-    /// # use yatagarasu::lexical::index::config::LexicalIndexConfig;
-    /// # use yatagarasu::storage::memory::MemoryStorage;
-    /// # use yatagarasu::storage::memory::MemoryStorageConfig;
+    /// # use platypus::lexical::engine::LexicalEngine;
+    /// # use platypus::lexical::index::factory::LexicalIndexFactory;
+    /// # use platypus::lexical::index::config::LexicalIndexConfig;
+    /// # use platypus::storage::memory::MemoryStorage;
+    /// # use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let config = LexicalIndexConfig::default();
     /// # let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

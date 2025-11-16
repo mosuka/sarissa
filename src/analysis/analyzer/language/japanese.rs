@@ -12,8 +12,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-//! use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+//! use platypus::analysis::analyzer::analyzer::Analyzer;
+//! use platypus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 //!
 //! let analyzer = JapaneseAnalyzer::new().unwrap();
 //! let tokens: Vec<_> = analyzer.analyze("日本語のテキスト").unwrap().collect();
@@ -48,8 +48,8 @@ use crate::error::Result;
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-/// use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+/// use platypus::analysis::analyzer::analyzer::Analyzer;
+/// use platypus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 ///
 /// let analyzer = JapaneseAnalyzer::new().unwrap();
 /// let tokens: Vec<_> = analyzer.analyze("日本語の形態素解析").unwrap().collect();
@@ -78,8 +78,8 @@ impl JapaneseAnalyzer {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-    /// use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+    /// use platypus::analysis::analyzer::analyzer::Analyzer;
+    /// use platypus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
     ///
     /// let analyzer = JapaneseAnalyzer::new().unwrap();
     /// assert_eq!(analyzer.name(), "japanese");

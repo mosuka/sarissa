@@ -28,8 +28,8 @@
 //! Converting a CSV file:
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::csv::CsvDocumentConverter;
 //!
 //! let converter = CsvDocumentConverter::new();
 //!
@@ -47,8 +47,8 @@
 //! Converting a JSONL file:
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::jsonl::JsonlDocumentConverter;
 //!
 //! let converter = JsonlDocumentConverter::new();
 //!
@@ -64,8 +64,8 @@
 //! Using custom delimiters (CSV):
 //!
 //! ```no_run
-//! use yatagarasu::document::converter::DocumentConverter;
-//! use yatagarasu::document::converter::csv::CsvDocumentConverter;
+//! use platypus::document::converter::DocumentConverter;
+//! use platypus::document::converter::csv::CsvDocumentConverter;
 //!
 //! // Tab-separated values
 //! let converter = CsvDocumentConverter::new()
@@ -93,9 +93,9 @@ pub mod jsonl;
 /// # Example
 ///
 /// ```no_run
-/// use yatagarasu::document::converter::DocumentConverter;
-/// use yatagarasu::document::converter::csv::CsvDocumentConverter;
-/// use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
+/// use platypus::document::converter::DocumentConverter;
+/// use platypus::document::converter::csv::CsvDocumentConverter;
+/// use platypus::document::converter::jsonl::JsonlDocumentConverter;
 ///
 /// // CSV converter
 /// let csv_converter = CsvDocumentConverter::new();

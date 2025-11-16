@@ -19,8 +19,8 @@ use crate::vector::search::searcher::VectorSearchParams;
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::hybrid::search::searcher::HybridSearchRequest;
-/// use yatagarasu::vector::core::vector::Vector;
+/// use platypus::hybrid::search::searcher::HybridSearchRequest;
+/// use platypus::vector::core::vector::Vector;
 ///
 /// // Text-only search
 /// let request = HybridSearchRequest::new("rust programming");

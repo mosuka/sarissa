@@ -21,12 +21,12 @@ use crate::embedding::text_embedder::TextEmbedder;
 /// ## Text-to-Image Search
 ///
 /// ```no_run
-/// use yatagarasu::embedding::multimodal_embedder::MultimodalEmbedder;
-/// use yatagarasu::embedding::text_embedder::TextEmbedder;
-/// use yatagarasu::embedding::image_embedder::ImageEmbedder;
-/// use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use platypus::embedding::multimodal_embedder::MultimodalEmbedder;
+/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::embedding::image_embedder::ImageEmbedder;
+/// use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
-/// # async fn example() -> yatagarasu::error::Result<()> {
+/// # async fn example() -> platypus::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 ///
 /// // Embed text query
@@ -43,11 +43,11 @@ use crate::embedding::text_embedder::TextEmbedder;
 /// ## Image-to-Image Search
 ///
 /// ```no_run
-/// use yatagarasu::embedding::multimodal_embedder::MultimodalEmbedder;
-/// use yatagarasu::embedding::image_embedder::ImageEmbedder;
-/// use yatagarasu::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use platypus::embedding::multimodal_embedder::MultimodalEmbedder;
+/// use platypus::embedding::image_embedder::ImageEmbedder;
+/// use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
-/// # async fn example() -> yatagarasu::error::Result<()> {
+/// # async fn example() -> platypus::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 ///
 /// // Use an image as query

@@ -1,4 +1,4 @@
-//! Lexical search example demonstrating Yatagarasu's keyword tooling.
+//! Lexical search example demonstrating Platypus's keyword tooling.
 //!
 //! This walkthrough exercises every built-in query type exposed by the
 //! `lexical::index::inverted::query` module, including:
@@ -21,30 +21,30 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
-use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::document::converter::DocumentConverter;
-use yatagarasu::document::converter::jsonl::JsonlDocumentConverter;
-use yatagarasu::document::field::FieldValue;
-use yatagarasu::error::Result;
-use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::index::inverted::query::Query;
-use yatagarasu::lexical::index::inverted::query::boolean::BooleanQuery;
-use yatagarasu::lexical::index::inverted::query::fuzzy::FuzzyQuery;
-use yatagarasu::lexical::index::inverted::query::geo::{
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::document::converter::DocumentConverter;
+use platypus::document::converter::jsonl::JsonlDocumentConverter;
+use platypus::document::field::FieldValue;
+use platypus::error::Result;
+use platypus::lexical::engine::LexicalEngine;
+use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use platypus::lexical::index::factory::LexicalIndexFactory;
+use platypus::lexical::index::inverted::query::Query;
+use platypus::lexical::index::inverted::query::boolean::BooleanQuery;
+use platypus::lexical::index::inverted::query::fuzzy::FuzzyQuery;
+use platypus::lexical::index::inverted::query::geo::{
     GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint,
 };
-use yatagarasu::lexical::index::inverted::query::phrase::PhraseQuery;
-use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
-use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-use yatagarasu::lexical::index::inverted::query::wildcard::WildcardQuery;
-use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorageConfig;
-use yatagarasu::storage::{StorageConfig, StorageFactory};
+use platypus::lexical::index::inverted::query::phrase::PhraseQuery;
+use platypus::lexical::index::inverted::query::range::NumericRangeQuery;
+use platypus::lexical::index::inverted::query::term::TermQuery;
+use platypus::lexical::index::inverted::query::wildcard::WildcardQuery;
+use platypus::lexical::search::searcher::LexicalSearchRequest;
+use platypus::storage::file::FileStorageConfig;
+use platypus::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== Comprehensive Lexical Search Example ===\n");
@@ -558,7 +558,7 @@ fn main() -> Result<()> {
 }
 
 /// Helper function to display search results in a formatted way
-fn display_results(results: &yatagarasu::lexical::index::inverted::query::SearchResults) {
+fn display_results(results: &platypus::lexical::index::inverted::query::SearchResults) {
     for (i, hit) in results.hits.iter().enumerate() {
         println!("  {}. Score: {:.4}", i + 1, hit.score);
 

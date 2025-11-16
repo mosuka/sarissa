@@ -1,4 +1,4 @@
-//! Text and multimodal embedding support for Yatagarasu's vector search.
+//! Text and multimodal embedding support for Platypus's vector search.
 //!
 //! The core traits live here while concrete embedders are compiled in via feature
 //! flags. Keeping implementations optional lets projects pick local Candle models,
@@ -19,17 +19,17 @@
 //! Add to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! yatagarasu = { version = "0.1", features = ["embeddings-candle"] }
+//! platypus = { version = "0.1", features = ["embeddings-candle"] }
 //! ```
 //!
 //! Then use:
 //! ```no_run
 //! # #[cfg(feature = "embeddings-candle")]
 //! # {
-//! use yatagarasu::embedding::text_embedder::TextEmbedder;
-//! use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use platypus::embedding::text_embedder::TextEmbedder;
+//! use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 //!
-//! # async fn example() -> yatagarasu::error::Result<()> {
+//! # async fn example() -> platypus::error::Result<()> {
 //! let embedder = CandleTextEmbedder::new(
 //!     "sentence-transformers/all-MiniLM-L6-v2"
 //! )?;
@@ -46,17 +46,17 @@
 //! Add to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! yatagarasu = { version = "0.1", features = ["embeddings-openai"] }
+//! platypus = { version = "0.1", features = ["embeddings-openai"] }
 //! ```
 //!
 //! Then use:
 //! ```no_run
 //! # #[cfg(feature = "embeddings-openai")]
 //! # {
-//! use yatagarasu::embedding::text_embedder::TextEmbedder;
-//! use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
+//! use platypus::embedding::text_embedder::TextEmbedder;
+//! use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
 //!
-//! # async fn example() -> yatagarasu::error::Result<()> {
+//! # async fn example() -> platypus::error::Result<()> {
 //! let embedder = OpenAITextEmbedder::new(
 //!     std::env::var("OPENAI_API_KEY").unwrap(),
 //!     "text-embedding-3-small".to_string()
@@ -74,9 +74,9 @@
 //!
 //! ```
 //! use async_trait::async_trait;
-//! use yatagarasu::embedding::text_embedder::TextEmbedder;
-//! use yatagarasu::error::Result;
-//! use yatagarasu::vector::Vector;
+//! use platypus::embedding::text_embedder::TextEmbedder;
+//! use platypus::error::Result;
+//! use platypus::vector::Vector;
 //!
 //! struct MyEmbedder {
 //!     dimension: usize,
@@ -100,14 +100,14 @@
 //! You can switch between embedders at runtime using trait objects:
 //!
 //! ```no_run
-//! use yatagarasu::embedding::text_embedder::TextEmbedder;
+//! use platypus::embedding::text_embedder::TextEmbedder;
 //! use std::sync::Arc;
 //!
-//! # async fn example() -> yatagarasu::error::Result<()> {
+//! # async fn example() -> platypus::error::Result<()> {
 //! #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 //! {
-//!     use yatagarasu::embedding::candle_text_embedder::CandleTextEmbedder;
-//!     use yatagarasu::embedding::openai_text_embedder::OpenAITextEmbedder;
+//!     use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+//!     use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
 //!
 //!     let embedder: Arc<dyn TextEmbedder> = if std::env::var("USE_OPENAI").is_ok() {
 //!         Arc::new(OpenAITextEmbedder::new(

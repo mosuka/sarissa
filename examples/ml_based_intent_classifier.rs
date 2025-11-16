@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use yatagarasu::analysis::analyzer::language::english::EnglishAnalyzer;
-use yatagarasu::analysis::analyzer::language::japanese::JapaneseAnalyzer;
-use yatagarasu::ml::intent_classifier::core;
+use platypus::analysis::analyzer::language::english::EnglishAnalyzer;
+use platypus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+use platypus::ml::intent_classifier::core;
 
 #[tokio::main]
 async fn main() -> Result<()> {

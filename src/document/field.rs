@@ -28,7 +28,7 @@
 //! The `FieldValue` enum provides conversion methods for extracting typed values:
 //!
 //! ```
-//! use yatagarasu::document::field::FieldValue;
+//! use platypus::document::field::FieldValue;
 //!
 //! let text_value = FieldValue::Text("hello".to_string());
 //! assert_eq!(text_value.as_text(), Some("hello"));
@@ -45,7 +45,7 @@
 //! String values can be interpreted as different types:
 //!
 //! ```
-//! use yatagarasu::document::field::FieldValue;
+//! use platypus::document::field::FieldValue;
 //!
 //! // Boolean inference from text
 //! let text = FieldValue::Text("true".to_string());
@@ -68,7 +68,7 @@ use crate::vector::core::distance::DistanceMetric;
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::document::field::{Field, FieldValue, FieldOption, TextOption};
+/// use platypus::document::field::{Field, FieldValue, FieldOption, TextOption};
 ///
 /// // Create a text field with custom options
 /// let field = Field {
@@ -129,7 +129,7 @@ pub enum NumericType {
 /// Creating field values:
 ///
 /// ```
-/// use yatagarasu::document::field::FieldValue;
+/// use platypus::document::field::FieldValue;
 ///
 /// let text = FieldValue::Text("Rust Programming".to_string());
 /// let number = FieldValue::Integer(2024);
@@ -141,7 +141,7 @@ pub enum NumericType {
 /// Extracting typed values:
 ///
 /// ```
-/// use yatagarasu::document::field::FieldValue;
+/// use platypus::document::field::FieldValue;
 ///
 /// let value = FieldValue::Integer(100);
 /// assert_eq!(value.as_numeric(), Some("100".to_string()));
@@ -367,8 +367,8 @@ impl Default for IvfOption {
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::document::field::{VectorOption, VectorIndexType};
-/// use yatagarasu::vector::DistanceMetric;
+/// use platypus::document::field::{VectorOption, VectorIndexType};
+/// use platypus::vector::DistanceMetric;
 ///
 /// // Simple flat index
 /// let flat = VectorOption::flat(384);
@@ -442,7 +442,7 @@ impl VectorOption {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::document::field::VectorOption;
+    /// use platypus::document::field::VectorOption;
     ///
     /// let opt = VectorOption::flat(384);
     /// ```
@@ -466,7 +466,7 @@ impl VectorOption {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::document::field::VectorOption;
+    /// use platypus::document::field::VectorOption;
     ///
     /// let opt = VectorOption::hnsw(768);
     /// ```
@@ -490,7 +490,7 @@ impl VectorOption {
     /// # Examples
     ///
     /// ```
-    /// use yatagarasu::document::field::VectorOption;
+    /// use platypus::document::field::VectorOption;
     ///
     /// let opt = VectorOption::ivf(1536);
     /// ```
@@ -624,7 +624,7 @@ pub struct GeoOption {
 /// # Examples
 ///
 /// ```
-/// use yatagarasu::document::field::{FieldOption, TextOption, VectorOption};
+/// use platypus::document::field::{FieldOption, TextOption, VectorOption};
 ///
 /// // Text field with custom options
 /// let text_opt = FieldOption::Text(TextOption {

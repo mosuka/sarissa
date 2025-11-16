@@ -13,8 +13,8 @@
 //! # Examples
 //!
 //! ```
-//! use yatagarasu::analysis::token_filter::stem::Stemmer;
-//! use yatagarasu::analysis::token_filter::stem::identity::IdentityStemmer;
+//! use platypus::analysis::token_filter::stem::Stemmer;
+//! use platypus::analysis::token_filter::stem::identity::IdentityStemmer;
 //!
 //! let stemmer = IdentityStemmer::new();
 //!

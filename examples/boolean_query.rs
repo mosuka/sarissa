@@ -4,24 +4,24 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use yatagarasu::analysis::analyzer::analyzer::Analyzer;
-use yatagarasu::analysis::analyzer::keyword::KeywordAnalyzer;
-use yatagarasu::analysis::analyzer::per_field::PerFieldAnalyzer;
-use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-use yatagarasu::document::document::Document;
-use yatagarasu::document::field::{FloatOption, TextOption};
-use yatagarasu::error::Result;
-use yatagarasu::lexical::engine::LexicalEngine;
-use yatagarasu::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use yatagarasu::lexical::index::factory::LexicalIndexFactory;
-use yatagarasu::lexical::index::inverted::query::Query;
-use yatagarasu::lexical::index::inverted::query::boolean::BooleanQuery;
-use yatagarasu::lexical::index::inverted::query::phrase::PhraseQuery;
-use yatagarasu::lexical::index::inverted::query::range::NumericRangeQuery;
-use yatagarasu::lexical::index::inverted::query::term::TermQuery;
-use yatagarasu::lexical::search::searcher::LexicalSearchRequest;
-use yatagarasu::storage::file::FileStorageConfig;
-use yatagarasu::storage::{StorageConfig, StorageFactory};
+use platypus::analysis::analyzer::analyzer::Analyzer;
+use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+use platypus::analysis::analyzer::standard::StandardAnalyzer;
+use platypus::document::document::Document;
+use platypus::document::field::{FloatOption, TextOption};
+use platypus::error::Result;
+use platypus::lexical::engine::LexicalEngine;
+use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use platypus::lexical::index::factory::LexicalIndexFactory;
+use platypus::lexical::index::inverted::query::Query;
+use platypus::lexical::index::inverted::query::boolean::BooleanQuery;
+use platypus::lexical::index::inverted::query::phrase::PhraseQuery;
+use platypus::lexical::index::inverted::query::range::NumericRangeQuery;
+use platypus::lexical::index::inverted::query::term::TermQuery;
+use platypus::lexical::search::searcher::LexicalSearchRequest;
+use platypus::storage::file::FileStorageConfig;
+use platypus::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== BooleanQuery Example - Complex Boolean Logic ===\n");
@@ -228,12 +228,12 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
+                && let platypus::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
             if let Some(field) = doc.get_field("rating")
-                && let yatagarasu::document::field::FieldValue::Float(rating) = &field.value
+                && let platypus::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -323,7 +323,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
+                && let platypus::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -358,7 +358,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("rating")
-                && let yatagarasu::document::field::FieldValue::Float(rating) = &field.value
+                && let platypus::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -414,12 +414,12 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
+                && let platypus::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
             if let Some(field) = doc.get_field("rating")
-                && let yatagarasu::document::field::FieldValue::Float(rating) = &field.value
+                && let platypus::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -474,7 +474,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let yatagarasu::document::field::FieldValue::Float(price) = &field.value
+                && let platypus::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }

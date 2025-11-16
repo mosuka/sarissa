@@ -14,13 +14,13 @@ use crate::error::Result;
 /// # Examples
 ///
 /// ```no_run
-/// use yatagarasu::hybrid::engine::HybridEngine;
-/// use yatagarasu::hybrid::search::searcher::HybridSearchRequest;
-/// use yatagarasu::lexical::engine::LexicalEngine;
-/// use yatagarasu::vector::engine::VectorEngine;
-/// use yatagarasu::vector::Vector;
+/// use platypus::hybrid::engine::HybridEngine;
+/// use platypus::hybrid::search::searcher::HybridSearchRequest;
+/// use platypus::lexical::engine::LexicalEngine;
+/// use platypus::vector::engine::VectorEngine;
+/// use platypus::vector::Vector;
 ///
-/// # async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> yatagarasu::error::Result<()> {
+/// # async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> platypus::error::Result<()> {
 /// // Create hybrid engine from existing engines
 /// let engine = HybridEngine::new(lexical_engine, vector_engine)?;
 ///
@@ -62,11 +62,11 @@ impl HybridEngine {
     /// # Examples
     ///
     /// ```no_run
-    /// use yatagarasu::hybrid::engine::HybridEngine;
-    /// use yatagarasu::lexical::engine::LexicalEngine;
-    /// use yatagarasu::vector::engine::VectorEngine;
+    /// use platypus::hybrid::engine::HybridEngine;
+    /// use platypus::lexical::engine::LexicalEngine;
+    /// use platypus::vector::engine::VectorEngine;
     ///
-    /// # fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> yatagarasu::error::Result<()> {
+    /// # fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> platypus::error::Result<()> {
     /// let engine = HybridEngine::new(lexical_engine, vector_engine)?;
     /// # Ok(())
     /// # }
@@ -156,9 +156,9 @@ impl HybridEngine {
     /// # Examples
     ///
     /// ```no_run
-    /// # use yatagarasu::hybrid::engine::HybridEngine;
-    /// # use yatagarasu::hybrid::search::searcher::HybridSearchRequest;
-    /// # async fn example(engine: HybridEngine) -> yatagarasu::error::Result<()> {
+    /// # use platypus::hybrid::engine::HybridEngine;
+    /// # use platypus::hybrid::search::searcher::HybridSearchRequest;
+    /// # async fn example(engine: HybridEngine) -> platypus::error::Result<()> {
     /// let request = HybridSearchRequest::new("rust programming");
     /// let results = engine.search(request).await?;
     /// # Ok(())

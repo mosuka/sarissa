@@ -466,14 +466,14 @@ impl SpanQueryWrapper {
 impl Query for SpanQueryWrapper {
     fn matcher(&self, _reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         // In a real implementation, this would create a SpanMatcher
-        Err(crate::error::YatagarasuError::query(
+        Err(crate::error::PlatypusError::query(
             "SpanQueryWrapper matcher not implemented",
         ))
     }
 
     fn scorer(&self, _reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
         // In a real implementation, this would create a SpanScorer
-        Err(crate::error::YatagarasuError::query(
+        Err(crate::error::PlatypusError::query(
             "SpanQueryWrapper scorer not implemented",
         ))
     }

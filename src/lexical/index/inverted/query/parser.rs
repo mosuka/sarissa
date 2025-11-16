@@ -21,7 +21,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field::NumericType;
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::boolean::{BooleanClause, BooleanQuery, Occur};
 use crate::lexical::index::inverted::query::fuzzy::FuzzyQuery;
@@ -66,8 +66,8 @@ impl QueryParser {
     ///
     /// # Example
     /// ```
-    /// use yatagarasu::analysis::analyzer::standard::StandardAnalyzer;
-    /// use yatagarasu::lexical::index::inverted::query::parser::QueryParser;
+    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
+    /// use platypus::lexical::index::inverted::query::parser::QueryParser;
     /// use std::sync::Arc;
     ///
     /// let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
@@ -119,7 +119,7 @@ impl QueryParser {
     /// Parses a query string into a Query object.
     pub fn parse(&self, query_str: &str) -> Result<Box<dyn Query>> {
         let pairs = QueryStringParser::parse(Rule::query, query_str)
-            .map_err(|e| YatagarasuError::parse(format!("Parse error: {e}")))?;
+            .map_err(|e| PlatypusError::parse(format!("Parse error: {e}")))?;
 
         for pair in pairs {
             if pair.as_rule() == Rule::query {
@@ -131,7 +131,7 @@ impl QueryParser {
             }
         }
 
-        Err(YatagarasuError::parse("No valid query found".to_string()))
+        Err(PlatypusError::parse("No valid query found".to_string()))
     }
 
     fn parse_boolean_query(&self, pair: pest::iterators::Pair<Rule>) -> Result<Box<dyn Query>> {
@@ -201,7 +201,7 @@ impl QueryParser {
             }
         }
 
-        Err(YatagarasuError::parse("Invalid clause".to_string()))
+        Err(PlatypusError::parse("Invalid clause".to_string()))
     }
 
     fn parse_sub_clause(&self, pair: pest::iterators::Pair<Rule>) -> Result<Box<dyn Query>> {
@@ -214,7 +214,7 @@ impl QueryParser {
             }
         }
 
-        Err(YatagarasuError::parse("Invalid sub-clause".to_string()))
+        Err(PlatypusError::parse("Invalid sub-clause".to_string()))
     }
 
     fn parse_grouped_query(&self, pair: pest::iterators::Pair<Rule>) -> Result<Box<dyn Query>> {
@@ -239,7 +239,7 @@ impl QueryParser {
             }
             Ok(q)
         } else {
-            Err(YatagarasuError::parse("Invalid grouped query".to_string()))
+            Err(PlatypusError::parse("Invalid grouped query".to_string()))
         }
     }
 
@@ -253,14 +253,14 @@ impl QueryParser {
                 }
                 Rule::field_value => {
                     let field_name = field
-                        .ok_or_else(|| YatagarasuError::parse("Missing field name".to_string()))?;
+                        .ok_or_else(|| PlatypusError::parse("Missing field name".to_string()))?;
                     return self.parse_field_value(inner_pair, Some(&field_name));
                 }
                 _ => {}
             }
         }
 
-        Err(YatagarasuError::parse("Invalid field query".to_string()))
+        Err(PlatypusError::parse("Invalid field query".to_string()))
     }
 
     fn parse_term_query(&self, pair: pest::iterators::Pair<Rule>) -> Result<Box<dyn Query>> {
@@ -270,7 +270,7 @@ impl QueryParser {
             }
         }
 
-        Err(YatagarasuError::parse("Invalid term query".to_string()))
+        Err(PlatypusError::parse("Invalid term query".to_string()))
     }
 
     fn parse_field_value(
@@ -289,7 +289,7 @@ impl QueryParser {
             }
         }
 
-        Err(YatagarasuError::parse("Invalid field value".to_string()))
+        Err(PlatypusError::parse("Invalid field value".to_string()))
     }
 
     fn parse_range_query(
@@ -299,7 +299,7 @@ impl QueryParser {
     ) -> Result<Box<dyn Query>> {
         let field_name = field
             .or(self.default_field.as_deref())
-            .ok_or_else(|| YatagarasuError::parse("No field specified".to_string()))?;
+            .ok_or_else(|| PlatypusError::parse("No field specified".to_string()))?;
 
         let mut lower_inclusive = true;
         let mut upper_inclusive = true;
@@ -382,7 +382,7 @@ impl QueryParser {
     ) -> Result<Box<dyn Query>> {
         let field_name = field
             .or(self.default_field.as_deref())
-            .ok_or_else(|| YatagarasuError::parse("No field specified".to_string()))?;
+            .ok_or_else(|| PlatypusError::parse("No field specified".to_string()))?;
 
         let mut phrase_content = String::new();
         let mut slop: Option<u32> = None;
@@ -428,7 +428,7 @@ impl QueryParser {
     ) -> Result<Box<dyn Query>> {
         let field_name = field
             .or(self.default_field.as_deref())
-            .ok_or_else(|| YatagarasuError::parse("No field specified".to_string()))?;
+            .ok_or_else(|| PlatypusError::parse("No field specified".to_string()))?;
 
         let mut term = String::new();
         let mut fuzziness: u8 = 2; // Default fuzziness
@@ -472,7 +472,7 @@ impl QueryParser {
     ) -> Result<Box<dyn Query>> {
         let field_name = field
             .or(self.default_field.as_deref())
-            .ok_or_else(|| YatagarasuError::parse("No field specified".to_string()))?;
+            .ok_or_else(|| PlatypusError::parse("No field specified".to_string()))?;
 
         let mut pattern = String::new();
 
@@ -492,7 +492,7 @@ impl QueryParser {
     ) -> Result<Box<dyn Query>> {
         let field_name = field
             .or(self.default_field.as_deref())
-            .ok_or_else(|| YatagarasuError::parse("No field specified".to_string()))?;
+            .ok_or_else(|| PlatypusError::parse("No field specified".to_string()))?;
 
         let mut term = String::new();
         let mut boost = 1.0;
@@ -512,7 +512,7 @@ impl QueryParser {
         let terms = self.analyze_term(Some(field_name), &term)?;
 
         if terms.is_empty() {
-            return Err(YatagarasuError::parse(
+            return Err(PlatypusError::parse(
                 "No terms after analysis".to_string(),
             ));
         }

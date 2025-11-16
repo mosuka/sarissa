@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
-use crate::error::{Result, YatagarasuError};
+use crate::error::{Result, PlatypusError};
 use crate::lexical::index::inverted::maintenance::deletion::DeletionManager;
 use crate::lexical::index::inverted::segment::manager::SegmentManager;
 use crate::lexical::index::inverted::segment::merge_engine::MergeEngine;
@@ -314,7 +314,7 @@ impl BackgroundScheduler {
     /// Start the background scheduler.
     pub fn start(&self) -> Result<()> {
         if self.running.load(Ordering::Acquire) {
-            return Err(YatagarasuError::index(
+            return Err(PlatypusError::index(
                 "Background scheduler already running",
             ));
         }
@@ -351,7 +351,7 @@ impl BackgroundScheduler {
     /// Submit a task for background execution.
     pub fn submit_task(&self, task: BackgroundTask) -> Result<()> {
         if !self.running.load(Ordering::Acquire) {
-            return Err(YatagarasuError::index("Background scheduler not running"));
+            return Err(PlatypusError::index("Background scheduler not running"));
         }
 
         // Update statistics
@@ -364,7 +364,7 @@ impl BackgroundScheduler {
         // Send task to queue
         self.task_sender
             .send(task)
-            .map_err(|_| YatagarasuError::index("Failed to submit task to queue"))?;
+            .map_err(|_| PlatypusError::index("Failed to submit task to queue"))?;
 
         Ok(())
     }
