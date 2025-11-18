@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field::FieldValue;
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::boolean::BooleanQuery;
 use crate::lexical::index::inverted::query::collector::{

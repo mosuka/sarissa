@@ -10,11 +10,12 @@ pub mod config;
 pub mod factory;
 pub mod flat;
 pub mod hnsw;
+pub mod io;
 pub mod ivf;
 
 use std::sync::{Arc, RwLock};
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::config::{

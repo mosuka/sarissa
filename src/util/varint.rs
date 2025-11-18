@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 
 use byteorder::ReadBytesExt;
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 
 /// Encode a u32 value using variable-length encoding.
 ///

@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::IvfIndexConfig;
+use crate::vector::index::io::{read_metadata, write_metadata};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 #[derive(Debug)]
@@ -141,7 +142,8 @@ impl IvfIndexWriter {
                     PlatypusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                 })?;
 
-                // Read vector data
+                // Read metadata and vector data
+                let metadata = read_metadata(&mut input)?;
                 let mut values = vec![0.0f32; dimension];
                 for value in &mut values {
                     let mut value_buf = [0u8; 4];
@@ -149,7 +151,7 @@ impl IvfIndexWriter {
                     *value = f32::from_le_bytes(value_buf);
                 }
 
-                list.push((doc_id, field_name, Vector::new(values)));
+                list.push((doc_id, field_name, Vector::with_metadata(values, metadata)));
             }
         }
 
@@ -505,13 +507,12 @@ impl VectorIndexWriter for IvfIndexWriter {
         for (field_name, field) in doc.fields().iter() {
             // Check if this is a vector field and if it should be indexed
             if let FieldValue::Vector(text) = &field.value {
-                // Check FieldOption to determine if this vector should be indexed
-                let should_index = match &field.option {
-                    FieldOption::Vector(opt) => {
-                        // Check if flat, hnsw, or ivf indexing is enabled
-                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some()
-                    }
-                    _ => false,
+                let (should_index, store_value) = match &field.option {
+                    FieldOption::Vector(opt) => (
+                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some(),
+                        opt.stored,
+                    ),
+                    _ => (false, false),
                 };
 
                 if !should_index {
@@ -519,7 +520,7 @@ impl VectorIndexWriter for IvfIndexWriter {
                 }
 
                 // Check if embedder is PerFieldEmbedder for field-specific embedding
-                let vector = if let Some(per_field) = self
+                let mut vector = if let Some(per_field) = self
                     .index_config
                     .embedder
                     .as_any()
@@ -529,6 +530,10 @@ impl VectorIndexWriter for IvfIndexWriter {
                 } else {
                     self.index_config.embedder.embed(text.as_str()).await?
                 };
+
+                if store_value {
+                    vector.set_original_text(text.clone());
+                }
 
                 vectors.push((doc_id, field_name.clone(), vector));
             }
@@ -555,13 +560,12 @@ impl VectorIndexWriter for IvfIndexWriter {
         for (field_name, field) in doc.fields().iter() {
             // Check if this is a vector field and if it should be indexed
             if let FieldValue::Vector(text) = &field.value {
-                // Check FieldOption to determine if this vector should be indexed
-                let should_index = match &field.option {
-                    FieldOption::Vector(opt) => {
-                        // Check if flat, hnsw, or ivf indexing is enabled
-                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some()
-                    }
-                    _ => false,
+                let (should_index, store_value) = match &field.option {
+                    FieldOption::Vector(opt) => (
+                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some(),
+                        opt.stored,
+                    ),
+                    _ => (false, false),
                 };
 
                 if !should_index {
@@ -569,7 +573,7 @@ impl VectorIndexWriter for IvfIndexWriter {
                 }
 
                 // Check if embedder is PerFieldEmbedder for field-specific embedding
-                let vector = if let Some(per_field) = self
+                let mut vector = if let Some(per_field) = self
                     .index_config
                     .embedder
                     .as_any()
@@ -579,6 +583,10 @@ impl VectorIndexWriter for IvfIndexWriter {
                 } else {
                     self.index_config.embedder.embed(text.as_str()).await?
                 };
+
+                if store_value {
+                    vector.set_original_text(text.clone());
+                }
 
                 vectors.push((doc_id, field_name.clone(), vector));
             }
@@ -747,9 +755,10 @@ impl VectorIndexWriter for IvfIndexWriter {
             ));
         }
 
-        let storage = self.storage.as_ref().ok_or_else(|| {
-            PlatypusError::InvalidOperation("No storage configured".to_string())
-        })?;
+        let storage = self
+            .storage
+            .as_ref()
+            .ok_or_else(|| PlatypusError::InvalidOperation("No storage configured".to_string()))?;
 
         // Create the index file
         let file_name = format!("{}.ivf", path);
@@ -778,6 +787,8 @@ impl VectorIndexWriter for IvfIndexWriter {
                 let field_name_bytes = field_name.as_bytes();
                 output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
                 output.write_all(field_name_bytes)?;
+
+                write_metadata(&mut output, &vector.metadata)?;
 
                 // Write vector data
                 for value in &vector.data {

@@ -6,7 +6,6 @@
 
 use std::sync::Arc;
 
-use tempfile::TempDir;
 use platypus::analysis::analyzer::analyzer::Analyzer;
 use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
 use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
@@ -18,6 +17,7 @@ use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
 use platypus::lexical::index::factory::LexicalIndexFactory;
 use platypus::storage::file::FileStorageConfig;
 use platypus::storage::{StorageConfig, StorageFactory};
+use tempfile::TempDir;
 
 fn main() -> platypus::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");

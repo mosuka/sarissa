@@ -21,7 +21,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::document::field::NumericType;
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::boolean::{BooleanClause, BooleanQuery, Occur};
 use crate::lexical::index::inverted::query::fuzzy::FuzzyQuery;
@@ -512,9 +512,7 @@ impl QueryParser {
         let terms = self.analyze_term(Some(field_name), &term)?;
 
         if terms.is_empty() {
-            return Err(PlatypusError::parse(
-                "No terms after analysis".to_string(),
-            ));
+            return Err(PlatypusError::parse("No terms after analysis".to_string()));
         }
 
         if terms.len() == 1 {

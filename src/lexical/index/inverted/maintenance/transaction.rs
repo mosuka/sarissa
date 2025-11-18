@@ -11,7 +11,7 @@ use ahash::AHashMap;
 use uuid::Uuid;
 
 use crate::document::document::Document;
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::maintenance::deletion::{
     DeletionManager, GlobalDeletionState,
 };
@@ -125,9 +125,7 @@ impl Transaction {
     /// Mark transaction as preparing for commit.
     pub fn prepare(&mut self) -> Result<()> {
         if self.state != TransactionState::Active {
-            return Err(PlatypusError::index(
-                "Cannot prepare inactive transaction",
-            ));
+            return Err(PlatypusError::index("Cannot prepare inactive transaction"));
         }
         self.state = TransactionState::Preparing;
         Ok(())
@@ -136,9 +134,7 @@ impl Transaction {
     /// Mark transaction as committed.
     pub fn commit(&mut self) -> Result<()> {
         if self.state != TransactionState::Preparing {
-            return Err(PlatypusError::index(
-                "Cannot commit unprepared transaction",
-            ));
+            return Err(PlatypusError::index("Cannot commit unprepared transaction"));
         }
         self.state = TransactionState::Committed;
         Ok(())

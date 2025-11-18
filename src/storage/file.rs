@@ -55,7 +55,7 @@ use std::time::SystemTime;
 
 use memmap2::{Mmap, MmapOptions};
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::storage::{
     LockManager, Storage, StorageError, StorageInput, StorageLock, StorageOutput,
 };
@@ -197,9 +197,8 @@ impl FileStorage {
 
         // Create directory if it doesn't exist
         if !directory.exists() {
-            std::fs::create_dir_all(&directory).map_err(|e| {
-                PlatypusError::storage(format!("Failed to create directory: {e}"))
-            })?;
+            std::fs::create_dir_all(&directory)
+                .map_err(|e| PlatypusError::storage(format!("Failed to create directory: {e}")))?;
         }
 
         // Verify it's a directory

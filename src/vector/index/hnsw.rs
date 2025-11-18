@@ -9,7 +9,7 @@ pub mod writer;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::vector::index::config::HnswIndexConfig;
 use crate::vector::index::hnsw::searcher::HnswSearcher;

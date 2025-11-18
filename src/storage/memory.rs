@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::storage::{
     LockManager, Storage, StorageError, StorageInput, StorageLock, StorageOutput,
 };

@@ -43,7 +43,7 @@
 use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 
 pub mod column;
 pub mod file;

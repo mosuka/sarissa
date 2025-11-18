@@ -5,7 +5,10 @@ use std::collections::HashMap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
+
+/// Metadata key used to store the original (pre-embedded) text.
+pub const ORIGINAL_TEXT_METADATA_KEY: &str = "original_text";
 
 /// A dense vector representation for similarity search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,9 +65,22 @@ impl Vector {
         self.metadata.insert(key, value);
     }
 
+    /// Store the original text representation for this vector.
+    pub fn set_original_text<T: Into<String>>(&mut self, text: T) {
+        self.metadata
+            .insert(ORIGINAL_TEXT_METADATA_KEY.to_string(), text.into());
+    }
+
     /// Get metadata by key.
     pub fn get_metadata(&self, key: &str) -> Option<&String> {
         self.metadata.get(key)
+    }
+
+    /// Convenience accessor for the stored original text.
+    pub fn original_text(&self) -> Option<&str> {
+        self.metadata
+            .get(ORIGINAL_TEXT_METADATA_KEY)
+            .map(|s| s.as_str())
     }
 
     /// Validate that this vector has the expected dimension.

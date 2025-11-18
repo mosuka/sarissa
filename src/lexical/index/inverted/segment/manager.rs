@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{Storage, StorageInput};

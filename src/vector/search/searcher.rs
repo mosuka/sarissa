@@ -108,6 +108,7 @@ pub struct VectorSearchResult {
     /// Optional vector data.
     pub vector: Option<Vector>,
     /// Result metadata.
+    /// Contains stored vector field values (e.g., `original_text`) when available.
     pub metadata: std::collections::HashMap<String, String>,
 }
 

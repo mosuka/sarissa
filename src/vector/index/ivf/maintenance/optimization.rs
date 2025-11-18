@@ -1,6 +1,6 @@
 //! Vector index optimization utilities.
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::vector::writer::VectorIndexWriter;
 
 /// Optimizer for vector indexes after construction.

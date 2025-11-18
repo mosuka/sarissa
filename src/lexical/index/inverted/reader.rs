@@ -14,7 +14,7 @@ use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::document::document::Document;
 use crate::document::field::FieldValue;
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::HybridTermDictionary;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::core::doc_values::DocValuesReader;

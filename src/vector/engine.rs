@@ -500,6 +500,7 @@ mod tests {
     use crate::document::field::{TextOption, VectorOption};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::core::distance::DistanceMetric;
+    use crate::vector::core::vector::ORIGINAL_TEXT_METADATA_KEY;
     use crate::vector::index::config::{FlatIndexConfig, VectorIndexConfig};
     use crate::vector::index::factory::VectorIndexFactory;
     use std::sync::Arc;
@@ -578,6 +579,15 @@ mod tests {
 
         let results = engine.search(request)?;
         assert_eq!(results.results.len(), 2);
+
+        let expected_texts = ["Machine Learning", "Deep Learning", "Neural Network"];
+        for hit in &results.results {
+            let stored = hit
+                .metadata
+                .get(ORIGINAL_TEXT_METADATA_KEY)
+                .expect("stored text missing");
+            assert!(expected_texts.contains(&stored.as_str()));
+        }
 
         Ok(())
     }

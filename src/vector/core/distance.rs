@@ -3,7 +3,7 @@
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 
 /// Distance metrics for vector similarity calculation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

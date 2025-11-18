@@ -9,9 +9,9 @@ Platypus is a Rust-based hybrid search engine that unifies Keyword Search, Seman
 The name comes from the platypus — one of the most remarkable real-world creatures, known for combining traits from mammals, birds, and reptiles into a single organism.
 This unique fusion of distinct evolutionary features mirrors the three complementary forms of understanding in modern search:
 
-🦫 Keyword Search — precise retrieval through lexical, symbolic, and linguistic matching.
+🦎 Keyword Search — precise retrieval through lexical, symbolic, and linguistic matching.
 
-🦫 Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
+🦆 Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
 
 🦫 Multimodal Search — bridging text, images, and other modalities through shared latent representations.
 

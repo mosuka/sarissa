@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use ahash::AHashSet;
 
 use crate::document::document::Document;
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::index::inverted::core::posting::TermPostingIndex;
@@ -496,9 +496,7 @@ impl MergeEngine {
 
         // Check document count matches
         if reader.doc_count() != segment.segment_info.doc_count {
-            return Err(PlatypusError::index(
-                "Document count mismatch after merge",
-            ));
+            return Err(PlatypusError::index("Document count mismatch after merge"));
         }
 
         // TODO: Add more verification checks
