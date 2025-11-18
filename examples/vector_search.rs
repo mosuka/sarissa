@@ -136,28 +136,28 @@ async fn main() -> Result<()> {
     display_results(&results, "all fields");
 
     // 2. Search only title_embedding field
-    println!("\n[2] Search ONLY field 'title_embedding': \"programming language\"");
+    println!("\n[2] Search ONLY field 'title': \"programming language\"");
     println!("{}", "-".repeat(80));
     let query_vec = embedder_for_index
-        .embed_with_field("programming language", "title_embedding")
+        .embed_with_field("programming language", "title")
         .await?;
     let request = VectorSearchRequest::new(query_vec)
         .top_k(3)
-        .field_name("title_embedding".to_string());
+        .field_name("title".to_string());
     let results = vector_engine.search(request)?;
-    display_results(&results, "title_embedding");
+    display_results(&results, "title");
 
-    // 3. Search only content_embedding field
-    println!("\n[3] Search ONLY field 'content_embedding': \"artificial intelligence\"");
+    // 3. Search only content field
+    println!("\n[3] Search ONLY field 'content': \"artificial intelligence\"");
     println!("{}", "-".repeat(80));
     let query_vec = embedder_for_index
-        .embed_with_field("artificial intelligence", "content_embedding")
+        .embed_with_field("artificial intelligence", "content")
         .await?;
     let request = VectorSearchRequest::new(query_vec)
         .top_k(3)
-        .field_name("content_embedding".to_string());
+        .field_name("content".to_string());
     let results = vector_engine.search(request)?;
-    display_results(&results, "content_embedding");
+    display_results(&results, "content");
 
     // 4. Compare title vs content results for the same query
     println!("\n[4] Field comparison for query: \"web development\"");
@@ -166,16 +166,16 @@ async fn main() -> Result<()> {
     let title_results = vector_engine.search(
         VectorSearchRequest::new(query_vec.clone())
             .top_k(2)
-            .field_name("title_embedding".to_string()),
+            .field_name("title".to_string()),
     )?;
-    display_results(&title_results, "title_embedding");
+    display_results(&title_results, "title");
 
     let content_results = vector_engine.search(
         VectorSearchRequest::new(query_vec)
             .top_k(2)
-            .field_name("content_embedding".to_string()),
+            .field_name("content".to_string()),
     )?;
-    display_results(&content_results, "content_embedding");
+    display_results(&content_results, "content");
 
     println!("\n{}", "=".repeat(80));
     println!("Vector search demonstration completed!\n");
