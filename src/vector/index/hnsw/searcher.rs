@@ -78,6 +78,13 @@ impl VectorSearcher for HnswSearcher {
                 break;
             }
 
+            let metadata = vector.metadata.clone();
+            let vector_output = if request.params.include_vectors {
+                Some(vector)
+            } else {
+                None
+            };
+
             results
                 .results
                 .push(crate::vector::search::searcher::VectorSearchResult {
@@ -85,12 +92,8 @@ impl VectorSearcher for HnswSearcher {
                     field_name,
                     similarity,
                     distance,
-                    vector: if request.params.include_vectors {
-                        Some(vector)
-                    } else {
-                        None
-                    },
-                    metadata: std::collections::HashMap::new(),
+                    vector: vector_output,
+                    metadata,
                 });
         }
 

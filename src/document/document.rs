@@ -742,7 +742,8 @@ impl DocumentBuilder {
     /// Vector fields store text that will be converted to embeddings when indexed
     /// by a VectorEngine. The actual embedding conversion happens during indexing,
     /// using the embedder configured for that field.
-    /// The VectorOption parameter controls how this field is indexed (indexed, stored).
+    /// The VectorOption parameter controls how this field is indexed (including whether
+    /// the original text should be stored via vector metadata).
     ///
     /// # Arguments
     ///

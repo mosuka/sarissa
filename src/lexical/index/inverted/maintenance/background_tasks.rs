@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::maintenance::deletion::DeletionManager;
 use crate::lexical::index::inverted::segment::manager::SegmentManager;
 use crate::lexical::index::inverted::segment::merge_engine::MergeEngine;
@@ -314,9 +314,7 @@ impl BackgroundScheduler {
     /// Start the background scheduler.
     pub fn start(&self) -> Result<()> {
         if self.running.load(Ordering::Acquire) {
-            return Err(PlatypusError::index(
-                "Background scheduler already running",
-            ));
+            return Err(PlatypusError::index("Background scheduler already running"));
         }
 
         self.running.store(true, Ordering::Release);

@@ -14,7 +14,7 @@ use crate::analysis::token::Token;
 use crate::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
 use crate::document::document::Document;
 use crate::document::field::FieldValue;
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
 use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};

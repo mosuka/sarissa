@@ -401,6 +401,11 @@ pub struct VectorOption {
     #[serde(default = "default_true")]
     pub normalize: bool,
 
+    /// Whether to store the original field value alongside the vector.
+    /// When true, the raw text is emitted via `VectorSearchResult.metadata`.
+    #[serde(default = "default_true")]
+    pub stored: bool,
+
     /// Flat-specific configuration (used when index_type = Flat).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flat: Option<FlatOption>,
@@ -425,6 +430,7 @@ impl Default for VectorOption {
             dimension: 384,
             distance_metric: DistanceMetric::Cosine,
             normalize: true,
+            stored: true,
             flat: None,
             hnsw: Some(HnswOption::default()),
             ivf: None,

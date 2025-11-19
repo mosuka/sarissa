@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::maintenance::deletion::DeletionManager;
 use crate::lexical::index::inverted::segment::manager::{
     ManagedSegmentInfo, MergeStrategy, SegmentManager,

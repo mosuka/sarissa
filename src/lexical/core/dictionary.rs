@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use ahash::AHashMap;
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{StorageInput, StorageOutput};
 
@@ -288,9 +288,7 @@ impl HashTermDictionary {
         let magic = reader.read_u32()?;
         if magic != 0x48544443 {
             // "HTDC"
-            return Err(PlatypusError::index(
-                "Invalid hash dictionary magic number",
-            ));
+            return Err(PlatypusError::index("Invalid hash dictionary magic number"));
         }
 
         // Read version

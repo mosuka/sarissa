@@ -13,7 +13,7 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 
 use crate::document::field::FieldValue;
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 
 /// DocValues file extension

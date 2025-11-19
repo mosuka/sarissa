@@ -25,9 +25,7 @@ use platypus::error::Result;
 use platypus::lexical::engine::LexicalEngine;
 use platypus::lexical::index::config::LexicalIndexConfig;
 use platypus::lexical::index::factory::LexicalIndexFactory;
-use platypus::lexical::index::inverted::writer::{
-    InvertedIndexWriter, InvertedIndexWriterConfig,
-};
+use platypus::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use platypus::lexical::search::searcher::LexicalSearchRequest;
 use platypus::storage::file::FileStorage;
 use platypus::storage::file::FileStorageConfig;

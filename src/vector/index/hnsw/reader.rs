@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::error::{Result, PlatypusError};
+use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
+use crate::vector::index::io::read_metadata;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
 
@@ -78,6 +79,7 @@ impl HnswIndexReader {
                 PlatypusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
             })?;
 
+            let metadata = read_metadata(&mut input)?;
             // Read vector data
             let mut values = vec![0.0f32; dimension];
             for value in &mut values {
@@ -87,7 +89,10 @@ impl HnswIndexReader {
             }
 
             vector_ids.push((doc_id, field_name.clone()));
-            vectors.insert((doc_id, field_name), Vector::new(values));
+            vectors.insert(
+                (doc_id, field_name),
+                Vector::with_metadata(values, metadata),
+            );
         }
 
         Ok(Self {
