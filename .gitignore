@@ -6,9 +6,11 @@
 .DS_Store
 .env
 
-target
+target/
 perf.data*
 
 Cargo.lock
 
 flamegraph.svg
+
+tmp/
