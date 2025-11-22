@@ -4,6 +4,11 @@
 //! engines to provide unified hybrid search functionality.
 
 use crate::error::Result;
+use crate::hybrid::search::searcher::{
+    HybridSearchParams, HybridVectorOptions, HybridSearchRequest, HybridSearchResults,
+};
+use crate::vector::collection::{VectorCollectionQuery, VectorCollectionSearchResults};
+use crate::vector::search::searcher::VectorSearchParams;
 
 /// High-level hybrid search engine combining lexical and vector search.
 ///
@@ -166,39 +171,50 @@ impl HybridEngine {
     /// ```
     pub async fn search(
         &self,
-        request: crate::hybrid::search::searcher::HybridSearchRequest,
-    ) -> Result<crate::hybrid::search::searcher::HybridSearchResults> {
+        request: HybridSearchRequest,
+    ) -> Result<HybridSearchResults> {
         use std::collections::HashMap;
         use std::time::Instant;
+
+        let HybridSearchRequest {
+            text_query,
+            vector_query,
+            params,
+            lexical_params,
+            vector_params,
+            vector_overrides,
+        } = request;
 
         let start = Instant::now();
 
         // Prepare lexical search request
         let lexical_request =
-            crate::lexical::search::searcher::LexicalSearchRequest::new(request.text_query.clone())
-                .max_docs(request.lexical_params.max_docs)
-                .min_score(request.lexical_params.min_score)
-                .load_documents(request.lexical_params.load_documents);
-
-        // Prepare vector search request if vector query provided
-        let vector_request_opt = request.vector_query.as_ref().map(|vector| {
-            crate::vector::search::searcher::VectorSearchRequest::new(vector.clone())
-                .top_k(request.vector_params.top_k)
-                .min_similarity(request.params.min_vector_similarity)
-        });
+            crate::lexical::search::searcher::LexicalSearchRequest::new(text_query.clone())
+                .max_docs(lexical_params.max_docs)
+                .min_score(lexical_params.min_score)
+                .load_documents(lexical_params.load_documents);
 
         // Execute both searches sequentially (engines are not Send, so can't use spawn_blocking)
         // However, we can still execute them efficiently using tokio's runtime
         let keyword_results = self.lexical_engine.search(lexical_request)?;
 
-        let vector_results = if let Some(vector_request) = vector_request_opt {
-            Some(self.vector_engine.search(vector_request)?)
+        let vector_query = Self::build_vector_collection_query(
+            vector_overrides,
+            vector_query,
+            &vector_params,
+            &params,
+        );
+
+        let vector_results = if let Some(query) = vector_query {
+            let mut results = self.vector_engine.search(query)?;
+            Self::apply_vector_constraints(&mut results, &vector_params);
+            Some(results)
         } else {
             None
         };
 
         // Merge results
-        let merger = crate::hybrid::search::merger::ResultMerger::new(request.params.clone());
+        let merger = crate::hybrid::search::merger::ResultMerger::new(params.clone());
         let query_time_ms = start.elapsed().as_millis() as u64;
 
         // TODO: Implement proper document store
@@ -209,11 +225,54 @@ impl HybridEngine {
             .merge_results(
                 keyword_results,
                 vector_results,
-                request.text_query,
+                text_query,
                 query_time_ms,
                 &document_store,
             )
             .await
+    }
+
+    fn build_vector_collection_query(
+        overrides: HybridVectorOptions,
+        mut query: Option<VectorCollectionQuery>,
+        vector_params: &VectorSearchParams,
+        params: &HybridSearchParams,
+    ) -> Option<VectorCollectionQuery> {
+        let mut query = query?;
+        HybridSearchRequest::apply_overrides_to_query(&overrides, &mut query);
+        if query.limit == 0 {
+            query.limit = Self::default_vector_limit(vector_params, params);
+        }
+        Some(query)
+    }
+
+    fn default_vector_limit(
+        vector_params: &VectorSearchParams,
+        params: &HybridSearchParams,
+    ) -> usize {
+        let mut candidates = Vec::new();
+        if vector_params.top_k > 0 {
+            candidates.push(vector_params.top_k);
+        }
+        if params.max_results > 0 {
+            candidates.push(params.max_results);
+        }
+        candidates.into_iter().max().unwrap_or(1).max(1)
+    }
+
+    fn apply_vector_constraints(
+        results: &mut VectorCollectionSearchResults,
+        vector_params: &VectorSearchParams,
+    ) {
+        if vector_params.min_similarity > 0.0 {
+            results
+                .hits
+                .retain(|hit| hit.score >= vector_params.min_similarity);
+        }
+
+        if vector_params.top_k > 0 && results.hits.len() > vector_params.top_k {
+            results.hits.truncate(vector_params.top_k);
+        }
     }
 
     /// Get a reference to the lexical engine.
@@ -229,11 +288,95 @@ impl HybridEngine {
 
 #[cfg(test)]
 mod tests {
-    // Note: Full integration tests would require setting up both engines
-    // These are placeholder tests for the basic structure
+    use super::*;
+    use crate::vector::collection::{
+        FieldSelector, MetadataFilter, VectorCollectionFilter, VectorCollectionHit,
+        VectorScoreMode,
+    };
+    use crate::vector::field::FieldHit;
+
     #[test]
-    fn test_hybrid_engine_structure() {
-        // This test just verifies the struct can be constructed
-        // Real tests would need actual engine instances
+    fn build_query_apply_overrides_and_limits() {
+        let mut overrides = HybridVectorOptions::default();
+        overrides.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
+        overrides.score_mode = Some(VectorScoreMode::MaxSim);
+        overrides.overfetch = Some(1.25);
+        let mut field_filter = MetadataFilter::default();
+        field_filter
+            .equals
+            .insert("section".to_string(), "body".to_string());
+        overrides.filter = Some(VectorCollectionFilter {
+            document: MetadataFilter::default(),
+            field: field_filter.clone(),
+        });
+
+        let mut query = VectorCollectionQuery::default();
+        query.limit = 0;
+
+        let vector_params = VectorSearchParams {
+            top_k: 4,
+            ..Default::default()
+        };
+        let mut hybrid_params = HybridSearchParams::default();
+        hybrid_params.max_results = 2;
+
+        let resolved = HybridEngine::build_vector_collection_query(
+            overrides,
+            Some(query),
+            &vector_params,
+            &hybrid_params,
+        )
+        .expect("vector query");
+
+        assert_eq!(resolved.limit, 4);
+        assert!(matches!(resolved.score_mode, VectorScoreMode::MaxSim));
+        let fields = resolved.fields.expect("fields");
+        assert_eq!(fields.len(), 1);
+        let filter = resolved.filter.expect("filter");
+        assert_eq!(
+            filter.field.equals.get("section"),
+            field_filter.equals.get("section")
+        );
+    }
+
+    #[test]
+    fn apply_vector_constraints_respects_similarity_and_topk() {
+        let mut results = VectorCollectionSearchResults {
+            hits: vec![
+                VectorCollectionHit {
+                    doc_id: 1,
+                    score: 0.9,
+                    field_hits: vec![FieldHit {
+                        doc_id: 1,
+                        field: "title".into(),
+                        score: 0.9,
+                        distance: 0.1,
+                        metadata: Default::default(),
+                    }],
+                },
+                VectorCollectionHit {
+                    doc_id: 2,
+                    score: 0.4,
+                    field_hits: vec![FieldHit {
+                        doc_id: 2,
+                        field: "title".into(),
+                        score: 0.4,
+                        distance: 0.6,
+                        metadata: Default::default(),
+                    }],
+                },
+            ],
+        };
+
+        let params = VectorSearchParams {
+            top_k: 1,
+            min_similarity: 0.5,
+            ..Default::default()
+        };
+
+        HybridEngine::apply_vector_constraints(&mut results, &params);
+
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].doc_id, 1);
     }
 }

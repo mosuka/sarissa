@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod factory;
+pub mod field;
 pub mod flat;
 pub mod hnsw;
 pub mod io;

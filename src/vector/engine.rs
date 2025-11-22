@@ -4,12 +4,22 @@
 //! similar to the lexical SearchEngine.
 
 use std::cell::{RefCell, RefMut};
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::error::Result;
+use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
+use crate::vector::collection::{
+    FieldSelector, VectorCollectionHit, VectorCollectionQuery, VectorCollectionSearchResults,
+    VectorScoreMode,
+};
 use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::document::{
+    METADATA_EMBEDDER_ID, METADATA_ROLE, METADATA_WEIGHT, VectorRole,
+};
 use crate::vector::core::vector::Vector;
+use crate::vector::field::FieldHit;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorSearcher;
@@ -22,11 +32,12 @@ use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 ///
 /// ```no_run
 /// use platypus::vector::engine::VectorEngine;
+/// use platypus::vector::collection::{QueryVector, VectorCollectionQuery};
+/// use platypus::vector::core::distance::DistanceMetric;
+/// use platypus::vector::core::document::StoredVector;
+/// use platypus::vector::core::vector::Vector;
 /// use platypus::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
 /// use platypus::vector::index::factory::VectorIndexFactory;
-/// use platypus::vector::core::distance::DistanceMetric;
-/// use platypus::vector::core::vector::Vector;
-/// use platypus::vector::search::searcher::VectorSearchRequest;
 /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use platypus::document::document::Document;
 /// use platypus::embedding::text_embedder::TextEmbedder;
@@ -59,8 +70,13 @@ use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 ///
 /// // Search
 /// let query_vector = Vector::new(vec![1.0, 0.1, 0.0]);
-/// let request = VectorSearchRequest::new(query_vector).top_k(2);
-/// let results = engine.search(request)?;
+/// let mut query = VectorCollectionQuery::default();
+/// query.limit = 2;
+/// query.query_vectors.push(QueryVector {
+///     vector: StoredVector::from(query_vector),
+///     weight: 1.0,
+/// });
+/// let results = engine.search(query)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -411,23 +427,329 @@ impl VectorEngine {
         self.index.storage()
     }
 
-    /// Search for similar vectors.
+    /// Search for similar vectors using the doc-centric query model.
     ///
     /// This method automatically selects the appropriate searcher implementation
     /// based on the underlying index type (Flat, HNSW, or IVF).
     /// The searcher is cached for efficiency.
-    pub fn search(&self, request: VectorSearchRequest) -> Result<VectorSearchResults> {
+    pub fn search(&self, query: VectorCollectionQuery) -> Result<VectorCollectionSearchResults> {
+        Self::validate_query(&query)?;
+
+        let field_selection = self.resolve_field_selection(&query)?;
+        let field_limit = Self::scaled_field_limit(query.limit, query.overfetch);
+        let search_runs = self.execute_legacy_searches(&query, &field_selection, field_limit)?;
+
+        Ok(Self::map_legacy_results(
+            &query,
+            &field_selection,
+            search_runs,
+        ))
+    }
+
+    fn validate_query(query: &VectorCollectionQuery) -> Result<()> {
+        if query.query_vectors.is_empty() {
+            return Err(PlatypusError::invalid_argument(
+                "VectorCollectionQuery requires at least one query vector",
+            ));
+        }
+
+        if query.limit == 0 {
+            return Err(PlatypusError::invalid_argument(
+                "VectorCollectionQuery limit must be greater than zero",
+            ));
+        }
+
+        if matches!(query.score_mode, VectorScoreMode::LateInteraction) {
+            return Err(PlatypusError::invalid_argument(
+                "VectorScoreMode::LateInteraction is not supported by VectorEngine",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn resolve_field_selection(&self, query: &VectorCollectionQuery) -> Result<FieldSelection> {
+        let reader_ref = self.get_or_create_reader()?;
+        let available_fields = reader_ref.field_names()?;
+        drop(reader_ref);
+
+        let mut resolved_fields = Vec::new();
+        let mut required_roles = Vec::new();
+        let mut has_explicit_field_selector = false;
+
+        if let Some(selectors) = &query.fields {
+            if selectors.is_empty() {
+                return Err(PlatypusError::invalid_argument(
+                    "VectorCollectionQuery field selector list cannot be empty",
+                ));
+            }
+
+            let available_lookup: HashSet<String> = available_fields.iter().cloned().collect();
+
+            for selector in selectors {
+                match selector {
+                    FieldSelector::Exact(name) => {
+                        has_explicit_field_selector = true;
+                        if !available_lookup.is_empty() && !available_lookup.contains(name) {
+                            return Err(PlatypusError::not_found(format!(
+                                "vector field '{name}' is not available in the legacy index"
+                            )));
+                        }
+                        resolved_fields.push(name.clone());
+                    }
+                    FieldSelector::Prefix(prefix) => {
+                        has_explicit_field_selector = true;
+                        let mut matched = false;
+                        for field in &available_fields {
+                            if field.starts_with(prefix) {
+                                resolved_fields.push(field.clone());
+                                matched = true;
+                            }
+                        }
+                        if !matched {
+                            return Err(PlatypusError::not_found(format!(
+                                "no vector fields match prefix '{prefix}'"
+                            )));
+                        }
+                    }
+                    FieldSelector::Role(role) => {
+                        required_roles.push(role.clone());
+                    }
+                }
+            }
+        }
+
+        let scope = if has_explicit_field_selector {
+            let mut seen = HashSet::new();
+            resolved_fields.retain(|field| seen.insert(field.clone()));
+            FieldSearchScope::Named(resolved_fields)
+        } else {
+            FieldSearchScope::All
+        };
+
+        Ok(FieldSelection {
+            scope,
+            required_roles,
+        })
+    }
+
+    fn scaled_field_limit(limit: usize, overfetch: f32) -> usize {
+        if limit == 0 {
+            return 0;
+        }
+        let factor = if overfetch.is_finite() && overfetch > 0.0 {
+            overfetch
+        } else {
+            1.0
+        };
+        let scaled = (limit as f32 * factor).ceil() as usize;
+        scaled.max(limit).max(1)
+    }
+
+    fn execute_legacy_searches(
+        &self,
+        query: &VectorCollectionQuery,
+        selection: &FieldSelection,
+        field_limit: usize,
+    ) -> Result<Vec<LegacySearchRun>> {
         let searcher = self.get_or_create_searcher()?;
-        searcher.search(&request)
+        let mut runs = Vec::new();
+
+        for target in selection.targets() {
+            for query_vector in &query.query_vectors {
+                let mut request = VectorSearchRequest::new(query_vector.vector.to_vector());
+                request.params.top_k = field_limit.max(1);
+                if let Some(field_name) = target.clone() {
+                    request.field_name = Some(field_name);
+                }
+
+                let results = searcher.search(&request)?;
+                runs.push(LegacySearchRun {
+                    query_weight: query_vector.weight * query_vector.vector.weight,
+                    query_role: query_vector.vector.role.clone(),
+                    query_embedder_id: query_vector.vector.embedder_id.clone(),
+                    results,
+                });
+            }
+        }
+
+        Ok(runs)
+    }
+
+    fn map_legacy_results(
+        query: &VectorCollectionQuery,
+        selection: &FieldSelection,
+        runs: Vec<LegacySearchRun>,
+    ) -> VectorCollectionSearchResults {
+        if runs.is_empty() {
+            return VectorCollectionSearchResults::default();
+        }
+
+        let role_filters: HashSet<String> = selection
+            .required_roles
+            .iter()
+            .map(|role| role.to_string())
+            .collect();
+        let field_filter = query
+            .filter
+            .as_ref()
+            .map(|filter| filter.field.equals.clone());
+        let document_filter = query
+            .filter
+            .as_ref()
+            .map(|filter| filter.document.equals.clone())
+            .filter(|filter| !filter.is_empty());
+
+        let mut hits_by_doc: HashMap<u64, VectorCollectionHit> = HashMap::new();
+
+        for run in runs {
+            for result in run.results.results {
+                let crate::vector::search::searcher::VectorSearchResult {
+                    doc_id,
+                    field_name,
+                    similarity,
+                    distance,
+                    metadata,
+                    ..
+                } = result;
+
+                if !role_filters.is_empty()
+                    && !Self::metadata_role_matches(&role_filters, metadata.get(METADATA_ROLE))
+                {
+                    continue;
+                }
+
+                if !Self::role_matches_query(&run.query_role, metadata.get(METADATA_ROLE)) {
+                    continue;
+                }
+
+                if !Self::embedder_matches(
+                    &run.query_embedder_id,
+                    metadata.get(METADATA_EMBEDDER_ID),
+                ) {
+                    continue;
+                }
+
+                if let Some(ref filter) = field_filter {
+                    if !Self::metadata_matches(filter, &metadata) {
+                        continue;
+                    }
+                }
+
+                if let Some(ref filter) = document_filter {
+                    if !Self::metadata_matches(filter, &metadata) {
+                        continue;
+                    }
+                }
+
+                let weighted_score =
+                    similarity * run.query_weight * Self::metadata_weight(&metadata);
+                if weighted_score == 0.0 {
+                    continue;
+                }
+
+                let field_hit = FieldHit {
+                    doc_id,
+                    field: field_name,
+                    score: weighted_score,
+                    distance,
+                    metadata,
+                };
+
+                let entry = hits_by_doc
+                    .entry(doc_id)
+                    .or_insert_with(|| VectorCollectionHit {
+                        doc_id,
+                        score: if matches!(query.score_mode, VectorScoreMode::MaxSim) {
+                            f32::NEG_INFINITY
+                        } else {
+                            0.0
+                        },
+                        field_hits: Vec::new(),
+                    });
+
+                match query.score_mode {
+                    VectorScoreMode::WeightedSum => {
+                        entry.score += field_hit.score;
+                    }
+                    VectorScoreMode::MaxSim => {
+                        entry.score = entry.score.max(field_hit.score);
+                    }
+                    VectorScoreMode::LateInteraction => unreachable!(),
+                }
+
+                entry.field_hits.push(field_hit);
+            }
+        }
+
+        let mut hits: Vec<VectorCollectionHit> = hits_by_doc.into_values().collect();
+        for hit in &mut hits {
+            if hit.score == f32::NEG_INFINITY {
+                hit.score = 0.0;
+            }
+        }
+        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+        if hits.len() > query.limit {
+            hits.truncate(query.limit);
+        }
+
+        VectorCollectionSearchResults { hits }
+    }
+
+    fn metadata_role_matches(required: &HashSet<String>, candidate: Option<&String>) -> bool {
+        match candidate {
+            Some(role) => required.contains(role),
+            None => false,
+        }
+    }
+
+    fn role_matches_query(query_role: &VectorRole, candidate: Option<&String>) -> bool {
+        match query_role {
+            VectorRole::Generic => true,
+            _ => candidate
+                .map(|role| role == &query_role.to_string())
+                .unwrap_or(false),
+        }
+    }
+
+    fn embedder_matches(query_embedder: &str, candidate: Option<&String>) -> bool {
+        if query_embedder.is_empty() {
+            return true;
+        }
+
+        match candidate {
+            Some(embedder) => embedder == query_embedder,
+            None => true,
+        }
+    }
+
+    fn metadata_matches(
+        expected: &HashMap<String, String>,
+        metadata: &HashMap<String, String>,
+    ) -> bool {
+        expected.iter().all(|(key, value)| {
+            metadata
+                .get(key)
+                .map(|candidate| candidate == value)
+                .unwrap_or(false)
+        })
+    }
+
+    fn metadata_weight(metadata: &HashMap<String, String>) -> f32 {
+        metadata
+            .get(METADATA_WEIGHT)
+            .and_then(|raw| raw.parse::<f32>().ok())
+            .filter(|value| value.is_normal() || *value > 0.0)
+            .unwrap_or(1.0)
     }
 
     /// Count the number of vectors matching the request.
     ///
     /// This method counts vectors that match the field filter in the request.
     /// It's more efficient than searching when you only need the count.
-    pub fn count(&self, request: VectorSearchRequest) -> Result<u64> {
-        let searcher = self.get_or_create_searcher()?;
-        searcher.count(request)
+    pub fn count(&self, query: VectorCollectionQuery) -> Result<u64> {
+        let results = self.search(query)?;
+        Ok(results.hits.len() as u64)
     }
 
     /// Get build progress (0.0 to 1.0).
@@ -494,15 +816,50 @@ impl VectorEngine {
     }
 }
 
+#[derive(Debug, Clone)]
+struct LegacySearchRun {
+    query_weight: f32,
+    query_role: VectorRole,
+    query_embedder_id: String,
+    results: VectorSearchResults,
+}
+
+#[derive(Debug, Clone)]
+struct FieldSelection {
+    scope: FieldSearchScope,
+    required_roles: Vec<VectorRole>,
+}
+
+#[derive(Debug, Clone)]
+enum FieldSearchScope {
+    All,
+    Named(Vec<String>),
+}
+
+impl FieldSelection {
+    fn targets(&self) -> Vec<Option<String>> {
+        match &self.scope {
+            FieldSearchScope::All => vec![None],
+            FieldSearchScope::Named(fields) => fields.iter().cloned().map(Some).collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::document::field::{TextOption, VectorOption};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use crate::vector::collection::{
+        MetadataFilter, QueryVector, VectorCollectionFilter, VectorCollectionQuery,
+    };
     use crate::vector::core::distance::DistanceMetric;
+    use crate::vector::core::document::{METADATA_WEIGHT, StoredVector};
     use crate::vector::core::vector::ORIGINAL_TEXT_METADATA_KEY;
     use crate::vector::index::config::{FlatIndexConfig, VectorIndexConfig};
     use crate::vector::index::factory::VectorIndexFactory;
+    use crate::vector::search::searcher::{VectorSearchResult, VectorSearchResults};
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -574,19 +931,26 @@ mod tests {
         engine.commit()?;
 
         // Search for similar vectors
-        let query = Vector::new(vec![0.5, 0.5, 0.5]);
-        let request = VectorSearchRequest::new(query).top_k(2);
+        let query_vector = Vector::new(vec![0.5, 0.5, 0.5]);
+        let mut query = VectorCollectionQuery::default();
+        query.limit = 2;
+        query.query_vectors.push(QueryVector {
+            vector: StoredVector::from(query_vector),
+            weight: 1.0,
+        });
 
-        let results = engine.search(request)?;
-        assert_eq!(results.results.len(), 2);
+        let results = engine.search(query)?;
+        assert_eq!(results.hits.len(), 2);
 
         let expected_texts = ["Machine Learning", "Deep Learning", "Neural Network"];
-        for hit in &results.results {
-            let stored = hit
-                .metadata
-                .get(ORIGINAL_TEXT_METADATA_KEY)
-                .expect("stored text missing");
-            assert!(expected_texts.contains(&stored.as_str()));
+        for hit in &results.hits {
+            for field_hit in &hit.field_hits {
+                let stored = field_hit
+                    .metadata
+                    .get(ORIGINAL_TEXT_METADATA_KEY)
+                    .expect("stored text missing");
+                assert!(expected_texts.contains(&stored.as_str()));
+            }
         }
 
         Ok(())
@@ -657,5 +1021,64 @@ mod tests {
         let _stats = engine.stats()?;
 
         Ok(())
+    }
+
+    #[test]
+    fn map_legacy_results_honor_document_filters() {
+        let mut query = VectorCollectionQuery::default();
+        query.limit = 5;
+        query.score_mode = VectorScoreMode::WeightedSum;
+        let mut doc_filter = MetadataFilter::default();
+        doc_filter
+            .equals
+            .insert("lang".to_string(), "ja".to_string());
+        query.filter = Some(VectorCollectionFilter {
+            document: doc_filter,
+            field: MetadataFilter::default(),
+        });
+
+        let selection = FieldSelection {
+            scope: FieldSearchScope::All,
+            required_roles: Vec::new(),
+        };
+
+        let mut english = HashMap::new();
+        english.insert("lang".to_string(), "en".to_string());
+        english.insert(METADATA_WEIGHT.to_string(), "1.0".to_string());
+
+        let mut japanese = HashMap::new();
+        japanese.insert("lang".to_string(), "ja".to_string());
+        japanese.insert(METADATA_WEIGHT.to_string(), "1.0".to_string());
+
+        let mut results = VectorSearchResults::new();
+        results.results = vec![
+            VectorSearchResult {
+                doc_id: 1,
+                field_name: "body".into(),
+                similarity: 0.9,
+                distance: 0.1,
+                vector: None,
+                metadata: english,
+            },
+            VectorSearchResult {
+                doc_id: 2,
+                field_name: "body".into(),
+                similarity: 0.8,
+                distance: 0.2,
+                vector: None,
+                metadata: japanese,
+            },
+        ];
+
+        let run = LegacySearchRun {
+            query_weight: 1.0,
+            query_role: VectorRole::Generic,
+            query_embedder_id: String::new(),
+            results,
+        };
+
+        let merged = VectorEngine::map_legacy_results(&query, &selection, vec![run]);
+        assert_eq!(merged.hits.len(), 1);
+        assert_eq!(merged.hits[0].doc_id, 2);
     }
 }

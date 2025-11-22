@@ -8,6 +8,7 @@ use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::FlatIndexConfig;
+use crate::vector::index::field::LegacyVectorFieldWriter;
 use crate::vector::index::io::{read_metadata, write_metadata};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
@@ -55,6 +56,11 @@ impl FlatIndexWriter {
             total_vectors_to_add: None,
             next_vec_id: 0,
         })
+    }
+
+    /// Convert this writer into a doc-centric field writer adapter.
+    pub fn into_field_writer(self, field_name: impl Into<String>) -> LegacyVectorFieldWriter<Self> {
+        LegacyVectorFieldWriter::new(field_name, self)
     }
 
     /// Load an existing flat vector index from storage.

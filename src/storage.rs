@@ -48,6 +48,7 @@ use crate::error::{PlatypusError, Result};
 pub mod column;
 pub mod file;
 pub mod memory;
+pub mod prefixed;
 pub mod structured;
 
 /// File metadata information.
