@@ -1,239 +1,214 @@
-//! Vector search example that mirrors the `lexical_search` flow:
+//! Minimal VectorCollection query example without legacy adapters.
 //!
-//! 1. ストレージを作成
-//! 2. PerFieldEmbedder を構築
-//! 3. VectorEngine を生成
-//! 4. DocumentBuilder でドキュメントを作成し、フィールドごとにベクターを登録
-//!
-//! その後、複数の検索シナリオで field 指定のベクター検索を確認します。
-//!
-//! 実行手順:
-//! ```bash
-//! cargo run --example vector_search --features embeddings-candle
-//! ```
+//! This sample builds an in-memory `VectorCollection`, ingests a handful of
+//! demo documents, and executes `VectorCollectionQuery` instances directly. It
+//! illustrates field-scoped queries, metadata-driven previews, and score-mode
+//! defaults without relying on `VectorSearchRequest` or other legacy APIs.
 
-#[cfg(feature = "embeddings-candle")]
+use std::collections::HashMap;
 use std::sync::Arc;
 
-#[cfg(feature = "embeddings-candle")]
-use tempfile::TempDir;
-
-#[cfg(feature = "embeddings-candle")]
-use platypus::document::document::Document;
-#[cfg(feature = "embeddings-candle")]
-use platypus::document::field::VectorOption;
-#[cfg(feature = "embeddings-candle")]
-use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-#[cfg(feature = "embeddings-candle")]
-use platypus::embedding::per_field::PerFieldEmbedder;
-#[cfg(feature = "embeddings-candle")]
-use platypus::embedding::text_embedder::TextEmbedder;
-#[cfg(feature = "embeddings-candle")]
 use platypus::error::Result;
-#[cfg(feature = "embeddings-candle")]
-use platypus::storage::file::FileStorageConfig;
-#[cfg(feature = "embeddings-candle")]
-use platypus::storage::{StorageConfig, StorageFactory};
-#[cfg(feature = "embeddings-candle")]
+use platypus::storage::Storage;
+use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use platypus::vector::DistanceMetric;
+use platypus::vector::collection::{
+    FieldSelector, MetadataFilter, QueryVector, VectorCollection, VectorCollectionConfig,
+    VectorCollectionFilter, VectorCollectionQuery, VectorCollectionSearchResults,
+    VectorFieldConfig, VectorIndexKind, VectorScoreMode,
+};
+use platypus::vector::core::document::{DocumentVectors, StoredVector, VectorRole};
 use platypus::vector::core::vector::ORIGINAL_TEXT_METADATA_KEY;
-#[cfg(feature = "embeddings-candle")]
-use platypus::vector::engine::VectorEngine;
-#[cfg(feature = "embeddings-candle")]
-use platypus::vector::index::config::{FlatIndexConfig, VectorIndexConfig};
-#[cfg(feature = "embeddings-candle")]
-use platypus::vector::index::factory::VectorIndexFactory;
-#[cfg(feature = "embeddings-candle")]
-use platypus::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
 
-#[cfg(feature = "embeddings-candle")]
-#[tokio::main]
-async fn main() -> Result<()> {
-    println!("=== Vector Search Pipeline (Storage → Embedders → Engine → Documents) ===\n");
+const DIMENSION: usize = 4;
+const EMBEDDER_ID: &str = "text-encoder-v1";
+const TITLE_FIELD: &str = "title_embedding";
+const CONTENT_FIELD: &str = "body_embedding";
+const SAMPLE_VECTORS_JSON: &str = include_str!("../resources/vector_collection_sample.json");
 
-    // Step 1. ストレージを作る
-    println!("Step 1: Creating storage backend (TempDir + file storage)...");
-    let temp_dir = TempDir::new().unwrap();
-    let storage =
-        StorageFactory::create(StorageConfig::File(FileStorageConfig::new(temp_dir.path())))?;
-    println!("  Storage path: {}\n", temp_dir.path().display());
+fn main() -> Result<()> {
+    println!("=== VectorCollection query demo ===\n");
 
-    // Step 2. PerFieldEmbedder を作る
-    println!("Step 2: Configuring PerFieldEmbedder...");
-    let base_model = "sentence-transformers/all-MiniLM-L6-v2";
-    let default_embedder: Arc<dyn TextEmbedder> = Arc::new(CandleTextEmbedder::new(base_model)?);
-    let mut per_field_builder = PerFieldEmbedder::new(Arc::clone(&default_embedder));
-    per_field_builder.add_embedder("title", Arc::clone(&default_embedder));
-    per_field_builder.add_embedder("content", Arc::clone(&default_embedder));
-    println!("  Default model: {}", default_embedder.name());
-    println!(
-        "  Configured fields: {:?}\n",
-        per_field_builder.configured_fields()
-    );
-    let per_field_embedder = Arc::new(per_field_builder);
-    let embedder_for_index: Arc<dyn TextEmbedder> = per_field_embedder.clone();
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default())) as Arc<dyn Storage>;
+    let config = build_collection_config();
+    let collection = VectorCollection::new(config, storage, None)?;
 
-    // Step 3. VectorEngine を作る
-    println!("Step 3: Building VectorEngine with Flat index...");
-    let mut flat_config = FlatIndexConfig::default();
-    flat_config.dimension = embedder_for_index.dimension();
-    flat_config.embedder = Arc::clone(&embedder_for_index);
-    let config = VectorIndexConfig::Flat(flat_config);
-    let index = VectorIndexFactory::create(storage, config)?;
-    let mut vector_engine = VectorEngine::new(index)?;
-    println!(
-        "  VectorEngine ready (dimension = {})\n",
-        embedder_for_index.dimension()
-    );
-
-    // Step 4. Add documents for testing boolean queries
-    let documents = vec![
-        Document::builder()
-            .add_vector("title", "Rust Programming", VectorOption::default())
-            .add_vector("content", "Rust is a systems programming language focused on safety, concurrency, and performance.", VectorOption::default())
-            .build(),
-        Document::builder()
-            .add_vector("title", "Python for AI", VectorOption::default())
-            .add_vector("content", "Python is widely used in artificial intelligence, machine learning, and data science applications.", VectorOption::default())
-            .build(),
-        Document::builder()
-            .add_vector("title", "JavaScript Web Development", VectorOption::default())
-            .add_vector("content", "JavaScript powers interactive web applications and is essential for modern frontend development.", VectorOption::default())
-            .build(),
-        Document::builder()
-            .add_vector("title", "Database Systems", VectorOption::default())
-            .add_vector("content", "Database management systems efficiently store, organize, and retrieve data for applications.", VectorOption::default())
-            .build(),
-        Document::builder()
-            .add_vector("title", "Machine Learning", VectorOption::default())
-            .add_vector("content", "Machine learning algorithms enable computers to learn patterns from data without explicit programming.", VectorOption::default())
-            .build(),
-    ];
-
-    println!("Adding {} documents to the index...", documents.len());
-    for document in documents {
-        let doc_id = vector_engine.add_document(document.clone()).await?;
-        println!(
-            "  Indexed doc_id {}: {:?}",
-            doc_id,
-            document.get_field("title")
-        );
-    }
-
-    vector_engine.commit()?;
-    vector_engine.optimize()?;
-
-    // Demonstrate vector search scenarios (mirroring lexical example style)
-    println!("{}", "=".repeat(80));
-    println!("Step 5: Running vector search scenarios\n");
-
-    // 1. Search across all vector fields
-    println!("[1] Search ALL fields: \"programming language\"");
-    println!("{}", "-".repeat(80));
-    let query_all = "programming language";
-    let query_vec = embedder_for_index.embed(query_all).await?;
-    let request = VectorSearchRequest::new(query_vec).top_k(3);
-    let results = vector_engine.search(request)?;
-    display_results(&results, "all fields");
-
-    // 2. Search only title_embedding field
-    println!("\n[2] Search ONLY field 'title': \"programming language\"");
-    println!("{}", "-".repeat(80));
-    let query_vec = embedder_for_index
-        .embed_with_field("programming language", "title")
-        .await?;
-    let request = VectorSearchRequest::new(query_vec)
-        .top_k(3)
-        .field_name("title".to_string());
-    let results = vector_engine.search(request)?;
-    display_results(&results, "title");
-
-    // 3. Search only content field
-    println!("\n[3] Search ONLY field 'content': \"artificial intelligence\"");
-    println!("{}", "-".repeat(80));
-    let query_vec = embedder_for_index
-        .embed_with_field("artificial intelligence", "content")
-        .await?;
-    let request = VectorSearchRequest::new(query_vec)
-        .top_k(3)
-        .field_name("content".to_string());
-    let results = vector_engine.search(request)?;
-    display_results(&results, "content");
-
-    // 4. Compare title vs content results for the same query
-    println!("\n[4] Field comparison for query: \"web development\"");
-    println!("{}", "-".repeat(80));
-    let query_vec = embedder_for_index.embed("web development").await?;
-    let title_results = vector_engine.search(
-        VectorSearchRequest::new(query_vec.clone())
-            .top_k(2)
-            .field_name("title".to_string()),
-    )?;
-    display_results(&title_results, "title");
-
-    let content_results = vector_engine.search(
-        VectorSearchRequest::new(query_vec)
-            .top_k(2)
-            .field_name("content".to_string()),
-    )?;
-    display_results(&content_results, "content");
-
-    println!("\n{}", "=".repeat(80));
-    println!("Vector search demonstration completed!\n");
+    ingest_documents(&collection)?;
+    demo_queries(&collection)?;
 
     Ok(())
 }
 
-#[cfg(feature = "embeddings-candle")]
-fn display_results(results: &VectorSearchResults, context: &str) {
-    println!(
-        "Results ({}): {} hits in {} ms",
-        context,
-        results.results.len(),
-        results.search_time_ms
+fn build_collection_config() -> VectorCollectionConfig {
+    let mut fields = HashMap::new();
+    fields.insert(
+        TITLE_FIELD.to_string(),
+        VectorFieldConfig {
+            dimension: DIMENSION,
+            distance: DistanceMetric::Cosine,
+            index: VectorIndexKind::Flat,
+            embedder_id: EMBEDDER_ID.to_string(),
+            role: VectorRole::Text,
+            base_weight: 1.2,
+        },
+    );
+    fields.insert(
+        CONTENT_FIELD.to_string(),
+        VectorFieldConfig {
+            dimension: DIMENSION,
+            distance: DistanceMetric::Cosine,
+            index: VectorIndexKind::Flat,
+            embedder_id: EMBEDDER_ID.to_string(),
+            role: VectorRole::Text,
+            base_weight: 1.0,
+        },
     );
 
-    for (rank, hit) in results.results.iter().enumerate() {
+    VectorCollectionConfig {
+        fields,
+        default_fields: vec![TITLE_FIELD.into(), CONTENT_FIELD.into()],
+        metadata: HashMap::new(),
+    }
+}
+
+fn ingest_documents(collection: &VectorCollection) -> Result<()> {
+    let documents: Vec<DocumentVectors> = serde_json::from_str(SAMPLE_VECTORS_JSON)?;
+    let total = documents.len();
+    for document in documents {
+        collection.upsert_document(document)?;
+    }
+
+    println!("Inserted demo documents ({} total).\n", total);
+    Ok(())
+}
+
+fn demo_queries(collection: &VectorCollection) -> Result<()> {
+    println!("Running VectorCollection queries...\n");
+
+    run_query(
+        collection,
+        make_query(
+            [0.92, 0.08, 0.0, 0.0],
+            None,
+            None,
+            VectorScoreMode::WeightedSum,
+        ),
+        "All fields • programming focus",
+    )?;
+
+    let doc_filter = VectorCollectionFilter {
+        document: metadata_filter(&[("lang", "ja")]),
+        field: MetadataFilter::default(),
+    };
+
+    run_query(
+        collection,
+        make_query(
+            [0.2, 0.1, 0.9, 0.05],
+            None,
+            Some(doc_filter),
+            VectorScoreMode::WeightedSum,
+        ),
+        "Document metadata filter • lang=ja",
+    )?;
+
+    let field_filter = VectorCollectionFilter {
+        document: MetadataFilter::default(),
+        field: metadata_filter(&[("section", "body")]),
+    };
+
+    run_query(
+        collection,
+        make_query(
+            [0.1, 0.1, 0.85, 0.1],
+            Some(vec![FieldSelector::Exact(CONTENT_FIELD.into())]),
+            Some(field_filter),
+            VectorScoreMode::MaxSim,
+        ),
+        "Content-only • section=body filter • MaxSim",
+    )?;
+
+    Ok(())
+}
+
+fn make_query(
+    data: [f32; DIMENSION],
+    fields: Option<Vec<FieldSelector>>,
+    filter: Option<VectorCollectionFilter>,
+    score_mode: VectorScoreMode,
+) -> VectorCollectionQuery {
+    let mut query = VectorCollectionQuery::default();
+    query.limit = 3;
+    query.fields = fields;
+    query.filter = filter;
+    query.score_mode = score_mode;
+    query.query_vectors.push(query_vector(data, "demo query"));
+    query
+}
+
+fn run_query(
+    collection: &VectorCollection,
+    query: VectorCollectionQuery,
+    label: &str,
+) -> Result<()> {
+    println!("{}", "-".repeat(72));
+    println!("{label}");
+    let results = collection.search(&query)?;
+    display_results(&results, label);
+    Ok(())
+}
+
+fn display_results(results: &VectorCollectionSearchResults, context: &str) {
+    if results.hits.is_empty() {
+        println!("  No hits for {context}.\n");
+        return;
+    }
+
+    println!("  {} aggregated hits", results.hits.len());
+    for (rank, hit) in results.hits.iter().enumerate() {
         println!(
-            "  {}. Doc#{:02} • similarity {:.4} • field {}",
+            "  {}. doc #{:02} • score {:.3}",
             rank + 1,
             hit.doc_id,
-            hit.similarity,
-            hit.field_name
+            hit.score
         );
-
-        match hit.metadata.get(ORIGINAL_TEXT_METADATA_KEY) {
-            Some(original_text) => {
-                let label = hit.field_name.as_str();
-                println!("     {} : {}", label, preview_text(original_text));
-            }
-            None => println!("     Stored Text: <not stored>"),
+        for field_hit in &hit.field_hits {
+            println!(
+                "     field {:<7} • score {:.3} • distance {:.3}",
+                field_hit.field, field_hit.score, field_hit.distance
+            );
         }
     }
+    println!();
 }
 
-#[cfg(feature = "embeddings-candle")]
-fn preview_text(text: &str) -> String {
-    const LIMIT: usize = 80;
-    if text.len() > LIMIT {
-        format!("{}...", &text[..LIMIT])
-    } else {
-        text.to_string()
+fn query_vector(data: [f32; DIMENSION], text: &str) -> QueryVector {
+    let mut vector = StoredVector::new(Arc::from(data), EMBEDDER_ID.to_string(), VectorRole::Text);
+    vector
+        .attributes
+        .insert(ORIGINAL_TEXT_METADATA_KEY.to_string(), text.to_string());
+    QueryVector {
+        vector,
+        weight: 1.0,
     }
 }
 
-#[cfg(not(feature = "embeddings-candle"))]
-fn main() {
-    eprintln!("This example requires the 'embeddings-candle' feature.");
-    eprintln!("Please run with: cargo run --example vector_search --features embeddings-candle");
-    std::process::exit(1);
+fn metadata_filter(pairs: &[(&str, &str)]) -> MetadataFilter {
+    let mut filter = MetadataFilter::default();
+    for (key, value) in pairs {
+        filter
+            .equals
+            .insert((*key).to_string(), (*value).to_string());
+    }
+    filter
 }
-
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "embeddings-candle")]
+    use super::*;
+
     #[test]
-    fn test_vector_search_example() {
-        let result = super::main();
+    fn vector_search_demo_runs() {
+        let result = main();
         assert!(result.is_ok());
     }
 }

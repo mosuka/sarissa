@@ -5,6 +5,7 @@
 .idea
 .DS_Store
 .env
+.github/copilot-instructions.md
 
 target/
 perf.data*

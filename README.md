@@ -280,10 +280,12 @@ platypus = { version = "0.1", features = ["embeddings-candle"] }
 ```rust
 use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
+use platypus::vector::collection::{QueryVector, VectorCollectionQuery};
+use platypus::vector::core::document::StoredVector;
+use platypus::vector::core::vector::Vector;
 use platypus::vector::DistanceMetric;
 use platypus::vector::engine::VectorEngine;
 use platypus::vector::index::{FlatIndexConfig, VectorIndexConfig, VectorIndexFactory};
-use platypus::vector::types::VectorSearchRequest;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
 
@@ -321,11 +323,16 @@ async fn main() -> platypus::error::Result<()> {
 
     // Search with query embedding
     let query_vector = embedder.embed("programming languages").await?;
-    let request = VectorSearchRequest::new(query_vector).top_k(10);
-    let results = engine.search(request)?;
+    let mut query = VectorCollectionQuery::default();
+    query.limit = 10;
+    query.query_vectors.push(QueryVector {
+        vector: StoredVector::from(query_vector),
+        weight: 1.0,
+    });
+    let results = engine.search(query)?;
 
-    for result in results.results {
-        println!("Doc ID: {}, Similarity: {:.4}", result.doc_id, result.similarity);
+    for hit in results.hits {
+        println!("Doc ID: {}, Score: {:.4}", hit.doc_id, hit.score);
     }
 
     Ok(())
@@ -353,6 +360,82 @@ let embedder = OpenAITextEmbedder::new(
 let vector = embedder.embed("your text here").await?;
 ```
 
+### Doc-centric VectorCollection (Experimental)
+
+Platypus ships a document-centric vector flow where each `doc_id` owns multiple named vector fields and metadata. The full architecture is captured in `docs/vector_collection.md`, and two handy entry points are provided:
+
+- `resources/vector_collection_sample.json` — three synthetic `DocumentVectors` with field-level and document-level metadata for trying out `MetadataFilter` / `FieldSelector` scenarios.
+- `cargo test --test vector_collection_scenarios` — spins up an in-memory collection, loads the sample, and verifies multi-field scoring plus metadata filters end to end.
+
+You can also use the sample data in your own experiments:
+
+```rust
+use platypus::vector::collection::VectorCollection;
+use platypus::vector::collection::VectorCollectionConfig;
+use platypus::vector::core::document::DocumentVectors;
+
+let config: VectorCollectionConfig = load_collection_config()?; // see docs/vector_collection.md
+let sample_docs: Vec<DocumentVectors> = serde_json::from_str(include_str!(
+    "resources/vector_collection_sample.json"
+))?;
+let collection = VectorCollection::new(config, storage, None)?;
+for doc in sample_docs {
+    collection.upsert_document(doc)?;
+}
+```
+
+Once the collection is populated, build `VectorCollectionQuery` objects (see `examples/vector_search.rs`) to target specific fields, adjust `VectorScoreMode`, and apply metadata filters — exactly the same path used by the integration test above.
+
+#### Hybrid Search with VectorCollection
+
+`HybridSearchRequest` now understands doc-centric overrides so you can keep using the lexical-first ergonomics while routing the vector side through `VectorCollection`:
+
+```rust
+use platypus::hybrid::search::searcher::{HybridSearchRequest, ScoreNormalization};
+use platypus::vector::collection::{
+    FieldSelector, QueryVector, VectorCollectionFilter, VectorCollectionQuery, VectorScoreMode,
+};
+use platypus::vector::core::document::StoredVector;
+use platypus::vector::search::searcher::VectorSearchParams;
+
+let my_vector = Vector::new(vec![0.1, 0.2, 0.3]);
+
+let mut vector_query = VectorCollectionQuery::default();
+vector_query.limit = 32;
+vector_query.query_vectors.push(QueryVector {
+    vector: StoredVector::from(my_vector),
+    weight: 1.0,
+});
+
+let mut filter = VectorCollectionFilter::default();
+filter
+    .document
+    .equals
+    .insert("lang".into(), "en".into());
+
+let mut vector_params = VectorSearchParams::default();
+vector_params.top_k = 32;
+
+let request = HybridSearchRequest::new("rust programming")
+    .with_vector_collection_query(vector_query)
+    .vector_fields(vec![FieldSelector::Exact("body_embedding".into())])
+    .vector_filter(filter)
+    .vector_score_mode(VectorScoreMode::WeightedSum)
+    .vector_overfetch(2.0)
+    .vector_params(vector_params)
+    .keyword_weight(0.5)
+    .vector_weight(0.5)
+    .min_vector_similarity(0.35)
+    .normalization(ScoreNormalization::MinMax);
+```
+
+Key points:
+
+- Vector overrides (`vector_fields`, `vector_filter`, `vector_score_mode`, `vector_overfetch`) are applied consistently whether you pass a raw `Vector` or a fully built `VectorCollectionQuery`.
+- Document-level metadata filters (`VectorCollectionFilter::document`) execute before any vector work, so hybrid queries can cheaply target subsets such as `lang = ja` or `tenant_id = acme`.
+- Field-level hits from the vector side are preserved in `HybridSearchResult::vector_field_hits`, making it easy to explain which embeddings matched.
+- The helper tests under `src/hybrid/engine.rs` and `src/hybrid/search/merger.rs` illustrate how the engine enforces `min_vector_similarity`, top-k limits, and metadata propagation end to end (`cargo test hybrid::engine` / `cargo test hybrid::search::merger`).
+
 ### Multimodal Search (Text + Images)
 
 Platypus supports cross-modal search using CLIP (Contrastive Language-Image Pre-Training) models, enabling semantic search across text and images. This allows you to:
@@ -376,9 +459,10 @@ platypus = { version = "0.1", features = ["embeddings-multimodal"] }
 use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::embedding::image_embedder::ImageEmbedder;
+use platypus::vector::collection::{QueryVector, VectorCollectionQuery};
+use platypus::vector::core::document::StoredVector;
 use platypus::vector::engine::VectorEngine;
 use platypus::vector::index::{HnswIndexConfig, VectorIndexConfig, VectorIndexFactory};
-use platypus::vector::types::VectorSearchRequest;
 use platypus::vector::DistanceMetric;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
@@ -409,11 +493,16 @@ async fn main() -> platypus::error::Result<()> {
 
     // Search images using natural language
     let query_vector = embedder.embed("a photo of a cat playing").await?;
-    let request = VectorSearchRequest::new(query_vector).top_k(10);
-    let results = engine.search(request)?;
+    let mut query = VectorCollectionQuery::default();
+    query.limit = 10;
+    query.query_vectors.push(QueryVector {
+        vector: StoredVector::from(query_vector),
+        weight: 1.0,
+    });
+    let results = engine.search(query)?;
 
-    for result in results.results {
-        println!("Image ID: {}, Similarity: {:.4}", result.doc_id, result.similarity);
+    for hit in results.hits {
+        println!("Image ID: {}, Score: {:.4}", hit.doc_id, hit.score);
     }
 
     Ok(())
@@ -425,11 +514,16 @@ async fn main() -> platypus::error::Result<()> {
 ```rust
 // Find visually similar images using an image as query
 let query_image_vector = embedder.embed_image("query.jpg").await?;
-let request = VectorSearchRequest::new(query_image_vector).top_k(5);
-let results = engine.search(request)?;
+let mut query = VectorCollectionQuery::default();
+query.limit = 5;
+query.query_vectors.push(QueryVector {
+    vector: StoredVector::from(query_image_vector),
+    weight: 1.0,
+});
+let results = engine.search(query)?;
 
-for result in results.results {
-    println!("Similar Image ID: {}, Similarity: {:.4}", result.doc_id, result.similarity);
+for hit in results.hits {
+    println!("Similar Image ID: {}, Score: {:.4}", hit.doc_id, hit.score);
 }
 ```
 
@@ -619,7 +713,7 @@ Platypus includes numerous examples demonstrating various features:
 
 ### Vector Search Examples
 
-- [vector_search](examples/vector_search.rs) - Semantic text search using vector embeddings
+- [vector_search](examples/vector_search.rs) - Doc-centric `VectorCollection` demo with sample metadata filters
 - [embedding_with_candle](examples/embedding_with_candle.rs) - Local BERT model embeddings
 - [embedding_with_openai](examples/embedding_with_openai.rs) - OpenAI API embeddings
 - [dynamic_embedder_switching](examples/dynamic_embedder_switching.rs) - Switch between embedding providers
@@ -641,6 +735,8 @@ Run any example with:
 cargo run --example <example_name>
 
 # For embedding examples, use feature flags:
+# Doc-centric VectorCollection sample (uses built-in JSON fixtures)
+cargo run --example vector_search
 cargo run --example vector_search --features embeddings-candle
 cargo run --example embedding_with_openai --features embeddings-openai
 cargo run --example text_to_image_search --features embeddings-multimodal

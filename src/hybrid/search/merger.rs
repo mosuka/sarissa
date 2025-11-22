@@ -11,7 +11,7 @@ use crate::hybrid::search::scorer::ScoreNormalizer;
 use crate::hybrid::search::searcher::HybridSearchParams;
 use crate::hybrid::search::searcher::{HybridSearchResult, HybridSearchResults};
 use crate::lexical::index::inverted::query::SearchResults;
-use crate::vector::search::searcher::VectorSearchResults;
+use crate::vector::collection::VectorCollectionSearchResults;
 
 /// Result merger for combining keyword and vector search results.
 ///
@@ -64,7 +64,7 @@ impl ResultMerger {
     pub async fn merge_results(
         &self,
         keyword_results: SearchResults,
-        vector_results: Option<VectorSearchResults>,
+        vector_results: Option<VectorCollectionSearchResults>,
         query_text: String,
         query_time_ms: u64,
         document_store: &HashMap<u64, HashMap<String, String>>,
@@ -82,15 +82,21 @@ impl ResultMerger {
 
         // Process vector results
         if let Some(ref vector_results) = vector_results {
-            for result in &vector_results.results {
-                vector_similarities.push(result.similarity);
+            for hit in &vector_results.hits {
+                vector_similarities.push(hit.score);
 
-                if let Some(existing) = result_map.get_mut(&result.doc_id) {
-                    existing.vector_similarity = Some(result.similarity);
+                if let Some(existing) = result_map.get_mut(&hit.doc_id) {
+                    existing.vector_similarity = Some(hit.score);
+                    if existing.vector_field_hits.is_empty() {
+                        existing.vector_field_hits = hit.field_hits.clone();
+                    } else {
+                        existing.vector_field_hits.extend(hit.field_hits.clone());
+                    }
                 } else {
-                    let hybrid_result = HybridSearchResult::new(result.doc_id, 0.0)
-                        .with_vector_similarity(result.similarity);
-                    result_map.insert(result.doc_id, hybrid_result);
+                    let mut hybrid_result =
+                        HybridSearchResult::new(hit.doc_id, 0.0).with_vector_similarity(hit.score);
+                    hybrid_result.vector_field_hits = hit.field_hits.clone();
+                    result_map.insert(hit.doc_id, hybrid_result);
                 }
             }
         }
@@ -134,7 +140,10 @@ impl ResultMerger {
 
         let total_searched = document_store.len();
         let keyword_matches = keyword_results.hits.len();
-        let vector_matches = vector_results.map(|vr| vr.results.len()).unwrap_or(0);
+        let vector_matches = vector_results
+            .as_ref()
+            .map(|vr| vr.hits.len())
+            .unwrap_or(0);
 
         Ok(HybridSearchResults::new(
             results,
@@ -166,5 +175,62 @@ impl ResultMerger {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexical::index::inverted::query::SearchHit;
+    use crate::vector::collection::VectorCollectionHit;
+    use crate::vector::field::FieldHit;
+
+    #[tokio::test]
+    async fn merge_results_preserves_vector_field_hits() {
+        let mut keyword_results = SearchResults {
+            hits: Vec::new(),
+            total_hits: 0,
+            max_score: 0.0,
+        };
+        keyword_results.hits.push(SearchHit {
+            doc_id: 7,
+            score: 0.42,
+            document: None,
+        });
+        keyword_results.total_hits = 1;
+        keyword_results.max_score = 0.42;
+
+        let vector_results = VectorCollectionSearchResults {
+            hits: vec![VectorCollectionHit {
+                doc_id: 7,
+                score: 0.91,
+                field_hits: vec![FieldHit {
+                    doc_id: 7,
+                    field: "title_embedding".into(),
+                    score: 0.91,
+                    distance: 0.08,
+                    metadata: Default::default(),
+                }],
+            }],
+        };
+
+        let params = HybridSearchParams::default();
+        let merger = ResultMerger::new(params);
+        let merged = merger
+            .merge_results(
+                keyword_results,
+                Some(vector_results),
+                "rust".to_string(),
+                1,
+                &HashMap::new(),
+            )
+            .await
+            .expect("merge");
+
+        assert_eq!(merged.results.len(), 1);
+        let result = &merged.results[0];
+        assert_eq!(result.vector_similarity, Some(0.91));
+        assert_eq!(result.vector_field_hits.len(), 1);
+        assert_eq!(result.vector_field_hits[0].field, "title_embedding");
     }
 }
