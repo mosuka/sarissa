@@ -1,6 +1,6 @@
 //! Document-centric vector data structures.
 //!
-//! These types power the experimental VectorCollection feature flag. They extend
+//! These types power the experimental VectorEngine feature flag. They extend
 //! the existing `Vector` representation with metadata describing vector roles,
 //! field-level weights, and document-wide groupings.
 

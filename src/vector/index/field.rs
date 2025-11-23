@@ -7,9 +7,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use crate::error::{PlatypusError, Result};
-use crate::vector::collection::VectorFieldConfig;
 use crate::vector::core::document::{FieldVectors, METADATA_WEIGHT};
 use crate::vector::core::vector::Vector;
+use crate::vector::engine::VectorFieldConfig;
 use crate::vector::field::{
     FieldHit, FieldSearchInput, FieldSearchResults, VectorField, VectorFieldReader,
     VectorFieldStats, VectorFieldWriter,
@@ -92,7 +92,8 @@ where
         }
 
         let mut guard = self.writer.lock();
-        let legacy = self.to_legacy_vectors(doc_id, field, Self::effective_field_weight(field.weight));
+        let legacy =
+            self.to_legacy_vectors(doc_id, field, Self::effective_field_weight(field.weight));
         guard.add_vectors(legacy)
     }
 
@@ -286,10 +287,10 @@ impl VectorField for AdapterBackedVectorField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::collection::QueryVector;
     use crate::vector::core::distance::DistanceMetric;
     use crate::vector::core::document::{FieldVectors, StoredVector, VectorRole};
     use crate::vector::core::vector::Vector;
+    use crate::vector::engine::QueryVector;
     use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
     use crate::vector::index::flat::writer::FlatIndexWriter;
     use crate::vector::index::hnsw::writer::HnswIndexWriter;

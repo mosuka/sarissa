@@ -5,9 +5,10 @@
 
 use crate::error::Result;
 use crate::hybrid::search::searcher::{
-    HybridSearchParams, HybridVectorOptions, HybridSearchRequest, HybridSearchResults,
+    HybridSearchParams, HybridSearchRequest, HybridSearchResults, HybridVectorOptions,
 };
-use crate::vector::collection::{VectorCollectionQuery, VectorCollectionSearchResults};
+use crate::vector::core::document::DocumentVectors;
+use crate::vector::engine::{VectorEngineQuery, VectorEngineSearchResults};
 use crate::vector::search::searcher::VectorSearchParams;
 
 /// High-level hybrid search engine combining lexical and vector search.
@@ -96,14 +97,20 @@ impl HybridEngine {
     ///
     /// # Arguments
     ///
-    /// * `doc` - The document to add (containing both text and vector fields)
+    /// * `doc` - The document to add to the lexical index
+    /// * `vectors` - Doc-centric vector payloads matching the same `doc_id`
     ///
     /// # Returns
     ///
     /// The assigned document ID
-    pub async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64> {
+    pub async fn add_document(
+        &mut self,
+        doc: crate::document::document::Document,
+        mut vectors: DocumentVectors,
+    ) -> Result<u64> {
         let doc_id = self.next_doc_id;
-        self.add_document_with_id(doc_id, doc).await?;
+        vectors.doc_id = doc_id;
+        self.add_document_with_id(doc_id, doc, vectors).await?;
         Ok(doc_id)
     }
 
@@ -112,16 +119,21 @@ impl HybridEngine {
     /// # Arguments
     ///
     /// * `doc_id` - The document ID to use
-    /// * `doc` - The document to add (containing both text and vector fields)
+    /// * `doc` - The document to add to the lexical index
+    /// * `vectors` - Doc-centric vector payloads to upsert into the vector engine
     pub async fn add_document_with_id(
         &mut self,
         doc_id: u64,
         doc: crate::document::document::Document,
+        mut vectors: DocumentVectors,
     ) -> Result<()> {
         // Clone the document for both indexes since they'll process different fields
         self.lexical_engine
             .add_document_with_id(doc_id, doc.clone())?;
-        self.vector_engine.add_document_with_id(doc_id, doc).await?;
+        if vectors.doc_id != doc_id {
+            vectors.doc_id = doc_id;
+        }
+        self.vector_engine.upsert_document(vectors)?;
 
         // Update next_doc_id if necessary
         if doc_id >= self.next_doc_id {
@@ -134,14 +146,12 @@ impl HybridEngine {
     /// Commit changes to both lexical and vector indexes.
     pub fn commit(&mut self) -> Result<()> {
         self.lexical_engine.commit()?;
-        self.vector_engine.commit()?;
         Ok(())
     }
 
     /// Optimize both indexes.
     pub fn optimize(&mut self) -> Result<()> {
         self.lexical_engine.optimize()?;
-        self.vector_engine.optimize()?;
         Ok(())
     }
 
@@ -169,10 +179,7 @@ impl HybridEngine {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn search(
-        &self,
-        request: HybridSearchRequest,
-    ) -> Result<HybridSearchResults> {
+    pub async fn search(&self, request: HybridSearchRequest) -> Result<HybridSearchResults> {
         use std::collections::HashMap;
         use std::time::Instant;
 
@@ -198,7 +205,7 @@ impl HybridEngine {
         // However, we can still execute them efficiently using tokio's runtime
         let keyword_results = self.lexical_engine.search(lexical_request)?;
 
-        let vector_query = Self::build_vector_collection_query(
+        let vector_query = Self::build_vector_engine_query(
             vector_overrides,
             vector_query,
             &vector_params,
@@ -206,7 +213,7 @@ impl HybridEngine {
         );
 
         let vector_results = if let Some(query) = vector_query {
-            let mut results = self.vector_engine.search(query)?;
+            let mut results = self.vector_engine.search(&query)?;
             Self::apply_vector_constraints(&mut results, &vector_params);
             Some(results)
         } else {
@@ -232,12 +239,12 @@ impl HybridEngine {
             .await
     }
 
-    fn build_vector_collection_query(
+    fn build_vector_engine_query(
         overrides: HybridVectorOptions,
-        mut query: Option<VectorCollectionQuery>,
+        query: Option<VectorEngineQuery>,
         vector_params: &VectorSearchParams,
         params: &HybridSearchParams,
-    ) -> Option<VectorCollectionQuery> {
+    ) -> Option<VectorEngineQuery> {
         let mut query = query?;
         HybridSearchRequest::apply_overrides_to_query(&overrides, &mut query);
         if query.limit == 0 {
@@ -261,7 +268,7 @@ impl HybridEngine {
     }
 
     fn apply_vector_constraints(
-        results: &mut VectorCollectionSearchResults,
+        results: &mut VectorEngineSearchResults,
         vector_params: &VectorSearchParams,
     ) {
         if vector_params.min_similarity > 0.0 {
@@ -289,9 +296,8 @@ impl HybridEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::collection::{
-        FieldSelector, MetadataFilter, VectorCollectionFilter, VectorCollectionHit,
-        VectorScoreMode,
+    use crate::vector::engine::{
+        FieldSelector, MetadataFilter, VectorEngineFilter, VectorEngineHit, VectorScoreMode,
     };
     use crate::vector::field::FieldHit;
 
@@ -305,12 +311,12 @@ mod tests {
         field_filter
             .equals
             .insert("section".to_string(), "body".to_string());
-        overrides.filter = Some(VectorCollectionFilter {
+        overrides.filter = Some(VectorEngineFilter {
             document: MetadataFilter::default(),
             field: field_filter.clone(),
         });
 
-        let mut query = VectorCollectionQuery::default();
+        let mut query = VectorEngineQuery::default();
         query.limit = 0;
 
         let vector_params = VectorSearchParams {
@@ -320,7 +326,7 @@ mod tests {
         let mut hybrid_params = HybridSearchParams::default();
         hybrid_params.max_results = 2;
 
-        let resolved = HybridEngine::build_vector_collection_query(
+        let resolved = HybridEngine::build_vector_engine_query(
             overrides,
             Some(query),
             &vector_params,
@@ -341,9 +347,9 @@ mod tests {
 
     #[test]
     fn apply_vector_constraints_respects_similarity_and_topk() {
-        let mut results = VectorCollectionSearchResults {
+        let mut results = VectorEngineSearchResults {
             hits: vec![
-                VectorCollectionHit {
+                VectorEngineHit {
                     doc_id: 1,
                     score: 0.9,
                     field_hits: vec![FieldHit {
@@ -354,7 +360,7 @@ mod tests {
                         metadata: Default::default(),
                     }],
                 },
-                VectorCollectionHit {
+                VectorEngineHit {
                     doc_id: 2,
                     score: 0.4,
                     field_hits: vec![FieldHit {

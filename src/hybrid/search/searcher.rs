@@ -8,18 +8,18 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::lexical::search::searcher::LexicalSearchParams;
-use crate::vector::collection::{
-    FieldSelector, QueryVector, VectorCollectionFilter, VectorCollectionQuery, VectorScoreMode,
-};
 use crate::vector::core::document::StoredVector;
 use crate::vector::core::vector::Vector;
+use crate::vector::engine::{
+    FieldSelector, QueryVector, VectorEngineFilter, VectorEngineQuery, VectorScoreMode,
+};
 use crate::vector::field::FieldHit;
 use crate::vector::search::searcher::VectorSearchParams;
 
 /// Hybrid search request combining text query, optional vector, and search parameters.
 ///
 /// This is the main structure for executing hybrid searches, similar to
-/// `LexicalSearchRequest` and `VectorCollectionQuery`.
+/// `LexicalSearchRequest` and `VectorEngineQuery`.
 ///
 /// # Examples
 ///
@@ -43,7 +43,7 @@ pub struct HybridVectorOptions {
     pub fields: Option<Vec<FieldSelector>>,
     pub score_mode: Option<VectorScoreMode>,
     pub overfetch: Option<f32>,
-    pub filter: Option<VectorCollectionFilter>,
+    pub filter: Option<VectorEngineFilter>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,7 +51,7 @@ pub struct HybridSearchRequest {
     /// Text query for lexical search.
     pub text_query: String,
     /// Optional vector for semantic search.
-    pub vector_query: Option<VectorCollectionQuery>,
+    pub vector_query: Option<VectorEngineQuery>,
     /// Hybrid search parameters.
     pub params: HybridSearchParams,
     /// Lexical search parameters.
@@ -83,8 +83,8 @@ impl HybridSearchRequest {
         self
     }
 
-    /// Provide a fully-specified VectorCollectionQuery.
-    pub fn with_vector_collection_query(mut self, mut vector_query: VectorCollectionQuery) -> Self {
+    /// Provide a fully-specified VectorEngineQuery.
+    pub fn with_vector_engine_query(mut self, mut vector_query: VectorEngineQuery) -> Self {
         Self::apply_overrides_to_query(&self.vector_overrides, &mut vector_query);
         self.vector_query = Some(vector_query);
         self
@@ -116,7 +116,7 @@ impl HybridSearchRequest {
     }
 
     /// Override vector metadata filters for doc-centric search.
-    pub fn vector_filter(mut self, filter: VectorCollectionFilter) -> Self {
+    pub fn vector_filter(mut self, filter: VectorEngineFilter) -> Self {
         self.vector_overrides.filter = Some(filter);
         self.update_active_query();
         self
@@ -176,8 +176,8 @@ impl HybridSearchRequest {
         self
     }
 
-    fn build_query_from_vector(vector: Vector, top_k: usize) -> VectorCollectionQuery {
-        let mut query = VectorCollectionQuery::default();
+    fn build_query_from_vector(vector: Vector, top_k: usize) -> VectorEngineQuery {
+        let mut query = VectorEngineQuery::default();
         query.limit = top_k.max(1);
         query.query_vectors.push(QueryVector {
             vector: StoredVector::from(vector),
@@ -188,7 +188,7 @@ impl HybridSearchRequest {
 
     pub(crate) fn apply_overrides_to_query(
         overrides: &HybridVectorOptions,
-        query: &mut VectorCollectionQuery,
+        query: &mut VectorEngineQuery,
     ) {
         if let Some(fields) = &overrides.fields {
             query.fields = Some(fields.clone());
@@ -491,12 +491,12 @@ mod tests {
 
     #[test]
     fn test_hybrid_request_vector_overrides() {
-        use crate::vector::collection::MetadataFilter;
+        use crate::vector::engine::MetadataFilter;
         use std::collections::HashMap;
 
         let mut equals = HashMap::new();
         equals.insert("lang".to_string(), "ja".to_string());
-        let filter = VectorCollectionFilter {
+        let filter = VectorEngineFilter {
             document: MetadataFilter::default(),
             field: MetadataFilter { equals },
         };
