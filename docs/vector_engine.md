@@ -1,4 +1,4 @@
-# VectorCollection Architecture Draft
+# VectorEngine Architecture Draft
 
 Last updated: 2025-11-21
 
@@ -18,7 +18,7 @@ _Non-goals for the first iteration_:
 ## 2. High-Level Structure
 
 ```text
-VectorCollection
+VectorEngine
  ├── fields: HashMap<String, VectorField>
  │     └── VectorField = Arc<dyn VectorIndex> + config metadata
  ├── registry: DocumentVectorRegistry
@@ -26,14 +26,14 @@ VectorCollection
  └── storage: Storage backend handles snapshots + index blobs
 ```
 
-- `VectorCollectionConfig` is loaded/persisted alongside the registry snapshot.
+- `VectorEngineConfig` is loaded/persisted alongside the registry snapshot.
 - Each `VectorField` owns its own ANN index instance (`FlatIndex`, `HnswIndex`, `IvfIndex`, …) but shares the `Storage` handle so segments land under `storage/vector/<field_name>/`.
 - `DocumentVectorRegistry` preserves doc-level metadata needed to rehydrate indexes (similar to Qdrant payload catalog).
 
 ## 3. Configuration Model
 
 ```rust
-pub struct VectorCollectionConfig {
+pub struct VectorEngineConfig {
     pub fields: HashMap<String, VectorFieldConfig>,
     pub default_fields: Vec<String>,
     pub shard_number: NonZeroU32,           // future-proofing
@@ -92,13 +92,13 @@ pub struct StoredVector {
 ## 5. Query API Sketch
 
 ```rust
-pub struct VectorCollectionQuery {
+pub struct VectorEngineQuery {
     pub query_vectors: Vec<QueryVector>,
     pub fields: Option<Vec<FieldSelector>>, // default => config.default_fields
     pub limit: usize,
     pub score_mode: VectorScoreMode,
     pub overfetch: f32,
-    pub filter: Option<VectorCollectionFilter>,
+    pub filter: Option<VectorEngineFilter>,
 }
 
 pub struct QueryVector {
@@ -118,7 +118,7 @@ pub enum VectorScoreMode {
     LateInteraction, // reserved for future rerankers
 }
 
-pub struct VectorCollectionFilter {
+pub struct VectorEngineFilter {
     pub document: MetadataFilter,
     pub field: MetadataFilter,
 }
@@ -134,29 +134,29 @@ pub struct MetadataFilter {
 2. **Match query vectors**: filter `query_vectors` per field by `(embedder_id, role)`; reject the query if nothing matches.
 3. **Field-local search**: run `VectorIndex::search(FieldSearchInput)` with per-field limit = `ceil(limit * overfetch)` (minimum = `limit`).
 4. **Doc-level merge**: combine hits via `score_mode`, factoring `VectorFieldConfig.base_weight`, `FieldVectors.weight`, and `QueryVector.weight`.
-5. **Materialize response**: produce `VectorCollectionHit { doc_id, score, field_hits, metadata }`.
+5. **Materialize response**: produce `VectorEngineHit { doc_id, score, field_hits, metadata }`.
 
 ### Filters & Constraints
 
-- `VectorCollectionFilter.document.equals` enforces exact-match key/value checks against `DocumentVectors.metadata` before any field searches are executed.
-- `VectorCollectionFilter.field.equals` performs the same equality checks on per-document, per-field metadata (`FieldVectors.metadata`). Only hits coming from fields whose metadata satisfy the filter are allowed to bubble up.
+- `VectorEngineFilter.document.equals` enforces exact-match key/value checks against `DocumentVectors.metadata` before any field searches are executed.
+- `VectorEngineFilter.field.equals` performs the same equality checks on per-document, per-field metadata (`FieldVectors.metadata`). Only hits coming from fields whose metadata satisfy the filter are allowed to bubble up.
 - Query vectors must declare an `embedder_id` + `VectorRole` that matches the target field configuration; otherwise the field is skipped and the query errors if no fields remain.
 - Later we can reuse `Filter` structs from `lexical::search` for richer comparisons (prefix ranges, numeric ops, etc.).
-- 実際の `VectorCollectionQuery` 構築例は `examples/vector_search.rs` を参照。
+- 実際の `VectorEngineQuery` 構築例は `examples/vector_search.rs` を参照。
 - 実際のエンドツーエンドの利用例は `examples/vector_search.rs` を参照。
 
 ## 5.1 Hybrid Engine Integration
 
-- `HybridSearchRequest` exposes `vector_fields`, `vector_filter`, `vector_score_mode`, and `vector_overfetch` so doc-centric options can be layered on top of the familiar lexical-first builder. Internally, the engine now constructs a `VectorCollectionQuery` for you and reapplies these overrides every time the request changes.
-- Document-level metadata filters are executed before any ANN probes (`VectorCollectionFilter.document`), letting you scope hybrid queries to a tenant, language, or workflow flag without paying per-field costs.
+- `HybridSearchRequest` exposes `vector_fields`, `vector_filter`, `vector_score_mode`, and `vector_overfetch` so doc-centric options can be layered on top of the familiar lexical-first builder. Internally, the engine now constructs a `VectorEngineQuery` for you and reapplies these overrides every time the request changes.
+- Document-level metadata filters are executed before any ANN probes (`VectorEngineFilter.document`), letting you scope hybrid queries to a tenant, language, or workflow flag without paying per-field costs.
 - The vector helper enforces both `vector_params.top_k` and `HybridSearchParams::min_vector_similarity`, so hybrid results respect the same constraints you would expect when hitting the vector engine directly.
-- `HybridSearchResult::vector_field_hits` retains the field-level matches returned by `VectorCollection`, making it straightforward to surface explanations (“body_embedding matched summary chunk #2”).
+- `HybridSearchResult::vector_field_hits` retains the field-level matches returned by `VectorEngine`, making it straightforward to surface explanations (“body_embedding matched summary chunk #2”).
 - Focused unit tests live next to the engine (`src/hybrid/engine.rs`) and merger (`src/hybrid/search/merger.rs`). Run `cargo test hybrid::engine` or `cargo test hybrid::search::merger` to see how the overrides and metadata propagation behave end to end.
 
 ### Reference fixtures & tests
 
-- `resources/vector_collection_sample.json`: 3 件の `DocumentVectors` を収録したサンプルで、フィールド/ドキュメントのメタデータ（`section` や `lang` など）と複数ロールの組み合わせを含む。`MetadataFilter` や `FieldSelector` の挙動確認に利用可能。
-- `tests/vector_collection_scenarios.rs`: 上記サンプルを読み込み、フィールド指定、`VectorScoreMode`、ドキュメント/フィールド両方のメタデータフィルタを通す統合テスト。`MemoryStorage` で完結するため CI で高速に実行できる。`cargo test --test vector_collection_scenarios` で単独実行可能。
+- `resources/vector_engine_sample.json`: 3 件の `DocumentVectors` を収録したサンプルで、フィールド/ドキュメントのメタデータ（`section` や `lang` など）と複数ロールの組み合わせを含む。`MetadataFilter` や `FieldSelector` の挙動確認に利用可能。
+- `tests/vector_engine_scenarios.rs`: 上記サンプルを読み込み、フィールド指定、`VectorScoreMode`、ドキュメント/フィールド両方のメタデータフィルタを通す統合テスト。`MemoryStorage` で完結するため CI で高速に実行できる。`cargo test --test vector_engine_scenarios` で単独実行可能。
 
 ## 6. Update / Delete Lifecycle
 
@@ -167,7 +167,7 @@ pub enum UpdatePolicy {
     MergeIncremental,
 }
 
-impl VectorCollection {
+impl VectorEngine {
     pub async fn upsert_document(
         &self,
         doc_vectors: DocumentVectors,
@@ -189,8 +189,8 @@ Flow:
 ## 6.1 API Skeleton (Draft)
 
 ```rust
-pub struct VectorCollection {
-    config: Arc<VectorCollectionConfig>,
+pub struct VectorEngine {
+    config: Arc<VectorEngineConfig>,
     fields: HashMap<String, Arc<dyn VectorField>>, // wraps writer+reader
     registry: Arc<DocumentVectorRegistry>,
     wal: Arc<VectorWal>,
@@ -264,7 +264,7 @@ Decision guideline: start with **hybrid WAL + structured snapshot** for Phase 1,
 | `src/vector/core` | Introduce `StoredVector`, `DocumentVectors`, `VectorRole`, normalization helpers. |
 | `src/vector/index` | Add `VectorFieldWriter/Reader` traits; adapt existing Flat/HNSW/IVF writers to accept doc-centric inputs. |
 | `src/vector/search` | Expand search params to handle multiple query vectors, field filters, new score modes. |
-| `src/hybrid/` | Later consume `VectorCollection::search` outputs instead of dealing with raw `Vector`. |
+| `src/hybrid/` | Later consume `VectorEngine::search` outputs instead of dealing with raw `Vector`. |
 | `src/storage/` | Provide registry snapshot/WAL primitives, unify with existing columnar/file storage as needed. |
 | `src/util/` | Add config validation + warning helpers (similar to Qdrant). |
 
@@ -275,11 +275,11 @@ Decision guideline: start with **hybrid WAL + structured snapshot** for Phase 1,
     - Add adapters to wrap legacy `(doc_id, field, Vector)` APIs → new DocumentVectors.
 2. **Phase 2 – Field-local indexes**
    - Update Flat/HNSW/IVF writers/readers to implement `VectorFieldWriter/Reader`.
-   - Build `VectorCollection` layer with in-memory registry.
+   - Build `VectorEngine` layer with in-memory registry.
 3. **Phase 3 – Persistence**
    - Introduce registry snapshot/WAL, integrate with existing `Storage` backends.
 4. **Phase 4 – Hybrid integration**
-   - Switch hybrid search to use `VectorCollectionQuery`.
+   - Switch hybrid search to use `VectorEngineQuery`.
    - Deprecate old vector APIs.
 5. **Phase 5 – Advanced scoring / sharding**
    - Add LateInteraction implementation, expose sharding knobs, plan for distributed replication.
@@ -310,15 +310,15 @@ Decision guideline: start with **hybrid WAL + structured snapshot** for Phase 1,
 
 ### `src/vector/search`
 
-- Extend search params to accept `VectorCollectionQuery` inputs, including multiple query vectors, field selectors, and score modes.
+- Extend search params to accept `VectorEngineQuery` inputs, including multiple query vectors, field selectors, and score modes.
 - Implement score combiners for `MaxSim`, `WeightedSum`, and stub out hooks for `LateInteraction`.
 - Add constraint filtering that can read `FieldVectors.metadata` and registry-level attributes.
 
 ### `src/vector/collection` (new)
 
-- Implement `VectorCollection` façade that wires configs, registry, field indexes, and WAL together.
+- Implement `VectorEngine` façade that wires configs, registry, field indexes, and WAL together.
 - Provide `upsert_document`, `delete_document`, `search`, `stats` APIs with async interfaces.
-- Emit warnings/info (`VectorCollectionInfo`) similar to Qdrant’s `CollectionInfo` for observability.
+- Emit warnings/info (`VectorEngineInfo`) similar to Qdrant’s `CollectionInfo` for observability.
 
 ### `src/storage`
 
@@ -327,14 +327,14 @@ Decision guideline: start with **hybrid WAL + structured snapshot** for Phase 1,
 
 ### `src/hybrid`
 
-- Update hybrid search flow to consume `VectorCollection::search` outputs instead of raw `VectorSearcher` responses.
+- Update hybrid search flow to consume `VectorEngine::search` outputs instead of raw `VectorSearcher` responses.
 - Revisit score fusion to allow vector-side `score_mode` outputs and lexical weights to combine cleanly.
 
 ### Tooling & Testing
 
 - Keep regression tests for legacy vector APIs so the new data model can coexist while wiring progresses.
 - Create integration tests that ingest multi-field documents and validate query/update semantics end-to-end.
-- Provide migration utilities (CLI or scripts) to convert existing indexes into VectorCollection snapshots once stable.
+- Provide migration utilities (CLI or scripts) to convert existing indexes into VectorEngine snapshots once stable.
 
 ## 12. Phase 0 Issue Checklist
 
@@ -344,10 +344,10 @@ Goal: land the minimum scaffolding directly in-tree while still keeping existing
 |----|-------|------------|
 | P0-01 | Define `VectorRole`, `StoredVector`, `DocumentVectors` in `src/vector/core` with serde + conversion helpers | PR adding structs, docs, unit tests |
 | P0-02 | Introduce `VectorFieldWriter/Reader` traits and adapt Flat writer to implement them (read path can stay no-op) | PR touching `src/vector/index/flat` + trait module |
-| P0-03 | Create `VectorCollection` skeleton with `search` stub returning `unimplemented!()` and ensure it compiles even when unused | PR adding new module + plumbing |
+| P0-03 | Create `VectorEngine` skeleton with `search` stub returning `unimplemented!()` and ensure it compiles even when unused | PR adding new module + plumbing |
 | P0-04 | Implement in-memory `DocumentVectorRegistry` + WAL stub (Vec-backed) for tests | PR under `src/storage/vector_registry` |
 | P0-05 | Provide adapter that converts legacy `(doc_id, field, Vector)` ingestion calls into `DocumentVectors` so existing pipelines keep compiling | PR updating ingestion path + runtime toggles |
-| P0-06 | Add crate-level documentation + example describing the doc-centric defaults and how to opt into the new API surface | PR updating `README.md`/`docs/vector_collection.md` |
+| P0-06 | Add crate-level documentation + example describing the doc-centric defaults and how to opt into the new API surface | PR updating `README.md`/`docs/vector_engine.md` |
 
 Tracking template for GitHub Issues:
 
@@ -366,13 +366,13 @@ Tracking template for GitHub Issues:
 ## 13. Prototype Implementation Plan
 
 1. **Config plumbing anchored in main crate**
-    - Expose `VectorCollectionConfig` loader and ensure unused code paths stay no-op until higher layers consume them.
+    - Expose `VectorEngineConfig` loader and ensure unused code paths stay no-op until higher layers consume them.
 2. **Minimal ingestion path**
     - Use in-memory registry + Flat writer to accept `DocumentVectors` and allow `stats()` inspection.
 3. **Search happy path stub**
-    - Implement `VectorCollection::search` that only supports a single field + single vector (wired to Flat reader) but already obeys the new request struct.
+    - Implement `VectorEngine::search` that only supports a single field + single vector (wired to Flat reader) but already obeys the new request struct.
 4. **Integration test**
-    - Example test in `examples/vector_collection_smoke.rs` that builds a collection, ingests two docs, and queries them.
+    - Example test in `examples/vector_engine_smoke.rs` that builds a collection, ingests two docs, and queries them.
 5. **Feedback loop**
     - Once the prototype compiles and tests pass, gather API feedback before expanding to multi-field/hnsw support.
 
@@ -381,8 +381,8 @@ Tracking template for GitHub Issues:
 | Date | Change |
 |------|--------|
 | 2025-11-19 | Added `vector-collection` feature flag and document-centric core types (`src/vector/core/document.rs`). |
-| 2025-11-19 | Introduced `src/vector/collection/mod.rs` skeleton (`VectorCollection`, registry + WAL stubs, field traits). |
-| 2025-11-20 | Enabled the VectorCollection scaffolding by default (removed feature flag) and flattened the module to `src/vector/collection.rs`. |
+| 2025-11-19 | Introduced `src/vector/collection/mod.rs` skeleton (`VectorEngine`, registry + WAL stubs, field traits). |
+| 2025-11-20 | Enabled the VectorEngine scaffolding by default (removed feature flag) and flattened the module to `src/vector/collection.rs`. |
 
 ---
 This draft intentionally mirrors proven ideas from Qdrant’s collection layer while keeping room for Platypus-specific extensions (hybrid search integration, custom score modes). Feedback welcome before evolving into an RFC.

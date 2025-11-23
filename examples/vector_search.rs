@@ -1,9 +1,6 @@
-//! Minimal VectorCollection query example without legacy adapters.
+//! Step-by-step doc-centric vector search example.
 //!
-//! This sample builds an in-memory `VectorCollection`, ingests a handful of
-//! demo documents, and executes `VectorCollectionQuery` instances directly. It
-//! illustrates field-scoped queries, metadata-driven previews, and score-mode
-//! defaults without relying on `VectorSearchRequest` or other legacy APIs.
+//! Run with `cargo run --example vector_search`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,39 +9,25 @@ use platypus::error::Result;
 use platypus::storage::Storage;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use platypus::vector::DistanceMetric;
-use platypus::vector::collection::{
-    FieldSelector, MetadataFilter, QueryVector, VectorCollection, VectorCollectionConfig,
-    VectorCollectionFilter, VectorCollectionQuery, VectorCollectionSearchResults,
-    VectorFieldConfig, VectorIndexKind, VectorScoreMode,
+use platypus::vector::core::document::{DocumentVectors, FieldVectors, StoredVector, VectorRole};
+use platypus::vector::engine::{
+    FieldSelector, QueryVector, VectorEngine, VectorEngineConfig, VectorEngineFilter,
+    VectorEngineQuery, VectorFieldConfig, VectorIndexKind, VectorScoreMode,
 };
-use platypus::vector::core::document::{DocumentVectors, StoredVector, VectorRole};
-use platypus::vector::core::vector::ORIGINAL_TEXT_METADATA_KEY;
 
-const DIMENSION: usize = 4;
-const EMBEDDER_ID: &str = "text-encoder-v1";
+const DIM: usize = 4;
+const EMBEDDER_ID: &str = "demo-encoder";
 const TITLE_FIELD: &str = "title_embedding";
-const CONTENT_FIELD: &str = "body_embedding";
-const SAMPLE_VECTORS_JSON: &str = include_str!("../resources/vector_collection_sample.json");
+const BODY_FIELD: &str = "body_embedding";
 
 fn main() -> Result<()> {
-    println!("=== VectorCollection query demo ===\n");
-
+    println!("1) Configure storage + VectorEngine fields\n");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default())) as Arc<dyn Storage>;
-    let config = build_collection_config();
-    let collection = VectorCollection::new(config, storage, None)?;
-
-    ingest_documents(&collection)?;
-    demo_queries(&collection)?;
-
-    Ok(())
-}
-
-fn build_collection_config() -> VectorCollectionConfig {
-    let mut fields = HashMap::new();
-    fields.insert(
+    let mut field_configs = HashMap::new();
+    field_configs.insert(
         TITLE_FIELD.to_string(),
         VectorFieldConfig {
-            dimension: DIMENSION,
+            dimension: DIM,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
             embedder_id: EMBEDDER_ID.to_string(),
@@ -52,10 +35,10 @@ fn build_collection_config() -> VectorCollectionConfig {
             base_weight: 1.2,
         },
     );
-    fields.insert(
-        CONTENT_FIELD.to_string(),
+    field_configs.insert(
+        BODY_FIELD.to_string(),
         VectorFieldConfig {
-            dimension: DIMENSION,
+            dimension: DIM,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
             embedder_id: EMBEDDER_ID.to_string(),
@@ -63,152 +46,122 @@ fn build_collection_config() -> VectorCollectionConfig {
             base_weight: 1.0,
         },
     );
-
-    VectorCollectionConfig {
-        fields,
-        default_fields: vec![TITLE_FIELD.into(), CONTENT_FIELD.into()],
+    let config = VectorEngineConfig {
+        fields: field_configs,
+        default_fields: vec![TITLE_FIELD.into(), BODY_FIELD.into()],
         metadata: HashMap::new(),
-    }
-}
-
-fn ingest_documents(collection: &VectorCollection) -> Result<()> {
-    let documents: Vec<DocumentVectors> = serde_json::from_str(SAMPLE_VECTORS_JSON)?;
-    let total = documents.len();
-    for document in documents {
-        collection.upsert_document(document)?;
-    }
-
-    println!("Inserted demo documents ({} total).\n", total);
-    Ok(())
-}
-
-fn demo_queries(collection: &VectorCollection) -> Result<()> {
-    println!("Running VectorCollection queries...\n");
-
-    run_query(
-        collection,
-        make_query(
-            [0.92, 0.08, 0.0, 0.0],
-            None,
-            None,
-            VectorScoreMode::WeightedSum,
-        ),
-        "All fields • programming focus",
-    )?;
-
-    let doc_filter = VectorCollectionFilter {
-        document: metadata_filter(&[("lang", "ja")]),
-        field: MetadataFilter::default(),
     };
+    let engine = VectorEngine::new(config, storage, None)?;
 
-    run_query(
-        collection,
-        make_query(
-            [0.2, 0.1, 0.9, 0.05],
-            None,
-            Some(doc_filter),
-            VectorScoreMode::WeightedSum,
-        ),
-        "Document metadata filter • lang=ja",
-    )?;
+    println!("2) Upsert documents where each doc owns multiple vector fields\n");
+    let mut doc1 = DocumentVectors::new(1);
+    doc1.metadata.insert("lang".into(), "en".into());
+    doc1.metadata
+        .insert("category".into(), "programming".into());
+    doc1.fields.insert(
+        TITLE_FIELD.into(),
+        FieldVectors {
+            vectors: vec![StoredVector {
+                data: Arc::from([0.95_f32, 0.05, 0.0, 0.0]),
+                embedder_id: EMBEDDER_ID.into(),
+                role: VectorRole::Text,
+                weight: 1.0,
+                attributes: HashMap::from([(String::from("text"), String::from("Rust overview"))]),
+            }],
+            weight: 1.0,
+            metadata: HashMap::from([(String::from("section"), String::from("title"))]),
+        },
+    );
+    doc1.fields.insert(
+        BODY_FIELD.into(),
+        FieldVectors {
+            vectors: vec![StoredVector {
+                data: Arc::from([0.2_f32, 0.1, 0.65, 0.05]),
+                embedder_id: EMBEDDER_ID.into(),
+                role: VectorRole::Text,
+                weight: 1.0,
+                attributes: HashMap::from([(String::from("chunk"), String::from("rust-body"))]),
+            }],
+            weight: 1.0,
+            metadata: HashMap::from([(String::from("section"), String::from("body"))]),
+        },
+    );
 
-    let field_filter = VectorCollectionFilter {
-        document: MetadataFilter::default(),
-        field: metadata_filter(&[("section", "body")]),
-    };
+    let mut doc2 = DocumentVectors::new(2);
+    doc2.metadata.insert("lang".into(), "ja".into());
+    doc2.metadata.insert("category".into(), "ai".into());
+    doc2.fields.insert(
+        TITLE_FIELD.into(),
+        FieldVectors {
+            vectors: vec![StoredVector {
+                data: Arc::from([0.1_f32, 0.85, 0.05, 0.0]),
+                embedder_id: EMBEDDER_ID.into(),
+                role: VectorRole::Text,
+                weight: 1.0,
+                attributes: HashMap::from([(String::from("text"), String::from("LLM primer"))]),
+            }],
+            weight: 0.9,
+            metadata: HashMap::from([(String::from("section"), String::from("title"))]),
+        },
+    );
+    doc2.fields.insert(
+        BODY_FIELD.into(),
+        FieldVectors {
+            vectors: vec![StoredVector {
+                data: Arc::from([0.1_f32, 0.15, 0.7, 0.05]),
+                embedder_id: EMBEDDER_ID.into(),
+                role: VectorRole::Text,
+                weight: 1.0,
+                attributes: HashMap::from([(String::from("chunk"), String::from("llm-body"))]),
+            }],
+            weight: 1.1,
+            metadata: HashMap::from([(String::from("section"), String::from("body"))]),
+        },
+    );
 
-    run_query(
-        collection,
-        make_query(
-            [0.1, 0.1, 0.85, 0.1],
-            Some(vec![FieldSelector::Exact(CONTENT_FIELD.into())]),
-            Some(field_filter),
-            VectorScoreMode::MaxSim,
-        ),
-        "Content-only • section=body filter • MaxSim",
-    )?;
+    engine.upsert_document(doc1)?;
+    engine.upsert_document(doc2)?;
+    println!("   -> Inserted {} docs\n", engine.stats()?.document_count);
 
-    Ok(())
-}
+    println!("3) Build a VectorEngineQuery (pick fields, filters, limit)\n");
+    let mut doc_filter = VectorEngineFilter::default();
+    doc_filter
+        .document
+        .equals
+        .insert("lang".into(), "en".into());
+    let mut query = VectorEngineQuery::default();
+    query.limit = 5;
+    query.fields = Some(vec![
+        FieldSelector::Exact(BODY_FIELD.into()),
+        FieldSelector::Exact(TITLE_FIELD.into()),
+    ]);
+    query.filter = Some(doc_filter);
+    query.score_mode = VectorScoreMode::WeightedSum;
+    query.query_vectors.push(QueryVector {
+        vector: StoredVector {
+            data: Arc::from([0.9_f32, 0.05, 0.05, 0.0]),
+            embedder_id: EMBEDDER_ID.into(),
+            role: VectorRole::Text,
+            weight: 1.0,
+            attributes: HashMap::from([(
+                String::from("text"),
+                String::from("systems programming"),
+            )]),
+        },
+        weight: 1.0,
+    });
 
-fn make_query(
-    data: [f32; DIMENSION],
-    fields: Option<Vec<FieldSelector>>,
-    filter: Option<VectorCollectionFilter>,
-    score_mode: VectorScoreMode,
-) -> VectorCollectionQuery {
-    let mut query = VectorCollectionQuery::default();
-    query.limit = 3;
-    query.fields = fields;
-    query.filter = filter;
-    query.score_mode = score_mode;
-    query.query_vectors.push(query_vector(data, "demo query"));
-    query
-}
-
-fn run_query(
-    collection: &VectorCollection,
-    query: VectorCollectionQuery,
-    label: &str,
-) -> Result<()> {
-    println!("{}", "-".repeat(72));
-    println!("{label}");
-    let results = collection.search(&query)?;
-    display_results(&results, label);
-    Ok(())
-}
-
-fn display_results(results: &VectorCollectionSearchResults, context: &str) {
-    if results.hits.is_empty() {
-        println!("  No hits for {context}.\n");
-        return;
-    }
-
-    println!("  {} aggregated hits", results.hits.len());
+    println!("4) Execute the search and inspect doc-centric hits\n");
+    let results = engine.search(&query)?;
     for (rank, hit) in results.hits.iter().enumerate() {
-        println!(
-            "  {}. doc #{:02} • score {:.3}",
-            rank + 1,
-            hit.doc_id,
-            hit.score
-        );
+        println!("{}. doc {} • score {:.3}", rank + 1, hit.doc_id, hit.score);
         for field_hit in &hit.field_hits {
             println!(
-                "     field {:<7} • score {:.3} • distance {:.3}",
-                field_hit.field, field_hit.score, field_hit.distance
+                "   field {:<15} distance {:.3} score {:.3}",
+                field_hit.field, field_hit.distance, field_hit.score
             );
         }
     }
-    println!();
-}
 
-fn query_vector(data: [f32; DIMENSION], text: &str) -> QueryVector {
-    let mut vector = StoredVector::new(Arc::from(data), EMBEDDER_ID.to_string(), VectorRole::Text);
-    vector
-        .attributes
-        .insert(ORIGINAL_TEXT_METADATA_KEY.to_string(), text.to_string());
-    QueryVector {
-        vector,
-        weight: 1.0,
-    }
-}
-
-fn metadata_filter(pairs: &[(&str, &str)]) -> MetadataFilter {
-    let mut filter = MetadataFilter::default();
-    for (key, value) in pairs {
-        filter
-            .equals
-            .insert((*key).to_string(), (*value).to_string());
-    }
-    filter
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn vector_search_demo_runs() {
-        let result = main();
-        assert!(result.is_ok());
-    }
+    Ok(())
 }

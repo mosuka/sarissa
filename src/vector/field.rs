@@ -8,8 +8,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector::collection::{QueryVector, VectorFieldConfig};
 use crate::vector::core::document::FieldVectors;
+use crate::vector::engine::{QueryVector, VectorFieldConfig};
 
 /// Represents a single logical vector field backed by an index implementation.
 pub trait VectorField: Send + Sync + Debug {
