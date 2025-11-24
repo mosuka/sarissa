@@ -136,6 +136,7 @@ fn main() -> Result<()> {
     println!("   -> Inserted {} docs\n", engine.stats()?.document_count);
 
     println!("3) Build a VectorEngineSearchRequest directly from query text\n");
+
     let mut doc_filter = VectorEngineFilter::default();
     doc_filter
         .document

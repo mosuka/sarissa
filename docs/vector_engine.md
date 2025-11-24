@@ -168,8 +168,13 @@ pub struct MetadataFilter {
 - `VectorEngineFilter.field.equals` performs the same equality checks on per-document, per-field metadata (`FieldVectors.metadata`). Only hits coming from fields whose metadata satisfy the filter are allowed to bubble up.
 - Query vectors must declare an `embedder_id` + `VectorRole` that matches the target field configuration; otherwise the field is skipped and the query errors if no fields remain.
 - Later we can reuse `Filter` structs from `lexical::search` for richer comparisons (prefix ranges, numeric ops, etc.).
+<<<<<<< HEAD
 - 実際の `VectorEngineSearchRequest` 構築例や自動ベクトル化のフローは `examples/vector_search.rs` を参照。
 - エンドツーエンドの挙動は同じサンプルで確認できる。
+=======
+- 実際の `VectorEngineSearchRequest` 構築例は `examples/vector_search.rs` を参照。
+- 実際のエンドツーエンドの利用例は `examples/vector_search.rs` を参照。
+>>>>>>> main
 
 ## 5.1 Hybrid Engine Integration
 
