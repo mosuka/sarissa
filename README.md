@@ -280,7 +280,7 @@ platypus = { version = "0.1", features = ["embeddings-candle"] }
 ```rust
 use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
-use platypus::vector::engine::{QueryVector, VectorEngineQuery};
+use platypus::vector::engine::{QueryVector, VectorEngineSearchRequest};
 use platypus::vector::core::document::StoredVector;
 use platypus::vector::core::vector::Vector;
 use platypus::vector::DistanceMetric;
@@ -323,7 +323,7 @@ async fn main() -> platypus::error::Result<()> {
 
     // Search with query embedding
     let query_vector = embedder.embed("programming languages").await?;
-    let mut query = VectorEngineQuery::default();
+    let mut query = VectorEngineSearchRequest::default();
     query.limit = 10;
     query.query_vectors.push(QueryVector {
         vector: StoredVector::from(query_vector),
@@ -384,7 +384,7 @@ for doc in sample_docs {
 }
 ```
 
-Once the engine is populated, build `VectorEngineQuery` objects (see `examples/vector_search.rs`) to target specific fields, adjust `VectorScoreMode`, and apply metadata filters — exactly the same path used by the integration test above.
+Once the engine is populated, build `VectorEngineSearchRequest` objects (see `examples/vector_search.rs`) to target specific fields, adjust `VectorScoreMode`, and apply metadata filters — exactly the same path used by the integration test above.
 
 #### Hybrid Search with VectorEngine
 
@@ -393,14 +393,14 @@ Once the engine is populated, build `VectorEngineQuery` objects (see `examples/v
 ```rust
 use platypus::hybrid::search::searcher::{HybridSearchRequest, ScoreNormalization};
 use platypus::vector::engine::{
-    FieldSelector, QueryVector, VectorEngineFilter, VectorEngineQuery, VectorScoreMode,
+    FieldSelector, QueryVector, VectorEngineFilter, VectorEngineSearchRequest, VectorScoreMode,
 };
 use platypus::vector::core::document::StoredVector;
 use platypus::vector::search::searcher::VectorSearchParams;
 
 let my_vector = Vector::new(vec![0.1, 0.2, 0.3]);
 
-let mut vector_query = VectorEngineQuery::default();
+let mut vector_query = VectorEngineSearchRequest::default();
 vector_query.limit = 32;
 vector_query.query_vectors.push(QueryVector {
     vector: StoredVector::from(my_vector),
@@ -417,7 +417,7 @@ let mut vector_params = VectorSearchParams::default();
 vector_params.top_k = 32;
 
 let request = HybridSearchRequest::new("rust programming")
-    .with_vector_engine_query(vector_query)
+    .with_vector_engine_search_request(vector_query)
     .vector_fields(vec![FieldSelector::Exact("body_embedding".into())])
     .vector_filter(filter)
     .vector_score_mode(VectorScoreMode::WeightedSum)
@@ -431,7 +431,7 @@ let request = HybridSearchRequest::new("rust programming")
 
 Key points:
 
-- Vector overrides (`vector_fields`, `vector_filter`, `vector_score_mode`, `vector_overfetch`) are applied consistently whether you pass a raw `Vector` or a fully built `VectorEngineQuery`.
+- Vector overrides (`vector_fields`, `vector_filter`, `vector_score_mode`, `vector_overfetch`) are applied consistently whether you pass a raw `Vector` or a fully built `VectorEngineSearchRequest`.
 - Document-level metadata filters (`VectorEngineFilter::document`) execute before any vector work, so hybrid queries can cheaply target subsets such as `lang = ja` or `tenant_id = acme`.
 - Field-level hits from the vector side are preserved in `HybridSearchResult::vector_field_hits`, making it easy to explain which embeddings matched.
 - The helper tests under `src/hybrid/engine.rs` and `src/hybrid/search/merger.rs` illustrate how the engine enforces `min_vector_similarity`, top-k limits, and metadata propagation end to end (`cargo test hybrid::engine` / `cargo test hybrid::search::merger`).
@@ -459,7 +459,7 @@ platypus = { version = "0.1", features = ["embeddings-multimodal"] }
 use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::embedding::image_embedder::ImageEmbedder;
-use platypus::vector::engine::{QueryVector, VectorEngineQuery};
+use platypus::vector::engine::{QueryVector, VectorEngineSearchRequest};
 use platypus::vector::core::document::StoredVector;
 use platypus::vector::engine::VectorEngine;
 use platypus::vector::index::{HnswIndexConfig, VectorIndexConfig, VectorIndexFactory};
@@ -493,7 +493,7 @@ async fn main() -> platypus::error::Result<()> {
 
     // Search images using natural language
     let query_vector = embedder.embed("a photo of a cat playing").await?;
-    let mut query = VectorEngineQuery::default();
+    let mut query = VectorEngineSearchRequest::default();
     query.limit = 10;
     query.query_vectors.push(QueryVector {
         vector: StoredVector::from(query_vector),
@@ -514,7 +514,7 @@ async fn main() -> platypus::error::Result<()> {
 ```rust
 // Find visually similar images using an image as query
 let query_image_vector = embedder.embed_image("query.jpg").await?;
-let mut query = VectorEngineQuery::default();
+let mut query = VectorEngineSearchRequest::default();
 query.limit = 5;
 query.query_vectors.push(QueryVector {
     vector: StoredVector::from(query_image_vector),

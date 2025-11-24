@@ -8,14 +8,15 @@ use platypus::vector::DistanceMetric;
 use platypus::vector::core::document::{DocumentVectors, StoredVector, VectorRole};
 use platypus::vector::engine::{
     FieldSelector, MetadataFilter, QueryVector, VectorEngine, VectorEngineConfig,
-    VectorEngineFilter, VectorEngineQuery, VectorFieldConfig, VectorIndexKind, VectorScoreMode,
+    VectorEngineFilter, VectorEngineSearchRequest, VectorFieldConfig, VectorIndexKind,
+    VectorScoreMode,
 };
 
 #[test]
 fn vector_engine_multi_field_search_prefers_relevant_documents() -> Result<()> {
     let engine = build_sample_engine()?;
 
-    let mut query = VectorEngineQuery::default();
+    let mut query = VectorEngineSearchRequest::default();
     query.limit = 2;
     query.score_mode = VectorScoreMode::WeightedSum;
     query.overfetch = 1.25;
@@ -45,7 +46,7 @@ fn vector_engine_multi_field_search_prefers_relevant_documents() -> Result<()> {
 fn vector_engine_respects_document_metadata_filters() -> Result<()> {
     let engine = build_sample_engine()?;
 
-    let mut query = VectorEngineQuery::default();
+    let mut query = VectorEngineSearchRequest::default();
     query.limit = 3;
     query.score_mode = VectorScoreMode::MaxSim;
     query.query_vectors.push(QueryVector {
@@ -70,7 +71,7 @@ fn vector_engine_respects_document_metadata_filters() -> Result<()> {
 fn vector_engine_field_metadata_filters_limit_hits() -> Result<()> {
     let engine = build_sample_engine()?;
 
-    let mut query = VectorEngineQuery::default();
+    let mut query = VectorEngineSearchRequest::default();
     query.limit = 3;
     query.fields = Some(vec![
         FieldSelector::Exact("title_embedding".into()),

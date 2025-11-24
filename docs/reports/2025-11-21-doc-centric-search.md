@@ -19,14 +19,14 @@ VectorEngine を正規の検索 API として使うために `VectorEngine` / `H
 
 ### 2. HybridEngine からの呼び出し
 
-- `HybridEngine::build_vector_engine_query` (`src/hybrid/engine.rs`) は生の `Vector` 1 本からデフォルト `VectorEngineQuery` を生成するだけで、`HybridSearchRequest` からの `FieldSelector` やメタデータ条件を受け取る経路が無い。
+- `HybridEngine::build_vector_engine_search_request` (`src/hybrid/engine.rs`) は生の `Vector` 1 本からデフォルト `VectorEngineSearchRequest` を生成するだけで、`HybridSearchRequest` からの `FieldSelector` やメタデータ条件を受け取る経路が無い。
 - Hybrid 検索時に得られる `VectorEngineSearchResults` の `field_hits` やメタデータは `ResultMerger` (`src/hybrid/search/merger.rs`) で利用されておらず、単に doc-id 単位のスコアに落とし込まれる。
 - その結果、doc-centric 検索で意図した「フィールド別ウェイト」「ドキュメントメタデータ連動」等が Hybrid 経路からは観測できない。
 
 ### 3. サンプル / E2E テスト不足
 
 - `vector::engine` のユニットテストは単一フィールド・単一クエリでの動作検証のみで、`FieldSelector` やメタデータフィルタを扱うケースが無い。
-- `hybrid::engine` には構造テストしかなく、実際に VectorEngineQuery による doc-centric 検索を通す統合テストが不足している。
+- `hybrid::engine` には構造テストしかなく、実際に VectorEngineSearchRequest による doc-centric 検索を通す統合テストが不足している。
 - `docs/vector_engine.md` にも Hybrid 経路での利用例や `MetadataFilter` の活用例が未掲載。
 
 ## 実現までに必要な主な作業
@@ -37,7 +37,7 @@ VectorEngine を正規の検索 API として使うために `VectorEngine` / `H
    - `VectorScoreMode` ごとのスコア合成ロジックを doc-centric 仕様に合わせて拡張（特に WeightedSum でのフィールドウェイト・クエリウェイトの反映）。
 
 2. **HybridEngine / ResultMerger の doc-centric 化**
-   - `HybridSearchRequest` に VectorEngine 向けパラメータ（フィールド指定、メタデータフィルタ、score_mode 等）を追加し、`HybridEngine::build_vector_engine_query` で反映。
+   - `HybridSearchRequest` に VectorEngine 向けパラメータ（フィールド指定、メタデータフィルタ、score_mode 等）を追加し、`HybridEngine::build_vector_engine_search_request` で反映。
    - `ResultMerger` で `field_hits` とメタデータを使った可視化・加重スコアリング（例: フィールド単位で別重みを掛けて lexical スコアと融合）を実装。
    - Vector 結果のみでも `document_store` にメタデータを渡せるよう、`VectorEngineSearchResults` から補完する導線を追加。
 

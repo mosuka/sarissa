@@ -1,36 +1,38 @@
-# 2025-11-23 VectorCollection → VectorEngine リネーム計画（破壊的変更前提）
+# 2025-11-24 VectorEngineQuery → VectorEngineSearchRequest リネーム計画
 
 ## 目的
 
-- Doc-centric ベクトル実装を唯一の VectorEngine として再定義し、`VectorCollection*` という命名とモジュールを廃止する。
-- コード／ドキュメント／テスト／リソースのすべてを新名称へ統一し、旧 API は完全削除する。
+- VectorEngine で用いる検索リクエスト型を `VectorEngineSearchResults` と対になる名前に揃え、API の責務をより明示する。
+- ハイブリッド検索やサンプルコードを含め、`VectorEngineQuery` 参照をすべて `VectorEngineSearchRequest` に更新する（後方互換は保持しない）。
 
 ## 関連ファイル・ディレクトリ
 
-- `src/vector/collection.rs` → 新しい `src/vector/engine.rs` 本体として統合。
-- `src/vector/engine.rs`（旧実装）、`src/vector/index/*.rs`, `src/vector/core/*.rs`。
-- `src/hybrid/**`, `examples/vector_search.rs`, `tests/vector_engine_scenarios.rs`。
-- ドキュメント類: `README.md`, `docs/vector_engine.md`, `docs/reports/**`。
-- リソース: `resources/vector_engine_sample.json`。
+- `src/vector/engine.rs`（型定義、検索実装、テスト用 helper）。
+- `src/hybrid/engine.rs`, `src/hybrid/search/searcher.rs`（VectorEngineQuery を受け渡す箇所）。
+- `examples/vector_search.rs`, `tests/vector_engine_scenarios.rs`（API 利用例）。
+- ドキュメント類: `README.md`, `docs/vector_engine.md`, `docs/reports/2025-11-22-vector-collection-rename.md`（用語説明）。
 
-## 作業ステップ
+## 実装ステップ
 
-1. **モジュール再構成** ✅ 2025-11-23 完了
-   - `src/vector/collection.rs` の中身を `src/vector/engine.rs` に移動し、`mod collection;` を削除済み。
-   - `pub use` などで `platypus::vector::engine::*` のみを公開 API にする。
+1. **型定義のリネーム** ✅ 2025-11-24 完了
+   - `rg -l "VectorEngineQuery" | xargs sed -i 's/VectorEngineQuery/VectorEngineSearchRequest/g'` でコア構造体/impl と関連コメントを一括置換し、`VectorEngine::search` 引数や `FieldSelector` 等の型注釈も更新した。
+2. **内部参照の一括更新** ✅ 2025-11-24 完了
+   - `rg -l "vector_engine_query" | xargs sed -i 's/vector_engine_query/vector_engine_search_request/g'` を基に `src/hybrid/**`, `examples`, `tests` の参照を整理し、関連メソッド (`with_vector_engine_search_request`) まで整合させた。
+3. **ドキュメントとサンプル表記の更新** ✅ 2025-11-24 完了
+   - README・`docs/vector_engine.md`・サンプル/レポートの記述を新名称に差し替え、`examples/vector_search.rs` のチュートリアル文面も更新。
+4. **ビルド検証** ✅ 2025-11-24 完了
+   - `cargo fmt`, `cargo clippy`, `cargo test --all` を順番に実行し、エラー無く完了（テスト 628 件成功）。
+5. **CHANGELOG 追記** ✅ 2025-11-24 完了
+   - Unreleased セクションに `VectorEngineQuery` → `VectorEngineSearchRequest` の破壊的 rename を追記。
 
-2. **型と構造体のリネーム** ✅ 2025-11-23 完了
-   - `VectorCollection` → `VectorEngine`、`VectorCollectionConfig` → `VectorEngineConfig`、`VectorCollectionQuery` → `VectorEngineQuery` をコード全体で確認済み。
-   - `VectorCollectionFilter`, `VectorCollectionSearchResults`, `VectorCollectionHit`, `VectorCollectionStats` など派生型も未使用であることを `rg "VectorCollection" -n` で検証。
+## リスク・考慮点
 
-3. **周辺コードの更新** ✅ 2025-11-23 完了
-   - `rg "platypus::vector::collection" -n` / `rg "crate::vector::collection" -n` でソース内の旧モジュール参照が存在しないことを確認。
-   - `src/hybrid/**`, `examples`, `tests`, `src/vector/*.rs` はすべて `vector::engine` API へ切り替わっており、互換メソッドも削除済み。
+- 参照箇所が広範囲（ハイブリッド検索、テスト、サンプル）にわたるため、部分的な rename 漏れがビルド失敗に直結する。
+- ドキュメントの画面コピーやテキスト説明に旧名が残ると混乱を招くため、`grep` ベースでの全文チェックが必要。
+- 将来的にさらに命名整理を行う場合、この変更が別名との整合を左右するため、後続方針と齟齬がないか事前確認する。
 
-4. **リソース／テスト／ドキュメント名の変更** ✅ 2025-11-23 完了
-   - `ls resources` / `ls tests` で `vector_engine_*` 系ファイルを確認し、旧 `vector_collection_*` ファイルが存在しないことを確認。
-   - `docs/vector_engine.md`、`README.md` のサンプル/導線が `resources/vector_engine_sample.json` と `tests/vector_engine_scenarios.rs` を参照していることを目視確認し、`git grep -n "vector_collection"` で残存参照が無いことを確認。
+## 推奨アクション
 
-5. **検証** ✅ 2025-11-23 完了
-   - `cargo fmt`, `cargo clippy`, `cargo test --all` を順番に実行し、いずれもエラーなく終了したことをターミナルで確認（テストは 600+ 件のユニットテストがすべて成功）。
-   - 破壊的変更を明示するため `CHANGELOG.md` を新規作成し、「Doc-centric VectorEngine へ全面置換」を Breaking Changes として追記。
+- `rg "VectorEngineSearchRequest" -n` で全面検索し、該当ファイルを上記ステップ順に処理する。
+- リネーム後すぐに `cargo check` を走らせ、コンパイルエラー箇所を即時洗い出してからテストへ進む。
+- CHANGELOG とドキュメント更新が完了した段階で semantic commit (`feat(vector): rename search request type` 等) を予定し、レビュー依頼時に破壊的変更である旨を明記する。

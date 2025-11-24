@@ -12,7 +12,7 @@ use platypus::vector::DistanceMetric;
 use platypus::vector::core::document::{DocumentVectors, FieldVectors, StoredVector, VectorRole};
 use platypus::vector::engine::{
     FieldSelector, QueryVector, VectorEngine, VectorEngineConfig, VectorEngineFilter,
-    VectorEngineQuery, VectorFieldConfig, VectorIndexKind, VectorScoreMode,
+    VectorEngineSearchRequest, VectorFieldConfig, VectorIndexKind, VectorScoreMode,
 };
 
 const DIM: usize = 4;
@@ -123,13 +123,13 @@ fn main() -> Result<()> {
     engine.upsert_document(doc2)?;
     println!("   -> Inserted {} docs\n", engine.stats()?.document_count);
 
-    println!("3) Build a VectorEngineQuery (pick fields, filters, limit)\n");
+    println!("3) Build a VectorEngineSearchRequest (pick fields, filters, limit)\n");
     let mut doc_filter = VectorEngineFilter::default();
     doc_filter
         .document
         .equals
         .insert("lang".into(), "en".into());
-    let mut query = VectorEngineQuery::default();
+    let mut query = VectorEngineSearchRequest::default();
     query.limit = 5;
     query.fields = Some(vec![
         FieldSelector::Exact(BODY_FIELD.into()),

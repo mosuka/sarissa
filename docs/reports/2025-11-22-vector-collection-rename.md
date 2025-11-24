@@ -3,13 +3,13 @@
 ## 現状の構成
 
 - doc-centric 実装は `src/vector/collection.rs` の `VectorEngine*` 系型に集約されている。
-- 旧来の `VectorEngine` (`src/vector/engine.rs`) はレガシー VectorIndex API へのブリッジとして存続し、内部で `VectorEngineQuery` を直接組み立てている。
+- 旧来の `VectorEngine` (`src/vector/engine.rs`) はレガシー VectorIndex API へのブリッジとして存続し、内部で `VectorEngineSearchRequest` を直接組み立てている。
 - 公開 API/ドキュメントでは `platypus::vector::engine::*` を参照する箇所が多数存在（`README.md`, `docs/vector_collection.md`, `examples/vector_search.rs`, `tests/vector_collection_scenarios.rs` 等）。
-- ハイブリッド系 (`src/hybrid/*.rs`) はすでに `VectorEngineQuery`/`VectorEngineSearchResults` を直接扱っており、旧 `VectorEngine` には依存していない。
+- ハイブリッド系 (`src/hybrid/*.rs`) はすでに `VectorEngineSearchRequest`/`VectorEngineSearchResults` を直接扱っており、旧 `VectorEngine` には依存していない。
 
 ## リネーム対象と影響範囲
 
-- 型/モジュール名: `VectorEngine`, `VectorEngineConfig`, `VectorEngineQuery`, `VectorEngineFilter`, `VectorEngineSearchResults`, `VectorEngineHit`, `VectorEngineStats` など十数個。
+- 型/モジュール名: `VectorEngine`, `VectorEngineConfig`, `VectorEngineSearchRequest`, `VectorEngineFilter`, `VectorEngineSearchResults`, `VectorEngineHit`, `VectorEngineStats` など十数個。
 - モジュールパス: `platypus::vector::engine` -> `platypus::vector::engine`（もしくは `vector::collection` を削除して `vector::engine` に実装を移動）。
 - 周辺アセット: `docs/vector_collection.md`, `resources/vector_collection_sample.json`, `tests/vector_collection_scenarios.rs`, `examples/vector_search.rs` の命名・記述。
 - Downstream 互換性: crate 利用者が `use platypus::vector::engine::VectorEngine;` のように呼んでいるため、単純な rename は破壊的変更になる。
@@ -52,7 +52,7 @@
    - `src/vector/collection.rs` を `src/vector/engine.rs` に直接統合（既存ファイルを置換）。
    - `mod collection;` を削除し、`pub mod engine;` のみ残す。`vector.rs` から `pub mod collection;` を除去。
 2. **型/関数リネーム**
-   - `VectorEngine` → `VectorEngine`、`VectorEngineConfig` → `VectorEngineConfig`、`VectorEngineQuery` → `VectorSearchQuery`（など最終命名に合わせて一括変換）。
+   - `VectorEngine` → `VectorEngine`、`VectorEngineConfig` → `VectorEngineConfig`、`VectorEngineSearchRequest` → `VectorSearchQuery`（など最終命名に合わせて一括変換）。
    - 派生型（`VectorEngineFilter`, `VectorEngineSearchResults`, `VectorEngineHit`, `VectorEngineStats`…）も同様に `VectorEngine` 起点の名前へ変更。
    - `FieldSelector`, `MetadataFilter` など独立概念は名称維持でよい。
 3. **旧 VectorEngine の削除**
