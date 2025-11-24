@@ -385,6 +385,40 @@ for doc in sample_docs {
 ```
 
 Once the engine is populated, build `VectorEngineSearchRequest` objects (see `examples/vector_search.rs`) to target specific fields, adjust `VectorScoreMode`, and apply metadata filters — exactly the same path used by the integration test above.
+<<<<<<< HEAD
+
+#### Automatic Embedding (Raw Payloads)
+
+When you prefer not to precompute vectors yourself, hand the engine raw text payloads and let it run the configured embedder pipeline:
+
+```rust
+use platypus::vector::core::document::{DocumentPayload, FieldPayload, RawTextSegment};
+use platypus::vector::engine::{
+    FieldSelector, VectorEngine, VectorEngineSearchRequest,
+};
+
+let mut payload = DocumentPayload::new(42);
+let mut body = FieldPayload::default();
+body.add_text_segment(RawTextSegment::new("Rust balances safety with performance"));
+payload.add_field("body_embedding", body);
+engine.upsert_document_payload(payload)?;
+
+let mut query = VectorEngineSearchRequest::default();
+query.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
+query.query_vectors.extend(engine.embed_query_field_payload(
+    "body_embedding",
+    {
+        let mut q = FieldPayload::default();
+        q.add_text_segment(RawTextSegment::new("systems programming"));
+        q
+    },
+)?);
+let hits = engine.search(&query)?;
+```
+
+These helpers power `examples/vector_search.rs` and the `vector_engine_upserts_and_queries_raw_payloads` integration test, so you can follow the same pattern or wrap it through `HybridSearchRequest::with_vector_text` when composing hybrid searches.
+=======
+>>>>>>> main
 
 #### Hybrid Search with VectorEngine
 

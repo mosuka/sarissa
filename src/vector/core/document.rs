@@ -29,6 +29,61 @@ pub enum VectorRole {
     Custom(String),
 }
 
+/// Unprocessed textual content destined for a vector field.
+#[derive(Debug, Clone, Default)]
+pub struct FieldPayload {
+    /// Ordered text segments that will be embedded sequentially.
+    pub text_segments: Vec<RawTextSegment>,
+    /// Arbitrary metadata propagated to the resulting `FieldVectors` entry.
+    pub metadata: HashMap<String, String>,
+}
+
+impl FieldPayload {
+    /// Returns true when no text segments are present.
+    pub fn is_empty(&self) -> bool {
+        self.text_segments.is_empty()
+    }
+
+    /// Add a text segment to this payload.
+    pub fn add_text_segment(&mut self, segment: RawTextSegment) {
+        self.text_segments.push(segment);
+    }
+
+    pub fn add_metadata(&mut self, key: String, value: String) {
+        self.metadata.insert(key, value);
+    }
+}
+
+/// Raw text plus optional weighting/attributes before embedding.
+#[derive(Debug, Clone)]
+pub struct RawTextSegment {
+    pub value: String,
+    pub weight: f32,
+    pub attributes: HashMap<String, String>,
+}
+
+impl RawTextSegment {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            weight: 1.0,
+            attributes: HashMap::new(),
+        }
+    }
+
+    pub fn with_attributes(
+        value: impl Into<String>,
+        weight: f32,
+        attributes: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            value: value.into(),
+            weight,
+            attributes,
+        }
+    }
+}
+
 impl VectorRole {
     /// Create a custom role label.
     pub fn custom<S: Into<String>>(label: S) -> Self {
@@ -207,6 +262,32 @@ pub struct DocumentVectors {
     pub fields: HashMap<String, FieldVectors>,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
+}
+
+/// Document input model capturing raw payloads before embedding.
+#[derive(Debug, Clone, Default)]
+pub struct DocumentPayload {
+    pub doc_id: u64,
+    pub fields: HashMap<String, FieldPayload>,
+    pub metadata: HashMap<String, String>,
+}
+
+impl DocumentPayload {
+    pub fn new(doc_id: u64) -> Self {
+        Self {
+            doc_id,
+            fields: HashMap::new(),
+            metadata: HashMap::new(),
+        }
+    }
+
+    pub fn add_field(&mut self, field_name: impl Into<String>, payload: FieldPayload) {
+        self.fields.insert(field_name.into(), payload);
+    }
+
+    pub fn add_metadata(&mut self, key: String, value: String) {
+        self.metadata.insert(key, value);
+    }
 }
 
 impl DocumentVectors {

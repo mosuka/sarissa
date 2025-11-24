@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::lexical::search::searcher::LexicalSearchParams;
-use crate::vector::core::document::StoredVector;
+use crate::vector::core::document::{FieldPayload, RawTextSegment, StoredVector};
 use crate::vector::core::vector::Vector;
 use crate::vector::engine::{
     FieldSelector, QueryVector, VectorEngineFilter, VectorEngineSearchRequest, VectorScoreMode,
@@ -52,6 +52,8 @@ pub struct HybridSearchRequest {
     pub text_query: String,
     /// Optional vector for semantic search.
     pub vector_query: Option<VectorEngineSearchRequest>,
+    /// Raw payloads that require embedding before executing the vector search.
+    pub vector_payloads: HashMap<String, FieldPayload>,
     /// Hybrid search parameters.
     pub params: HybridSearchParams,
     /// Lexical search parameters.
@@ -68,6 +70,7 @@ impl HybridSearchRequest {
         Self {
             text_query: text_query.into(),
             vector_query: None,
+            vector_payloads: HashMap::new(),
             params: HybridSearchParams::default(),
             lexical_params: LexicalSearchParams::default(),
             vector_params: VectorSearchParams::default(),
@@ -90,6 +93,34 @@ impl HybridSearchRequest {
     ) -> Self {
         Self::apply_overrides_to_query(&self.vector_overrides, &mut vector_query);
         self.vector_query = Some(vector_query);
+        self
+    }
+
+    /// Provide a raw payload that will be embedded for the specified field at query time.
+    pub fn with_vector_payload(
+        mut self,
+        field_name: impl Into<String>,
+        payload: FieldPayload,
+    ) -> Self {
+        self.vector_payloads.insert(field_name.into(), payload);
+        self
+    }
+
+    /// Convenience helper to embed a single text snippet for a specific field.
+    pub fn with_vector_text(self, field_name: impl Into<String>, text: impl Into<String>) -> Self {
+        self.push_vector_text_segment(field_name, RawTextSegment::new(text))
+    }
+
+    /// Append a raw text segment to the payload for the given field.
+    pub fn push_vector_text_segment(
+        mut self,
+        field_name: impl Into<String>,
+        segment: RawTextSegment,
+    ) -> Self {
+        self.vector_payloads
+            .entry(field_name.into())
+            .or_insert_with(FieldPayload::default)
+            .add_text_segment(segment);
         self
     }
 
