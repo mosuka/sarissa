@@ -3,18 +3,22 @@
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::fmt;
+use std::future::Future;
 use std::io::{Read, Write};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 
+use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
 use crate::vector::DistanceMetric;
-use crate::vector::core::document::{DocumentVectors, FieldVectors, StoredVector, VectorRole};
+use crate::vector::core::document::{
+    DocumentPayload, DocumentVectors, FieldPayload, FieldVectors, StoredVector, VectorRole,
+};
 use crate::vector::core::vector::Vector;
 use crate::vector::field::{
     FieldHit, FieldSearchInput, FieldSearchResults, VectorField, VectorFieldReader,
@@ -34,12 +38,22 @@ use crate::vector::index::ivf::{
     reader::IvfIndexReader, searcher::IvfSearcher, writer::IvfIndexWriter,
 };
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+use tokio::runtime::Builder as TokioRuntimeBuilder;
+
+#[cfg(feature = "embeddings-multimodal")]
+use crate::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+#[cfg(feature = "embeddings-candle")]
+use crate::embedding::candle_text_embedder::CandleTextEmbedder;
+#[cfg(feature = "embeddings-openai")]
+use crate::embedding::openai_text_embedder::OpenAITextEmbedder;
 
 /// High-level collection combining multiple vector fields.
 pub struct VectorEngine {
     config: Arc<VectorEngineConfig>,
     fields: HashMap<String, FieldHandle>,
     registry: Arc<DocumentVectorRegistry>,
+    embedder_registry: Arc<VectorEmbedderRegistry>,
+    embedder_executor: Mutex<Option<Arc<EmbedderExecutor>>>,
     wal: Arc<VectorWal>,
     storage: Arc<dyn Storage>,
     documents: Arc<RwLock<HashMap<u64, DocumentVectors>>>,
@@ -57,6 +71,192 @@ struct FieldRuntime {
     default_reader: Arc<dyn VectorFieldReader>,
     current_reader: RwLock<Arc<dyn VectorFieldReader>>,
     writer: Arc<dyn VectorFieldWriter>,
+}
+
+struct VectorEmbedderRegistry {
+    configs: HashMap<String, VectorEmbedderConfig>,
+    instances: RwLock<HashMap<String, Arc<dyn TextEmbedder>>>,
+}
+
+impl VectorEmbedderRegistry {
+    fn new(configs: HashMap<String, VectorEmbedderConfig>) -> Self {
+        Self {
+            configs,
+            instances: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn resolve(&self, embedder_id: &str) -> Result<Arc<dyn TextEmbedder>> {
+        if let Some(instance) = self.instances.read().get(embedder_id) {
+            return Ok(instance.clone());
+        }
+
+        let config = self.configs.get(embedder_id).ok_or_else(|| {
+            PlatypusError::invalid_config(format!(
+                "embedder '{embedder_id}' is not defined in VectorEngineConfig.embedders"
+            ))
+        })?;
+
+        let instance = self.instantiate(embedder_id, config)?;
+        self.instances
+            .write()
+            .insert(embedder_id.to_string(), instance.clone());
+        Ok(instance)
+    }
+
+    fn instantiate(
+        &self,
+        embedder_id: &str,
+        config: &VectorEmbedderConfig,
+    ) -> Result<Arc<dyn TextEmbedder>> {
+        match config.provider {
+            VectorEmbedderProvider::CandleText => {
+                Self::instantiate_candle_text(embedder_id, config)
+            }
+            VectorEmbedderProvider::CandleMultimodal => {
+                Self::instantiate_candle_multimodal(embedder_id, config)
+            }
+            VectorEmbedderProvider::OpenAiText => {
+                Self::instantiate_openai_text(embedder_id, config)
+            }
+            VectorEmbedderProvider::External => Err(PlatypusError::invalid_config(format!(
+                "embedder '{embedder_id}' uses provider 'external' and requires a runtime instance via register_embedder_instance"
+            ))),
+        }
+    }
+
+    fn register_external(
+        &self,
+        embedder_id: String,
+        embedder: Arc<dyn TextEmbedder>,
+    ) -> Result<()> {
+        let config = self.configs.get(&embedder_id).ok_or_else(|| {
+            PlatypusError::invalid_config(format!(
+                "cannot register embedder '{embedder_id}' that is not declared in config"
+            ))
+        })?;
+
+        if !matches!(config.provider, VectorEmbedderProvider::External) {
+            return Err(PlatypusError::invalid_config(format!(
+                "embedder '{embedder_id}' does not use provider 'external'"
+            )));
+        }
+
+        self.instances.write().insert(embedder_id, embedder);
+        Ok(())
+    }
+
+    #[cfg(feature = "embeddings-candle")]
+    fn instantiate_candle_text(
+        _embedder_id: &str,
+        config: &VectorEmbedderConfig,
+    ) -> Result<Arc<dyn TextEmbedder>> {
+        let embedder = CandleTextEmbedder::new(config.model.as_str())?;
+        Ok(Arc::new(embedder))
+    }
+
+    #[cfg(not(feature = "embeddings-candle"))]
+    fn instantiate_candle_text(
+        embedder_id: &str,
+        _: &VectorEmbedderConfig,
+    ) -> Result<Arc<dyn TextEmbedder>> {
+        Err(Self::missing_feature("embeddings-candle", embedder_id))
+    }
+
+    #[cfg(feature = "embeddings-multimodal")]
+    fn instantiate_candle_multimodal(
+        _embedder_id: &str,
+        config: &VectorEmbedderConfig,
+    ) -> Result<Arc<dyn TextEmbedder>> {
+        let embedder = CandleMultimodalEmbedder::new(config.model.as_str())?;
+        Ok(Arc::new(embedder))
+    }
+
+    #[cfg(not(feature = "embeddings-multimodal"))]
+    fn instantiate_candle_multimodal(
+        embedder_id: &str,
+        _: &VectorEmbedderConfig,
+    ) -> Result<Arc<dyn TextEmbedder>> {
+        Err(Self::missing_feature("embeddings-multimodal", embedder_id))
+    }
+
+    #[cfg(feature = "embeddings-openai")]
+    fn instantiate_openai_text(
+        _embedder_id: &str,
+        config: &VectorEmbedderConfig,
+    ) -> Result<Arc<dyn TextEmbedder>> {
+        let api_key = config
+            .options
+            .get("api_key")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| {
+                PlatypusError::invalid_config("OpenAI embedder requires 'api_key' option")
+            })?
+            .to_string();
+
+        let dimension = config
+            .options
+            .get("dimension")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize);
+
+        let embedder = if let Some(custom_dim) = dimension {
+            OpenAITextEmbedder::with_dimension(api_key, config.model.clone(), custom_dim)?
+        } else {
+            OpenAITextEmbedder::new(api_key, config.model.clone())?
+        };
+
+        Ok(Arc::new(embedder))
+    }
+
+    #[cfg(not(feature = "embeddings-openai"))]
+    fn instantiate_openai_text(
+        embedder_id: &str,
+        _: &VectorEmbedderConfig,
+    ) -> Result<Arc<dyn TextEmbedder>> {
+        Err(Self::missing_feature("embeddings-openai", embedder_id))
+    }
+
+    fn missing_feature(feature: &str, embedder_id: &str) -> PlatypusError {
+        PlatypusError::invalid_config(format!(
+            "embedder '{embedder_id}' requires feature '{feature}'"
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct EmbedderExecutor {
+    runtime: Arc<tokio::runtime::Runtime>,
+}
+
+impl EmbedderExecutor {
+    fn new() -> Result<Self> {
+        let runtime = TokioRuntimeBuilder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .map_err(|err| {
+                PlatypusError::internal(format!("failed to initialize embedder runtime: {err}"))
+            })?;
+        Ok(Self {
+            runtime: Arc::new(runtime),
+        })
+    }
+
+    fn run<F, T>(&self, future: F) -> Result<T>
+    where
+        F: Future<Output = Result<T>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        let handle = self.runtime.handle().clone();
+        handle.spawn(async move {
+            let _ = tx.send(future.await);
+        });
+        rx.recv().map_err(|err| {
+            PlatypusError::internal(format!("embedder task channel closed: {err}"))
+        })?
+    }
 }
 
 const FIELD_INDEX_BASENAME: &str = "index";
@@ -118,12 +318,15 @@ impl VectorEngine {
         storage: Arc<dyn Storage>,
         registry: Option<Arc<DocumentVectorRegistry>>,
     ) -> Result<Self> {
+        let embedder_registry = Arc::new(VectorEmbedderRegistry::new(config.embedders.clone()));
         let should_load_state = registry.is_none();
         let registry = registry.unwrap_or_else(|| Arc::new(DocumentVectorRegistry::default()));
         let mut collection = Self {
             config: Arc::new(config),
             fields: HashMap::new(),
             registry,
+            embedder_registry,
+            embedder_executor: Mutex::new(None),
             wal: Arc::new(VectorWal::default()),
             storage,
             documents: Arc::new(RwLock::new(HashMap::new())),
@@ -164,6 +367,16 @@ impl VectorEngine {
         let field: Arc<dyn VectorField> =
             Arc::new(AdapterBackedVectorField::new(name, config, writer, reader));
         self.register_field(field)
+    }
+
+    /// Register an externally constructed embedder instance for `VectorEmbedderProvider::External`.
+    pub fn register_embedder_instance(
+        &self,
+        embedder_id: impl Into<String>,
+        embedder: Arc<dyn TextEmbedder>,
+    ) -> Result<()> {
+        self.embedder_registry
+            .register_external(embedder_id.into(), embedder)
     }
 
     /// Replace the active reader for a field, returning the previously registered reader.
@@ -254,6 +467,105 @@ impl VectorEngine {
         self.persist_state()?;
         self.maybe_compact_wal()?;
         Ok(version)
+    }
+
+    /// Upsert a document represented by raw payloads that require embedding.
+    pub fn upsert_document_payload(&self, payload: DocumentPayload) -> Result<RegistryVersion> {
+        let document = self.embed_document_payload(payload)?;
+        self.upsert_document(document)
+    }
+
+    fn embed_document_payload(&self, payload: DocumentPayload) -> Result<DocumentVectors> {
+        let mut document = DocumentVectors::new(payload.doc_id);
+        document.metadata = payload.metadata;
+
+        for (field_name, field_payload) in payload.fields.into_iter() {
+            let vectors = self.embed_field_payload(&field_name, field_payload)?;
+            if !vectors.vectors.is_empty() || !vectors.metadata.is_empty() {
+                document.fields.insert(field_name, vectors);
+            }
+        }
+
+        Ok(document)
+    }
+
+    fn embed_field_payload(&self, field_name: &str, payload: FieldPayload) -> Result<FieldVectors> {
+        let handle = self.fields.get(field_name).ok_or_else(|| {
+            PlatypusError::invalid_argument(format!(
+                "vector field '{field_name}' is not registered"
+            ))
+        })?;
+        let field_config = handle.field.config().clone();
+        if payload.is_empty() {
+            let mut empty = FieldVectors::default();
+            empty.metadata = payload.metadata;
+            return Ok(empty);
+        }
+
+        let embedder_name = field_config.embedder.as_ref().ok_or_else(|| {
+            PlatypusError::invalid_config(format!(
+                "vector field '{field_name}' must specify 'embedder' to use raw payload ingestion"
+            ))
+        })?;
+        let embedder = self.embedder_registry.resolve(embedder_name)?;
+        let executor = self.ensure_embedder_executor()?;
+
+        let mut field_vectors = FieldVectors::default();
+        field_vectors.metadata = payload.metadata;
+
+        for segment in payload.text_segments.into_iter() {
+            let text = segment.value;
+            let attributes = segment.attributes;
+            let weight = if segment.weight <= 0.0 {
+                1.0
+            } else {
+                segment.weight
+            };
+            let embedder_clone = Arc::clone(&embedder);
+            let vector = executor.run(async move { embedder_clone.embed(&text).await })?;
+            vector.validate_dimension(field_config.dimension)?;
+            if !vector.is_valid() {
+                return Err(PlatypusError::InvalidOperation(format!(
+                    "embedder '{}' produced invalid values for field '{}'",
+                    embedder_name, field_name
+                )));
+            }
+            let mut stored: StoredVector = vector.into();
+            stored.embedder_id = field_config.embedder_id.clone();
+            stored.role = field_config.role.clone();
+            stored.weight = weight;
+            stored.attributes.extend(attributes);
+            field_vectors.vectors.push(stored);
+        }
+
+        Ok(field_vectors)
+    }
+
+    /// Embed a raw payload for use as query vectors without mutating the index.
+    pub fn embed_query_field_payload(
+        &self,
+        field_name: &str,
+        payload: FieldPayload,
+    ) -> Result<Vec<QueryVector>> {
+        let vectors = self.embed_field_payload(field_name, payload)?;
+        Ok(vectors
+            .vectors
+            .into_iter()
+            .map(|vector| QueryVector {
+                vector,
+                weight: 1.0,
+            })
+            .collect())
+    }
+
+    fn ensure_embedder_executor(&self) -> Result<Arc<EmbedderExecutor>> {
+        let mut guard = self.embedder_executor.lock();
+        if let Some(executor) = guard.as_ref() {
+            return Ok(executor.clone());
+        }
+        let executor = Arc::new(EmbedderExecutor::new()?);
+        *guard = Some(executor.clone());
+        Ok(executor)
     }
 
     pub fn delete_document(&self, doc_id: u64) -> Result<()> {
@@ -1020,6 +1332,8 @@ fn build_field_entries(document: &DocumentVectors) -> Vec<FieldEntry> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorEngineConfig {
     pub fields: HashMap<String, VectorFieldConfig>,
+    #[serde(default)]
+    pub embedders: HashMap<String, VectorEmbedderConfig>,
     pub default_fields: Vec<String>,
     #[serde(default)]
     pub metadata: HashMap<String, serde_json::Value>,
@@ -1034,6 +1348,16 @@ impl VectorEngineConfig {
                 )));
             }
         }
+
+        for (field_name, config) in &self.fields {
+            if let Some(embedder_id) = &config.embedder {
+                if !self.embedders.contains_key(embedder_id) {
+                    return Err(PlatypusError::invalid_config(format!(
+                        "vector field '{field_name}' references undefined embedder '{embedder_id}'"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -1045,6 +1369,8 @@ pub struct VectorFieldConfig {
     pub index: VectorIndexKind,
     pub embedder_id: String,
     pub role: VectorRole,
+    #[serde(default)]
+    pub embedder: Option<String>,
     #[serde(default = "VectorFieldConfig::default_weight")]
     pub base_weight: f32,
 }
@@ -1061,6 +1387,23 @@ pub enum VectorIndexKind {
     Flat,
     Hnsw,
     Ivf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorEmbedderConfig {
+    pub provider: VectorEmbedderProvider,
+    pub model: String,
+    #[serde(default)]
+    pub options: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorEmbedderProvider {
+    CandleText,
+    CandleMultimodal,
+    OpenAiText,
+    External,
 }
 
 /// Request model for collection-level search.
@@ -1722,10 +2065,15 @@ mod tests {
     use crate::storage::Storage;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::storage::prefixed::PrefixedStorage;
-    use crate::vector::core::document::{DocumentVectors, FieldVectors, StoredVector, VectorRole};
+    use crate::vector::core::document::{
+        DocumentPayload, DocumentVectors, FieldPayload, FieldVectors, RawTextSegment, StoredVector,
+        VectorRole,
+    };
+    use crate::vector::core::vector::Vector;
     use crate::vector::field::{
         FieldSearchResults, VectorFieldReader, VectorFieldStats, VectorFieldWriter,
     };
+    use async_trait::async_trait;
     use std::collections::HashMap;
     use std::io::Write;
     use std::sync::{Arc, Mutex};
@@ -1799,10 +2147,12 @@ mod tests {
             index: VectorIndexKind::Flat,
             embedder_id: "mock".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: weight,
         };
         let config = VectorEngineConfig {
             fields: HashMap::new(),
+            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
         };
@@ -2056,10 +2406,12 @@ mod tests {
             index: VectorIndexKind::Flat,
             embedder_id: "mock".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.0,
         };
         let config = VectorEngineConfig {
             fields: HashMap::from([(String::from("body"), field_config.clone())]),
+            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
         };
@@ -2096,10 +2448,12 @@ mod tests {
             index: VectorIndexKind::Flat,
             embedder_id: "mock".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.0,
         };
         let config = VectorEngineConfig {
             fields: HashMap::from([(String::from("body"), field_config.clone())]),
+            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
         };
@@ -2141,10 +2495,12 @@ mod tests {
             index: VectorIndexKind::Flat,
             embedder_id: "mock".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.0,
         };
         let config = VectorEngineConfig {
             fields: HashMap::from([(String::from("body"), field_config.clone())]),
+            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
         };
@@ -2195,10 +2551,12 @@ mod tests {
             index: VectorIndexKind::Flat,
             embedder_id: "mock".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.0,
         };
         let config = VectorEngineConfig {
             fields: HashMap::from([(String::from("body"), field_config.clone())]),
+            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
         };
@@ -2242,6 +2600,54 @@ mod tests {
     }
 
     #[test]
+    fn upsert_document_payload_embeds_vectors() {
+        let field_config = VectorFieldConfig {
+            dimension: 3,
+            distance: DistanceMetric::Cosine,
+            index: VectorIndexKind::Flat,
+            embedder_id: "mock".into(),
+            role: VectorRole::Text,
+            embedder: Some("mock_embedder".into()),
+            base_weight: 1.0,
+        };
+        let embedders = HashMap::from([(
+            String::from("mock_embedder"),
+            VectorEmbedderConfig {
+                provider: VectorEmbedderProvider::External,
+                model: "mock".into(),
+                options: HashMap::new(),
+            },
+        )]);
+        let config = VectorEngineConfig {
+            fields: HashMap::from([(String::from("body"), field_config.clone())]),
+            embedders,
+            default_fields: vec!["body".into()],
+            metadata: HashMap::new(),
+        };
+        let storage: Arc<dyn Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let engine = VectorEngine::new(config, storage, None).expect("engine");
+        engine
+            .register_embedder_instance("mock_embedder", Arc::new(MockTextEmbedder::new(3)))
+            .expect("register embedder");
+
+        let mut field_payload = FieldPayload::default();
+        field_payload.add_text_segment(RawTextSegment::new("hello world"));
+        let mut document_payload = DocumentPayload::new(1);
+        document_payload.add_field("body", field_payload);
+
+        let version = engine
+            .upsert_document_payload(document_payload)
+            .expect("upsert raw payload");
+        assert!(version > 0);
+
+        let stats = engine.stats().expect("stats");
+        assert_eq!(stats.document_count, 1);
+        let body_stats = stats.fields.get("body").expect("body stats");
+        assert_eq!(body_stats.vector_count, 1);
+    }
+
+    #[test]
     fn wal_compaction_drops_tombstones() {
         let field_config = VectorFieldConfig {
             dimension: 3,
@@ -2249,10 +2655,12 @@ mod tests {
             index: VectorIndexKind::Flat,
             embedder_id: "mock".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.0,
         };
         let config = VectorEngineConfig {
             fields: HashMap::from([(String::from("body"), field_config.clone())]),
+            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
         };
@@ -2295,10 +2703,12 @@ mod tests {
             index: VectorIndexKind::Flat,
             embedder_id: "mock".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.0,
         };
         let config = VectorEngineConfig {
             fields: HashMap::from([(String::from("body"), field_config.clone())]),
+            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
         };
@@ -2341,10 +2751,12 @@ mod tests {
             index: VectorIndexKind::Flat,
             embedder_id: "mock".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.0,
         };
         let config = VectorEngineConfig {
             fields: HashMap::from([(String::from("body"), field_config.clone())]),
+            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
         };
@@ -2455,5 +2867,32 @@ mod tests {
         let deletions = writer.deletions().lock().unwrap().clone();
         assert_eq!(deletions.len(), 1);
         assert_eq!(deletions[0].0, 7);
+    }
+
+    #[derive(Debug)]
+    struct MockTextEmbedder {
+        dimension: usize,
+    }
+
+    impl MockTextEmbedder {
+        fn new(dimension: usize) -> Self {
+            Self { dimension }
+        }
+    }
+
+    #[async_trait]
+    impl TextEmbedder for MockTextEmbedder {
+        async fn embed(&self, text: &str) -> Result<Vector> {
+            let value = text.len() as f32;
+            Ok(Vector::new(vec![value; self.dimension]))
+        }
+
+        fn dimension(&self) -> usize {
+            self.dimension
+        }
+
+        fn name(&self) -> &str {
+            "mock-text-embedder"
+        }
     }
 }

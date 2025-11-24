@@ -1,15 +1,20 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::error::Result;
 use platypus::storage::Storage;
 use platypus::storage::memory::MemoryStorage;
 use platypus::vector::DistanceMetric;
-use platypus::vector::core::document::{DocumentVectors, StoredVector, VectorRole};
+use platypus::vector::core::document::{
+    DocumentPayload, DocumentVectors, FieldPayload, RawTextSegment, StoredVector, VectorRole,
+};
+use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, MetadataFilter, QueryVector, VectorEngine, VectorEngineConfig,
-    VectorEngineFilter, VectorEngineSearchRequest, VectorFieldConfig, VectorIndexKind,
-    VectorScoreMode,
+    FieldSelector, MetadataFilter, QueryVector, VectorEmbedderConfig, VectorEmbedderProvider,
+    VectorEngine, VectorEngineConfig, VectorEngineFilter, VectorEngineSearchRequest,
+    VectorFieldConfig, VectorIndexKind, VectorScoreMode,
 };
 
 #[test]
@@ -101,6 +106,30 @@ fn vector_engine_field_metadata_filters_limit_hits() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn vector_engine_upserts_and_queries_raw_payloads() -> Result<()> {
+    let engine = build_payload_engine()?;
+
+    let mut payload = DocumentPayload::new(42);
+    payload.metadata.insert("lang".into(), "en".into());
+    payload.add_field("body_embedding", sample_payload("rust embeddings", "body"));
+    let version = engine.upsert_document_payload(payload)?;
+    assert!(version > 0);
+
+    let mut query = VectorEngineSearchRequest::default();
+    query.limit = 1;
+    query.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
+    query.query_vectors.extend(engine.embed_query_field_payload(
+        "body_embedding",
+        sample_payload("embeddings overview", "body"),
+    )?);
+
+    let results = engine.search(&query)?;
+    assert_eq!(results.hits.len(), 1);
+    assert_eq!(results.hits[0].doc_id, 42);
+    Ok(())
+}
+
 fn build_sample_engine() -> Result<VectorEngine> {
     let config = sample_engine_config();
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
@@ -123,6 +152,7 @@ fn sample_engine_config() -> VectorEngineConfig {
             index: VectorIndexKind::Flat,
             embedder_id: "text-encoder-v1".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.4,
         },
     );
@@ -134,12 +164,14 @@ fn sample_engine_config() -> VectorEngineConfig {
             index: VectorIndexKind::Flat,
             embedder_id: "text-encoder-v1".into(),
             role: VectorRole::Text,
+            embedder: None,
             base_weight: 1.0,
         },
     );
 
     VectorEngineConfig {
         fields,
+        embedders: HashMap::new(),
         default_fields: vec!["title_embedding".into(), "body_embedding".into()],
         metadata: HashMap::new(),
     }
@@ -158,4 +190,84 @@ fn stored_query_vector(data: [f32; 4]) -> StoredVector {
 fn sample_documents() -> Vec<DocumentVectors> {
     serde_json::from_str(include_str!("../resources/vector_engine_sample.json"))
         .expect("vector_engine_sample.json parses")
+}
+
+fn sample_payload(text: &str, section: &str) -> FieldPayload {
+    let mut payload = FieldPayload::default();
+    payload
+        .metadata
+        .insert("section".into(), section.to_string());
+    payload.add_text_segment(RawTextSegment::new(text));
+    payload
+}
+
+fn build_payload_engine() -> Result<VectorEngine> {
+    let mut fields = HashMap::new();
+    fields.insert(
+        "body_embedding".into(),
+        VectorFieldConfig {
+            dimension: 4,
+            distance: DistanceMetric::Cosine,
+            index: VectorIndexKind::Flat,
+            embedder_id: "payload-encoder".into(),
+            role: VectorRole::Text,
+            embedder: Some("integration_embedder".into()),
+            base_weight: 1.0,
+        },
+    );
+
+    let embedders = HashMap::from([(
+        "integration_embedder".into(),
+        VectorEmbedderConfig {
+            provider: VectorEmbedderProvider::External,
+            model: "integration-test".into(),
+            options: HashMap::new(),
+        },
+    )]);
+
+    let config = VectorEngineConfig {
+        fields,
+        embedders,
+        default_fields: vec!["body_embedding".into()],
+        metadata: HashMap::new(),
+    };
+
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
+    let engine = VectorEngine::new(config, storage, None)?;
+    engine.register_embedder_instance(
+        "integration_embedder",
+        Arc::new(IntegrationTestEmbedder::new(4)),
+    )?;
+    Ok(engine)
+}
+
+#[derive(Debug)]
+struct IntegrationTestEmbedder {
+    dimension: usize,
+}
+
+impl IntegrationTestEmbedder {
+    fn new(dimension: usize) -> Self {
+        Self { dimension }
+    }
+}
+
+#[async_trait]
+impl TextEmbedder for IntegrationTestEmbedder {
+    async fn embed(&self, text: &str) -> Result<Vector> {
+        let mut data = vec![0.0_f32; self.dimension];
+        for (idx, byte) in text.bytes().enumerate() {
+            let bucket = idx % self.dimension;
+            data[bucket] += (byte as f32) / 255.0;
+        }
+        Ok(Vector::new(data))
+    }
+
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn name(&self) -> &str {
+        "integration-test-embedder"
+    }
 }

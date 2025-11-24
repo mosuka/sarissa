@@ -3,12 +3,16 @@
 //! This module provides the `HybridEngine` that combines lexical and vector search
 //! engines to provide unified hybrid search functionality.
 
+use std::collections::HashMap;
+
 use crate::error::Result;
 use crate::hybrid::search::searcher::{
     HybridSearchParams, HybridSearchRequest, HybridSearchResults, HybridVectorOptions,
 };
-use crate::vector::core::document::DocumentVectors;
-use crate::vector::engine::{VectorEngineSearchRequest, VectorEngineSearchResults};
+use crate::vector::core::document::{DocumentVectors, FieldPayload};
+use crate::vector::engine::{
+    FieldSelector, VectorEngine, VectorEngineSearchRequest, VectorEngineSearchResults,
+};
 use crate::vector::search::searcher::VectorSearchParams;
 
 /// High-level hybrid search engine combining lexical and vector search.
@@ -186,6 +190,7 @@ impl HybridEngine {
         let HybridSearchRequest {
             text_query,
             vector_query,
+            vector_payloads,
             params,
             lexical_params,
             vector_params,
@@ -208,9 +213,11 @@ impl HybridEngine {
         let vector_query = Self::build_vector_engine_search_request(
             vector_overrides,
             vector_query,
+            vector_payloads,
             &vector_params,
             &params,
-        );
+            &self.vector_engine,
+        )?;
 
         let vector_results = if let Some(query) = vector_query {
             let mut results = self.vector_engine.search(&query)?;
@@ -242,15 +249,44 @@ impl HybridEngine {
     fn build_vector_engine_search_request(
         overrides: HybridVectorOptions,
         query: Option<VectorEngineSearchRequest>,
+        vector_payloads: HashMap<String, FieldPayload>,
         vector_params: &VectorSearchParams,
         params: &HybridSearchParams,
-    ) -> Option<VectorEngineSearchRequest> {
-        let mut query = query?;
+        vector_engine: &VectorEngine,
+    ) -> Result<Option<VectorEngineSearchRequest>> {
+        let mut query = query.unwrap_or_else(VectorEngineSearchRequest::default);
+        let mut payload_fields: Vec<String> = Vec::new();
+
+        for (field_name, payload) in vector_payloads {
+            if payload.is_empty() {
+                continue;
+            }
+            let embedded = vector_engine.embed_query_field_payload(&field_name, payload)?;
+            if embedded.is_empty() {
+                continue;
+            }
+            payload_fields.push(field_name);
+            query.query_vectors.extend(embedded);
+        }
+
+        if query.query_vectors.is_empty() {
+            return Ok(None);
+        }
+
         HybridSearchRequest::apply_overrides_to_query(&overrides, &mut query);
         if query.limit == 0 {
             query.limit = Self::default_vector_limit(vector_params, params);
         }
-        Some(query)
+        if query.fields.is_none() && overrides.fields.is_none() && !payload_fields.is_empty() {
+            let mut dedup = Vec::new();
+            for field in payload_fields {
+                if !dedup.iter().any(|existing: &String| existing == &field) {
+                    dedup.push(field);
+                }
+            }
+            query.fields = Some(dedup.into_iter().map(FieldSelector::Exact).collect());
+        }
+        Ok(Some(query))
     }
 
     fn default_vector_limit(
@@ -296,13 +332,25 @@ impl HybridEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embedding::text_embedder::TextEmbedder;
+    use crate::storage::Storage;
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use crate::vector::DistanceMetric;
+    use crate::vector::core::document::{FieldPayload, RawTextSegment, StoredVector, VectorRole};
+    use crate::vector::core::vector::Vector;
     use crate::vector::engine::{
-        FieldSelector, MetadataFilter, VectorEngineFilter, VectorEngineHit, VectorScoreMode,
+        FieldSelector, MetadataFilter, QueryVector, VectorEmbedderConfig, VectorEmbedderProvider,
+        VectorEngineConfig, VectorEngineFilter, VectorEngineHit, VectorFieldConfig,
+        VectorIndexKind, VectorScoreMode,
     };
     use crate::vector::field::FieldHit;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[test]
     fn build_query_apply_overrides_and_limits() {
+        let engine = mock_vector_engine();
         let mut overrides = HybridVectorOptions::default();
         overrides.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
         overrides.score_mode = Some(VectorScoreMode::MaxSim);
@@ -318,6 +366,14 @@ mod tests {
 
         let mut query = VectorEngineSearchRequest::default();
         query.limit = 0;
+        query.query_vectors.push(QueryVector {
+            vector: StoredVector::new(
+                Arc::<[f32]>::from([1.0_f32, 0.0, 0.0]),
+                "mock".into(),
+                VectorRole::Text,
+            ),
+            weight: 1.0,
+        });
 
         let vector_params = VectorSearchParams {
             top_k: 4,
@@ -329,10 +385,13 @@ mod tests {
         let resolved = HybridEngine::build_vector_engine_search_request(
             overrides,
             Some(query),
+            HashMap::new(),
             &vector_params,
             &hybrid_params,
+            &engine,
         )
-        .expect("vector query");
+        .expect("vector query")
+        .expect("query present");
 
         assert_eq!(resolved.limit, 4);
         assert!(matches!(resolved.score_mode, VectorScoreMode::MaxSim));
@@ -384,5 +443,93 @@ mod tests {
 
         assert_eq!(results.hits.len(), 1);
         assert_eq!(results.hits[0].doc_id, 1);
+    }
+
+    #[test]
+    fn build_query_from_payload_embeds_vectors() {
+        let engine = mock_vector_engine();
+        let mut payloads = HashMap::new();
+        let mut payload = FieldPayload::default();
+        payload.add_text_segment(RawTextSegment::new("rust embeddings"));
+        payloads.insert("body".into(), payload);
+
+        let resolved = HybridEngine::build_vector_engine_search_request(
+            HybridVectorOptions::default(),
+            None,
+            payloads,
+            &VectorSearchParams::default(),
+            &HybridSearchParams::default(),
+            &engine,
+        )
+        .expect("payload query")
+        .expect("query present");
+
+        assert!(!resolved.query_vectors.is_empty());
+        let fields = resolved.fields.expect("fields inferred");
+        assert_eq!(fields.len(), 1);
+    }
+
+    fn mock_vector_engine() -> VectorEngine {
+        let mut fields = HashMap::new();
+        fields.insert(
+            "body".into(),
+            VectorFieldConfig {
+                dimension: 3,
+                distance: DistanceMetric::Cosine,
+                index: VectorIndexKind::Flat,
+                embedder_id: "mock".into(),
+                role: VectorRole::Text,
+                embedder: Some("mock_embedder".into()),
+                base_weight: 1.0,
+            },
+        );
+        let embedders = HashMap::from([(
+            "mock_embedder".into(),
+            VectorEmbedderConfig {
+                provider: VectorEmbedderProvider::External,
+                model: "mock".into(),
+                options: HashMap::new(),
+            },
+        )]);
+        let config = VectorEngineConfig {
+            fields,
+            embedders,
+            default_fields: vec!["body".into()],
+            metadata: HashMap::new(),
+        };
+        let storage: Arc<dyn Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let engine = VectorEngine::new(config, storage, None).expect("engine");
+        engine
+            .register_embedder_instance("mock_embedder", Arc::new(MockTextEmbedder::new(3)))
+            .expect("register embedder");
+        engine
+    }
+
+    #[derive(Debug)]
+    struct MockTextEmbedder {
+        dimension: usize,
+    }
+
+    impl MockTextEmbedder {
+        fn new(dimension: usize) -> Self {
+            Self { dimension }
+        }
+    }
+
+    #[async_trait]
+    impl TextEmbedder for MockTextEmbedder {
+        async fn embed(&self, text: &str) -> Result<Vector> {
+            let value = text.len() as f32;
+            Ok(Vector::new(vec![value; self.dimension]))
+        }
+
+        fn dimension(&self) -> usize {
+            self.dimension
+        }
+
+        fn name(&self) -> &str {
+            "mock-hybrid-text-embedder"
+        }
     }
 }

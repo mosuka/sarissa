@@ -1,6 +1,6 @@
 # VectorEngine Architecture Draft
 
-Last updated: 2025-11-21
+Last updated: 2025-11-24
 
 ## 1. Goals & Non-Goals
 
@@ -82,12 +82,38 @@ pub struct StoredVector {
     pub weight: f32,
     pub attributes: HashMap<String, String>, // chunk ids, original text, etc.
 }
+
+pub struct DocumentPayload {
+    pub doc_id: u64,
+    pub fields: HashMap<String, FieldPayload>,
+    pub metadata: HashMap<String, String>,
+}
+
+pub struct FieldPayload {
+    pub text_segments: Vec<RawTextSegment>,
+    pub metadata: HashMap<String, String>,
+}
+
+pub struct RawTextSegment {
+    pub value: String,
+    pub weight: f32,
+    pub attributes: HashMap<String, String>,
+}
 ```
 
 - `DocumentVectorRegistry` keeps `doc_id -> Vec<FieldEntry>` where `FieldEntry` stores `field_name`, `version`, `vector_count`, `weight`, `metadata`, and a pointer to WAL offsets.
 - A lightweight `documents.json` snapshot persists the latest `DocumentVectors` payloads (the same structures written into the WAL) along with the last applied WAL sequence so the in-memory stores can be rebuilt even if the WAL is truncated.
 - `manifest.json` mirrors the snapshot metadata (`snapshot_wal_seq`, `wal_last_seq`) so startup can verify that the snapshot and WAL pair is self-consistent before replaying anything, preventing partial/manual edits from sneaking in.
 - WAL entries now carry the full `DocumentVectors` payload so the in-memory field stores can be rebuilt after a restart, e.g. `Upsert { document: DocumentVectors }` and `Delete { doc_id }`. Once the WAL grows beyond a small threshold it is compacted back down to a single `Upsert` per live document (tombstones are dropped) to keep recovery times predictable.
+
+## 4. Automatic Embedding Pipeline
+
+- `VectorEngineConfig.embedders` に ID → `VectorEmbedderConfig` を登録し、`VectorFieldConfig.embedder` から参照することでフィールド毎に埋め込みモデルを割り当てる。
+- `VectorEngine::register_embedder_instance` で `TextEmbedder` 実装を注入すると、エンジンは `FieldPayload` を `FieldVectors` に変換できる。Candle/OpenAI/カスタム実装すべて同じ仕組みで扱える。
+- ドキュメント投入は `VectorEngine::upsert_document_payload` を通じて `DocumentPayload` を渡すだけで良く、`RawTextSegment` が順番に埋め込まれて `DocumentVectors` に変換された後、既存の upsert パスへ委譲される。
+- フィールド実装側は `VectorFieldWriter::add_raw_field_payload` を実装すれば raw payload を直接受け取れる。未対応の場合はデフォルト実装が `InvalidOperation` を返すため、段階的な移行が可能。
+- クエリ側は `VectorEngine::embed_query_field_payload` で raw テキストを `QueryVector` に変換でき、`HybridSearchRequest::with_vector_payload` / `with_vector_text` が同じ経路をラップしている。
+- 実働サンプルは `examples/vector_search.rs`、統合テストは `vector_engine_upserts_and_queries_raw_payloads`（`cargo test --test vector_engine_scenarios`）を参照。
 
 ## 5. Query API Sketch
 
@@ -142,8 +168,8 @@ pub struct MetadataFilter {
 - `VectorEngineFilter.field.equals` performs the same equality checks on per-document, per-field metadata (`FieldVectors.metadata`). Only hits coming from fields whose metadata satisfy the filter are allowed to bubble up.
 - Query vectors must declare an `embedder_id` + `VectorRole` that matches the target field configuration; otherwise the field is skipped and the query errors if no fields remain.
 - Later we can reuse `Filter` structs from `lexical::search` for richer comparisons (prefix ranges, numeric ops, etc.).
-- 実際の `VectorEngineSearchRequest` 構築例は `examples/vector_search.rs` を参照。
-- 実際のエンドツーエンドの利用例は `examples/vector_search.rs` を参照。
+- 実際の `VectorEngineSearchRequest` 構築例や自動ベクトル化のフローは `examples/vector_search.rs` を参照。
+- エンドツーエンドの挙動は同じサンプルで確認できる。
 
 ## 5.1 Hybrid Engine Integration
 
@@ -156,7 +182,7 @@ pub struct MetadataFilter {
 ### Reference fixtures & tests
 
 - `resources/vector_engine_sample.json`: 3 件の `DocumentVectors` を収録したサンプルで、フィールド/ドキュメントのメタデータ（`section` や `lang` など）と複数ロールの組み合わせを含む。`MetadataFilter` や `FieldSelector` の挙動確認に利用可能。
-- `tests/vector_engine_scenarios.rs`: 上記サンプルを読み込み、フィールド指定、`VectorScoreMode`、ドキュメント/フィールド両方のメタデータフィルタを通す統合テスト。`MemoryStorage` で完結するため CI で高速に実行できる。`cargo test --test vector_engine_scenarios` で単独実行可能。
+- `tests/vector_engine_scenarios.rs`: 上記サンプルに加えて raw payload → 自動埋め込み → クエリ埋め込みまでを通す `vector_engine_upserts_and_queries_raw_payloads` を収録。`cargo test --test vector_engine_scenarios` で単独実行可能。
 
 ## 6. Update / Delete Lifecycle
 
