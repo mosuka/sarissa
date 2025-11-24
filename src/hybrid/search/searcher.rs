@@ -11,7 +11,7 @@ use crate::lexical::search::searcher::LexicalSearchParams;
 use crate::vector::core::document::StoredVector;
 use crate::vector::core::vector::Vector;
 use crate::vector::engine::{
-    FieldSelector, QueryVector, VectorEngineFilter, VectorEngineQuery, VectorScoreMode,
+    FieldSelector, QueryVector, VectorEngineFilter, VectorEngineSearchRequest, VectorScoreMode,
 };
 use crate::vector::field::FieldHit;
 use crate::vector::search::searcher::VectorSearchParams;
@@ -19,7 +19,7 @@ use crate::vector::search::searcher::VectorSearchParams;
 /// Hybrid search request combining text query, optional vector, and search parameters.
 ///
 /// This is the main structure for executing hybrid searches, similar to
-/// `LexicalSearchRequest` and `VectorEngineQuery`.
+/// `LexicalSearchRequest` and `VectorEngineSearchRequest`.
 ///
 /// # Examples
 ///
@@ -51,7 +51,7 @@ pub struct HybridSearchRequest {
     /// Text query for lexical search.
     pub text_query: String,
     /// Optional vector for semantic search.
-    pub vector_query: Option<VectorEngineQuery>,
+    pub vector_query: Option<VectorEngineSearchRequest>,
     /// Hybrid search parameters.
     pub params: HybridSearchParams,
     /// Lexical search parameters.
@@ -83,8 +83,11 @@ impl HybridSearchRequest {
         self
     }
 
-    /// Provide a fully-specified VectorEngineQuery.
-    pub fn with_vector_engine_query(mut self, mut vector_query: VectorEngineQuery) -> Self {
+    /// Provide a fully-specified VectorEngineSearchRequest.
+    pub fn with_vector_engine_search_request(
+        mut self,
+        mut vector_query: VectorEngineSearchRequest,
+    ) -> Self {
         Self::apply_overrides_to_query(&self.vector_overrides, &mut vector_query);
         self.vector_query = Some(vector_query);
         self
@@ -176,8 +179,8 @@ impl HybridSearchRequest {
         self
     }
 
-    fn build_query_from_vector(vector: Vector, top_k: usize) -> VectorEngineQuery {
-        let mut query = VectorEngineQuery::default();
+    fn build_query_from_vector(vector: Vector, top_k: usize) -> VectorEngineSearchRequest {
+        let mut query = VectorEngineSearchRequest::default();
         query.limit = top_k.max(1);
         query.query_vectors.push(QueryVector {
             vector: StoredVector::from(vector),
@@ -188,7 +191,7 @@ impl HybridSearchRequest {
 
     pub(crate) fn apply_overrides_to_query(
         overrides: &HybridVectorOptions,
-        query: &mut VectorEngineQuery,
+        query: &mut VectorEngineSearchRequest,
     ) {
         if let Some(fields) = &overrides.fields {
             query.fields = Some(fields.clone());

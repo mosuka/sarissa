@@ -270,10 +270,10 @@ impl VectorEngine {
         self.maybe_compact_wal()
     }
 
-    pub fn search(&self, query: &VectorEngineQuery) -> Result<VectorEngineSearchResults> {
+    pub fn search(&self, query: &VectorEngineSearchRequest) -> Result<VectorEngineSearchResults> {
         if query.query_vectors.is_empty() {
             return Err(PlatypusError::invalid_argument(
-                "VectorEngineQuery requires at least one query vector",
+                "VectorEngineSearchRequest requires at least one query vector",
             ));
         }
 
@@ -283,7 +283,7 @@ impl VectorEngine {
 
         if query.overfetch < 1.0 {
             return Err(PlatypusError::invalid_argument(
-                "VectorEngineQuery overfetch must be >= 1.0",
+                "VectorEngineSearchRequest overfetch must be >= 1.0",
             ));
         }
 
@@ -349,7 +349,7 @@ impl VectorEngine {
         Ok(VectorEngineSearchResults { hits })
     }
 
-    fn resolve_fields(&self, query: &VectorEngineQuery) -> Result<Vec<String>> {
+    fn resolve_fields(&self, query: &VectorEngineSearchRequest) -> Result<Vec<String>> {
         let mut candidates: Vec<String> = if let Some(selectors) = &query.fields {
             self.apply_field_selectors(selectors)?
         } else if !self.config.default_fields.is_empty() {
@@ -371,7 +371,7 @@ impl VectorEngine {
 
     fn build_filter_matches(
         &self,
-        query: &VectorEngineQuery,
+        query: &VectorEngineSearchRequest,
         target_fields: &[String],
     ) -> Option<RegistryFilterMatches> {
         query
@@ -384,7 +384,7 @@ impl VectorEngine {
     fn apply_field_selectors(&self, selectors: &[FieldSelector]) -> Result<Vec<String>> {
         if selectors.is_empty() {
             return Err(PlatypusError::invalid_argument(
-                "VectorEngineQuery fields selector list is empty",
+                "VectorEngineSearchRequest fields selector list is empty",
             ));
         }
 
@@ -441,7 +441,7 @@ impl VectorEngine {
     fn query_vectors_for_field(
         &self,
         config: &VectorFieldConfig,
-        query: &VectorEngineQuery,
+        query: &VectorEngineSearchRequest,
     ) -> Vec<QueryVector> {
         query
             .query_vectors
@@ -1066,7 +1066,7 @@ pub enum VectorIndexKind {
 /// Request model for collection-level search.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorEngineQuery {
+pub struct VectorEngineSearchRequest {
     #[serde(default)]
     pub query_vectors: Vec<QueryVector>,
     #[serde(default)]
@@ -1089,7 +1089,7 @@ fn default_overfetch() -> f32 {
     1.0
 }
 
-impl Default for VectorEngineQuery {
+impl Default for VectorEngineSearchRequest {
     fn default() -> Self {
         Self {
             query_vectors: Vec::new(),
@@ -1831,8 +1831,8 @@ mod tests {
         vectors
     }
 
-    fn sample_query(limit: usize) -> VectorEngineQuery {
-        let mut query = VectorEngineQuery::default();
+    fn sample_query(limit: usize) -> VectorEngineSearchRequest {
+        let mut query = VectorEngineSearchRequest::default();
         query.limit = limit;
         query.query_vectors.push(QueryVector {
             vector: StoredVector::new(
@@ -1993,7 +1993,7 @@ mod tests {
     #[test]
     fn search_errors_when_vectors_do_not_match_fields() {
         let (collection, _) = collection_with_field(vec![], 1.0);
-        let mut query = VectorEngineQuery::default();
+        let mut query = VectorEngineSearchRequest::default();
         query.limit = 5;
         query.query_vectors.push(QueryVector {
             vector: StoredVector::new(

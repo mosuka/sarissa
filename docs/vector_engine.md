@@ -92,7 +92,7 @@ pub struct StoredVector {
 ## 5. Query API Sketch
 
 ```rust
-pub struct VectorEngineQuery {
+pub struct VectorEngineSearchRequest {
     pub query_vectors: Vec<QueryVector>,
     pub fields: Option<Vec<FieldSelector>>, // default => config.default_fields
     pub limit: usize,
@@ -142,12 +142,12 @@ pub struct MetadataFilter {
 - `VectorEngineFilter.field.equals` performs the same equality checks on per-document, per-field metadata (`FieldVectors.metadata`). Only hits coming from fields whose metadata satisfy the filter are allowed to bubble up.
 - Query vectors must declare an `embedder_id` + `VectorRole` that matches the target field configuration; otherwise the field is skipped and the query errors if no fields remain.
 - Later we can reuse `Filter` structs from `lexical::search` for richer comparisons (prefix ranges, numeric ops, etc.).
-- 実際の `VectorEngineQuery` 構築例は `examples/vector_search.rs` を参照。
+- 実際の `VectorEngineSearchRequest` 構築例は `examples/vector_search.rs` を参照。
 - 実際のエンドツーエンドの利用例は `examples/vector_search.rs` を参照。
 
 ## 5.1 Hybrid Engine Integration
 
-- `HybridSearchRequest` exposes `vector_fields`, `vector_filter`, `vector_score_mode`, and `vector_overfetch` so doc-centric options can be layered on top of the familiar lexical-first builder. Internally, the engine now constructs a `VectorEngineQuery` for you and reapplies these overrides every time the request changes.
+- `HybridSearchRequest` exposes `vector_fields`, `vector_filter`, `vector_score_mode`, and `vector_overfetch` so doc-centric options can be layered on top of the familiar lexical-first builder. Internally, the engine now constructs a `VectorEngineSearchRequest` for you and reapplies these overrides every time the request changes.
 - Document-level metadata filters are executed before any ANN probes (`VectorEngineFilter.document`), letting you scope hybrid queries to a tenant, language, or workflow flag without paying per-field costs.
 - The vector helper enforces both `vector_params.top_k` and `HybridSearchParams::min_vector_similarity`, so hybrid results respect the same constraints you would expect when hitting the vector engine directly.
 - `HybridSearchResult::vector_field_hits` retains the field-level matches returned by `VectorEngine`, making it straightforward to surface explanations (“body_embedding matched summary chunk #2”).
@@ -279,7 +279,7 @@ Decision guideline: start with **hybrid WAL + structured snapshot** for Phase 1,
 3. **Phase 3 – Persistence**
    - Introduce registry snapshot/WAL, integrate with existing `Storage` backends.
 4. **Phase 4 – Hybrid integration**
-   - Switch hybrid search to use `VectorEngineQuery`.
+   - Switch hybrid search to use `VectorEngineSearchRequest`.
    - Deprecate old vector APIs.
 5. **Phase 5 – Advanced scoring / sharding**
    - Add LateInteraction implementation, expose sharding knobs, plan for distributed replication.
@@ -310,7 +310,7 @@ Decision guideline: start with **hybrid WAL + structured snapshot** for Phase 1,
 
 ### `src/vector/search`
 
-- Extend search params to accept `VectorEngineQuery` inputs, including multiple query vectors, field selectors, and score modes.
+- Extend search params to accept `VectorEngineSearchRequest` inputs, including multiple query vectors, field selectors, and score modes.
 - Implement score combiners for `MaxSim`, `WeightedSum`, and stub out hooks for `LateInteraction`.
 - Add constraint filtering that can read `FieldVectors.metadata` and registry-level attributes.
 

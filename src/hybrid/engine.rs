@@ -8,7 +8,7 @@ use crate::hybrid::search::searcher::{
     HybridSearchParams, HybridSearchRequest, HybridSearchResults, HybridVectorOptions,
 };
 use crate::vector::core::document::DocumentVectors;
-use crate::vector::engine::{VectorEngineQuery, VectorEngineSearchResults};
+use crate::vector::engine::{VectorEngineSearchRequest, VectorEngineSearchResults};
 use crate::vector::search::searcher::VectorSearchParams;
 
 /// High-level hybrid search engine combining lexical and vector search.
@@ -205,7 +205,7 @@ impl HybridEngine {
         // However, we can still execute them efficiently using tokio's runtime
         let keyword_results = self.lexical_engine.search(lexical_request)?;
 
-        let vector_query = Self::build_vector_engine_query(
+        let vector_query = Self::build_vector_engine_search_request(
             vector_overrides,
             vector_query,
             &vector_params,
@@ -239,12 +239,12 @@ impl HybridEngine {
             .await
     }
 
-    fn build_vector_engine_query(
+    fn build_vector_engine_search_request(
         overrides: HybridVectorOptions,
-        query: Option<VectorEngineQuery>,
+        query: Option<VectorEngineSearchRequest>,
         vector_params: &VectorSearchParams,
         params: &HybridSearchParams,
-    ) -> Option<VectorEngineQuery> {
+    ) -> Option<VectorEngineSearchRequest> {
         let mut query = query?;
         HybridSearchRequest::apply_overrides_to_query(&overrides, &mut query);
         if query.limit == 0 {
@@ -316,7 +316,7 @@ mod tests {
             field: field_filter.clone(),
         });
 
-        let mut query = VectorEngineQuery::default();
+        let mut query = VectorEngineSearchRequest::default();
         query.limit = 0;
 
         let vector_params = VectorSearchParams {
@@ -326,7 +326,7 @@ mod tests {
         let mut hybrid_params = HybridSearchParams::default();
         hybrid_params.max_results = 2;
 
-        let resolved = HybridEngine::build_vector_engine_query(
+        let resolved = HybridEngine::build_vector_engine_search_request(
             overrides,
             Some(query),
             &vector_params,
