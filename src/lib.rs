@@ -17,7 +17,6 @@ pub mod embedding;
 pub mod error;
 pub mod hybrid;
 pub mod lexical;
-pub mod ml;
 pub mod spelling;
 pub mod storage;
 pub mod util;

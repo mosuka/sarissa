@@ -385,7 +385,6 @@ for doc in sample_docs {
 ```
 
 Once the engine is populated, build `VectorEngineSearchRequest` objects (see `examples/vector_search.rs`) to target specific fields, adjust `VectorScoreMode`, and apply metadata filters — exactly the same path used by the integration test above.
-<<<<<<< HEAD
 
 #### Automatic Embedding (Raw Payloads)
 
@@ -417,8 +416,6 @@ let hits = engine.search(&query)?;
 ```
 
 These helpers power `examples/vector_search.rs` and the `vector_engine_upserts_and_queries_raw_payloads` integration test, so you can follow the same pattern or wrap it through `HybridSearchRequest::with_vector_text` when composing hybrid searches.
-=======
->>>>>>> main
 
 #### Hybrid Search with VectorEngine
 
@@ -758,8 +755,6 @@ Platypus includes numerous examples demonstrating various features:
 
 - [schemaless_indexing](examples/schemaless_indexing.rs) - Dynamic schema management
 - [synonym_graph_filter](examples/synonym_graph_filter.rs) - Synonym expansion in queries
-- [keyword_based_intent_classifier](examples/keyword_based_intent_classifier.rs) - Intent classification
-- [ml_based_intent_classifier](examples/ml_based_intent_classifier.rs) - ML-powered intent detection
 - [document_parser](examples/document_parser.rs) - Parsing various document formats
 - [document_converter](examples/document_converter.rs) - Converting between document formats
 

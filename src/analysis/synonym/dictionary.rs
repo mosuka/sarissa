@@ -247,7 +247,19 @@ mod tests {
 
     #[test]
     fn test_synonym_dictionary_load_from_file() {
-        let dict = SynonymDictionary::load_from_file("resources/ml/synonyms.json").unwrap();
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary file with synonym data
+        let mut file = NamedTempFile::new().unwrap();
+        let json_content = r#"[
+            ["ml", "machine learning"],
+            ["学習", "勉強"]
+        ]"#;
+        write!(file, "{}", json_content).unwrap();
+        let path = file.path().to_str().unwrap();
+
+        let dict = SynonymDictionary::load_from_file(path).unwrap();
 
         // Test English synonyms
         let ml_synonyms = dict.get_synonyms("ml");
@@ -258,5 +270,7 @@ mod tests {
         // Test Japanese synonyms
         let learning_synonyms = dict.get_synonyms("学習");
         assert!(learning_synonyms.is_some());
+        let learning_synonyms = learning_synonyms.unwrap();
+        assert!(learning_synonyms.contains(&"勉強".to_string()));
     }
 }

@@ -214,9 +214,13 @@ impl VectorEmbedderRegistry {
         embedder_id: &str,
         _: &VectorEmbedderConfig,
     ) -> Result<Arc<dyn TextEmbedder>> {
-        Err(PlatypusError::invalid_config(format!(
-            "embedder '{embedder_id}' requires feature embeddings-openai"
-        )))
+        Err(Self::missing_feature("embeddings-openai", embedder_id))
+    }
+
+    fn missing_feature(feature: &str, embedder_id: &str) -> PlatypusError {
+        PlatypusError::invalid_config(format!(
+            "embedder '{embedder_id}' requires feature '{feature}'"
+        ))
     }
 }
 
