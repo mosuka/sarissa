@@ -99,21 +99,11 @@ pub enum PlatypusError {
     /// Generic anyhow error
     #[error("Anyhow error: {0}")]
     Anyhow(#[from] anyhow::Error),
-
-    /// Machine learning error
-    #[error("ML error: {0}")]
-    ML(String),
 }
 
 /// Result type alias for operations that may fail with PlatypusError.
 pub type Result<T> = std::result::Result<T, PlatypusError>;
 
-/// Implement `From<MLError>` for PlatypusError
-impl From<crate::ml::MLError> for PlatypusError {
-    fn from(err: crate::ml::MLError) -> Self {
-        PlatypusError::ML(err.to_string())
-    }
-}
 impl PlatypusError {
     /// Create a new index error.
     pub fn index<S: Into<String>>(msg: S) -> Self {
@@ -148,11 +138,6 @@ impl PlatypusError {
     /// Create a new field error.
     pub fn field<S: Into<String>>(msg: S) -> Self {
         PlatypusError::Field(msg.into())
-    }
-
-    /// Create a new ML error.
-    pub fn ml<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::ML(msg.into())
     }
 
     /// Create a new generic error.
