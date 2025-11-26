@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::lexical::search::searcher::LexicalSearchParams;
-use crate::vector::core::document::{FieldPayload, RawTextSegment, StoredVector};
+use crate::vector::core::document::{FieldPayload, StoredVector};
 use crate::vector::core::vector::Vector;
 use crate::vector::engine::{
     FieldSelector, QueryVector, VectorEngineFilter, VectorEngineSearchRequest, VectorScoreMode,
@@ -108,19 +108,19 @@ impl HybridSearchRequest {
 
     /// Convenience helper to embed a single text snippet for a specific field.
     pub fn with_vector_text(self, field_name: impl Into<String>, text: impl Into<String>) -> Self {
-        self.push_vector_text_segment(field_name, RawTextSegment::new(text))
+        self.push_vector_text_segment(field_name, text)
     }
 
     /// Append a raw text segment to the payload for the given field.
     pub fn push_vector_text_segment(
         mut self,
         field_name: impl Into<String>,
-        segment: RawTextSegment,
+        text: impl Into<String>,
     ) -> Self {
         self.vector_payloads
             .entry(field_name.into())
-            .or_insert_with(FieldPayload::default)
-            .add_text_segment(segment);
+            .or_default()
+            .add_text_segment(text);
         self
     }
 
@@ -211,13 +211,14 @@ impl HybridSearchRequest {
     }
 
     fn build_query_from_vector(vector: Vector, top_k: usize) -> VectorEngineSearchRequest {
-        let mut query = VectorEngineSearchRequest::default();
-        query.limit = top_k.max(1);
-        query.query_vectors.push(QueryVector {
-            vector: StoredVector::from(vector),
-            weight: 1.0,
-        });
-        query
+        VectorEngineSearchRequest {
+            limit: top_k.max(1),
+            query_vectors: vec![QueryVector {
+                vector: StoredVector::from(vector),
+                weight: 1.0,
+            }],
+            ..VectorEngineSearchRequest::default()
+        }
     }
 
     pub(crate) fn apply_overrides_to_query(

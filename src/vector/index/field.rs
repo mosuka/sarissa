@@ -288,7 +288,7 @@ impl VectorField for AdapterBackedVectorField {
 mod tests {
     use super::*;
     use crate::vector::core::distance::DistanceMetric;
-    use crate::vector::core::document::{FieldVectors, StoredVector, VectorRole};
+    use crate::vector::core::document::{FieldVectors, StoredVector, VectorType};
     use crate::vector::core::vector::Vector;
     use crate::vector::engine::QueryVector;
     use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
@@ -308,7 +308,7 @@ mod tests {
         field.vectors.push(StoredVector::new(
             Arc::<[f32]>::from([1.0_f32, 0.0_f32]),
             "embedder-a".into(),
-            VectorRole::Text,
+            VectorType::Text,
         ));
         field
     }
@@ -444,7 +444,7 @@ mod tests {
         let mut stored = StoredVector::new(
             Arc::<[f32]>::from([1.0_f32, 0.0_f32]),
             String::new(),
-            VectorRole::Text,
+            VectorType::Text,
         );
         stored.weight = 0.5; // additional weighting factor
         let query = QueryVector {

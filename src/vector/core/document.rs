@@ -14,13 +14,13 @@ use super::vector::Vector;
 
 /// Metadata keys used when bridging to the legacy `Vector` representation.
 pub const METADATA_EMBEDDER_ID: &str = "__platypus_vector_embedder_id";
-pub const METADATA_ROLE: &str = "__platypus_vector_role";
+pub const METADATA_VECTOR_TYPE: &str = "__platypus_vector_type";
 pub const METADATA_WEIGHT: &str = "__platypus_vector_weight";
 
-/// Semantic role associated with a stored vector.
+/// Semantic type associated with a stored vector.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum VectorRole {
+pub enum VectorType {
     Text,
     Image,
     Intent,
@@ -29,78 +29,114 @@ pub enum VectorRole {
     Custom(String),
 }
 
-/// Unprocessed textual content destined for a vector field.
+impl VectorType {
+    /// Create a custom vector type label.
+    pub fn custom<S: Into<String>>(label: S) -> Self {
+        VectorType::Custom(label.into())
+    }
+}
+
+impl fmt::Display for VectorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VectorType::Text => write!(f, "text"),
+            VectorType::Image => write!(f, "image"),
+            VectorType::Intent => write!(f, "intent"),
+            VectorType::Metadata => write!(f, "metadata"),
+            VectorType::Generic => write!(f, "generic"),
+            VectorType::Custom(label) => write!(f, "{label}"),
+        }
+    }
+}
+
+/// Source material used to produce a vector embedding.
+#[derive(Debug, Clone)]
+pub enum PayloadSource {
+    Text {
+        value: String,
+    },
+    Bytes {
+        bytes: Arc<[u8]>,
+        mime: Option<String>,
+    },
+    Uri {
+        uri: String,
+        media_hint: Option<String>,
+    },
+    Vector {
+        data: Arc<[f32]>,
+        embedder_id: String,
+    },
+}
+
+impl PayloadSource {
+    pub fn text(value: impl Into<String>) -> Self {
+        PayloadSource::Text {
+            value: value.into(),
+        }
+    }
+}
+
+/// DSL unit describing a concrete segment slated for embedding.
+#[derive(Debug, Clone)]
+pub struct SegmentPayload {
+    pub source: PayloadSource,
+    pub vector_type: VectorType,
+    pub weight: f32,
+    pub metadata: HashMap<String, String>,
+}
+
+impl SegmentPayload {
+    pub fn new(source: PayloadSource, vector_type: VectorType) -> Self {
+        Self {
+            source,
+            vector_type,
+            weight: 1.0,
+            metadata: HashMap::new(),
+        }
+    }
+
+    pub fn text(value: impl Into<String>) -> Self {
+        Self::new(PayloadSource::text(value), VectorType::Text)
+    }
+
+    pub fn with_weight(mut self, weight: f32) -> Self {
+        self.weight = if weight <= 0.0 { 1.0 } else { weight };
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
+        self.metadata = metadata;
+        self
+    }
+}
+
+/// Unprocessed content destined for a vector field.
 #[derive(Debug, Clone, Default)]
 pub struct FieldPayload {
-    /// Ordered text segments that will be embedded sequentially.
-    pub text_segments: Vec<RawTextSegment>,
-    /// Arbitrary metadata propagated to the resulting `FieldVectors` entry.
+    pub segments: Vec<SegmentPayload>,
     pub metadata: HashMap<String, String>,
 }
 
 impl FieldPayload {
-    /// Returns true when no text segments are present.
-    pub fn is_empty(&self) -> bool {
-        self.text_segments.is_empty()
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Add a text segment to this payload.
-    pub fn add_text_segment(&mut self, segment: RawTextSegment) {
-        self.text_segments.push(segment);
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
+    pub fn add_segment(&mut self, segment: SegmentPayload) {
+        self.segments.push(segment);
+    }
+
+    pub fn add_text_segment(&mut self, value: impl Into<String>) {
+        self.segments.push(SegmentPayload::text(value));
     }
 
     pub fn add_metadata(&mut self, key: String, value: String) {
         self.metadata.insert(key, value);
-    }
-}
-
-/// Raw text plus optional weighting/attributes before embedding.
-#[derive(Debug, Clone)]
-pub struct RawTextSegment {
-    pub value: String,
-    pub weight: f32,
-    pub attributes: HashMap<String, String>,
-}
-
-impl RawTextSegment {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self {
-            value: value.into(),
-            weight: 1.0,
-            attributes: HashMap::new(),
-        }
-    }
-
-    pub fn with_attributes(
-        value: impl Into<String>,
-        weight: f32,
-        attributes: HashMap<String, String>,
-    ) -> Self {
-        Self {
-            value: value.into(),
-            weight,
-            attributes,
-        }
-    }
-}
-
-impl VectorRole {
-    /// Create a custom role label.
-    pub fn custom<S: Into<String>>(label: S) -> Self {
-        VectorRole::Custom(label.into())
-    }
-}
-
-impl fmt::Display for VectorRole {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            VectorRole::Text => write!(f, "text"),
-            VectorRole::Image => write!(f, "image"),
-            VectorRole::Intent => write!(f, "intent"),
-            VectorRole::Metadata => write!(f, "metadata"),
-            VectorRole::Generic => write!(f, "generic"),
-            VectorRole::Custom(label) => write!(f, "{label}"),
-        }
     }
 }
 
@@ -113,18 +149,18 @@ pub struct StoredVector {
     )]
     pub data: Arc<[f32]>,
     pub embedder_id: String,
-    pub role: VectorRole,
+    pub vector_type: VectorType,
     pub weight: f32,
     #[serde(default)]
     pub attributes: HashMap<String, String>,
 }
 
 impl StoredVector {
-    pub fn new(data: Arc<[f32]>, embedder_id: String, role: VectorRole) -> Self {
+    pub fn new(data: Arc<[f32]>, embedder_id: String, vector_type: VectorType) -> Self {
         Self {
             data,
             embedder_id,
-            role,
+            vector_type,
             weight: 1.0,
             attributes: HashMap::new(),
         }
@@ -141,7 +177,7 @@ impl From<Vector> for StoredVector {
         Self {
             data,
             embedder_id: String::new(),
-            role: VectorRole::Generic,
+            vector_type: VectorType::Generic,
             weight: 1.0,
             attributes: vector.metadata,
         }
@@ -154,7 +190,7 @@ impl From<&Vector> for StoredVector {
         Self {
             data,
             embedder_id: String::new(),
-            role: VectorRole::Generic,
+            vector_type: VectorType::Generic,
             weight: 1.0,
             attributes: vector.metadata.clone(),
         }
@@ -176,7 +212,12 @@ impl From<&StoredVector> for Vector {
 impl StoredVector {
     pub fn to_vector(&self) -> Vector {
         let mut metadata = self.attributes.clone();
-        enrich_metadata(&mut metadata, &self.embedder_id, &self.role, self.weight);
+        enrich_metadata(
+            &mut metadata,
+            &self.embedder_id,
+            &self.vector_type,
+            self.weight,
+        );
         Vector {
             data: self.data.as_ref().to_vec(),
             metadata,
@@ -187,11 +228,11 @@ impl StoredVector {
         let StoredVector {
             data,
             embedder_id,
-            role,
+            vector_type,
             weight,
             mut attributes,
         } = self;
-        enrich_metadata(&mut attributes, &embedder_id, &role, weight);
+        enrich_metadata(&mut attributes, &embedder_id, &vector_type, weight);
         Vector {
             data: data.as_ref().to_vec(),
             metadata: attributes,
@@ -202,7 +243,7 @@ impl StoredVector {
 fn enrich_metadata(
     metadata: &mut HashMap<String, String>,
     embedder_id: &str,
-    role: &VectorRole,
+    vector_type: &VectorType,
     weight: f32,
 ) {
     if !embedder_id.is_empty() {
@@ -211,8 +252,8 @@ fn enrich_metadata(
             .or_insert_with(|| embedder_id.to_string());
     }
     metadata
-        .entry(METADATA_ROLE.to_string())
-        .or_insert_with(|| role.to_string());
+        .entry(METADATA_VECTOR_TYPE.to_string())
+        .or_insert_with(|| vector_type.to_string());
     metadata
         .entry(METADATA_WEIGHT.to_string())
         .or_insert_with(|| weight.to_string());
@@ -313,7 +354,7 @@ mod tests {
         let stored = StoredVector {
             data: Arc::<[f32]>::from([1.0_f32, 2.0_f32]),
             embedder_id: "embedder-x".into(),
-            role: VectorRole::Intent,
+            vector_type: VectorType::Intent,
             weight: 2.5,
             attributes: HashMap::from([(String::from("chunk"), String::from("a"))]),
         };
@@ -326,7 +367,7 @@ mod tests {
             Some(&"embedder-x".to_string())
         );
         assert_eq!(
-            vector.metadata.get(METADATA_ROLE),
+            vector.metadata.get(METADATA_VECTOR_TYPE),
             Some(&"intent".to_string())
         );
         assert_eq!(

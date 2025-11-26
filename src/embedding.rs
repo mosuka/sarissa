@@ -139,8 +139,7 @@ pub mod candle_text_embedder;
 #[cfg(feature = "embeddings-openai")]
 pub mod openai_text_embedder;
 
-// Image and multimodal embeddings (requires embeddings-multimodal feature flag)
-#[cfg(feature = "embeddings-multimodal")]
+// Image and multimodal embeddings (requires embeddings-multimodal feature flag for implementations)
 pub mod image_embedder;
 
 #[cfg(feature = "embeddings-multimodal")]
