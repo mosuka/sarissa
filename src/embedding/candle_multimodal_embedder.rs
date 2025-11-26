@@ -286,8 +286,14 @@ impl CandleMultimodalEmbedder {
         use image::{DynamicImage, ImageReader};
 
         // Load image
-        let img = ImageReader::open(image_path)
+        let img_reader = ImageReader::open(image_path)
             .map_err(|e| PlatypusError::InvalidOperation(format!("Image open failed: {}", e)))?
+            .with_guessed_format()
+            .map_err(|e| {
+                PlatypusError::InvalidOperation(format!("Image format guess failed: {}", e))
+            })?;
+
+        let img = img_reader
             .decode()
             .map_err(|e| PlatypusError::InvalidOperation(format!("Image decode failed: {}", e)))?;
 
