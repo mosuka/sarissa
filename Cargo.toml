@@ -43,6 +43,7 @@ unicode-segmentation = "1.12.0"
 unicode-normalization = "0.1.25"
 uuid = { version = "1.18.1", features = ["v4"] }
 wide = "0.8.3"
+tempfile = "3.23.0"
 
 # Optional embedding dependencies
 candle-core = { version = "0.9.1", optional = true }
@@ -91,5 +92,4 @@ harness = false
 
 [dev-dependencies]
 criterion = "0.7.0"
-tempfile = "3.23.0"
 tokio-test = "0.4.4"

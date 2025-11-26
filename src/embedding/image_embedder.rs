@@ -1,8 +1,11 @@
 //! Image embedding trait for Platypus's multimodal vector search.
 
-use async_trait::async_trait;
+use std::io::Write;
 
-use crate::error::Result;
+use async_trait::async_trait;
+use tempfile::NamedTempFile;
+
+use crate::error::{PlatypusError, Result};
 use crate::vector::core::vector::Vector;
 
 /// Trait for converting images to vector embeddings.
@@ -16,6 +19,8 @@ use crate::vector::core::vector::Vector;
 /// ## Using Candle CLIP embedder (requires `embeddings-multimodal` feature)
 ///
 /// ```no_run
+/// # #[cfg(feature = "embeddings-multimodal")]
+/// # {
 /// use platypus::embedding::image_embedder::ImageEmbedder;
 /// use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
@@ -27,6 +32,7 @@ use crate::vector::core::vector::Vector;
 /// let vector = embedder.embed("path/to/image.jpg").await?;
 /// println!("Dimension: {}", ImageEmbedder::dimension(&embedder));
 /// # Ok(())
+/// # }
 /// # }
 /// ```
 ///
@@ -104,5 +110,41 @@ pub trait ImageEmbedder: Send + Sync {
     /// A string identifying the embedder (e.g., model name)
     fn name(&self) -> &str {
         "unknown"
+    }
+
+    /// Embed an in-memory binary payload by writing it to a temporary file.
+    async fn embed_bytes(&self, bytes: &[u8], _mime: Option<&str>) -> Result<Vector> {
+        let mut temp_file = NamedTempFile::new().map_err(|err| {
+            PlatypusError::internal(format!(
+                "failed to create temporary file for image embedding: {err}"
+            ))
+        })?;
+        temp_file.write_all(bytes).map_err(|err| {
+            PlatypusError::internal(format!("failed to write temporary image payload: {err}"))
+        })?;
+        let temp_path = temp_file.into_temp_path();
+        let path_buf = temp_path.to_path_buf();
+        let path_string = path_buf
+            .to_str()
+            .ok_or_else(|| {
+                PlatypusError::invalid_argument(
+                    "temporary image path contains invalid UTF-8 characters",
+                )
+            })?
+            .to_string();
+        let vector = self.embed(path_string.as_str()).await?;
+        drop(temp_path);
+        Ok(vector)
+    }
+
+    /// Embed a resource identified by URI. Currently supports file paths and `file://` URIs.
+    async fn embed_uri(&self, uri: &str, _media_hint: Option<&str>) -> Result<Vector> {
+        if uri.starts_with("http://") || uri.starts_with("https://") {
+            return Err(PlatypusError::invalid_argument(
+                "remote HTTP(S) URIs are not supported yet—download to disk first",
+            ));
+        }
+        let path = uri.strip_prefix("file://").unwrap_or(uri);
+        self.embed(path).await
     }
 }

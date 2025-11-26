@@ -11,7 +11,7 @@ use platypus::error::Result;
 use platypus::storage::Storage;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use platypus::vector::DistanceMetric;
-use platypus::vector::core::document::{DocumentPayload, FieldPayload, RawTextSegment, VectorRole};
+use platypus::vector::core::document::{DocumentPayload, FieldPayload, SegmentPayload, VectorType};
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
     FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine, VectorEngineConfig,
@@ -37,7 +37,7 @@ fn main() -> Result<()> {
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
             embedder_id: EMBEDDER_ID.to_string(),
-            role: VectorRole::Text,
+            vector_type: VectorType::Text,
             embedder: Some(EMBEDDER_CONFIG_ID.into()),
             base_weight: 1.2,
         },
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
             embedder_id: EMBEDDER_ID.to_string(),
-            role: VectorRole::Text,
+            vector_type: VectorType::Text,
             embedder: Some(EMBEDDER_CONFIG_ID.into()),
             base_weight: 1.0,
         },
@@ -81,14 +81,12 @@ fn main() -> Result<()> {
 
     let mut doc1_title = FieldPayload::default();
     doc1_title.add_metadata("section".into(), "title".into());
-    doc1_title.add_text_segment(RawTextSegment::new("Rust overview"));
+    doc1_title.add_text_segment("Rust overview");
     doc1.add_field(TITLE_FIELD, doc1_title);
 
     let mut doc1_body = FieldPayload::default();
     doc1_body.add_metadata("section".into(), "body".into());
-    doc1_body.add_text_segment(RawTextSegment::new(
-        "Rust balances performance with memory safety",
-    ));
+    doc1_body.add_text_segment("Rust balances performance with memory safety");
     doc1_body.add_metadata("chunk".into(), "rust-body".into());
     doc1.add_field(BODY_FIELD, doc1_body);
 
@@ -98,12 +96,12 @@ fn main() -> Result<()> {
 
     let mut doc2_title = FieldPayload::default();
     doc2_title.add_metadata("section".into(), "title".into());
-    doc2_title.add_text_segment(RawTextSegment::new("LLM primer"));
+    doc2_title.add_text_segment("LLM primer");
     doc2.add_field(TITLE_FIELD, doc2_title);
 
     let mut doc2_body = FieldPayload::default();
     doc2_body.add_metadata("section".into(), "body".into());
-    doc2_body.add_text_segment(RawTextSegment::new("LLM internals"));
+    doc2_body.add_text_segment("LLM internals");
     doc2_body.add_metadata("chunk".into(), "llm-body".into());
     doc2.add_field(BODY_FIELD, doc2_body);
 
@@ -116,18 +114,20 @@ fn main() -> Result<()> {
     doc3_body.add_metadata("section".into(), "body".into());
     doc3_body.add_metadata("source".into(), "user-guide".into());
 
-    let mut page1 = RawTextSegment::new("Page 1: Installation steps for the runtime environment");
-    page1.attributes.insert("page".into(), "1".into());
-    doc3_body.add_text_segment(page1);
+    doc3_body.add_segment(
+        SegmentPayload::text("Page 1: Installation steps for the runtime environment")
+            .with_metadata(HashMap::from([(String::from("page"), String::from("1"))])),
+    );
 
-    let mut page2 = RawTextSegment::new("Page 2: Configuration references and tuning knobs");
-    page2.attributes.insert("page".into(), "2".into());
+    doc3_body.add_segment(
+        SegmentPayload::text("Page 2: Configuration references and tuning knobs")
+            .with_metadata(HashMap::from([(String::from("page"), String::from("2"))])),
+    );
 
-    doc3_body.add_text_segment(page2);
-    let mut page3 = RawTextSegment::new("Page 3: Troubleshooting common deployment issues");
-    page3.attributes.insert("page".into(), "3".into());
-
-    doc3_body.add_text_segment(page3);
+    doc3_body.add_segment(
+        SegmentPayload::text("Page 3: Troubleshooting common deployment issues")
+            .with_metadata(HashMap::from([(String::from("page"), String::from("3"))])),
+    );
     doc3.add_field(BODY_FIELD, doc3_body);
 
     engine.upsert_document_payload(doc1)?;
@@ -154,14 +154,14 @@ fn main() -> Result<()> {
 
     let mut title_query = FieldPayload::default();
     title_query.add_metadata("section".into(), "title".into());
-    title_query.add_text_segment(RawTextSegment::new("systems programming"));
+    title_query.add_text_segment("systems programming");
     query
         .query_vectors
         .extend(engine.embed_query_field_payload(TITLE_FIELD, title_query)?);
 
     let mut body_query = FieldPayload::default();
     body_query.add_metadata("section".into(), "body".into());
-    body_query.add_text_segment(RawTextSegment::new("memory safety"));
+    body_query.add_text_segment("memory safety");
     query
         .query_vectors
         .extend(engine.embed_query_field_payload(BODY_FIELD, body_query)?);

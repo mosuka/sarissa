@@ -254,7 +254,7 @@ impl HybridEngine {
         params: &HybridSearchParams,
         vector_engine: &VectorEngine,
     ) -> Result<Option<VectorEngineSearchRequest>> {
-        let mut query = query.unwrap_or_else(VectorEngineSearchRequest::default);
+        let mut query = query.unwrap_or_default();
         let mut payload_fields: Vec<String> = Vec::new();
 
         for (field_name, payload) in vector_payloads {
@@ -336,7 +336,7 @@ mod tests {
     use crate::storage::Storage;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
-    use crate::vector::core::document::{FieldPayload, RawTextSegment, StoredVector, VectorRole};
+    use crate::vector::core::document::{FieldPayload, StoredVector, VectorType};
     use crate::vector::core::vector::Vector;
     use crate::vector::engine::{
         FieldSelector, MetadataFilter, QueryVector, VectorEmbedderConfig, VectorEmbedderProvider,
@@ -370,7 +370,7 @@ mod tests {
             vector: StoredVector::new(
                 Arc::<[f32]>::from([1.0_f32, 0.0, 0.0]),
                 "mock".into(),
-                VectorRole::Text,
+                VectorType::Text,
             ),
             weight: 1.0,
         });
@@ -450,7 +450,7 @@ mod tests {
         let engine = mock_vector_engine();
         let mut payloads = HashMap::new();
         let mut payload = FieldPayload::default();
-        payload.add_text_segment(RawTextSegment::new("rust embeddings"));
+        payload.add_text_segment("rust embeddings");
         payloads.insert("body".into(), payload);
 
         let resolved = HybridEngine::build_vector_engine_search_request(
@@ -478,7 +478,7 @@ mod tests {
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
                 embedder_id: "mock".into(),
-                role: VectorRole::Text,
+                vector_type: VectorType::Text,
                 embedder: Some("mock_embedder".into()),
                 base_weight: 1.0,
             },

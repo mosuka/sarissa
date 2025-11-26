@@ -1,14 +1,18 @@
 use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use platypus::embedding::image_embedder::ImageEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::error::Result;
 use platypus::storage::Storage;
 use platypus::storage::memory::MemoryStorage;
 use platypus::vector::DistanceMetric;
 use platypus::vector::core::document::{
-    DocumentPayload, DocumentVectors, FieldPayload, RawTextSegment, StoredVector, VectorRole,
+    DocumentPayload, DocumentVectors, FieldPayload, PayloadSource, SegmentPayload, StoredVector,
+    VectorType,
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
@@ -16,6 +20,7 @@ use platypus::vector::engine::{
     VectorEngine, VectorEngineConfig, VectorEngineFilter, VectorEngineSearchRequest,
     VectorFieldConfig, VectorIndexKind, VectorScoreMode,
 };
+use tempfile::NamedTempFile;
 
 #[test]
 fn vector_engine_multi_field_search_prefers_relevant_documents() -> Result<()> {
@@ -130,6 +135,56 @@ fn vector_engine_upserts_and_queries_raw_payloads() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn vector_engine_payload_accepts_image_bytes_segments() -> Result<()> {
+    let engine = build_multimodal_payload_engine()?;
+
+    let mut payload = DocumentPayload::new(99);
+    payload.add_field("image_embedding", image_bytes_payload(&[1, 2, 3, 4]));
+    engine.upsert_document_payload(payload)?;
+
+    let mut query = VectorEngineSearchRequest::default();
+    query.limit = 1;
+    query.fields = Some(vec![FieldSelector::Exact("image_embedding".into())]);
+    query.query_vectors.extend(
+        engine.embed_query_field_payload("image_embedding", image_bytes_payload(&[4, 3, 2, 1]))?,
+    );
+
+    let results = engine.search(&query)?;
+    assert_eq!(results.hits.len(), 1);
+    assert_eq!(results.hits[0].doc_id, 99);
+    Ok(())
+}
+
+#[test]
+fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
+    let engine = build_multimodal_payload_engine()?;
+
+    let mut document_file = NamedTempFile::new()?;
+    document_file.write_all(&[7, 6, 5, 4])?;
+    let document_uri = document_file.path().to_string_lossy().to_string();
+
+    let mut payload = DocumentPayload::new(314);
+    payload.add_field("image_embedding", image_uri_payload(document_uri));
+    engine.upsert_document_payload(payload)?;
+
+    let mut query_file = NamedTempFile::new()?;
+    query_file.write_all(&[4, 5, 6, 7])?;
+    let query_uri = query_file.path().to_string_lossy().to_string();
+
+    let mut query = VectorEngineSearchRequest::default();
+    query.limit = 1;
+    query.fields = Some(vec![FieldSelector::Exact("image_embedding".into())]);
+    query
+        .query_vectors
+        .extend(engine.embed_query_field_payload("image_embedding", image_uri_payload(query_uri))?);
+
+    let results = engine.search(&query)?;
+    assert_eq!(results.hits.len(), 1);
+    assert_eq!(results.hits[0].doc_id, 314);
+    Ok(())
+}
+
 fn build_sample_engine() -> Result<VectorEngine> {
     let config = sample_engine_config();
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
@@ -151,7 +206,7 @@ fn sample_engine_config() -> VectorEngineConfig {
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
             embedder_id: "text-encoder-v1".into(),
-            role: VectorRole::Text,
+            vector_type: VectorType::Text,
             embedder: None,
             base_weight: 1.4,
         },
@@ -163,7 +218,7 @@ fn sample_engine_config() -> VectorEngineConfig {
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
             embedder_id: "text-encoder-v1".into(),
-            role: VectorRole::Text,
+            vector_type: VectorType::Text,
             embedder: None,
             base_weight: 1.0,
         },
@@ -181,7 +236,7 @@ fn stored_query_vector(data: [f32; 4]) -> StoredVector {
     StoredVector {
         data: Arc::from(data),
         embedder_id: "text-encoder-v1".into(),
-        role: VectorRole::Text,
+        vector_type: VectorType::Text,
         weight: 1.0,
         attributes: HashMap::new(),
     }
@@ -197,8 +252,28 @@ fn sample_payload(text: &str, section: &str) -> FieldPayload {
     payload
         .metadata
         .insert("section".into(), section.to_string());
-    payload.add_text_segment(RawTextSegment::new(text));
+    payload.add_text_segment(text);
     payload
+}
+
+fn image_segment_payload(source: PayloadSource) -> FieldPayload {
+    let mut payload = FieldPayload::default();
+    payload.add_segment(SegmentPayload::new(source, VectorType::Image));
+    payload
+}
+
+fn image_bytes_payload(bytes: &[u8]) -> FieldPayload {
+    image_segment_payload(PayloadSource::Bytes {
+        bytes: Arc::<[u8]>::from(bytes.to_vec()),
+        mime: Some("image/png".into()),
+    })
+}
+
+fn image_uri_payload(uri: String) -> FieldPayload {
+    image_segment_payload(PayloadSource::Uri {
+        uri,
+        media_hint: Some("image/png".into()),
+    })
 }
 
 fn build_payload_engine() -> Result<VectorEngine> {
@@ -210,7 +285,7 @@ fn build_payload_engine() -> Result<VectorEngine> {
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
             embedder_id: "payload-encoder".into(),
-            role: VectorRole::Text,
+            vector_type: VectorType::Text,
             embedder: Some("integration_embedder".into()),
             base_weight: 1.0,
         },
@@ -241,6 +316,46 @@ fn build_payload_engine() -> Result<VectorEngine> {
     Ok(engine)
 }
 
+fn build_multimodal_payload_engine() -> Result<VectorEngine> {
+    let mut fields = HashMap::new();
+    fields.insert(
+        "image_embedding".into(),
+        VectorFieldConfig {
+            dimension: 3,
+            distance: DistanceMetric::Cosine,
+            index: VectorIndexKind::Flat,
+            embedder_id: "multimodal-encoder".into(),
+            vector_type: VectorType::Image,
+            embedder: Some("integration_multimodal".into()),
+            base_weight: 1.0,
+        },
+    );
+
+    let embedders = HashMap::from([(
+        "integration_multimodal".into(),
+        VectorEmbedderConfig {
+            provider: VectorEmbedderProvider::External,
+            model: "integration-multimodal".into(),
+            options: HashMap::new(),
+        },
+    )]);
+
+    let config = VectorEngineConfig {
+        fields,
+        embedders,
+        default_fields: vec!["image_embedding".into()],
+        metadata: HashMap::new(),
+    };
+
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
+    let engine = VectorEngine::new(config, storage, None)?;
+    let embedder = Arc::new(IntegrationMultimodalEmbedder::new(3));
+    let text: Arc<dyn TextEmbedder> = embedder.clone();
+    let image: Arc<dyn ImageEmbedder> = embedder;
+    engine.register_multimodal_embedder_instance("integration_multimodal", text, image)?;
+    Ok(engine)
+}
+
 #[derive(Debug)]
 struct IntegrationTestEmbedder {
     dimension: usize,
@@ -249,6 +364,57 @@ struct IntegrationTestEmbedder {
 impl IntegrationTestEmbedder {
     fn new(dimension: usize) -> Self {
         Self { dimension }
+    }
+}
+
+#[derive(Debug)]
+struct IntegrationMultimodalEmbedder {
+    dimension: usize,
+}
+
+impl IntegrationMultimodalEmbedder {
+    fn new(dimension: usize) -> Self {
+        Self { dimension }
+    }
+
+    fn vector_from_bytes(&self, bytes: &[u8]) -> Vector {
+        if bytes.is_empty() {
+            return Vector::new(vec![0.0; self.dimension]);
+        }
+        let sum = bytes.iter().map(|b| *b as f32).sum::<f32>();
+        let avg = sum / (bytes.len() as f32);
+        Vector::new(vec![avg; self.dimension])
+    }
+}
+
+#[async_trait]
+impl TextEmbedder for IntegrationMultimodalEmbedder {
+    async fn embed(&self, text: &str) -> Result<Vector> {
+        Ok(self.vector_from_bytes(text.as_bytes()))
+    }
+
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn name(&self) -> &str {
+        "integration-multimodal"
+    }
+}
+
+#[async_trait]
+impl ImageEmbedder for IntegrationMultimodalEmbedder {
+    async fn embed(&self, image_path: &str) -> Result<Vector> {
+        let bytes = fs::read(image_path)?;
+        Ok(self.vector_from_bytes(&bytes))
+    }
+
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn name(&self) -> &str {
+        "integration-multimodal"
     }
 }
 
