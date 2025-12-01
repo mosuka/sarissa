@@ -25,9 +25,8 @@ use platypus::analysis::analyzer::analyzer::Analyzer;
 use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
 use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
 use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::document::converter::DocumentConverter;
-use platypus::document::converter::jsonl::JsonlDocumentConverter;
-use platypus::document::field::FieldValue;
+use platypus::document::document::Document;
+use platypus::document::field::{FieldValue, GeoOption, IntegerOption, TextOption};
 use platypus::error::Result;
 use platypus::lexical::engine::LexicalEngine;
 use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
@@ -74,20 +73,14 @@ fn main() -> Result<()> {
     let mut lexical_engine = LexicalEngine::new(lexical_index)?;
     println!();
 
-    // Step 2: Load documents from JSONL file
-    println!("Step 2: Loading documents from resources/documents.jsonl...");
-    let converter = JsonlDocumentConverter::new();
-    let doc_iter = converter.convert("resources/documents.jsonl")?;
-
-    // Add documents one by one using iterator (memory efficient)
-    // Note: The engine caches the writer, so calling add_document() repeatedly
-    // is efficient and doesn't create a new writer each time
-    let mut count = 0;
-    for doc_result in doc_iter {
-        lexical_engine.add_document(doc_result?)?;
-        count += 1;
+    // Step 2: Build documents manually using Document::builder()
+    println!("Step 2: Building documents via Document::builder()...");
+    let documents = sample_documents();
+    let doc_count = documents.len();
+    for doc in documents {
+        lexical_engine.add_document(doc)?;
     }
-    println!("  Added {} documents from JSONL file", count);
+    println!("  Added {} documents via builder API", doc_count);
 
     // Commit the changes to make them searchable
     lexical_engine.commit()?;
@@ -555,6 +548,132 @@ fn main() -> Result<()> {
     println!("\nFull-text search example completed successfully!");
 
     Ok(())
+}
+
+// NOTE: Keep this list in sync with resources/documents.jsonl when sample data changes.
+fn sample_documents() -> Vec<Document> {
+    vec![
+        Document::builder()
+            .add_text("id", "doc001", TextOption::default())
+            .add_text("title", "Introduction to Rust Programming", TextOption::default())
+            .add_text("body", "Rust is a modern systems programming language that focuses on safety, speed, and concurrency. It provides memory safety without garbage collection and enables developers to write efficient and reliable software.", TextOption::default())
+            .add_text("author", "Alice Johnson", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
+            .add_text("tags", "rust systems-programming memory-safety", TextOption::default())
+            .add_integer("year", 2023, IntegerOption::default())
+            .add_integer("rating", 5, IntegerOption::default())
+            .add_geo("location", 35.6762, 139.6503, GeoOption::default())
+            .add_text("city", "Tokyo", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc002", TextOption::default())
+            .add_text("title", "Web Development with Rust", TextOption::default())
+            .add_text("body", "Building web applications with Rust has become increasingly popular. Frameworks like Actix and Rocket make it easy to create fast and secure web services. Rust's performance and safety make it ideal for web development.", TextOption::default())
+            .add_text("author", "Bob Smith", TextOption::default())
+            .add_text("category", "web-development", TextOption::default())
+            .add_text("tags", "rust web actix rocket", TextOption::default())
+            .add_integer("year", 2023, IntegerOption::default())
+            .add_integer("rating", 4, IntegerOption::default())
+            .add_geo("location", 37.7749, -122.4194, GeoOption::default())
+            .add_text("city", "San Francisco", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc003", TextOption::default())
+            .add_text("title", "Python for Data Science", TextOption::default())
+            .add_text("body", "Python is the most popular language for data science and machine learning. Libraries like NumPy, Pandas, and Scikit-learn provide powerful tools for data analysis and statistical computing.", TextOption::default())
+            .add_text("author", "Carol Williams", TextOption::default())
+            .add_text("category", "data-science", TextOption::default())
+            .add_text("tags", "python data-science machine-learning", TextOption::default())
+            .add_integer("year", 2022, IntegerOption::default())
+            .add_integer("rating", 5, IntegerOption::default())
+            .add_geo("location", 51.5074, -0.1278, GeoOption::default())
+            .add_text("city", "London", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc004", TextOption::default())
+            .add_text("title", "Building Microservices with Rast", TextOption::default())
+            .add_text("body", "Microservices architecture has revolutionized how we build distributed systems. Rast's lightweight runtime and excellent performance make it a great choice for building scalable microservices.", TextOption::default())
+            .add_text("author", "David Brown", TextOption::default())
+            .add_text("category", "architecture", TextOption::default())
+            .add_text("tags", "rast microservices distributed-systems", TextOption::default())
+            .add_integer("year", 2024, IntegerOption::default())
+            .add_integer("rating", 4, IntegerOption::default())
+            .add_geo("location", 40.7128, -74.0060, GeoOption::default())
+            .add_text("city", "New York", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc005", TextOption::default())
+            .add_text("title", "JavaScript and TypeScript Best Practices", TextOption::default())
+            .add_text("body", "Modern JavaScript development relies heavily on TypeScript for type safety. This guide covers best practices for writing maintainable JavaScript and TypeScript code for web applications.", TextOption::default())
+            .add_text("author", "Eve Davis", TextOption::default())
+            .add_text("category", "web-development", TextOption::default())
+            .add_text("tags", "javascript typescript web frontend", TextOption::default())
+            .add_integer("year", 2023, IntegerOption::default())
+            .add_integer("rating", 4, IntegerOption::default())
+            .add_geo("location", 48.8566, 2.3522, GeoOption::default())
+            .add_text("city", "Paris", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc006", TextOption::default())
+            .add_text("title", "Machine Learning with Pyhton", TextOption::default())
+            .add_text("body", "Deep learning and neural networks are transforming artificial intelligence. Pyhton frameworks like TensorFlow and PyTorch enable developers to build sophisticated machine learning models.", TextOption::default())
+            .add_text("author", "Frank Miller", TextOption::default())
+            .add_text("category", "data-science", TextOption::default())
+            .add_text("tags", "pyhton machine-learning deep-learning ai", TextOption::default())
+            .add_integer("year", 2024, IntegerOption::default())
+            .add_integer("rating", 5, IntegerOption::default())
+            .add_geo("location", 52.5200, 13.4050, GeoOption::default())
+            .add_text("city", "Berlin", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc007", TextOption::default())
+            .add_text("title", "Concurrent Programming in Rust", TextOption::default())
+            .add_text("body", "Rust's ownership system makes concurrent programming safe and efficient. Understanding threads, async/await, and message passing is essential for building high-performance concurrent applications in Rust.", TextOption::default())
+            .add_text("author", "Grace Taylor", TextOption::default())
+            .add_text("category", "programming", TextOption::default())
+            .add_text("tags", "rust concurrency async parallel", TextOption::default())
+            .add_integer("year", 2024, IntegerOption::default())
+            .add_integer("rating", 5, IntegerOption::default())
+            .add_geo("location", 34.0522, -118.2437, GeoOption::default())
+            .add_text("city", "Los Angeles", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc008", TextOption::default())
+            .add_text("title", "Database Design Principles", TextOption::default())
+            .add_text("body", "Effective database design is crucial for application performance. This guide covers normalization, indexing strategies, and query optimization for both SQL and NoSQL databases.", TextOption::default())
+            .add_text("author", "Henry Wilson", TextOption::default())
+            .add_text("category", "database", TextOption::default())
+            .add_text("tags", "database sql nosql design", TextOption::default())
+            .add_integer("year", 2023, IntegerOption::default())
+            .add_integer("rating", 4, IntegerOption::default())
+            .add_geo("location", 35.6762, 139.6503, GeoOption::default())
+            .add_text("city", "Tokyo", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc009", TextOption::default())
+            .add_text("title", "Cloud Architecture Patterns", TextOption::default())
+            .add_text("body", "Cloud-native architectures require different design patterns. Learn about scalability, resilience, and cost optimization in cloud environments.", TextOption::default())
+            .add_text("author", "Isabel Martinez", TextOption::default())
+            .add_text("category", "cloud", TextOption::default())
+            .add_text("tags", "cloud architecture scalability", TextOption::default())
+            .add_integer("year", 2024, IntegerOption::default())
+            .add_integer("rating", 5, IntegerOption::default())
+            .add_geo("location", 35.6895, 139.6917, GeoOption::default())
+            .add_text("city", "Tokyo", TextOption::default())
+            .build(),
+        Document::builder()
+            .add_text("id", "doc010", TextOption::default())
+            .add_text("title", "DevOps Best Practices", TextOption::default())
+            .add_text("body", "DevOps combines development and operations for faster delivery. CI/CD pipelines, infrastructure as code, and monitoring are key practices.", TextOption::default())
+            .add_text("author", "Jack Anderson", TextOption::default())
+            .add_text("category", "devops", TextOption::default())
+            .add_text("tags", "devops cicd automation", TextOption::default())
+            .add_integer("year", 2023, IntegerOption::default())
+            .add_integer("rating", 4, IntegerOption::default())
+            .add_geo("location", 37.5665, 126.9780, GeoOption::default())
+            .add_text("city", "Seoul", TextOption::default())
+            .build(),
+    ]
 }
 
 /// Helper function to display search results in a formatted way
