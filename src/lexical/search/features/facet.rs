@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::field::FieldValue;
+use crate::lexical::document::field::FieldValue;
 use crate::error::Result;
 use crate::lexical::index::inverted::query::Hit;
 use crate::lexical::index::inverted::query::Query;

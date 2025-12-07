@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::field::FieldValue;
 use crate::error::Result;
+use crate::lexical::document::field::FieldValue;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::QueryResult;
 use crate::lexical::reader::LexicalIndexReader;

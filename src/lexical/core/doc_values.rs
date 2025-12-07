@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
 
-use crate::document::field::FieldValue;
+use crate::lexical::document::field::FieldValue;
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 

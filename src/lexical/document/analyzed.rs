@@ -61,7 +61,7 @@
 
 use ahash::AHashMap;
 
-use crate::document::field::FieldValue;
+use crate::lexical::document::field::FieldValue;
 
 /// A document with analyzed terms ready for indexing.
 ///

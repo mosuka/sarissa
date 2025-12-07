@@ -255,9 +255,12 @@ impl VectorIndexWriter for FlatIndexWriter {
         self.next_vec_id
     }
 
-    async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64> {
-        use crate::document::field::{FieldOption, FieldValue};
+    async fn add_document(
+        &mut self,
+        doc: crate::lexical::document::document::Document,
+    ) -> Result<u64> {
         use crate::embedding::per_field::PerFieldEmbedder;
+        use crate::lexical::document::field::{FieldOption, FieldValue};
 
         let doc_id = self.next_vec_id;
         let mut vectors = Vec::new();
@@ -308,10 +311,10 @@ impl VectorIndexWriter for FlatIndexWriter {
     async fn add_document_with_id(
         &mut self,
         doc_id: u64,
-        doc: crate::document::document::Document,
+        doc: crate::lexical::document::document::Document,
     ) -> Result<()> {
-        use crate::document::field::{FieldOption, FieldValue};
         use crate::embedding::per_field::PerFieldEmbedder;
+        use crate::lexical::document::field::{FieldOption, FieldValue};
 
         let mut vectors = Vec::new();
 
@@ -536,7 +539,7 @@ impl VectorIndexWriter for FlatIndexWriter {
         &mut self,
         field: &str,
         value: &str,
-        doc: crate::document::document::Document,
+        doc: crate::lexical::document::document::Document,
     ) -> Result<()> {
         // Delete existing documents
         self.delete_documents(field, value)?;

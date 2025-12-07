@@ -90,9 +90,9 @@ use ahash::AHashMap;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::token::Token;
-use crate::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
-use crate::document::document::Document;
-use crate::document::field::FieldValue;
+use crate::lexical::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
+use crate::lexical::document::document::Document;
+use crate::lexical::document::field::FieldValue;
 use crate::error::Result;
 
 /// A document parser that converts Documents into AnalyzedDocuments.
@@ -314,7 +314,7 @@ mod tests {
     use super::*;
     use crate::analysis::analyzer::keyword::KeywordAnalyzer;
     use crate::analysis::analyzer::standard::StandardAnalyzer;
-    use crate::document::field::{BooleanOption, FloatOption, IntegerOption, TextOption};
+    use crate::lexical::document::field::{BooleanOption, FloatOption, IntegerOption, TextOption};
 
     #[test]
     fn test_basic_parsing() {

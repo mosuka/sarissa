@@ -22,7 +22,7 @@ use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 #[allow(unused_imports)]
-use crate::document::document::Document;
+use crate::lexical::document::document::Document;
 use crate::error::Result;
 use crate::lexical::reader::LexicalIndexReader;
 

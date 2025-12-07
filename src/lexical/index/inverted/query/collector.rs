@@ -53,7 +53,7 @@ struct ScoredDoc {
 struct FieldScoredDoc {
     doc_id: u64,
     score: f32,
-    field_value: crate::document::field::FieldValue,
+    field_value: crate::lexical::document::field::FieldValue,
     ascending: bool,
 }
 
@@ -117,13 +117,13 @@ impl<'a> TopFieldCollector<'a> {
 
     /// Get the field value for a document using DocValues.
     /// DocValues provide efficient column-oriented storage for field values.
-    fn get_field_value(&self, doc_id: u64) -> crate::document::field::FieldValue {
+    fn get_field_value(&self, doc_id: u64) -> crate::lexical::document::field::FieldValue {
         // Get field value from DocValues (efficient column-oriented storage)
         if let Ok(Some(value)) = self.reader.get_doc_value(&self.field_name, doc_id) {
             value
         } else {
             // Return Null if field not found
-            crate::document::field::FieldValue::Null
+            crate::lexical::document::field::FieldValue::Null
         }
     }
 
@@ -190,7 +190,7 @@ impl<'a> Collector for TopFieldCollector<'a> {
         let mut sorted_docs: Vec<_> = self.hits.iter().cloned().collect();
 
         // Sort based on the sort order
-        use crate::document::field::FieldValue;
+        use crate::lexical::document::field::FieldValue;
         if self.ascending {
             // Ascending: compare field values directly
             sorted_docs.sort_by(|a, b| match (&a.field_value, &b.field_value) {
@@ -294,7 +294,7 @@ impl Ord for FieldScoredDoc {
         //   So we reverse comparison: b.cmp(a) makes heap pop smallest first.
         // For descending: We want highest values to be popped first (max-heap).
         //   So we use normal comparison: a.cmp(b) makes heap pop largest first.
-        use crate::document::field::FieldValue;
+        use crate::lexical::document::field::FieldValue;
 
         let field_cmp = if self.ascending {
             // Ascending: reverse comparison for min-heap behavior

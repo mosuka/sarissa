@@ -91,7 +91,7 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     ///
     /// This method processes the document's vector fields, uses the configured embedder
     /// to convert text to vectors, and adds them to the index.
-    async fn add_document(&mut self, doc: crate::document::document::Document) -> Result<u64>;
+    async fn add_document(&mut self, doc: crate::lexical::document::document::Document) -> Result<u64>;
 
     /// Add a document with a specific ID, converting text fields to vectors.
     ///
@@ -100,7 +100,7 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     async fn add_document_with_id(
         &mut self,
         doc_id: u64,
-        doc: crate::document::document::Document,
+        doc: crate::lexical::document::document::Document,
     ) -> Result<()>;
 
     /// Build an index from a collection of vectors with field names.
@@ -150,7 +150,7 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
         &mut self,
         field: &str,
         value: &str,
-        doc: crate::document::document::Document,
+        doc: crate::lexical::document::document::Document,
     ) -> Result<()>;
 
     /// Commit pending changes to the index.

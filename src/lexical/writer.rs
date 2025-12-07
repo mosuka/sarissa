@@ -3,8 +3,8 @@
 //! This module defines the `LexicalIndexWriter` trait which all lexical index writer
 //! implementations must follow. The primary implementation is `InvertedIndexWriter`.
 
-use crate::document::analyzed::AnalyzedDocument;
-use crate::document::document::Document;
+use crate::lexical::document::analyzed::AnalyzedDocument;
+use crate::lexical::document::document::Document;
 use crate::error::Result;
 
 /// Trait for lexical index writers.
