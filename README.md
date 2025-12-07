@@ -159,6 +159,11 @@ fn main() -> Result<()> {
 }
 ```
 
+### Upsert / Hybrid ingestion
+
+- 既存のドキュメント ID を指定して差し替える場合は `LexicalEngine::upsert_document(doc_id, doc)` を利用してください。`add_document` は自動採番のみを行います。
+- ハイブリッド構成ではレキシカルとベクターを別々に登録します。まず `HybridEngine::add_document`/`upsert_document` でレキシカルを書き込み、埋め込み済みベクターは `HybridEngine::upsert_vector_document`、生テキストを埋め込みながら登録する場合は `HybridEngine::upsert_vector_payload` を使います。
+
 ## 🏗️ Architecture
 
 Platypus is built with a modular architecture:

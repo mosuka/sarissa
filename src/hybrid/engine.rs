@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::hybrid::search::searcher::{
     HybridSearchParams, HybridSearchRequest, HybridSearchResults, HybridVectorOptions,
 };
-use crate::vector::core::document::{DocumentVectors, FieldPayload};
+use crate::vector::core::document::{DocumentPayload, DocumentVectors, FieldPayload};
 use crate::vector::engine::{
     FieldSelector, VectorEngine, VectorEngineSearchRequest, VectorEngineSearchResults,
 };
@@ -92,17 +92,15 @@ impl HybridEngine {
         })
     }
 
-    /// Add a document to both lexical and vector indexes.
+    /// Add a document to the lexical index.
     /// Returns the assigned document ID.
     ///
-    /// This method ensures that the same document ID is used in both indexes.
-    /// The document should contain both text fields (for lexical indexing) and
-    /// vector fields (for vector indexing).
+    /// This method assigns the same document ID that would be used for hybrid operations,
+    /// but only writes to the lexical index. Vector ingestion should be done separately.
     ///
     /// # Arguments
     ///
     /// * `doc` - The document to add to the lexical index
-    /// * `vectors` - Doc-centric vector payloads matching the same `doc_id`
     ///
     /// # Returns
     ///
@@ -110,34 +108,25 @@ impl HybridEngine {
     pub async fn add_document(
         &mut self,
         doc: crate::lexical::document::document::Document,
-        mut vectors: DocumentVectors,
     ) -> Result<u64> {
         let doc_id = self.next_doc_id;
-        vectors.doc_id = doc_id;
-        self.add_document_with_id(doc_id, doc, vectors).await?;
+        self.upsert_document(doc_id, doc).await?;
         Ok(doc_id)
     }
 
-    /// Add a document using a specific document ID.
+    /// Add a document to the lexical index using a specific document ID.
     ///
     /// # Arguments
     ///
     /// * `doc_id` - The document ID to use
     /// * `doc` - The document to add to the lexical index
-    /// * `vectors` - Doc-centric vector payloads to upsert into the vector engine
-    pub async fn add_document_with_id(
+    pub async fn upsert_document(
         &mut self,
         doc_id: u64,
         doc: crate::lexical::document::document::Document,
-        mut vectors: DocumentVectors,
     ) -> Result<()> {
-        // Clone the document for both indexes since they'll process different fields
         self.lexical_engine
-            .add_document_with_id(doc_id, doc.clone())?;
-        if vectors.doc_id != doc_id {
-            vectors.doc_id = doc_id;
-        }
-        self.vector_engine.upsert_document(vectors)?;
+            .upsert_document(doc_id, doc.clone())?;
 
         // Update next_doc_id if necessary
         if doc_id >= self.next_doc_id {
@@ -150,6 +139,33 @@ impl HybridEngine {
     /// Commit changes to both lexical and vector indexes.
     pub fn commit(&mut self) -> Result<()> {
         self.lexical_engine.commit()?;
+        Ok(())
+    }
+
+    /// Upsert vectors only (pre-embedded).
+    ///
+    /// This does not touch the lexical index. It upserts the provided
+    /// `DocumentVectors` into the vector engine and advances `next_doc_id`
+    /// if the given `doc_id` is new/highest.
+    pub fn upsert_vector_document(&mut self, vectors: DocumentVectors) -> Result<()> {
+        let doc_id = vectors.doc_id;
+        self.vector_engine.upsert_document(vectors)?;
+        if doc_id >= self.next_doc_id {
+            self.next_doc_id = doc_id + 1;
+        }
+        Ok(())
+    }
+
+    /// Upsert vectors only from raw payloads (embedding inside vector engine).
+    ///
+    /// This does not touch the lexical index. It embeds the payload and
+    /// upserts into the vector engine, advancing `next_doc_id` if needed.
+    pub fn upsert_vector_payload(&mut self, payload: DocumentPayload) -> Result<()> {
+        let doc_id = payload.doc_id;
+        self.vector_engine.upsert_document_payload(payload)?;
+        if doc_id >= self.next_doc_id {
+            self.next_doc_id = doc_id + 1;
+        }
         Ok(())
     }
 

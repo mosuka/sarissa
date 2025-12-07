@@ -19,6 +19,8 @@ use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
 use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};
+use crate::lexical::index::inverted::maintenance::deletion::{DeletionConfig, DeletionManager};
+use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
@@ -172,19 +174,24 @@ impl InvertedIndexWriter {
         self.add_analyzed_document(analyzed_doc)
     }
 
-    /// Add a document to the index with a specific document ID.
-    pub fn add_document_with_id(&mut self, doc_id: u64, doc: Document) -> Result<()> {
+    /// Upsert a document to the index with a specific document ID.
+    pub fn upsert_document(&mut self, doc_id: u64, doc: Document) -> Result<()> {
         self.check_closed()?;
 
         // Analyze the document
         let analyzed_doc = self.analyze_document(doc)?;
 
+        // Upsert: remove any pending document with the same ID before adding
+        self.remove_pending_document(doc_id)?;
+        // Upsert: mark persisted occurrences as deleted (flushed segments)
+        self.mark_persisted_doc_deleted(doc_id)?;
+
         // Add the analyzed document with the specified ID
-        self.add_analyzed_document_with_id(doc_id, analyzed_doc)
+        self.upsert_analyzed_document(doc_id, analyzed_doc)
     }
 
     /// Add an already analyzed document to the index with a specific document ID.
-    pub fn add_analyzed_document_with_id(
+    pub fn upsert_analyzed_document(
         &mut self,
         doc_id: u64,
         analyzed_doc: AnalyzedDocument,
@@ -263,7 +270,7 @@ impl InvertedIndexWriter {
         self.next_doc_id += 1;
 
         // Add the analyzed document with the assigned ID
-        self.add_analyzed_document_with_id(doc_id, analyzed_doc)?;
+        self.upsert_analyzed_document(doc_id, analyzed_doc)?;
 
         Ok(doc_id)
     }
@@ -854,6 +861,124 @@ impl InvertedIndexWriter {
         self.closed
     }
 
+    /// Remove a pending document with the given ID from in-memory buffers and rebuild indices.
+    fn remove_pending_document(&mut self, doc_id: u64) -> Result<()> {
+        // Fast path: nothing buffered
+        if self.buffered_docs.is_empty() {
+            return Ok(());
+        }
+
+        // Retain only docs with different IDs
+        let mut changed = false;
+        self.buffered_docs.retain(|(id, _)| {
+            let keep = *id != doc_id;
+            if !keep {
+                changed = true;
+            }
+            keep
+        });
+
+        if !changed {
+            return Ok(());
+        }
+
+        // Rebuild in-memory inverted index and DocValues from the remaining buffered docs
+        self.rebuild_in_memory_index()
+    }
+
+    /// Rebuild the in-memory index and DocValues from buffered docs (used after removals).
+    fn rebuild_in_memory_index(&mut self) -> Result<()> {
+        // Reset structures
+        self.inverted_index = TermPostingIndex::new();
+        let segment_name = format!("{}_{:06}", self.config.segment_prefix, self.current_segment);
+        self.doc_values_writer = DocValuesWriter::new(self.storage.clone(), segment_name);
+
+        // Reset stats counters that depend on buffered content
+        self.stats.docs_added = 0;
+        self.stats.unique_terms = 0;
+        self.stats.total_postings = 0;
+
+        // Re-add all buffered analyzed docs
+        let buffered_snapshot = self.buffered_docs.clone();
+        for (id, analyzed_doc) in buffered_snapshot {
+            // Re-add stored fields to DocValues
+            for (field_name, value) in &analyzed_doc.stored_fields {
+                self.doc_values_writer
+                    .add_value(id, field_name, value.clone());
+            }
+
+            // Re-add postings
+            self.add_analyzed_document_to_index(id, &analyzed_doc)?;
+            self.stats.docs_added += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Mark an already flushed document as deleted by locating its segment via metadata.
+    fn mark_persisted_doc_deleted(&self, doc_id: u64) -> Result<()> {
+        if let Some((segment_id, local_doc_id, doc_count)) = self.find_segment_for_doc(doc_id)? {
+            let manager = DeletionManager::new(DeletionConfig::default(), self.storage.clone())?;
+
+            // Ensure bitmap exists; if not, initialize then delete.
+            let delete_result = manager.delete_document(&segment_id, local_doc_id, "upsert");
+            if let Err(_) = delete_result {
+                manager.initialize_segment(&segment_id, doc_count)?;
+                manager.delete_document(&segment_id, local_doc_id, "upsert")?;
+            }
+
+            // Update segment metadata to reflect deletions
+            self.update_segment_meta_deletions(&segment_id)?;
+        }
+        Ok(())
+    }
+
+    /// Find the segment containing the global doc_id by scanning segment metadata files.
+    /// Returns (segment_id, local_doc_id, doc_count) if found.
+    fn find_segment_for_doc(&self, doc_id: u64) -> Result<Option<(String, u64, u64)>> {
+        let files = self.storage.list_files()?;
+        for file in files {
+            if !file.ends_with(".meta") || file == "index.meta" {
+                continue;
+            }
+            let input = match self.storage.open_input(&file) {
+                Ok(input) => input,
+                Err(_) => continue,
+            };
+            let meta: SegmentInfo = match serde_json::from_reader(input) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let start = meta.doc_offset;
+            let end = meta.doc_offset + meta.doc_count;
+            if doc_id >= start && doc_id < end {
+                let local = doc_id - start;
+                return Ok(Some((meta.segment_id.clone(), local, meta.doc_count)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Rewrite segment metadata to mark `has_deletions = true`.
+    fn update_segment_meta_deletions(&self, segment_id: &str) -> Result<()> {
+        let meta_file = format!("{segment_id}.meta");
+        let input = self.storage.open_input(&meta_file)?;
+        let mut meta: SegmentInfo = serde_json::from_reader(input)
+            .map_err(|e| PlatypusError::index(format!("Failed to read segment meta: {e}")))?;
+
+        if !meta.has_deletions {
+            meta.has_deletions = true;
+            let json = serde_json::to_string_pretty(&meta).map_err(|e| {
+                PlatypusError::index(format!("Failed to serialize segment meta: {e}"))
+            })?;
+            let mut output = self.storage.create_output(&meta_file)?;
+            std::io::Write::write_all(&mut output, json.as_bytes())?;
+            output.close()?;
+        }
+
+        Ok(())
+    }
+
     /// Delete documents matching the given term.
     /// Note: This is a simplified implementation for compatibility.
     pub fn delete_documents(&mut self, _field: &str, _value: &str) -> Result<u64> {
@@ -881,16 +1006,16 @@ impl LexicalIndexWriter for InvertedIndexWriter {
         InvertedIndexWriter::add_document(self, doc)
     }
 
-    fn add_document_with_id(&mut self, doc_id: u64, doc: Document) -> Result<()> {
-        InvertedIndexWriter::add_document_with_id(self, doc_id, doc)
+    fn upsert_document(&mut self, doc_id: u64, doc: Document) -> Result<()> {
+        InvertedIndexWriter::upsert_document(self, doc_id, doc)
     }
 
     fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<u64> {
         InvertedIndexWriter::add_analyzed_document(self, doc)
     }
 
-    fn add_analyzed_document_with_id(&mut self, doc_id: u64, doc: AnalyzedDocument) -> Result<()> {
-        InvertedIndexWriter::add_analyzed_document_with_id(self, doc_id, doc)
+    fn upsert_analyzed_document(&mut self, doc_id: u64, doc: AnalyzedDocument) -> Result<()> {
+        InvertedIndexWriter::upsert_analyzed_document(self, doc_id, doc)
     }
 
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {

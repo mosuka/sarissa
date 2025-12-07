@@ -286,11 +286,11 @@ impl LexicalEngine {
         Ok(doc_id)
     }
 
-    /// Add a document to the index with a specific document ID.
+    /// Upsert a document with a specific document ID.
     /// Note: You must call `commit()` to persist the changes.
-    pub fn add_document_with_id(&mut self, doc_id: u64, doc: Document) -> Result<()> {
+    pub fn upsert_document(&mut self, doc_id: u64, doc: Document) -> Result<()> {
         let mut writer = self.get_or_create_writer()?;
-        writer.add_document_with_id(doc_id, doc)?;
+        writer.upsert_document(doc_id, doc)?;
         Ok(())
     }
 
