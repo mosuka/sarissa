@@ -329,8 +329,8 @@ impl LexicalIndex for InvertedIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::document::Document;
-    use crate::document::field::{FloatOption, TextOption};
+    use crate::lexical::document::document::Document;
+    use crate::lexical::document::field::{FloatOption, TextOption};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use std::sync::Arc;
 

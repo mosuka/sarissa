@@ -79,7 +79,7 @@
 
 use std::path::Path;
 
-use crate::document::document::Document;
+use crate::lexical::document::document::Document;
 use crate::error::Result;
 
 pub mod csv;

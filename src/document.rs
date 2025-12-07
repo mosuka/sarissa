@@ -74,9 +74,4 @@
 //! }
 //! ```
 
-pub mod analyzed;
-pub mod converter;
-#[allow(clippy::module_inception)]
-pub mod document;
-pub mod field;
-pub mod parser;
+pub use crate::lexical::document::{analyzed, converter, document, field, parser};

@@ -12,8 +12,8 @@ use ahash::AHashMap;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
-use crate::document::document::Document;
-use crate::document::field::FieldValue;
+use crate::lexical::document::document::Document;
+use crate::lexical::document::field::FieldValue;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::HybridTermDictionary;
 use crate::lexical::core::dictionary::TermInfo;
@@ -484,7 +484,7 @@ impl SegmentReader {
 
                     doc.add_field(
                         field_name,
-                        crate::document::field::Field::with_default_option(field_value),
+                        crate::lexical::document::field::Field::with_default_option(field_value),
                     );
                 }
 

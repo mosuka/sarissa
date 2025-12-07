@@ -3,12 +3,13 @@
 //! This module provides the core functionality for merging multiple segments
 //! into a single optimized segment with proper handling of deletions and updates.
 
+use crate::lexical::document::field::FieldValue;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use ahash::AHashSet;
 
-use crate::document::document::Document;
+use crate::lexical::document::document::Document;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
@@ -464,19 +465,19 @@ impl MergeEngine {
                 for (field_name, field_value) in document.fields() {
                     writer.write_string(field_name)?;
                     let field_str = match &field_value.value {
-                        crate::document::field::FieldValue::Text(s) => s.clone(),
-                        crate::document::field::FieldValue::Integer(i) => i.to_string(),
-                        crate::document::field::FieldValue::Float(f) => f.to_string(),
-                        crate::document::field::FieldValue::Boolean(b) => b.to_string(),
-                        crate::document::field::FieldValue::Binary(_) => "[binary]".to_string(),
-                        crate::document::field::FieldValue::DateTime(dt) => dt.to_rfc3339(),
-                        crate::document::field::FieldValue::Geo(point) => {
+                        FieldValue::Text(s) => s.clone(),
+                        FieldValue::Integer(i) => i.to_string(),
+                        FieldValue::Float(f) => f.to_string(),
+                        FieldValue::Boolean(b) => b.to_string(),
+                        FieldValue::Binary(_) => "[binary]".to_string(),
+                        FieldValue::DateTime(dt) => dt.to_rfc3339(),
+                        FieldValue::Geo(point) => {
                             format!("{},{}", point.lat, point.lon)
                         }
-                        crate::document::field::FieldValue::Vector(text) => {
+                        FieldValue::Vector(text) => {
                             format!("[vector: {}]", text)
                         }
-                        crate::document::field::FieldValue::Null => "null".to_string(),
+                        FieldValue::Null => "null".to_string(),
                     };
                     writer.write_string(&field_str)?;
                 }

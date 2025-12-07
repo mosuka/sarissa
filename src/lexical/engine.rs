@@ -55,8 +55,8 @@ use std::cell::{RefCell, RefMut};
 use std::sync::Arc;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
-use crate::document::document::Document;
 use crate::error::Result;
+use crate::lexical::document::document::Document;
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::SearchResults;
@@ -608,7 +608,7 @@ impl LexicalEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::field::TextOption;
+    use crate::lexical::document::field::TextOption;
     use crate::lexical::index::config::LexicalIndexConfig;
     use crate::lexical::index::factory::LexicalIndexFactory;
     use crate::lexical::index::inverted::query::Query;

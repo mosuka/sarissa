@@ -1,5 +1,7 @@
 //! Searcher implementation for executing queries against an index.
 
+use crate::lexical::document::field::FieldValue;
+use crate::lexical::document::field::FieldValue::Vector;
 use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -7,7 +9,7 @@ use std::time::{Duration, Instant};
 use rayon::prelude::*;
 
 use crate::analysis::analyzer::standard::StandardAnalyzer;
-use crate::document::field::FieldValue;
+use crate::lexical::document::field::FieldValue::{Text, Integer, Float, Boolean, Geo, DateTime, Binary, Null};
 use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::boolean::BooleanQuery;
@@ -435,7 +437,7 @@ impl InvertedIndexSearcher {
     /// Compare two field values.
     #[allow(dead_code)]
     fn compare_values(&self, a: &FieldValue, b: &FieldValue) -> Ordering {
-        use FieldValue::*;
+        // use FieldValue::*; // 不要なため削除
 
         match (a, b) {
             // Same type comparisons

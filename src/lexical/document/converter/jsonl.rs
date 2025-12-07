@@ -77,9 +77,9 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::document::converter::DocumentConverter;
-use crate::document::document::Document;
-use crate::document::field::FieldValue;
+use crate::lexical::document::converter::DocumentConverter;
+use crate::lexical::document::document::Document;
+use crate::lexical::document::field::FieldValue;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 

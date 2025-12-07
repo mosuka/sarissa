@@ -2,6 +2,7 @@
 //!
 //! This module provides the writer for building inverted indexes in schema-less mode.
 
+use crate::lexical::document::field::Field;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -11,9 +12,9 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
-use crate::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
-use crate::document::document::Document;
-use crate::document::field::FieldValue;
+use crate::lexical::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
+use crate::lexical::document::document::Document;
+use crate::lexical::document::field::FieldValue;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
@@ -274,7 +275,7 @@ impl InvertedIndexWriter {
 
         // Process each field in the document (schema-less mode)
         for (field_name, field) in doc.fields() {
-            use crate::document::field::{FieldOption, FieldValue};
+            use crate::lexical::document::field::{FieldOption, FieldValue};
 
             // Check field option to determine indexing and storage behavior
             let should_index = match &field.option {
@@ -731,7 +732,7 @@ impl InvertedIndexWriter {
             for (field_name, field_value) in &analyzed_doc.stored_fields {
                 doc.add_field(
                     field_name,
-                    crate::document::field::Field::with_default_option(field_value.clone()),
+                    Field::with_default_option(field_value.clone()),
                 );
             }
             documents.push(doc);

@@ -109,7 +109,7 @@ impl HybridEngine {
     /// The assigned document ID
     pub async fn add_document(
         &mut self,
-        doc: crate::document::document::Document,
+        doc: crate::lexical::document::document::Document,
         mut vectors: DocumentVectors,
     ) -> Result<u64> {
         let doc_id = self.next_doc_id;
@@ -128,7 +128,7 @@ impl HybridEngine {
     pub async fn add_document_with_id(
         &mut self,
         doc_id: u64,
-        doc: crate::document::document::Document,
+        doc: crate::lexical::document::document::Document,
         mut vectors: DocumentVectors,
     ) -> Result<()> {
         // Clone the document for both indexes since they'll process different fields

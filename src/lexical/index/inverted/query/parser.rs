@@ -20,7 +20,7 @@ use pest_derive::Parser;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
-use crate::document::field::NumericType;
+use crate::lexical::document::field::NumericType;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::boolean::{BooleanClause, BooleanQuery, Occur};

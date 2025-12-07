@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ahash::AHashMap;
 use uuid::Uuid;
 
-use crate::document::document::Document;
+use crate::lexical::document::document::Document;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::maintenance::deletion::{
     DeletionManager, GlobalDeletionState,
@@ -193,7 +193,7 @@ impl TransactionManager {
     )]
     pub fn with_schema(
         storage: Arc<dyn Storage>,
-        schema: Arc<crate::document::field::FieldValue>,
+        schema: Arc<crate::lexical::document::field::FieldValue>,
     ) -> Self {
         let _ = schema; // Ignore schema parameter
         Self::new(storage)
@@ -450,7 +450,7 @@ pub trait AtomicOperations {
 mod tests {
     use super::*;
 
-    use crate::document::field::TextOption;
+    use crate::lexical::document::field::TextOption;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;
 
@@ -486,7 +486,7 @@ mod tests {
     fn test_transaction_operations() {
         let mut txn = Transaction::new(IsolationLevel::ReadCommitted);
 
-        let doc = crate::document::document::Document::builder()
+        let doc = crate::lexical::document::document::Document::builder()
             .add_text("title", "Test", TextOption::default())
             .build();
 
@@ -500,7 +500,7 @@ mod tests {
 
         // Cannot add operation to inactive transaction
         txn.state = TransactionState::Committed;
-        let doc2 = crate::document::document::Document::builder()
+        let doc2 = crate::lexical::document::document::Document::builder()
             .add_text("title", "Test2", TextOption::default())
             .build();
         let op2 = TransactionOperation::AddDocument {

@@ -1,9 +1,9 @@
 //! Lexical index reader traits for searching and retrieving documents.
 
-use crate::document::document::Document;
-use crate::document::field::FieldValue;
 use crate::error::Result;
 use crate::lexical::core::bkd_tree::SimpleBKDTree;
+use crate::lexical::document::document::Document;
+use crate::lexical::document::field::FieldValue;
 
 /// Information about a term in the index.
 #[derive(Debug, Clone)]
