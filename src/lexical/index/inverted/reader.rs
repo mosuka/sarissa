@@ -22,6 +22,7 @@ use crate::lexical::index::inverted::core::posting::{Posting, PostingList};
 use crate::lexical::index::inverted::core::terms::{
     InvertedIndexTerms, TermDictionaryAccess, Terms,
 };
+use crate::lexical::index::inverted::maintenance::deletion::DeletionBitmap;
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::reader::FieldStats;
 use crate::lexical::reader::PostingIterator;
@@ -309,6 +310,9 @@ pub struct SegmentReader {
     /// DocValues reader for this segment.
     doc_values: RwLock<Option<Arc<DocValuesReader>>>,
 
+    /// Optional deletion bitmap for this segment.
+    deletion_bitmap: RwLock<Option<Arc<DeletionBitmap>>>,
+
     /// Whether the segment is loaded.
     loaded: AtomicBool,
 }
@@ -324,6 +328,7 @@ impl SegmentReader {
             field_lengths: RwLock::new(None),
             field_stats: RwLock::new(None),
             doc_values: RwLock::new(None),
+            deletion_bitmap: RwLock::new(None),
             loaded: AtomicBool::new(false),
         };
 
@@ -357,6 +362,9 @@ impl SegmentReader {
 
         // Load DocValues
         self.load_doc_values()?;
+
+        // Load deletion bitmap if present
+        self.load_deletion_bitmap()?;
 
         self.loaded.store(true, Ordering::Release);
         Ok(())
@@ -506,6 +514,56 @@ impl SegmentReader {
         *doc_values = Some(Arc::new(reader));
 
         Ok(())
+    }
+
+    /// Load deletion bitmap if present for this segment.
+    fn load_deletion_bitmap(&self) -> Result<()> {
+        if !self.info.has_deletions {
+            return Ok(());
+        }
+
+        // Already loaded
+        if self.deletion_bitmap.read().unwrap().is_some() {
+            return Ok(());
+        }
+
+        let bitmap_file = format!("{}.delmap", self.info.segment_id);
+        if !self.storage.file_exists(&bitmap_file) {
+            // Metadata says we have deletions but bitmap is missing; treat as no deletions.
+            return Ok(());
+        }
+
+        let input = self.storage.open_input(&bitmap_file)?;
+        let mut reader = StructReader::new(input)?;
+        let bitmap = DeletionBitmap::read_from_storage(&mut reader)?;
+        *self.deletion_bitmap.write().unwrap() = Some(Arc::new(bitmap));
+        Ok(())
+    }
+
+    /// Check whether a global doc_id is marked as deleted in this segment.
+    fn is_deleted(&self, global_doc_id: u64) -> Result<bool> {
+        if !self.info.has_deletions {
+            return Ok(false);
+        }
+
+        // Outside this segment's range.
+        if global_doc_id < self.info.doc_offset
+            || global_doc_id >= self.info.doc_offset + self.info.doc_count
+        {
+            return Ok(false);
+        }
+
+        if self.deletion_bitmap.read().unwrap().is_none() {
+            self.load_deletion_bitmap()?;
+        }
+
+        let maybe_bitmap = self.deletion_bitmap.read().unwrap().clone();
+        if let Some(bitmap) = maybe_bitmap {
+            let local_doc_id = global_doc_id - self.info.doc_offset;
+            Ok(bitmap.is_deleted(local_doc_id))
+        } else {
+            Ok(false)
+        }
     }
 
     /// Get a DocValues field value for a document.
@@ -668,6 +726,10 @@ impl SegmentReader {
         // Convert local doc_id to global doc_id for storage lookup
         let global_doc_id = self.info.doc_offset + local_doc_id;
 
+        if self.is_deleted(global_doc_id)? {
+            return Ok(None);
+        }
+
         let docs = self.stored_documents.read().unwrap();
         if let Some(ref documents) = *docs {
             Ok(documents.get(&global_doc_id).cloned())
@@ -715,10 +777,20 @@ impl SegmentReader {
             // Decode the posting list
             let posting_list = PostingList::decode(&mut reader)?;
 
-            Ok(Some(Box::new(InvertedIndexPostingIterator::with_blocks(
-                posting_list.postings,
-                64,
-            ))))
+            let mut filtered = Vec::new();
+            for posting in posting_list.postings.into_iter() {
+                if !self.is_deleted(posting.doc_id)? {
+                    filtered.push(posting);
+                }
+            }
+
+            if filtered.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(Box::new(InvertedIndexPostingIterator::with_blocks(
+                    filtered, 64,
+                ))))
+            }
         } else {
             Ok(None)
         }
@@ -742,6 +814,10 @@ impl SegmentReader {
             let default_analyzer = StandardAnalyzer::new()?;
 
             for (doc_id, doc) in documents.iter() {
+                if self.is_deleted(*doc_id)? {
+                    continue;
+                }
+
                 if let Some(field_value) = doc.get_field(field)
                     && let Some(text) = field_value.value.as_text()
                 {
@@ -781,6 +857,21 @@ impl SegmentReader {
 
     /// Get the number of documents in this segment.
     pub fn doc_count(&self) -> u64 {
+        if !self.info.has_deletions {
+            return self.info.doc_count;
+        }
+
+        if let Some(bitmap) = self.deletion_bitmap.read().unwrap().clone() {
+            return bitmap.live_count();
+        }
+
+        // Lazy load bitmap if needed
+        if self.load_deletion_bitmap().is_ok() {
+            if let Some(bitmap) = self.deletion_bitmap.read().unwrap().clone() {
+                return bitmap.live_count();
+            }
+        }
+
         self.info.doc_count
     }
 }

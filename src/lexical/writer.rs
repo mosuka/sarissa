@@ -34,8 +34,8 @@ pub trait LexicalIndexWriter: Send + Sync + std::fmt::Debug {
     /// Returns the assigned document ID.
     fn add_document(&mut self, doc: Document) -> Result<u64>;
 
-    /// Add a document to the index with a specific document ID.
-    fn add_document_with_id(&mut self, doc_id: u64, doc: Document) -> Result<()>;
+    /// Upsert a document to the index with a specific document ID.
+    fn upsert_document(&mut self, doc_id: u64, doc: Document) -> Result<()>;
 
     /// Add an already analyzed document to the index with automatic ID assignment.
     /// Returns the assigned document ID.
@@ -44,8 +44,8 @@ pub trait LexicalIndexWriter: Send + Sync + std::fmt::Debug {
     /// using DocumentParser or from external tokenization systems.
     fn add_analyzed_document(&mut self, doc: AnalyzedDocument) -> Result<u64>;
 
-    /// Add an already analyzed document to the index with a specific document ID.
-    fn add_analyzed_document_with_id(&mut self, doc_id: u64, doc: AnalyzedDocument) -> Result<()>;
+    /// Upsert an already analyzed document to the index with a specific document ID.
+    fn upsert_analyzed_document(&mut self, doc_id: u64, doc: AnalyzedDocument) -> Result<()>;
 
     /// Delete documents matching the given term.
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64>;

@@ -9,8 +9,7 @@ use crate::error::Result;
 use crate::hybrid::search::searcher::{
     HybridSearchParams, HybridSearchRequest, HybridSearchResults, HybridVectorOptions,
 };
-use crate::vector::core::document::{DocumentPayload, FieldPayload, SegmentPayload};
-use crate::vector::core::vector::ORIGINAL_TEXT_METADATA_KEY;
+use crate::vector::core::document::{DocumentPayload, DocumentVectors, FieldPayload};
 use crate::vector::engine::{
     FieldSelector, VectorEngine, VectorEngineSearchRequest, VectorEngineSearchResults,
 };
@@ -93,12 +92,11 @@ impl HybridEngine {
         })
     }
 
-    /// Add a document to both lexical and vector indexes.
+    /// Add a document to the lexical index.
     /// Returns the assigned document ID.
     ///
-    /// This method ensures that the same document ID is used in both indexes.
-    /// The document should contain both text fields (for lexical indexing) and
-    /// vector fields (for vector indexing).
+    /// This method assigns the same document ID that would be used for hybrid operations,
+    /// but only writes to the lexical index. Vector ingestion should be done separately.
     ///
     /// # Arguments
     ///
@@ -112,26 +110,23 @@ impl HybridEngine {
         doc: crate::lexical::document::document::Document,
     ) -> Result<u64> {
         let doc_id = self.next_doc_id;
-        self.add_document_with_id(doc_id, doc).await?;
+        self.upsert_document(doc_id, doc).await?;
         Ok(doc_id)
     }
 
-    /// Add a document using a specific document ID.
+    /// Add a document to the lexical index using a specific document ID.
     ///
     /// # Arguments
     ///
     /// * `doc_id` - The document ID to use
     /// * `doc` - The document to add to the lexical index
-    pub async fn add_document_with_id(
+    pub async fn upsert_document(
         &mut self,
         doc_id: u64,
         doc: crate::lexical::document::document::Document,
     ) -> Result<()> {
-        // Clone the document for both indexes since they'll process different fields
         self.lexical_engine
-            .add_document_with_id(doc_id, doc.clone())?;
-        let payload = build_vector_payload_from_lexical(doc_id, &doc);
-        self.vector_engine.upsert_document_payload(payload)?;
+            .upsert_document(doc_id, doc.clone())?;
 
         // Update next_doc_id if necessary
         if doc_id >= self.next_doc_id {
@@ -144,6 +139,33 @@ impl HybridEngine {
     /// Commit changes to both lexical and vector indexes.
     pub fn commit(&mut self) -> Result<()> {
         self.lexical_engine.commit()?;
+        Ok(())
+    }
+
+    /// Upsert vectors only (pre-embedded).
+    ///
+    /// This does not touch the lexical index. It upserts the provided
+    /// `DocumentVectors` into the vector engine and advances `next_doc_id`
+    /// if the given `doc_id` is new/highest.
+    pub fn upsert_vector_document(&mut self, vectors: DocumentVectors) -> Result<()> {
+        let doc_id = vectors.doc_id;
+        self.vector_engine.upsert_document(vectors)?;
+        if doc_id >= self.next_doc_id {
+            self.next_doc_id = doc_id + 1;
+        }
+        Ok(())
+    }
+
+    /// Upsert vectors only from raw payloads (embedding inside vector engine).
+    ///
+    /// This does not touch the lexical index. It embeds the payload and
+    /// upserts into the vector engine, advancing `next_doc_id` if needed.
+    pub fn upsert_vector_payload(&mut self, payload: DocumentPayload) -> Result<()> {
+        let doc_id = payload.doc_id;
+        self.vector_engine.upsert_document_payload(payload)?;
+        if doc_id >= self.next_doc_id {
+            self.next_doc_id = doc_id + 1;
+        }
         Ok(())
     }
 
@@ -321,41 +343,6 @@ impl HybridEngine {
     pub fn vector_engine(&self) -> &crate::vector::engine::VectorEngine {
         &self.vector_engine
     }
-}
-
-/// Convert a lexical `Document` into a vector `DocumentPayload` by extracting
-/// vector fields and preserving original text when requested.
-fn build_vector_payload_from_lexical(
-    doc_id: u64,
-    doc: &crate::lexical::document::document::Document,
-) -> DocumentPayload {
-    use crate::lexical::document::field::{FieldOption, FieldValue};
-
-    let mut payload = DocumentPayload::new(doc_id);
-
-    for (field_name, field) in doc.fields().iter() {
-        let FieldOption::Vector(vector_opt) = &field.option else {
-            continue;
-        };
-
-        let FieldValue::Vector(text) = &field.value else {
-            continue;
-        };
-
-        let mut field_payload = FieldPayload::new();
-
-        // Preserve original text if the field is marked as stored.
-        if vector_opt.stored {
-            field_payload
-                .metadata
-                .insert(ORIGINAL_TEXT_METADATA_KEY.to_string(), text.clone());
-        }
-
-        field_payload.add_segment(SegmentPayload::text(text.clone()));
-        payload.fields.insert(field_name.clone(), field_payload);
-    }
-
-    payload
 }
 
 #[cfg(test)]
