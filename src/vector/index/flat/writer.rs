@@ -249,120 +249,9 @@ impl FlatIndexWriter {
     }
 }
 
-#[async_trait::async_trait]
 impl VectorIndexWriter for FlatIndexWriter {
     fn next_vector_id(&self) -> u64 {
         self.next_vec_id
-    }
-
-    async fn add_document(
-        &mut self,
-        doc: crate::lexical::document::document::Document,
-    ) -> Result<u64> {
-        use crate::embedding::per_field::PerFieldEmbedder;
-        use crate::lexical::document::field::{FieldOption, FieldValue};
-
-        let doc_id = self.next_vec_id;
-        let mut vectors = Vec::new();
-
-        for (field_name, field) in doc.fields().iter() {
-            // Check if this is a vector field and if it should be indexed
-            if let FieldValue::Vector(text) = &field.value {
-                let (should_index, store_value) = match &field.option {
-                    FieldOption::Vector(opt) => (
-                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some(),
-                        opt.stored,
-                    ),
-                    _ => (false, false),
-                };
-
-                if !should_index {
-                    continue;
-                }
-
-                // Check if embedder is PerFieldEmbedder for field-specific embedding
-                let mut vector = if let Some(per_field) = self
-                    .index_config
-                    .embedder
-                    .as_any()
-                    .downcast_ref::<PerFieldEmbedder>()
-                {
-                    per_field.embed_field(field_name, text.as_str()).await?
-                } else {
-                    self.index_config.embedder.embed(text.as_str()).await?
-                };
-
-                if store_value {
-                    vector.set_original_text(text.clone());
-                }
-
-                vectors.push((doc_id, field_name.clone(), vector));
-            }
-        }
-
-        if !vectors.is_empty() {
-            self.add_vectors(vectors)?;
-        }
-
-        self.next_vec_id += 1;
-        Ok(doc_id)
-    }
-
-    async fn add_document_with_id(
-        &mut self,
-        doc_id: u64,
-        doc: crate::lexical::document::document::Document,
-    ) -> Result<()> {
-        use crate::embedding::per_field::PerFieldEmbedder;
-        use crate::lexical::document::field::{FieldOption, FieldValue};
-
-        let mut vectors = Vec::new();
-
-        for (field_name, field) in doc.fields().iter() {
-            // Check if this is a vector field and if it should be indexed
-            if let FieldValue::Vector(text) = &field.value {
-                let (should_index, store_value) = match &field.option {
-                    FieldOption::Vector(opt) => (
-                        opt.flat.is_some() || opt.hnsw.is_some() || opt.ivf.is_some(),
-                        opt.stored,
-                    ),
-                    _ => (false, false),
-                };
-
-                if !should_index {
-                    continue;
-                }
-
-                // Check if embedder is PerFieldEmbedder for field-specific embedding
-                let mut vector = if let Some(per_field) = self
-                    .index_config
-                    .embedder
-                    .as_any()
-                    .downcast_ref::<PerFieldEmbedder>()
-                {
-                    per_field.embed_field(field_name, text.as_str()).await?
-                } else {
-                    self.index_config.embedder.embed(text.as_str()).await?
-                };
-
-                if store_value {
-                    vector.set_original_text(text.clone());
-                }
-
-                vectors.push((doc_id, field_name.clone(), vector));
-            }
-        }
-
-        if !vectors.is_empty() {
-            self.add_vectors(vectors)?;
-        }
-
-        // Update next_vec_id if necessary
-        if doc_id >= self.next_vec_id {
-            self.next_vec_id = doc_id + 1;
-        }
-
-        Ok(())
     }
 
     fn build(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
@@ -533,21 +422,6 @@ impl VectorIndexWriter for FlatIndexWriter {
         let _field = field;
         let _value = value;
         Ok(0)
-    }
-
-    async fn update_document(
-        &mut self,
-        field: &str,
-        value: &str,
-        doc: crate::lexical::document::document::Document,
-    ) -> Result<()> {
-        // Delete existing documents
-        self.delete_documents(field, value)?;
-
-        // Add new document
-        self.add_document(doc).await?;
-
-        Ok(())
     }
 
     fn rollback(&mut self) -> Result<()> {

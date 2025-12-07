@@ -81,27 +81,9 @@ impl Default for VectorIndexWriterConfig {
 /// // writer.finalize().unwrap();
 /// // writer.write("my_index").unwrap();
 /// ```
-#[async_trait::async_trait]
 pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     /// Get the next available vector ID (for automatic ID assignment).
     fn next_vector_id(&self) -> u64;
-
-    /// Add a document to the index, converting text fields to vectors.
-    /// Returns the assigned vector ID.
-    ///
-    /// This method processes the document's vector fields, uses the configured embedder
-    /// to convert text to vectors, and adds them to the index.
-    async fn add_document(&mut self, doc: crate::lexical::document::document::Document) -> Result<u64>;
-
-    /// Add a document with a specific ID, converting text fields to vectors.
-    ///
-    /// This method processes the document's vector fields, uses the configured embedder
-    /// to convert text to vectors, and adds them to the index with the specified ID.
-    async fn add_document_with_id(
-        &mut self,
-        doc_id: u64,
-        doc: crate::lexical::document::document::Document,
-    ) -> Result<()>;
 
     /// Build an index from a collection of vectors with field names.
     /// Each vector is a tuple of (vec_id, field_name, Vector).
@@ -141,17 +123,6 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     /// This method marks documents for deletion based on field matching.
     /// The actual deletion occurs during commit or optimize.
     fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64>;
-
-    /// Update a document (delete old, add new).
-    ///
-    /// This is a convenience method that deletes documents matching the field/value
-    /// and adds the new document.
-    async fn update_document(
-        &mut self,
-        field: &str,
-        value: &str,
-        doc: crate::lexical::document::document::Document,
-    ) -> Result<()>;
 
     /// Commit pending changes to the index.
     ///
