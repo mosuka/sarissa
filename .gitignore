@@ -1,6 +1,9 @@
 .claude
 .serena
 .mcp.json
+AGENTS.md
+CLAUDE.md
+
 .vscode
 .idea
 .DS_Store

@@ -369,7 +369,7 @@ let vector = embedder.embed("your text here").await?;
 
 Platypus ships a document-centric vector flow where each `doc_id` owns multiple named vector fields and metadata. The full architecture is captured in `docs/vector_engine.md`, and two handy entry points are provided:
 
-- `resources/vector_engine_sample.json` — three synthetic `DocumentVectors` with field-level and document-level metadata for trying out `MetadataFilter` / `FieldSelector` scenarios.
+- `resources/vector_engine_sample.json` — three synthetic `DocumentVector` with field-level and document-level metadata for trying out `MetadataFilter` / `FieldSelector` scenarios.
 - `cargo test --test vector_engine_scenarios` — spins up an in-memory engine, loads the sample, and verifies multi-field scoring plus metadata filters end to end.
 
 You can also use the sample data in your own experiments:
@@ -377,10 +377,10 @@ You can also use the sample data in your own experiments:
 ```rust
 use platypus::vector::engine::VectorEngine;
 use platypus::vector::engine::VectorEngineConfig;
-use platypus::vector::core::document::DocumentVectors;
+use platypus::vector::core::document::DocumentVector;
 
 let config: VectorEngineConfig = load_vector_engine_config()?; // see docs/vector_engine.md
-let sample_docs: Vec<DocumentVectors> = serde_json::from_str(include_str!(
+let sample_docs: Vec<DocumentVector> = serde_json::from_str(include_str!(
     "resources/vector_engine_sample.json"
 ))?;
 let engine = VectorEngine::new(config, storage, None)?;
@@ -401,11 +401,11 @@ use platypus::vector::engine::{
     FieldSelector, VectorEngine, VectorEngineSearchRequest,
 };
 
-let mut payload = DocumentPayload::new(42);
+let mut payload = DocumentPayload::new();
 let mut body = FieldPayload::default();
 body.add_text_segment(RawTextSegment::new("Rust balances safety with performance"));
 payload.add_field("body_embedding", body);
-engine.upsert_document_payload(payload)?;
+engine.upsert_document_payload(42, payload)?;
 
 let mut query = VectorEngineSearchRequest::default();
 query.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);

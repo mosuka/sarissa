@@ -18,7 +18,7 @@ use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
 use crate::vector::DistanceMetric;
 use crate::vector::core::document::{
-    DocumentPayload, DocumentVectors, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
+    DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
     StoredVector, VectorType,
 };
 use crate::vector::core::vector::Vector;
@@ -58,8 +58,9 @@ pub struct VectorEngine {
     embedder_executor: Mutex<Option<Arc<EmbedderExecutor>>>,
     wal: Arc<VectorWal>,
     storage: Arc<dyn Storage>,
-    documents: Arc<RwLock<HashMap<u64, DocumentVectors>>>,
+    documents: Arc<RwLock<HashMap<u64, DocumentVector>>>,
     snapshot_wal_seq: AtomicU64,
+    next_doc_id: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -389,6 +390,7 @@ impl VectorEngine {
             storage,
             documents: Arc::new(RwLock::new(HashMap::new())),
             snapshot_wal_seq: AtomicU64::new(0),
+            next_doc_id: AtomicU64::new(0),
         };
         collection.instantiate_configured_fields()?;
         if should_load_state {
@@ -518,36 +520,58 @@ impl VectorEngine {
         Ok(reader)
     }
 
-    pub fn upsert_document(&self, document: DocumentVectors) -> Result<RegistryVersion> {
+    /// Add a document with automatically assigned doc_id.
+    pub fn add_document(&self, document: DocumentVector) -> Result<u64> {
+        let doc_id = self.next_doc_id.fetch_add(1, Ordering::SeqCst);
+        self.upsert_document(doc_id, document)?;
+        Ok(doc_id)
+    }
+
+    /// Add a raw payload document with automatically assigned doc_id (embedding occurs inside).
+    pub fn add_document_payload(&self, payload: DocumentPayload) -> Result<u64> {
+        let doc_id = self.next_doc_id.fetch_add(1, Ordering::SeqCst);
+        self.upsert_document_payload(doc_id, payload)?;
+        Ok(doc_id)
+    }
+
+    pub fn upsert_document(
+        &self,
+        doc_id: u64,
+        document: DocumentVector,
+    ) -> Result<RegistryVersion> {
         self.validate_document_fields(&document)?;
-        let doc_id = document.doc_id;
         let entries = build_field_entries(&document);
         let version = self
             .registry
-            .upsert(document.doc_id, &entries, document.metadata.clone())?;
+            .upsert(doc_id, &entries, document.metadata.clone())?;
 
-        if let Err(err) = self.apply_field_updates(document.doc_id, version, &document.fields) {
+        if let Err(err) = self.apply_field_updates(doc_id, version, &document.fields) {
             // Best-effort rollback to keep registry consistent with field state.
             let _ = self.registry.delete(doc_id);
             return Err(err);
         }
 
         let cached_document = document.clone();
-        self.wal.append(WalPayload::Upsert { document })?;
+        self.wal.append(WalPayload::Upsert { doc_id, document })?;
         self.documents.write().insert(doc_id, cached_document);
         self.persist_state()?;
+        self.bump_next_doc_id(doc_id);
         self.maybe_compact_wal()?;
         Ok(version)
     }
 
     /// Upsert a document represented by raw payloads that require embedding.
-    pub fn upsert_document_payload(&self, payload: DocumentPayload) -> Result<RegistryVersion> {
-        let document = self.embed_document_payload(payload)?;
-        self.upsert_document(document)
+    pub fn upsert_document_payload(
+        &self,
+        doc_id: u64,
+        payload: DocumentPayload,
+    ) -> Result<RegistryVersion> {
+        let document = self.embed_document_payload(doc_id, payload)?;
+        self.upsert_document(doc_id, document)
     }
 
-    fn embed_document_payload(&self, payload: DocumentPayload) -> Result<DocumentVectors> {
-        let mut document = DocumentVectors::new(payload.doc_id);
+    fn embed_document_payload(&self, _doc_id: u64, payload: DocumentPayload) -> Result<DocumentVector> {
+        let mut document = DocumentVector::new();
         document.metadata = payload.metadata;
 
         for (field_name, field_payload) in payload.fields.into_iter() {
@@ -1252,7 +1276,7 @@ impl VectorEngine {
         format!("vector_fields/{sanitized}")
     }
 
-    fn validate_document_fields(&self, document: &DocumentVectors) -> Result<()> {
+    fn validate_document_fields(&self, document: &DocumentVector) -> Result<()> {
         for field_name in document.fields.keys() {
             if !self.fields.contains_key(field_name) {
                 return Err(PlatypusError::invalid_argument(format!(
@@ -1261,6 +1285,31 @@ impl VectorEngine {
             }
         }
         Ok(())
+    }
+
+    fn bump_next_doc_id(&self, doc_id: u64) {
+        let _ = self.next_doc_id.fetch_update(
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+            |current| {
+                if doc_id >= current {
+                    Some(doc_id.saturating_add(1))
+                } else {
+                    None
+                }
+            },
+        );
+    }
+
+    fn recompute_next_doc_id(&self) {
+        let max_id = self
+            .documents
+            .read()
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or(0);
+        self.bump_next_doc_id(max_id);
     }
 
     fn delete_fields_for_entry(&self, doc_id: u64, entry: &DocumentEntry) -> Result<()> {
@@ -1320,6 +1369,7 @@ impl VectorEngine {
         self.load_document_snapshot(storage.clone())?;
         self.load_collection_manifest(storage.clone())?;
         self.replay_wal_into_fields()?;
+        self.recompute_next_doc_id();
         self.persist_manifest()
     }
 
@@ -1341,21 +1391,40 @@ impl VectorEngine {
             return Ok(());
         }
 
+        #[derive(Deserialize)]
+        struct LegacySnapshotDocument {
+            doc_id: u64,
+            #[serde(default)]
+            fields: HashMap<String, FieldVectors>,
+            #[serde(default)]
+            metadata: HashMap<String, String>,
+        }
+
         let snapshot = match serde_json::from_slice::<DocumentSnapshot>(&buffer) {
             Ok(snapshot) => snapshot,
             Err(primary_err) => {
-                let docs: Vec<DocumentVectors> =
+                let docs: Vec<LegacySnapshotDocument> =
                     serde_json::from_slice(&buffer).map_err(|_| primary_err)?;
+                let converted = docs
+                    .into_iter()
+                    .map(|legacy| SnapshotDocument {
+                        doc_id: legacy.doc_id,
+                        document: DocumentVector {
+                            fields: legacy.fields,
+                            metadata: legacy.metadata,
+                        },
+                    })
+                    .collect();
                 DocumentSnapshot {
                     last_wal_seq: 0,
-                    documents: docs,
+                    documents: converted,
                 }
             }
         };
         let map = snapshot
             .documents
             .into_iter()
-            .map(|doc| (doc.doc_id, doc))
+            .map(|doc| (doc.doc_id, doc.document))
             .collect();
         *self.documents.write() = map;
         self.snapshot_wal_seq
@@ -1422,15 +1491,15 @@ impl VectorEngine {
             }
             applied_seq = record.seq;
             match record.payload {
-                WalPayload::Upsert { document } => {
+                WalPayload::Upsert { doc_id, document } => {
                     if document.fields.is_empty() {
-                        documents.remove(&document.doc_id);
+                        documents.remove(&doc_id);
                         continue;
                     }
-                    if let Some(entry) = self.registry.get(document.doc_id) {
-                        self.apply_field_updates(document.doc_id, entry.version, &document.fields)?;
+                    if let Some(entry) = self.registry.get(doc_id) {
+                        self.apply_field_updates(doc_id, entry.version, &document.fields)?;
                     }
-                    documents.insert(document.doc_id, document);
+                    documents.insert(doc_id, document);
                 }
                 WalPayload::Delete { doc_id } => {
                     if let Some(entry) = self.registry.get(doc_id) {
@@ -1449,7 +1518,7 @@ impl VectorEngine {
         Ok(())
     }
 
-    fn apply_documents_to_fields(&self, documents: &HashMap<u64, DocumentVectors>) -> Result<()> {
+    fn apply_documents_to_fields(&self, documents: &HashMap<u64, DocumentVector>) -> Result<()> {
         for (doc_id, document) in documents.iter() {
             if let Some(entry) = self.registry.get(*doc_id) {
                 if document.fields.is_empty() {
@@ -1477,7 +1546,13 @@ impl VectorEngine {
     fn persist_document_snapshot(&self) -> Result<()> {
         let storage = self.registry_storage();
         let guard = self.documents.read();
-        let documents: Vec<DocumentVectors> = guard.values().cloned().collect();
+        let documents: Vec<SnapshotDocument> = guard
+            .iter()
+            .map(|(doc_id, document)| SnapshotDocument {
+                doc_id: *doc_id,
+                document: document.clone(),
+            })
+            .collect();
         drop(guard);
         let snapshot = DocumentSnapshot {
             last_wal_seq: self.wal.last_seq(),
@@ -1530,13 +1605,13 @@ impl VectorEngine {
             return self.persist_wal();
         }
 
-        let mut entries: Vec<(u64, DocumentVectors)> = documents.into_iter().collect();
+        let mut entries: Vec<(u64, DocumentVector)> = documents.into_iter().collect();
         entries.sort_by(|(a_id, _), (b_id, _)| a_id.cmp(b_id));
         let mut records = Vec::with_capacity(entries.len());
-        for (idx, (_, document)) in entries.into_iter().enumerate() {
+        for (idx, (doc_id, document)) in entries.into_iter().enumerate() {
             records.push(WalRecord {
                 seq: (idx as u64) + 1,
-                payload: WalPayload::Upsert { document },
+                payload: WalPayload::Upsert { doc_id, document },
             });
         }
         self.wal.replace_records(records);
@@ -1556,7 +1631,7 @@ impl VectorEngine {
     }
 }
 
-fn build_field_entries(document: &DocumentVectors) -> Vec<FieldEntry> {
+fn build_field_entries(document: &DocumentVector) -> Vec<FieldEntry> {
     document
         .fields
         .iter()
@@ -1978,7 +2053,13 @@ struct DocumentSnapshot {
     #[serde(default)]
     last_wal_seq: SeqNumber,
     #[serde(default)]
-    documents: Vec<DocumentVectors>,
+    documents: Vec<SnapshotDocument>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotDocument {
+    doc_id: u64,
+    document: DocumentVector,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1996,7 +2077,7 @@ pub struct WalRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WalPayload {
-    Upsert { document: DocumentVectors },
+    Upsert { doc_id: u64, document: DocumentVector },
     Delete { doc_id: u64 },
 }
 
@@ -2307,7 +2388,7 @@ mod tests {
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::storage::prefixed::PrefixedStorage;
     use crate::vector::core::document::{
-        DocumentPayload, DocumentVectors, FieldPayload, FieldVectors, PayloadSource,
+        DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource,
         SegmentPayload, StoredVector, VectorType,
     };
     use crate::vector::core::vector::Vector;
@@ -2482,15 +2563,15 @@ mod tests {
         ];
         let (collection, _) = collection_with_field(hits, 1.0);
 
-        let mut ja_doc = DocumentVectors::new(10);
+        let mut ja_doc = DocumentVector::new();
         ja_doc.metadata.insert("lang".into(), "ja".into());
         ja_doc.add_field("body", field_vectors_with_metadata(None));
-        collection.upsert_document(ja_doc).expect("upsert ja");
+        collection.upsert_document(10, ja_doc).expect("upsert ja");
 
-        let mut en_doc = DocumentVectors::new(11);
+        let mut en_doc = DocumentVector::new();
         en_doc.metadata.insert("lang".into(), "en".into());
         en_doc.add_field("body", field_vectors_with_metadata(None));
-        collection.upsert_document(en_doc).expect("upsert en");
+        collection.upsert_document(11, en_doc).expect("upsert en");
 
         let mut query = sample_query(5);
         query.filter = Some(VectorEngineFilter {
@@ -2534,22 +2615,22 @@ mod tests {
         ];
         let (collection, _) = collection_with_field(hits, 1.0);
 
-        let mut title_doc = DocumentVectors::new(1);
+        let mut title_doc = DocumentVector::new();
         title_doc.add_field(
             "body",
             field_vectors_with_metadata(Some(("section", "title"))),
         );
         collection
-            .upsert_document(title_doc)
+            .upsert_document(1, title_doc)
             .expect("upsert title doc");
 
-        let mut body_doc = DocumentVectors::new(2);
+        let mut body_doc = DocumentVector::new();
         body_doc.add_field(
             "body",
             field_vectors_with_metadata(Some(("section", "body"))),
         );
         collection
-            .upsert_document(body_doc)
+            .upsert_document(2, body_doc)
             .expect("upsert body doc");
 
         let mut query = sample_query(5);
@@ -2666,7 +2747,7 @@ mod tests {
         assert_eq!(body_stats.vector_count, 0);
         assert_eq!(body_stats.dimension, 3);
 
-        let mut doc = DocumentVectors::new(5);
+        let mut doc = DocumentVector::new();
         let mut vectors = FieldVectors::default();
         vectors.vectors.push(StoredVector::new(
             Arc::<[f32]>::from([0.5, 0.1, 0.3]),
@@ -2674,7 +2755,7 @@ mod tests {
             VectorType::Text,
         ));
         doc.add_field("body", vectors);
-        collection.upsert_document(doc).expect("upsert");
+        collection.upsert_document(5, doc).expect("upsert");
 
         let updated = collection.stats().expect("stats");
         assert_eq!(updated.document_count, 1);
@@ -2703,7 +2784,7 @@ mod tests {
             Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let collection = VectorEngine::new(config, storage.clone(), None).expect("collection");
 
-        let mut doc = DocumentVectors::new(1);
+        let mut doc = DocumentVector::new();
         let mut vectors = FieldVectors::default();
         vectors.vectors.push(StoredVector::new(
             Arc::<[f32]>::from([1.0, 0.0, 0.0]),
@@ -2711,7 +2792,7 @@ mod tests {
             VectorType::Text,
         ));
         doc.add_field("body", vectors);
-        collection.upsert_document(doc).expect("upsert");
+        collection.upsert_document(1, doc).expect("upsert");
 
         collection
             .materialize_delegate_reader("body")
@@ -2752,7 +2833,7 @@ mod tests {
         {
             let collection =
                 VectorEngine::new(config.clone(), storage.clone(), None).expect("collection");
-            let mut doc = DocumentVectors::new(10);
+            let mut doc = DocumentVector::new();
             let mut vectors = FieldVectors::default();
             vectors.vectors.push(StoredVector::new(
                 Arc::<[f32]>::from([0.2, 0.3, 0.4]),
@@ -2760,7 +2841,7 @@ mod tests {
                 VectorType::Text,
             ));
             doc.add_field("body", vectors);
-            collection.upsert_document(doc).expect("upsert");
+            collection.upsert_document(10, doc).expect("upsert");
         }
 
         let files = storage.list_files().expect("list files");
@@ -2808,7 +2889,7 @@ mod tests {
         {
             let collection =
                 VectorEngine::new(config.clone(), storage.clone(), None).expect("collection");
-            let mut doc_one = DocumentVectors::new(1);
+            let mut doc_one = DocumentVector::new();
             let mut vectors_one = FieldVectors::default();
             vectors_one.vectors.push(StoredVector::new(
                 Arc::<[f32]>::from([1.0, 0.0, 0.0]),
@@ -2816,9 +2897,9 @@ mod tests {
                 VectorType::Text,
             ));
             doc_one.add_field("body", vectors_one);
-            collection.upsert_document(doc_one).expect("upsert doc one");
+            collection.upsert_document(1, doc_one).expect("upsert doc one");
 
-            let mut doc_two = DocumentVectors::new(2);
+            let mut doc_two = DocumentVector::new();
             let mut vectors_two = FieldVectors::default();
             vectors_two.vectors.push(StoredVector::new(
                 Arc::<[f32]>::from([0.8, 0.0, 0.2]),
@@ -2826,7 +2907,7 @@ mod tests {
                 VectorType::Text,
             ));
             doc_two.add_field("body", vectors_two);
-            collection.upsert_document(doc_two).expect("upsert doc two");
+            collection.upsert_document(2, doc_two).expect("upsert doc two");
 
             collection.delete_document(1).expect("delete doc one");
         }
@@ -2875,11 +2956,11 @@ mod tests {
 
         let mut field_payload = FieldPayload::default();
         field_payload.add_text_segment("hello world");
-        let mut document_payload = DocumentPayload::new(1);
+        let mut document_payload = DocumentPayload::new();
         document_payload.add_field("body", field_payload);
 
         let version = engine
-            .upsert_document_payload(document_payload)
+            .upsert_document_payload(1, document_payload)
             .expect("upsert raw payload");
         assert!(version > 0);
 
@@ -2955,7 +3036,7 @@ mod tests {
         let collection = VectorEngine::new(config, storage, None).expect("collection");
 
         for doc_id in 0..6_u64 {
-            let mut doc = DocumentVectors::new(doc_id);
+            let mut doc = DocumentVector::new();
             let mut vectors = FieldVectors::default();
             vectors.vectors.push(StoredVector::new(
                 Arc::<[f32]>::from([1.0, 0.0, 0.0]),
@@ -2963,7 +3044,7 @@ mod tests {
                 VectorType::Text,
             ));
             doc.add_field("body", vectors);
-            collection.upsert_document(doc).expect("upsert");
+            collection.upsert_document(doc_id, doc).expect("upsert");
         }
 
         collection.delete_document(0).expect("delete doc zero");
@@ -2973,8 +3054,8 @@ mod tests {
         for (expected_seq, record) in records.iter().enumerate() {
             assert_eq!(record.seq, (expected_seq as u64) + 1);
             match &record.payload {
-                WalPayload::Upsert { document } => {
-                    assert_ne!(document.doc_id, 0);
+                WalPayload::Upsert { doc_id, .. } => {
+                    assert_ne!(*doc_id, 0);
                 }
                 _ => panic!("compacted WAL should only contain upserts"),
             }
@@ -3004,7 +3085,7 @@ mod tests {
         {
             let collection =
                 VectorEngine::new(config.clone(), storage.clone(), None).expect("collection");
-            let mut doc = DocumentVectors::new(77);
+            let mut doc = DocumentVector::new();
             let mut vectors = FieldVectors::default();
             vectors.vectors.push(StoredVector::new(
                 Arc::<[f32]>::from([0.4, 0.5, 0.6]),
@@ -3012,7 +3093,7 @@ mod tests {
                 VectorType::Text,
             ));
             doc.add_field("body", vectors);
-            collection.upsert_document(doc).expect("upsert");
+            collection.upsert_document(77, doc).expect("upsert");
         }
 
         storage
@@ -3052,7 +3133,7 @@ mod tests {
         {
             let collection =
                 VectorEngine::new(config.clone(), storage.clone(), None).expect("collection");
-            let mut doc = DocumentVectors::new(1);
+            let mut doc = DocumentVector::new();
             let mut vectors = FieldVectors::default();
             vectors.vectors.push(StoredVector::new(
                 Arc::<[f32]>::from([1.0, 0.0, 0.0]),
@@ -3060,7 +3141,7 @@ mod tests {
                 VectorType::Text,
             ));
             doc.add_field("body", vectors);
-            collection.upsert_document(doc).expect("upsert");
+            collection.upsert_document(1, doc).expect("upsert");
         }
 
         let registry_storage: Arc<dyn Storage> =
@@ -3125,7 +3206,7 @@ mod tests {
     #[test]
     fn upsert_routes_vectors_to_field_writer() {
         let (collection, writer) = collection_with_field(vec![], 1.0);
-        let mut doc = DocumentVectors::new(99);
+        let mut doc = DocumentVector::new();
         let mut vectors = FieldVectors::default();
         vectors.vectors.push(StoredVector::new(
             Arc::<[f32]>::from([0.1, 0.2, 0.3]),
@@ -3134,7 +3215,7 @@ mod tests {
         ));
         doc.add_field("body", vectors);
 
-        let version = collection.upsert_document(doc).expect("upsert");
+        let version = collection.upsert_document(99, doc).expect("upsert");
         let additions = writer.additions().lock().unwrap().clone();
         assert_eq!(additions.len(), 1);
         assert_eq!(additions[0].0, 99);
@@ -3145,9 +3226,9 @@ mod tests {
     #[test]
     fn delete_invokes_field_writer() {
         let (collection, writer) = collection_with_field(vec![], 1.0);
-        let mut doc = DocumentVectors::new(7);
+        let mut doc = DocumentVector::new();
         doc.add_field("body", FieldVectors::default());
-        collection.upsert_document(doc).expect("upsert");
+        collection.upsert_document(7, doc).expect("upsert");
 
         collection.delete_document(7).expect("delete");
         let deletions = writer.deletions().lock().unwrap().clone();

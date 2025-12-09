@@ -295,10 +295,9 @@ impl FieldVectors {
     }
 }
 
-/// Document-level wrapper around field vectors and metadata.
+/// Document-level wrapper around field vectors and metadata (doc_id is supplied separately).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct DocumentVectors {
-    pub doc_id: u64,
+pub struct DocumentVector {
     #[serde(default)]
     pub fields: HashMap<String, FieldVectors>,
     #[serde(default)]
@@ -308,15 +307,13 @@ pub struct DocumentVectors {
 /// Document input model capturing raw payloads before embedding.
 #[derive(Debug, Clone, Default)]
 pub struct DocumentPayload {
-    pub doc_id: u64,
     pub fields: HashMap<String, FieldPayload>,
     pub metadata: HashMap<String, String>,
 }
 
 impl DocumentPayload {
-    pub fn new(doc_id: u64) -> Self {
+    pub fn new() -> Self {
         Self {
-            doc_id,
             fields: HashMap::new(),
             metadata: HashMap::new(),
         }
@@ -331,10 +328,9 @@ impl DocumentPayload {
     }
 }
 
-impl DocumentVectors {
-    pub fn new(doc_id: u64) -> Self {
+impl DocumentVector {
+    pub fn new() -> Self {
         Self {
-            doc_id,
             fields: HashMap::new(),
             metadata: HashMap::new(),
         }
@@ -342,6 +338,10 @@ impl DocumentVectors {
 
     pub fn add_field<V: Into<String>>(&mut self, field_name: V, field: FieldVectors) {
         self.fields.insert(field_name.into(), field);
+    }
+
+    pub fn add_metadata(&mut self, key: String, value: String) {
+        self.metadata.insert(key, value);
     }
 }
 

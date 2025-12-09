@@ -98,13 +98,13 @@ fn main() -> Result<()> {
     )?;
 
     println!("2) Upsert documents containing text and image segments\n");
-    let mut doc1 = DocumentPayload::new(1);
+    let mut doc1 = DocumentPayload::new();
     doc1.metadata.insert("category".into(), "notebook".into());
     doc1.add_field(TEXT_FIELD, text_payload("Rust notebook overview"));
     let doc1_image = embedder_choice.sample_image_bytes(3)?;
     doc1.add_field(IMAGE_FIELD, image_bytes_payload(doc1_image, "rye-paper"));
 
-    let mut doc2 = DocumentPayload::new(2);
+    let mut doc2 = DocumentPayload::new();
     doc2.metadata.insert("category".into(), "camera".into());
     doc2.add_field(
         TEXT_FIELD,
@@ -114,8 +114,8 @@ fn main() -> Result<()> {
     let (image_payload_doc2, temp_file_doc2) = image_uri_payload(doc2_image, "studio");
     doc2.add_field(IMAGE_FIELD, image_payload_doc2);
 
-    engine.upsert_document_payload(doc1)?;
-    engine.upsert_document_payload(doc2)?;
+    engine.upsert_document_payload(1, doc1)?;
+    engine.upsert_document_payload(2, doc2)?;
     // Ensure the temporary file lives until ingestion finishes.
     drop(temp_file_doc2);
 

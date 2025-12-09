@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::hybrid::search::searcher::{
     HybridSearchParams, HybridSearchRequest, HybridSearchResults, HybridVectorOptions,
 };
-use crate::vector::core::document::{DocumentPayload, DocumentVectors, FieldPayload};
+use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
 use crate::vector::engine::{
     FieldSelector, VectorEngine, VectorEngineSearchRequest, VectorEngineSearchResults,
 };
@@ -145,11 +145,10 @@ impl HybridEngine {
     /// Upsert vectors only (pre-embedded).
     ///
     /// This does not touch the lexical index. It upserts the provided
-    /// `DocumentVectors` into the vector engine and advances `next_doc_id`
+    /// `DocumentVector` into the vector engine and advances `next_doc_id`
     /// if the given `doc_id` is new/highest.
-    pub fn upsert_vector_document(&mut self, vectors: DocumentVectors) -> Result<()> {
-        let doc_id = vectors.doc_id;
-        self.vector_engine.upsert_document(vectors)?;
+    pub fn upsert_vector_document(&mut self, doc_id: u64, vectors: DocumentVector) -> Result<()> {
+        self.vector_engine.upsert_document(doc_id, vectors)?;
         if doc_id >= self.next_doc_id {
             self.next_doc_id = doc_id + 1;
         }
@@ -160,9 +159,8 @@ impl HybridEngine {
     ///
     /// This does not touch the lexical index. It embeds the payload and
     /// upserts into the vector engine, advancing `next_doc_id` if needed.
-    pub fn upsert_vector_payload(&mut self, payload: DocumentPayload) -> Result<()> {
-        let doc_id = payload.doc_id;
-        self.vector_engine.upsert_document_payload(payload)?;
+    pub fn upsert_vector_payload(&mut self, doc_id: u64, payload: DocumentPayload) -> Result<()> {
+        self.vector_engine.upsert_document_payload(doc_id, payload)?;
         if doc_id >= self.next_doc_id {
             self.next_doc_id = doc_id + 1;
         }
