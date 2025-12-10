@@ -25,6 +25,7 @@ mod candle_vector_example {
         },
         vector::{
             DistanceMetric,
+            collection::factory::VectorCollectionFactory,
             core::document::{DocumentPayload, FieldPayload, SegmentPayload, VectorType},
             engine::{
                 FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine,
@@ -96,12 +97,16 @@ mod candle_vector_example {
             metadata: HashMap::new(),
         };
 
-        let engine = VectorEngine::new(config, storage, None)?;
+        let collection = VectorCollectionFactory::create(config, storage, None)?;
+        let engine = VectorEngine::new(collection)?;
 
         // Configure PerFieldEmbedder so each vector field can transparently use Candle embedders.
         let mut per_field_embedder = PerFieldEmbedder::new(Arc::clone(&body_embedder));
         per_field_embedder.add_embedder(TITLE_FIELD, Arc::clone(&title_embedder));
-        engine.register_embedder_instance(EMBEDDER_CONFIG_ID, Arc::new(per_field_embedder))?;
+        engine.register_embedder_instance(
+            EMBEDDER_CONFIG_ID.to_string(),
+            Arc::new(per_field_embedder),
+        )?;
 
         println!("2) Upsert documents with raw payloads that will be embedded automatically\n");
         let mut doc1 = DocumentPayload::new();
@@ -196,7 +201,7 @@ mod candle_vector_example {
             .extend(engine.embed_query_field_payload(BODY_FIELD, body_query)?);
 
         println!("4) Execute the search and inspect doc-centric hits\n");
-        let results = engine.search(&query)?;
+        let results = engine.search(query)?;
         for (rank, hit) in results.hits.iter().enumerate() {
             println!("{}. doc {} • score {:.3}", rank + 1, hit.doc_id, hit.score);
             for field_hit in &hit.field_hits {

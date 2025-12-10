@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
-use crate::lexical::document::field::FieldValue;
 use crate::error::Result;
+use crate::lexical::document::field::FieldValue;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::Matcher;
 use crate::lexical::index::inverted::query::scorer::Scorer;
@@ -1126,7 +1126,10 @@ mod tests {
         fn is_deleted(&self, _doc_id: u64) -> bool {
             false
         }
-        fn document(&self, _doc_id: u64) -> Result<Option<crate::lexical::document::document::Document>> {
+        fn document(
+            &self,
+            _doc_id: u64,
+        ) -> Result<Option<crate::lexical::document::document::Document>> {
             Ok(None)
         }
         fn term_info(

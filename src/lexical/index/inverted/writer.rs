@@ -12,12 +12,12 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
-use crate::lexical::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
-use crate::lexical::document::document::Document;
-use crate::lexical::document::field::FieldValue;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
+use crate::lexical::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
+use crate::lexical::document::document::Document;
+use crate::lexical::document::field::FieldValue;
 use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};
 use crate::lexical::index::inverted::maintenance::deletion::{DeletionConfig, DeletionManager};
 use crate::lexical::index::inverted::segment::SegmentInfo;
@@ -737,10 +737,7 @@ impl InvertedIndexWriter {
         for (_doc_id, analyzed_doc) in &self.buffered_docs {
             let mut doc = Document::new();
             for (field_name, field_value) in &analyzed_doc.stored_fields {
-                doc.add_field(
-                    field_name,
-                    Field::with_default_option(field_value.clone()),
-                );
+                doc.add_field(field_name, Field::with_default_option(field_value.clone()));
             }
             documents.push(doc);
         }
@@ -979,17 +976,13 @@ impl InvertedIndexWriter {
         Ok(())
     }
 
-    /// Delete documents matching the given term.
-    /// Note: This is a simplified implementation for compatibility.
-    pub fn delete_documents(&mut self, _field: &str, _value: &str) -> Result<u64> {
-        // TODO: Implement proper deletion support
-        Ok(0)
-    }
-
-    /// Update a document (delete old, add new).
-    pub fn update_document(&mut self, field: &str, value: &str, doc: Document) -> Result<()> {
-        self.delete_documents(field, value)?;
-        self.add_document(doc)?;
+    /// Delete a document by ID.
+    ///
+    /// Removes the document from the buffered documents if it exists.
+    /// For committed documents, deletion is handled through the DeletionManager.
+    pub fn delete_document(&mut self, doc_id: u64) -> Result<()> {
+        // Remove from buffered documents if present
+        self.buffered_docs.retain(|(id, _)| *id != doc_id);
         Ok(())
     }
 }
@@ -1018,12 +1011,8 @@ impl LexicalIndexWriter for InvertedIndexWriter {
         InvertedIndexWriter::upsert_analyzed_document(self, doc_id, doc)
     }
 
-    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
-        InvertedIndexWriter::delete_documents(self, field, value)
-    }
-
-    fn update_document(&mut self, field: &str, value: &str, doc: Document) -> Result<()> {
-        InvertedIndexWriter::update_document(self, field, value, doc)
+    fn delete_document(&mut self, doc_id: u64) -> Result<()> {
+        InvertedIndexWriter::delete_document(self, doc_id)
     }
 
     fn commit(&mut self) -> Result<()> {

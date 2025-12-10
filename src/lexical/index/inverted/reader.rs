@@ -12,12 +12,12 @@ use ahash::AHashMap;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
-use crate::lexical::document::document::Document;
-use crate::lexical::document::field::FieldValue;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::HybridTermDictionary;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::core::doc_values::DocValuesReader;
+use crate::lexical::document::document::Document;
+use crate::lexical::document::field::FieldValue;
 use crate::lexical::index::inverted::core::posting::{Posting, PostingList};
 use crate::lexical::index::inverted::core::terms::{
     InvertedIndexTerms, TermDictionaryAccess, Terms,

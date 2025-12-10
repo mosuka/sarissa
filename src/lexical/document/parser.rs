@@ -90,10 +90,10 @@ use ahash::AHashMap;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::token::Token;
+use crate::error::Result;
 use crate::lexical::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
 use crate::lexical::document::document::Document;
 use crate::lexical::document::field::FieldValue;
-use crate::error::Result;
 
 /// A document parser that converts Documents into AnalyzedDocuments.
 ///

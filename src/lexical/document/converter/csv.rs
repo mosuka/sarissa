@@ -91,10 +91,10 @@ use std::sync::Arc;
 
 use csv::{Reader, ReaderBuilder, StringRecord};
 
+use crate::error::{PlatypusError, Result};
 use crate::lexical::document::converter::DocumentConverter;
 use crate::lexical::document::document::Document;
 use crate::lexical::document::field::FieldValue;
-use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document converter for CSV format.

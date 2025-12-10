@@ -9,10 +9,10 @@ use std::time::SystemTime;
 
 use ahash::AHashSet;
 
-use crate::lexical::document::document::Document;
 use crate::error::{PlatypusError, Result};
 use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
+use crate::lexical::document::document::Document;
 use crate::lexical::index::inverted::core::posting::TermPostingIndex;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::index::inverted::segment::SegmentInfo;

@@ -75,6 +75,11 @@ pub struct WalRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WalPayload {
-    Upsert { doc_id: u64, document: DocumentVector },
-    Delete { doc_id: u64 },
+    Upsert {
+        doc_id: u64,
+        document: DocumentVector,
+    },
+    Delete {
+        doc_id: u64,
+    },
 }

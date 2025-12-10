@@ -1,0 +1,1421 @@
+//! Multi-field vector collection implementation.
+//!
+//! This module provides `MultiFieldVectorCollection`, a document-centric vector
+//! collection that manages multiple vector fields with different configurations.
+
+use std::cmp::Ordering as CmpOrdering;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::io::{Read, Write};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use parking_lot::{Mutex, RwLock};
+
+use crate::embedding::image_embedder::ImageEmbedder;
+use crate::embedding::text_embedder::TextEmbedder;
+use crate::error::{PlatypusError, Result};
+use crate::storage::Storage;
+use crate::storage::prefixed::PrefixedStorage;
+use crate::vector::collection::VectorCollection;
+use crate::vector::core::document::{
+    DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
+    StoredVector, VectorType,
+};
+use crate::vector::core::vector::Vector;
+use crate::vector::engine::config::{VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
+use crate::vector::engine::embedder::{EmbedderExecutor, VectorEmbedderRegistry};
+use crate::vector::engine::filter::RegistryFilterMatches;
+use crate::vector::engine::memory::{FieldHandle, FieldRuntime, InMemoryVectorField};
+use crate::vector::engine::registry::{DocumentEntry, DocumentVectorRegistry, FieldEntry};
+use crate::vector::engine::request::{
+    FieldSelector, QueryVector, VectorEngineSearchRequest, VectorScoreMode,
+};
+use crate::vector::engine::response::{
+    VectorEngineHit, VectorEngineSearchResults, VectorEngineStats,
+};
+use crate::vector::engine::snapshot::{
+    COLLECTION_MANIFEST_FILE, COLLECTION_MANIFEST_VERSION, CollectionManifest,
+    DOCUMENT_SNAPSHOT_FILE, DOCUMENT_SNAPSHOT_TEMP_FILE, DocumentSnapshot, FIELD_INDEX_BASENAME,
+    REGISTRY_NAMESPACE, REGISTRY_SNAPSHOT_FILE, REGISTRY_WAL_FILE, SnapshotDocument,
+};
+use crate::vector::engine::wal::{VectorWal, WAL_COMPACTION_THRESHOLD, WalPayload, WalRecord};
+use crate::vector::field::{
+    FieldHit, FieldSearchInput, VectorField, VectorFieldReader, VectorFieldStats, VectorFieldWriter,
+};
+use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
+use crate::vector::index::field::{
+    AdapterBackedVectorField, LegacyVectorFieldReader, LegacyVectorFieldWriter,
+};
+use crate::vector::index::flat::{
+    reader::FlatVectorIndexReader, searcher::FlatVectorSearcher, writer::FlatIndexWriter,
+};
+use crate::vector::index::hnsw::{
+    reader::HnswIndexReader, searcher::HnswSearcher, writer::HnswIndexWriter,
+};
+use crate::vector::index::ivf::{
+    reader::IvfIndexReader, searcher::IvfSearcher, writer::IvfIndexWriter,
+};
+use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+
+#[cfg(feature = "embeddings-multimodal")]
+use crate::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+#[cfg(feature = "embeddings-candle")]
+use crate::embedding::candle_text_embedder::CandleTextEmbedder;
+#[cfg(feature = "embeddings-openai")]
+use crate::embedding::openai_text_embedder::OpenAITextEmbedder;
+
+/// A document-centric vector collection with multiple vector fields.
+///
+/// This is the primary implementation of [`VectorCollection`], supporting:
+/// - Multiple vector fields with different configurations
+/// - Document-level and field-level metadata filtering
+/// - WAL-based persistence and recovery
+/// - Configurable embedder integration
+pub struct MultiFieldVectorCollection {
+    config: Arc<VectorEngineConfig>,
+    fields: RwLock<HashMap<String, FieldHandle>>,
+    registry: Arc<DocumentVectorRegistry>,
+    embedder_registry: Arc<VectorEmbedderRegistry>,
+    embedder_executor: Mutex<Option<Arc<EmbedderExecutor>>>,
+    wal: Arc<VectorWal>,
+    storage: Arc<dyn Storage>,
+    documents: Arc<RwLock<HashMap<u64, DocumentVector>>>,
+    snapshot_wal_seq: AtomicU64,
+    next_doc_id: AtomicU64,
+    closed: AtomicU64, // 0 = open, 1 = closed
+}
+
+impl fmt::Debug for MultiFieldVectorCollection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MultiFieldVectorCollection")
+            .field("config", &self.config)
+            .field("field_count", &self.fields.read().len())
+            .finish()
+    }
+}
+
+impl MultiFieldVectorCollection {
+    /// Create a new multi-field vector collection.
+    pub fn new(
+        config: VectorEngineConfig,
+        storage: Arc<dyn Storage>,
+        initial_doc_id: Option<u64>,
+    ) -> Result<Self> {
+        let embedder_registry = Arc::new(VectorEmbedderRegistry::new(config.embedders.clone()));
+        let registry = Arc::new(DocumentVectorRegistry::default());
+        let mut collection = Self {
+            config: Arc::new(config),
+            fields: RwLock::new(HashMap::new()),
+            registry,
+            embedder_registry,
+            embedder_executor: Mutex::new(None),
+            wal: Arc::new(VectorWal::default()),
+            storage,
+            documents: Arc::new(RwLock::new(HashMap::new())),
+            snapshot_wal_seq: AtomicU64::new(0),
+            next_doc_id: AtomicU64::new(initial_doc_id.unwrap_or(0)),
+            closed: AtomicU64::new(0),
+        };
+        collection.instantiate_configured_fields()?;
+        collection.load_persisted_state()?;
+        Ok(collection)
+    }
+
+    /// Register a concrete field implementation. Each field name must be unique.
+    pub fn register_field_impl(&self, field: Arc<dyn VectorField>) -> Result<()> {
+        let name = field.name().to_string();
+        let mut fields = self.fields.write();
+        if fields.contains_key(&name) {
+            return Err(PlatypusError::invalid_config(format!(
+                "vector field '{name}' is already registered"
+            )));
+        }
+        let runtime = FieldRuntime::from_field(&field);
+        fields.insert(name, FieldHandle { field, runtime });
+        Ok(())
+    }
+
+    /// Convenience helper to register a field backed by legacy adapters.
+    pub fn register_adapter_field(
+        &self,
+        name: impl Into<String>,
+        config: VectorFieldConfig,
+        writer: Arc<dyn VectorFieldWriter>,
+        reader: Arc<dyn VectorFieldReader>,
+    ) -> Result<()> {
+        let field: Arc<dyn VectorField> =
+            Arc::new(AdapterBackedVectorField::new(name, config, writer, reader));
+        self.register_field_impl(field)
+    }
+
+    // =========================================================================
+    // Internal methods (moved from VectorEngine)
+    // =========================================================================
+
+    fn embed_document_payload_internal(
+        &self,
+        _doc_id: u64,
+        payload: DocumentPayload,
+    ) -> Result<DocumentVector> {
+        let mut document = DocumentVector::new();
+        document.metadata = payload.metadata;
+
+        for (field_name, field_payload) in payload.fields.into_iter() {
+            let vectors = self.embed_field_payload(&field_name, field_payload)?;
+            if !vectors.vectors.is_empty() || !vectors.metadata.is_empty() {
+                document.fields.insert(field_name, vectors);
+            }
+        }
+
+        Ok(document)
+    }
+
+    fn embed_field_payload(&self, field_name: &str, payload: FieldPayload) -> Result<FieldVectors> {
+        let fields = self.fields.read();
+        let handle = fields.get(field_name).ok_or_else(|| {
+            PlatypusError::invalid_argument(format!(
+                "vector field '{field_name}' is not registered"
+            ))
+        })?;
+        let field_config = handle.field.config().clone();
+        drop(fields);
+
+        if payload.is_empty() {
+            let empty = FieldVectors {
+                metadata: payload.metadata,
+                ..FieldVectors::default()
+            };
+            return Ok(empty);
+        }
+
+        struct ResolvedEmbedders {
+            name: String,
+            executor: Arc<EmbedderExecutor>,
+            text: Option<Arc<dyn TextEmbedder>>,
+            image: Option<Arc<dyn ImageEmbedder>>,
+        }
+
+        let needs_text = payload
+            .segments
+            .iter()
+            .any(|segment| matches!(segment.source, PayloadSource::Text { .. }));
+        let needs_image = payload.segments.iter().any(|segment| {
+            matches!(
+                segment.source,
+                PayloadSource::Bytes { .. } | PayloadSource::Uri { .. }
+            )
+        });
+
+        let embedder_handles = if needs_text || needs_image {
+            let embedder_name = field_config.embedder.as_ref().ok_or_else(|| {
+                PlatypusError::invalid_config(format!(
+                    "vector field '{field_name}' must specify 'embedder' to ingest raw payloads"
+                ))
+            })?;
+            let executor = self.ensure_embedder_executor()?;
+            let text = if needs_text {
+                Some(self.embedder_registry.resolve_text(embedder_name)?)
+            } else {
+                None
+            };
+            let image = if needs_image {
+                Some(self.embedder_registry.resolve_image(embedder_name)?)
+            } else {
+                None
+            };
+            Some(ResolvedEmbedders {
+                name: embedder_name.clone(),
+                executor,
+                text,
+                image,
+            })
+        } else {
+            None
+        };
+
+        let mut field_vectors = FieldVectors {
+            metadata: payload.metadata,
+            ..FieldVectors::default()
+        };
+
+        for segment in payload.segments.into_iter() {
+            let SegmentPayload {
+                source,
+                vector_type: segment_vector_type,
+                weight: segment_weight,
+                metadata,
+            } = segment;
+            let vector_type = match segment_vector_type {
+                VectorType::Generic => field_config.vector_type.clone(),
+                explicit => explicit,
+            };
+            let weight = if segment_weight <= 0.0 {
+                1.0
+            } else {
+                segment_weight
+            };
+            match source {
+                PayloadSource::Text { value } => {
+                    let handles = embedder_handles.as_ref().ok_or_else(|| {
+                        PlatypusError::invalid_config(format!(
+                            "vector field '{field_name}' must specify 'embedder' to ingest text segments"
+                        ))
+                    })?;
+                    let embedder = handles.text.as_ref().ok_or_else(|| {
+                        PlatypusError::invalid_config(format!(
+                            "embedder '{}' does not support text segments",
+                            handles.name
+                        ))
+                    })?;
+                    let embedder_name = handles.name.clone();
+                    let executor = handles.executor.clone();
+                    let embedder_clone = Arc::clone(embedder);
+                    let text_value = value;
+                    let vector =
+                        executor.run(async move { embedder_clone.embed(&text_value).await })?;
+                    vector.validate_dimension(field_config.dimension)?;
+                    if !vector.is_valid() {
+                        return Err(PlatypusError::InvalidOperation(format!(
+                            "embedder '{}' produced invalid values for field '{}'",
+                            embedder_name, field_name
+                        )));
+                    }
+                    let mut stored: StoredVector = vector.into();
+                    stored.embedder_id = field_config.embedder_id.clone();
+                    stored.vector_type = vector_type;
+                    stored.weight = weight;
+                    stored.attributes.extend(metadata);
+                    field_vectors.vectors.push(stored);
+                }
+                PayloadSource::Bytes { bytes, mime } => {
+                    let handles = embedder_handles.as_ref().ok_or_else(|| {
+                        PlatypusError::invalid_config(format!(
+                            "vector field '{field_name}' must specify 'embedder' to ingest binary segments"
+                        ))
+                    })?;
+                    let embedder = handles.image.as_ref().ok_or_else(|| {
+                        PlatypusError::invalid_config(format!(
+                            "embedder '{}' does not support binary segments",
+                            handles.name
+                        ))
+                    })?;
+                    let embedder_name = handles.name.clone();
+                    let executor = handles.executor.clone();
+                    let embedder_clone = Arc::clone(embedder);
+                    let payload = bytes.clone();
+                    let mime_hint = mime.clone();
+                    let vector = executor.run(async move {
+                        embedder_clone
+                            .embed_bytes(payload.as_ref(), mime_hint.as_deref())
+                            .await
+                    })?;
+                    vector.validate_dimension(field_config.dimension)?;
+                    if !vector.is_valid() {
+                        return Err(PlatypusError::InvalidOperation(format!(
+                            "embedder '{}' produced invalid values for field '{}'",
+                            embedder_name, field_name
+                        )));
+                    }
+                    let mut stored: StoredVector = vector.into();
+                    stored.embedder_id = field_config.embedder_id.clone();
+                    stored.vector_type = vector_type;
+                    stored.weight = weight;
+                    stored.attributes.extend(metadata);
+                    field_vectors.vectors.push(stored);
+                }
+                PayloadSource::Uri { uri, media_hint } => {
+                    let handles = embedder_handles.as_ref().ok_or_else(|| {
+                        PlatypusError::invalid_config(format!(
+                            "vector field '{field_name}' must specify 'embedder' to ingest URI segments"
+                        ))
+                    })?;
+                    let embedder = handles.image.as_ref().ok_or_else(|| {
+                        PlatypusError::invalid_config(format!(
+                            "embedder '{}' does not support URI segments",
+                            handles.name
+                        ))
+                    })?;
+                    let embedder_name = handles.name.clone();
+                    let executor = handles.executor.clone();
+                    let embedder_clone = Arc::clone(embedder);
+                    let uri_value = uri;
+                    let hint = media_hint.clone();
+                    let vector = executor.run(async move {
+                        embedder_clone
+                            .embed_uri(uri_value.as_str(), hint.as_deref())
+                            .await
+                    })?;
+                    vector.validate_dimension(field_config.dimension)?;
+                    if !vector.is_valid() {
+                        return Err(PlatypusError::InvalidOperation(format!(
+                            "embedder '{}' produced invalid values for field '{}'",
+                            embedder_name, field_name
+                        )));
+                    }
+                    let mut stored: StoredVector = vector.into();
+                    stored.embedder_id = field_config.embedder_id.clone();
+                    stored.vector_type = vector_type;
+                    stored.weight = weight;
+                    stored.attributes.extend(metadata);
+                    field_vectors.vectors.push(stored);
+                }
+                PayloadSource::Vector { data, embedder_id } => {
+                    if embedder_id != field_config.embedder_id {
+                        return Err(PlatypusError::invalid_argument(format!(
+                            "vector field '{field_name}' only accepts embedder_id '{}' but got '{}'",
+                            field_config.embedder_id, embedder_id
+                        )));
+                    }
+                    if data.len() != field_config.dimension {
+                        return Err(PlatypusError::invalid_argument(format!(
+                            "vector field '{field_name}' expects dimension {} but received {}",
+                            field_config.dimension,
+                            data.len()
+                        )));
+                    }
+                    let mut stored = StoredVector::new(
+                        data.clone(),
+                        field_config.embedder_id.clone(),
+                        vector_type,
+                    );
+                    stored.weight = weight;
+                    stored.attributes.extend(metadata);
+                    field_vectors.vectors.push(stored);
+                }
+            }
+        }
+
+        Ok(field_vectors)
+    }
+
+    fn ensure_embedder_executor(&self) -> Result<Arc<EmbedderExecutor>> {
+        let mut guard = self.embedder_executor.lock();
+        if let Some(executor) = guard.as_ref() {
+            return Ok(executor.clone());
+        }
+        let executor = Arc::new(EmbedderExecutor::new()?);
+        *guard = Some(executor.clone());
+        Ok(executor)
+    }
+
+    fn upsert_document_internal(&self, doc_id: u64, document: DocumentVector) -> Result<u64> {
+        self.validate_document_fields(&document)?;
+        let entries = build_field_entries(&document);
+        let version = self
+            .registry
+            .upsert(doc_id, &entries, document.metadata.clone())?;
+
+        if let Err(err) = self.apply_field_updates(doc_id, version, &document.fields) {
+            let _ = self.registry.delete(doc_id);
+            return Err(err);
+        }
+
+        let cached_document = document.clone();
+        self.wal.append(WalPayload::Upsert { doc_id, document })?;
+        self.documents.write().insert(doc_id, cached_document);
+        self.persist_state()?;
+        self.bump_next_doc_id(doc_id);
+        self.maybe_compact_wal()?;
+        Ok(version)
+    }
+
+    fn resolve_fields(&self, query: &VectorEngineSearchRequest) -> Result<Vec<String>> {
+        let fields = self.fields.read();
+        let mut candidates: Vec<String> = if let Some(selectors) = &query.fields {
+            self.apply_field_selectors(&fields, selectors)?
+        } else if !self.config.default_fields.is_empty() {
+            self.config.default_fields.clone()
+        } else {
+            fields.keys().cloned().collect()
+        };
+
+        if candidates.is_empty() {
+            return Err(PlatypusError::invalid_config(
+                "VectorEngine has no fields configured",
+            ));
+        }
+
+        let mut seen = HashSet::new();
+        candidates.retain(|field| seen.insert(field.clone()));
+        Ok(candidates)
+    }
+
+    fn build_filter_matches(
+        &self,
+        query: &VectorEngineSearchRequest,
+        target_fields: &[String],
+    ) -> Option<RegistryFilterMatches> {
+        query
+            .filter
+            .as_ref()
+            .filter(|filter| !filter.is_empty())
+            .map(|filter| self.registry.filter_matches(filter, target_fields))
+    }
+
+    fn apply_field_selectors(
+        &self,
+        fields: &HashMap<String, FieldHandle>,
+        selectors: &[FieldSelector],
+    ) -> Result<Vec<String>> {
+        if selectors.is_empty() {
+            return Err(PlatypusError::invalid_argument(
+                "VectorEngineSearchRequest fields selector list is empty",
+            ));
+        }
+
+        let mut resolved = Vec::new();
+        for selector in selectors {
+            match selector {
+                FieldSelector::Exact(name) => {
+                    if fields.contains_key(name) {
+                        resolved.push(name.clone());
+                    } else {
+                        return Err(PlatypusError::not_found(format!(
+                            "vector field '{name}' is not registered"
+                        )));
+                    }
+                }
+                FieldSelector::Prefix(prefix) => {
+                    let mut matched = false;
+                    for field in fields.keys() {
+                        if field.starts_with(prefix) {
+                            resolved.push(field.clone());
+                            matched = true;
+                        }
+                    }
+                    if !matched {
+                        return Err(PlatypusError::not_found(format!(
+                            "no vector fields match prefix '{prefix}'"
+                        )));
+                    }
+                }
+                FieldSelector::VectorType(vector_type) => {
+                    let mut matched = false;
+                    for (field_name, field_handle) in fields.iter() {
+                        if field_handle.field.config().vector_type == *vector_type {
+                            resolved.push(field_name.clone());
+                            matched = true;
+                        }
+                    }
+                    if !matched {
+                        return Err(PlatypusError::not_found(format!(
+                            "no vector fields registered with vector type '{vector_type:?}'"
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(resolved)
+    }
+
+    fn scaled_field_limit(&self, limit: usize, overfetch: f32) -> usize {
+        let scaled = (limit as f32 * overfetch).ceil() as usize;
+        scaled.max(limit).max(1)
+    }
+
+    fn query_vectors_for_field(
+        &self,
+        config: &VectorFieldConfig,
+        query: &VectorEngineSearchRequest,
+    ) -> Vec<QueryVector> {
+        query
+            .query_vectors
+            .iter()
+            .filter(|candidate| {
+                candidate.vector.embedder_id == config.embedder_id
+                    && candidate.vector.vector_type == config.vector_type
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn merge_field_hits(
+        &self,
+        doc_hits: &mut HashMap<u64, VectorEngineHit>,
+        hits: Vec<FieldHit>,
+        field_weight: f32,
+        score_mode: VectorScoreMode,
+        filter_matches: Option<&RegistryFilterMatches>,
+    ) -> Result<()> {
+        for hit in hits {
+            if let Some(matches) = filter_matches {
+                if !matches.contains_doc(hit.doc_id) {
+                    continue;
+                }
+                if !matches.field_allowed(hit.doc_id, &hit.field) {
+                    continue;
+                }
+            }
+
+            let weighted_score = hit.score * field_weight;
+            let entry = doc_hits
+                .entry(hit.doc_id)
+                .or_insert_with(|| VectorEngineHit {
+                    doc_id: hit.doc_id,
+                    score: 0.0,
+                    field_hits: Vec::new(),
+                });
+
+            match score_mode {
+                VectorScoreMode::WeightedSum => {
+                    entry.score += weighted_score;
+                }
+                VectorScoreMode::MaxSim => {
+                    entry.score = entry.score.max(weighted_score);
+                }
+                VectorScoreMode::LateInteraction => {
+                    return Err(PlatypusError::invalid_argument(
+                        "VectorScoreMode::LateInteraction is not supported yet",
+                    ));
+                }
+            }
+            entry.field_hits.push(hit);
+        }
+
+        Ok(())
+    }
+
+    fn instantiate_configured_fields(&mut self) -> Result<()> {
+        let configs: Vec<(String, VectorFieldConfig)> = self
+            .config
+            .fields
+            .iter()
+            .map(|(name, config)| (name.clone(), config.clone()))
+            .collect();
+
+        for (name, config) in configs {
+            let delegate = self.build_delegate_writer(&name, &config)?;
+            let field = Arc::new(InMemoryVectorField::new(name, config, delegate)?);
+            self.register_field_impl(field)?;
+        }
+        Ok(())
+    }
+
+    fn build_delegate_writer(
+        &self,
+        field_name: &str,
+        config: &VectorFieldConfig,
+    ) -> Result<Option<Arc<dyn VectorFieldWriter>>> {
+        if config.dimension == 0 {
+            return Ok(None);
+        }
+
+        let writer_config = VectorIndexWriterConfig::default();
+        let storage = self.field_storage(field_name);
+        let delegate: Arc<dyn VectorFieldWriter> = match config.index {
+            VectorIndexKind::Flat => {
+                let flat = FlatIndexConfig {
+                    dimension: config.dimension,
+                    distance_metric: config.distance,
+                    ..FlatIndexConfig::default()
+                };
+                let writer =
+                    FlatIndexWriter::with_storage(flat, writer_config.clone(), storage.clone())?;
+                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
+            }
+            VectorIndexKind::Hnsw => {
+                let hnsw = HnswIndexConfig {
+                    dimension: config.dimension,
+                    distance_metric: config.distance,
+                    ..HnswIndexConfig::default()
+                };
+                let writer =
+                    HnswIndexWriter::with_storage(hnsw, writer_config.clone(), storage.clone())?;
+                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
+            }
+            VectorIndexKind::Ivf => {
+                let ivf = IvfIndexConfig {
+                    dimension: config.dimension,
+                    distance_metric: config.distance,
+                    ..IvfIndexConfig::default()
+                };
+                let writer = IvfIndexWriter::with_storage(ivf, writer_config, storage)?;
+                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
+            }
+        };
+        Ok(Some(delegate))
+    }
+
+    fn write_field_delegate_index(
+        &self,
+        field_name: &str,
+        config: &VectorFieldConfig,
+        vectors: Vec<(u64, String, Vector)>,
+    ) -> Result<()> {
+        if config.dimension == 0 {
+            return Err(PlatypusError::invalid_config(format!(
+                "vector field '{field_name}' cannot materialize a zero-dimension index"
+            )));
+        }
+
+        let storage = self.field_storage(field_name);
+        let mut pending_vectors = Some(vectors);
+        match config.index {
+            VectorIndexKind::Flat => {
+                let flat = FlatIndexConfig {
+                    dimension: config.dimension,
+                    distance_metric: config.distance,
+                    ..FlatIndexConfig::default()
+                };
+                let mut writer = FlatIndexWriter::with_storage(
+                    flat,
+                    VectorIndexWriterConfig::default(),
+                    storage.clone(),
+                )?;
+                let vectors = pending_vectors.take().unwrap_or_default();
+                writer.build(vectors)?;
+                writer.finalize()?;
+                writer.write(FIELD_INDEX_BASENAME)?;
+            }
+            VectorIndexKind::Hnsw => {
+                let hnsw = HnswIndexConfig {
+                    dimension: config.dimension,
+                    distance_metric: config.distance,
+                    ..HnswIndexConfig::default()
+                };
+                let mut writer = HnswIndexWriter::with_storage(
+                    hnsw,
+                    VectorIndexWriterConfig::default(),
+                    storage.clone(),
+                )?;
+                let vectors = pending_vectors.take().unwrap_or_default();
+                writer.build(vectors)?;
+                writer.finalize()?;
+                writer.write(FIELD_INDEX_BASENAME)?;
+            }
+            VectorIndexKind::Ivf => {
+                let ivf = IvfIndexConfig {
+                    dimension: config.dimension,
+                    distance_metric: config.distance,
+                    ..IvfIndexConfig::default()
+                };
+                let mut writer = IvfIndexWriter::with_storage(
+                    ivf,
+                    VectorIndexWriterConfig::default(),
+                    storage.clone(),
+                )?;
+                let vectors = pending_vectors.take().unwrap_or_default();
+                writer.build(vectors)?;
+                writer.finalize()?;
+                writer.write(FIELD_INDEX_BASENAME)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn load_delegate_reader(
+        &self,
+        field_name: &str,
+        config: &VectorFieldConfig,
+    ) -> Result<Arc<dyn VectorFieldReader>> {
+        let storage = self.field_storage(field_name);
+        Ok(match config.index {
+            VectorIndexKind::Flat => {
+                let reader = Arc::new(FlatVectorIndexReader::load(
+                    storage.clone(),
+                    FIELD_INDEX_BASENAME,
+                    config.distance,
+                )?);
+                let searcher = Arc::new(FlatVectorSearcher::new(reader.clone())?);
+                Arc::new(LegacyVectorFieldReader::new(
+                    field_name.to_string(),
+                    searcher,
+                    reader,
+                ))
+            }
+            VectorIndexKind::Hnsw => {
+                let reader = Arc::new(HnswIndexReader::load(
+                    storage.clone(),
+                    FIELD_INDEX_BASENAME,
+                    config.distance,
+                )?);
+                let searcher = Arc::new(HnswSearcher::new(reader.clone())?);
+                Arc::new(LegacyVectorFieldReader::new(
+                    field_name.to_string(),
+                    searcher,
+                    reader,
+                ))
+            }
+            VectorIndexKind::Ivf => {
+                let reader = Arc::new(IvfIndexReader::load(
+                    storage.clone(),
+                    FIELD_INDEX_BASENAME,
+                    config.distance,
+                )?);
+                let mut searcher = IvfSearcher::new(reader.clone())?;
+                searcher.set_n_probe(4);
+                let searcher = Arc::new(searcher);
+                Arc::new(LegacyVectorFieldReader::new(
+                    field_name.to_string(),
+                    searcher,
+                    reader,
+                ))
+            }
+        })
+    }
+
+    fn field_storage(&self, field_name: &str) -> Arc<dyn Storage> {
+        let prefix = Self::field_storage_prefix(field_name);
+        Arc::new(PrefixedStorage::new(prefix, self.storage.clone())) as Arc<dyn Storage>
+    }
+
+    fn registry_storage(&self) -> Arc<dyn Storage> {
+        Arc::new(PrefixedStorage::new(
+            REGISTRY_NAMESPACE,
+            self.storage.clone(),
+        )) as Arc<dyn Storage>
+    }
+
+    fn field_storage_prefix(field_name: &str) -> String {
+        let mut sanitized: String = field_name
+            .chars()
+            .map(|ch| match ch {
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+                _ => '_',
+            })
+            .collect();
+        if sanitized.is_empty() {
+            sanitized.push_str("field");
+        }
+        format!("vector_fields/{sanitized}")
+    }
+
+    fn validate_document_fields(&self, document: &DocumentVector) -> Result<()> {
+        let fields = self.fields.read();
+        for field_name in document.fields.keys() {
+            if !fields.contains_key(field_name) {
+                return Err(PlatypusError::invalid_argument(format!(
+                    "vector field '{field_name}' is not registered"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn bump_next_doc_id(&self, doc_id: u64) {
+        let _ = self
+            .next_doc_id
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                if doc_id >= current {
+                    Some(doc_id.saturating_add(1))
+                } else {
+                    None
+                }
+            });
+    }
+
+    fn recompute_next_doc_id(&self) {
+        let max_id = self.documents.read().keys().copied().max().unwrap_or(0);
+        self.bump_next_doc_id(max_id);
+    }
+
+    fn delete_fields_for_entry(&self, doc_id: u64, entry: &DocumentEntry) -> Result<()> {
+        let fields = self.fields.read();
+        for (field_name, field_entry) in &entry.fields {
+            let field = fields.get(field_name).ok_or_else(|| {
+                PlatypusError::not_found(format!(
+                    "vector field '{field_name}' not registered during delete"
+                ))
+            })?;
+            field
+                .runtime
+                .writer()
+                .delete_document(doc_id, field_entry.version)?;
+        }
+        Ok(())
+    }
+
+    fn apply_field_updates(
+        &self,
+        doc_id: u64,
+        version: u64,
+        fields_data: &HashMap<String, FieldVectors>,
+    ) -> Result<()> {
+        let fields = self.fields.read();
+        for (field_name, field_vectors) in fields_data {
+            let field = fields.get(field_name).ok_or_else(|| {
+                PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+            })?;
+            field
+                .runtime
+                .writer()
+                .add_field_vectors(doc_id, field_vectors, version)?;
+        }
+        Ok(())
+    }
+
+    fn load_persisted_state(&mut self) -> Result<()> {
+        let storage = self.registry_storage();
+        if storage.file_exists(REGISTRY_SNAPSHOT_FILE) {
+            let mut input = storage.open_input(REGISTRY_SNAPSHOT_FILE)?;
+            let mut buffer = Vec::new();
+            input.read_to_end(&mut buffer)?;
+            input.close()?;
+            self.registry = Arc::new(DocumentVectorRegistry::from_snapshot(&buffer)?);
+        }
+
+        if storage.file_exists(REGISTRY_WAL_FILE) {
+            let mut input = storage.open_input(REGISTRY_WAL_FILE)?;
+            let mut buffer = Vec::new();
+            input.read_to_end(&mut buffer)?;
+            input.close()?;
+            if !buffer.is_empty() {
+                let records: Vec<WalRecord> = serde_json::from_slice(&buffer)?;
+                self.wal = Arc::new(VectorWal::from_records(records));
+            }
+        }
+
+        self.load_document_snapshot(storage.clone())?;
+        self.load_collection_manifest(storage.clone())?;
+        self.replay_wal_into_fields()?;
+        self.recompute_next_doc_id();
+        self.persist_manifest()
+    }
+
+    fn load_document_snapshot(&self, storage: Arc<dyn Storage>) -> Result<()> {
+        if !storage.file_exists(DOCUMENT_SNAPSHOT_FILE) {
+            self.documents.write().clear();
+            self.snapshot_wal_seq.store(0, Ordering::SeqCst);
+            return Ok(());
+        }
+
+        let mut input = storage.open_input(DOCUMENT_SNAPSHOT_FILE)?;
+        let mut buffer = Vec::new();
+        input.read_to_end(&mut buffer)?;
+        input.close()?;
+
+        if buffer.is_empty() {
+            self.documents.write().clear();
+            self.snapshot_wal_seq.store(0, Ordering::SeqCst);
+            return Ok(());
+        }
+
+        #[derive(serde::Deserialize)]
+        struct LegacySnapshotDocument {
+            doc_id: u64,
+            #[serde(default)]
+            fields: HashMap<String, FieldVectors>,
+            #[serde(default)]
+            metadata: HashMap<String, String>,
+        }
+
+        let snapshot = match serde_json::from_slice::<DocumentSnapshot>(&buffer) {
+            Ok(snapshot) => snapshot,
+            Err(primary_err) => {
+                let docs: Vec<LegacySnapshotDocument> =
+                    serde_json::from_slice(&buffer).map_err(|_| primary_err)?;
+                let converted = docs
+                    .into_iter()
+                    .map(|legacy| SnapshotDocument {
+                        doc_id: legacy.doc_id,
+                        document: DocumentVector {
+                            fields: legacy.fields,
+                            metadata: legacy.metadata,
+                        },
+                    })
+                    .collect();
+                DocumentSnapshot {
+                    last_wal_seq: 0,
+                    documents: converted,
+                }
+            }
+        };
+        let map = snapshot
+            .documents
+            .into_iter()
+            .map(|doc| (doc.doc_id, doc.document))
+            .collect();
+        *self.documents.write() = map;
+        self.snapshot_wal_seq
+            .store(snapshot.last_wal_seq, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn load_collection_manifest(&self, storage: Arc<dyn Storage>) -> Result<()> {
+        if !storage.file_exists(COLLECTION_MANIFEST_FILE) {
+            return Ok(());
+        }
+
+        let mut input = storage.open_input(COLLECTION_MANIFEST_FILE)?;
+        let mut buffer = Vec::new();
+        input.read_to_end(&mut buffer)?;
+        input.close()?;
+        if buffer.is_empty() {
+            return Ok(());
+        }
+
+        let manifest: CollectionManifest = serde_json::from_slice(&buffer)?;
+        if manifest.version != COLLECTION_MANIFEST_VERSION {
+            return Err(PlatypusError::invalid_config(format!(
+                "collection manifest version mismatch: expected {}, found {}",
+                COLLECTION_MANIFEST_VERSION, manifest.version
+            )));
+        }
+
+        let snapshot_seq = self.snapshot_wal_seq.load(Ordering::SeqCst);
+        if manifest.snapshot_wal_seq != snapshot_seq {
+            return Err(PlatypusError::invalid_config(format!(
+                "collection manifest snapshot sequence {} does not match persisted snapshot {}",
+                manifest.snapshot_wal_seq, snapshot_seq
+            )));
+        }
+
+        if manifest.wal_last_seq < manifest.snapshot_wal_seq {
+            return Err(PlatypusError::invalid_config(
+                "collection manifest WAL sequence regressed",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn replay_wal_into_fields(&self) -> Result<()> {
+        let mut documents = self.documents.read().clone();
+        self.apply_documents_to_fields(&documents)?;
+        let mut records = self.wal.records();
+        let start_seq = self
+            .snapshot_wal_seq
+            .load(Ordering::SeqCst)
+            .saturating_add(1);
+        let mut applied_seq = self.snapshot_wal_seq.load(Ordering::SeqCst);
+        if records.is_empty() {
+            *self.documents.write() = documents;
+            return Ok(());
+        }
+
+        records.sort_by(|a, b| a.seq.cmp(&b.seq));
+        for record in records.into_iter() {
+            if record.seq < start_seq {
+                continue;
+            }
+            applied_seq = record.seq;
+            match record.payload {
+                WalPayload::Upsert { doc_id, document } => {
+                    if document.fields.is_empty() {
+                        documents.remove(&doc_id);
+                        continue;
+                    }
+                    if let Some(entry) = self.registry.get(doc_id) {
+                        self.apply_field_updates(doc_id, entry.version, &document.fields)?;
+                    }
+                    documents.insert(doc_id, document);
+                }
+                WalPayload::Delete { doc_id } => {
+                    if let Some(entry) = self.registry.get(doc_id) {
+                        self.delete_fields_for_entry(doc_id, &entry)?;
+                    }
+                    documents.remove(&doc_id);
+                }
+            }
+        }
+
+        if applied_seq > self.snapshot_wal_seq.load(Ordering::SeqCst) {
+            self.snapshot_wal_seq.store(applied_seq, Ordering::SeqCst);
+        }
+
+        *self.documents.write() = documents;
+        Ok(())
+    }
+
+    fn apply_documents_to_fields(&self, documents: &HashMap<u64, DocumentVector>) -> Result<()> {
+        for (doc_id, document) in documents.iter() {
+            if let Some(entry) = self.registry.get(*doc_id) {
+                if document.fields.is_empty() {
+                    continue;
+                }
+                self.apply_field_updates(*doc_id, entry.version, &document.fields)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn persist_state(&self) -> Result<()> {
+        self.persist_registry_snapshot()?;
+        self.persist_document_snapshot()?;
+        self.persist_wal()?;
+        self.persist_manifest()
+    }
+
+    fn persist_registry_snapshot(&self) -> Result<()> {
+        let storage = self.registry_storage();
+        let snapshot = self.registry.snapshot()?;
+        self.write_atomic(storage, REGISTRY_SNAPSHOT_FILE, &snapshot)
+    }
+
+    fn persist_document_snapshot(&self) -> Result<()> {
+        let storage = self.registry_storage();
+        let guard = self.documents.read();
+        let documents: Vec<SnapshotDocument> = guard
+            .iter()
+            .map(|(doc_id, document)| SnapshotDocument {
+                doc_id: *doc_id,
+                document: document.clone(),
+            })
+            .collect();
+        drop(guard);
+        let snapshot = DocumentSnapshot {
+            last_wal_seq: self.wal.last_seq(),
+            documents,
+        };
+        let serialized = serde_json::to_vec(&snapshot)?;
+
+        if serialized.len() > 256 * 1024 {
+            self.write_atomic(storage.clone(), DOCUMENT_SNAPSHOT_TEMP_FILE, &serialized)?;
+            storage.delete_file(DOCUMENT_SNAPSHOT_FILE).ok();
+            storage.rename_file(DOCUMENT_SNAPSHOT_TEMP_FILE, DOCUMENT_SNAPSHOT_FILE)?;
+        } else {
+            self.write_atomic(storage.clone(), DOCUMENT_SNAPSHOT_FILE, &serialized)?;
+        }
+
+        self.snapshot_wal_seq
+            .store(snapshot.last_wal_seq, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn persist_manifest(&self) -> Result<()> {
+        let storage = self.registry_storage();
+        let manifest = CollectionManifest {
+            version: COLLECTION_MANIFEST_VERSION,
+            snapshot_wal_seq: self.snapshot_wal_seq.load(Ordering::SeqCst),
+            wal_last_seq: self.wal.last_seq(),
+        };
+        let serialized = serde_json::to_vec(&manifest)?;
+        self.write_atomic(storage, COLLECTION_MANIFEST_FILE, &serialized)
+    }
+
+    fn persist_wal(&self) -> Result<()> {
+        let storage = self.registry_storage();
+        let records = self.wal.records();
+        let serialized = serde_json::to_vec(&records)?;
+        self.write_atomic(storage, REGISTRY_WAL_FILE, &serialized)
+    }
+
+    fn maybe_compact_wal(&self) -> Result<()> {
+        if self.wal.len() > WAL_COMPACTION_THRESHOLD {
+            self.compact_wal()?;
+        }
+        Ok(())
+    }
+
+    fn compact_wal(&self) -> Result<()> {
+        let documents = self.documents.read().clone();
+        if documents.is_empty() {
+            self.wal.replace_records(Vec::new());
+            return self.persist_wal();
+        }
+
+        let mut entries: Vec<(u64, DocumentVector)> = documents.into_iter().collect();
+        entries.sort_by(|(a_id, _), (b_id, _)| a_id.cmp(b_id));
+        let mut records = Vec::with_capacity(entries.len());
+        for (idx, (doc_id, document)) in entries.into_iter().enumerate() {
+            records.push(WalRecord {
+                seq: (idx as u64) + 1,
+                payload: WalPayload::Upsert { doc_id, document },
+            });
+        }
+        self.wal.replace_records(records);
+        self.persist_wal()
+    }
+
+    fn write_atomic(&self, storage: Arc<dyn Storage>, name: &str, bytes: &[u8]) -> Result<()> {
+        let tmp_name = format!("{name}.tmp");
+        let mut output = storage.create_output(&tmp_name)?;
+        output.write_all(bytes)?;
+        output.flush_and_sync()?;
+        output.close()?;
+        if storage.file_exists(name) {
+            storage.delete_file(name)?;
+        }
+        storage.rename_file(&tmp_name, name)
+    }
+}
+
+// =========================================================================
+// VectorCollection trait implementation
+// =========================================================================
+
+impl VectorCollection for MultiFieldVectorCollection {
+    fn config(&self) -> &VectorEngineConfig {
+        self.config.as_ref()
+    }
+
+    fn add_document(&self, doc: DocumentVector) -> Result<u64> {
+        let doc_id = self.next_doc_id.fetch_add(1, Ordering::SeqCst);
+        self.upsert_document(doc_id, doc)?;
+        Ok(doc_id)
+    }
+
+    fn add_document_payload(&self, payload: DocumentPayload) -> Result<u64> {
+        let doc_id = self.next_doc_id.fetch_add(1, Ordering::SeqCst);
+        self.upsert_document_payload(doc_id, payload)?;
+        Ok(doc_id)
+    }
+
+    fn upsert_document(&self, doc_id: u64, doc: DocumentVector) -> Result<()> {
+        self.upsert_document_internal(doc_id, doc)?;
+        Ok(())
+    }
+
+    fn upsert_document_payload(&self, doc_id: u64, payload: DocumentPayload) -> Result<()> {
+        let document = self.embed_document_payload_internal(doc_id, payload)?;
+        self.upsert_document_internal(doc_id, document)?;
+        Ok(())
+    }
+
+    fn delete_document(&self, doc_id: u64) -> Result<()> {
+        let entry = self
+            .registry
+            .get(doc_id)
+            .ok_or_else(|| PlatypusError::not_found(format!("doc_id {doc_id}")))?;
+        self.delete_fields_for_entry(doc_id, &entry)?;
+
+        self.registry.delete(doc_id)?;
+        self.wal.append(WalPayload::Delete { doc_id })?;
+        self.documents.write().remove(&doc_id);
+        self.persist_state()?;
+        self.maybe_compact_wal()
+    }
+
+    fn embed_document_payload(&self, payload: DocumentPayload) -> Result<DocumentVector> {
+        self.embed_document_payload_internal(0, payload)
+    }
+
+    fn embed_query_field_payload(
+        &self,
+        field_name: &str,
+        payload: FieldPayload,
+    ) -> Result<Vec<QueryVector>> {
+        let vectors = self.embed_field_payload(field_name, payload)?;
+        Ok(vectors
+            .vectors
+            .into_iter()
+            .map(|vector| QueryVector {
+                vector,
+                weight: 1.0,
+            })
+            .collect())
+    }
+
+    fn register_field(&self, _name: String, field: Box<dyn VectorField>) -> Result<()> {
+        let field_arc: Arc<dyn VectorField> = Arc::from(field);
+        self.register_field_impl(field_arc)
+    }
+
+    fn field_stats(&self, field_name: &str) -> Result<VectorFieldStats> {
+        let fields = self.fields.read();
+        let field = fields.get(field_name).ok_or_else(|| {
+            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+        })?;
+        field.runtime.reader().stats()
+    }
+
+    fn replace_field_reader(
+        &self,
+        field_name: &str,
+        reader: Box<dyn VectorFieldReader>,
+    ) -> Result<()> {
+        let fields = self.fields.read();
+        let field = fields.get(field_name).ok_or_else(|| {
+            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+        })?;
+        let reader_arc: Arc<dyn VectorFieldReader> = Arc::from(reader);
+        field.runtime.replace_reader(reader_arc);
+        Ok(())
+    }
+
+    fn reset_field_reader(&self, field_name: &str) -> Result<()> {
+        let fields = self.fields.read();
+        let field = fields.get(field_name).ok_or_else(|| {
+            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+        })?;
+        field.runtime.reset_reader();
+        Ok(())
+    }
+
+    fn materialize_delegate_reader(&self, field_name: &str) -> Result<()> {
+        let fields = self.fields.read();
+        let handle = fields.get(field_name).ok_or_else(|| {
+            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+        })?;
+
+        let in_memory = handle
+            .field
+            .as_any()
+            .downcast_ref::<InMemoryVectorField>()
+            .ok_or_else(|| {
+                PlatypusError::InvalidOperation(format!(
+                    "field '{field_name}' does not support delegate materialization"
+                ))
+            })?;
+
+        let vectors = in_memory.vector_tuples();
+        let config = in_memory.config().clone();
+        drop(fields);
+
+        self.write_field_delegate_index(field_name, &config, vectors)?;
+        let reader = self.load_delegate_reader(field_name, &config)?;
+
+        let fields = self.fields.read();
+        let handle = fields.get(field_name).ok_or_else(|| {
+            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+        })?;
+        handle.runtime.replace_reader(reader);
+        Ok(())
+    }
+
+    fn register_embedder_instance(
+        &self,
+        embedder_id: String,
+        embedder: Arc<dyn TextEmbedder>,
+    ) -> Result<()> {
+        self.embedder_registry
+            .register_external(embedder_id, embedder)
+    }
+
+    fn register_multimodal_embedder_instance(
+        &self,
+        embedder_id: String,
+        text_embedder: Arc<dyn TextEmbedder>,
+        image_embedder: Arc<dyn ImageEmbedder>,
+    ) -> Result<()> {
+        self.embedder_registry.register_external_with_image(
+            embedder_id,
+            text_embedder,
+            Some(image_embedder),
+        )
+    }
+
+    fn search(&self, request: &VectorEngineSearchRequest) -> Result<VectorEngineSearchResults> {
+        if request.query_vectors.is_empty() {
+            return Err(PlatypusError::invalid_argument(
+                "VectorEngineSearchRequest requires at least one query vector",
+            ));
+        }
+
+        if request.limit == 0 {
+            return Ok(VectorEngineSearchResults::default());
+        }
+
+        if request.overfetch < 1.0 {
+            return Err(PlatypusError::invalid_argument(
+                "VectorEngineSearchRequest overfetch must be >= 1.0",
+            ));
+        }
+
+        if matches!(request.score_mode, VectorScoreMode::LateInteraction) {
+            return Err(PlatypusError::invalid_argument(
+                "VectorScoreMode::LateInteraction is not supported yet",
+            ));
+        }
+
+        let target_fields = self.resolve_fields(request)?;
+        let filter_matches = self.build_filter_matches(request, &target_fields);
+        if filter_matches
+            .as_ref()
+            .is_some_and(|matches| matches.is_empty())
+        {
+            return Ok(VectorEngineSearchResults::default());
+        }
+
+        let mut doc_hits: HashMap<u64, VectorEngineHit> = HashMap::new();
+        let mut fields_with_queries = 0_usize;
+        let field_limit = self.scaled_field_limit(request.limit, request.overfetch);
+
+        let fields = self.fields.read();
+        for field_name in target_fields {
+            let field = fields
+                .get(&field_name)
+                .ok_or_else(|| PlatypusError::not_found(format!("vector field '{field_name}'")))?;
+            let matching_vectors = self.query_vectors_for_field(field.field.config(), request);
+            if matching_vectors.is_empty() {
+                continue;
+            }
+
+            fields_with_queries += 1;
+
+            let field_query = FieldSearchInput {
+                field: field_name.clone(),
+                query_vectors: matching_vectors,
+                limit: field_limit,
+            };
+
+            let field_results = field.runtime.reader().search(field_query)?;
+            let field_weight = field.field.config().base_weight;
+
+            self.merge_field_hits(
+                &mut doc_hits,
+                field_results.hits,
+                field_weight,
+                request.score_mode,
+                filter_matches.as_ref(),
+            )?;
+        }
+        drop(fields);
+
+        if fields_with_queries == 0 {
+            return Err(PlatypusError::invalid_argument(
+                "no query vectors matched the requested fields",
+            ));
+        }
+
+        let mut hits: Vec<VectorEngineHit> = doc_hits.into_values().collect();
+        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(CmpOrdering::Equal));
+        if hits.len() > request.limit {
+            hits.truncate(request.limit);
+        }
+
+        Ok(VectorEngineSearchResults { hits })
+    }
+
+    fn commit(&self) -> Result<()> {
+        self.persist_state()
+    }
+
+    fn stats(&self) -> Result<VectorEngineStats> {
+        let fields = self.fields.read();
+        let mut field_stats = HashMap::with_capacity(fields.len());
+        for (name, field) in fields.iter() {
+            let stats = field.runtime.reader().stats()?;
+            field_stats.insert(name.clone(), stats);
+        }
+
+        Ok(VectorEngineStats {
+            document_count: self.registry.document_count(),
+            fields: field_stats,
+        })
+    }
+
+    fn storage(&self) -> &Arc<dyn Storage> {
+        &self.storage
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.closed.store(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst) == 1
+    }
+}
+
+/// Build field entries from a document for registry upsert.
+fn build_field_entries(document: &DocumentVector) -> Vec<FieldEntry> {
+    document
+        .fields
+        .iter()
+        .map(|(name, field)| FieldEntry {
+            field_name: name.clone(),
+            version: 0,
+            vector_count: field.vector_count(),
+            weight: if field.weight == 0.0 {
+                1.0
+            } else {
+                field.weight
+            },
+            metadata: field.metadata.clone(),
+        })
+        .collect()
+}

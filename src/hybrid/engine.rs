@@ -125,8 +125,7 @@ impl HybridEngine {
         doc_id: u64,
         doc: crate::lexical::document::document::Document,
     ) -> Result<()> {
-        self.lexical_engine
-            .upsert_document(doc_id, doc.clone())?;
+        self.lexical_engine.upsert_document(doc_id, doc.clone())?;
 
         // Update next_doc_id if necessary
         if doc_id >= self.next_doc_id {
@@ -160,7 +159,8 @@ impl HybridEngine {
     /// This does not touch the lexical index. It embeds the payload and
     /// upserts into the vector engine, advancing `next_doc_id` if needed.
     pub fn upsert_vector_payload(&mut self, doc_id: u64, payload: DocumentPayload) -> Result<()> {
-        self.vector_engine.upsert_document_payload(doc_id, payload)?;
+        self.vector_engine
+            .upsert_document_payload(doc_id, payload)?;
         if doc_id >= self.next_doc_id {
             self.next_doc_id = doc_id + 1;
         }
@@ -234,7 +234,7 @@ impl HybridEngine {
         )?;
 
         let vector_results = if let Some(query) = vector_query {
-            let mut results = self.vector_engine.search(&query)?;
+            let mut results = self.vector_engine.search(query)?;
             Self::apply_vector_constraints(&mut results, &vector_params);
             Some(results)
         } else {
@@ -350,6 +350,7 @@ mod tests {
     use crate::storage::Storage;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
+    use crate::vector::collection::factory::VectorCollectionFactory;
     use crate::vector::core::document::{FieldPayload, StoredVector, VectorType};
     use crate::vector::core::vector::Vector;
     use crate::vector::engine::{
@@ -513,9 +514,14 @@ mod tests {
         };
         let storage: Arc<dyn Storage> =
             Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let engine = VectorEngine::new(config, storage, None).expect("engine");
+        let collection =
+            VectorCollectionFactory::create(config, storage, None).expect("collection");
+        let engine = VectorEngine::new(collection).expect("engine");
         engine
-            .register_embedder_instance("mock_embedder", Arc::new(MockTextEmbedder::new(3)))
+            .register_embedder_instance(
+                "mock_embedder".to_string(),
+                Arc::new(MockTextEmbedder::new(3)),
+            )
             .expect("register embedder");
         engine
     }

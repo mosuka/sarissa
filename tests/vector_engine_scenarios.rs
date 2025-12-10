@@ -10,6 +10,7 @@ use platypus::error::Result;
 use platypus::storage::Storage;
 use platypus::storage::memory::MemoryStorage;
 use platypus::vector::DistanceMetric;
+use platypus::vector::collection::factory::VectorCollectionFactory;
 use platypus::vector::core::document::{
     DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
     StoredVector, VectorType,
@@ -39,7 +40,7 @@ fn vector_engine_multi_field_search_prefers_relevant_documents() -> Result<()> {
         weight: 1.0,
     });
 
-    let results = engine.search(&query)?;
+    let results = engine.search(query)?;
     assert_eq!(results.hits.len(), 2);
     assert_eq!(results.hits[0].doc_id, 1);
     assert!(results.hits[0].score >= results.hits[1].score);
@@ -71,7 +72,7 @@ fn vector_engine_respects_document_metadata_filters() -> Result<()> {
         field: MetadataFilter::default(),
     });
 
-    let results = engine.search(&query)?;
+    let results = engine.search(query)?;
     assert_eq!(results.hits.len(), 1);
     assert_eq!(results.hits[0].doc_id, 3);
     Ok(())
@@ -99,7 +100,7 @@ fn vector_engine_field_metadata_filters_limit_hits() -> Result<()> {
         field: field_filter,
     });
 
-    let results = engine.search(&query)?;
+    let results = engine.search(query)?;
     assert!(
         results
             .hits
@@ -118,8 +119,7 @@ fn vector_engine_upserts_and_queries_raw_payloads() -> Result<()> {
     let mut payload = DocumentPayload::new();
     payload.metadata.insert("lang".into(), "en".into());
     payload.add_field("body_embedding", sample_payload("rust embeddings", "body"));
-    let version = engine.upsert_document_payload(42, payload)?;
-    assert!(version > 0);
+    engine.upsert_document_payload(42, payload)?;
 
     let mut query = VectorEngineSearchRequest::default();
     query.limit = 1;
@@ -129,7 +129,7 @@ fn vector_engine_upserts_and_queries_raw_payloads() -> Result<()> {
         sample_payload("embeddings overview", "body"),
     )?);
 
-    let results = engine.search(&query)?;
+    let results = engine.search(query)?;
     assert_eq!(results.hits.len(), 1);
     assert_eq!(results.hits[0].doc_id, 42);
     Ok(())
@@ -150,7 +150,7 @@ fn vector_engine_payload_accepts_image_bytes_segments() -> Result<()> {
         engine.embed_query_field_payload("image_embedding", image_bytes_payload(&[4, 3, 2, 1]))?,
     );
 
-    let results = engine.search(&query)?;
+    let results = engine.search(query)?;
     assert_eq!(results.hits.len(), 1);
     assert_eq!(results.hits[0].doc_id, 99);
     Ok(())
@@ -179,7 +179,7 @@ fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
         .query_vectors
         .extend(engine.embed_query_field_payload("image_embedding", image_uri_payload(query_uri))?);
 
-    let results = engine.search(&query)?;
+    let results = engine.search(query)?;
     assert_eq!(results.hits.len(), 1);
     assert_eq!(results.hits[0].doc_id, 314);
     Ok(())
@@ -188,7 +188,8 @@ fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
 fn build_sample_engine() -> Result<VectorEngine> {
     let config = sample_engine_config();
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let engine = VectorEngine::new(config, storage, None)?;
+    let collection = VectorCollectionFactory::create(config, storage, None)?;
+    let engine = VectorEngine::new(collection)?;
 
     for (doc_id, document) in sample_documents() {
         engine.upsert_document(doc_id, document)?;
@@ -330,9 +331,10 @@ fn build_payload_engine() -> Result<VectorEngine> {
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let engine = VectorEngine::new(config, storage, None)?;
+    let collection = VectorCollectionFactory::create(config, storage, None)?;
+    let engine = VectorEngine::new(collection)?;
     engine.register_embedder_instance(
-        "integration_embedder",
+        "integration_embedder".to_string(),
         Arc::new(IntegrationTestEmbedder::new(4)),
     )?;
     Ok(engine)
@@ -370,11 +372,16 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let engine = VectorEngine::new(config, storage, None)?;
+    let collection = VectorCollectionFactory::create(config, storage, None)?;
+    let engine = VectorEngine::new(collection)?;
     let embedder = Arc::new(IntegrationMultimodalEmbedder::new(3));
     let text: Arc<dyn TextEmbedder> = embedder.clone();
     let image: Arc<dyn ImageEmbedder> = embedder;
-    engine.register_multimodal_embedder_instance("integration_multimodal", text, image)?;
+    engine.register_multimodal_embedder_instance(
+        "integration_multimodal".to_string(),
+        text,
+        image,
+    )?;
     Ok(engine)
 }
 

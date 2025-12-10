@@ -77,10 +77,10 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::error::{PlatypusError, Result};
 use crate::lexical::document::converter::DocumentConverter;
 use crate::lexical::document::document::Document;
 use crate::lexical::document::field::FieldValue;
-use crate::error::{PlatypusError, Result};
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 
 /// A document converter for JSONL format.

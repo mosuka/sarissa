@@ -35,7 +35,10 @@ impl EmbedderInstance {
         }
     }
 
-    pub(crate) fn text_and_image(text: Arc<dyn TextEmbedder>, image: Arc<dyn ImageEmbedder>) -> Self {
+    pub(crate) fn text_and_image(
+        text: Arc<dyn TextEmbedder>,
+        image: Arc<dyn ImageEmbedder>,
+    ) -> Self {
         Self {
             text: Some(text),
             image: Some(image),

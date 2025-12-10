@@ -3,9 +3,9 @@
 //! This module defines the `LexicalIndexWriter` trait which all lexical index writer
 //! implementations must follow. The primary implementation is `InvertedIndexWriter`.
 
+use crate::error::Result;
 use crate::lexical::document::analyzed::AnalyzedDocument;
 use crate::lexical::document::document::Document;
-use crate::error::Result;
 
 /// Trait for lexical index writers.
 ///
@@ -47,11 +47,8 @@ pub trait LexicalIndexWriter: Send + Sync + std::fmt::Debug {
     /// Upsert an already analyzed document to the index with a specific document ID.
     fn upsert_analyzed_document(&mut self, doc_id: u64, doc: AnalyzedDocument) -> Result<()>;
 
-    /// Delete documents matching the given term.
-    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64>;
-
-    /// Update a document (delete old, add new).
-    fn update_document(&mut self, field: &str, value: &str, doc: Document) -> Result<()>;
+    /// Delete a document by ID.
+    fn delete_document(&mut self, doc_id: u64) -> Result<()>;
 
     /// Commit all pending changes to the index.
     fn commit(&mut self) -> Result<()>;

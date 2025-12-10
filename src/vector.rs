@@ -12,6 +12,7 @@
 //! - `engine`: High-level engine interface
 //! - `writer`: Index writer trait
 
+pub mod collection;
 pub mod core;
 pub mod document;
 pub mod index;
