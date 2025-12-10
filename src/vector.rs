@@ -13,6 +13,7 @@
 //! - `writer`: Index writer trait
 
 pub mod core;
+pub mod document;
 pub mod index;
 pub mod search;
 

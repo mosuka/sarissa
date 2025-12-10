@@ -104,7 +104,7 @@ mod candle_vector_example {
         engine.register_embedder_instance(EMBEDDER_CONFIG_ID, Arc::new(per_field_embedder))?;
 
         println!("2) Upsert documents with raw payloads that will be embedded automatically\n");
-        let mut doc1 = DocumentPayload::new(1);
+        let mut doc1 = DocumentPayload::new();
         doc1.add_metadata("lang".to_string(), "en".to_string());
         doc1.add_metadata("category".to_string(), "programming".to_string());
 
@@ -119,7 +119,7 @@ mod candle_vector_example {
         doc1_body.add_metadata("chunk".into(), "rust-body".into());
         doc1.add_field(BODY_FIELD, doc1_body);
 
-        let mut doc2 = DocumentPayload::new(2);
+        let mut doc2 = DocumentPayload::new();
         doc2.add_metadata("lang".to_string(), "ja".to_string());
         doc2.add_metadata("category".to_string(), "ai".to_string());
 
@@ -135,7 +135,7 @@ mod candle_vector_example {
         doc2.add_field(BODY_FIELD, doc2_body);
 
         // doc3 demonstrates splitting a long body into multiple text segments (e.g., per page).
-        let mut doc3 = DocumentPayload::new(3);
+        let mut doc3 = DocumentPayload::new();
         doc3.add_metadata("lang".to_string(), "en".to_string());
         doc3.add_metadata("category".to_string(), "manual".to_string());
 
@@ -159,9 +159,9 @@ mod candle_vector_example {
         );
         doc3.add_field(BODY_FIELD, doc3_body);
 
-        engine.upsert_document_payload(doc1)?;
-        engine.upsert_document_payload(doc2)?;
-        engine.upsert_document_payload(doc3)?;
+        engine.upsert_document_payload(1, doc1)?;
+        engine.upsert_document_payload(2, doc2)?;
+        engine.upsert_document_payload(3, doc3)?;
         println!("   -> Inserted {} docs\n", engine.stats()?.document_count);
 
         println!("3) Build a VectorEngineSearchRequest directly from query text\n");

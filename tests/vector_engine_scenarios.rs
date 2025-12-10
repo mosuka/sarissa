@@ -11,8 +11,8 @@ use platypus::storage::Storage;
 use platypus::storage::memory::MemoryStorage;
 use platypus::vector::DistanceMetric;
 use platypus::vector::core::document::{
-    DocumentPayload, DocumentVectors, FieldPayload, PayloadSource, SegmentPayload, StoredVector,
-    VectorType,
+    DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
+    StoredVector, VectorType,
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
@@ -115,10 +115,10 @@ fn vector_engine_field_metadata_filters_limit_hits() -> Result<()> {
 fn vector_engine_upserts_and_queries_raw_payloads() -> Result<()> {
     let engine = build_payload_engine()?;
 
-    let mut payload = DocumentPayload::new(42);
+    let mut payload = DocumentPayload::new();
     payload.metadata.insert("lang".into(), "en".into());
     payload.add_field("body_embedding", sample_payload("rust embeddings", "body"));
-    let version = engine.upsert_document_payload(payload)?;
+    let version = engine.upsert_document_payload(42, payload)?;
     assert!(version > 0);
 
     let mut query = VectorEngineSearchRequest::default();
@@ -139,9 +139,9 @@ fn vector_engine_upserts_and_queries_raw_payloads() -> Result<()> {
 fn vector_engine_payload_accepts_image_bytes_segments() -> Result<()> {
     let engine = build_multimodal_payload_engine()?;
 
-    let mut payload = DocumentPayload::new(99);
+    let mut payload = DocumentPayload::new();
     payload.add_field("image_embedding", image_bytes_payload(&[1, 2, 3, 4]));
-    engine.upsert_document_payload(payload)?;
+    engine.upsert_document_payload(99, payload)?;
 
     let mut query = VectorEngineSearchRequest::default();
     query.limit = 1;
@@ -164,9 +164,9 @@ fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
     document_file.write_all(&[7, 6, 5, 4])?;
     let document_uri = document_file.path().to_string_lossy().to_string();
 
-    let mut payload = DocumentPayload::new(314);
+    let mut payload = DocumentPayload::new();
     payload.add_field("image_embedding", image_uri_payload(document_uri));
-    engine.upsert_document_payload(payload)?;
+    engine.upsert_document_payload(314, payload)?;
 
     let mut query_file = NamedTempFile::new()?;
     query_file.write_all(&[4, 5, 6, 7])?;
@@ -190,8 +190,8 @@ fn build_sample_engine() -> Result<VectorEngine> {
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
     let engine = VectorEngine::new(config, storage, None)?;
 
-    for document in sample_documents() {
-        engine.upsert_document(document)?;
+    for (doc_id, document) in sample_documents() {
+        engine.upsert_document(doc_id, document)?;
     }
 
     Ok(engine)
@@ -242,9 +242,31 @@ fn stored_query_vector(data: [f32; 4]) -> StoredVector {
     }
 }
 
-fn sample_documents() -> Vec<DocumentVectors> {
-    serde_json::from_str(include_str!("../resources/vector_engine_sample.json"))
-        .expect("vector_engine_sample.json parses")
+fn sample_documents() -> Vec<(u64, DocumentVector)> {
+    #[derive(serde::Deserialize)]
+    struct LegacyDocumentVector {
+        doc_id: u64,
+        #[serde(default)]
+        fields: HashMap<String, FieldVectors>,
+        #[serde(default)]
+        metadata: HashMap<String, String>,
+    }
+
+    let docs: Vec<LegacyDocumentVector> =
+        serde_json::from_str(include_str!("../resources/vector_engine_sample.json"))
+            .expect("vector_engine_sample.json parses");
+
+    docs.into_iter()
+        .map(|legacy| {
+            (
+                legacy.doc_id,
+                DocumentVector {
+                    fields: legacy.fields,
+                    metadata: legacy.metadata,
+                },
+            )
+        })
+        .collect()
 }
 
 fn sample_payload(text: &str, section: &str) -> FieldPayload {
