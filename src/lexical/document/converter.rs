@@ -79,8 +79,8 @@
 
 use std::path::Path;
 
-use crate::lexical::document::document::Document;
 use crate::error::Result;
+use crate::lexical::document::document::Document;
 
 pub mod csv;
 pub mod jsonl;

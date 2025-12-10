@@ -4,8 +4,8 @@ use std::fmt::Debug;
 
 use chrono::{DateTime, Utc};
 
-use crate::lexical::document::field::NumericType;
 use crate::error::Result;
+use crate::lexical::document::field::NumericType;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
 use crate::lexical::index::inverted::query::scorer::{BM25Scorer, Scorer};

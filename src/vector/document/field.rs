@@ -176,7 +176,9 @@ impl FieldVectors {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::document::payload::{METADATA_EMBEDDER_ID, METADATA_VECTOR_TYPE, METADATA_WEIGHT};
+    use crate::vector::document::payload::{
+        METADATA_EMBEDDER_ID, METADATA_VECTOR_TYPE, METADATA_WEIGHT,
+    };
 
     #[test]
     fn stored_vector_conversion_enriches_metadata() {

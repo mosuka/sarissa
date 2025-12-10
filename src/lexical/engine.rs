@@ -309,20 +309,12 @@ impl LexicalEngine {
         Ok(doc_ids)
     }
 
-    /// Delete documents matching the given term.
+    /// Delete a document by ID.
+    ///
     /// Note: You must call `commit()` to persist the changes.
-    pub fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
+    pub fn delete_document(&mut self, doc_id: u64) -> Result<()> {
         let mut writer = self.get_or_create_writer()?;
-        let count = writer.delete_documents(field, value)?;
-
-        Ok(count)
-    }
-
-    /// Update a document (delete old, add new).
-    /// Note: You must call `commit()` to persist the changes.
-    pub fn update_document(&mut self, field: &str, value: &str, doc: Document) -> Result<()> {
-        let mut writer = self.get_or_create_writer()?;
-        writer.update_document(field, value, doc)?;
+        writer.delete_document(doc_id)?;
 
         Ok(())
     }

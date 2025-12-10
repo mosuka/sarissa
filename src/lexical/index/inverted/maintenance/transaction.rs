@@ -10,8 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ahash::AHashMap;
 use uuid::Uuid;
 
-use crate::lexical::document::document::Document;
 use crate::error::{PlatypusError, Result};
+use crate::lexical::document::document::Document;
 use crate::lexical::index::inverted::maintenance::deletion::{
     DeletionManager, GlobalDeletionState,
 };

@@ -9,8 +9,10 @@ use std::time::{Duration, Instant};
 use rayon::prelude::*;
 
 use crate::analysis::analyzer::standard::StandardAnalyzer;
-use crate::lexical::document::field::FieldValue::{Text, Integer, Float, Boolean, Geo, DateTime, Binary, Null};
 use crate::error::{PlatypusError, Result};
+use crate::lexical::document::field::FieldValue::{
+    Binary, Boolean, DateTime, Float, Geo, Integer, Null, Text,
+};
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::boolean::BooleanQuery;
 use crate::lexical::index::inverted::query::collector::{

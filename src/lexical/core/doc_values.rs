@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
 
-use crate::lexical::document::field::FieldValue;
 use crate::error::{PlatypusError, Result};
+use crate::lexical::document::field::FieldValue;
 use crate::storage::Storage;
 
 /// DocValues file extension

@@ -21,6 +21,7 @@ use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use platypus::vector::DistanceMetric;
+use platypus::vector::collection::factory::VectorCollectionFactory;
 use platypus::vector::core::document::{
     DocumentPayload, FieldPayload, PayloadSource, SegmentPayload, VectorType,
 };
@@ -90,9 +91,10 @@ fn main() -> Result<()> {
         metadata: HashMap::new(),
     };
 
-    let engine = VectorEngine::new(config, storage, None)?;
+    let collection = VectorCollectionFactory::create(config, storage, None)?;
+    let engine = VectorEngine::new(collection)?;
     engine.register_multimodal_embedder_instance(
-        MULTIMODAL_EMBEDDER_CONFIG,
+        MULTIMODAL_EMBEDDER_CONFIG.to_string(),
         Arc::clone(&embedder_choice.text),
         Arc::clone(&embedder_choice.image),
     )?;
@@ -144,7 +146,7 @@ fn main() -> Result<()> {
     drop(temp_query_file);
 
     println!("4) Execute the blended search\n");
-    let results = engine.search(&query)?;
+    let results = engine.search(query)?;
     for (rank, hit) in results.hits.iter().enumerate() {
         println!("{}. doc {} • score {:.3}", rank + 1, hit.doc_id, hit.score);
         for field_hit in &hit.field_hits {

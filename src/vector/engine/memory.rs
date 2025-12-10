@@ -12,11 +12,11 @@ use parking_lot::RwLock;
 use crate::error::{PlatypusError, Result};
 use crate::vector::Vector;
 use crate::vector::core::document::FieldVectors;
+use crate::vector::engine::config::VectorFieldConfig;
 use crate::vector::field::{
     FieldHit, FieldSearchInput, FieldSearchResults, VectorField, VectorFieldReader,
     VectorFieldStats, VectorFieldWriter,
 };
-use crate::vector::engine::config::VectorFieldConfig;
 
 #[derive(Clone)]
 pub(crate) struct FieldHandle {

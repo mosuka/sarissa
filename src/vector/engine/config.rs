@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{PlatypusError, Result};
-use crate::vector::core::document::VectorType;
 use crate::vector::DistanceMetric;
+use crate::vector::core::document::VectorType;
 
 /// Configuration for a single vector collection.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,17 +9,17 @@ Platypus is a Rust-based hybrid search engine that unifies Keyword Search, Seman
 The name comes from the platypus — one of the most remarkable real-world creatures, known for combining traits from mammals, birds, and reptiles into a single organism.
 This unique fusion of distinct evolutionary features mirrors the three complementary forms of understanding in modern search:
 
-🦎 Keyword Search — precise retrieval through lexical, symbolic, and linguistic matching.
+Keyword Search — precise retrieval through lexical, symbolic, and linguistic matching.
 
-🦆 Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
+Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
 
-🦫 Multimodal Search — bridging text, images, and other modalities through shared latent representations.
+Multimodal Search — bridging text, images, and other modalities through shared latent representations.
 
 Together, these capabilities form a unified hybrid search architecture — much like the platypus itself, where diverse traits work in harmony to navigate complex environments.
 
 Built in Rust for performance, safety, and extensibility, Platypus aims to provide a next-generation information retrieval platform that supports a broad range of use cases, from research exploration to production deployment.
 
-## ✨ Features
+## Features
 
 ### Core Search Capabilities
 
@@ -65,7 +65,7 @@ Built in Rust for performance, safety, and extensibility, Platypus aims to provi
 - **Schemaless Indexing** - Dynamic schema support for flexible document structures
 - **Document Parsing** - Built-in support for various document formats
 
-## 🚀 Quick Start
+## Quick Start
 
 Add Platypus to your `Cargo.toml`:
 
@@ -82,8 +82,8 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use platypus::analysis::analyzer::analyzer::Analyzer;
 use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::document::document::Document;
-use platypus::document::field::{IntegerOption, TextOption};
+use platypus::lexical::document::document::Document;
+use platypus::lexical::document::field::{IntegerOption, TextOption};
 use platypus::error::Result;
 use platypus::lexical::engine::LexicalEngine;
 use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
@@ -159,12 +159,12 @@ fn main() -> Result<()> {
 }
 ```
 
-### Upsert / Hybrid ingestion
+### Upsert / Hybrid Ingestion
 
-- 既存のドキュメント ID を指定して差し替える場合は `LexicalEngine::upsert_document(doc_id, doc)` を利用してください。`add_document` は自動採番のみを行います。
-- ハイブリッド構成ではレキシカルとベクターを別々に登録します。まず `HybridEngine::add_document`/`upsert_document` でレキシカルを書き込み、埋め込み済みベクターは `HybridEngine::upsert_vector_document`、生テキストを埋め込みながら登録する場合は `HybridEngine::upsert_vector_payload` を使います。
+- To replace an existing document with a specific ID, use `LexicalEngine::upsert_document(doc_id, doc)`. The `add_document` method only performs automatic ID assignment.
+- In hybrid configurations, lexical and vector data are registered separately. First use `HybridEngine::add_document`/`upsert_document` to write lexical data, then use `HybridEngine::upsert_vector_document` for pre-embedded vectors, or `HybridEngine::upsert_vector_payload` to register raw text and embed it on the fly.
 
-## 🏗️ Architecture
+## Architecture
 
 Platypus is built with a modular architecture:
 
@@ -178,14 +178,28 @@ Platypus is built with a modular architecture:
 - **Hybrid Search** - Combined lexical and vector search with configurable score fusion
 - **Query Engine** - Flexible query system supporting multiple query types
 
+### Engine Design Pattern
+
+Both `LexicalEngine` and `VectorEngine` follow the same facade + factory pattern:
+
+```rust
+// LexicalEngine pattern
+let index = LexicalIndexFactory::create(storage, config)?;
+let engine = LexicalEngine::new(index)?;
+
+// VectorEngine pattern
+let collection = VectorCollectionFactory::create(config, storage, None)?;
+let engine = VectorEngine::new(collection)?;
+```
+
 ### Field Types
 
 Platypus supports the following field value types through the `Document` builder API:
 
 ```rust
 use chrono::Utc;
-use platypus::document::document::Document;
-use platypus::document::field::{
+use platypus::lexical::document::document::Document;
+use platypus::lexical::document::field::{
     BinaryOption, BooleanOption, DateTimeOption, FloatOption, GeoOption, IntegerOption,
     TextOption, VectorOption,
 };
@@ -269,7 +283,18 @@ let query = Box::new(GeoBoundingBoxQuery::new(
 ));
 ```
 
-## 🎯 Advanced Features
+## Document Operations
+
+Both `LexicalEngine` and `VectorEngine` provide consistent document operations:
+
+| Operation | Method | Description |
+|-----------|--------|-------------|
+| Add | `add_document(doc) -> Result<u64>` | Add document with auto-assigned ID |
+| Upsert | `upsert_document(doc_id, doc) -> Result<()>` | Insert or replace document with specific ID |
+| Delete | `delete_document(doc_id) -> Result<()>` | Delete document by ID |
+| Commit | `commit() -> Result<()>` | Persist pending changes |
+
+## Advanced Features
 
 ### Vector Search with Text Embeddings
 
@@ -285,44 +310,63 @@ platypus = { version = "0.1", features = ["embeddings-candle"] }
 ```rust
 use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
-use platypus::vector::engine::{QueryVector, VectorEngineSearchRequest};
-use platypus::vector::core::document::StoredVector;
-use platypus::vector::core::vector::Vector;
-use platypus::vector::DistanceMetric;
+use platypus::vector::engine::request::{QueryVector, VectorEngineSearchRequest};
+use platypus::vector::core::document::{DocumentVector, FieldVectors, StoredVector, VectorType};
 use platypus::vector::engine::VectorEngine;
-use platypus::vector::index::{FlatIndexConfig, VectorIndexConfig, VectorIndexFactory};
+use platypus::vector::engine::config::{VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
+use platypus::vector::collection::factory::VectorCollectionFactory;
+use platypus::vector::DistanceMetric;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
+use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> platypus::error::Result<()> {
     // Initialize embedder with a sentence-transformers model
     let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
 
+    // Create vector engine configuration
+    let field_config = VectorFieldConfig {
+        dimension: embedder.dimension(),
+        distance: DistanceMetric::Cosine,
+        index: VectorIndexKind::Flat,
+        embedder_id: "candle".into(),
+        vector_type: VectorType::Text,
+        embedder: None,
+        base_weight: 1.0,
+    };
+    let config = VectorEngineConfig {
+        fields: HashMap::from([("body".into(), field_config)]),
+        embedders: HashMap::new(),
+        default_fields: vec!["body".into()],
+        metadata: HashMap::new(),
+    };
+
+    // Create storage and engine via factory
+    let storage: Arc<dyn platypus::storage::Storage> =
+        Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let collection = VectorCollectionFactory::create(config, storage, None)?;
+    let engine = VectorEngine::new(collection)?;
+
     // Generate embeddings for documents
     let documents = vec![
-        (1, "Rust is a systems programming language"),
-        (2, "Python is great for data science"),
-        (3, "Machine learning with neural networks"),
+        "Rust is a systems programming language",
+        "Python is great for data science",
+        "Machine learning with neural networks",
     ];
 
-    // Create vector index configuration
-    let vector_config = VectorIndexConfig::Flat(FlatIndexConfig {
-        dimension: embedder.dimension(),
-        distance_metric: DistanceMetric::Cosine,
-        normalize_vectors: true,
-        ..Default::default()
-    });
-
-    // Create storage and index
-    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let index = VectorIndexFactory::create(storage, vector_config)?;
-    let mut engine = VectorEngine::new(index)?;
-
     // Add documents with their embeddings
-    for (id, text) in &documents {
+    for text in &documents {
         let vector = embedder.embed(text).await?;
-        engine.add_vector(*id, vector)?;
+        let mut doc = DocumentVector::new();
+        let mut field_vectors = FieldVectors::default();
+        field_vectors.vectors.push(StoredVector::new(
+            Arc::from(vector.as_slice()),
+            "candle".into(),
+            VectorType::Text,
+        ));
+        doc.add_field("body", field_vectors);
+        engine.add_document(doc)?;
     }
     engine.commit()?;
 
@@ -331,7 +375,11 @@ async fn main() -> platypus::error::Result<()> {
     let mut query = VectorEngineSearchRequest::default();
     query.limit = 10;
     query.query_vectors.push(QueryVector {
-        vector: StoredVector::from(query_vector),
+        vector: StoredVector::new(
+            Arc::from(query_vector.as_slice()),
+            "candle".into(),
+            VectorType::Text,
+        ),
         weight: 1.0,
     });
     let results = engine.search(query)?;
@@ -365,27 +413,29 @@ let embedder = OpenAITextEmbedder::new(
 let vector = embedder.embed("your text here").await?;
 ```
 
-### Doc-centric VectorEngine (Experimental)
+### Doc-centric VectorEngine
 
 Platypus ships a document-centric vector flow where each `doc_id` owns multiple named vector fields and metadata. The full architecture is captured in `docs/vector_engine.md`, and two handy entry points are provided:
 
-- `resources/vector_engine_sample.json` — three synthetic `DocumentVector` with field-level and document-level metadata for trying out `MetadataFilter` / `FieldSelector` scenarios.
+- `resources/vector_engine_sample.json` — three synthetic `DocumentVector` entries with field-level and document-level metadata for trying out `MetadataFilter` / `FieldSelector` scenarios.
 - `cargo test --test vector_engine_scenarios` — spins up an in-memory engine, loads the sample, and verifies multi-field scoring plus metadata filters end to end.
 
 You can also use the sample data in your own experiments:
 
 ```rust
 use platypus::vector::engine::VectorEngine;
-use platypus::vector::engine::VectorEngineConfig;
+use platypus::vector::engine::config::VectorEngineConfig;
+use platypus::vector::collection::factory::VectorCollectionFactory;
 use platypus::vector::core::document::DocumentVector;
 
 let config: VectorEngineConfig = load_vector_engine_config()?; // see docs/vector_engine.md
 let sample_docs: Vec<DocumentVector> = serde_json::from_str(include_str!(
     "resources/vector_engine_sample.json"
 ))?;
-let engine = VectorEngine::new(config, storage, None)?;
+let collection = VectorCollectionFactory::create(config, storage, None)?;
+let engine = VectorEngine::new(collection)?;
 for doc in sample_docs {
-    engine.upsert_document(doc)?;
+    engine.add_document(doc)?;
 }
 ```
 
@@ -397,9 +447,8 @@ When you prefer not to precompute vectors yourself, hand the engine raw text pay
 
 ```rust
 use platypus::vector::core::document::{DocumentPayload, FieldPayload, RawTextSegment};
-use platypus::vector::engine::{
-    FieldSelector, VectorEngine, VectorEngineSearchRequest,
-};
+use platypus::vector::engine::request::{FieldSelector, VectorEngineSearchRequest};
+use platypus::vector::engine::VectorEngine;
 
 let mut payload = DocumentPayload::new();
 let mut body = FieldPayload::default();
@@ -417,7 +466,7 @@ query.query_vectors.extend(engine.embed_query_field_payload(
         q
     },
 )?);
-let hits = engine.search(&query)?;
+let hits = engine.search(query)?;
 ```
 
 These helpers power `examples/vector_search.rs` and the `vector_engine_upserts_and_queries_raw_payloads` integration test, so you can follow the same pattern or wrap it through `HybridSearchRequest::with_vector_text` when composing hybrid searches.
@@ -428,9 +477,10 @@ These helpers power `examples/vector_search.rs` and the `vector_engine_upserts_a
 
 ```rust
 use platypus::hybrid::search::searcher::{HybridSearchRequest, ScoreNormalization};
-use platypus::vector::engine::{
-    FieldSelector, QueryVector, VectorEngineFilter, VectorEngineSearchRequest, VectorScoreMode,
+use platypus::vector::engine::request::{
+    FieldSelector, QueryVector, VectorEngineSearchRequest, VectorScoreMode,
 };
+use platypus::vector::engine::filter::VectorEngineFilter;
 use platypus::vector::core::document::StoredVector;
 use platypus::vector::search::searcher::VectorSearchParams;
 
@@ -495,35 +545,56 @@ platypus = { version = "0.1", features = ["embeddings-multimodal"] }
 use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::embedding::image_embedder::ImageEmbedder;
-use platypus::vector::engine::{QueryVector, VectorEngineSearchRequest};
-use platypus::vector::core::document::StoredVector;
+use platypus::vector::engine::request::{QueryVector, VectorEngineSearchRequest};
+use platypus::vector::core::document::{DocumentVector, FieldVectors, StoredVector, VectorType};
 use platypus::vector::engine::VectorEngine;
-use platypus::vector::index::{HnswIndexConfig, VectorIndexConfig, VectorIndexFactory};
+use platypus::vector::engine::config::{VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
+use platypus::vector::collection::factory::VectorCollectionFactory;
 use platypus::vector::DistanceMetric;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
+use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> platypus::error::Result<()> {
     // Initialize CLIP embedder (automatically downloads model from HuggingFace)
     let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 
-    // Create vector index with CLIP's embedding dimension (512)
-    let vector_config = VectorIndexConfig::Hnsw(HnswIndexConfig {
+    // Create vector engine configuration with CLIP's embedding dimension (512)
+    let field_config = VectorFieldConfig {
         dimension: ImageEmbedder::dimension(&embedder), // 512 for CLIP ViT-Base-Patch32
-        distance_metric: DistanceMetric::Cosine,
-        ..Default::default()
-    });
+        distance: DistanceMetric::Cosine,
+        index: VectorIndexKind::Hnsw,
+        embedder_id: "clip".into(),
+        vector_type: VectorType::Image,
+        embedder: None,
+        base_weight: 1.0,
+    };
+    let config = VectorEngineConfig {
+        fields: HashMap::from([("image".into(), field_config)]),
+        embedders: HashMap::new(),
+        default_fields: vec!["image".into()],
+        metadata: HashMap::new(),
+    };
 
-    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let index = VectorIndexFactory::create(storage, vector_config)?;
-    let mut engine = VectorEngine::new(index)?;
+    let storage: Arc<dyn platypus::storage::Storage> =
+        Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let collection = VectorCollectionFactory::create(config, storage, None)?;
+    let engine = VectorEngine::new(collection)?;
 
     // Index your image collection
     let image_paths = vec!["image1.jpg", "image2.jpg", "image3.jpg"];
-    for (id, image_path) in image_paths.iter().enumerate() {
+    for image_path in &image_paths {
         let vector = embedder.embed_image(image_path).await?;
-        engine.add_vector(id as u64, vector)?;
+        let mut doc = DocumentVector::new();
+        let mut field_vectors = FieldVectors::default();
+        field_vectors.vectors.push(StoredVector::new(
+            Arc::from(vector.as_slice()),
+            "clip".into(),
+            VectorType::Image,
+        ));
+        doc.add_field("image", field_vectors);
+        engine.add_document(doc)?;
     }
     engine.commit()?;
 
@@ -532,7 +603,11 @@ async fn main() -> platypus::error::Result<()> {
     let mut query = VectorEngineSearchRequest::default();
     query.limit = 10;
     query.query_vectors.push(QueryVector {
-        vector: StoredVector::from(query_vector),
+        vector: StoredVector::new(
+            Arc::from(query_vector.as_slice()),
+            "clip".into(),
+            VectorType::Text,
+        ),
         weight: 1.0,
     });
     let results = engine.search(query)?;
@@ -553,7 +628,11 @@ let query_image_vector = embedder.embed_image("query.jpg").await?;
 let mut query = VectorEngineSearchRequest::default();
 query.limit = 5;
 query.query_vectors.push(QueryVector {
-    vector: StoredVector::from(query_image_vector),
+    vector: StoredVector::new(
+        Arc::from(query_image_vector.as_slice()),
+        "clip".into(),
+        VectorType::Image,
+    ),
     weight: 1.0,
 });
 let results = engine.search(query)?;
@@ -600,7 +679,7 @@ cargo run --example image_to_image_search --features embeddings-multimodal -- qu
 ```rust
 use platypus::lexical::index::inverted::query::term::TermQuery;
 use platypus::lexical::search::facet::{FacetConfig, FacetedSearchEngine};
-use platypus::lexical::types::LexicalSearchRequest;
+use platypus::lexical::search::searcher::LexicalSearchRequest;
 
 // Create faceted search engine
 let facet_config = FacetConfig {
@@ -688,11 +767,11 @@ use platypus::analysis::analyzer::pipeline::PipelineAnalyzer;
 let tokenizer = LinderaTokenizer::japanese()?;
 let analyzer = PipelineAnalyzer::new(Box::new(tokenizer));
 
-let text = "東京は日本の首都です";
+let text = "Tokyo is the capital of Japan";
 let tokens = analyzer.analyze(text)?;
 ```
 
-## 📊 Performance
+## Performance
 
 Platypus is designed for high performance:
 
@@ -701,7 +780,7 @@ Platypus is designed for high performance:
 - **Incremental Updates** - Real-time document addition without full reindexing
 - **Index Optimization** - Background merge operations for optimal search performance
 
-## 🛠️ Development
+## Development
 
 ### Building from Source
 
@@ -730,7 +809,7 @@ cargo clippy
 cargo fmt --check
 ```
 
-## 📖 Examples
+## Examples
 
 Platypus includes numerous examples demonstrating various features:
 
@@ -777,7 +856,7 @@ cargo run --example text_to_image_search --features embeddings-multimodal
 cargo run --example image_to_image_search --features embeddings-multimodal
 ```
 
-## 🔧 Feature Flags
+## Feature Flags
 
 Platypus uses feature flags to enable optional functionality:
 
@@ -803,23 +882,23 @@ Available features:
 - `embeddings-multimodal` - Multimodal embeddings (text and images) using CLIP models
 - `embeddings-all` - All embedding providers
 
-## 📚 Documentation
+## Documentation
 
 - [API Documentation](https://docs.rs/platypus)
 - [User Guide](https://github.com/mosuka/platypus/wiki)
 - [Examples](./examples/)
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)  
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under either of
 
