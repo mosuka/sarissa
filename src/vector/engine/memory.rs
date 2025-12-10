@@ -1,0 +1,369 @@
+//! VectorEngine インメモリフィールド実装
+//!
+//! このモジュールはインメモリでベクトルを管理するフィールド実装を提供する。
+
+use std::cmp::Ordering as CmpOrdering;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
+use crate::error::{PlatypusError, Result};
+use crate::vector::Vector;
+use crate::vector::core::document::FieldVectors;
+use crate::vector::field::{
+    FieldHit, FieldSearchInput, FieldSearchResults, VectorField, VectorFieldReader,
+    VectorFieldStats, VectorFieldWriter,
+};
+use crate::vector::engine::config::VectorFieldConfig;
+
+#[derive(Clone)]
+pub(crate) struct FieldHandle {
+    pub(crate) field: Arc<dyn VectorField>,
+    pub(crate) runtime: Arc<FieldRuntime>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FieldRuntime {
+    default_reader: Arc<dyn VectorFieldReader>,
+    current_reader: RwLock<Arc<dyn VectorFieldReader>>,
+    writer: Arc<dyn VectorFieldWriter>,
+}
+
+impl FieldRuntime {
+    pub(crate) fn new(
+        reader: Arc<dyn VectorFieldReader>,
+        writer: Arc<dyn VectorFieldWriter>,
+    ) -> Self {
+        Self {
+            current_reader: RwLock::new(reader.clone()),
+            default_reader: reader,
+            writer,
+        }
+    }
+
+    pub(crate) fn from_field(field: &Arc<dyn VectorField>) -> Arc<Self> {
+        Arc::new(Self::new(field.reader_handle(), field.writer_handle()))
+    }
+
+    pub(crate) fn reader(&self) -> Arc<dyn VectorFieldReader> {
+        self.current_reader.read().clone()
+    }
+
+    pub(crate) fn writer(&self) -> Arc<dyn VectorFieldWriter> {
+        self.writer.clone()
+    }
+
+    pub(crate) fn replace_reader(
+        &self,
+        reader: Arc<dyn VectorFieldReader>,
+    ) -> Arc<dyn VectorFieldReader> {
+        let mut guard = self.current_reader.write();
+        std::mem::replace(&mut *guard, reader)
+    }
+
+    pub(crate) fn reset_reader(&self) -> Arc<dyn VectorFieldReader> {
+        self.replace_reader(self.default_reader.clone())
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct InMemoryVectorField {
+    name: String,
+    config: VectorFieldConfig,
+    store: Arc<FieldStore>,
+    writer: Arc<InMemoryFieldWriter>,
+    reader: Arc<InMemoryFieldReader>,
+}
+
+impl InMemoryVectorField {
+    pub(crate) fn new(
+        name: String,
+        config: VectorFieldConfig,
+        delegate: Option<Arc<dyn VectorFieldWriter>>,
+    ) -> Result<Self> {
+        let store = Arc::new(FieldStore::default());
+        let writer = Arc::new(InMemoryFieldWriter::new(
+            name.clone(),
+            config.clone(),
+            store.clone(),
+            delegate,
+        ));
+        let reader = Arc::new(InMemoryFieldReader::new(
+            name.clone(),
+            config.clone(),
+            store.clone(),
+        ));
+        Ok(Self {
+            name,
+            config,
+            store,
+            writer,
+            reader,
+        })
+    }
+
+    pub(crate) fn vector_tuples(&self) -> Vec<(u64, String, Vector)> {
+        self.store.vector_tuples(&self.name)
+    }
+}
+
+impl VectorField for InMemoryVectorField {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn config(&self) -> &VectorFieldConfig {
+        &self.config
+    }
+
+    fn writer(&self) -> &dyn VectorFieldWriter {
+        self.writer.as_ref()
+    }
+
+    fn reader(&self) -> &dyn VectorFieldReader {
+        self.reader.as_ref()
+    }
+
+    fn writer_handle(&self) -> Arc<dyn VectorFieldWriter> {
+        self.writer.clone()
+    }
+
+    fn reader_handle(&self) -> Arc<dyn VectorFieldReader> {
+        self.reader.clone()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct InMemoryFieldWriter {
+    field_name: String,
+    config: VectorFieldConfig,
+    store: Arc<FieldStore>,
+    delegate: Option<Arc<dyn VectorFieldWriter>>,
+}
+
+impl InMemoryFieldWriter {
+    fn new(
+        field_name: String,
+        config: VectorFieldConfig,
+        store: Arc<FieldStore>,
+        delegate: Option<Arc<dyn VectorFieldWriter>>,
+    ) -> Self {
+        Self {
+            field_name,
+            config,
+            store,
+            delegate,
+        }
+    }
+
+    fn convert_vectors(&self, field: &FieldVectors) -> Result<Vec<Vector>> {
+        let mut vectors = Vec::with_capacity(field.vector_count());
+        for stored in &field.vectors {
+            let vector = stored.to_vector();
+            if vector.dimension() != self.config.dimension {
+                return Err(PlatypusError::invalid_argument(format!(
+                    "vector dimension mismatch for field '{}': expected {}, got {}",
+                    self.field_name,
+                    self.config.dimension,
+                    vector.dimension()
+                )));
+            }
+            if !vector.is_valid() {
+                return Err(PlatypusError::invalid_argument(format!(
+                    "vector for field '{}' contains invalid values",
+                    self.field_name
+                )));
+            }
+            vectors.push(vector);
+        }
+        Ok(vectors)
+    }
+}
+
+impl VectorFieldWriter for InMemoryFieldWriter {
+    fn add_field_vectors(&self, doc_id: u64, field: &FieldVectors, version: u64) -> Result<()> {
+        if field.vectors.is_empty() {
+            self.store.remove(doc_id);
+            if let Some(delegate) = &self.delegate {
+                delegate.delete_document(doc_id, version)?;
+            }
+            return Ok(());
+        }
+
+        if let Some(delegate) = &self.delegate {
+            delegate.add_field_vectors(doc_id, field, version)?;
+        }
+
+        let vectors = self.convert_vectors(field)?;
+        self.store.replace(doc_id, FieldStoreEntry { vectors });
+        Ok(())
+    }
+
+    fn delete_document(&self, doc_id: u64, version: u64) -> Result<()> {
+        self.store.remove(doc_id);
+        if let Some(delegate) = &self.delegate {
+            delegate.delete_document(doc_id, version)?;
+        }
+        Ok(())
+    }
+
+    fn flush(&self) -> Result<()> {
+        if let Some(delegate) = &self.delegate {
+            delegate.flush()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct InMemoryFieldReader {
+    field_name: String,
+    config: VectorFieldConfig,
+    store: Arc<FieldStore>,
+}
+
+impl InMemoryFieldReader {
+    fn new(field_name: String, config: VectorFieldConfig, store: Arc<FieldStore>) -> Self {
+        Self {
+            field_name,
+            config,
+            store,
+        }
+    }
+}
+
+impl VectorFieldReader for InMemoryFieldReader {
+    fn search(&self, request: FieldSearchInput) -> Result<FieldSearchResults> {
+        if request.field != self.field_name {
+            return Err(PlatypusError::invalid_argument(format!(
+                "field mismatch: expected '{}', got '{}'",
+                self.field_name, request.field
+            )));
+        }
+
+        if request.query_vectors.is_empty() {
+            return Ok(FieldSearchResults::default());
+        }
+
+        let snapshot = self.store.snapshot();
+        let mut merged: HashMap<u64, FieldHit> = HashMap::new();
+
+        for query in &request.query_vectors {
+            let query_vector = query.vector.to_vector();
+            if query_vector.dimension() != self.config.dimension {
+                return Err(PlatypusError::invalid_argument(format!(
+                    "query vector dimension mismatch for field '{}': expected {}, got {}",
+                    self.field_name,
+                    self.config.dimension,
+                    query_vector.dimension()
+                )));
+            }
+            let effective_weight = query.weight * query.vector.weight;
+            if effective_weight == 0.0 {
+                continue;
+            }
+
+            for (doc_id, entry) in &snapshot {
+                for vector in &entry.vectors {
+                    let similarity = self
+                        .config
+                        .distance
+                        .similarity(&query_vector.data, &vector.data)?;
+                    let distance = self
+                        .config
+                        .distance
+                        .distance(&query_vector.data, &vector.data)?;
+                    let weighted_score = similarity * effective_weight;
+                    if weighted_score == 0.0 {
+                        continue;
+                    }
+
+                    match merged.entry(*doc_id) {
+                        Entry::Vacant(slot) => {
+                            slot.insert(FieldHit {
+                                doc_id: *doc_id,
+                                field: self.field_name.clone(),
+                                score: weighted_score,
+                                distance,
+                                metadata: vector.metadata.clone(),
+                            });
+                        }
+                        Entry::Occupied(mut slot) => {
+                            let hit = slot.get_mut();
+                            hit.score += weighted_score;
+                            hit.distance = hit.distance.min(distance);
+                            if hit.metadata.is_empty() {
+                                hit.metadata = vector.metadata.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut hits: Vec<FieldHit> = merged.into_values().collect();
+        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(CmpOrdering::Equal));
+        if hits.len() > request.limit {
+            hits.truncate(request.limit);
+        }
+
+        Ok(FieldSearchResults { hits })
+    }
+
+    fn stats(&self) -> Result<VectorFieldStats> {
+        Ok(VectorFieldStats {
+            vector_count: self.store.total_vectors(),
+            dimension: self.config.dimension,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct FieldStore {
+    entries: RwLock<HashMap<u64, FieldStoreEntry>>,
+}
+
+impl FieldStore {
+    pub(crate) fn replace(&self, doc_id: u64, entry: FieldStoreEntry) {
+        self.entries.write().insert(doc_id, entry);
+    }
+
+    pub(crate) fn remove(&self, doc_id: u64) {
+        self.entries.write().remove(&doc_id);
+    }
+
+    pub(crate) fn snapshot(&self) -> HashMap<u64, FieldStoreEntry> {
+        self.entries.read().clone()
+    }
+
+    pub(crate) fn total_vectors(&self) -> usize {
+        self.entries
+            .read()
+            .values()
+            .map(|entry| entry.vectors.len())
+            .sum()
+    }
+
+    pub(crate) fn vector_tuples(&self, field_name: &str) -> Vec<(u64, String, Vector)> {
+        let guard = self.entries.read();
+        let mut tuples = Vec::new();
+        let name = field_name.to_string();
+        for (doc_id, entry) in guard.iter() {
+            for vector in &entry.vectors {
+                tuples.push((*doc_id, name.clone(), vector.clone()));
+            }
+        }
+        tuples
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FieldStoreEntry {
+    pub(crate) vectors: Vec<Vector>,
+}

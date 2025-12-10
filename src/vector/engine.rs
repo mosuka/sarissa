@@ -1,30 +1,60 @@
-//! Experimental doc-centric vector collection implementation.
+//! VectorEngine: ドキュメント中心のベクトルコレクション実装
+//!
+//! このモジュールは複数のベクトルフィールドを管理する高レベルのコレクションエンジンを提供する。
+//!
+//! # モジュール構成
+//!
+//! - [`config`] - 設定型（VectorEngineConfig, VectorFieldConfig, VectorIndexKind）
+//! - [`embedder`] - 埋め込みレジストリとエグゼキュータ
+//! - [`filter`] - メタデータフィルタリング
+//! - [`memory`] - インメモリフィールド実装
+//! - [`registry`] - ドキュメントベクトルレジストリ
+//! - [`request`] - 検索リクエスト型
+//! - [`response`] - 検索レスポンス型
+//! - [`snapshot`] - スナップショット永続化
+//! - [`wal`] - Write-Ahead Logging
+//!
+//! # 使用例
+//!
+//! ```ignore
+//! use platypus::vector::engine::{VectorEngine, VectorEngineConfig, VectorFieldConfig};
+//!
+//! let config = VectorEngineConfig::default();
+//! let engine = VectorEngine::new(config, storage, None)?;
+//! ```
+
+pub mod config;
+pub mod embedder;
+pub mod filter;
+pub mod memory;
+pub mod registry;
+pub mod request;
+pub mod response;
+pub mod snapshot;
+pub mod wal;
 
 use std::cmp::Ordering as CmpOrdering;
-use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::future::Future;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
-use serde::{Deserialize, Serialize};
 
 use crate::embedding::image_embedder::ImageEmbedder;
 use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
-use crate::vector::DistanceMetric;
 use crate::vector::core::document::{
     DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
     StoredVector, VectorType,
 };
 use crate::vector::core::vector::Vector;
 use crate::vector::field::{
-    FieldHit, FieldSearchInput, FieldSearchResults, VectorField, VectorFieldReader,
-    VectorFieldStats, VectorFieldWriter,
+    FieldHit, FieldSearchInput, VectorField, VectorFieldReader, VectorFieldStats,
+    VectorFieldWriter,
 };
 use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
 use crate::vector::index::field::{
@@ -40,7 +70,6 @@ use crate::vector::index::ivf::{
     reader::IvfIndexReader, searcher::IvfSearcher, writer::IvfIndexWriter,
 };
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
-use tokio::runtime::Builder as TokioRuntimeBuilder;
 
 #[cfg(feature = "embeddings-multimodal")]
 use crate::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
@@ -48,6 +77,23 @@ use crate::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use crate::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(feature = "embeddings-openai")]
 use crate::embedding::openai_text_embedder::OpenAITextEmbedder;
+
+pub use config::{VectorEmbedderConfig, VectorEmbedderProvider, VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
+pub use filter::{MetadataFilter, VectorEngineFilter};
+pub use registry::{DocumentVectorRegistry, RegistryVersion};
+pub use request::{FieldSelector, QueryVector, VectorEngineSearchRequest, VectorScoreMode};
+pub use response::{VectorEngineHit, VectorEngineSearchResults, VectorEngineStats};
+
+use embedder::{EmbedderExecutor, VectorEmbedderRegistry};
+use filter::RegistryFilterMatches;
+use memory::{FieldHandle, FieldRuntime, InMemoryVectorField};
+use registry::{DocumentEntry, FieldEntry};
+use snapshot::{
+    CollectionManifest, DocumentSnapshot, SnapshotDocument, COLLECTION_MANIFEST_FILE,
+    COLLECTION_MANIFEST_VERSION, DOCUMENT_SNAPSHOT_FILE, DOCUMENT_SNAPSHOT_TEMP_FILE,
+    FIELD_INDEX_BASENAME, REGISTRY_NAMESPACE, REGISTRY_SNAPSHOT_FILE, REGISTRY_WAL_FILE,
+};
+use wal::{VectorWal, WalPayload, WalRecord, WAL_COMPACTION_THRESHOLD};
 
 /// High-level collection combining multiple vector fields.
 pub struct VectorEngine {
@@ -61,305 +107,6 @@ pub struct VectorEngine {
     documents: Arc<RwLock<HashMap<u64, DocumentVector>>>,
     snapshot_wal_seq: AtomicU64,
     next_doc_id: AtomicU64,
-}
-
-#[derive(Clone)]
-struct FieldHandle {
-    field: Arc<dyn VectorField>,
-    runtime: Arc<FieldRuntime>,
-}
-
-#[derive(Debug)]
-struct FieldRuntime {
-    default_reader: Arc<dyn VectorFieldReader>,
-    current_reader: RwLock<Arc<dyn VectorFieldReader>>,
-    writer: Arc<dyn VectorFieldWriter>,
-}
-
-#[derive(Clone)]
-struct EmbedderInstance {
-    text: Option<Arc<dyn TextEmbedder>>,
-    image: Option<Arc<dyn ImageEmbedder>>,
-}
-
-impl EmbedderInstance {
-    fn text_only(embedder: Arc<dyn TextEmbedder>) -> Self {
-        Self {
-            text: Some(embedder),
-            image: None,
-        }
-    }
-
-    fn text_and_image(text: Arc<dyn TextEmbedder>, image: Arc<dyn ImageEmbedder>) -> Self {
-        Self {
-            text: Some(text),
-            image: Some(image),
-        }
-    }
-}
-
-struct VectorEmbedderRegistry {
-    configs: HashMap<String, VectorEmbedderConfig>,
-    instances: RwLock<HashMap<String, EmbedderInstance>>,
-}
-
-impl VectorEmbedderRegistry {
-    fn new(configs: HashMap<String, VectorEmbedderConfig>) -> Self {
-        Self {
-            configs,
-            instances: RwLock::new(HashMap::new()),
-        }
-    }
-
-    fn resolve_text(&self, embedder_id: &str) -> Result<Arc<dyn TextEmbedder>> {
-        let instance = self.ensure_instance(embedder_id)?;
-        instance.text.clone().ok_or_else(|| {
-            PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' does not expose text embedding capabilities"
-            ))
-        })
-    }
-
-    fn resolve_image(&self, embedder_id: &str) -> Result<Arc<dyn ImageEmbedder>> {
-        let instance = self.ensure_instance(embedder_id)?;
-        instance.image.clone().ok_or_else(|| {
-            PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' does not expose image embedding capabilities"
-            ))
-        })
-    }
-
-    fn ensure_instance(&self, embedder_id: &str) -> Result<EmbedderInstance> {
-        if let Some(instance) = self.instances.read().get(embedder_id) {
-            return Ok(instance.clone());
-        }
-
-        let config = self.configs.get(embedder_id).ok_or_else(|| {
-            PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' is not defined in VectorEngineConfig.embedders"
-            ))
-        })?;
-
-        let instance = self.instantiate(embedder_id, config)?;
-        self.instances
-            .write()
-            .insert(embedder_id.to_string(), instance.clone());
-        Ok(instance)
-    }
-
-    fn instantiate(
-        &self,
-        embedder_id: &str,
-        config: &VectorEmbedderConfig,
-    ) -> Result<EmbedderInstance> {
-        match config.provider {
-            VectorEmbedderProvider::CandleText => {
-                Self::instantiate_candle_text(embedder_id, config)
-            }
-            VectorEmbedderProvider::CandleMultimodal => {
-                Self::instantiate_candle_multimodal(embedder_id, config)
-            }
-            VectorEmbedderProvider::OpenAiText => {
-                Self::instantiate_openai_text(embedder_id, config)
-            }
-            VectorEmbedderProvider::External => Err(PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' uses provider 'external' and requires a runtime instance via register_embedder_instance"
-            ))),
-        }
-    }
-
-    fn register_external(
-        &self,
-        embedder_id: String,
-        embedder: Arc<dyn TextEmbedder>,
-    ) -> Result<()> {
-        self.register_external_with_image(embedder_id, embedder, None)
-    }
-
-    pub(super) fn register_external_with_image(
-        &self,
-        embedder_id: String,
-        text_embedder: Arc<dyn TextEmbedder>,
-        image_embedder: Option<Arc<dyn ImageEmbedder>>,
-    ) -> Result<()> {
-        let config = self.configs.get(&embedder_id).ok_or_else(|| {
-            PlatypusError::invalid_config(format!(
-                "cannot register embedder '{embedder_id}' that is not declared in config"
-            ))
-        })?;
-
-        if !matches!(config.provider, VectorEmbedderProvider::External) {
-            return Err(PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' does not use provider 'external'"
-            )));
-        }
-
-        let instance = match image_embedder {
-            Some(image) => EmbedderInstance::text_and_image(text_embedder, image),
-            None => EmbedderInstance::text_only(text_embedder),
-        };
-        self.instances.write().insert(embedder_id, instance);
-        Ok(())
-    }
-
-    #[cfg(feature = "embeddings-candle")]
-    fn instantiate_candle_text(
-        _embedder_id: &str,
-        config: &VectorEmbedderConfig,
-    ) -> Result<EmbedderInstance> {
-        let embedder = Arc::new(CandleTextEmbedder::new(config.model.as_str())?);
-        Ok(EmbedderInstance::text_only(embedder))
-    }
-
-    #[cfg(not(feature = "embeddings-candle"))]
-    fn instantiate_candle_text(
-        embedder_id: &str,
-        _: &VectorEmbedderConfig,
-    ) -> Result<EmbedderInstance> {
-        Err(Self::missing_feature("embeddings-candle", embedder_id))
-    }
-
-    #[cfg(feature = "embeddings-multimodal")]
-    fn instantiate_candle_multimodal(
-        _embedder_id: &str,
-        config: &VectorEmbedderConfig,
-    ) -> Result<EmbedderInstance> {
-        let embedder = Arc::new(CandleMultimodalEmbedder::new(config.model.as_str())?);
-        let text: Arc<dyn TextEmbedder> = embedder.clone();
-        let image: Arc<dyn ImageEmbedder> = embedder;
-        Ok(EmbedderInstance::text_and_image(text, image))
-    }
-
-    #[cfg(not(feature = "embeddings-multimodal"))]
-    fn instantiate_candle_multimodal(
-        embedder_id: &str,
-        _: &VectorEmbedderConfig,
-    ) -> Result<EmbedderInstance> {
-        Err(Self::missing_feature("embeddings-multimodal", embedder_id))
-    }
-
-    #[cfg(feature = "embeddings-openai")]
-    fn instantiate_openai_text(
-        _embedder_id: &str,
-        config: &VectorEmbedderConfig,
-    ) -> Result<EmbedderInstance> {
-        let api_key = config
-            .options
-            .get("api_key")
-            .and_then(|value| value.as_str())
-            .ok_or_else(|| {
-                PlatypusError::invalid_config("OpenAI embedder requires 'api_key' option")
-            })?
-            .to_string();
-
-        let dimension = config
-            .options
-            .get("dimension")
-            .and_then(|value| value.as_u64())
-            .map(|value| value as usize);
-
-        let embedder = if let Some(custom_dim) = dimension {
-            OpenAITextEmbedder::with_dimension(api_key, config.model.clone(), custom_dim)?
-        } else {
-            OpenAITextEmbedder::new(api_key, config.model.clone())?
-        };
-
-        Ok(EmbedderInstance::text_only(Arc::new(embedder)))
-    }
-
-    #[cfg(not(feature = "embeddings-openai"))]
-    fn instantiate_openai_text(
-        embedder_id: &str,
-        _: &VectorEmbedderConfig,
-    ) -> Result<EmbedderInstance> {
-        Err(Self::missing_feature("embeddings-openai", embedder_id))
-    }
-
-    #[allow(dead_code)]
-    fn missing_feature(feature: &str, embedder_id: &str) -> PlatypusError {
-        PlatypusError::invalid_config(format!(
-            "embedder '{embedder_id}' requires feature '{feature}'"
-        ))
-    }
-}
-
-#[derive(Clone)]
-struct EmbedderExecutor {
-    runtime: Arc<tokio::runtime::Runtime>,
-}
-
-impl EmbedderExecutor {
-    fn new() -> Result<Self> {
-        let runtime = TokioRuntimeBuilder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .map_err(|err| {
-                PlatypusError::internal(format!("failed to initialize embedder runtime: {err}"))
-            })?;
-        Ok(Self {
-            runtime: Arc::new(runtime),
-        })
-    }
-
-    fn run<F, T>(&self, future: F) -> Result<T>
-    where
-        F: Future<Output = Result<T>> + Send + 'static,
-        T: Send + 'static,
-    {
-        let (tx, rx) = mpsc::channel();
-        let handle = self.runtime.handle().clone();
-        handle.spawn(async move {
-            let _ = tx.send(future.await);
-        });
-        rx.recv().map_err(|err| {
-            PlatypusError::internal(format!("embedder task channel closed: {err}"))
-        })?
-    }
-}
-
-const FIELD_INDEX_BASENAME: &str = "index";
-const REGISTRY_NAMESPACE: &str = "vector_registry";
-const REGISTRY_SNAPSHOT_FILE: &str = "registry.json";
-const REGISTRY_WAL_FILE: &str = "wal.json";
-const DOCUMENT_SNAPSHOT_FILE: &str = "documents.json";
-const DOCUMENT_SNAPSHOT_TEMP_FILE: &str = "documents.tmp";
-const COLLECTION_MANIFEST_FILE: &str = "manifest.json";
-const COLLECTION_MANIFEST_VERSION: u32 = 1;
-#[cfg(test)]
-const WAL_COMPACTION_THRESHOLD: usize = 4;
-#[cfg(not(test))]
-const WAL_COMPACTION_THRESHOLD: usize = 64;
-
-impl FieldRuntime {
-    fn new(reader: Arc<dyn VectorFieldReader>, writer: Arc<dyn VectorFieldWriter>) -> Self {
-        Self {
-            current_reader: RwLock::new(reader.clone()),
-            default_reader: reader,
-            writer,
-        }
-    }
-
-    fn from_field(field: &Arc<dyn VectorField>) -> Arc<Self> {
-        Arc::new(Self::new(field.reader_handle(), field.writer_handle()))
-    }
-
-    fn reader(&self) -> Arc<dyn VectorFieldReader> {
-        self.current_reader.read().clone()
-    }
-
-    fn writer(&self) -> Arc<dyn VectorFieldWriter> {
-        self.writer.clone()
-    }
-
-    fn replace_reader(&self, reader: Arc<dyn VectorFieldReader>) -> Arc<dyn VectorFieldReader> {
-        let mut guard = self.current_reader.write();
-        std::mem::replace(&mut *guard, reader)
-    }
-
-    fn reset_reader(&self) -> Arc<dyn VectorFieldReader> {
-        self.replace_reader(self.default_reader.clone())
-    }
 }
 
 impl fmt::Debug for VectorEngine {
@@ -1391,7 +1138,7 @@ impl VectorEngine {
             return Ok(());
         }
 
-        #[derive(Deserialize)]
+        #[derive(serde::Deserialize)]
         struct LegacySnapshotDocument {
             doc_id: u64,
             #[serde(default)]
@@ -1649,749 +1396,19 @@ fn build_field_entries(document: &DocumentVector) -> Vec<FieldEntry> {
         .collect()
 }
 
-/// Configuration for a single vector collection.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorEngineConfig {
-    pub fields: HashMap<String, VectorFieldConfig>,
-    #[serde(default)]
-    pub embedders: HashMap<String, VectorEmbedderConfig>,
-    pub default_fields: Vec<String>,
-    #[serde(default)]
-    pub metadata: HashMap<String, serde_json::Value>,
-}
-
-impl VectorEngineConfig {
-    pub fn validate(&self) -> Result<()> {
-        for field in &self.default_fields {
-            if !self.fields.contains_key(field) {
-                return Err(PlatypusError::invalid_config(format!(
-                    "default field '{field}' is not defined"
-                )));
-            }
-        }
-
-        for (field_name, config) in &self.fields {
-            if let Some(embedder_id) = config.embedder.as_deref()
-                && !self.embedders.contains_key(embedder_id)
-            {
-                return Err(PlatypusError::invalid_config(format!(
-                    "vector field '{field_name}' references undefined embedder '{embedder_id}'"
-                )));
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorFieldConfig {
-    pub dimension: usize,
-    pub distance: DistanceMetric,
-    pub index: VectorIndexKind,
-    pub embedder_id: String,
-    pub vector_type: VectorType,
-    #[serde(default)]
-    pub embedder: Option<String>,
-    #[serde(default = "VectorFieldConfig::default_weight")]
-    pub base_weight: f32,
-}
-
-impl VectorFieldConfig {
-    fn default_weight() -> f32 {
-        1.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum VectorIndexKind {
-    Flat,
-    Hnsw,
-    Ivf,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorEmbedderConfig {
-    pub provider: VectorEmbedderProvider,
-    pub model: String,
-    #[serde(default)]
-    pub options: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum VectorEmbedderProvider {
-    CandleText,
-    CandleMultimodal,
-    OpenAiText,
-    External,
-}
-
-/// Request model for collection-level search.
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorEngineSearchRequest {
-    #[serde(default)]
-    pub query_vectors: Vec<QueryVector>,
-    #[serde(default)]
-    pub fields: Option<Vec<FieldSelector>>,
-    #[serde(default = "default_query_limit")]
-    pub limit: usize,
-    #[serde(default)]
-    pub score_mode: VectorScoreMode,
-    #[serde(default = "default_overfetch")]
-    pub overfetch: f32,
-    #[serde(default)]
-    pub filter: Option<VectorEngineFilter>,
-}
-
-fn default_query_limit() -> usize {
-    10
-}
-
-fn default_overfetch() -> f32 {
-    1.0
-}
-
-impl Default for VectorEngineSearchRequest {
-    fn default() -> Self {
-        Self {
-            query_vectors: Vec::new(),
-            fields: None,
-            limit: default_query_limit(),
-            score_mode: VectorScoreMode::default(),
-            overfetch: default_overfetch(),
-            filter: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum FieldSelector {
-    Exact(String),
-    Prefix(String),
-    VectorType(VectorType),
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum VectorScoreMode {
-    #[default]
-    WeightedSum,
-    MaxSim,
-    LateInteraction,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MetadataFilter {
-    #[serde(default)]
-    pub equals: HashMap<String, String>,
-}
-
-impl MetadataFilter {
-    fn matches(&self, metadata: &HashMap<String, String>) -> bool {
-        self.equals.iter().all(|(key, expected)| {
-            metadata
-                .get(key)
-                .map(|actual| actual == expected)
-                .unwrap_or(false)
-        })
-    }
-
-    fn is_empty(&self) -> bool {
-        self.equals.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct VectorEngineFilter {
-    #[serde(default)]
-    pub document: MetadataFilter,
-    #[serde(default)]
-    pub field: MetadataFilter,
-}
-
-impl VectorEngineFilter {
-    fn is_empty(&self) -> bool {
-        self.document.is_empty() && self.field.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueryVector {
-    pub vector: StoredVector,
-    #[serde(default = "QueryVector::default_weight")]
-    pub weight: f32,
-}
-
-impl QueryVector {
-    fn default_weight() -> f32 {
-        1.0
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct VectorEngineSearchResults {
-    #[serde(default)]
-    pub hits: Vec<VectorEngineHit>,
-}
-
-/// Aggregated statistics describing a collection and its fields.
-#[derive(Debug, Clone, Default)]
-pub struct VectorEngineStats {
-    pub document_count: usize,
-    pub fields: HashMap<String, VectorFieldStats>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorEngineHit {
-    pub doc_id: u64,
-    pub score: f32,
-    #[serde(default)]
-    pub field_hits: Vec<FieldHit>,
-}
-
-#[derive(Debug, Default)]
-pub struct RegistryFilterMatches {
-    allowed_fields: HashMap<u64, HashSet<String>>,
-}
-
-impl RegistryFilterMatches {
-    fn is_empty(&self) -> bool {
-        self.allowed_fields.is_empty()
-    }
-
-    fn contains_doc(&self, doc_id: u64) -> bool {
-        self.allowed_fields.contains_key(&doc_id)
-    }
-
-    fn field_allowed(&self, doc_id: u64, field: &str) -> bool {
-        self.allowed_fields
-            .get(&doc_id)
-            .map(|fields| fields.contains(field))
-            .unwrap_or(false)
-    }
-}
-
-pub type RegistryVersion = u64;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FieldEntry {
-    pub field_name: String,
-    pub version: RegistryVersion,
-    pub vector_count: usize,
-    pub weight: f32,
-    pub metadata: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentEntry {
-    pub doc_id: u64,
-    pub version: RegistryVersion,
-    pub metadata: HashMap<String, String>,
-    pub fields: HashMap<String, FieldEntry>,
-}
-
-#[derive(Debug, Default)]
-pub struct DocumentVectorRegistry {
-    entries: RwLock<HashMap<u64, DocumentEntry>>,
-    next_version: AtomicU64,
-}
-
-impl DocumentVectorRegistry {
-    pub fn upsert(
-        &self,
-        doc_id: u64,
-        fields: &[FieldEntry],
-        metadata: HashMap<String, String>,
-    ) -> Result<RegistryVersion> {
-        let version = self.next_version.fetch_add(1, Ordering::SeqCst) + 1;
-        let mut map = HashMap::new();
-        for entry in fields {
-            let mut cloned = entry.clone();
-            cloned.version = version;
-            map.insert(cloned.field_name.clone(), cloned);
-        }
-
-        let doc_entry = DocumentEntry {
-            doc_id,
-            version,
-            metadata,
-            fields: map,
-        };
-
-        self.entries.write().insert(doc_id, doc_entry);
-        Ok(version)
-    }
-
-    pub fn delete(&self, doc_id: u64) -> Result<()> {
-        let mut guard = self.entries.write();
-        guard
-            .remove(&doc_id)
-            .ok_or_else(|| PlatypusError::not_found(format!("doc_id {doc_id}")))?;
-        Ok(())
-    }
-
-    pub fn get(&self, doc_id: u64) -> Option<DocumentEntry> {
-        self.entries.read().get(&doc_id).cloned()
-    }
-
-    pub fn snapshot(&self) -> Result<Vec<u8>> {
-        let guard = self.entries.read();
-        serde_json::to_vec(&*guard).map_err(PlatypusError::from)
-    }
-
-    pub fn from_snapshot(bytes: &[u8]) -> Result<Self> {
-        if bytes.is_empty() {
-            return Ok(Self::default());
-        }
-
-        let entries: HashMap<u64, DocumentEntry> = serde_json::from_slice(bytes)?;
-        let max_version = entries
-            .values()
-            .map(|entry| entry.version)
-            .max()
-            .unwrap_or(0);
-        Ok(Self {
-            entries: RwLock::new(entries),
-            next_version: AtomicU64::new(max_version),
-        })
-    }
-
-    pub fn document_count(&self) -> usize {
-        self.entries.read().len()
-    }
-
-    pub fn filter_matches(
-        &self,
-        filter: &VectorEngineFilter,
-        target_fields: &[String],
-    ) -> RegistryFilterMatches {
-        let guard = self.entries.read();
-        let mut allowed_fields: HashMap<u64, HashSet<String>> = HashMap::new();
-
-        for entry in guard.values() {
-            if !filter.document.is_empty() && !filter.document.matches(&entry.metadata) {
-                continue;
-            }
-
-            let mut matched_fields: HashSet<String> = HashSet::new();
-            for field_name in target_fields {
-                if let Some(field_entry) = entry.fields.get(field_name)
-                    && (filter.field.is_empty() || filter.field.matches(&field_entry.metadata))
-                {
-                    matched_fields.insert(field_name.clone());
-                }
-            }
-
-            if matched_fields.is_empty() {
-                continue;
-            }
-
-            allowed_fields.insert(entry.doc_id, matched_fields);
-        }
-
-        RegistryFilterMatches { allowed_fields }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct VectorWal {
-    records: Mutex<Vec<WalRecord>>,
-    next_seq: AtomicU64,
-}
-
-impl VectorWal {
-    pub fn from_records(records: Vec<WalRecord>) -> Self {
-        let max_seq = records.iter().map(|record| record.seq).max().unwrap_or(0);
-        Self {
-            records: Mutex::new(records),
-            next_seq: AtomicU64::new(max_seq),
-        }
-    }
-
-    pub fn records(&self) -> Vec<WalRecord> {
-        self.records.lock().clone()
-    }
-
-    pub fn len(&self) -> usize {
-        self.records.lock().len()
-    }
-
-    pub fn last_seq(&self) -> SeqNumber {
-        self.next_seq.load(Ordering::SeqCst)
-    }
-
-    pub fn append(&self, payload: WalPayload) -> Result<SeqNumber> {
-        let seq = self.next_seq.fetch_add(1, Ordering::SeqCst) + 1;
-        let record = WalRecord { seq, payload };
-        self.records.lock().push(record);
-        Ok(seq)
-    }
-
-    pub fn replay<F: FnMut(&WalRecord)>(&self, from: SeqNumber, mut handler: F) {
-        for record in self.records.lock().iter() {
-            if record.seq >= from {
-                handler(record);
-            }
-        }
-    }
-
-    pub fn replace_records(&self, records: Vec<WalRecord>) {
-        let max_seq = records.iter().map(|record| record.seq).max().unwrap_or(0);
-        let mut guard = self.records.lock();
-        *guard = records;
-        self.next_seq.store(max_seq, Ordering::SeqCst);
-    }
-}
-
-pub type SeqNumber = u64;
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct DocumentSnapshot {
-    #[serde(default)]
-    last_wal_seq: SeqNumber,
-    #[serde(default)]
-    documents: Vec<SnapshotDocument>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SnapshotDocument {
-    doc_id: u64,
-    document: DocumentVector,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CollectionManifest {
-    version: u32,
-    snapshot_wal_seq: SeqNumber,
-    wal_last_seq: SeqNumber,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WalRecord {
-    pub seq: SeqNumber,
-    pub payload: WalPayload,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WalPayload {
-    Upsert { doc_id: u64, document: DocumentVector },
-    Delete { doc_id: u64 },
-}
-
-#[derive(Debug)]
-struct InMemoryVectorField {
-    name: String,
-    config: VectorFieldConfig,
-    store: Arc<FieldStore>,
-    writer: Arc<InMemoryFieldWriter>,
-    reader: Arc<InMemoryFieldReader>,
-}
-
-impl InMemoryVectorField {
-    fn new(
-        name: String,
-        config: VectorFieldConfig,
-        delegate: Option<Arc<dyn VectorFieldWriter>>,
-    ) -> Result<Self> {
-        let store = Arc::new(FieldStore::default());
-        let writer = Arc::new(InMemoryFieldWriter::new(
-            name.clone(),
-            config.clone(),
-            store.clone(),
-            delegate,
-        ));
-        let reader = Arc::new(InMemoryFieldReader::new(
-            name.clone(),
-            config.clone(),
-            store.clone(),
-        ));
-        Ok(Self {
-            name,
-            config,
-            store,
-            writer,
-            reader,
-        })
-    }
-
-    fn vector_tuples(&self) -> Vec<(u64, String, Vector)> {
-        self.store.vector_tuples(&self.name)
-    }
-}
-
-impl VectorField for InMemoryVectorField {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn config(&self) -> &VectorFieldConfig {
-        &self.config
-    }
-
-    fn writer(&self) -> &dyn VectorFieldWriter {
-        self.writer.as_ref()
-    }
-
-    fn reader(&self) -> &dyn VectorFieldReader {
-        self.reader.as_ref()
-    }
-
-    fn writer_handle(&self) -> Arc<dyn VectorFieldWriter> {
-        self.writer.clone()
-    }
-
-    fn reader_handle(&self) -> Arc<dyn VectorFieldReader> {
-        self.reader.clone()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-#[derive(Debug)]
-struct InMemoryFieldWriter {
-    field_name: String,
-    config: VectorFieldConfig,
-    store: Arc<FieldStore>,
-    delegate: Option<Arc<dyn VectorFieldWriter>>,
-}
-
-impl InMemoryFieldWriter {
-    fn new(
-        field_name: String,
-        config: VectorFieldConfig,
-        store: Arc<FieldStore>,
-        delegate: Option<Arc<dyn VectorFieldWriter>>,
-    ) -> Self {
-        Self {
-            field_name,
-            config,
-            store,
-            delegate,
-        }
-    }
-
-    fn convert_vectors(&self, field: &FieldVectors) -> Result<Vec<Vector>> {
-        let mut vectors = Vec::with_capacity(field.vector_count());
-        for stored in &field.vectors {
-            let vector = stored.to_vector();
-            if vector.dimension() != self.config.dimension {
-                return Err(PlatypusError::invalid_argument(format!(
-                    "vector dimension mismatch for field '{}': expected {}, got {}",
-                    self.field_name,
-                    self.config.dimension,
-                    vector.dimension()
-                )));
-            }
-            if !vector.is_valid() {
-                return Err(PlatypusError::invalid_argument(format!(
-                    "vector for field '{}' contains invalid values",
-                    self.field_name
-                )));
-            }
-            vectors.push(vector);
-        }
-        Ok(vectors)
-    }
-}
-
-impl VectorFieldWriter for InMemoryFieldWriter {
-    fn add_field_vectors(&self, doc_id: u64, field: &FieldVectors, version: u64) -> Result<()> {
-        if field.vectors.is_empty() {
-            self.store.remove(doc_id);
-            if let Some(delegate) = &self.delegate {
-                delegate.delete_document(doc_id, version)?;
-            }
-            return Ok(());
-        }
-
-        if let Some(delegate) = &self.delegate {
-            delegate.add_field_vectors(doc_id, field, version)?;
-        }
-
-        let vectors = self.convert_vectors(field)?;
-        self.store.replace(doc_id, FieldStoreEntry { vectors });
-        Ok(())
-    }
-
-    fn delete_document(&self, doc_id: u64, version: u64) -> Result<()> {
-        self.store.remove(doc_id);
-        if let Some(delegate) = &self.delegate {
-            delegate.delete_document(doc_id, version)?;
-        }
-        Ok(())
-    }
-
-    fn flush(&self) -> Result<()> {
-        if let Some(delegate) = &self.delegate {
-            delegate.flush()?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct InMemoryFieldReader {
-    field_name: String,
-    config: VectorFieldConfig,
-    store: Arc<FieldStore>,
-}
-
-impl InMemoryFieldReader {
-    fn new(field_name: String, config: VectorFieldConfig, store: Arc<FieldStore>) -> Self {
-        Self {
-            field_name,
-            config,
-            store,
-        }
-    }
-}
-
-impl VectorFieldReader for InMemoryFieldReader {
-    fn search(&self, request: FieldSearchInput) -> Result<FieldSearchResults> {
-        if request.field != self.field_name {
-            return Err(PlatypusError::invalid_argument(format!(
-                "field mismatch: expected '{}', got '{}'",
-                self.field_name, request.field
-            )));
-        }
-
-        if request.query_vectors.is_empty() {
-            return Ok(FieldSearchResults::default());
-        }
-
-        let snapshot = self.store.snapshot();
-        let mut merged: HashMap<u64, FieldHit> = HashMap::new();
-
-        for query in &request.query_vectors {
-            let query_vector = query.vector.to_vector();
-            if query_vector.dimension() != self.config.dimension {
-                return Err(PlatypusError::invalid_argument(format!(
-                    "query vector dimension mismatch for field '{}': expected {}, got {}",
-                    self.field_name,
-                    self.config.dimension,
-                    query_vector.dimension()
-                )));
-            }
-            let effective_weight = query.weight * query.vector.weight;
-            if effective_weight == 0.0 {
-                continue;
-            }
-
-            for (doc_id, entry) in &snapshot {
-                for vector in &entry.vectors {
-                    let similarity = self
-                        .config
-                        .distance
-                        .similarity(&query_vector.data, &vector.data)?;
-                    let distance = self
-                        .config
-                        .distance
-                        .distance(&query_vector.data, &vector.data)?;
-                    let weighted_score = similarity * effective_weight;
-                    if weighted_score == 0.0 {
-                        continue;
-                    }
-
-                    match merged.entry(*doc_id) {
-                        Entry::Vacant(slot) => {
-                            slot.insert(FieldHit {
-                                doc_id: *doc_id,
-                                field: self.field_name.clone(),
-                                score: weighted_score,
-                                distance,
-                                metadata: vector.metadata.clone(),
-                            });
-                        }
-                        Entry::Occupied(mut slot) => {
-                            let hit = slot.get_mut();
-                            hit.score += weighted_score;
-                            hit.distance = hit.distance.min(distance);
-                            if hit.metadata.is_empty() {
-                                hit.metadata = vector.metadata.clone();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut hits: Vec<FieldHit> = merged.into_values().collect();
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(CmpOrdering::Equal));
-        if hits.len() > request.limit {
-            hits.truncate(request.limit);
-        }
-
-        Ok(FieldSearchResults { hits })
-    }
-
-    fn stats(&self) -> Result<VectorFieldStats> {
-        Ok(VectorFieldStats {
-            vector_count: self.store.total_vectors(),
-            dimension: self.config.dimension,
-        })
-    }
-}
-
-#[derive(Debug, Default)]
-struct FieldStore {
-    entries: RwLock<HashMap<u64, FieldStoreEntry>>,
-}
-
-impl FieldStore {
-    fn replace(&self, doc_id: u64, entry: FieldStoreEntry) {
-        self.entries.write().insert(doc_id, entry);
-    }
-
-    fn remove(&self, doc_id: u64) {
-        self.entries.write().remove(&doc_id);
-    }
-
-    fn snapshot(&self) -> HashMap<u64, FieldStoreEntry> {
-        self.entries.read().clone()
-    }
-
-    fn total_vectors(&self) -> usize {
-        self.entries
-            .read()
-            .values()
-            .map(|entry| entry.vectors.len())
-            .sum()
-    }
-
-    fn vector_tuples(&self, field_name: &str) -> Vec<(u64, String, Vector)> {
-        let guard = self.entries.read();
-        let mut tuples = Vec::new();
-        let name = field_name.to_string();
-        for (doc_id, entry) in guard.iter() {
-            for vector in &entry.vectors {
-                tuples.push((*doc_id, name.clone(), vector.clone()));
-            }
-        }
-        tuples
-    }
-}
-
-#[derive(Debug, Clone)]
-struct FieldStoreEntry {
-    vectors: Vec<Vector>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::Storage;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::storage::prefixed::PrefixedStorage;
+    use crate::vector::DistanceMetric;
     use crate::vector::core::document::{
         DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource,
         SegmentPayload, StoredVector, VectorType,
     };
     use crate::vector::core::vector::Vector;
+    use crate::vector::core::document::FieldVectors as CoreFieldVectors;
     use crate::vector::field::{
         FieldSearchResults, VectorFieldReader, VectorFieldStats, VectorFieldWriter,
     };
@@ -2442,7 +1459,7 @@ mod tests {
     }
 
     impl VectorFieldWriter for RecordingFieldWriter {
-        fn add_field_vectors(&self, doc_id: u64, field: &FieldVectors, version: u64) -> Result<()> {
+        fn add_field_vectors(&self, doc_id: u64, field: &CoreFieldVectors, version: u64) -> Result<()> {
             self.additions
                 .lock()
                 .unwrap()
@@ -2936,7 +1953,7 @@ mod tests {
         let embedders = HashMap::from([(
             String::from("mock_embedder"),
             VectorEmbedderConfig {
-                provider: VectorEmbedderProvider::External,
+                provider: config::VectorEmbedderProvider::External,
                 model: "mock".into(),
                 options: HashMap::new(),
             },
@@ -3254,7 +2271,7 @@ mod tests {
         let embedders = HashMap::from([(
             "mock_multi".into(),
             VectorEmbedderConfig {
-                provider: VectorEmbedderProvider::External,
+                provider: config::VectorEmbedderProvider::External,
                 model: "mock".into(),
                 options: HashMap::new(),
             },
