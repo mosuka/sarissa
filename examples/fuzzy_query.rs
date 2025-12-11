@@ -13,7 +13,6 @@ use platypus::document::field::TextOption;
 use platypus::error::Result;
 use platypus::lexical::engine::LexicalEngine;
 use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use platypus::lexical::index::factory::LexicalIndexFactory;
 use platypus::lexical::index::inverted::query::Query;
 use platypus::lexical::index::inverted::query::fuzzy::FuzzyQuery;
 use platypus::lexical::search::searcher::LexicalSearchRequest;
@@ -34,15 +33,12 @@ fn main() -> Result<()> {
     let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::clone(&standard_analyzer));
     per_field_analyzer.add_analyzer("id", Arc::clone(&keyword_analyzer));
 
-    // Create a lexical index
+    // Create a lexical engine
     let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
         analyzer: Arc::new(per_field_analyzer.clone()),
         ..InvertedIndexConfig::default()
     });
-    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
-
-    // Create a lexical engine
-    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
+    let mut lexical_engine = LexicalEngine::new(storage, lexical_index_config)?;
 
     // Add documents with various spellings and terms for fuzzy matching
     let documents = vec![

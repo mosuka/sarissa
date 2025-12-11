@@ -10,7 +10,6 @@ use platypus::error::Result;
 use platypus::storage::Storage;
 use platypus::storage::memory::MemoryStorage;
 use platypus::vector::DistanceMetric;
-use platypus::vector::collection::factory::VectorIndexFactory;
 use platypus::vector::core::document::{
     DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
     StoredVector, VectorType,
@@ -188,8 +187,7 @@ fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
 fn build_sample_engine() -> Result<VectorEngine> {
     let config = sample_engine_config();
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let collection = VectorIndexFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
 
     for (doc_id, document) in sample_documents() {
         engine.upsert_document(doc_id, document)?;
@@ -335,8 +333,7 @@ fn build_payload_engine() -> Result<VectorEngine> {
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let collection = VectorIndexFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
     engine.register_embedder_instance(
         "integration_embedder".to_string(),
         Arc::new(IntegrationTestEmbedder::new(4)),
@@ -378,8 +375,7 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let collection = VectorIndexFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
     let embedder = Arc::new(IntegrationMultimodalEmbedder::new(3));
     let text: Arc<dyn TextEmbedder> = embedder.clone();
     let image: Arc<dyn ImageEmbedder> = embedder;

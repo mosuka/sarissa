@@ -84,7 +84,7 @@ impl VectorEmbedderRegistry {
 
         let config = self.configs.get(embedder_id).ok_or_else(|| {
             PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' is not defined in VectorEngineConfig.embedders"
+                "embedder '{embedder_id}' is not defined in VectorIndexConfig.embedders"
             ))
         })?;
 

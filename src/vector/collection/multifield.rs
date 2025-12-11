@@ -56,13 +56,6 @@ use crate::vector::index::ivf::{
 };
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
-#[cfg(feature = "embeddings-multimodal")]
-use crate::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-#[cfg(feature = "embeddings-candle")]
-use crate::embedding::candle_text_embedder::CandleTextEmbedder;
-#[cfg(feature = "embeddings-openai")]
-use crate::embedding::openai_text_embedder::OpenAITextEmbedder;
-
 /// A document-centric vector collection with multiple vector fields.
 ///
 /// This is the primary implementation of [`VectorCollection`], supporting:

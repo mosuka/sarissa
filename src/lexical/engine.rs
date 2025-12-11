@@ -20,23 +20,16 @@
 //! use platypus::document::field::TextOption;
 //! use platypus::lexical::engine::LexicalEngine;
 //! use platypus::lexical::index::config::LexicalIndexConfig;
-//! use platypus::lexical::index::factory::LexicalIndexFactory;
 //! use platypus::lexical::search::searcher::LexicalSearchRequest;
-//! use platypus::lexical::index::inverted::query::term::TermQuery;
-//! use platypus::storage::{StorageConfig, StorageFactory};
-//! use platypus::storage::memory::MemoryStorageConfig;
+//! use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 //! use std::sync::Arc;
 //!
-//! // Create storage using factory
-//! let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-//! let storage = StorageFactory::create(storage_config).unwrap();
+//! // Create storage
+//! let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 //!
-//! // Create index using factory
-//! let index_config = LexicalIndexConfig::default();
-//! let index = LexicalIndexFactory::create(storage, index_config).unwrap();
-//!
-//! // Create engine
-//! let mut engine = LexicalEngine::new(index).unwrap();
+//! // Create engine with storage and config
+//! let config = LexicalIndexConfig::default();
+//! let mut engine = LexicalEngine::new(storage, config).unwrap();
 //!
 //! // Add documents
 //! let doc = Document::builder()
@@ -58,6 +51,8 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::error::Result;
 use crate::lexical::document::document::Document;
 use crate::lexical::index::LexicalIndex;
+use crate::lexical::index::config::LexicalIndexConfig;
+use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::SearchResults;
 use crate::lexical::reader::LexicalIndexReader;
@@ -91,18 +86,14 @@ use crate::storage::Storage;
 /// use platypus::document::document::Document;
 /// use platypus::lexical::engine::LexicalEngine;
 /// use platypus::lexical::index::config::LexicalIndexConfig;
-/// use platypus::lexical::index::factory::LexicalIndexFactory;
 /// use platypus::lexical::search::searcher::LexicalSearchRequest;
-/// use platypus::lexical::index::inverted::query::term::TermQuery;
-/// use platypus::storage::{StorageConfig, StorageFactory};
-/// use platypus::storage::memory::MemoryStorageConfig;
+/// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use std::sync::Arc;
 ///
-/// // Setup
-/// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
-/// let storage = StorageFactory::create(storage_config).unwrap();
-/// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
-/// let mut engine = LexicalEngine::new(index).unwrap();
+/// // Create storage and engine
+/// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+/// let config = LexicalIndexConfig::default();
+/// let mut engine = LexicalEngine::new(storage, config).unwrap();
 ///
 /// // Add documents
 /// use platypus::document::field::TextOption;
@@ -138,15 +129,16 @@ impl std::fmt::Debug for LexicalEngine {
 }
 
 impl LexicalEngine {
-    /// Create a new lexical search engine with the given lexical index.
+    /// Create a new lexical search engine with the given storage and configuration.
     ///
-    /// This constructor wraps a `LexicalIndex` and initializes empty caches for
-    /// the reader and writer. The reader and writer will be created on-demand
-    /// when needed.
+    /// This constructor creates a `LexicalIndex` internally using the provided storage
+    /// and configuration, then wraps it with lazy-initialized caches for the reader,
+    /// writer, and searcher.
     ///
     /// # Arguments
     ///
-    /// * `index` - A lexical index trait object (contains configuration and storage)
+    /// * `storage` - The storage backend for persisting index data
+    /// * `config` - Configuration for the lexical index (schema, analyzer, etc.)
     ///
     /// # Returns
     ///
@@ -157,15 +149,13 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use platypus::lexical::engine::LexicalEngine;
     /// use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
-    /// use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::{Storage, StorageConfig, StorageFactory};
     /// use platypus::storage::memory::MemoryStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// let storage = StorageFactory::create(storage_config).unwrap();
-    /// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
-    /// let engine = LexicalEngine::new(index).unwrap();
+    /// let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     /// ```
     ///
     /// # Example with File Storage
@@ -173,17 +163,16 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use platypus::lexical::engine::LexicalEngine;
     /// use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
-    /// use platypus::storage::{StorageConfig, StorageFactory};
+    /// use platypus::storage::{Storage, StorageConfig, StorageFactory};
     /// use platypus::storage::file::FileStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
     /// let storage = StorageFactory::create(storage_config).unwrap();
-    /// let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
-    /// let engine = LexicalEngine::new(index).unwrap();
+    /// let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     /// ```
-    pub fn new(index: Box<dyn LexicalIndex>) -> Result<Self> {
+    pub fn new(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
+        let index = LexicalIndexFactory::create(storage, config)?;
         Ok(Self {
             index,
             reader: RefCell::new(None),
@@ -263,14 +252,12 @@ impl LexicalEngine {
     /// use platypus::document::document::Document;
     /// # use platypus::lexical::engine::LexicalEngine;
     /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
     /// # use platypus::storage::{StorageConfig, StorageFactory};
     /// use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
-    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// use platypus::document::field::TextOption;
     /// let doc = Document::builder()
@@ -341,14 +328,12 @@ impl LexicalEngine {
     /// use platypus::document::document::Document;
     /// # use platypus::lexical::engine::LexicalEngine;
     /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
     /// # use platypus::storage::{StorageConfig, StorageFactory};
     /// use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
-    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// // Add multiple documents
     /// use platypus::document::field::TextOption;
@@ -398,14 +383,12 @@ impl LexicalEngine {
     /// use platypus::document::document::Document;
     /// # use platypus::lexical::engine::LexicalEngine;
     /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
     /// # use platypus::storage::{StorageConfig, StorageFactory};
     /// use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
-    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// // Add and commit many documents
     /// use platypus::document::field::TextOption;
@@ -468,14 +451,12 @@ impl LexicalEngine {
     /// use platypus::lexical::index::inverted::query::term::TermQuery;
     /// # use platypus::lexical::engine::LexicalEngine;
     /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
     /// # use platypus::storage::{StorageConfig, StorageFactory};
     /// use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
-    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     /// # use platypus::document::field::TextOption;
     /// # let doc = Document::builder().add_text("title", "hello world", TextOption::default()).build();
     /// # engine.add_document(doc).unwrap();
@@ -501,15 +482,13 @@ impl LexicalEngine {
     /// # use platypus::document::document::Document;
     /// # use platypus::lexical::engine::LexicalEngine;
     /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
     /// # use platypus::storage::{StorageConfig, StorageFactory};
     /// use platypus::storage::memory::MemoryStorageConfig;
     /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let index = LexicalIndexFactory::create(storage, LexicalIndexConfig::default()).unwrap();
-    /// # let mut engine = LexicalEngine::new(index).unwrap();
+    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// let analyzer = Arc::new(StandardAnalyzer::default());
     /// let parser = QueryParser::new(analyzer).with_default_field("title");
@@ -534,15 +513,13 @@ impl LexicalEngine {
     ///
     /// ```no_run
     /// # use platypus::lexical::engine::LexicalEngine;
-    /// # use platypus::lexical::index::factory::LexicalIndexFactory;
     /// # use platypus::lexical::index::config::LexicalIndexConfig;
     /// # use platypus::storage::memory::MemoryStorage;
     /// # use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let config = LexicalIndexConfig::default();
     /// # let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    /// # let index = LexicalIndexFactory::create(storage, config).unwrap();
-    /// # let engine = LexicalEngine::new(index).unwrap();
+    /// # let engine = LexicalEngine::new(storage, config).unwrap();
     /// // Using DSL string
     /// let count = engine.count("title:hello").unwrap();
     /// println!("Found {} documents", count);
@@ -602,7 +579,6 @@ mod tests {
     use super::*;
     use crate::lexical::document::field::TextOption;
     use crate::lexical::index::config::LexicalIndexConfig;
-    use crate::lexical::index::factory::LexicalIndexFactory;
     use crate::lexical::index::inverted::query::Query;
     use crate::lexical::index::inverted::query::term::TermQuery;
     use crate::storage::file::{FileStorage, FileStorageConfig};
@@ -625,8 +601,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         // Schema-less mode: no schema() method available
         assert!(!engine.is_closed());
@@ -636,8 +611,7 @@ mod tests {
     fn test_search_engine_in_memory() {
         let config = LexicalIndexConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let mut engine = LexicalEngine::new(index).unwrap();
+        let mut engine = LexicalEngine::new(storage, config).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -667,16 +641,14 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config.clone()).unwrap();
-        let mut engine = LexicalEngine::new(index).unwrap();
+        let mut engine = LexicalEngine::new(storage, config.clone()).unwrap();
         engine.close().unwrap();
 
         // Open engine
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         // Schema-less mode: no schema() method available
         assert!(!engine.is_closed());
@@ -690,8 +662,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let mut engine = LexicalEngine::new(index).unwrap();
+        let mut engine = LexicalEngine::new(storage, config).unwrap();
 
         let doc = create_test_document("Hello World", "This is a test document");
         engine.add_document(doc).unwrap();
@@ -712,8 +683,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let mut engine = LexicalEngine::new(index).unwrap();
+        let mut engine = LexicalEngine::new(storage, config).unwrap();
 
         let docs = vec![
             create_test_document("First Document", "Content of first document"),
@@ -736,8 +706,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
         let request = LexicalSearchRequest::new(query);
@@ -756,8 +725,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let mut engine = LexicalEngine::new(index).unwrap();
+        let mut engine = LexicalEngine::new(storage, config).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -786,8 +754,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
         let count = engine.count(query).unwrap();
@@ -804,8 +771,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let mut engine = LexicalEngine::new(index).unwrap();
+        let mut engine = LexicalEngine::new(storage, config).unwrap();
 
         // Add a document
         let doc = create_test_document("Test Document", "Test content");
@@ -830,8 +796,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         let stats = engine.stats().unwrap();
         // doc_count is usize, so >= 0 check is redundant
@@ -847,8 +812,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let mut engine = LexicalEngine::new(index).unwrap();
+        let mut engine = LexicalEngine::new(storage, config).unwrap();
 
         assert!(!engine.is_closed());
 
@@ -865,8 +829,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
         let request = LexicalSearchRequest::new(query)
@@ -889,8 +852,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let mut engine = LexicalEngine::new(index).unwrap();
+        let mut engine = LexicalEngine::new(storage, config).unwrap();
 
         // Add some documents with lowercase titles for testing
         let docs = vec![
@@ -924,8 +886,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         // Search specific field
         use crate::analysis::analyzer::standard::StandardAnalyzer;
@@ -951,8 +912,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let _engine = LexicalEngine::new(index).unwrap();
+        let _engine = LexicalEngine::new(storage, config).unwrap();
 
         use crate::analysis::analyzer::standard::StandardAnalyzer;
         use crate::lexical::index::inverted::query::parser::QueryParser;
@@ -972,8 +932,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         // Test complex query parsing
         use crate::analysis::analyzer::standard::StandardAnalyzer;

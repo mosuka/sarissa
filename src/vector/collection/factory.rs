@@ -21,9 +21,9 @@ use crate::vector::engine::config::VectorIndexConfig;
 ///
 /// ```ignore
 /// use platypus::vector::collection::factory::VectorCollectionFactory;
-/// use platypus::vector::engine::config::VectorEngineConfig;
+/// use platypus::vector::engine::config::VectorIndexConfig;
 ///
-/// let config = VectorEngineConfig::default();
+/// let config = VectorIndexConfig::default();
 /// let collection = VectorCollectionFactory::create(config, storage, None)?;
 /// ```
 pub struct VectorIndexFactory;

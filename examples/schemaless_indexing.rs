@@ -14,7 +14,6 @@ use platypus::document::document::Document;
 use platypus::document::field::{Field, FieldValue, TextOption};
 use platypus::lexical::engine::LexicalEngine;
 use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use platypus::lexical::index::factory::LexicalIndexFactory;
 use platypus::storage::file::FileStorageConfig;
 use platypus::storage::{StorageConfig, StorageFactory};
 use tempfile::TempDir;
@@ -38,15 +37,12 @@ fn main() -> platypus::error::Result<()> {
     per_field_analyzer.add_analyzer("email", Arc::clone(&keyword_analyzer));
     per_field_analyzer.add_analyzer("post_id", Arc::clone(&keyword_analyzer));
 
-    // Create a lexical index
+    // Create a lexical engine
     let lexical_index_config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
         analyzer: Arc::new(per_field_analyzer.clone()),
         ..InvertedIndexConfig::default()
     });
-    let lexical_index = LexicalIndexFactory::create(storage, lexical_index_config)?;
-
-    // Create a lexical engine
-    let mut lexical_engine = LexicalEngine::new(lexical_index)?;
+    let mut lexical_engine = LexicalEngine::new(storage, lexical_index_config)?;
 
     // Configure per-field analyzers using PerFieldAnalyzer (Lucene-style)
     let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new()?));

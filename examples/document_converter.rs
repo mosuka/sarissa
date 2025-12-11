@@ -15,7 +15,6 @@ use platypus::document::field::FieldValue;
 use platypus::error::Result;
 use platypus::lexical::engine::LexicalEngine;
 use platypus::lexical::index::config::LexicalIndexConfig;
-use platypus::lexical::index::factory::LexicalIndexFactory;
 use platypus::storage::file::FileStorage;
 use platypus::storage::file::FileStorageConfig;
 
@@ -32,8 +31,7 @@ fn main() -> Result<()> {
         temp_dir.path(),
         FileStorageConfig::new(temp_dir.path()),
     )?);
-    let index = LexicalIndexFactory::create(storage, config)?;
-    let mut engine = LexicalEngine::new(index)?;
+    let mut engine = LexicalEngine::new(storage, config)?;
 
     // ===================================================================
     // Example 1: JSONL Format with nested GeoPoint objects

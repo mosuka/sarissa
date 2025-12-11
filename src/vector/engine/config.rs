@@ -13,7 +13,7 @@
 //! use platypus::embedding::per_field::PerFieldEmbedder;
 //! use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 //! use platypus::embedding::text_embedder::TextEmbedder;
-//! use platypus::vector::engine::VectorEngineConfig;
+//! use platypus::vector::engine::VectorIndexConfig;
 //! use std::sync::Arc;
 //!
 //! # fn example() -> platypus::error::Result<()> {
@@ -23,7 +23,7 @@
 //!
 //! let mut embedder = PerFieldEmbedder::with_default_text(text_embedder);
 //!
-//! let config = VectorEngineConfig::builder()
+//! let config = VectorIndexConfig::builder()
 //!     .embedder(embedder)
 //!     .build()?;
 //! # Ok(())
@@ -72,7 +72,7 @@ pub struct VectorIndexConfig {
 
 impl std::fmt::Debug for VectorIndexConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VectorEngineConfig")
+        f.debug_struct("VectorIndexConfig")
             .field("fields", &self.fields)
             .field("default_fields", &self.default_fields)
             .field("metadata", &self.metadata)
@@ -82,7 +82,7 @@ impl std::fmt::Debug for VectorIndexConfig {
 }
 
 impl VectorIndexConfig {
-    /// Create a new builder for VectorEngineConfig.
+    /// Create a new builder for VectorIndexConfig.
     pub fn builder() -> VectorIndexConfigBuilder {
         VectorIndexConfigBuilder::new()
     }
@@ -122,9 +122,9 @@ impl VectorIndexConfig {
     }
 }
 
-/// Builder for VectorEngineConfig.
+/// Builder for VectorIndexConfig.
 ///
-/// Provides a fluent API for constructing VectorEngineConfig.
+/// Provides a fluent API for constructing VectorIndexConfig.
 ///
 /// # Example
 ///
@@ -134,7 +134,7 @@ impl VectorIndexConfig {
 /// use platypus::embedding::per_field::PerFieldEmbedder;
 /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 /// use platypus::embedding::text_embedder::TextEmbedder;
-/// use platypus::vector::engine::{VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
+/// use platypus::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use platypus::vector::DistanceMetric;
 /// use platypus::vector::core::document::VectorType;
 /// use std::sync::Arc;
@@ -147,7 +147,7 @@ impl VectorIndexConfig {
 ///
 /// let mut embedder = PerFieldEmbedder::with_default_text(text_embedder);
 ///
-/// let config = VectorEngineConfig::builder()
+/// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
 ///     .field("content_embedding", VectorFieldConfig {
 ///         dimension: dim,
@@ -312,7 +312,7 @@ impl Serialize for VectorIndexConfig {
     {
         use serde::ser::SerializeStruct;
 
-        let mut state = serializer.serialize_struct("VectorEngineConfig", 4)?;
+        let mut state = serializer.serialize_struct("VectorIndexConfig", 4)?;
         state.serialize_field("fields", &self.fields)?;
         #[allow(deprecated)]
         state.serialize_field("embedders", &self.embedders)?;
@@ -330,7 +330,7 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
         D: serde::Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        struct VectorEngineConfigHelper {
+        struct VectorIndexConfigHelper {
             fields: HashMap<String, VectorFieldConfig>,
             #[serde(default)]
             embedders: HashMap<String, VectorEmbedderConfig>,
@@ -339,7 +339,7 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             metadata: HashMap<String, serde_json::Value>,
         }
 
-        let helper = VectorEngineConfigHelper::deserialize(deserializer)?;
+        let helper = VectorIndexConfigHelper::deserialize(deserializer)?;
         Ok(VectorIndexConfig {
             fields: helper.fields,
             embedders: helper.embedders,

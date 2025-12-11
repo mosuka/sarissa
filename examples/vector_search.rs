@@ -25,7 +25,6 @@ mod candle_vector_example {
         },
         vector::{
             DistanceMetric,
-            collection::factory::VectorIndexFactory,
             core::document::{DocumentPayload, FieldPayload, SegmentPayload, VectorType},
             engine::{
                 FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine,
@@ -90,26 +89,21 @@ mod candle_vector_example {
             },
         );
 
-        #[allow(deprecated)]
-        let config = VectorEngineConfig {
-            fields: field_configs,
-            embedders,
-            default_fields: vec![TITLE_FIELD.into(), BODY_FIELD.into()],
-            metadata: HashMap::new(),
-            embedder: None,
-        };
-
-        let collection = VectorCollectionFactory::create(config, storage, None)?;
-        let engine = VectorEngine::new(collection)?;
-
         // Configure PerFieldEmbedder so each vector field can transparently use Candle embedders.
         let mut per_field_embedder =
             PerFieldEmbedder::with_default_text(Arc::clone(&body_embedder));
         per_field_embedder.add_text_embedder(TITLE_FIELD, Arc::clone(&title_embedder));
-        engine.register_embedder_instance(
-            EMBEDDER_CONFIG_ID.to_string(),
-            Arc::new(per_field_embedder),
-        )?;
+
+        #[allow(deprecated)]
+        let config = VectorIndexConfig {
+            fields: field_configs,
+            embedders,
+            default_fields: vec![TITLE_FIELD.into(), BODY_FIELD.into()],
+            metadata: HashMap::new(),
+            embedder: Some(Arc::new(per_field_embedder)),
+        };
+
+        let engine = VectorEngine::new(storage, config)?;
 
         println!("2) Upsert documents with raw payloads that will be embedded automatically\n");
         let mut doc1 = DocumentPayload::new();

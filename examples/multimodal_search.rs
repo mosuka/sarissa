@@ -21,7 +21,6 @@ use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use platypus::vector::DistanceMetric;
-use platypus::vector::collection::factory::VectorIndexFactory;
 use platypus::vector::core::document::{
     DocumentPayload, FieldPayload, PayloadSource, SegmentPayload, VectorType,
 };
@@ -94,8 +93,7 @@ fn main() -> Result<()> {
         embedder: None,
     };
 
-    let collection = VectorIndexFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
     engine.register_multimodal_embedder_instance(
         MULTIMODAL_EMBEDDER_CONFIG.to_string(),
         Arc::clone(&embedder_choice.text),
