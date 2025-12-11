@@ -225,11 +225,13 @@ fn sample_engine_config() -> VectorEngineConfig {
         },
     );
 
+    #[allow(deprecated)]
     VectorEngineConfig {
         fields,
         embedders: HashMap::new(),
         default_fields: vec!["title_embedding".into(), "body_embedding".into()],
         metadata: HashMap::new(),
+        embedder: None,
     }
 }
 
@@ -323,11 +325,13 @@ fn build_payload_engine() -> Result<VectorEngine> {
         },
     )]);
 
+    #[allow(deprecated)]
     let config = VectorEngineConfig {
         fields,
         embedders,
         default_fields: vec!["body_embedding".into()],
         metadata: HashMap::new(),
+        embedder: None,
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
@@ -364,11 +368,13 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
         },
     )]);
 
+    #[allow(deprecated)]
     let config = VectorEngineConfig {
         fields,
         embedders,
         default_fields: vec!["image_embedding".into()],
         metadata: HashMap::new(),
+        embedder: None,
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());

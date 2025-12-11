@@ -506,11 +506,13 @@ mod tests {
                 options: HashMap::new(),
             },
         )]);
+        #[allow(deprecated)]
         let config = VectorEngineConfig {
             fields,
             embedders,
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
+            embedder: None,
         };
         let storage: Arc<dyn Storage> =
             Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

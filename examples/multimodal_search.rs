@@ -84,11 +84,13 @@ fn main() -> Result<()> {
         },
     )]);
 
+    #[allow(deprecated)]
     let config = VectorEngineConfig {
         fields: field_configs,
         embedders,
         default_fields: vec![TEXT_FIELD.into(), IMAGE_FIELD.into()],
         metadata: HashMap::new(),
+        embedder: None,
     };
 
     let collection = VectorCollectionFactory::create(config, storage, None)?;

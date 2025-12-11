@@ -97,6 +97,11 @@ impl fmt::Debug for MultiFieldVectorCollection {
 
 impl MultiFieldVectorCollection {
     /// Create a new multi-field vector collection.
+    ///
+    /// If the config contains an `embedder` field (new API), the embedder instances
+    /// will be automatically registered from it. Otherwise, the legacy `embedders`
+    /// HashMap will be used.
+    #[allow(deprecated)]
     pub fn new(
         config: VectorEngineConfig,
         storage: Arc<dyn Storage>,
@@ -104,6 +109,10 @@ impl MultiFieldVectorCollection {
     ) -> Result<Self> {
         let embedder_registry = Arc::new(VectorEmbedderRegistry::new(config.embedders.clone()));
         let registry = Arc::new(DocumentVectorRegistry::default());
+
+        // Store the embedder from config before moving config into Arc
+        let config_embedder = config.embedder.clone();
+
         let mut collection = Self {
             config: Arc::new(config),
             fields: RwLock::new(HashMap::new()),
@@ -119,7 +128,51 @@ impl MultiFieldVectorCollection {
         };
         collection.instantiate_configured_fields()?;
         collection.load_persisted_state()?;
+
+        // If new embedder API is used, automatically register embedder instances
+        if let Some(embedder) = config_embedder {
+            collection.register_embedder_from_config(embedder)?;
+        }
+
         Ok(collection)
+    }
+
+    /// Register embedder instances from the Embedder trait object.
+    ///
+    /// This extracts text and image embedders for each configured field
+    /// and registers them with the embedder registry.
+    fn register_embedder_from_config(
+        &self,
+        embedder: Arc<dyn crate::embedding::embedder::Embedder>,
+    ) -> Result<()> {
+        // For each configured field, register the appropriate embedder
+        for (field_name, field_config) in &self.config.fields {
+            // Try to get text embedder for this field
+            if let Some(text_embedder) = embedder.get_text_embedder(field_name) {
+                // If field has an embedder config reference, register with that ID
+                if let Some(embedder_id) = field_config.embedder.as_ref() {
+                    self.embedder_registry
+                        .register_external(embedder_id.clone(), text_embedder.clone())?;
+                }
+            }
+
+            // Try to get image embedder for this field
+            if let Some(image_embedder) = embedder.get_image_embedder(field_name) {
+                if let Some(embedder_id) = field_config.embedder.as_ref() {
+                    // Check if we already have a text embedder registered with this ID
+                    if let Ok(text_emb) = self.embedder_registry.resolve_text(embedder_id) {
+                        // Register as multimodal (both text and image)
+                        self.embedder_registry.register_external_with_image(
+                            embedder_id.clone(),
+                            text_emb,
+                            Some(image_embedder),
+                        )?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Register a concrete field implementation. Each field name must be unique.

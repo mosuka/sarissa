@@ -128,6 +128,9 @@
 
 pub mod text_embedder;
 
+// Unified embedder trait (analogous to Analyzer in lexical module)
+pub mod embedder;
+
 // Per-field embedder support
 pub mod per_field;
 

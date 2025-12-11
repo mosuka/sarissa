@@ -300,11 +300,13 @@ mod tests {
             embedder: None,
             base_weight: 1.0,
         };
+        #[allow(deprecated)]
         VectorEngineConfig {
             fields: HashMap::from([("body".into(), field_config)]),
             embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
+            embedder: None,
         }
     }
 
