@@ -23,7 +23,6 @@ use crate::vector::index::config::{
     FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig,
 };
 use crate::vector::reader::VectorIndexReader;
-use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::writer::VectorIndexWriter;
 
 /// Trait for vector index implementations.
@@ -66,11 +65,6 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     ///
     /// Performs index optimization to improve query performance.
     fn optimize(&mut self) -> Result<()>;
-
-    /// Create a searcher tailored for this index implementation.
-    ///
-    /// Returns a boxed [`VectorSearcher`] that can execute search/count operations.
-    fn searcher(&self) -> Result<Box<dyn VectorSearcher>>;
 }
 
 /// Statistics about a vector index.

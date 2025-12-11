@@ -45,12 +45,12 @@ use crate::embedding::image_embedder::ImageEmbedder;
 use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::Result;
 use crate::storage::Storage;
-use crate::vector::collection::VectorCollection;
+use crate::vector::collection::VectorIndex;
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
 
 pub use config::{
-    VectorEmbedderConfig, VectorEmbedderProvider, VectorEngineConfig, VectorFieldConfig,
+    VectorEmbedderConfig, VectorEmbedderProvider, VectorFieldConfig, VectorIndexConfig,
     VectorIndexKind,
 };
 pub use filter::{MetadataFilter, VectorEngineFilter};
@@ -84,7 +84,7 @@ pub use response::{VectorEngineHit, VectorEngineSearchResults, VectorEngineStats
 /// let results = engine.search(request)?;
 /// ```
 pub struct VectorEngine {
-    collection: Box<dyn VectorCollection>,
+    collection: Box<dyn VectorIndex>,
 }
 
 impl std::fmt::Debug for VectorEngine {
@@ -112,7 +112,7 @@ impl VectorEngine {
     /// let collection = VectorCollectionFactory::create(config, storage, None)?;
     /// let engine = VectorEngine::new(collection)?;
     /// ```
-    pub fn new(collection: Box<dyn VectorCollection>) -> Result<Self> {
+    pub fn new(collection: Box<dyn VectorIndex>) -> Result<Self> {
         Ok(Self { collection })
     }
 
@@ -121,7 +121,7 @@ impl VectorEngine {
     // =========================================================================
 
     /// Get the collection configuration.
-    pub fn config(&self) -> &VectorEngineConfig {
+    pub fn config(&self) -> &VectorIndexConfig {
         self.collection.config()
     }
 
@@ -286,11 +286,11 @@ mod tests {
     use super::*;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
-    use crate::vector::collection::factory::VectorCollectionFactory;
+    use crate::vector::collection::factory::VectorIndexFactory;
     use crate::vector::core::document::{FieldVectors, StoredVector, VectorType};
     use std::collections::HashMap;
 
-    fn sample_config() -> VectorEngineConfig {
+    fn sample_config() -> VectorIndexConfig {
         let field_config = VectorFieldConfig {
             dimension: 3,
             distance: DistanceMetric::Cosine,
@@ -301,7 +301,7 @@ mod tests {
             base_weight: 1.0,
         };
         #[allow(deprecated)]
-        VectorEngineConfig {
+        VectorIndexConfig {
             fields: HashMap::from([("body".into(), field_config)]),
             embedders: HashMap::new(),
             default_fields: vec!["body".into()],
@@ -324,9 +324,8 @@ mod tests {
         query
     }
 
-    fn create_engine(config: VectorEngineConfig, storage: Arc<dyn Storage>) -> VectorEngine {
-        let collection =
-            VectorCollectionFactory::create(config, storage, None).expect("collection");
+    fn create_engine(config: VectorIndexConfig, storage: Arc<dyn Storage>) -> VectorEngine {
+        let collection = VectorIndexFactory::create(config, storage, None).expect("collection");
         VectorEngine::new(collection).expect("engine")
     }
 

@@ -19,7 +19,7 @@ use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::Result;
 use crate::storage::Storage;
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
-use crate::vector::engine::config::VectorEngineConfig;
+use crate::vector::engine::config::VectorIndexConfig;
 use crate::vector::engine::request::{QueryVector, VectorEngineSearchRequest};
 use crate::vector::engine::response::{VectorEngineSearchResults, VectorEngineStats};
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
@@ -42,13 +42,13 @@ use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
 /// collection.commit()?;
 /// let results = collection.search(&request)?;
 /// ```
-pub trait VectorCollection: Send + Sync + std::fmt::Debug {
+pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     // =========================================================================
     // Configuration
     // =========================================================================
 
     /// Get the collection configuration.
-    fn config(&self) -> &VectorEngineConfig;
+    fn config(&self) -> &VectorIndexConfig;
 
     // =========================================================================
     // Document Operations

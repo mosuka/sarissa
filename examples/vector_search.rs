@@ -25,12 +25,12 @@ mod candle_vector_example {
         },
         vector::{
             DistanceMetric,
-            collection::factory::VectorCollectionFactory,
+            collection::factory::VectorIndexFactory,
             core::document::{DocumentPayload, FieldPayload, SegmentPayload, VectorType},
             engine::{
                 FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine,
-                VectorEngineConfig, VectorEngineFilter, VectorEngineSearchRequest,
-                VectorFieldConfig, VectorIndexKind, VectorScoreMode,
+                VectorEngineFilter, VectorEngineSearchRequest, VectorFieldConfig,
+                VectorIndexConfig, VectorIndexKind, VectorScoreMode,
             },
         },
     };

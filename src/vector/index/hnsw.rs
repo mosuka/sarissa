@@ -1,5 +1,6 @@
 //! HNSW vector index implementation.
 
+pub mod field_reader;
 pub mod maintenance;
 pub mod reader;
 pub mod searcher;
@@ -12,11 +13,9 @@ use std::sync::Arc;
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::vector::index::config::HnswIndexConfig;
-use crate::vector::index::hnsw::searcher::HnswSearcher;
 use crate::vector::index::hnsw::writer::HnswIndexWriter;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
-use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Metadata for the HNSW index.
@@ -212,12 +211,5 @@ impl VectorIndex for HnswIndex {
         self.check_closed()?;
         self.update_metadata()?;
         Ok(())
-    }
-
-    fn searcher(&self) -> Result<Box<dyn VectorSearcher>> {
-        self.check_closed()?;
-        let reader = self.reader()?;
-        let searcher = HnswSearcher::new(reader)?;
-        Ok(Box::new(searcher))
     }
 }

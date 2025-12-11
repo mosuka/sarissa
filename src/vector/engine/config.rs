@@ -47,7 +47,7 @@ use crate::vector::core::document::VectorType;
 /// 1. Using the builder pattern with an `Embedder` (recommended)
 /// 2. Using the legacy HashMap-based configuration (for backward compatibility)
 #[derive(Clone)]
-pub struct VectorEngineConfig {
+pub struct VectorIndexConfig {
     /// Field configurations.
     pub fields: HashMap<String, VectorFieldConfig>,
 
@@ -70,7 +70,7 @@ pub struct VectorEngineConfig {
     pub embedder: Option<Arc<dyn Embedder>>,
 }
 
-impl std::fmt::Debug for VectorEngineConfig {
+impl std::fmt::Debug for VectorIndexConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VectorEngineConfig")
             .field("fields", &self.fields)
@@ -81,10 +81,10 @@ impl std::fmt::Debug for VectorEngineConfig {
     }
 }
 
-impl VectorEngineConfig {
+impl VectorIndexConfig {
     /// Create a new builder for VectorEngineConfig.
-    pub fn builder() -> VectorEngineConfigBuilder {
-        VectorEngineConfigBuilder::new()
+    pub fn builder() -> VectorIndexConfigBuilder {
+        VectorIndexConfigBuilder::new()
     }
 
     /// Validate the configuration.
@@ -165,14 +165,14 @@ impl VectorEngineConfig {
 /// # }
 /// ```
 #[derive(Default)]
-pub struct VectorEngineConfigBuilder {
+pub struct VectorIndexConfigBuilder {
     fields: HashMap<String, VectorFieldConfig>,
     default_fields: Vec<String>,
     metadata: HashMap<String, serde_json::Value>,
     embedder: Option<Arc<dyn Embedder>>,
 }
 
-impl VectorEngineConfigBuilder {
+impl VectorIndexConfigBuilder {
     /// Create a new builder.
     pub fn new() -> Self {
         Self::default()
@@ -291,8 +291,8 @@ impl VectorEngineConfigBuilder {
 
     /// Build the configuration.
     #[allow(deprecated)]
-    pub fn build(self) -> Result<VectorEngineConfig> {
-        let config = VectorEngineConfig {
+    pub fn build(self) -> Result<VectorIndexConfig> {
+        let config = VectorIndexConfig {
             fields: self.fields,
             embedders: HashMap::new(),
             default_fields: self.default_fields,
@@ -305,7 +305,7 @@ impl VectorEngineConfigBuilder {
 }
 
 // Implement Serialize manually to skip the embedder field
-impl Serialize for VectorEngineConfig {
+impl Serialize for VectorIndexConfig {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -323,7 +323,7 @@ impl Serialize for VectorEngineConfig {
 }
 
 // Implement Deserialize manually to handle the embedder field
-impl<'de> Deserialize<'de> for VectorEngineConfig {
+impl<'de> Deserialize<'de> for VectorIndexConfig {
     #[allow(deprecated)]
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
@@ -340,7 +340,7 @@ impl<'de> Deserialize<'de> for VectorEngineConfig {
         }
 
         let helper = VectorEngineConfigHelper::deserialize(deserializer)?;
-        Ok(VectorEngineConfig {
+        Ok(VectorIndexConfig {
             fields: helper.fields,
             embedders: helper.embedders,
             default_fields: helper.default_fields,

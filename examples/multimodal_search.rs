@@ -21,14 +21,15 @@ use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use platypus::vector::DistanceMetric;
-use platypus::vector::collection::factory::VectorCollectionFactory;
+use platypus::vector::collection::factory::VectorIndexFactory;
 use platypus::vector::core::document::{
     DocumentPayload, FieldPayload, PayloadSource, SegmentPayload, VectorType,
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine, VectorEngineConfig,
-    VectorEngineSearchRequest, VectorFieldConfig, VectorIndexKind, VectorScoreMode,
+    FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine,
+    VectorEngineSearchRequest, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
+    VectorScoreMode,
 };
 use tempfile::{Builder, NamedTempFile};
 
@@ -85,7 +86,7 @@ fn main() -> Result<()> {
     )]);
 
     #[allow(deprecated)]
-    let config = VectorEngineConfig {
+    let config = VectorIndexConfig {
         fields: field_configs,
         embedders,
         default_fields: vec![TEXT_FIELD.into(), IMAGE_FIELD.into()],
@@ -93,7 +94,7 @@ fn main() -> Result<()> {
         embedder: None,
     };
 
-    let collection = VectorCollectionFactory::create(config, storage, None)?;
+    let collection = VectorIndexFactory::create(config, storage, None)?;
     let engine = VectorEngine::new(collection)?;
     engine.register_multimodal_embedder_instance(
         MULTIMODAL_EMBEDDER_CONFIG.to_string(),

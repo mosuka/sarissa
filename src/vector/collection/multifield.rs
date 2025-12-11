@@ -17,13 +17,13 @@ use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
-use crate::vector::collection::VectorCollection;
+use crate::vector::collection::VectorIndex;
 use crate::vector::core::document::{
     DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
     StoredVector, VectorType,
 };
 use crate::vector::core::vector::Vector;
-use crate::vector::engine::config::{VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
+use crate::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 use crate::vector::engine::embedder::{EmbedderExecutor, VectorEmbedderRegistry};
 use crate::vector::engine::filter::RegistryFilterMatches;
 use crate::vector::engine::memory::{FieldHandle, FieldRuntime, InMemoryVectorField};
@@ -44,17 +44,15 @@ use crate::vector::field::{
     FieldHit, FieldSearchInput, VectorField, VectorFieldReader, VectorFieldStats, VectorFieldWriter,
 };
 use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
-use crate::vector::index::field::{
-    AdapterBackedVectorField, LegacyVectorFieldReader, LegacyVectorFieldWriter,
-};
+use crate::vector::index::field::{AdapterBackedVectorField, LegacyVectorFieldWriter};
 use crate::vector::index::flat::{
-    reader::FlatVectorIndexReader, searcher::FlatVectorSearcher, writer::FlatIndexWriter,
+    field_reader::FlatFieldReader, reader::FlatVectorIndexReader, writer::FlatIndexWriter,
 };
 use crate::vector::index::hnsw::{
-    reader::HnswIndexReader, searcher::HnswSearcher, writer::HnswIndexWriter,
+    field_reader::HnswFieldReader, reader::HnswIndexReader, writer::HnswIndexWriter,
 };
 use crate::vector::index::ivf::{
-    reader::IvfIndexReader, searcher::IvfSearcher, writer::IvfIndexWriter,
+    field_reader::IvfFieldReader, reader::IvfIndexReader, writer::IvfIndexWriter,
 };
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
@@ -72,8 +70,8 @@ use crate::embedding::openai_text_embedder::OpenAITextEmbedder;
 /// - Document-level and field-level metadata filtering
 /// - WAL-based persistence and recovery
 /// - Configurable embedder integration
-pub struct MultiFieldVectorCollection {
-    config: Arc<VectorEngineConfig>,
+pub struct MultiFieldVectorIndex {
+    config: Arc<VectorIndexConfig>,
     fields: RwLock<HashMap<String, FieldHandle>>,
     registry: Arc<DocumentVectorRegistry>,
     embedder_registry: Arc<VectorEmbedderRegistry>,
@@ -86,7 +84,7 @@ pub struct MultiFieldVectorCollection {
     closed: AtomicU64, // 0 = open, 1 = closed
 }
 
-impl fmt::Debug for MultiFieldVectorCollection {
+impl fmt::Debug for MultiFieldVectorIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MultiFieldVectorCollection")
             .field("config", &self.config)
@@ -95,7 +93,7 @@ impl fmt::Debug for MultiFieldVectorCollection {
     }
 }
 
-impl MultiFieldVectorCollection {
+impl MultiFieldVectorIndex {
     /// Create a new multi-field vector collection.
     ///
     /// If the config contains an `embedder` field (new API), the embedder instances
@@ -103,7 +101,7 @@ impl MultiFieldVectorCollection {
     /// HashMap will be used.
     #[allow(deprecated)]
     pub fn new(
-        config: VectorEngineConfig,
+        config: VectorIndexConfig,
         storage: Arc<dyn Storage>,
         initial_doc_id: Option<u64>,
     ) -> Result<Self> {
@@ -771,12 +769,7 @@ impl MultiFieldVectorCollection {
                     FIELD_INDEX_BASENAME,
                     config.distance,
                 )?);
-                let searcher = Arc::new(FlatVectorSearcher::new(reader.clone())?);
-                Arc::new(LegacyVectorFieldReader::new(
-                    field_name.to_string(),
-                    searcher,
-                    reader,
-                ))
+                Arc::new(FlatFieldReader::new(field_name.to_string(), reader))
             }
             VectorIndexKind::Hnsw => {
                 let reader = Arc::new(HnswIndexReader::load(
@@ -784,12 +777,7 @@ impl MultiFieldVectorCollection {
                     FIELD_INDEX_BASENAME,
                     config.distance,
                 )?);
-                let searcher = Arc::new(HnswSearcher::new(reader.clone())?);
-                Arc::new(LegacyVectorFieldReader::new(
-                    field_name.to_string(),
-                    searcher,
-                    reader,
-                ))
+                Arc::new(HnswFieldReader::new(field_name.to_string(), reader))
             }
             VectorIndexKind::Ivf => {
                 let reader = Arc::new(IvfIndexReader::load(
@@ -797,13 +785,10 @@ impl MultiFieldVectorCollection {
                     FIELD_INDEX_BASENAME,
                     config.distance,
                 )?);
-                let mut searcher = IvfSearcher::new(reader.clone())?;
-                searcher.set_n_probe(4);
-                let searcher = Arc::new(searcher);
-                Arc::new(LegacyVectorFieldReader::new(
+                Arc::new(IvfFieldReader::with_n_probe(
                     field_name.to_string(),
-                    searcher,
                     reader,
+                    4,
                 ))
             }
         })
@@ -1189,8 +1174,8 @@ impl MultiFieldVectorCollection {
 // VectorCollection trait implementation
 // =========================================================================
 
-impl VectorCollection for MultiFieldVectorCollection {
-    fn config(&self) -> &VectorEngineConfig {
+impl VectorIndex for MultiFieldVectorIndex {
+    fn config(&self) -> &VectorIndexConfig {
         self.config.as_ref()
     }
 

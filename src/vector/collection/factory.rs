@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::storage::Storage;
-use crate::vector::collection::VectorCollection;
-use crate::vector::collection::multifield::MultiFieldVectorCollection;
-use crate::vector::engine::config::VectorEngineConfig;
+use crate::vector::collection::VectorIndex;
+use crate::vector::collection::multifield::MultiFieldVectorIndex;
+use crate::vector::engine::config::VectorIndexConfig;
 
 /// Factory for creating vector collections.
 ///
@@ -26,9 +26,9 @@ use crate::vector::engine::config::VectorEngineConfig;
 /// let config = VectorEngineConfig::default();
 /// let collection = VectorCollectionFactory::create(config, storage, None)?;
 /// ```
-pub struct VectorCollectionFactory;
+pub struct VectorIndexFactory;
 
-impl VectorCollectionFactory {
+impl VectorIndexFactory {
     /// Create a new vector collection from configuration.
     ///
     /// # Arguments
@@ -45,11 +45,11 @@ impl VectorCollectionFactory {
     ///
     /// Returns an error if the collection cannot be created.
     pub fn create(
-        config: VectorEngineConfig,
+        config: VectorIndexConfig,
         storage: Arc<dyn Storage>,
         initial_doc_id: Option<u64>,
-    ) -> Result<Box<dyn VectorCollection>> {
-        let collection = MultiFieldVectorCollection::new(config, storage, initial_doc_id)?;
+    ) -> Result<Box<dyn VectorIndex>> {
+        let collection = MultiFieldVectorIndex::new(config, storage, initial_doc_id)?;
         Ok(Box::new(collection))
     }
 }
