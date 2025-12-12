@@ -100,7 +100,7 @@ mod candle_vector_example {
             embedders,
             default_fields: vec![TITLE_FIELD.into(), BODY_FIELD.into()],
             metadata: HashMap::new(),
-            embedder: Some(Arc::new(per_field_embedder)),
+            embedder: Arc::new(per_field_embedder),
         };
 
         let engine = VectorEngine::new(storage, config)?;

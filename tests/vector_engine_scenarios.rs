@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use platypus::embedding::image_embedder::ImageEmbedder;
+use platypus::embedding::noop::NoOpEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::error::Result;
 use platypus::storage::Storage;
@@ -229,7 +230,7 @@ fn sample_engine_config() -> VectorIndexConfig {
         embedders: HashMap::new(),
         default_fields: vec!["title_embedding".into(), "body_embedding".into()],
         metadata: HashMap::new(),
-        embedder: None,
+        embedder: Arc::new(NoOpEmbedder::new()),
     }
 }
 
@@ -329,7 +330,7 @@ fn build_payload_engine() -> Result<VectorEngine> {
         embedders,
         default_fields: vec!["body_embedding".into()],
         metadata: HashMap::new(),
-        embedder: None,
+        embedder: Arc::new(NoOpEmbedder::new()),
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
@@ -371,7 +372,7 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
         embedders,
         default_fields: vec!["image_embedding".into()],
         metadata: HashMap::new(),
-        embedder: None,
+        embedder: Arc::new(NoOpEmbedder::new()),
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());

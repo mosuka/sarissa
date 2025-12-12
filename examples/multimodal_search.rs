@@ -16,6 +16,7 @@ use async_trait::async_trait;
 #[cfg(feature = "embeddings-multimodal")]
 use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use platypus::embedding::image_embedder::ImageEmbedder;
+use platypus::embedding::noop::NoOpEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
@@ -90,7 +91,7 @@ fn main() -> Result<()> {
         embedders,
         default_fields: vec![TEXT_FIELD.into(), IMAGE_FIELD.into()],
         metadata: HashMap::new(),
-        embedder: None,
+        embedder: Arc::new(NoOpEmbedder::new()),
     };
 
     let engine = VectorEngine::new(storage, config)?;

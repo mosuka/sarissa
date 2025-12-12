@@ -67,7 +67,8 @@ pub struct VectorIndexConfig {
     ///
     /// This is analogous to `analyzer` in `InvertedIndexConfig`.
     /// Use `PerFieldEmbedder` for field-specific embedders.
-    pub embedder: Option<Arc<dyn Embedder>>,
+    /// Use `NoOpEmbedder` when using pre-computed vectors.
+    pub embedder: Arc<dyn Embedder>,
 }
 
 impl std::fmt::Debug for VectorIndexConfig {
@@ -76,7 +77,7 @@ impl std::fmt::Debug for VectorIndexConfig {
             .field("fields", &self.fields)
             .field("default_fields", &self.default_fields)
             .field("metadata", &self.metadata)
-            .field("has_embedder", &self.embedder.is_some())
+            .field("embedder", &format_args!("{:?}", self.embedder))
             .finish()
     }
 }
@@ -98,8 +99,11 @@ impl VectorIndexConfig {
             }
         }
 
-        // If using new embedder API, skip legacy validation
-        if self.embedder.is_some() {
+        // Skip legacy validation if the embedder is not NoOpEmbedder
+        // (i.e., a real embedder is configured)
+        if self.embedder.get_text_embedder("").is_some()
+            || self.embedder.get_image_embedder("").is_some()
+        {
             return Ok(());
         }
 
@@ -117,8 +121,8 @@ impl VectorIndexConfig {
     }
 
     /// Get the embedder for this configuration.
-    pub fn get_embedder(&self) -> Option<&Arc<dyn Embedder>> {
-        self.embedder.as_ref()
+    pub fn get_embedder(&self) -> &Arc<dyn Embedder> {
+        &self.embedder
     }
 }
 
@@ -290,14 +294,22 @@ impl VectorIndexConfigBuilder {
     }
 
     /// Build the configuration.
+    ///
+    /// If no embedder is set, defaults to `NoOpEmbedder` for pre-computed vectors.
     #[allow(deprecated)]
     pub fn build(self) -> Result<VectorIndexConfig> {
+        use crate::embedding::noop::NoOpEmbedder;
+
+        let embedder = self
+            .embedder
+            .unwrap_or_else(|| Arc::new(NoOpEmbedder::new()));
+
         let config = VectorIndexConfig {
             fields: self.fields,
             embedders: HashMap::new(),
             default_fields: self.default_fields,
             metadata: self.metadata,
-            embedder: self.embedder,
+            embedder,
         };
         config.validate()?;
         Ok(config)
@@ -339,13 +351,16 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             metadata: HashMap<String, serde_json::Value>,
         }
 
+        use crate::embedding::noop::NoOpEmbedder;
+
         let helper = VectorIndexConfigHelper::deserialize(deserializer)?;
         Ok(VectorIndexConfig {
             fields: helper.fields,
             embedders: helper.embedders,
             default_fields: helper.default_fields,
             metadata: helper.metadata,
-            embedder: None, // Embedder must be set programmatically
+            // Default to NoOpEmbedder; can be replaced programmatically
+            embedder: Arc::new(NoOpEmbedder::new()),
         })
     }
 }

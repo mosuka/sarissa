@@ -322,13 +322,15 @@ mod tests {
             embedder: None,
             base_weight: 1.0,
         };
+        use crate::embedding::noop::NoOpEmbedder;
+
         #[allow(deprecated)]
         VectorIndexConfig {
             fields: HashMap::from([("body".into(), field_config)]),
             embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
-            embedder: None,
+            embedder: Arc::new(NoOpEmbedder::new()),
         }
     }
 
