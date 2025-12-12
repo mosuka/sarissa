@@ -20,7 +20,7 @@ use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::config::{
-    FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig,
+    FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexTypeConfig,
 };
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::writer::VectorIndexWriter;
@@ -96,7 +96,7 @@ pub struct VectorIndexStats {
 /// This is an internal implementation detail. The public API for vector indexes
 /// is defined by the `VectorIndex` trait and `VectorIndexFactory`.
 pub struct ManagedVectorIndex {
-    config: VectorIndexConfig,
+    config: VectorIndexTypeConfig,
     builder: Arc<RwLock<Box<dyn VectorIndexWriter>>>,
     is_finalized: Arc<RwLock<bool>>,
     storage: Option<Arc<dyn Storage>>,
@@ -109,10 +109,10 @@ impl ManagedVectorIndex {
     ///
     /// * `config` - Vector index configuration including index type
     /// * `storage` - Storage backend (MemoryStorage, FileStorage, etc.)
-    pub fn new(config: VectorIndexConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+    pub fn new(config: VectorIndexTypeConfig, storage: Arc<dyn Storage>) -> Result<Self> {
         // Create builder based on config type
         let builder: Box<dyn VectorIndexWriter> = match &config {
-            VectorIndexConfig::Flat(flat_config) => {
+            VectorIndexTypeConfig::Flat(flat_config) => {
                 let writer_config = Self::default_writer_config();
                 Box::new(flat::writer::FlatIndexWriter::with_storage(
                     flat_config.clone(),
@@ -120,7 +120,7 @@ impl ManagedVectorIndex {
                     storage.clone(),
                 )?)
             }
-            VectorIndexConfig::HNSW(hnsw_config) => {
+            VectorIndexTypeConfig::HNSW(hnsw_config) => {
                 let writer_config = Self::default_writer_config();
                 Box::new(hnsw::writer::HnswIndexWriter::with_storage(
                     hnsw_config.clone(),
@@ -128,7 +128,7 @@ impl ManagedVectorIndex {
                     storage.clone(),
                 )?)
             }
-            VectorIndexConfig::IVF(ivf_config) => {
+            VectorIndexTypeConfig::IVF(ivf_config) => {
                 let writer_config = Self::default_writer_config();
                 Box::new(ivf::writer::IvfIndexWriter::with_storage(
                     ivf_config.clone(),
@@ -181,7 +181,7 @@ impl ManagedVectorIndex {
     }
 
     /// Get the configuration.
-    pub fn config(&self) -> &VectorIndexConfig {
+    pub fn config(&self) -> &VectorIndexTypeConfig {
         &self.config
     }
 

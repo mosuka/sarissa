@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::storage::Storage;
 use crate::vector::index::VectorIndex;
-use crate::vector::index::config::VectorIndexConfig;
+use crate::vector::index::config::VectorIndexTypeConfig;
 use crate::vector::index::flat::FlatIndex;
 use crate::vector::index::hnsw::HnswIndex;
 use crate::vector::index::ivf::IvfIndex;
@@ -25,7 +25,7 @@ use crate::vector::index::ivf::IvfIndex;
 ///
 /// ```
 /// use platypus::vector::index::factory::VectorIndexFactory;
-/// use platypus::vector::index::config::VectorIndexConfig;
+/// use platypus::vector::index::config::VectorIndexTypeConfig;
 /// use platypus::storage::{StorageFactory, StorageConfig};
 /// use platypus::storage::memory::MemoryStorageConfig;
 ///
@@ -34,7 +34,7 @@ use crate::vector::index::ivf::IvfIndex;
 /// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
 ///
 /// // Create index using factory
-/// let config = VectorIndexConfig::default();
+/// let config = VectorIndexTypeConfig::default();
 /// let index = VectorIndexFactory::create(storage, config)?;
 /// # Ok(())
 /// # }
@@ -58,7 +58,7 @@ impl VectorIndexFactory {
     ///
     /// ```
     /// use platypus::vector::index::factory::VectorIndexFactory;
-    /// use platypus::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
+    /// use platypus::vector::index::config::{VectorIndexTypeConfig, FlatIndexConfig};
     /// use platypus::storage::{StorageFactory, StorageConfig};
     /// use platypus::storage::file::FileStorageConfig;
     ///
@@ -68,25 +68,25 @@ impl VectorIndexFactory {
     /// let storage = StorageFactory::create(storage_config)?;
     ///
     /// // Create flat index
-    /// let index_config = VectorIndexConfig::Flat(FlatIndexConfig::default());
+    /// let index_config = VectorIndexTypeConfig::Flat(FlatIndexConfig::default());
     /// let index = VectorIndexFactory::create(storage, index_config)?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn create(
         storage: Arc<dyn Storage>,
-        config: VectorIndexConfig,
+        config: VectorIndexTypeConfig,
     ) -> Result<Box<dyn VectorIndex>> {
         match config {
-            VectorIndexConfig::Flat(flat_config) => {
+            VectorIndexTypeConfig::Flat(flat_config) => {
                 let index = FlatIndex::create(storage, flat_config)?;
                 Ok(Box::new(index))
             }
-            VectorIndexConfig::HNSW(hnsw_config) => {
+            VectorIndexTypeConfig::HNSW(hnsw_config) => {
                 let index = HnswIndex::create(storage, hnsw_config)?;
                 Ok(Box::new(index))
             }
-            VectorIndexConfig::IVF(ivf_config) => {
+            VectorIndexTypeConfig::IVF(ivf_config) => {
                 let index = IvfIndex::create(storage, ivf_config)?;
                 Ok(Box::new(index))
             }
@@ -108,31 +108,31 @@ impl VectorIndexFactory {
     ///
     /// ```no_run
     /// use platypus::vector::index::factory::VectorIndexFactory;
-    /// use platypus::vector::index::config::{VectorIndexConfig, FlatIndexConfig};
+    /// use platypus::vector::index::config::{VectorIndexTypeConfig, FlatIndexConfig};
     /// use platypus::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
     ///
     /// # fn main() -> platypus::error::Result<()> {
     /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
-    /// let config = VectorIndexConfig::Flat(FlatIndexConfig::default());
+    /// let config = VectorIndexTypeConfig::Flat(FlatIndexConfig::default());
     /// let index = VectorIndexFactory::open(storage, config)?;
     /// # Ok(())
     /// # }
     /// ```
     pub fn open(
         storage: Arc<dyn Storage>,
-        config: VectorIndexConfig,
+        config: VectorIndexTypeConfig,
     ) -> Result<Box<dyn VectorIndex>> {
         match config {
-            VectorIndexConfig::Flat(flat_config) => {
+            VectorIndexTypeConfig::Flat(flat_config) => {
                 let index = FlatIndex::open(storage, flat_config)?;
                 Ok(Box::new(index))
             }
-            VectorIndexConfig::HNSW(hnsw_config) => {
+            VectorIndexTypeConfig::HNSW(hnsw_config) => {
                 let index = HnswIndex::open(storage, hnsw_config)?;
                 Ok(Box::new(index))
             }
-            VectorIndexConfig::IVF(ivf_config) => {
+            VectorIndexTypeConfig::IVF(ivf_config) => {
                 let index = IvfIndex::open(storage, ivf_config)?;
                 Ok(Box::new(index))
             }
@@ -147,12 +147,12 @@ mod tests {
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;
     use crate::vector::index::config::{
-        FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexConfig,
+        FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexTypeConfig,
     };
 
     #[test]
     fn test_vector_index_creation() {
-        let config = VectorIndexConfig::default();
+        let config = VectorIndexTypeConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let index = VectorIndexFactory::create(storage, config).unwrap();
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_vector_index_open() {
-        let config = VectorIndexConfig::default();
+        let config = VectorIndexTypeConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         // Create index
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_vector_index_stats() {
-        let config = VectorIndexConfig::default();
+        let config = VectorIndexTypeConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let index = VectorIndexFactory::create(storage, config).unwrap();
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_vector_index_close() {
-        let config = VectorIndexConfig::default();
+        let config = VectorIndexTypeConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         let mut index = VectorIndexFactory::create(storage, config).unwrap();
@@ -209,11 +209,11 @@ mod tests {
 
     #[test]
     fn test_vector_index_config() {
-        let config = VectorIndexConfig::default();
+        let config = VectorIndexTypeConfig::default();
 
         // Test that default is Flat and check its configuration
         match config {
-            VectorIndexConfig::Flat(flat) => {
+            VectorIndexTypeConfig::Flat(flat) => {
                 assert_eq!(flat.dimension, 128);
             }
             _ => panic!("Expected Flat config as default"),
@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn test_factory_create_flat() {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let config = VectorIndexConfig::Flat(FlatIndexConfig::default());
+        let config = VectorIndexTypeConfig::Flat(FlatIndexConfig::default());
 
         let index = VectorIndexFactory::create(storage, config).unwrap();
 
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn test_factory_create_hnsw() {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let config = VectorIndexConfig::HNSW(HnswIndexConfig::default());
+        let config = VectorIndexTypeConfig::HNSW(HnswIndexConfig::default());
 
         let index = VectorIndexFactory::create(storage, config).unwrap();
 
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn test_factory_create_ivf() {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let config = VectorIndexConfig::IVF(IvfIndexConfig::default());
+        let config = VectorIndexTypeConfig::IVF(IvfIndexConfig::default());
 
         let index = VectorIndexFactory::create(storage, config).unwrap();
 
