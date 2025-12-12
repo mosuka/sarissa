@@ -89,16 +89,14 @@ impl fmt::Debug for MultiFieldVectorIndex {
 impl MultiFieldVectorIndex {
     /// Create a new multi-field vector collection.
     ///
-    /// If the config contains an `embedder` field (new API), the embedder instances
-    /// will be automatically registered from it. Otherwise, the legacy `embedders`
-    /// HashMap will be used.
-    #[allow(deprecated)]
+    /// The embedder instances are automatically registered from the
+    /// `VectorIndexConfig.embedder` field.
     pub fn new(
         config: VectorIndexConfig,
         storage: Arc<dyn Storage>,
         initial_doc_id: Option<u64>,
     ) -> Result<Self> {
-        let embedder_registry = Arc::new(VectorEmbedderRegistry::new(config.embedders.clone()));
+        let embedder_registry = Arc::new(VectorEmbedderRegistry::new());
         let registry = Arc::new(DocumentVectorRegistry::default());
 
         // Store the embedder from config before moving config into Arc
@@ -136,28 +134,18 @@ impl MultiFieldVectorIndex {
     ) -> Result<()> {
         // For each configured field, register the appropriate embedder
         for (field_name, field_config) in &self.config.fields {
-            // Try to get text embedder for this field
-            if let Some(text_embedder) = embedder.get_text_embedder(field_name) {
-                // If field has an embedder config reference, register with that ID
-                if let Some(embedder_id) = field_config.embedder.as_ref() {
-                    self.embedder_registry
-                        .register_external(embedder_id.clone(), text_embedder.clone())?;
-                }
-            }
+            // If field has an embedder config reference, use it as the lookup key
+            if let Some(embedder_id) = field_config.embedder.as_ref() {
+                // Try to get embedders for this field
+                let text_embedder = embedder.get_text_embedder(field_name);
+                let image_embedder = embedder.get_image_embedder(field_name);
 
-            // Try to get image embedder for this field
-            if let Some(image_embedder) = embedder.get_image_embedder(field_name) {
-                if let Some(embedder_id) = field_config.embedder.as_ref() {
-                    // Check if we already have a text embedder registered with this ID
-                    if let Ok(text_emb) = self.embedder_registry.resolve_text(embedder_id) {
-                        // Register as multimodal (both text and image)
-                        self.embedder_registry.register_external_with_image(
-                            embedder_id.clone(),
-                            text_emb,
-                            Some(image_embedder),
-                        )?;
-                    }
-                }
+                // Register using the new method that doesn't require pre-declaration
+                self.embedder_registry.register_from_embedder_trait(
+                    embedder_id.clone(),
+                    text_embedder,
+                    image_embedder,
+                );
             }
         }
 
@@ -1292,28 +1280,6 @@ impl VectorIndex for MultiFieldVectorIndex {
         })?;
         handle.runtime.replace_reader(reader);
         Ok(())
-    }
-
-    fn register_embedder_instance(
-        &self,
-        embedder_id: String,
-        embedder: Arc<dyn TextEmbedder>,
-    ) -> Result<()> {
-        self.embedder_registry
-            .register_external(embedder_id, embedder)
-    }
-
-    fn register_multimodal_embedder_instance(
-        &self,
-        embedder_id: String,
-        text_embedder: Arc<dyn TextEmbedder>,
-        image_embedder: Arc<dyn ImageEmbedder>,
-    ) -> Result<()> {
-        self.embedder_registry.register_external_with_image(
-            embedder_id,
-            text_embedder,
-            Some(image_embedder),
-        )
     }
 
     fn search(&self, request: &VectorEngineSearchRequest) -> Result<VectorEngineSearchResults> {

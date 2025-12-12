@@ -16,7 +16,7 @@ use async_trait::async_trait;
 #[cfg(feature = "embeddings-multimodal")]
 use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use platypus::embedding::image_embedder::ImageEmbedder;
-use platypus::embedding::noop::NoOpEmbedder;
+use platypus::embedding::per_field::PerFieldEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
@@ -27,16 +27,14 @@ use platypus::vector::core::document::{
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine,
-    VectorEngineSearchRequest, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
-    VectorScoreMode,
+    FieldSelector, VectorEngine, VectorEngineSearchRequest, VectorFieldConfig, VectorIndexConfig,
+    VectorIndexKind, VectorScoreMode,
 };
 use tempfile::{Builder, NamedTempFile};
 
 const DEMO_TEXT_DIM: usize = 4;
 const DEMO_IMAGE_DIM: usize = 3;
 const MULTIMODAL_EMBEDDER_ID: &str = "demo-multimodal";
-const MULTIMODAL_EMBEDDER_CONFIG: &str = "demo_multimodal_embedder";
 const TEXT_FIELD: &str = "body_embedding";
 const IMAGE_FIELD: &str = "image_embedding";
 #[cfg(feature = "embeddings-multimodal")]
@@ -50,56 +48,46 @@ fn main() -> Result<()> {
     println!("1) Configure an in-memory VectorEngine with text and image fields\n");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default())) as Arc<dyn Storage>;
 
-    let mut field_configs = HashMap::new();
-    field_configs.insert(
-        TEXT_FIELD.into(),
-        VectorFieldConfig {
-            dimension: text_dim,
-            distance: DistanceMetric::Cosine,
-            index: VectorIndexKind::Flat,
-            embedder_id: MULTIMODAL_EMBEDDER_ID.into(),
-            vector_type: VectorType::Text,
-            embedder: Some(MULTIMODAL_EMBEDDER_CONFIG.into()),
-            base_weight: 1.0,
-        },
-    );
-    field_configs.insert(
-        IMAGE_FIELD.into(),
-        VectorFieldConfig {
-            dimension: image_dim,
-            distance: DistanceMetric::Cosine,
-            index: VectorIndexKind::Flat,
-            embedder_id: MULTIMODAL_EMBEDDER_ID.into(),
-            vector_type: VectorType::Image,
-            embedder: Some(MULTIMODAL_EMBEDDER_CONFIG.into()),
-            base_weight: 1.0,
-        },
-    );
+    // Create PerFieldEmbedder with text and image embedders for each field
+    let mut per_field_embedder = PerFieldEmbedder::new();
+    // TEXT_FIELD uses text embedder
+    per_field_embedder.add_text_embedder(TEXT_FIELD, Arc::clone(&embedder_choice.text));
+    // IMAGE_FIELD uses image embedder
+    per_field_embedder.add_image_embedder(IMAGE_FIELD, Arc::clone(&embedder_choice.image));
 
-    let embedders = HashMap::from([(
-        MULTIMODAL_EMBEDDER_CONFIG.into(),
-        VectorEmbedderConfig {
-            provider: VectorEmbedderProvider::External,
-            model: embedder_choice.model_label.clone(),
-            options: HashMap::new(),
-        },
-    )]);
-
-    #[allow(deprecated)]
-    let config = VectorIndexConfig {
-        fields: field_configs,
-        embedders,
-        default_fields: vec![TEXT_FIELD.into(), IMAGE_FIELD.into()],
-        metadata: HashMap::new(),
-        embedder: Arc::new(NoOpEmbedder::new()),
-    };
+    // Build config using the new embedder field
+    // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
+    let config = VectorIndexConfig::builder()
+        .field(
+            TEXT_FIELD,
+            VectorFieldConfig {
+                dimension: text_dim,
+                distance: DistanceMetric::Cosine,
+                index: VectorIndexKind::Flat,
+                embedder_id: MULTIMODAL_EMBEDDER_ID.into(),
+                vector_type: VectorType::Text,
+                embedder: Some(TEXT_FIELD.into()),
+                base_weight: 1.0,
+            },
+        )
+        .field(
+            IMAGE_FIELD,
+            VectorFieldConfig {
+                dimension: image_dim,
+                distance: DistanceMetric::Cosine,
+                index: VectorIndexKind::Flat,
+                embedder_id: MULTIMODAL_EMBEDDER_ID.into(),
+                vector_type: VectorType::Image,
+                embedder: Some(IMAGE_FIELD.into()),
+                base_weight: 1.0,
+            },
+        )
+        .default_field(TEXT_FIELD)
+        .default_field(IMAGE_FIELD)
+        .embedder(per_field_embedder)
+        .build()?;
 
     let engine = VectorEngine::new(storage, config)?;
-    engine.register_multimodal_embedder_instance(
-        MULTIMODAL_EMBEDDER_CONFIG.to_string(),
-        Arc::clone(&embedder_choice.text),
-        Arc::clone(&embedder_choice.image),
-    )?;
 
     println!("2) Upsert documents containing text and image segments\n");
     let mut doc1 = DocumentPayload::new();

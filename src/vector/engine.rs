@@ -44,8 +44,6 @@ pub mod wal;
 
 use std::sync::Arc;
 
-use crate::embedding::image_embedder::ImageEmbedder;
-use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::Result;
 use crate::storage::Storage;
 use crate::vector::collection::VectorIndex;
@@ -53,10 +51,7 @@ use crate::vector::collection::multifield::MultiFieldVectorIndex;
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
 
-pub use config::{
-    VectorEmbedderConfig, VectorEmbedderProvider, VectorFieldConfig, VectorIndexConfig,
-    VectorIndexKind,
-};
+pub use config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 pub use filter::{MetadataFilter, VectorEngineFilter};
 pub use registry::{DocumentVectorRegistry, RegistryVersion};
 pub use request::{FieldSelector, QueryVector, VectorEngineSearchRequest, VectorScoreMode};
@@ -234,34 +229,6 @@ impl VectorEngine {
     }
 
     // =========================================================================
-    // Embedder Operations
-    // =========================================================================
-
-    /// Register an external text embedder instance.
-    pub fn register_embedder_instance(
-        &self,
-        embedder_id: String,
-        embedder: Arc<dyn TextEmbedder>,
-    ) -> Result<()> {
-        self.collection
-            .register_embedder_instance(embedder_id, embedder)
-    }
-
-    /// Register an external multimodal embedder instance.
-    pub fn register_multimodal_embedder_instance(
-        &self,
-        embedder_id: String,
-        text_embedder: Arc<dyn TextEmbedder>,
-        image_embedder: Arc<dyn ImageEmbedder>,
-    ) -> Result<()> {
-        self.collection.register_multimodal_embedder_instance(
-            embedder_id,
-            text_embedder,
-            image_embedder,
-        )
-    }
-
-    // =========================================================================
     // Search Operations
     // =========================================================================
 
@@ -324,10 +291,8 @@ mod tests {
         };
         use crate::embedding::noop::NoOpEmbedder;
 
-        #[allow(deprecated)]
         VectorIndexConfig {
             fields: HashMap::from([("body".into(), field_config)]),
-            embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
             embedder: Arc::new(NoOpEmbedder::new()),

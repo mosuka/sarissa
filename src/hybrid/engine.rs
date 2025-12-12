@@ -346,6 +346,7 @@ impl HybridEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embedding::per_field::PerFieldEmbedder;
     use crate::embedding::text_embedder::TextEmbedder;
     use crate::storage::Storage;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
@@ -353,9 +354,8 @@ mod tests {
     use crate::vector::core::document::{FieldPayload, StoredVector, VectorType};
     use crate::vector::core::vector::Vector;
     use crate::vector::engine::{
-        FieldSelector, MetadataFilter, QueryVector, VectorEmbedderConfig, VectorEmbedderProvider,
-        VectorEngineFilter, VectorEngineHit, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
-        VectorScoreMode,
+        FieldSelector, MetadataFilter, QueryVector, VectorEngineFilter, VectorEngineHit,
+        VectorFieldConfig, VectorIndexConfig, VectorIndexKind, VectorScoreMode,
     };
     use crate::vector::field::FieldHit;
     use async_trait::async_trait;
@@ -484,47 +484,36 @@ mod tests {
     }
 
     fn mock_vector_engine() -> VectorEngine {
-        let mut fields = HashMap::new();
-        fields.insert(
-            "body".into(),
-            VectorFieldConfig {
-                dimension: 3,
-                distance: DistanceMetric::Cosine,
-                index: VectorIndexKind::Flat,
-                embedder_id: "mock".into(),
-                vector_type: VectorType::Text,
-                embedder: Some("mock_embedder".into()),
-                base_weight: 1.0,
-            },
-        );
-        let embedders = HashMap::from([(
-            "mock_embedder".into(),
-            VectorEmbedderConfig {
-                provider: VectorEmbedderProvider::External,
-                model: "mock".into(),
-                options: HashMap::new(),
-            },
-        )]);
-        use crate::embedding::noop::NoOpEmbedder;
+        // Create the text embedder
+        let text_embedder: Arc<dyn TextEmbedder> = Arc::new(MockTextEmbedder::new(3));
 
-        #[allow(deprecated)]
-        let config = VectorIndexConfig {
-            fields,
-            embedders,
-            default_fields: vec!["body".into()],
-            metadata: HashMap::new(),
-            embedder: Arc::new(NoOpEmbedder::new()),
-        };
+        // Create PerFieldEmbedder with the text embedder as default
+        let per_field_embedder = PerFieldEmbedder::with_default_text(text_embedder);
+
+        // Build config using the new embedder field
+        // Note: `embedder` field in VectorFieldConfig is the embedder lookup key
+        // that PerFieldEmbedder uses to resolve embedders for each field
+        let config = VectorIndexConfig::builder()
+            .field(
+                "body",
+                VectorFieldConfig {
+                    dimension: 3,
+                    distance: DistanceMetric::Cosine,
+                    index: VectorIndexKind::Flat,
+                    embedder_id: "mock".into(),
+                    vector_type: VectorType::Text,
+                    embedder: Some("body".into()),
+                    base_weight: 1.0,
+                },
+            )
+            .default_field("body")
+            .embedder(per_field_embedder)
+            .build()
+            .expect("config");
+
         let storage: Arc<dyn Storage> =
             Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let engine = VectorEngine::new(storage, config).expect("engine");
-        engine
-            .register_embedder_instance(
-                "mock_embedder".to_string(),
-                Arc::new(MockTextEmbedder::new(3)),
-            )
-            .expect("register embedder");
-        engine
+        VectorEngine::new(storage, config).expect("engine")
     }
 
     #[derive(Debug)]

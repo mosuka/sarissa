@@ -14,8 +14,6 @@ pub mod multifield;
 
 use std::sync::Arc;
 
-use crate::embedding::image_embedder::ImageEmbedder;
-use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::Result;
 use crate::storage::Storage;
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
@@ -109,25 +107,6 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
 
     /// Materialize the delegate reader for a field (build persistent index).
     fn materialize_delegate_reader(&self, field_name: &str) -> Result<()>;
-
-    // =========================================================================
-    // Embedder Operations
-    // =========================================================================
-
-    /// Register an external text embedder instance.
-    fn register_embedder_instance(
-        &self,
-        embedder_id: String,
-        embedder: Arc<dyn TextEmbedder>,
-    ) -> Result<()>;
-
-    /// Register an external multimodal embedder instance.
-    fn register_multimodal_embedder_instance(
-        &self,
-        embedder_id: String,
-        text_embedder: Arc<dyn TextEmbedder>,
-        image_embedder: Arc<dyn ImageEmbedder>,
-    ) -> Result<()>;
 
     // =========================================================================
     // Search Operations
