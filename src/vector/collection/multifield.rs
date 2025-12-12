@@ -17,13 +17,13 @@ use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
-use crate::vector::collection::VectorCollection;
+use crate::vector::collection::VectorIndex;
 use crate::vector::core::document::{
     DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
     StoredVector, VectorType,
 };
 use crate::vector::core::vector::Vector;
-use crate::vector::engine::config::{VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
+use crate::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 use crate::vector::engine::embedder::{EmbedderExecutor, VectorEmbedderRegistry};
 use crate::vector::engine::filter::RegistryFilterMatches;
 use crate::vector::engine::memory::{FieldHandle, FieldRuntime, InMemoryVectorField};
@@ -44,26 +44,17 @@ use crate::vector::field::{
     FieldHit, FieldSearchInput, VectorField, VectorFieldReader, VectorFieldStats, VectorFieldWriter,
 };
 use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
-use crate::vector::index::field::{
-    AdapterBackedVectorField, LegacyVectorFieldReader, LegacyVectorFieldWriter,
-};
+use crate::vector::index::field::{AdapterBackedVectorField, LegacyVectorFieldWriter};
 use crate::vector::index::flat::{
-    reader::FlatVectorIndexReader, searcher::FlatVectorSearcher, writer::FlatIndexWriter,
+    field_reader::FlatFieldReader, reader::FlatVectorIndexReader, writer::FlatIndexWriter,
 };
 use crate::vector::index::hnsw::{
-    reader::HnswIndexReader, searcher::HnswSearcher, writer::HnswIndexWriter,
+    field_reader::HnswFieldReader, reader::HnswIndexReader, writer::HnswIndexWriter,
 };
 use crate::vector::index::ivf::{
-    reader::IvfIndexReader, searcher::IvfSearcher, writer::IvfIndexWriter,
+    field_reader::IvfFieldReader, reader::IvfIndexReader, writer::IvfIndexWriter,
 };
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
-
-#[cfg(feature = "embeddings-multimodal")]
-use crate::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-#[cfg(feature = "embeddings-candle")]
-use crate::embedding::candle_text_embedder::CandleTextEmbedder;
-#[cfg(feature = "embeddings-openai")]
-use crate::embedding::openai_text_embedder::OpenAITextEmbedder;
 
 /// A document-centric vector collection with multiple vector fields.
 ///
@@ -72,8 +63,8 @@ use crate::embedding::openai_text_embedder::OpenAITextEmbedder;
 /// - Document-level and field-level metadata filtering
 /// - WAL-based persistence and recovery
 /// - Configurable embedder integration
-pub struct MultiFieldVectorCollection {
-    config: Arc<VectorEngineConfig>,
+pub struct MultiFieldVectorIndex {
+    config: Arc<VectorIndexConfig>,
     fields: RwLock<HashMap<String, FieldHandle>>,
     registry: Arc<DocumentVectorRegistry>,
     embedder_registry: Arc<VectorEmbedderRegistry>,
@@ -86,7 +77,7 @@ pub struct MultiFieldVectorCollection {
     closed: AtomicU64, // 0 = open, 1 = closed
 }
 
-impl fmt::Debug for MultiFieldVectorCollection {
+impl fmt::Debug for MultiFieldVectorIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MultiFieldVectorCollection")
             .field("config", &self.config)
@@ -95,15 +86,24 @@ impl fmt::Debug for MultiFieldVectorCollection {
     }
 }
 
-impl MultiFieldVectorCollection {
+impl MultiFieldVectorIndex {
     /// Create a new multi-field vector collection.
+    ///
+    /// If the config contains an `embedder` field (new API), the embedder instances
+    /// will be automatically registered from it. Otherwise, the legacy `embedders`
+    /// HashMap will be used.
+    #[allow(deprecated)]
     pub fn new(
-        config: VectorEngineConfig,
+        config: VectorIndexConfig,
         storage: Arc<dyn Storage>,
         initial_doc_id: Option<u64>,
     ) -> Result<Self> {
         let embedder_registry = Arc::new(VectorEmbedderRegistry::new(config.embedders.clone()));
         let registry = Arc::new(DocumentVectorRegistry::default());
+
+        // Store the embedder from config before moving config into Arc
+        let config_embedder = config.embedder.clone();
+
         let mut collection = Self {
             config: Arc::new(config),
             fields: RwLock::new(HashMap::new()),
@@ -119,7 +119,51 @@ impl MultiFieldVectorCollection {
         };
         collection.instantiate_configured_fields()?;
         collection.load_persisted_state()?;
+
+        // If new embedder API is used, automatically register embedder instances
+        if let Some(embedder) = config_embedder {
+            collection.register_embedder_from_config(embedder)?;
+        }
+
         Ok(collection)
+    }
+
+    /// Register embedder instances from the Embedder trait object.
+    ///
+    /// This extracts text and image embedders for each configured field
+    /// and registers them with the embedder registry.
+    fn register_embedder_from_config(
+        &self,
+        embedder: Arc<dyn crate::embedding::embedder::Embedder>,
+    ) -> Result<()> {
+        // For each configured field, register the appropriate embedder
+        for (field_name, field_config) in &self.config.fields {
+            // Try to get text embedder for this field
+            if let Some(text_embedder) = embedder.get_text_embedder(field_name) {
+                // If field has an embedder config reference, register with that ID
+                if let Some(embedder_id) = field_config.embedder.as_ref() {
+                    self.embedder_registry
+                        .register_external(embedder_id.clone(), text_embedder.clone())?;
+                }
+            }
+
+            // Try to get image embedder for this field
+            if let Some(image_embedder) = embedder.get_image_embedder(field_name) {
+                if let Some(embedder_id) = field_config.embedder.as_ref() {
+                    // Check if we already have a text embedder registered with this ID
+                    if let Ok(text_emb) = self.embedder_registry.resolve_text(embedder_id) {
+                        // Register as multimodal (both text and image)
+                        self.embedder_registry.register_external_with_image(
+                            embedder_id.clone(),
+                            text_emb,
+                            Some(image_embedder),
+                        )?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Register a concrete field implementation. Each field name must be unique.
@@ -718,12 +762,7 @@ impl MultiFieldVectorCollection {
                     FIELD_INDEX_BASENAME,
                     config.distance,
                 )?);
-                let searcher = Arc::new(FlatVectorSearcher::new(reader.clone())?);
-                Arc::new(LegacyVectorFieldReader::new(
-                    field_name.to_string(),
-                    searcher,
-                    reader,
-                ))
+                Arc::new(FlatFieldReader::new(field_name.to_string(), reader))
             }
             VectorIndexKind::Hnsw => {
                 let reader = Arc::new(HnswIndexReader::load(
@@ -731,12 +770,7 @@ impl MultiFieldVectorCollection {
                     FIELD_INDEX_BASENAME,
                     config.distance,
                 )?);
-                let searcher = Arc::new(HnswSearcher::new(reader.clone())?);
-                Arc::new(LegacyVectorFieldReader::new(
-                    field_name.to_string(),
-                    searcher,
-                    reader,
-                ))
+                Arc::new(HnswFieldReader::new(field_name.to_string(), reader))
             }
             VectorIndexKind::Ivf => {
                 let reader = Arc::new(IvfIndexReader::load(
@@ -744,13 +778,10 @@ impl MultiFieldVectorCollection {
                     FIELD_INDEX_BASENAME,
                     config.distance,
                 )?);
-                let mut searcher = IvfSearcher::new(reader.clone())?;
-                searcher.set_n_probe(4);
-                let searcher = Arc::new(searcher);
-                Arc::new(LegacyVectorFieldReader::new(
+                Arc::new(IvfFieldReader::with_n_probe(
                     field_name.to_string(),
-                    searcher,
                     reader,
+                    4,
                 ))
             }
         })
@@ -1136,8 +1167,8 @@ impl MultiFieldVectorCollection {
 // VectorCollection trait implementation
 // =========================================================================
 
-impl VectorCollection for MultiFieldVectorCollection {
-    fn config(&self) -> &VectorEngineConfig {
+impl VectorIndex for MultiFieldVectorIndex {
+    fn config(&self) -> &VectorIndexConfig {
         self.config.as_ref()
     }
 

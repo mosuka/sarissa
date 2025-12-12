@@ -399,7 +399,6 @@ impl SpellSearchUtils {
 mod tests {
     use super::*;
     use crate::lexical::index::config::LexicalIndexConfig;
-    use crate::lexical::index::factory::LexicalIndexFactory;
     use crate::storage::file::{FileStorage, FileStorageConfig};
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -412,8 +411,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         assert!(spell_engine.config.enabled);
@@ -427,8 +425,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, engine_config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, engine_config).unwrap();
 
         let spell_config = SpellCorrectedSearchConfig {
             enabled: false,
@@ -453,8 +450,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
         let mut spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         // Test with a query that might have typos
@@ -474,8 +470,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         // Test with common words
@@ -535,8 +530,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let index = LexicalIndexFactory::create(storage, config).unwrap();
-        let engine = LexicalEngine::new(index).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
         let spell_engine = SpellCorrectedSearchEngine::new(engine);
 
         let stats = spell_engine.corrector_stats();

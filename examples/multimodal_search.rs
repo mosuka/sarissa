@@ -21,14 +21,14 @@ use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use platypus::vector::DistanceMetric;
-use platypus::vector::collection::factory::VectorCollectionFactory;
 use platypus::vector::core::document::{
     DocumentPayload, FieldPayload, PayloadSource, SegmentPayload, VectorType,
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine, VectorEngineConfig,
-    VectorEngineSearchRequest, VectorFieldConfig, VectorIndexKind, VectorScoreMode,
+    FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine,
+    VectorEngineSearchRequest, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
+    VectorScoreMode,
 };
 use tempfile::{Builder, NamedTempFile};
 
@@ -84,15 +84,16 @@ fn main() -> Result<()> {
         },
     )]);
 
-    let config = VectorEngineConfig {
+    #[allow(deprecated)]
+    let config = VectorIndexConfig {
         fields: field_configs,
         embedders,
         default_fields: vec![TEXT_FIELD.into(), IMAGE_FIELD.into()],
         metadata: HashMap::new(),
+        embedder: None,
     };
 
-    let collection = VectorCollectionFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
     engine.register_multimodal_embedder_instance(
         MULTIMODAL_EMBEDDER_CONFIG.to_string(),
         Arc::clone(&embedder_choice.text),

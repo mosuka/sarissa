@@ -350,13 +350,12 @@ mod tests {
     use crate::storage::Storage;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
-    use crate::vector::collection::factory::VectorCollectionFactory;
     use crate::vector::core::document::{FieldPayload, StoredVector, VectorType};
     use crate::vector::core::vector::Vector;
     use crate::vector::engine::{
         FieldSelector, MetadataFilter, QueryVector, VectorEmbedderConfig, VectorEmbedderProvider,
-        VectorEngineConfig, VectorEngineFilter, VectorEngineHit, VectorFieldConfig,
-        VectorIndexKind, VectorScoreMode,
+        VectorEngineFilter, VectorEngineHit, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
+        VectorScoreMode,
     };
     use crate::vector::field::FieldHit;
     use async_trait::async_trait;
@@ -506,17 +505,17 @@ mod tests {
                 options: HashMap::new(),
             },
         )]);
-        let config = VectorEngineConfig {
+        #[allow(deprecated)]
+        let config = VectorIndexConfig {
             fields,
             embedders,
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
+            embedder: None,
         };
         let storage: Arc<dyn Storage> =
             Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let collection =
-            VectorCollectionFactory::create(config, storage, None).expect("collection");
-        let engine = VectorEngine::new(collection).expect("engine");
+        let engine = VectorEngine::new(storage, config).expect("engine");
         engine
             .register_embedder_instance(
                 "mock_embedder".to_string(),

@@ -1,5 +1,6 @@
 //! Flat vector index implementation.
 
+pub mod field_reader;
 pub mod maintenance;
 pub mod reader;
 pub mod searcher;
@@ -12,11 +13,9 @@ use std::sync::Arc;
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::vector::index::config::FlatIndexConfig;
-use crate::vector::index::flat::searcher::FlatVectorSearcher;
 use crate::vector::index::flat::writer::FlatIndexWriter;
 use crate::vector::index::{VectorIndex, VectorIndexStats};
 use crate::vector::reader::VectorIndexReader;
-use crate::vector::search::searcher::VectorSearcher;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Metadata for the flat index.
@@ -214,11 +213,5 @@ impl VectorIndex for FlatIndex {
         self.check_closed()?;
         self.update_metadata()?;
         Ok(())
-    }
-
-    fn searcher(&self) -> Result<Box<dyn VectorSearcher>> {
-        self.check_closed()?;
-        let reader = self.reader()?;
-        Ok(Box::new(FlatVectorSearcher::new(reader)?))
     }
 }

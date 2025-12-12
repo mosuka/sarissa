@@ -5,8 +5,8 @@
 //!
 //! # Module Structure
 //!
-//! - [`config`] - Configuration types (VectorEngineConfig, VectorFieldConfig, VectorIndexKind)
-//! - [`embedder`] - Embedding registry and executor
+//! - [`config`] - Configuration types (VectorIndexConfig, VectorFieldConfig, VectorIndexKind)
+//! - [`embedder`] - Embedding utilities
 //! - [`filter`] - Metadata filtering
 //! - [`memory`] - In-memory field implementation
 //! - [`registry`] - Document vector registry
@@ -19,12 +19,15 @@
 //!
 //! ```ignore
 //! use platypus::vector::engine::VectorEngine;
-//! use platypus::vector::collection::factory::VectorCollectionFactory;
-//! use platypus::vector::engine::config::VectorEngineConfig;
+//! use platypus::vector::engine::config::VectorIndexConfig;
+//! use platypus::storage::memory::MemoryStorage;
+//! use std::sync::Arc;
 //!
-//! let config = VectorEngineConfig::default();
-//! let collection = VectorCollectionFactory::create(config, storage, None)?;
-//! let engine = VectorEngine::new(collection)?;
+//! let storage = Arc::new(MemoryStorage::new(Default::default()));
+//! let config = VectorIndexConfig::builder()
+//!     .field("body", field_config)
+//!     .build()?;
+//! let engine = VectorEngine::new(storage, config)?;
 //! engine.add_document(doc)?;
 //! engine.commit()?;
 //! ```
@@ -45,12 +48,13 @@ use crate::embedding::image_embedder::ImageEmbedder;
 use crate::embedding::text_embedder::TextEmbedder;
 use crate::error::Result;
 use crate::storage::Storage;
-use crate::vector::collection::VectorCollection;
+use crate::vector::collection::VectorIndex;
+use crate::vector::collection::multifield::MultiFieldVectorIndex;
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
 
 pub use config::{
-    VectorEmbedderConfig, VectorEmbedderProvider, VectorEngineConfig, VectorFieldConfig,
+    VectorEmbedderConfig, VectorEmbedderProvider, VectorFieldConfig, VectorIndexConfig,
     VectorIndexKind,
 };
 pub use filter::{MetadataFilter, VectorEngineFilter};
@@ -69,12 +73,15 @@ pub use response::{VectorEngineHit, VectorEngineSearchResults, VectorEngineStats
 ///
 /// ```ignore
 /// use platypus::vector::engine::VectorEngine;
-/// use platypus::vector::collection::factory::VectorCollectionFactory;
-/// use platypus::vector::engine::config::VectorEngineConfig;
+/// use platypus::vector::engine::config::VectorIndexConfig;
+/// use platypus::storage::memory::MemoryStorage;
+/// use std::sync::Arc;
 ///
-/// // Create collection via factory
-/// let collection = VectorCollectionFactory::create(config, storage, None)?;
-/// let engine = VectorEngine::new(collection)?;
+/// let storage = Arc::new(MemoryStorage::new(Default::default()));
+/// let config = VectorIndexConfig::builder()
+///     .field("body", field_config)
+///     .build()?;
+/// let engine = VectorEngine::new(storage, config)?;
 ///
 /// // Add documents
 /// engine.add_document(doc)?;
@@ -84,7 +91,7 @@ pub use response::{VectorEngineHit, VectorEngineSearchResults, VectorEngineStats
 /// let results = engine.search(request)?;
 /// ```
 pub struct VectorEngine {
-    collection: Box<dyn VectorCollection>,
+    collection: Box<dyn VectorIndex>,
 }
 
 impl std::fmt::Debug for VectorEngine {
@@ -100,20 +107,36 @@ impl VectorEngine {
     // Constructor
     // =========================================================================
 
-    /// Create a new vector engine with the given collection.
+    /// Create a new vector engine with the given storage and configuration.
+    ///
+    /// This is the primary constructor for `VectorEngine`. It creates the
+    /// underlying `MultiFieldVectorIndex` internally, providing a simple
+    /// and consistent API that mirrors `LexicalEngine::new(storage, config)`.
     ///
     /// # Arguments
     ///
-    /// * `collection` - A boxed `VectorCollection` trait object
+    /// * `storage` - The storage backend for persistence
+    /// * `config` - The vector index configuration
     ///
     /// # Example
     ///
     /// ```ignore
-    /// let collection = VectorCollectionFactory::create(config, storage, None)?;
-    /// let engine = VectorEngine::new(collection)?;
+    /// use platypus::vector::engine::VectorEngine;
+    /// use platypus::vector::engine::config::VectorIndexConfig;
+    /// use platypus::storage::memory::MemoryStorage;
+    /// use std::sync::Arc;
+    ///
+    /// let storage = Arc::new(MemoryStorage::new(Default::default()));
+    /// let config = VectorIndexConfig::builder()
+    ///     .field("body", field_config)
+    ///     .build()?;
+    /// let engine = VectorEngine::new(storage, config)?;
     /// ```
-    pub fn new(collection: Box<dyn VectorCollection>) -> Result<Self> {
-        Ok(Self { collection })
+    pub fn new(storage: Arc<dyn Storage>, config: VectorIndexConfig) -> Result<Self> {
+        let collection = MultiFieldVectorIndex::new(config, storage, None)?;
+        Ok(Self {
+            collection: Box::new(collection),
+        })
     }
 
     // =========================================================================
@@ -121,7 +144,7 @@ impl VectorEngine {
     // =========================================================================
 
     /// Get the collection configuration.
-    pub fn config(&self) -> &VectorEngineConfig {
+    pub fn config(&self) -> &VectorIndexConfig {
         self.collection.config()
     }
 
@@ -286,11 +309,10 @@ mod tests {
     use super::*;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
-    use crate::vector::collection::factory::VectorCollectionFactory;
     use crate::vector::core::document::{FieldVectors, StoredVector, VectorType};
     use std::collections::HashMap;
 
-    fn sample_config() -> VectorEngineConfig {
+    fn sample_config() -> VectorIndexConfig {
         let field_config = VectorFieldConfig {
             dimension: 3,
             distance: DistanceMetric::Cosine,
@@ -300,11 +322,13 @@ mod tests {
             embedder: None,
             base_weight: 1.0,
         };
-        VectorEngineConfig {
+        #[allow(deprecated)]
+        VectorIndexConfig {
             fields: HashMap::from([("body".into(), field_config)]),
             embedders: HashMap::new(),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
+            embedder: None,
         }
     }
 
@@ -322,10 +346,8 @@ mod tests {
         query
     }
 
-    fn create_engine(config: VectorEngineConfig, storage: Arc<dyn Storage>) -> VectorEngine {
-        let collection =
-            VectorCollectionFactory::create(config, storage, None).expect("collection");
-        VectorEngine::new(collection).expect("engine")
+    fn create_engine(config: VectorIndexConfig, storage: Arc<dyn Storage>) -> VectorEngine {
+        VectorEngine::new(storage, config).expect("engine")
     }
 
     #[test]

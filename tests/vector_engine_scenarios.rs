@@ -10,7 +10,6 @@ use platypus::error::Result;
 use platypus::storage::Storage;
 use platypus::storage::memory::MemoryStorage;
 use platypus::vector::DistanceMetric;
-use platypus::vector::collection::factory::VectorCollectionFactory;
 use platypus::vector::core::document::{
     DocumentPayload, DocumentVector, FieldPayload, FieldVectors, PayloadSource, SegmentPayload,
     StoredVector, VectorType,
@@ -18,8 +17,8 @@ use platypus::vector::core::document::{
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
     FieldSelector, MetadataFilter, QueryVector, VectorEmbedderConfig, VectorEmbedderProvider,
-    VectorEngine, VectorEngineConfig, VectorEngineFilter, VectorEngineSearchRequest,
-    VectorFieldConfig, VectorIndexKind, VectorScoreMode,
+    VectorEngine, VectorEngineFilter, VectorEngineSearchRequest, VectorFieldConfig,
+    VectorIndexConfig, VectorIndexKind, VectorScoreMode,
 };
 use tempfile::NamedTempFile;
 
@@ -188,8 +187,7 @@ fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
 fn build_sample_engine() -> Result<VectorEngine> {
     let config = sample_engine_config();
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let collection = VectorCollectionFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
 
     for (doc_id, document) in sample_documents() {
         engine.upsert_document(doc_id, document)?;
@@ -198,7 +196,7 @@ fn build_sample_engine() -> Result<VectorEngine> {
     Ok(engine)
 }
 
-fn sample_engine_config() -> VectorEngineConfig {
+fn sample_engine_config() -> VectorIndexConfig {
     let mut fields = HashMap::new();
     fields.insert(
         "title_embedding".into(),
@@ -225,11 +223,13 @@ fn sample_engine_config() -> VectorEngineConfig {
         },
     );
 
-    VectorEngineConfig {
+    #[allow(deprecated)]
+    VectorIndexConfig {
         fields,
         embedders: HashMap::new(),
         default_fields: vec!["title_embedding".into(), "body_embedding".into()],
         metadata: HashMap::new(),
+        embedder: None,
     }
 }
 
@@ -323,16 +323,17 @@ fn build_payload_engine() -> Result<VectorEngine> {
         },
     )]);
 
-    let config = VectorEngineConfig {
+    #[allow(deprecated)]
+    let config = VectorIndexConfig {
         fields,
         embedders,
         default_fields: vec!["body_embedding".into()],
         metadata: HashMap::new(),
+        embedder: None,
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let collection = VectorCollectionFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
     engine.register_embedder_instance(
         "integration_embedder".to_string(),
         Arc::new(IntegrationTestEmbedder::new(4)),
@@ -364,16 +365,17 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
         },
     )]);
 
-    let config = VectorEngineConfig {
+    #[allow(deprecated)]
+    let config = VectorIndexConfig {
         fields,
         embedders,
         default_fields: vec!["image_embedding".into()],
         metadata: HashMap::new(),
+        embedder: None,
     };
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
-    let collection = VectorCollectionFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
     let embedder = Arc::new(IntegrationMultimodalEmbedder::new(3));
     let text: Arc<dyn TextEmbedder> = embedder.clone();
     let image: Arc<dyn ImageEmbedder> = embedder;

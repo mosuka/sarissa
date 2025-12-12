@@ -24,7 +24,6 @@ use platypus::document::parser::DocumentParser;
 use platypus::error::Result;
 use platypus::lexical::engine::LexicalEngine;
 use platypus::lexical::index::config::LexicalIndexConfig;
-use platypus::lexical::index::factory::LexicalIndexFactory;
 use platypus::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use platypus::lexical::search::searcher::LexicalSearchRequest;
 use platypus::storage::file::FileStorage;
@@ -50,8 +49,7 @@ fn main() -> Result<()> {
         temp_dir.path(),
         FileStorageConfig::new(temp_dir.path()),
     )?);
-    let index = LexicalIndexFactory::create(storage.clone(), config)?;
-    let engine = LexicalEngine::new(index)?;
+    let engine = LexicalEngine::new(storage.clone(), config)?;
 
     // Get storage for creating custom writer (already have it)
     let storage = storage.clone();

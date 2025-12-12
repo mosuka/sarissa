@@ -128,8 +128,14 @@
 
 pub mod text_embedder;
 
+// Unified embedder trait (analogous to Analyzer in lexical module)
+pub mod embedder;
+
 // Per-field embedder support
 pub mod per_field;
+
+// No-operation embedder for pre-computed vectors
+pub mod noop;
 
 // Candle implementation (requires feature flag)
 #[cfg(feature = "embeddings-candle")]
