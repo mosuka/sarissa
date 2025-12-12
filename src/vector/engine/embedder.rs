@@ -9,16 +9,8 @@ use std::sync::{Arc, mpsc};
 use parking_lot::RwLock;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 
-use crate::embedding::image_embedder::ImageEmbedder;
-use crate::embedding::text_embedder::TextEmbedder;
+use crate::embedding::embedder::Embedder;
 use crate::error::{PlatypusError, Result};
-
-/// An instance holding text and/or image embedder references.
-#[derive(Clone)]
-pub(crate) struct EmbedderInstance {
-    pub(crate) text: Option<Arc<dyn TextEmbedder>>,
-    pub(crate) image: Option<Arc<dyn ImageEmbedder>>,
-}
 
 /// Registry for managing embedder instances.
 ///
@@ -26,7 +18,7 @@ pub(crate) struct EmbedderInstance {
 /// Embedders are registered via `VectorIndexConfig.embedder` field using
 /// `PerFieldEmbedder` or similar implementations.
 pub(crate) struct VectorEmbedderRegistry {
-    instances: RwLock<HashMap<String, EmbedderInstance>>,
+    instances: RwLock<HashMap<String, Arc<dyn Embedder>>>,
 }
 
 impl VectorEmbedderRegistry {
@@ -37,57 +29,21 @@ impl VectorEmbedderRegistry {
         }
     }
 
-    /// Resolve a text embedder by its ID.
+    /// Register an embedder instance by its ID.
+    pub(crate) fn register(&self, embedder_id: impl Into<String>, embedder: Arc<dyn Embedder>) {
+        self.instances.write().insert(embedder_id.into(), embedder);
+    }
+
+    /// Resolve an embedder by its ID.
     ///
-    /// Returns an error if the embedder is not registered or does not support text embedding.
-    pub(crate) fn resolve_text(&self, embedder_id: &str) -> Result<Arc<dyn TextEmbedder>> {
+    /// Returns an error if the embedder is not registered.
+    pub(crate) fn resolve(&self, embedder_id: &str) -> Result<Arc<dyn Embedder>> {
         let instances = self.instances.read();
-        let instance = instances.get(embedder_id).ok_or_else(|| {
+        instances.get(embedder_id).cloned().ok_or_else(|| {
             PlatypusError::invalid_config(format!(
                 "embedder '{embedder_id}' is not registered. Use VectorIndexConfig.embedder field with PerFieldEmbedder to configure embedders."
             ))
-        })?;
-        instance.text.clone().ok_or_else(|| {
-            PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' does not expose text embedding capabilities"
-            ))
         })
-    }
-
-    /// Resolve an image embedder by its ID.
-    ///
-    /// Returns an error if the embedder is not registered or does not support image embedding.
-    pub(crate) fn resolve_image(&self, embedder_id: &str) -> Result<Arc<dyn ImageEmbedder>> {
-        let instances = self.instances.read();
-        let instance = instances.get(embedder_id).ok_or_else(|| {
-            PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' is not registered. Use VectorIndexConfig.embedder field with PerFieldEmbedder to configure embedders."
-            ))
-        })?;
-        instance.image.clone().ok_or_else(|| {
-            PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' does not expose image embedding capabilities"
-            ))
-        })
-    }
-
-    /// Register an embedder instance from the Embedder trait object.
-    ///
-    /// This method is used by the `VectorIndexConfig.embedder` field API.
-    pub(crate) fn register_from_embedder_trait(
-        &self,
-        embedder_id: String,
-        text_embedder: Option<Arc<dyn TextEmbedder>>,
-        image_embedder: Option<Arc<dyn ImageEmbedder>>,
-    ) {
-        // Only register if at least one embedder is provided
-        if text_embedder.is_some() || image_embedder.is_some() {
-            let instance = EmbedderInstance {
-                text: text_embedder,
-                image: image_embedder,
-            };
-            self.instances.write().insert(embedder_id, instance);
-        }
     }
 }
 

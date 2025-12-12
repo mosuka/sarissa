@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::embedding::text_embedder::TextEmbedder;
+use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 use crate::error::Result;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization;
@@ -286,34 +286,38 @@ pub struct FlatIndexConfig {
     /// will be triggered to consolidate them.
     pub max_segments: u32,
 
-    /// Text embedder for converting text to vectors.
+    /// Embedder for converting text/images to vectors.
     ///
-    /// This embedder is used when documents contain text fields that need to be
+    /// This embedder is used when documents contain text or image fields that need to be
     /// converted to vector representations. For field-specific embedders, use
     /// `PerFieldEmbedder`.
     #[serde(skip)]
     #[serde(default = "default_embedder")]
-    pub embedder: Arc<dyn crate::embedding::text_embedder::TextEmbedder>,
+    pub embedder: Arc<dyn Embedder>,
 }
 
 /// Default embedder for index configurations.
 ///
 /// This is a mock embedder that returns zero vectors. In production use,
 /// you should provide a real embedder implementation.
-fn default_embedder() -> Arc<dyn TextEmbedder> {
+fn default_embedder() -> Arc<dyn Embedder> {
     use async_trait::async_trait;
 
     #[derive(Debug)]
     struct MockEmbedder;
 
     #[async_trait]
-    impl TextEmbedder for MockEmbedder {
-        async fn embed(&self, _text: &str) -> Result<Vector> {
+    impl Embedder for MockEmbedder {
+        async fn embed(&self, _input: &EmbedInput<'_>) -> Result<Vector> {
             Ok(Vector::new(vec![0.0; 384]))
         }
 
         fn dimension(&self) -> usize {
             384
+        }
+
+        fn supported_input_types(&self) -> Vec<EmbedInputType> {
+            vec![EmbedInputType::Text]
         }
 
         fn name(&self) -> &str {
@@ -405,14 +409,14 @@ pub struct HnswIndexConfig {
     /// Maximum number of segments before merging.
     pub max_segments: u32,
 
-    /// Text embedder for converting text to vectors.
+    /// Embedder for converting text/images to vectors.
     ///
-    /// This embedder is used when documents contain text fields that need to be
+    /// This embedder is used when documents contain text or image fields that need to be
     /// converted to vector representations. For field-specific embedders, use
     /// `PerFieldEmbedder`.
     #[serde(skip)]
     #[serde(default = "default_embedder")]
-    pub embedder: Arc<dyn crate::embedding::text_embedder::TextEmbedder>,
+    pub embedder: Arc<dyn Embedder>,
 }
 
 impl Default for HnswIndexConfig {
@@ -497,14 +501,14 @@ pub struct IvfIndexConfig {
     /// Maximum number of segments before merging.
     pub max_segments: u32,
 
-    /// Text embedder for converting text to vectors.
+    /// Embedder for converting text/images to vectors.
     ///
-    /// This embedder is used when documents contain text fields that need to be
+    /// This embedder is used when documents contain text or image fields that need to be
     /// converted to vector representations. For field-specific embedders, use
     /// `PerFieldEmbedder`.
     #[serde(skip)]
     #[serde(default = "default_embedder")]
-    pub embedder: Arc<dyn crate::embedding::text_embedder::TextEmbedder>,
+    pub embedder: Arc<dyn Embedder>,
 }
 
 impl Default for IvfIndexConfig {

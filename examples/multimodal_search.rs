@@ -5,6 +5,7 @@
 //!
 //! Run with `cargo run --example multimodal_search`.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::fs;
 #[cfg(feature = "embeddings-multimodal")]
@@ -15,9 +16,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 #[cfg(feature = "embeddings-multimodal")]
 use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-use platypus::embedding::image_embedder::ImageEmbedder;
+use platypus::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 use platypus::embedding::per_field::PerFieldEmbedder;
-use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
@@ -42,18 +42,16 @@ const DEFAULT_CANDLE_MODEL: &str = "openai/clip-vit-base-patch32";
 
 fn main() -> Result<()> {
     let embedder_choice = select_embedder()?;
-    let text_dim = embedder_choice.text.dimension();
-    let image_dim = embedder_choice.image.dimension();
+    let text_dim = embedder_choice.text_embedder.dimension();
+    let image_dim = embedder_choice.image_embedder.dimension();
 
     println!("1) Configure an in-memory VectorEngine with text and image fields\n");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default())) as Arc<dyn Storage>;
 
-    // Create PerFieldEmbedder with text and image embedders for each field
-    let mut per_field_embedder = PerFieldEmbedder::new();
-    // TEXT_FIELD uses text embedder
-    per_field_embedder.add_text_embedder(TEXT_FIELD, Arc::clone(&embedder_choice.text));
-    // IMAGE_FIELD uses image embedder
-    per_field_embedder.add_image_embedder(IMAGE_FIELD, Arc::clone(&embedder_choice.image));
+    // Create PerFieldEmbedder with text embedder as default and image embedder for IMAGE_FIELD
+    let mut per_field_embedder = PerFieldEmbedder::new(Arc::clone(&embedder_choice.text_embedder));
+    per_field_embedder.add_embedder(TEXT_FIELD, Arc::clone(&embedder_choice.text_embedder));
+    per_field_embedder.add_embedder(IMAGE_FIELD, Arc::clone(&embedder_choice.image_embedder));
 
     // Build config using the new embedder field
     // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
@@ -152,8 +150,8 @@ fn main() -> Result<()> {
 
 struct EmbedderChoice {
     model_label: String,
-    text: Arc<dyn TextEmbedder>,
-    image: Arc<dyn ImageEmbedder>,
+    text_embedder: Arc<dyn Embedder>,
+    image_embedder: Arc<dyn Embedder>,
     real_images: bool,
 }
 
@@ -168,13 +166,12 @@ fn select_embedder() -> Result<EmbedderChoice> {
                 "   -> Using Candle CLIP embedder '{}' (enable caching via HF_HOME)",
                 model
             );
-            let embedder = Arc::new(CandleMultimodalEmbedder::new(model.as_str())?);
-            let text: Arc<dyn TextEmbedder> = embedder.clone();
-            let image: Arc<dyn ImageEmbedder> = embedder;
+            let embedder: Arc<dyn Embedder> =
+                Arc::new(CandleMultimodalEmbedder::new(model.as_str())?);
             return Ok(EmbedderChoice {
                 model_label: model,
-                text,
-                image,
+                text_embedder: embedder.clone(),
+                image_embedder: embedder,
                 real_images: true,
             });
         }
@@ -187,13 +184,12 @@ fn select_embedder() -> Result<EmbedderChoice> {
     }
 
     println!("   -> Using built-in demo embedder (no external models)");
-    let embedder = Arc::new(DemoMultimodalEmbedder::new(DEMO_TEXT_DIM, DEMO_IMAGE_DIM));
-    let text: Arc<dyn TextEmbedder> = embedder.clone();
-    let image: Arc<dyn ImageEmbedder> = embedder;
+    let text_embedder: Arc<dyn Embedder> = Arc::new(DemoTextEmbedder::new(DEMO_TEXT_DIM));
+    let image_embedder: Arc<dyn Embedder> = Arc::new(DemoImageEmbedder::new(DEMO_IMAGE_DIM));
     Ok(EmbedderChoice {
         model_label: "demo-multimodal".into(),
-        text,
-        image,
+        text_embedder,
+        image_embedder,
         real_images: false,
     })
 }
@@ -277,27 +273,24 @@ fn image_uri_payload(bytes: Vec<u8>, label: &str) -> (FieldPayload, NamedTempFil
     (payload, temp_file)
 }
 
+/// Demo text embedder for examples.
 #[derive(Debug)]
-struct DemoMultimodalEmbedder {
-    text_dim: usize,
-    image_dim: usize,
+struct DemoTextEmbedder {
+    dim: usize,
 }
 
-impl DemoMultimodalEmbedder {
-    fn new(text_dim: usize, image_dim: usize) -> Self {
-        Self {
-            text_dim,
-            image_dim,
-        }
+impl DemoTextEmbedder {
+    fn new(dim: usize) -> Self {
+        Self { dim }
     }
 
-    fn vector_from_bytes(&self, bytes: &[u8], dim: usize) -> Vector {
+    fn vector_from_bytes(&self, bytes: &[u8]) -> Vector {
         if bytes.is_empty() {
-            return Vector::new(vec![0.0; dim]);
+            return Vector::new(vec![0.0; self.dim]);
         }
-        let mut data = vec![0.0_f32; dim];
+        let mut data = vec![0.0_f32; self.dim];
         for (idx, byte) in bytes.iter().enumerate() {
-            let bucket = idx % dim;
+            let bucket = idx % self.dim;
             data[bucket] += (*byte as f32) / 255.0;
         }
         Vector::new(data)
@@ -305,32 +298,90 @@ impl DemoMultimodalEmbedder {
 }
 
 #[async_trait]
-impl TextEmbedder for DemoMultimodalEmbedder {
-    async fn embed(&self, text: &str) -> Result<Vector> {
-        Ok(self.vector_from_bytes(text.as_bytes(), self.text_dim))
+impl Embedder for DemoTextEmbedder {
+    async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+        match input {
+            EmbedInput::Text(text) => Ok(self.vector_from_bytes(text.as_bytes())),
+            _ => Err(PlatypusError::invalid_argument(
+                "DemoTextEmbedder only supports text input",
+            )),
+        }
     }
 
     fn dimension(&self) -> usize {
-        self.text_dim
+        self.dim
+    }
+
+    fn supported_input_types(&self) -> Vec<EmbedInputType> {
+        vec![EmbedInputType::Text]
     }
 
     fn name(&self) -> &str {
-        "demo-multimodal"
+        "demo-text"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// Demo image embedder for examples.
+#[derive(Debug)]
+struct DemoImageEmbedder {
+    dim: usize,
+}
+
+impl DemoImageEmbedder {
+    fn new(dim: usize) -> Self {
+        Self { dim }
+    }
+
+    fn vector_from_bytes(&self, bytes: &[u8]) -> Vector {
+        if bytes.is_empty() {
+            return Vector::new(vec![0.0; self.dim]);
+        }
+        let mut data = vec![0.0_f32; self.dim];
+        for (idx, byte) in bytes.iter().enumerate() {
+            let bucket = idx % self.dim;
+            data[bucket] += (*byte as f32) / 255.0;
+        }
+        Vector::new(data)
     }
 }
 
 #[async_trait]
-impl ImageEmbedder for DemoMultimodalEmbedder {
-    async fn embed(&self, image_path: &str) -> Result<Vector> {
-        let bytes = fs::read(image_path)?;
-        Ok(self.vector_from_bytes(&bytes, self.image_dim))
+impl Embedder for DemoImageEmbedder {
+    async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+        match input {
+            EmbedInput::ImagePath(path) => {
+                let bytes = fs::read(path)?;
+                Ok(self.vector_from_bytes(&bytes))
+            }
+            EmbedInput::ImageBytes(bytes, _) => Ok(self.vector_from_bytes(bytes)),
+            EmbedInput::ImageUri(uri) => {
+                // For demo purposes, treat URI as file path
+                let bytes = fs::read(uri)?;
+                Ok(self.vector_from_bytes(&bytes))
+            }
+            EmbedInput::Text(_) => Err(PlatypusError::invalid_argument(
+                "DemoImageEmbedder only supports image input",
+            )),
+        }
     }
 
     fn dimension(&self) -> usize {
-        self.image_dim
+        self.dim
+    }
+
+    fn supported_input_types(&self) -> Vec<EmbedInputType> {
+        vec![EmbedInputType::Image]
     }
 
     fn name(&self) -> &str {
-        "demo-multimodal"
+        "demo-image"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

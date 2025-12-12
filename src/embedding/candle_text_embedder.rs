@@ -4,6 +4,9 @@
 //! Requires the `embeddings-candle` feature to be enabled.
 
 #[cfg(feature = "embeddings-candle")]
+use std::any::Any;
+
+#[cfg(feature = "embeddings-candle")]
 use async_trait::async_trait;
 #[cfg(feature = "embeddings-candle")]
 use candle_core::{DType, Device, Tensor};
@@ -17,7 +20,7 @@ use hf_hub::api::sync::ApiBuilder;
 use tokenizers::Tokenizer;
 
 #[cfg(feature = "embeddings-candle")]
-use crate::embedding::text_embedder::TextEmbedder;
+use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 #[cfg(feature = "embeddings-candle")]
 use crate::error::{PlatypusError, Result};
 #[cfg(feature = "embeddings-candle")]
@@ -38,7 +41,7 @@ use crate::vector::core::vector::Vector;
 /// # Examples
 ///
 /// ```no_run
-/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::embedding::embedder::{Embedder, EmbedInput};
 /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 ///
 /// # async fn example() -> platypus::error::Result<()> {
@@ -48,12 +51,12 @@ use crate::vector::core::vector::Vector;
 /// )?;
 ///
 /// // Generate embedding
-/// let vector = embedder.embed("Rust is awesome!").await?;
+/// let vector = embedder.embed(&EmbedInput::Text("Rust is awesome!")).await?;
 /// println!("Embedding dimension: {}", embedder.dimension());
 ///
 /// // Batch processing
-/// let texts = vec!["Hello", "World"];
-/// let vectors = embedder.embed_batch(&texts).await?;
+/// let inputs = vec![EmbedInput::Text("Hello"), EmbedInput::Text("World")];
+/// let vectors = embedder.embed_batch(&inputs).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -66,9 +69,19 @@ pub struct CandleTextEmbedder {
     /// Device to run the model on (CPU or GPU).
     device: Device,
     /// Dimension of the output embeddings.
-    dimension: usize,
+    dim: usize,
     /// Name of the HuggingFace model.
     model_name: String,
+}
+
+#[cfg(feature = "embeddings-candle")]
+impl std::fmt::Debug for CandleTextEmbedder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CandleTextEmbedder")
+            .field("model_name", &self.model_name)
+            .field("dimension", &self.dim)
+            .finish()
+    }
 }
 
 #[cfg(feature = "embeddings-candle")]
@@ -159,38 +172,75 @@ impl CandleTextEmbedder {
             PlatypusError::InvalidOperation(format!("Tokenizer load failed: {}", e))
         })?;
 
-        let dimension = config.hidden_size;
+        let dim = config.hidden_size;
 
         Ok(Self {
             model,
             tokenizer,
             device,
-            dimension,
+            dim,
             model_name: model_name.to_string(),
         })
     }
 
+    /// Embed text directly (internal implementation).
+    async fn embed_text(&self, text: &str) -> Result<Vector> {
+        // Tokenize
+        let encoding = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| PlatypusError::InvalidOperation(format!("Tokenization failed: {}", e)))?;
+
+        let token_ids = encoding.get_ids();
+        let attention_mask = encoding.get_attention_mask();
+
+        // Convert to tensors
+        let token_ids_tensor = Tensor::new(token_ids, &self.device)
+            .map_err(|e| PlatypusError::InvalidOperation(format!("Tensor creation failed: {}", e)))?
+            .unsqueeze(0)
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
+
+        let attention_mask_tensor = Tensor::new(attention_mask, &self.device)
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
+            .unsqueeze(0)
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
+
+        // Forward pass
+        let embeddings = self
+            .model
+            .forward(&token_ids_tensor, &attention_mask_tensor, None)
+            .map_err(|e| PlatypusError::InvalidOperation(format!("Model forward failed: {}", e)))?;
+
+        // Mean pooling
+        let pooled = self.mean_pool(&embeddings, &attention_mask_tensor)?;
+
+        // Normalize (L2 normalization)
+        let norm = pooled
+            .sqr()
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
+            .sum_all()
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
+            .sqrt()
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
+            .to_scalar::<f32>()
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
+
+        // Divide by norm to normalize
+        let normalized = pooled
+            .affine((1.0 / norm) as f64, 0.0)
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
+
+        // Convert to Vector
+        let vector_data: Vec<f32> = normalized
+            .squeeze(0)
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
+            .to_vec1()
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
+
+        Ok(Vector::new(vector_data))
+    }
+
     /// Perform mean pooling over token embeddings.
-    ///
-    /// This method averages the token embeddings using the attention mask to ignore
-    /// padding tokens. Mean pooling is a common technique for generating sentence
-    /// embeddings from token-level BERT outputs.
-    ///
-    /// # Arguments
-    ///
-    /// * `embeddings` - Token embeddings from BERT model (shape: [batch_size, seq_len, hidden_dim])
-    /// * `attention_mask` - Attention mask indicating valid tokens (shape: [batch_size, seq_len])
-    ///
-    /// # Returns
-    ///
-    /// Mean-pooled embeddings (shape: [batch_size, hidden_dim])
-    ///
-    /// # How it works
-    ///
-    /// 1. Expand attention mask to match embedding dimensions
-    /// 2. Multiply embeddings by mask to zero out padding tokens
-    /// 3. Sum embeddings across sequence dimension
-    /// 4. Divide by sum of mask values to get mean
     fn mean_pool(&self, embeddings: &Tensor, attention_mask: &Tensor) -> Result<Tensor> {
         // Expand attention mask to match embedding dimensions
         let mask_expanded = attention_mask
@@ -227,100 +277,35 @@ impl CandleTextEmbedder {
 
 #[cfg(feature = "embeddings-candle")]
 #[async_trait]
-impl TextEmbedder for CandleTextEmbedder {
-    /// Generate an embedding vector for the given text.
+impl Embedder for CandleTextEmbedder {
+    /// Generate an embedding vector for the given input.
     ///
-    /// This method performs the following steps:
-    /// 1. Tokenize the input text
-    /// 2. Convert tokens to tensors
-    /// 3. Run BERT forward pass
-    /// 4. Apply mean pooling over token embeddings
-    /// 5. L2 normalize the result
-    ///
-    /// # Arguments
-    ///
-    /// * `text` - The text to embed
-    ///
-    /// # Returns
-    ///
-    /// A normalized vector representation of the input text
-    async fn embed(&self, text: &str) -> Result<Vector> {
-        // Tokenize
-        let encoding = self
-            .tokenizer
-            .encode(text, true)
-            .map_err(|e| PlatypusError::InvalidOperation(format!("Tokenization failed: {}", e)))?;
-
-        let token_ids = encoding.get_ids();
-        let attention_mask = encoding.get_attention_mask();
-
-        // Convert to tensors
-        let token_ids_tensor = Tensor::new(token_ids, &self.device)
-            .map_err(|e| PlatypusError::InvalidOperation(format!("Tensor creation failed: {}", e)))?
-            .unsqueeze(0)
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
-
-        let attention_mask_tensor = Tensor::new(attention_mask, &self.device)
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
-            .unsqueeze(0)
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
-
-        // Forward pass
-        let embeddings = self
-            .model
-            .forward(&token_ids_tensor, &attention_mask_tensor, None)
-            .map_err(|e| PlatypusError::InvalidOperation(format!("Model forward failed: {}", e)))?;
-
-        // Mean pooling
-        let pooled = self.mean_pool(&embeddings, &attention_mask_tensor)?;
-
-        // Normalize (L2 normalization)
-        // Calculate L2 norm: sqrt(sum(x^2))
-        let norm = pooled
-            .sqr()
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
-            .sum_all()
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
-            .sqrt()
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
-            .to_scalar::<f32>()
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
-
-        // Divide by norm to normalize
-        let normalized = pooled
-            .affine((1.0 / norm) as f64, 0.0)
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
-
-        // Convert to Vector
-        let vector_data: Vec<f32> = normalized
-            .squeeze(0)
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
-            .to_vec1()
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
-
-        Ok(Vector::new(vector_data))
+    /// Only text input is supported. Image input will return an error.
+    async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+        match input {
+            EmbedInput::Text(text) => self.embed_text(text).await,
+            _ => Err(PlatypusError::invalid_argument(
+                "CandleTextEmbedder only supports text input",
+            )),
+        }
     }
 
     /// Get the dimension of generated embeddings.
-    ///
-    /// Returns the hidden size of the BERT model, which is typically
-    /// 384 for MiniLM models and 768 for base BERT models.
-    ///
-    /// # Returns
-    ///
-    /// The number of dimensions in the embedding vectors
     fn dimension(&self) -> usize {
-        self.dimension
+        self.dim
+    }
+
+    /// Get the supported input types.
+    fn supported_input_types(&self) -> Vec<EmbedInputType> {
+        vec![EmbedInputType::Text]
     }
 
     /// Get the name/identifier of this embedder.
-    ///
-    /// Returns the HuggingFace model identifier used to create this embedder.
-    ///
-    /// # Returns
-    ///
-    /// The model name (e.g., "sentence-transformers/all-MiniLM-L6-v2")
     fn name(&self) -> &str {
         &self.model_name
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

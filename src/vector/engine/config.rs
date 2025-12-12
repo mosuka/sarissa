@@ -12,16 +12,16 @@
 //! # {
 //! use platypus::embedding::per_field::PerFieldEmbedder;
 //! use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-//! use platypus::embedding::text_embedder::TextEmbedder;
+//! use platypus::embedding::embedder::Embedder;
 //! use platypus::vector::engine::VectorIndexConfig;
 //! use std::sync::Arc;
 //!
 //! # fn example() -> platypus::error::Result<()> {
-//! let text_embedder: Arc<dyn TextEmbedder> = Arc::new(
+//! let text_embedder: Arc<dyn Embedder> = Arc::new(
 //!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 //! );
 //!
-//! let mut embedder = PerFieldEmbedder::with_default_text(text_embedder);
+//! let embedder = PerFieldEmbedder::new(text_embedder);
 //!
 //! let config = VectorIndexConfig::builder()
 //!     .embedder(embedder)
@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::embedding::embedder::Embedder;
 use crate::embedding::noop::NoOpEmbedder;
+use crate::embedding::per_field::PerFieldEmbedder;
 use crate::error::{PlatypusError, Result};
 use crate::vector::DistanceMetric;
 use crate::vector::core::document::VectorType;
@@ -53,19 +54,19 @@ use crate::vector::core::document::VectorType;
 /// # {
 /// use platypus::embedding::per_field::PerFieldEmbedder;
 /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::embedding::embedder::Embedder;
 /// use platypus::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use platypus::vector::DistanceMetric;
 /// use platypus::vector::core::document::VectorType;
 /// use std::sync::Arc;
 ///
 /// # fn example() -> platypus::error::Result<()> {
-/// let text_embedder: Arc<dyn TextEmbedder> = Arc::new(
+/// let text_embedder: Arc<dyn Embedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
 /// let dim = text_embedder.dimension();
 ///
-/// let embedder = PerFieldEmbedder::with_default_text(text_embedder);
+/// let embedder = PerFieldEmbedder::new(text_embedder);
 ///
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
@@ -149,19 +150,19 @@ impl VectorIndexConfig {
 /// # {
 /// use platypus::embedding::per_field::PerFieldEmbedder;
 /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::embedding::embedder::Embedder;
 /// use platypus::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use platypus::vector::DistanceMetric;
 /// use platypus::vector::core::document::VectorType;
 /// use std::sync::Arc;
 ///
 /// # fn example() -> platypus::error::Result<()> {
-/// let text_embedder: Arc<dyn TextEmbedder> = Arc::new(
+/// let text_embedder: Arc<dyn Embedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
 /// let dim = text_embedder.dimension();
 ///
-/// let mut embedder = PerFieldEmbedder::with_default_text(text_embedder);
+/// let embedder = PerFieldEmbedder::new(text_embedder);
 ///
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
@@ -221,18 +222,10 @@ impl VectorIndexConfigBuilder {
     /// Add a text field with automatic configuration from the embedder.
     ///
     /// The dimension will be inferred from the embedder if available.
+    /// For PerFieldEmbedder, the field-specific embedder will be used.
     pub fn text_field(mut self, name: impl Into<String>) -> Result<Self> {
         let name = name.into();
-        let dimension = self
-            .embedder
-            .as_ref()
-            .and_then(|e| e.text_dimension(&name))
-            .ok_or_else(|| {
-                PlatypusError::invalid_config(format!(
-                    "cannot infer dimension for text field '{}': no embedder configured or field not found",
-                    name
-                ))
-            })?;
+        let dimension = self.get_field_dimension(&name)?;
 
         let config = VectorFieldConfig {
             dimension,
@@ -240,7 +233,7 @@ impl VectorIndexConfigBuilder {
             index: VectorIndexKind::Flat,
             embedder_id: "default".to_string(),
             vector_type: VectorType::Text,
-            embedder: None,
+            embedder: Some(name.clone()),
             base_weight: 1.0,
         };
 
@@ -254,18 +247,10 @@ impl VectorIndexConfigBuilder {
     /// Add an image field with automatic configuration from the embedder.
     ///
     /// The dimension will be inferred from the embedder if available.
+    /// For PerFieldEmbedder, the field-specific embedder will be used.
     pub fn image_field(mut self, name: impl Into<String>) -> Result<Self> {
         let name = name.into();
-        let dimension = self
-            .embedder
-            .as_ref()
-            .and_then(|e| e.image_dimension(&name))
-            .ok_or_else(|| {
-                PlatypusError::invalid_config(format!(
-                    "cannot infer dimension for image field '{}': no embedder configured or field not found",
-                    name
-                ))
-            })?;
+        let dimension = self.get_field_dimension(&name)?;
 
         let config = VectorFieldConfig {
             dimension,
@@ -273,7 +258,7 @@ impl VectorIndexConfigBuilder {
             index: VectorIndexKind::Flat,
             embedder_id: "default".to_string(),
             vector_type: VectorType::Image,
-            embedder: None,
+            embedder: Some(name.clone()),
             base_weight: 1.0,
         };
 
@@ -282,6 +267,43 @@ impl VectorIndexConfigBuilder {
         }
         self.fields.insert(name, config);
         Ok(self)
+    }
+
+    /// Get the dimension for a specific field from the embedder.
+    ///
+    /// If the embedder is a PerFieldEmbedder, it will try to get the
+    /// field-specific embedder's dimension. Otherwise, it uses the
+    /// default embedder's dimension.
+    fn get_field_dimension(&self, field_name: &str) -> Result<usize> {
+        let embedder = self.embedder.as_ref().ok_or_else(|| {
+            PlatypusError::invalid_config(format!(
+                "cannot infer dimension for field '{}': no embedder configured",
+                field_name
+            ))
+        })?;
+
+        // Try to downcast to PerFieldEmbedder for field-specific dimensions
+        if let Some(per_field) = embedder.as_any().downcast_ref::<PerFieldEmbedder>() {
+            let field_embedder = per_field.get_embedder(field_name);
+            let dim = field_embedder.dimension();
+            if dim == 0 {
+                return Err(PlatypusError::invalid_config(format!(
+                    "cannot infer dimension for field '{}': embedder returned dimension 0",
+                    field_name
+                )));
+            }
+            Ok(dim)
+        } else {
+            // Use the embedder's dimension directly
+            let dim = embedder.dimension();
+            if dim == 0 {
+                return Err(PlatypusError::invalid_config(format!(
+                    "cannot infer dimension for field '{}': embedder returned dimension 0",
+                    field_name
+                )));
+            }
+            Ok(dim)
+        }
     }
 
     /// Add a default field for search.

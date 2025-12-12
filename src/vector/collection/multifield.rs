@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::{Mutex, RwLock};
 
-use crate::embedding::image_embedder::ImageEmbedder;
-use crate::embedding::text_embedder::TextEmbedder;
+use crate::embedding::embedder::{EmbedInput, Embedder};
+use crate::embedding::per_field::PerFieldEmbedder;
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
@@ -126,26 +126,27 @@ impl MultiFieldVectorIndex {
 
     /// Register embedder instances from the Embedder trait object.
     ///
-    /// This extracts text and image embedders for each configured field
-    /// and registers them with the embedder registry.
-    fn register_embedder_from_config(
-        &self,
-        embedder: Arc<dyn crate::embedding::embedder::Embedder>,
-    ) -> Result<()> {
-        // For each configured field, register the appropriate embedder
-        for (field_name, field_config) in &self.config.fields {
-            // If field has an embedder config reference, use it as the lookup key
-            if let Some(embedder_id) = field_config.embedder.as_ref() {
-                // Try to get embedders for this field
-                let text_embedder = embedder.get_text_embedder(field_name);
-                let image_embedder = embedder.get_image_embedder(field_name);
-
-                // Register using the new method that doesn't require pre-declaration
-                self.embedder_registry.register_from_embedder_trait(
-                    embedder_id.clone(),
-                    text_embedder,
-                    image_embedder,
-                );
+    /// This extracts embedders for each configured field and registers them
+    /// with the embedder registry.
+    fn register_embedder_from_config(&self, embedder: Arc<dyn Embedder>) -> Result<()> {
+        // Try to downcast to PerFieldEmbedder to get field-specific embedders
+        if let Some(per_field) = embedder.as_any().downcast_ref::<PerFieldEmbedder>() {
+            // For each configured field, register the appropriate embedder
+            for (field_name, field_config) in &self.config.fields {
+                if let Some(embedder_id) = field_config.embedder.as_ref() {
+                    // Get the embedder for this field from PerFieldEmbedder
+                    let field_embedder = per_field.get_embedder(field_name);
+                    self.embedder_registry
+                        .register(embedder_id.clone(), field_embedder.clone());
+                }
+            }
+        } else {
+            // If not PerFieldEmbedder, register the embedder for all fields that reference it
+            for (_field_name, field_config) in &self.config.fields {
+                if let Some(embedder_id) = field_config.embedder.as_ref() {
+                    self.embedder_registry
+                        .register(embedder_id.clone(), embedder.clone());
+                }
             }
         }
 
@@ -219,46 +220,34 @@ impl MultiFieldVectorIndex {
             return Ok(empty);
         }
 
-        struct ResolvedEmbedders {
+        /// Helper struct to hold resolved embedder and executor.
+        struct ResolvedEmbedder {
             name: String,
             executor: Arc<EmbedderExecutor>,
-            text: Option<Arc<dyn TextEmbedder>>,
-            image: Option<Arc<dyn ImageEmbedder>>,
+            embedder: Arc<dyn Embedder>,
         }
 
-        let needs_text = payload
-            .segments
-            .iter()
-            .any(|segment| matches!(segment.source, PayloadSource::Text { .. }));
-        let needs_image = payload.segments.iter().any(|segment| {
+        let needs_embedding = payload.segments.iter().any(|segment| {
             matches!(
                 segment.source,
-                PayloadSource::Bytes { .. } | PayloadSource::Uri { .. }
+                PayloadSource::Text { .. }
+                    | PayloadSource::Bytes { .. }
+                    | PayloadSource::Uri { .. }
             )
         });
 
-        let embedder_handles = if needs_text || needs_image {
+        let embedder_handle = if needs_embedding {
             let embedder_name = field_config.embedder.as_ref().ok_or_else(|| {
                 PlatypusError::invalid_config(format!(
                     "vector field '{field_name}' must specify 'embedder' to ingest raw payloads"
                 ))
             })?;
             let executor = self.ensure_embedder_executor()?;
-            let text = if needs_text {
-                Some(self.embedder_registry.resolve_text(embedder_name)?)
-            } else {
-                None
-            };
-            let image = if needs_image {
-                Some(self.embedder_registry.resolve_image(embedder_name)?)
-            } else {
-                None
-            };
-            Some(ResolvedEmbedders {
+            let embedder = self.embedder_registry.resolve(embedder_name)?;
+            Some(ResolvedEmbedder {
                 name: embedder_name.clone(),
                 executor,
-                text,
-                image,
+                embedder,
             })
         } else {
             None
@@ -287,23 +276,27 @@ impl MultiFieldVectorIndex {
             };
             match source {
                 PayloadSource::Text { value } => {
-                    let handles = embedder_handles.as_ref().ok_or_else(|| {
+                    let handle = embedder_handle.as_ref().ok_or_else(|| {
                         PlatypusError::invalid_config(format!(
                             "vector field '{field_name}' must specify 'embedder' to ingest text segments"
                         ))
                     })?;
-                    let embedder = handles.text.as_ref().ok_or_else(|| {
-                        PlatypusError::invalid_config(format!(
-                            "embedder '{}' does not support text segments",
-                            handles.name
-                        ))
-                    })?;
-                    let embedder_name = handles.name.clone();
-                    let executor = handles.executor.clone();
-                    let embedder_clone = Arc::clone(embedder);
+
+                    // Check if embedder supports text
+                    if !handle.embedder.supports_text() {
+                        return Err(PlatypusError::invalid_config(format!(
+                            "embedder '{}' does not support text embedding",
+                            handle.name
+                        )));
+                    }
+
+                    let embedder_name = handle.name.clone();
+                    let executor = handle.executor.clone();
+                    let embedder_clone = handle.embedder.clone();
                     let text_value = value;
-                    let vector =
-                        executor.run(async move { embedder_clone.embed(&text_value).await })?;
+                    let vector = executor.run(async move {
+                        embedder_clone.embed(&EmbedInput::Text(&text_value)).await
+                    })?;
                     vector.validate_dimension(field_config.dimension)?;
                     if !vector.is_valid() {
                         return Err(PlatypusError::InvalidOperation(format!(
@@ -319,25 +312,31 @@ impl MultiFieldVectorIndex {
                     field_vectors.vectors.push(stored);
                 }
                 PayloadSource::Bytes { bytes, mime } => {
-                    let handles = embedder_handles.as_ref().ok_or_else(|| {
+                    let handle = embedder_handle.as_ref().ok_or_else(|| {
                         PlatypusError::invalid_config(format!(
                             "vector field '{field_name}' must specify 'embedder' to ingest binary segments"
                         ))
                     })?;
-                    let embedder = handles.image.as_ref().ok_or_else(|| {
-                        PlatypusError::invalid_config(format!(
-                            "embedder '{}' does not support binary segments",
-                            handles.name
-                        ))
-                    })?;
-                    let embedder_name = handles.name.clone();
-                    let executor = handles.executor.clone();
-                    let embedder_clone = Arc::clone(embedder);
-                    let payload = bytes.clone();
+
+                    // Check if embedder supports images
+                    if !handle.embedder.supports_image() {
+                        return Err(PlatypusError::invalid_config(format!(
+                            "embedder '{}' does not support image embedding",
+                            handle.name
+                        )));
+                    }
+
+                    let embedder_name = handle.name.clone();
+                    let executor = handle.executor.clone();
+                    let embedder_clone = handle.embedder.clone();
+                    let payload_bytes = bytes.clone();
                     let mime_hint = mime.clone();
                     let vector = executor.run(async move {
                         embedder_clone
-                            .embed_bytes(payload.as_ref(), mime_hint.as_deref())
+                            .embed(&EmbedInput::ImageBytes(
+                                &payload_bytes,
+                                mime_hint.as_deref(),
+                            ))
                             .await
                     })?;
                     vector.validate_dimension(field_config.dimension)?;
@@ -355,25 +354,28 @@ impl MultiFieldVectorIndex {
                     field_vectors.vectors.push(stored);
                 }
                 PayloadSource::Uri { uri, media_hint } => {
-                    let handles = embedder_handles.as_ref().ok_or_else(|| {
+                    let handle = embedder_handle.as_ref().ok_or_else(|| {
                         PlatypusError::invalid_config(format!(
                             "vector field '{field_name}' must specify 'embedder' to ingest URI segments"
                         ))
                     })?;
-                    let embedder = handles.image.as_ref().ok_or_else(|| {
-                        PlatypusError::invalid_config(format!(
-                            "embedder '{}' does not support URI segments",
-                            handles.name
-                        ))
-                    })?;
-                    let embedder_name = handles.name.clone();
-                    let executor = handles.executor.clone();
-                    let embedder_clone = Arc::clone(embedder);
+
+                    // Check if embedder supports images
+                    if !handle.embedder.supports_image() {
+                        return Err(PlatypusError::invalid_config(format!(
+                            "embedder '{}' does not support image embedding",
+                            handle.name
+                        )));
+                    }
+
+                    let embedder_name = handle.name.clone();
+                    let executor = handle.executor.clone();
+                    let embedder_clone = handle.embedder.clone();
                     let uri_value = uri;
-                    let hint = media_hint.clone();
+                    let _hint = media_hint.clone();
                     let vector = executor.run(async move {
                         embedder_clone
-                            .embed_uri(uri_value.as_str(), hint.as_deref())
+                            .embed(&EmbedInput::ImageUri(&uri_value))
                             .await
                     })?;
                     vector.validate_dimension(field_config.dimension)?;
