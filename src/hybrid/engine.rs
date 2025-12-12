@@ -505,13 +505,15 @@ mod tests {
                 options: HashMap::new(),
             },
         )]);
+        use crate::embedding::noop::NoOpEmbedder;
+
         #[allow(deprecated)]
         let config = VectorIndexConfig {
             fields,
             embedders,
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
-            embedder: None,
+            embedder: Arc::new(NoOpEmbedder::new()),
         };
         let storage: Arc<dyn Storage> =
             Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

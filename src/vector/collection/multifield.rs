@@ -120,10 +120,8 @@ impl MultiFieldVectorIndex {
         collection.instantiate_configured_fields()?;
         collection.load_persisted_state()?;
 
-        // If new embedder API is used, automatically register embedder instances
-        if let Some(embedder) = config_embedder {
-            collection.register_embedder_from_config(embedder)?;
-        }
+        // Register embedder instances from the config
+        collection.register_embedder_from_config(config_embedder)?;
 
         Ok(collection)
     }
