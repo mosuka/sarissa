@@ -1,4 +1,34 @@
 //! Configuration for lexical index types.
+//!
+//! This module provides configuration types for lexical indexes.
+//!
+//! # Configuration with Analyzer
+//!
+//! The recommended way to configure a LexicalEngine is to use the builder pattern
+//! with an `Analyzer`, similar to how `Embedder` is used in `VectorEngine`.
+//!
+//! ```no_run
+//! use platypus::lexical::index::config::LexicalIndexConfig;
+//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
+//! use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+//! use std::sync::Arc;
+//!
+//! // Simple configuration with default analyzer
+//! let config = LexicalIndexConfig::builder().build();
+//!
+//! // Configuration with custom analyzer
+//! let analyzer = Arc::new(StandardAnalyzer::default());
+//! let config = LexicalIndexConfig::builder()
+//!     .analyzer(analyzer)
+//!     .build();
+//!
+//! // Configuration with per-field analyzer
+//! let default_analyzer = Arc::new(StandardAnalyzer::default());
+//! let per_field = PerFieldAnalyzer::new(default_analyzer);
+//! let config = LexicalIndexConfig::builder()
+//!     .analyzer(Arc::new(per_field))
+//!     .build();
+//! ```
 
 use std::sync::Arc;
 
@@ -61,6 +91,28 @@ impl Default for LexicalIndexConfig {
 }
 
 impl LexicalIndexConfig {
+    /// Create a new builder for LexicalIndexConfig.
+    ///
+    /// This provides a fluent API for constructing configuration,
+    /// consistent with `VectorIndexConfig::builder()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
+    /// use std::sync::Arc;
+    ///
+    /// let config = LexicalIndexConfig::builder()
+    ///     .analyzer(Arc::new(StandardAnalyzer::default()))
+    ///     .max_docs_per_segment(500_000)
+    ///     .compress_stored_fields(true)
+    ///     .build();
+    /// ```
+    pub fn builder() -> LexicalIndexConfigBuilder {
+        LexicalIndexConfigBuilder::new()
+    }
+
     /// Get a human-readable name for the index type.
     pub fn index_type_name(&self) -> &str {
         match self {
@@ -68,6 +120,15 @@ impl LexicalIndexConfig {
             // Future index types:
             // LexicalIndexConfig::ColumnStore(_) => "ColumnStore",
             // LexicalIndexConfig::LSMTree(_) => "LSMTree",
+        }
+    }
+
+    /// Get the analyzer from the configuration.
+    ///
+    /// Returns the analyzer used for text tokenization.
+    pub fn analyzer(&self) -> &Arc<dyn Analyzer> {
+        match self {
+            LexicalIndexConfig::Inverted(config) => &config.analyzer,
         }
     }
 }
@@ -155,5 +216,176 @@ impl std::fmt::Debug for InvertedIndexConfig {
             .field("max_segments", &self.max_segments)
             .field("analyzer", &self.analyzer.name())
             .finish()
+    }
+}
+
+/// Builder for LexicalIndexConfig.
+///
+/// Provides a fluent API for constructing LexicalIndexConfig,
+/// consistent with `VectorIndexConfigBuilder`.
+///
+/// # Example
+///
+/// ```no_run
+/// use platypus::lexical::index::config::LexicalIndexConfig;
+/// use platypus::analysis::analyzer::standard::StandardAnalyzer;
+/// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use std::sync::Arc;
+///
+/// // Simple usage with defaults
+/// let config = LexicalIndexConfig::builder().build();
+///
+/// // With custom analyzer
+/// let analyzer = Arc::new(StandardAnalyzer::default());
+/// let config = LexicalIndexConfig::builder()
+///     .analyzer(analyzer)
+///     .build();
+///
+/// // With per-field analyzer (similar to VectorEngine's PerFieldEmbedder)
+/// let default_analyzer = Arc::new(StandardAnalyzer::default());
+/// let per_field = PerFieldAnalyzer::new(default_analyzer);
+/// let config = LexicalIndexConfig::builder()
+///     .analyzer(Arc::new(per_field))
+///     .max_docs_per_segment(500_000)
+///     .compress_stored_fields(true)
+///     .build();
+/// ```
+#[derive(Default)]
+pub struct LexicalIndexConfigBuilder {
+    analyzer: Option<Arc<dyn Analyzer>>,
+    max_docs_per_segment: Option<u64>,
+    write_buffer_size: Option<usize>,
+    compress_stored_fields: Option<bool>,
+    store_term_vectors: Option<bool>,
+    merge_factor: Option<u32>,
+    max_segments: Option<u32>,
+}
+
+impl LexicalIndexConfigBuilder {
+    /// Create a new builder.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the analyzer for text fields.
+    ///
+    /// Use `PerFieldAnalyzer` for field-specific analyzers.
+    /// This is analogous to `VectorIndexConfigBuilder::embedder()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use platypus::lexical::index::config::LexicalIndexConfig;
+    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
+    /// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+    /// use std::sync::Arc;
+    ///
+    /// // With a single analyzer
+    /// let config = LexicalIndexConfig::builder()
+    ///     .analyzer(Arc::new(StandardAnalyzer::default()))
+    ///     .build();
+    ///
+    /// // With per-field analyzers
+    /// let default_analyzer = Arc::new(StandardAnalyzer::default());
+    /// let per_field = PerFieldAnalyzer::new(default_analyzer);
+    /// let config = LexicalIndexConfig::builder()
+    ///     .analyzer(Arc::new(per_field))
+    ///     .build();
+    /// ```
+    pub fn analyzer(mut self, analyzer: Arc<dyn Analyzer>) -> Self {
+        self.analyzer = Some(analyzer);
+        self
+    }
+
+    /// Set the maximum number of documents per segment.
+    ///
+    /// When a segment reaches this size, it will be considered for merging.
+    /// Larger values reduce merge overhead but increase memory usage.
+    /// Default: 1,000,000
+    pub fn max_docs_per_segment(mut self, max_docs: u64) -> Self {
+        self.max_docs_per_segment = Some(max_docs);
+        self
+    }
+
+    /// Set the buffer size for writing operations (in bytes).
+    ///
+    /// Controls how much data is buffered in memory before being flushed to disk.
+    /// Larger buffers improve write performance but use more memory.
+    /// Default: 1MB (1,048,576 bytes)
+    pub fn write_buffer_size(mut self, size: usize) -> Self {
+        self.write_buffer_size = Some(size);
+        self
+    }
+
+    /// Enable or disable compression for stored fields.
+    ///
+    /// Enabling compression reduces disk usage but increases CPU overhead
+    /// for indexing and retrieval operations.
+    /// Default: false
+    pub fn compress_stored_fields(mut self, compress: bool) -> Self {
+        self.compress_stored_fields = Some(compress);
+        self
+    }
+
+    /// Enable or disable term vector storage.
+    ///
+    /// Term vectors enable advanced features like highlighting and more-like-this
+    /// queries, but increase index size and indexing time.
+    /// Default: false
+    pub fn store_term_vectors(mut self, store: bool) -> Self {
+        self.store_term_vectors = Some(store);
+        self
+    }
+
+    /// Set the merge factor for segment merging.
+    ///
+    /// Controls how many segments are merged at once. Higher values reduce
+    /// the number of merge operations but create larger temporary segments.
+    /// Default: 10
+    pub fn merge_factor(mut self, factor: u32) -> Self {
+        self.merge_factor = Some(factor);
+        self
+    }
+
+    /// Set the maximum number of segments before merging.
+    ///
+    /// When the number of segments exceeds this threshold, a merge operation
+    /// will be triggered to consolidate them.
+    /// Default: 100
+    pub fn max_segments(mut self, max: u32) -> Self {
+        self.max_segments = Some(max);
+        self
+    }
+
+    /// Build the configuration.
+    ///
+    /// Returns `LexicalIndexConfig::Inverted` with the configured settings.
+    /// Any unset values will use defaults.
+    pub fn build(self) -> LexicalIndexConfig {
+        let mut config = InvertedIndexConfig::default();
+
+        if let Some(analyzer) = self.analyzer {
+            config.analyzer = analyzer;
+        }
+        if let Some(max_docs) = self.max_docs_per_segment {
+            config.max_docs_per_segment = max_docs;
+        }
+        if let Some(size) = self.write_buffer_size {
+            config.write_buffer_size = size;
+        }
+        if let Some(compress) = self.compress_stored_fields {
+            config.compress_stored_fields = compress;
+        }
+        if let Some(store) = self.store_term_vectors {
+            config.store_term_vectors = store;
+        }
+        if let Some(factor) = self.merge_factor {
+            config.merge_factor = factor;
+        }
+        if let Some(max) = self.max_segments {
+            config.max_segments = max;
+        }
+
+        LexicalIndexConfig::Inverted(config)
     }
 }

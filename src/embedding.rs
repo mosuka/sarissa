@@ -134,6 +134,9 @@ pub mod embedder;
 // Per-field embedder support
 pub mod per_field;
 
+// No-operation embedder for pre-computed vectors
+pub mod noop;
+
 // Candle implementation (requires feature flag)
 #[cfg(feature = "embeddings-candle")]
 pub mod candle_text_embedder;
