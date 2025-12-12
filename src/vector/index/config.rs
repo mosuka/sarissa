@@ -165,7 +165,7 @@ pub mod utils {
 /// # Example
 ///
 /// ```rust
-/// use platypus::vector::index::config::{VectorIndexConfig, HnswIndexConfig};
+/// use platypus::vector::index::config::{VectorIndexTypeConfig, HnswIndexConfig};
 /// use platypus::vector::core::distance::DistanceMetric;
 ///
 /// let hnsw_config = HnswIndexConfig {
@@ -175,11 +175,11 @@ pub mod utils {
 ///     ef_construction: 200,
 ///     ..Default::default()
 /// };
-/// let config = VectorIndexConfig::HNSW(hnsw_config);
+/// let config = VectorIndexTypeConfig::HNSW(hnsw_config);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum VectorIndexConfig {
+pub enum VectorIndexTypeConfig {
     /// Flat index configuration
     Flat(FlatIndexConfig),
     /// HNSW index configuration
@@ -188,55 +188,55 @@ pub enum VectorIndexConfig {
     IVF(IvfIndexConfig),
 }
 
-impl Default for VectorIndexConfig {
+impl Default for VectorIndexTypeConfig {
     fn default() -> Self {
-        VectorIndexConfig::Flat(FlatIndexConfig::default())
+        VectorIndexTypeConfig::Flat(FlatIndexConfig::default())
     }
 }
 
-impl VectorIndexConfig {
+impl VectorIndexTypeConfig {
     /// Get the index type as a string.
     pub fn index_type_name(&self) -> &'static str {
         match self {
-            VectorIndexConfig::Flat(_) => "Flat",
-            VectorIndexConfig::HNSW(_) => "HNSW",
-            VectorIndexConfig::IVF(_) => "IVF",
+            VectorIndexTypeConfig::Flat(_) => "Flat",
+            VectorIndexTypeConfig::HNSW(_) => "HNSW",
+            VectorIndexTypeConfig::IVF(_) => "IVF",
         }
     }
 
     /// Get the dimension from the config.
     pub fn dimension(&self) -> usize {
         match self {
-            VectorIndexConfig::Flat(config) => config.dimension,
-            VectorIndexConfig::HNSW(config) => config.dimension,
-            VectorIndexConfig::IVF(config) => config.dimension,
+            VectorIndexTypeConfig::Flat(config) => config.dimension,
+            VectorIndexTypeConfig::HNSW(config) => config.dimension,
+            VectorIndexTypeConfig::IVF(config) => config.dimension,
         }
     }
 
     /// Get the distance metric from the config.
     pub fn distance_metric(&self) -> DistanceMetric {
         match self {
-            VectorIndexConfig::Flat(config) => config.distance_metric,
-            VectorIndexConfig::HNSW(config) => config.distance_metric,
-            VectorIndexConfig::IVF(config) => config.distance_metric,
+            VectorIndexTypeConfig::Flat(config) => config.distance_metric,
+            VectorIndexTypeConfig::HNSW(config) => config.distance_metric,
+            VectorIndexTypeConfig::IVF(config) => config.distance_metric,
         }
     }
 
     /// Get the max vectors per segment from the config.
     pub fn max_vectors_per_segment(&self) -> u64 {
         match self {
-            VectorIndexConfig::Flat(config) => config.max_vectors_per_segment,
-            VectorIndexConfig::HNSW(config) => config.max_vectors_per_segment,
-            VectorIndexConfig::IVF(config) => config.max_vectors_per_segment,
+            VectorIndexTypeConfig::Flat(config) => config.max_vectors_per_segment,
+            VectorIndexTypeConfig::HNSW(config) => config.max_vectors_per_segment,
+            VectorIndexTypeConfig::IVF(config) => config.max_vectors_per_segment,
         }
     }
 
     /// Get the merge factor from the config.
     pub fn merge_factor(&self) -> u32 {
         match self {
-            VectorIndexConfig::Flat(config) => config.merge_factor,
-            VectorIndexConfig::HNSW(config) => config.merge_factor,
-            VectorIndexConfig::IVF(config) => config.merge_factor,
+            VectorIndexTypeConfig::Flat(config) => config.merge_factor,
+            VectorIndexTypeConfig::HNSW(config) => config.merge_factor,
+            VectorIndexTypeConfig::IVF(config) => config.merge_factor,
         }
     }
 }
