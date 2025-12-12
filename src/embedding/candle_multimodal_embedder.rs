@@ -5,6 +5,9 @@
 //! Requires the `embeddings-multimodal` feature to be enabled.
 
 #[cfg(feature = "embeddings-multimodal")]
+use std::any::Any;
+
+#[cfg(feature = "embeddings-multimodal")]
 use async_trait::async_trait;
 #[cfg(feature = "embeddings-multimodal")]
 use candle_core::{DType, Device, Module, Tensor};
@@ -18,9 +21,7 @@ use hf_hub::api::sync::ApiBuilder;
 use tokenizers::Tokenizer;
 
 #[cfg(feature = "embeddings-multimodal")]
-use crate::embedding::image_embedder::ImageEmbedder;
-#[cfg(feature = "embeddings-multimodal")]
-use crate::embedding::text_embedder::TextEmbedder;
+use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 #[cfg(feature = "embeddings-multimodal")]
 use crate::error::{PlatypusError, Result};
 #[cfg(feature = "embeddings-multimodal")]
@@ -52,8 +53,7 @@ use crate::vector::core::vector::Vector;
 /// ## Text-to-Image Search
 ///
 /// ```no_run
-/// use platypus::embedding::text_embedder::TextEmbedder;
-/// use platypus::embedding::image_embedder::ImageEmbedder;
+/// use platypus::embedding::embedder::{Embedder, EmbedInput};
 /// use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
 /// # async fn example() -> platypus::error::Result<()> {
@@ -62,14 +62,14 @@ use crate::vector::core::vector::Vector;
 /// )?;
 ///
 /// // Embed text query
-/// let text_vec = TextEmbedder::embed(&embedder, "a photo of a cat").await?;
+/// let text_vec = embedder.embed(&EmbedInput::Text("a photo of a cat")).await?;
 ///
 /// // Embed images
-/// let img1 = ImageEmbedder::embed(&embedder, "cat.jpg").await?;
-/// let img2 = ImageEmbedder::embed(&embedder, "dog.jpg").await?;
+/// let img1 = embedder.embed(&EmbedInput::ImagePath("cat.jpg")).await?;
+/// let img2 = embedder.embed(&EmbedInput::ImagePath("dog.jpg")).await?;
 ///
 /// // Text and images are in the same vector space
-/// println!("Dimension: {}", ImageEmbedder::dimension(&embedder));
+/// println!("Dimension: {}", embedder.dimension());
 /// # Ok(())
 /// # }
 /// ```
@@ -77,7 +77,7 @@ use crate::vector::core::vector::Vector;
 /// ## Image-to-Image Search
 ///
 /// ```no_run
-/// use platypus::embedding::image_embedder::ImageEmbedder;
+/// use platypus::embedding::embedder::{Embedder, EmbedInput};
 /// use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 ///
 /// # async fn example() -> platypus::error::Result<()> {
@@ -86,8 +86,13 @@ use crate::vector::core::vector::Vector;
 /// )?;
 ///
 /// // Find similar images
-/// let query = ImageEmbedder::embed(&embedder, "query.jpg").await?;
-/// let images = ImageEmbedder::embed_batch(&embedder, &["img1.jpg", "img2.jpg", "img3.jpg"]).await?;
+/// let query = embedder.embed(&EmbedInput::ImagePath("query.jpg")).await?;
+/// let inputs = vec![
+///     EmbedInput::ImagePath("img1.jpg"),
+///     EmbedInput::ImagePath("img2.jpg"),
+///     EmbedInput::ImagePath("img3.jpg"),
+/// ];
+/// let images = embedder.embed_batch(&inputs).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -111,6 +116,17 @@ pub struct CandleMultimodalEmbedder {
     model_name: String,
     /// Expected image size (width/height in pixels).
     image_size: usize,
+}
+
+#[cfg(feature = "embeddings-multimodal")]
+impl std::fmt::Debug for CandleMultimodalEmbedder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CandleMultimodalEmbedder")
+            .field("model_name", &self.model_name)
+            .field("dimension", &self.dimension)
+            .field("image_size", &self.image_size)
+            .finish()
+    }
 }
 
 #[cfg(feature = "embeddings-multimodal")]
@@ -259,6 +275,76 @@ impl CandleMultimodalEmbedder {
         })
     }
 
+    /// Embed text using CLIP text encoder.
+    async fn embed_text(&self, text: &str) -> Result<Vector> {
+        // Tokenize
+        let encoding = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| PlatypusError::InvalidOperation(format!("Tokenization failed: {}", e)))?;
+
+        let token_ids = encoding.get_ids();
+
+        // Convert to tensor
+        let token_ids_tensor = Tensor::new(token_ids, &self.device)
+            .map_err(|e| PlatypusError::InvalidOperation(format!("Tensor creation failed: {}", e)))?
+            .unsqueeze(0)
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
+
+        // Forward pass through text model
+        let text_features = self.text_model.forward(&token_ids_tensor).map_err(|e| {
+            PlatypusError::InvalidOperation(format!("Text model forward failed: {}", e))
+        })?;
+
+        // Project to common embedding space
+        let projected = self.text_projection.forward(&text_features).map_err(|e| {
+            PlatypusError::InvalidOperation(format!("Text projection failed: {}", e))
+        })?;
+
+        // Normalize
+        let normalized = self.normalize(&projected)?;
+
+        // Convert to Vector
+        let vector_data: Vec<f32> = normalized
+            .squeeze(0)
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
+            .to_vec1()
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
+
+        Ok(Vector::new(vector_data))
+    }
+
+    /// Embed image using CLIP vision encoder.
+    async fn embed_image(&self, image_path: &str) -> Result<Vector> {
+        // Preprocess image
+        let image_tensor = self.preprocess_image(image_path)?;
+
+        // Forward pass through vision model
+        let vision_features = self.vision_model.forward(&image_tensor).map_err(|e| {
+            PlatypusError::InvalidOperation(format!("Vision model forward failed: {}", e))
+        })?;
+
+        // Project to common embedding space
+        let projected = self
+            .vision_projection
+            .forward(&vision_features)
+            .map_err(|e| {
+                PlatypusError::InvalidOperation(format!("Vision projection failed: {}", e))
+            })?;
+
+        // Normalize
+        let normalized = self.normalize(&projected)?;
+
+        // Convert to Vector
+        let vector_data: Vec<f32> = normalized
+            .squeeze(0)
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
+            .to_vec1()
+            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
+
+        Ok(Vector::new(vector_data))
+    }
+
     /// Preprocess image to the format expected by CLIP vision model.
     ///
     /// This method performs standard CLIP image preprocessing:
@@ -381,153 +467,56 @@ impl CandleMultimodalEmbedder {
 
 #[cfg(feature = "embeddings-multimodal")]
 #[async_trait]
-impl TextEmbedder for CandleMultimodalEmbedder {
-    /// Generate an embedding vector for the given text using CLIP text encoder.
+impl Embedder for CandleMultimodalEmbedder {
+    /// Generate an embedding vector for the given input.
     ///
-    /// The resulting embedding is in the same vector space as image embeddings,
-    /// enabling cross-modal similarity search.
+    /// Supports both text and image inputs. Text and images are embedded into
+    /// the same vector space, enabling cross-modal similarity search.
     ///
     /// # Arguments
     ///
-    /// * `text` - The text to embed
+    /// * `input` - The input to embed (text or image)
     ///
     /// # Returns
     ///
     /// A normalized vector representation in CLIP's shared embedding space
-    async fn embed(&self, text: &str) -> Result<Vector> {
-        // Tokenize
-        let encoding = self
-            .tokenizer
-            .encode(text, true)
-            .map_err(|e| PlatypusError::InvalidOperation(format!("Tokenization failed: {}", e)))?;
-
-        let token_ids = encoding.get_ids();
-
-        // Convert to tensor
-        let token_ids_tensor = Tensor::new(token_ids, &self.device)
-            .map_err(|e| PlatypusError::InvalidOperation(format!("Tensor creation failed: {}", e)))?
-            .unsqueeze(0)
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
-
-        // Forward pass through text model
-        let text_features = self.text_model.forward(&token_ids_tensor).map_err(|e| {
-            PlatypusError::InvalidOperation(format!("Text model forward failed: {}", e))
-        })?;
-
-        // Project to common embedding space
-        let projected = self.text_projection.forward(&text_features).map_err(|e| {
-            PlatypusError::InvalidOperation(format!("Text projection failed: {}", e))
-        })?;
-
-        // Normalize
-        let normalized = self.normalize(&projected)?;
-
-        // Convert to Vector
-        let vector_data: Vec<f32> = normalized
-            .squeeze(0)
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
-            .to_vec1()
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
-
-        Ok(Vector::new(vector_data))
+    async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+        match input {
+            EmbedInput::Text(text) => self.embed_text(text).await,
+            EmbedInput::ImagePath(path) => self.embed_image(path).await,
+            EmbedInput::ImageBytes(_, _) => Err(PlatypusError::invalid_argument(
+                "CandleMultimodalEmbedder does not yet support image bytes input",
+            )),
+            EmbedInput::ImageUri(_) => Err(PlatypusError::invalid_argument(
+                "CandleMultimodalEmbedder does not support image URI input",
+            )),
+        }
     }
 
-    /// Get the dimension of generated text embeddings.
+    /// Get the dimension of generated embeddings.
     ///
     /// Returns the projection dimension of the CLIP model, which is the
-    /// dimension of the shared text-image embedding space.
-    ///
-    /// # Returns
-    ///
-    /// The number of dimensions in the embedding vectors
+    /// dimension of the shared text-image embedding space. This is the same
+    /// for both text and image embeddings.
     fn dimension(&self) -> usize {
         self.dimension
+    }
+
+    /// Get the supported input types.
+    ///
+    /// CandleMultimodalEmbedder supports both text and image inputs.
+    fn supported_input_types(&self) -> Vec<EmbedInputType> {
+        vec![EmbedInputType::Text, EmbedInputType::Image]
     }
 
     /// Get the name/identifier of this embedder.
     ///
     /// Returns the HuggingFace CLIP model identifier.
-    ///
-    /// # Returns
-    ///
-    /// The model name (e.g., "openai/clip-vit-base-patch32")
     fn name(&self) -> &str {
         &self.model_name
     }
-}
 
-#[cfg(feature = "embeddings-multimodal")]
-#[async_trait]
-impl ImageEmbedder for CandleMultimodalEmbedder {
-    /// Generate an embedding vector for the given image using CLIP vision encoder.
-    ///
-    /// The resulting embedding is in the same vector space as text embeddings,
-    /// enabling cross-modal similarity search.
-    ///
-    /// # Arguments
-    ///
-    /// * `image_path` - Path to the image file
-    ///
-    /// # Returns
-    ///
-    /// A normalized vector representation in CLIP's shared embedding space
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Image file cannot be opened or decoded
-    /// - Model forward pass fails
-    async fn embed(&self, image_path: &str) -> Result<Vector> {
-        // Preprocess image
-        let image_tensor = self.preprocess_image(image_path)?;
-
-        // Forward pass through vision model
-        let vision_features = self.vision_model.forward(&image_tensor).map_err(|e| {
-            PlatypusError::InvalidOperation(format!("Vision model forward failed: {}", e))
-        })?;
-
-        // Project to common embedding space
-        let projected = self
-            .vision_projection
-            .forward(&vision_features)
-            .map_err(|e| {
-                PlatypusError::InvalidOperation(format!("Vision projection failed: {}", e))
-            })?;
-
-        // Normalize
-        let normalized = self.normalize(&projected)?;
-
-        // Convert to Vector
-        let vector_data: Vec<f32> = normalized
-            .squeeze(0)
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?
-            .to_vec1()
-            .map_err(|e| PlatypusError::InvalidOperation(e.to_string()))?;
-
-        Ok(Vector::new(vector_data))
-    }
-
-    /// Get the dimension of generated image embeddings.
-    ///
-    /// Returns the projection dimension of the CLIP model, which is the
-    /// dimension of the shared text-image embedding space. This is always
-    /// the same as the text embedding dimension.
-    ///
-    /// # Returns
-    ///
-    /// The number of dimensions in the embedding vectors
-    fn dimension(&self) -> usize {
-        self.dimension
-    }
-
-    /// Get the name/identifier of this embedder.
-    ///
-    /// Returns the HuggingFace CLIP model identifier.
-    ///
-    /// # Returns
-    ///
-    /// The model name (e.g., "openai/clip-vit-base-patch32")
-    fn name(&self) -> &str {
-        &self.model_name
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

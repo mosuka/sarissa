@@ -1,14 +1,14 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use platypus::embedding::image_embedder::ImageEmbedder;
+use platypus::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 use platypus::embedding::noop::NoOpEmbedder;
 use platypus::embedding::per_field::PerFieldEmbedder;
-use platypus::embedding::text_embedder::TextEmbedder;
-use platypus::error::Result;
+use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
 use platypus::storage::memory::MemoryStorage;
 use platypus::vector::DistanceMetric;
@@ -300,11 +300,11 @@ fn image_uri_payload(uri: String) -> FieldPayload {
 }
 
 fn build_payload_engine() -> Result<VectorEngine> {
-    // Create the text embedder
-    let text_embedder: Arc<dyn TextEmbedder> = Arc::new(IntegrationTestEmbedder::new(4));
+    // Create the embedder
+    let embedder: Arc<dyn Embedder> = Arc::new(IntegrationTestEmbedder::new(4));
 
-    // Create PerFieldEmbedder with the text embedder as default
-    let per_field_embedder = PerFieldEmbedder::with_default_text(text_embedder);
+    // Create PerFieldEmbedder with the embedder as default
+    let per_field_embedder = PerFieldEmbedder::new(embedder);
 
     // Build config using the new embedder field
     // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
@@ -331,12 +331,12 @@ fn build_payload_engine() -> Result<VectorEngine> {
 }
 
 fn build_multimodal_payload_engine() -> Result<VectorEngine> {
-    // Create the multimodal embedder (implements both TextEmbedder and ImageEmbedder)
-    let multimodal_embedder = Arc::new(IntegrationMultimodalEmbedder::new(3));
+    // Create the multimodal embedder (implements unified Embedder trait)
+    let multimodal_embedder: Arc<dyn Embedder> = Arc::new(IntegrationMultimodalEmbedder::new(3));
 
-    // Create PerFieldEmbedder with multimodal embedder for the image_embedding field
-    let mut per_field_embedder = PerFieldEmbedder::new();
-    per_field_embedder.add_multimodal_embedder("image_embedding", multimodal_embedder);
+    // Create PerFieldEmbedder with multimodal embedder as default
+    let mut per_field_embedder = PerFieldEmbedder::new(multimodal_embedder.clone());
+    per_field_embedder.add_embedder("image_embedding", multimodal_embedder);
 
     // Build config using the new embedder field
     // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
@@ -373,6 +373,41 @@ impl IntegrationTestEmbedder {
     }
 }
 
+#[async_trait]
+impl Embedder for IntegrationTestEmbedder {
+    async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+        match input {
+            EmbedInput::Text(text) => {
+                let mut data = vec![0.0_f32; self.dimension];
+                for (idx, byte) in text.bytes().enumerate() {
+                    let bucket = idx % self.dimension;
+                    data[bucket] += (byte as f32) / 255.0;
+                }
+                Ok(Vector::new(data))
+            }
+            _ => Err(PlatypusError::invalid_argument(
+                "IntegrationTestEmbedder only supports text input",
+            )),
+        }
+    }
+
+    fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    fn supported_input_types(&self) -> Vec<EmbedInputType> {
+        vec![EmbedInputType::Text]
+    }
+
+    fn name(&self) -> &str {
+        "integration-test-embedder"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 #[derive(Debug)]
 struct IntegrationMultimodalEmbedder {
     dimension: usize,
@@ -394,52 +429,36 @@ impl IntegrationMultimodalEmbedder {
 }
 
 #[async_trait]
-impl TextEmbedder for IntegrationMultimodalEmbedder {
-    async fn embed(&self, text: &str) -> Result<Vector> {
-        Ok(self.vector_from_bytes(text.as_bytes()))
-    }
-
-    fn dimension(&self) -> usize {
-        self.dimension
-    }
-
-    fn name(&self) -> &str {
-        "integration-multimodal"
-    }
-}
-
-#[async_trait]
-impl ImageEmbedder for IntegrationMultimodalEmbedder {
-    async fn embed(&self, image_path: &str) -> Result<Vector> {
-        let bytes = fs::read(image_path)?;
-        Ok(self.vector_from_bytes(&bytes))
-    }
-
-    fn dimension(&self) -> usize {
-        self.dimension
-    }
-
-    fn name(&self) -> &str {
-        "integration-multimodal"
-    }
-}
-
-#[async_trait]
-impl TextEmbedder for IntegrationTestEmbedder {
-    async fn embed(&self, text: &str) -> Result<Vector> {
-        let mut data = vec![0.0_f32; self.dimension];
-        for (idx, byte) in text.bytes().enumerate() {
-            let bucket = idx % self.dimension;
-            data[bucket] += (byte as f32) / 255.0;
+impl Embedder for IntegrationMultimodalEmbedder {
+    async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+        match input {
+            EmbedInput::Text(text) => Ok(self.vector_from_bytes(text.as_bytes())),
+            EmbedInput::ImagePath(path) => {
+                let bytes = fs::read(path)?;
+                Ok(self.vector_from_bytes(&bytes))
+            }
+            EmbedInput::ImageBytes(bytes, _) => Ok(self.vector_from_bytes(bytes)),
+            EmbedInput::ImageUri(uri) => {
+                // For test purposes, treat URI as file path
+                let bytes = fs::read(uri)?;
+                Ok(self.vector_from_bytes(&bytes))
+            }
         }
-        Ok(Vector::new(data))
     }
 
     fn dimension(&self) -> usize {
         self.dimension
     }
 
+    fn supported_input_types(&self) -> Vec<EmbedInputType> {
+        vec![EmbedInputType::Text, EmbedInputType::Image]
+    }
+
     fn name(&self) -> &str {
-        "integration-test-embedder"
+        "integration-multimodal"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

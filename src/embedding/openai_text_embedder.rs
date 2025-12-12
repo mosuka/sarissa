@@ -4,6 +4,9 @@
 //! Requires the `embeddings-openai` feature to be enabled.
 
 #[cfg(feature = "embeddings-openai")]
+use std::any::Any;
+
+#[cfg(feature = "embeddings-openai")]
 use async_trait::async_trait;
 #[cfg(feature = "embeddings-openai")]
 use reqwest::Client;
@@ -11,7 +14,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "embeddings-openai")]
-use crate::embedding::text_embedder::TextEmbedder;
+use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 #[cfg(feature = "embeddings-openai")]
 use crate::error::{PlatypusError, Result};
 #[cfg(feature = "embeddings-openai")]
@@ -66,7 +69,7 @@ struct EmbeddingData {
 /// # Examples
 ///
 /// ```no_run
-/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::embedding::embedder::{Embedder, EmbedInput};
 /// use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
 ///
 /// # async fn example() -> platypus::error::Result<()> {
@@ -77,12 +80,12 @@ struct EmbeddingData {
 /// )?;
 ///
 /// // Generate embedding
-/// let vector = embedder.embed("Rust is awesome!").await?;
+/// let vector = embedder.embed(&EmbedInput::Text("Rust is awesome!")).await?;
 /// println!("Embedding dimension: {}", embedder.dimension());
 ///
 /// // Batch processing (more efficient)
-/// let texts = vec!["Hello", "World"];
-/// let vectors = embedder.embed_batch(&texts).await?;
+/// let inputs = vec![EmbedInput::Text("Hello"), EmbedInput::Text("World")];
+/// let vectors = embedder.embed_batch(&inputs).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -96,6 +99,16 @@ pub struct OpenAITextEmbedder {
     model: String,
     /// Dimension of the output embeddings.
     dimension: usize,
+}
+
+#[cfg(feature = "embeddings-openai")]
+impl std::fmt::Debug for OpenAITextEmbedder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAITextEmbedder")
+            .field("model", &self.model)
+            .field("dimension", &self.dimension)
+            .finish()
+    }
 }
 
 #[cfg(feature = "embeddings-openai")]
@@ -217,30 +230,9 @@ impl OpenAITextEmbedder {
             _ => 1536, // fallback
         }
     }
-}
 
-#[cfg(feature = "embeddings-openai")]
-#[async_trait]
-impl TextEmbedder for OpenAITextEmbedder {
-    /// Generate an embedding vector for the given text using OpenAI API.
-    ///
-    /// Makes a single API request to OpenAI's embeddings endpoint.
-    ///
-    /// # Arguments
-    ///
-    /// * `text` - The text to embed
-    ///
-    /// # Returns
-    ///
-    /// A vector representation from OpenAI's model
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - API request fails
-    /// - Authentication fails
-    /// - Response parsing fails
-    async fn embed(&self, text: &str) -> Result<Vector> {
+    /// Embed text using OpenAI API (internal implementation).
+    async fn embed_text(&self, text: &str) -> Result<Vector> {
         let dimensions = if self.dimension == Self::default_dimension(&self.model) {
             None
         } else {
@@ -294,26 +286,8 @@ impl TextEmbedder for OpenAITextEmbedder {
         Ok(Vector::new(embedding))
     }
 
-    /// Generate embeddings for multiple texts in a single batch request.
-    ///
-    /// This is more efficient than calling `embed` multiple times, as it makes
-    /// a single API request for all texts.
-    ///
-    /// # Arguments
-    ///
-    /// * `texts` - A slice of text strings to embed
-    ///
-    /// # Returns
-    ///
-    /// A vector of embeddings, one for each input text
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - API request fails
-    /// - Authentication fails
-    /// - Response parsing fails
-    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vector>> {
+    /// Embed multiple texts in a single batch request (internal implementation).
+    async fn embed_text_batch(&self, texts: &[&str]) -> Result<Vec<Vector>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -367,27 +341,60 @@ impl TextEmbedder for OpenAITextEmbedder {
             .map(|d| Vector::new(d.embedding))
             .collect())
     }
+}
+
+#[cfg(feature = "embeddings-openai")]
+#[async_trait]
+impl Embedder for OpenAITextEmbedder {
+    /// Generate an embedding vector for the given input.
+    ///
+    /// Only text input is supported. Image input will return an error.
+    async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+        match input {
+            EmbedInput::Text(text) => self.embed_text(text).await,
+            _ => Err(PlatypusError::invalid_argument(
+                "OpenAITextEmbedder only supports text input",
+            )),
+        }
+    }
+
+    /// Generate embeddings for multiple inputs in a batch.
+    ///
+    /// For text inputs, this makes a single API request which is more efficient.
+    /// All inputs must be text; image inputs will cause an error.
+    async fn embed_batch(&self, inputs: &[EmbedInput<'_>]) -> Result<Vec<Vector>> {
+        // Extract text from all inputs, fail if any are not text
+        let texts: Vec<&str> = inputs
+            .iter()
+            .map(|input| match input {
+                EmbedInput::Text(text) => Ok(*text),
+                _ => Err(PlatypusError::invalid_argument(
+                    "OpenAITextEmbedder only supports text input",
+                )),
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        self.embed_text_batch(&texts).await
+    }
 
     /// Get the dimension of generated embeddings.
-    ///
-    /// Returns the configured dimension for this embedder, which may be
-    /// customized using `with_dimension` or defaults to the model's standard size.
-    ///
-    /// # Returns
-    ///
-    /// The number of dimensions in the embedding vectors
     fn dimension(&self) -> usize {
         self.dimension
     }
 
+    /// Get the supported input types.
+    ///
+    /// OpenAITextEmbedder only supports text input.
+    fn supported_input_types(&self) -> Vec<EmbedInputType> {
+        vec![EmbedInputType::Text]
+    }
+
     /// Get the name/identifier of this embedder.
-    ///
-    /// Returns the OpenAI model identifier.
-    ///
-    /// # Returns
-    ///
-    /// The model name (e.g., "text-embedding-3-small")
     fn name(&self) -> &str {
         &self.model
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

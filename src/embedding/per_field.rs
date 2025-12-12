@@ -1,472 +1,253 @@
 //! Per-field embedder for applying different embedders to different fields.
 //!
 //! This module provides `PerFieldEmbedder`, which allows specifying different
-//! embedders for different vector fields. It supports both text and image
-//! embeddings, making it suitable for multimodal search applications.
+//! embedders for different vector fields. This is analogous to `PerFieldAnalyzer`
+//! in the lexical module.
 //!
-//! This is analogous to `PerFieldAnalyzer` in the lexical module.
+//! # Design Symmetry with PerFieldAnalyzer
+//!
+//! | PerFieldAnalyzer | PerFieldEmbedder |
+//! |-----------------|------------------|
+//! | `new(default_analyzer)` | `new(default_embedder)` |
+//! | `add_analyzer(field, analyzer)` | `add_embedder(field, embedder)` |
+//! | `get_analyzer(field)` | `get_embedder(field)` |
+//! | `default_analyzer()` | `default_embedder()` |
+//! | `analyze_field(field, text)` | `embed_field(field, input)` |
+//!
+//! # Example
+//!
+//! ```no_run
+//! # #[cfg(feature = "embeddings-candle")]
+//! # {
+//! use platypus::embedding::per_field::PerFieldEmbedder;
+//! use platypus::embedding::embedder::{Embedder, EmbedInput};
+//! use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use std::sync::Arc;
+//!
+//! # async fn example() -> platypus::error::Result<()> {
+//! // Create default embedder
+//! let default_embedder: Arc<dyn Embedder> = Arc::new(
+//!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+//! );
+//!
+//! // Create per-field embedder with default
+//! let mut per_field = PerFieldEmbedder::new(default_embedder);
+//!
+//! // Add specialized embedder for title field
+//! let title_embedder: Arc<dyn Embedder> = Arc::new(
+//!     CandleTextEmbedder::new("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")?
+//! );
+//! per_field.add_embedder("title_embedding", Arc::clone(&title_embedder));
+//!
+//! // "content_embedding" will use default_embedder
+//! // "title_embedding" will use the specialized title_embedder
+//!
+//! // Embed with field context
+//! let input = EmbedInput::Text("Hello, world!");
+//! let vector = per_field.embed_field("title_embedding", &input).await?;
+//! # Ok(())
+//! # }
+//! # }
+//! ```
 
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::embedding::embedder::Embedder;
-use crate::embedding::image_embedder::ImageEmbedder;
-use crate::embedding::text_embedder::TextEmbedder;
+use async_trait::async_trait;
+
+use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 use crate::error::Result;
 use crate::vector::core::vector::Vector;
 
-/// A per-field embedder that supports both text and image embeddings.
+/// A per-field embedder that applies different embedders to different fields.
 ///
-/// Similar to `PerFieldAnalyzer` in the lexical module, this allows specifying
-/// different embedders for different vector fields. It supports:
-///
-/// - Text-only embedders (e.g., BERT, sentence-transformers)
-/// - Image-only embedders
-/// - Multimodal embedders (e.g., CLIP) that handle both text and images
+/// This is similar to `PerFieldAnalyzer` in the lexical module. It allows you
+/// to specify a different embedder for each field, with a default embedder
+/// for fields not explicitly configured.
 ///
 /// # Memory Efficiency
 ///
 /// When using the same embedder for multiple fields, reuse a single instance
-/// with `Arc::clone` to save memory. This is especially important for large
-/// embedding models.
+/// with `Arc::clone` to save memory. This is especially important for embedders
+/// with large models.
 ///
-/// # Examples
-///
-/// ## Text-only embedder
+/// # Example
 ///
 /// ```no_run
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
+/// use platypus::embedding::embedder::Embedder;
 /// use platypus::embedding::per_field::PerFieldEmbedder;
 /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-/// use platypus::embedding::text_embedder::TextEmbedder;
 /// use std::sync::Arc;
 ///
 /// # fn example() -> platypus::error::Result<()> {
-/// let default_embedder: Arc<dyn TextEmbedder> = Arc::new(
+/// // Create default embedder
+/// let default_embedder: Arc<dyn Embedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
 ///
-/// let mut per_field = PerFieldEmbedder::with_default_text(default_embedder.clone());
+/// // Create per-field embedder
+/// let mut per_field = PerFieldEmbedder::new(default_embedder);
 ///
-/// // Use a specialized embedder for title field
-/// let title_embedder: Arc<dyn TextEmbedder> = Arc::new(
-///     CandleTextEmbedder::new("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")?
+/// // Reuse embedder instances to save memory
+/// let keyword_embedder: Arc<dyn Embedder> = Arc::new(
+///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
-/// per_field.add_text_embedder("title_embedding", title_embedder);
-///
-/// // "content_embedding" will use default_embedder
-/// // "title_embedding" will use the specialized title_embedder
+/// per_field.add_embedder("id", Arc::clone(&keyword_embedder));
+/// per_field.add_embedder("category", Arc::clone(&keyword_embedder));
 /// # Ok(())
 /// # }
 /// # }
 /// ```
-///
-/// ## Multimodal embedder
-///
-/// ```no_run
-/// # #[cfg(feature = "embeddings-multimodal")]
-/// # {
-/// use platypus::embedding::per_field::PerFieldEmbedder;
-/// use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-/// use platypus::embedding::text_embedder::TextEmbedder;
-/// use platypus::embedding::image_embedder::ImageEmbedder;
-/// use std::sync::Arc;
-///
-/// # fn example() -> platypus::error::Result<()> {
-/// let clip_embedder = Arc::new(
-///     CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?
-/// );
-///
-/// let mut per_field = PerFieldEmbedder::new();
-///
-/// // Register CLIP for both text and image on a field
-/// per_field.add_multimodal_embedder("content_embedding", clip_embedder);
-/// # Ok(())
-/// # }
-/// # }
-/// ```
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PerFieldEmbedder {
-    /// Text embedders per field.
-    text_embedders: HashMap<String, Arc<dyn TextEmbedder>>,
+    /// Default embedder for fields not in the map.
+    default_embedder: Arc<dyn Embedder>,
 
-    /// Image embedders per field.
-    image_embedders: HashMap<String, Arc<dyn ImageEmbedder>>,
-
-    /// Default text embedder for fields not explicitly configured.
-    default_text_embedder: Option<Arc<dyn TextEmbedder>>,
-
-    /// Default image embedder for fields not explicitly configured.
-    default_image_embedder: Option<Arc<dyn ImageEmbedder>>,
+    /// Map of field names to their specific embedders.
+    field_embedders: HashMap<String, Arc<dyn Embedder>>,
 }
 
 impl std::fmt::Debug for PerFieldEmbedder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PerFieldEmbedder")
-            .field(
-                "text_fields",
-                &self.text_embedders.keys().collect::<Vec<_>>(),
-            )
-            .field(
-                "image_fields",
-                &self.image_embedders.keys().collect::<Vec<_>>(),
-            )
-            .field("has_default_text", &self.default_text_embedder.is_some())
-            .field("has_default_image", &self.default_image_embedder.is_some())
+            .field("default_embedder", &self.default_embedder.name())
+            .field("fields", &self.field_embedders.keys().collect::<Vec<_>>())
             .finish()
     }
 }
 
 impl PerFieldEmbedder {
-    /// Create a new empty per-field embedder.
-    ///
-    /// Use this when you want to explicitly configure each field without defaults.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create a per-field embedder with a default text embedder.
-    ///
-    /// Fields not explicitly configured will use this default for text embedding.
+    /// Create a new per-field embedder with a default embedder.
     ///
     /// # Arguments
     ///
-    /// * `embedder` - The default text embedder
-    pub fn with_default_text(embedder: Arc<dyn TextEmbedder>) -> Self {
+    /// * `default_embedder` - The embedder to use for fields not explicitly configured
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "embeddings-candle")]
+    /// # {
+    /// use platypus::embedding::per_field::PerFieldEmbedder;
+    /// use platypus::embedding::embedder::Embedder;
+    /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+    /// use std::sync::Arc;
+    ///
+    /// # fn example() -> platypus::error::Result<()> {
+    /// let default: Arc<dyn Embedder> = Arc::new(
+    ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+    /// );
+    /// let per_field = PerFieldEmbedder::new(default);
+    /// # Ok(())
+    /// # }
+    /// # }
+    /// ```
+    pub fn new(default_embedder: Arc<dyn Embedder>) -> Self {
         Self {
-            default_text_embedder: Some(embedder),
-            ..Default::default()
+            default_embedder,
+            field_embedders: HashMap::new(),
         }
     }
 
-    /// Create a per-field embedder with a default image embedder.
-    ///
-    /// Fields not explicitly configured will use this default for image embedding.
-    ///
-    /// # Arguments
-    ///
-    /// * `embedder` - The default image embedder
-    pub fn with_default_image(embedder: Arc<dyn ImageEmbedder>) -> Self {
-        Self {
-            default_image_embedder: Some(embedder),
-            ..Default::default()
-        }
-    }
-
-    /// Create a per-field embedder with default embedders for both text and image.
-    ///
-    /// # Arguments
-    ///
-    /// * `text_embedder` - The default text embedder
-    /// * `image_embedder` - The default image embedder
-    pub fn with_defaults(
-        text_embedder: Arc<dyn TextEmbedder>,
-        image_embedder: Arc<dyn ImageEmbedder>,
-    ) -> Self {
-        Self {
-            default_text_embedder: Some(text_embedder),
-            default_image_embedder: Some(image_embedder),
-            ..Default::default()
-        }
-    }
-
-    /// Set the default text embedder.
-    ///
-    /// # Arguments
-    ///
-    /// * `embedder` - The default text embedder
-    pub fn set_default_text_embedder(&mut self, embedder: Arc<dyn TextEmbedder>) {
-        self.default_text_embedder = Some(embedder);
-    }
-
-    /// Set the default image embedder.
-    ///
-    /// # Arguments
-    ///
-    /// * `embedder` - The default image embedder
-    pub fn set_default_image_embedder(&mut self, embedder: Arc<dyn ImageEmbedder>) {
-        self.default_image_embedder = Some(embedder);
-    }
-
-    /// Add a text embedder for a specific field.
+    /// Add a field-specific embedder.
     ///
     /// # Arguments
     ///
     /// * `field` - The field name
-    /// * `embedder` - The text embedder to use for this field
-    pub fn add_text_embedder(&mut self, field: impl Into<String>, embedder: Arc<dyn TextEmbedder>) {
-        self.text_embedders.insert(field.into(), embedder);
+    /// * `embedder` - The embedder to use for this field
+    pub fn add_embedder(&mut self, field: impl Into<String>, embedder: Arc<dyn Embedder>) {
+        self.field_embedders.insert(field.into(), embedder);
     }
 
-    /// Add an image embedder for a specific field.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name
-    /// * `embedder` - The image embedder to use for this field
-    pub fn add_image_embedder(
-        &mut self,
-        field: impl Into<String>,
-        embedder: Arc<dyn ImageEmbedder>,
-    ) {
-        self.image_embedders.insert(field.into(), embedder);
-    }
-
-    /// Add a multimodal embedder for a specific field.
-    ///
-    /// This registers the embedder as both a text and image embedder for the field.
-    /// Use this with embedders like CLIP that support both modalities.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name
-    /// * `embedder` - The multimodal embedder (must implement both TextEmbedder and ImageEmbedder)
-    pub fn add_multimodal_embedder<E>(&mut self, field: impl Into<String>, embedder: Arc<E>)
-    where
-        E: TextEmbedder + ImageEmbedder + 'static,
-    {
-        let field = field.into();
-        self.text_embedders
-            .insert(field.clone(), embedder.clone() as Arc<dyn TextEmbedder>);
-        self.image_embedders
-            .insert(field, embedder as Arc<dyn ImageEmbedder>);
-    }
-
-    /// Get the text embedder for a specific field.
+    /// Get the embedder for a specific field.
     ///
     /// Returns the field-specific embedder if configured, otherwise returns the default.
-    /// Returns `None` if no embedder is available for the field.
     ///
     /// # Arguments
     ///
     /// * `field` - The field name
-    pub fn get_text_embedder(&self, field: &str) -> Option<Arc<dyn TextEmbedder>> {
-        self.text_embedders
+    pub fn get_embedder(&self, field: &str) -> &Arc<dyn Embedder> {
+        self.field_embedders
             .get(field)
-            .cloned()
-            .or_else(|| self.default_text_embedder.clone())
+            .unwrap_or(&self.default_embedder)
     }
 
-    /// Get the image embedder for a specific field.
-    ///
-    /// Returns the field-specific embedder if configured, otherwise returns the default.
-    /// Returns `None` if no embedder is available for the field.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name
-    pub fn get_image_embedder(&self, field: &str) -> Option<Arc<dyn ImageEmbedder>> {
-        self.image_embedders
-            .get(field)
-            .cloned()
-            .or_else(|| self.default_image_embedder.clone())
+    /// Get the default embedder.
+    pub fn default_embedder(&self) -> &Arc<dyn Embedder> {
+        &self.default_embedder
     }
 
-    /// Get the default text embedder.
-    pub fn default_text_embedder(&self) -> Option<&Arc<dyn TextEmbedder>> {
-        self.default_text_embedder.as_ref()
-    }
-
-    /// Get the default image embedder.
-    pub fn default_image_embedder(&self) -> Option<&Arc<dyn ImageEmbedder>> {
-        self.default_image_embedder.as_ref()
-    }
-
-    /// Embed text with the embedder for the given field.
+    /// Embed with the embedder for the given field.
     ///
     /// # Arguments
     ///
     /// * `field` - The field name to determine which embedder to use
-    /// * `text` - The text to embed
+    /// * `input` - The input to embed
     ///
     /// # Returns
     ///
-    /// The embedding vector for the text, or an error if no text embedder is available.
-    pub async fn embed_text(&self, field: &str, text: &str) -> Result<Vector> {
-        let embedder = self.get_text_embedder(field).ok_or_else(|| {
-            crate::error::PlatypusError::invalid_config(format!(
-                "no text embedder configured for field '{}'",
-                field
-            ))
-        })?;
-        embedder.embed(text).await
+    /// The embedding vector for the input.
+    pub async fn embed_field(&self, field: &str, input: &EmbedInput<'_>) -> Result<Vector> {
+        self.get_embedder(field).embed(input).await
     }
 
-    /// Embed an image with the embedder for the given field.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name to determine which embedder to use
-    /// * `image_path` - The path to the image file
-    ///
-    /// # Returns
-    ///
-    /// The embedding vector for the image, or an error if no image embedder is available.
-    pub async fn embed_image(&self, field: &str, image_path: &str) -> Result<Vector> {
-        let embedder = self.get_image_embedder(field).ok_or_else(|| {
-            crate::error::PlatypusError::invalid_config(format!(
-                "no image embedder configured for field '{}'",
-                field
-            ))
-        })?;
-        embedder.embed(image_path).await
-    }
-
-    /// Get the text embedding dimension for a specific field.
+    /// Get the embedding dimension for a specific field.
     ///
     /// # Arguments
     ///
     /// * `field` - The field name
-    ///
-    /// # Returns
-    ///
-    /// The embedding dimension, or `None` if no text embedder is available.
-    pub fn text_dimension(&self, field: &str) -> Option<usize> {
-        self.get_text_embedder(field).map(|e| e.dimension())
+    pub fn dimension(&self, field: &str) -> usize {
+        self.get_embedder(field).dimension()
     }
 
-    /// Get the image embedding dimension for a specific field.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name
-    ///
-    /// # Returns
-    ///
-    /// The embedding dimension, or `None` if no image embedder is available.
-    pub fn image_dimension(&self, field: &str) -> Option<usize> {
-        self.get_image_embedder(field).map(|e| e.dimension())
-    }
-
-    /// List all configured text field names.
-    pub fn text_fields(&self) -> Vec<&str> {
-        self.text_embedders.keys().map(|s| s.as_str()).collect()
-    }
-
-    /// List all configured image field names.
-    pub fn image_fields(&self) -> Vec<&str> {
-        self.image_embedders.keys().map(|s| s.as_str()).collect()
-    }
-
-    /// List all configured field names (both text and image).
+    /// List all configured field names.
     pub fn configured_fields(&self) -> Vec<&str> {
-        let mut fields: Vec<&str> = self.text_embedders.keys().map(|s| s.as_str()).collect();
-        for field in self.image_embedders.keys() {
-            if !fields.contains(&field.as_str()) {
-                fields.push(field.as_str());
-            }
-        }
-        fields
+        self.field_embedders.keys().map(|s| s.as_str()).collect()
     }
 
-    // Legacy compatibility methods
-
-    /// Legacy: Create a per-field embedder with a default embedder.
+    /// Check if a specific field supports the given input type.
     ///
-    /// This method is provided for backward compatibility with code that used
-    /// the old `PerFieldEmbedder::new(default_embedder)` signature.
-    #[deprecated(since = "0.2.0", note = "Use with_default_text() instead")]
-    pub fn with_default(default_embedder: Arc<dyn TextEmbedder>) -> Self {
-        Self::with_default_text(default_embedder)
-    }
-
-    /// Legacy: Add a field-specific embedder (text only).
+    /// # Arguments
     ///
-    /// This method is provided for backward compatibility.
-    #[deprecated(since = "0.2.0", note = "Use add_text_embedder() instead")]
-    pub fn add_embedder(&mut self, field: impl Into<String>, embedder: Arc<dyn TextEmbedder>) {
-        self.add_text_embedder(field, embedder);
-    }
-
-    /// Legacy: Get the embedder for a specific field (text only).
-    ///
-    /// This method is provided for backward compatibility.
-    #[deprecated(since = "0.2.0", note = "Use get_text_embedder() instead")]
-    pub fn get_embedder(&self, field: &str) -> Option<&Arc<dyn TextEmbedder>> {
-        self.text_embedders
-            .get(field)
-            .or(self.default_text_embedder.as_ref())
-    }
-
-    /// Legacy: Embed text with the embedder for the given field.
-    ///
-    /// This method is provided for backward compatibility.
-    #[deprecated(since = "0.2.0", note = "Use embed_text() instead")]
-    pub async fn embed_field(&self, field: &str, text: &str) -> Result<Vector> {
-        self.embed_text(field, text).await
-    }
-
-    /// Legacy: Get the dimension for a specific field (text only).
-    ///
-    /// This method is provided for backward compatibility.
-    #[deprecated(since = "0.2.0", note = "Use text_dimension() instead")]
-    pub fn field_dimension(&self, field: &str) -> usize {
-        self.text_dimension(field).unwrap_or(0)
+    /// * `field` - The field name
+    /// * `input_type` - The input type to check
+    pub fn field_supports(&self, field: &str, input_type: EmbedInputType) -> bool {
+        self.get_embedder(field).supports(input_type)
     }
 }
 
-// Implement Embedder trait for PerFieldEmbedder
+#[async_trait]
 impl Embedder for PerFieldEmbedder {
-    fn get_text_embedder(&self, field: &str) -> Option<Arc<dyn TextEmbedder>> {
-        PerFieldEmbedder::get_text_embedder(self, field)
-    }
-
-    fn get_image_embedder(&self, field: &str) -> Option<Arc<dyn ImageEmbedder>> {
-        PerFieldEmbedder::get_image_embedder(self, field)
-    }
-
-    fn text_dimension(&self, field: &str) -> Option<usize> {
-        PerFieldEmbedder::text_dimension(self, field)
-    }
-
-    fn image_dimension(&self, field: &str) -> Option<usize> {
-        PerFieldEmbedder::image_dimension(self, field)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// Implement TextEmbedder for PerFieldEmbedder (backward compatibility)
-#[async_trait::async_trait]
-impl TextEmbedder for PerFieldEmbedder {
-    /// Embed text using the default embedder.
+    /// Embed with the default embedder.
     ///
-    /// Note: When using PerFieldEmbedder, it's recommended to use `embed_text()`
+    /// Note: When using PerFieldEmbedder, it's recommended to use `embed_field()`
     /// to explicitly specify which field's embedder to use.
-    async fn embed(&self, text: &str) -> Result<Vector> {
-        let embedder = self.default_text_embedder.as_ref().ok_or_else(|| {
-            crate::error::PlatypusError::invalid_config(
-                "no default text embedder configured for PerFieldEmbedder",
-            )
-        })?;
-        embedder.embed(text).await
+    async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+        self.default_embedder.embed(input).await
     }
 
-    /// Embed text with field context - selects embedder based on field name.
-    async fn embed_with_field(&self, text: &str, field_name: &str) -> Result<Vector> {
-        self.embed_text(field_name, text).await
+    async fn embed_batch(&self, inputs: &[EmbedInput<'_>]) -> Result<Vec<Vector>> {
+        self.default_embedder.embed_batch(inputs).await
     }
 
     /// Returns the dimension of the default embedder.
     ///
     /// Note: Different fields may have different dimensions.
-    /// Use `text_dimension()` to get the dimension for a specific field.
+    /// Use `dimension(field)` to get the dimension for a specific field.
     fn dimension(&self) -> usize {
-        self.default_text_embedder
-            .as_ref()
-            .map(|e| e.dimension())
-            .unwrap_or(0)
+        self.default_embedder.dimension()
+    }
+
+    /// Returns the supported input types of the default embedder.
+    fn supported_input_types(&self) -> Vec<EmbedInputType> {
+        self.default_embedder.supported_input_types()
     }
 
     fn name(&self) -> &str {
-        self.default_text_embedder
-            .as_ref()
-            .map(|e| e.name())
-            .unwrap_or("per-field-embedder")
+        "PerFieldEmbedder"
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -477,23 +258,29 @@ impl TextEmbedder for PerFieldEmbedder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
+    use crate::error::PlatypusError;
 
-    // Mock text embedder for testing
-    #[derive(Debug, Clone)]
-    struct MockTextEmbedder {
+    #[derive(Debug)]
+    struct MockEmbedder {
         name: String,
-        dimension: usize,
+        dim: usize,
     }
 
     #[async_trait]
-    impl TextEmbedder for MockTextEmbedder {
-        async fn embed(&self, _text: &str) -> Result<Vector> {
-            Ok(Vector::new(vec![0.0; self.dimension]))
+    impl Embedder for MockEmbedder {
+        async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+            match input {
+                EmbedInput::Text(_) => Ok(Vector::new(vec![0.0; self.dim])),
+                _ => Err(PlatypusError::invalid_argument("only text supported")),
+            }
         }
 
         fn dimension(&self) -> usize {
-            self.dimension
+            self.dim
+        }
+
+        fn supported_input_types(&self) -> Vec<EmbedInputType> {
+            vec![EmbedInputType::Text]
         }
 
         fn name(&self) -> &str {
@@ -505,191 +292,109 @@ mod tests {
         }
     }
 
-    // Mock image embedder for testing
-    #[derive(Debug, Clone)]
-    struct MockImageEmbedder {
-        name: String,
-        dimension: usize,
-    }
-
-    #[async_trait]
-    impl ImageEmbedder for MockImageEmbedder {
-        async fn embed(&self, _image_path: &str) -> Result<Vector> {
-            Ok(Vector::new(vec![0.0; self.dimension]))
-        }
-
-        fn dimension(&self) -> usize {
-            self.dimension
-        }
-
-        fn name(&self) -> &str {
-            &self.name
-        }
-    }
-
-    // Mock multimodal embedder for testing
-    #[derive(Debug, Clone)]
-    struct MockMultimodalEmbedder {
-        dimension: usize,
-    }
-
-    #[async_trait]
-    impl TextEmbedder for MockMultimodalEmbedder {
-        async fn embed(&self, _text: &str) -> Result<Vector> {
-            Ok(Vector::new(vec![1.0; self.dimension]))
-        }
-
-        fn dimension(&self) -> usize {
-            self.dimension
-        }
-
-        fn name(&self) -> &str {
-            "mock-multimodal"
-        }
-
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-    }
-
-    #[async_trait]
-    impl ImageEmbedder for MockMultimodalEmbedder {
-        async fn embed(&self, _image_path: &str) -> Result<Vector> {
-            Ok(Vector::new(vec![2.0; self.dimension]))
-        }
-
-        fn dimension(&self) -> usize {
-            self.dimension
-        }
-
-        fn name(&self) -> &str {
-            "mock-multimodal"
-        }
-    }
-
     #[test]
-    fn test_new_empty() {
-        let per_field = PerFieldEmbedder::new();
-        assert!(per_field.default_text_embedder().is_none());
-        assert!(per_field.default_image_embedder().is_none());
-        assert!(per_field.text_fields().is_empty());
-        assert!(per_field.image_fields().is_empty());
-    }
-
-    #[test]
-    fn test_with_default_text() {
-        let default: Arc<dyn TextEmbedder> = Arc::new(MockTextEmbedder {
+    fn test_per_field_embedder() {
+        let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
             name: "default".into(),
-            dimension: 384,
+            dim: 384,
         });
-        let per_field = PerFieldEmbedder::with_default_text(default);
+        let mut per_field = PerFieldEmbedder::new(default);
 
-        assert!(per_field.default_text_embedder().is_some());
-        assert!(per_field.default_image_embedder().is_none());
-        assert_eq!(per_field.text_dimension("any_field"), Some(384));
-    }
-
-    #[test]
-    fn test_add_text_embedder() {
-        let default: Arc<dyn TextEmbedder> = Arc::new(MockTextEmbedder {
-            name: "default".into(),
-            dimension: 384,
-        });
-        let mut per_field = PerFieldEmbedder::with_default_text(default);
-
-        let title_embedder: Arc<dyn TextEmbedder> = Arc::new(MockTextEmbedder {
+        let title_embedder: Arc<dyn Embedder> = Arc::new(MockEmbedder {
             name: "title".into(),
-            dimension: 768,
+            dim: 768,
         });
-        per_field.add_text_embedder("title_embedding", title_embedder);
+        per_field.add_embedder("title", Arc::clone(&title_embedder));
+        per_field.add_embedder("description", title_embedder);
 
-        // Default field uses default embedder
-        assert_eq!(per_field.text_dimension("content_embedding"), Some(384));
-
-        // Configured field uses specific embedder
-        assert_eq!(per_field.text_dimension("title_embedding"), Some(768));
+        // Test that different fields use different embedders
+        assert_eq!(per_field.dimension("title"), 768);
+        assert_eq!(per_field.dimension("description"), 768);
+        assert_eq!(per_field.dimension("content"), 384); // Uses default
+        assert_eq!(per_field.dimension("unknown"), 384); // Uses default
     }
 
     #[test]
-    fn test_add_image_embedder() {
-        let mut per_field = PerFieldEmbedder::new();
-
-        let image_embedder: Arc<dyn ImageEmbedder> = Arc::new(MockImageEmbedder {
-            name: "image".into(),
-            dimension: 512,
-        });
-        per_field.add_image_embedder("image_embedding", image_embedder);
-
-        assert_eq!(per_field.image_dimension("image_embedding"), Some(512));
-        assert!(per_field.text_dimension("image_embedding").is_none());
-    }
-
-    #[test]
-    fn test_add_multimodal_embedder() {
-        let mut per_field = PerFieldEmbedder::new();
-
-        let clip_embedder = Arc::new(MockMultimodalEmbedder { dimension: 512 });
-        per_field.add_multimodal_embedder("content_embedding", clip_embedder);
-
-        // Both text and image should be available
-        assert_eq!(per_field.text_dimension("content_embedding"), Some(512));
-        assert_eq!(per_field.image_dimension("content_embedding"), Some(512));
-    }
-
-    #[tokio::test]
-    async fn test_embed_text() -> Result<()> {
-        let default: Arc<dyn TextEmbedder> = Arc::new(MockTextEmbedder {
+    fn test_default_embedder_when_field_not_configured() {
+        let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
             name: "default".into(),
-            dimension: 384,
+            dim: 384,
         });
-        let per_field = PerFieldEmbedder::with_default_text(default);
+        let per_field = PerFieldEmbedder::new(default);
 
-        let vec = per_field.embed_text("any_field", "test text").await?;
-        assert_eq!(vec.dimension(), 384);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_embed_text_no_embedder() {
-        let per_field = PerFieldEmbedder::new();
-        let result = per_field.embed_text("any_field", "test").await;
-        assert!(result.is_err());
+        // Should use default for unconfigured fields
+        assert_eq!(per_field.dimension("unknown_field"), 384);
+        assert_eq!(per_field.get_embedder("unknown_field").name(), "default");
     }
 
     #[test]
-    fn test_embedder_trait_implementation() {
-        let default: Arc<dyn TextEmbedder> = Arc::new(MockTextEmbedder {
+    fn test_as_embedder_trait() {
+        let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
             name: "default".into(),
-            dimension: 384,
+            dim: 384,
         });
-        let per_field = PerFieldEmbedder::with_default_text(default);
+        let per_field = PerFieldEmbedder::new(default);
 
-        // Test via Embedder trait
+        // When used as Embedder trait, should use default embedder
         let embedder: &dyn Embedder = &per_field;
-        assert!(embedder.supports_text("any_field"));
-        assert!(!embedder.supports_image("any_field"));
-        assert_eq!(embedder.text_dimension("any_field"), Some(384));
+        assert_eq!(embedder.dimension(), 384);
+        assert!(embedder.supports_text());
+    }
+
+    #[tokio::test]
+    async fn test_embed_field() {
+        let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
+            name: "default".into(),
+            dim: 384,
+        });
+        let mut per_field = PerFieldEmbedder::new(default);
+
+        let title_embedder: Arc<dyn Embedder> = Arc::new(MockEmbedder {
+            name: "title".into(),
+            dim: 768,
+        });
+        per_field.add_embedder("title", title_embedder);
+
+        // Embed with specific field
+        let input = EmbedInput::Text("hello");
+        let vec = per_field.embed_field("title", &input).await.unwrap();
+        assert_eq!(vec.dimension(), 768);
+
+        // Embed with default field
+        let vec = per_field.embed_field("unknown", &input).await.unwrap();
+        assert_eq!(vec.dimension(), 384);
     }
 
     #[test]
     fn test_configured_fields() {
-        let mut per_field = PerFieldEmbedder::new();
-
-        let text_embedder: Arc<dyn TextEmbedder> = Arc::new(MockTextEmbedder {
-            name: "text".into(),
-            dimension: 384,
+        let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
+            name: "default".into(),
+            dim: 384,
         });
-        per_field.add_text_embedder("text_field", text_embedder);
+        let mut per_field = PerFieldEmbedder::new(default);
 
-        let image_embedder: Arc<dyn ImageEmbedder> = Arc::new(MockImageEmbedder {
-            name: "image".into(),
-            dimension: 512,
+        let embedder: Arc<dyn Embedder> = Arc::new(MockEmbedder {
+            name: "special".into(),
+            dim: 512,
         });
-        per_field.add_image_embedder("image_field", image_embedder);
+        per_field.add_embedder("title", Arc::clone(&embedder));
+        per_field.add_embedder("body", embedder);
 
         let fields = per_field.configured_fields();
-        assert!(fields.contains(&"text_field"));
-        assert!(fields.contains(&"image_field"));
+        assert!(fields.contains(&"title"));
+        assert!(fields.contains(&"body"));
+        assert!(!fields.contains(&"unknown"));
+    }
+
+    #[test]
+    fn test_field_supports() {
+        let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
+            name: "default".into(),
+            dim: 384,
+        });
+        let per_field = PerFieldEmbedder::new(default);
+
+        assert!(per_field.field_supports("any", EmbedInputType::Text));
+        assert!(!per_field.field_supports("any", EmbedInputType::Image));
     }
 }

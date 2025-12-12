@@ -346,8 +346,9 @@ impl HybridEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
     use crate::embedding::per_field::PerFieldEmbedder;
-    use crate::embedding::text_embedder::TextEmbedder;
+    use crate::error::PlatypusError;
     use crate::storage::Storage;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
@@ -359,6 +360,7 @@ mod tests {
     };
     use crate::vector::field::FieldHit;
     use async_trait::async_trait;
+    use std::any::Any;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -484,11 +486,11 @@ mod tests {
     }
 
     fn mock_vector_engine() -> VectorEngine {
-        // Create the text embedder
-        let text_embedder: Arc<dyn TextEmbedder> = Arc::new(MockTextEmbedder::new(3));
+        // Create the embedder
+        let embedder: Arc<dyn Embedder> = Arc::new(MockEmbedder::new(3));
 
-        // Create PerFieldEmbedder with the text embedder as default
-        let per_field_embedder = PerFieldEmbedder::with_default_text(text_embedder);
+        // Create PerFieldEmbedder with the embedder as default
+        let per_field_embedder = PerFieldEmbedder::new(embedder);
 
         // Build config using the new embedder field
         // Note: `embedder` field in VectorFieldConfig is the embedder lookup key
@@ -517,29 +519,42 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct MockTextEmbedder {
+    struct MockEmbedder {
         dimension: usize,
     }
 
-    impl MockTextEmbedder {
+    impl MockEmbedder {
         fn new(dimension: usize) -> Self {
             Self { dimension }
         }
     }
 
     #[async_trait]
-    impl TextEmbedder for MockTextEmbedder {
-        async fn embed(&self, text: &str) -> Result<Vector> {
-            let value = text.len() as f32;
-            Ok(Vector::new(vec![value; self.dimension]))
+    impl Embedder for MockEmbedder {
+        async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
+            match input {
+                EmbedInput::Text(text) => {
+                    let value = text.len() as f32;
+                    Ok(Vector::new(vec![value; self.dimension]))
+                }
+                _ => Err(PlatypusError::invalid_argument("only text supported")),
+            }
         }
 
         fn dimension(&self) -> usize {
             self.dimension
         }
 
+        fn supported_input_types(&self) -> Vec<EmbedInputType> {
+            vec![EmbedInputType::Text]
+        }
+
         fn name(&self) -> &str {
-            "mock-hybrid-text-embedder"
+            "mock-hybrid-embedder"
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
         }
     }
 }
