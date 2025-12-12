@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use platypus::embedding::image_embedder::ImageEmbedder;
 use platypus::embedding::noop::NoOpEmbedder;
+use platypus::embedding::per_field::PerFieldEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::error::Result;
 use platypus::storage::Storage;
@@ -17,9 +18,9 @@ use platypus::vector::core::document::{
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, MetadataFilter, QueryVector, VectorEmbedderConfig, VectorEmbedderProvider,
-    VectorEngine, VectorEngineFilter, VectorEngineSearchRequest, VectorFieldConfig,
-    VectorIndexConfig, VectorIndexKind, VectorScoreMode,
+    FieldSelector, MetadataFilter, QueryVector, VectorEngine, VectorEngineFilter,
+    VectorEngineSearchRequest, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
+    VectorScoreMode,
 };
 use tempfile::NamedTempFile;
 
@@ -224,10 +225,8 @@ fn sample_engine_config() -> VectorIndexConfig {
         },
     );
 
-    #[allow(deprecated)]
     VectorIndexConfig {
         fields,
-        embedders: HashMap::new(),
         default_fields: vec!["title_embedding".into(), "body_embedding".into()],
         metadata: HashMap::new(),
         embedder: Arc::new(NoOpEmbedder::new()),
@@ -301,90 +300,65 @@ fn image_uri_payload(uri: String) -> FieldPayload {
 }
 
 fn build_payload_engine() -> Result<VectorEngine> {
-    let mut fields = HashMap::new();
-    fields.insert(
-        "body_embedding".into(),
-        VectorFieldConfig {
-            dimension: 4,
-            distance: DistanceMetric::Cosine,
-            index: VectorIndexKind::Flat,
-            embedder_id: "payload-encoder".into(),
-            vector_type: VectorType::Text,
-            embedder: Some("integration_embedder".into()),
-            base_weight: 1.0,
-        },
-    );
+    // Create the text embedder
+    let text_embedder: Arc<dyn TextEmbedder> = Arc::new(IntegrationTestEmbedder::new(4));
 
-    let embedders = HashMap::from([(
-        "integration_embedder".into(),
-        VectorEmbedderConfig {
-            provider: VectorEmbedderProvider::External,
-            model: "integration-test".into(),
-            options: HashMap::new(),
-        },
-    )]);
+    // Create PerFieldEmbedder with the text embedder as default
+    let per_field_embedder = PerFieldEmbedder::with_default_text(text_embedder);
 
-    #[allow(deprecated)]
-    let config = VectorIndexConfig {
-        fields,
-        embedders,
-        default_fields: vec!["body_embedding".into()],
-        metadata: HashMap::new(),
-        embedder: Arc::new(NoOpEmbedder::new()),
-    };
+    // Build config using the new embedder field
+    // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
+    let config = VectorIndexConfig::builder()
+        .field(
+            "body_embedding",
+            VectorFieldConfig {
+                dimension: 4,
+                distance: DistanceMetric::Cosine,
+                index: VectorIndexKind::Flat,
+                embedder_id: "payload-encoder".into(),
+                vector_type: VectorType::Text,
+                embedder: Some("body_embedding".into()),
+                base_weight: 1.0,
+            },
+        )
+        .default_field("body_embedding")
+        .embedder(per_field_embedder)
+        .build()?;
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
     let engine = VectorEngine::new(storage, config)?;
-    engine.register_embedder_instance(
-        "integration_embedder".to_string(),
-        Arc::new(IntegrationTestEmbedder::new(4)),
-    )?;
     Ok(engine)
 }
 
 fn build_multimodal_payload_engine() -> Result<VectorEngine> {
-    let mut fields = HashMap::new();
-    fields.insert(
-        "image_embedding".into(),
-        VectorFieldConfig {
-            dimension: 3,
-            distance: DistanceMetric::Cosine,
-            index: VectorIndexKind::Flat,
-            embedder_id: "multimodal-encoder".into(),
-            vector_type: VectorType::Image,
-            embedder: Some("integration_multimodal".into()),
-            base_weight: 1.0,
-        },
-    );
+    // Create the multimodal embedder (implements both TextEmbedder and ImageEmbedder)
+    let multimodal_embedder = Arc::new(IntegrationMultimodalEmbedder::new(3));
 
-    let embedders = HashMap::from([(
-        "integration_multimodal".into(),
-        VectorEmbedderConfig {
-            provider: VectorEmbedderProvider::External,
-            model: "integration-multimodal".into(),
-            options: HashMap::new(),
-        },
-    )]);
+    // Create PerFieldEmbedder with multimodal embedder for the image_embedding field
+    let mut per_field_embedder = PerFieldEmbedder::new();
+    per_field_embedder.add_multimodal_embedder("image_embedding", multimodal_embedder);
 
-    #[allow(deprecated)]
-    let config = VectorIndexConfig {
-        fields,
-        embedders,
-        default_fields: vec!["image_embedding".into()],
-        metadata: HashMap::new(),
-        embedder: Arc::new(NoOpEmbedder::new()),
-    };
+    // Build config using the new embedder field
+    // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
+    let config = VectorIndexConfig::builder()
+        .field(
+            "image_embedding",
+            VectorFieldConfig {
+                dimension: 3,
+                distance: DistanceMetric::Cosine,
+                index: VectorIndexKind::Flat,
+                embedder_id: "multimodal-encoder".into(),
+                vector_type: VectorType::Image,
+                embedder: Some("image_embedding".into()),
+                base_weight: 1.0,
+            },
+        )
+        .default_field("image_embedding")
+        .embedder(per_field_embedder)
+        .build()?;
 
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
     let engine = VectorEngine::new(storage, config)?;
-    let embedder = Arc::new(IntegrationMultimodalEmbedder::new(3));
-    let text: Arc<dyn TextEmbedder> = embedder.clone();
-    let image: Arc<dyn ImageEmbedder> = embedder;
-    engine.register_multimodal_embedder_instance(
-        "integration_multimodal".to_string(),
-        text,
-        image,
-    )?;
     Ok(engine)
 }
 

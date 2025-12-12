@@ -27,14 +27,12 @@ mod candle_vector_example {
             DistanceMetric,
             core::document::{DocumentPayload, FieldPayload, SegmentPayload, VectorType},
             engine::{
-                FieldSelector, VectorEmbedderConfig, VectorEmbedderProvider, VectorEngine,
-                VectorEngineFilter, VectorEngineSearchRequest, VectorFieldConfig,
-                VectorIndexConfig, VectorIndexKind, VectorScoreMode,
+                FieldSelector, VectorEngine, VectorEngineFilter, VectorEngineSearchRequest,
+                VectorFieldConfig, VectorIndexConfig, VectorIndexKind, VectorScoreMode,
             },
         },
     };
 
-    const EMBEDDER_ID: &str = "candle-encoder";
     const EMBEDDER_CONFIG_ID: &str = "candle_text_embedder";
     const TITLE_FIELD: &str = "title_embedding";
     const BODY_FIELD: &str = "body_embedding";
@@ -53,55 +51,41 @@ mod candle_vector_example {
         let title_dim = title_embedder.dimension();
         let body_dim = body_embedder.dimension();
 
-        let mut field_configs = HashMap::new();
-        field_configs.insert(
-            TITLE_FIELD.to_string(),
-            VectorFieldConfig {
-                dimension: title_dim,
-                distance: DistanceMetric::Cosine,
-                index: VectorIndexKind::Flat,
-                embedder_id: EMBEDDER_ID.to_string(),
-                vector_type: VectorType::Text,
-                embedder: Some(EMBEDDER_CONFIG_ID.into()),
-                base_weight: 1.2,
-            },
-        );
-        field_configs.insert(
-            BODY_FIELD.to_string(),
-            VectorFieldConfig {
-                dimension: body_dim,
-                distance: DistanceMetric::Cosine,
-                index: VectorIndexKind::Flat,
-                embedder_id: EMBEDDER_ID.to_string(),
-                vector_type: VectorType::Text,
-                embedder: Some(EMBEDDER_CONFIG_ID.into()),
-                base_weight: 1.0,
-            },
-        );
-
-        let mut embedders = HashMap::new();
-        embedders.insert(
-            EMBEDDER_CONFIG_ID.into(),
-            VectorEmbedderConfig {
-                provider: VectorEmbedderProvider::External,
-                model: "per-field-candle".into(),
-                options: HashMap::new(),
-            },
-        );
-
         // Configure PerFieldEmbedder so each vector field can transparently use Candle embedders.
         let mut per_field_embedder =
             PerFieldEmbedder::with_default_text(Arc::clone(&body_embedder));
         per_field_embedder.add_text_embedder(TITLE_FIELD, Arc::clone(&title_embedder));
 
-        #[allow(deprecated)]
-        let config = VectorIndexConfig {
-            fields: field_configs,
-            embedders,
-            default_fields: vec![TITLE_FIELD.into(), BODY_FIELD.into()],
-            metadata: HashMap::new(),
-            embedder: Arc::new(per_field_embedder),
-        };
+        // Build config using the new embedder field API
+        let config = VectorIndexConfig::builder()
+            .field(
+                TITLE_FIELD,
+                VectorFieldConfig {
+                    dimension: title_dim,
+                    distance: DistanceMetric::Cosine,
+                    index: VectorIndexKind::Flat,
+                    embedder_id: EMBEDDER_CONFIG_ID.to_string(),
+                    vector_type: VectorType::Text,
+                    embedder: Some(EMBEDDER_CONFIG_ID.into()),
+                    base_weight: 1.2,
+                },
+            )
+            .field(
+                BODY_FIELD,
+                VectorFieldConfig {
+                    dimension: body_dim,
+                    distance: DistanceMetric::Cosine,
+                    index: VectorIndexKind::Flat,
+                    embedder_id: EMBEDDER_CONFIG_ID.to_string(),
+                    vector_type: VectorType::Text,
+                    embedder: Some(EMBEDDER_CONFIG_ID.into()),
+                    base_weight: 1.0,
+                },
+            )
+            .default_field(TITLE_FIELD)
+            .default_field(BODY_FIELD)
+            .embedder(per_field_embedder)
+            .build()?;
 
         let engine = VectorEngine::new(storage, config)?;
 

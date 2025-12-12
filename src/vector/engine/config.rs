@@ -37,25 +37,57 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::embedding::embedder::Embedder;
+use crate::embedding::noop::NoOpEmbedder;
 use crate::error::{PlatypusError, Result};
 use crate::vector::DistanceMetric;
 use crate::vector::core::document::VectorType;
 
 /// Configuration for a single vector collection.
 ///
-/// This configuration can be created in two ways:
-/// 1. Using the builder pattern with an `Embedder` (recommended)
-/// 2. Using the legacy HashMap-based configuration (for backward compatibility)
+/// This configuration should be created using the builder pattern with an `Embedder`.
+///
+/// # Example
+///
+/// ```no_run
+/// # #[cfg(feature = "embeddings-candle")]
+/// # {
+/// use platypus::embedding::per_field::PerFieldEmbedder;
+/// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use platypus::embedding::text_embedder::TextEmbedder;
+/// use platypus::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
+/// use platypus::vector::DistanceMetric;
+/// use platypus::vector::core::document::VectorType;
+/// use std::sync::Arc;
+///
+/// # fn example() -> platypus::error::Result<()> {
+/// let text_embedder: Arc<dyn TextEmbedder> = Arc::new(
+///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+/// );
+/// let dim = text_embedder.dimension();
+///
+/// let embedder = PerFieldEmbedder::with_default_text(text_embedder);
+///
+/// let config = VectorIndexConfig::builder()
+///     .embedder(embedder)
+///     .field("content_embedding", VectorFieldConfig {
+///         dimension: dim,
+///         distance: DistanceMetric::Cosine,
+///         index: VectorIndexKind::Flat,
+///         embedder_id: "default".to_string(),
+///         vector_type: VectorType::Text,
+///         embedder: None,
+///         base_weight: 1.0,
+///     })
+///     .default_field("content_embedding")
+///     .build()?;
+/// # Ok(())
+/// # }
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct VectorIndexConfig {
     /// Field configurations.
     pub fields: HashMap<String, VectorFieldConfig>,
-
-    /// Legacy embedder configurations (for backward compatibility).
-    ///
-    /// Prefer using the `embedder` field instead.
-    #[deprecated(since = "0.2.0", note = "Use the `embedder` field instead")]
-    pub embedders: HashMap<String, VectorEmbedderConfig>,
 
     /// Default fields for search.
     pub default_fields: Vec<String>,
@@ -89,31 +121,11 @@ impl VectorIndexConfig {
     }
 
     /// Validate the configuration.
-    #[allow(deprecated)]
     pub fn validate(&self) -> Result<()> {
         for field in &self.default_fields {
             if !self.fields.contains_key(field) {
                 return Err(PlatypusError::invalid_config(format!(
                     "default field '{field}' is not defined"
-                )));
-            }
-        }
-
-        // Skip legacy validation if the embedder is not NoOpEmbedder
-        // (i.e., a real embedder is configured)
-        if self.embedder.get_text_embedder("").is_some()
-            || self.embedder.get_image_embedder("").is_some()
-        {
-            return Ok(());
-        }
-
-        // Legacy validation for embedders HashMap
-        for (field_name, config) in &self.fields {
-            if let Some(embedder_id) = config.embedder.as_deref()
-                && !self.embedders.contains_key(embedder_id)
-            {
-                return Err(PlatypusError::invalid_config(format!(
-                    "vector field '{field_name}' references undefined embedder '{embedder_id}'"
                 )));
             }
         }
@@ -296,17 +308,13 @@ impl VectorIndexConfigBuilder {
     /// Build the configuration.
     ///
     /// If no embedder is set, defaults to `NoOpEmbedder` for pre-computed vectors.
-    #[allow(deprecated)]
     pub fn build(self) -> Result<VectorIndexConfig> {
-        use crate::embedding::noop::NoOpEmbedder;
-
         let embedder = self
             .embedder
             .unwrap_or_else(|| Arc::new(NoOpEmbedder::new()));
 
         let config = VectorIndexConfig {
             fields: self.fields,
-            embedders: HashMap::new(),
             default_fields: self.default_fields,
             metadata: self.metadata,
             embedder,
@@ -324,10 +332,8 @@ impl Serialize for VectorIndexConfig {
     {
         use serde::ser::SerializeStruct;
 
-        let mut state = serializer.serialize_struct("VectorIndexConfig", 4)?;
+        let mut state = serializer.serialize_struct("VectorIndexConfig", 3)?;
         state.serialize_field("fields", &self.fields)?;
-        #[allow(deprecated)]
-        state.serialize_field("embedders", &self.embedders)?;
         state.serialize_field("default_fields", &self.default_fields)?;
         state.serialize_field("metadata", &self.metadata)?;
         state.end()
@@ -336,7 +342,6 @@ impl Serialize for VectorIndexConfig {
 
 // Implement Deserialize manually to handle the embedder field
 impl<'de> Deserialize<'de> for VectorIndexConfig {
-    #[allow(deprecated)]
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -344,19 +349,14 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
         #[derive(Deserialize)]
         struct VectorIndexConfigHelper {
             fields: HashMap<String, VectorFieldConfig>,
-            #[serde(default)]
-            embedders: HashMap<String, VectorEmbedderConfig>,
             default_fields: Vec<String>,
             #[serde(default)]
             metadata: HashMap<String, serde_json::Value>,
         }
 
-        use crate::embedding::noop::NoOpEmbedder;
-
         let helper = VectorIndexConfigHelper::deserialize(deserializer)?;
         Ok(VectorIndexConfig {
             fields: helper.fields,
-            embedders: helper.embedders,
             default_fields: helper.default_fields,
             metadata: helper.metadata,
             // Default to NoOpEmbedder; can be replaced programmatically
@@ -365,15 +365,23 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
     }
 }
 
+/// Configuration for a single vector field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorFieldConfig {
+    /// The dimension of vectors in this field.
     pub dimension: usize,
+    /// The distance metric used for similarity calculations.
     pub distance: DistanceMetric,
+    /// The type of index to use (Flat, HNSW, IVF).
     pub index: VectorIndexKind,
+    /// The ID of the embedder to use for this field.
     pub embedder_id: String,
+    /// The type of vectors in this field (Text or Image).
     pub vector_type: VectorType,
+    /// Optional embedder key for PerFieldEmbedder lookup.
     #[serde(default)]
     pub embedder: Option<String>,
+    /// Base weight for scoring (default: 1.0).
     #[serde(default = "VectorFieldConfig::default_weight")]
     pub base_weight: f32,
 }
@@ -384,27 +392,14 @@ impl VectorFieldConfig {
     }
 }
 
+/// The type of vector index to use.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VectorIndexKind {
+    /// Flat (brute-force) index - exact but slower for large datasets.
     Flat,
+    /// HNSW (Hierarchical Navigable Small World) - approximate but fast.
     Hnsw,
+    /// IVF (Inverted File Index) - approximate with clustering.
     Ivf,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorEmbedderConfig {
-    pub provider: VectorEmbedderProvider,
-    pub model: String,
-    #[serde(default)]
-    pub options: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum VectorEmbedderProvider {
-    CandleText,
-    CandleMultimodal,
-    OpenAiText,
-    External,
 }
