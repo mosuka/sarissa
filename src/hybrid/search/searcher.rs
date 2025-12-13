@@ -11,10 +11,10 @@ use crate::lexical::search::searcher::LexicalSearchParams;
 use crate::vector::core::document::{FieldPayload, StoredVector};
 use crate::vector::core::vector::Vector;
 use crate::vector::engine::{
-    FieldSelector, QueryVector, VectorEngineFilter, VectorEngineSearchRequest, VectorScoreMode,
+    FieldSelector, QueryVector, VectorFilter, VectorScoreMode, VectorSearchRequest,
 };
 use crate::vector::field::FieldHit;
-use crate::vector::search::searcher::VectorSearchParams;
+use crate::vector::search::searcher::VectorIndexSearchParams;
 
 /// Hybrid search request combining text query, optional vector, and search parameters.
 ///
@@ -43,7 +43,7 @@ pub struct HybridVectorOptions {
     pub fields: Option<Vec<FieldSelector>>,
     pub score_mode: Option<VectorScoreMode>,
     pub overfetch: Option<f32>,
-    pub filter: Option<VectorEngineFilter>,
+    pub filter: Option<VectorFilter>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,7 +51,7 @@ pub struct HybridSearchRequest {
     /// Text query for lexical search.
     pub text_query: String,
     /// Optional vector for semantic search.
-    pub vector_query: Option<VectorEngineSearchRequest>,
+    pub vector_query: Option<VectorSearchRequest>,
     /// Raw payloads that require embedding before executing the vector search.
     pub vector_payloads: HashMap<String, FieldPayload>,
     /// Hybrid search parameters.
@@ -59,7 +59,7 @@ pub struct HybridSearchRequest {
     /// Lexical search parameters.
     pub lexical_params: LexicalSearchParams,
     /// Vector search parameters.
-    pub vector_params: VectorSearchParams,
+    pub vector_params: VectorIndexSearchParams,
     /// Doc-centric overrides applied when generating vector queries.
     pub vector_overrides: HybridVectorOptions,
 }
@@ -73,7 +73,7 @@ impl HybridSearchRequest {
             vector_payloads: HashMap::new(),
             params: HybridSearchParams::default(),
             lexical_params: LexicalSearchParams::default(),
-            vector_params: VectorSearchParams::default(),
+            vector_params: VectorIndexSearchParams::default(),
             vector_overrides: HybridVectorOptions::default(),
         }
     }
@@ -89,7 +89,7 @@ impl HybridSearchRequest {
     /// Provide a fully-specified VectorEngineSearchRequest.
     pub fn with_vector_engine_search_request(
         mut self,
-        mut vector_query: VectorEngineSearchRequest,
+        mut vector_query: VectorSearchRequest,
     ) -> Self {
         Self::apply_overrides_to_query(&self.vector_overrides, &mut vector_query);
         self.vector_query = Some(vector_query);
@@ -150,7 +150,7 @@ impl HybridSearchRequest {
     }
 
     /// Override vector metadata filters for doc-centric search.
-    pub fn vector_filter(mut self, filter: VectorEngineFilter) -> Self {
+    pub fn vector_filter(mut self, filter: VectorFilter) -> Self {
         self.vector_overrides.filter = Some(filter);
         self.update_active_query();
         self
@@ -205,25 +205,25 @@ impl HybridSearchRequest {
     }
 
     /// Set vector search parameters.
-    pub fn vector_params(mut self, params: VectorSearchParams) -> Self {
+    pub fn vector_params(mut self, params: VectorIndexSearchParams) -> Self {
         self.vector_params = params;
         self
     }
 
-    fn build_query_from_vector(vector: Vector, top_k: usize) -> VectorEngineSearchRequest {
-        VectorEngineSearchRequest {
+    fn build_query_from_vector(vector: Vector, top_k: usize) -> VectorSearchRequest {
+        VectorSearchRequest {
             limit: top_k.max(1),
             query_vectors: vec![QueryVector {
                 vector: StoredVector::from(vector),
                 weight: 1.0,
             }],
-            ..VectorEngineSearchRequest::default()
+            ..VectorSearchRequest::default()
         }
     }
 
     pub(crate) fn apply_overrides_to_query(
         overrides: &HybridVectorOptions,
-        query: &mut VectorEngineSearchRequest,
+        query: &mut VectorSearchRequest,
     ) {
         if let Some(fields) = &overrides.fields {
             query.fields = Some(fields.clone());
@@ -531,7 +531,7 @@ mod tests {
 
         let mut equals = HashMap::new();
         equals.insert("lang".to_string(), "ja".to_string());
-        let filter = VectorEngineFilter {
+        let filter = VectorFilter {
             document: MetadataFilter::default(),
             field: MetadataFilter { equals },
         };

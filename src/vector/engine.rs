@@ -53,10 +53,10 @@ use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayloa
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
 
 pub use config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
-pub use filter::{MetadataFilter, VectorEngineFilter};
+pub use filter::{MetadataFilter, VectorFilter};
 pub use registry::{DocumentVectorRegistry, RegistryVersion};
-pub use request::{FieldSelector, QueryVector, VectorEngineSearchRequest, VectorScoreMode};
-pub use response::{VectorEngineHit, VectorEngineSearchResults, VectorEngineStats};
+pub use request::{FieldSelector, QueryVector, VectorScoreMode, VectorSearchRequest};
+pub use response::{VectorHit, VectorSearchResults, VectorStats};
 
 /// A high-level vector search engine that provides both indexing and searching.
 ///
@@ -292,8 +292,12 @@ impl VectorEngine {
     // =========================================================================
 
     /// Execute a search query.
-    pub fn search(&self, request: VectorEngineSearchRequest) -> Result<VectorEngineSearchResults> {
-        self.index.search(&request)
+    ///
+    /// This method creates a [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
+    /// from the underlying index and delegates the search operation to it.
+    pub fn search(&self, request: VectorSearchRequest) -> Result<VectorSearchResults> {
+        let searcher = self.index.searcher()?;
+        searcher.search(&request)
     }
 
     // =========================================================================
@@ -305,6 +309,9 @@ impl VectorEngine {
     /// Returns the number of documents that would match the given search request.
     /// If the request has no query vectors, returns the total document count.
     ///
+    /// This method creates a [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
+    /// from the underlying index and delegates the count operation to it.
+    ///
     /// # Arguments
     ///
     /// * `request` - Search request defining query vectors, filters, and min_score threshold.
@@ -313,16 +320,17 @@ impl VectorEngine {
     ///
     /// ```ignore
     /// // Count all documents
-    /// let total = engine.count(VectorEngineSearchRequest::default())?;
+    /// let total = engine.count(VectorSearchRequest::default())?;
     ///
     /// // Count documents matching a query with min_score threshold
-    /// let mut request = VectorEngineSearchRequest::default();
+    /// let mut request = VectorSearchRequest::default();
     /// request.query_vectors = vec![query_vector];
     /// request.min_score = 0.8;
     /// let matching = engine.count(request)?;
     /// ```
-    pub fn count(&self, request: VectorEngineSearchRequest) -> Result<usize> {
-        self.index.count(&request)
+    pub fn count(&self, request: VectorSearchRequest) -> Result<usize> {
+        let searcher = self.index.searcher()?;
+        searcher.count(&request)
     }
 
     /// Commit pending changes (persist state).
@@ -335,7 +343,7 @@ impl VectorEngine {
     // =========================================================================
 
     /// Get collection statistics.
-    pub fn stats(&self) -> Result<VectorEngineStats> {
+    pub fn stats(&self) -> Result<VectorStats> {
         self.index.stats()
     }
 
@@ -383,8 +391,8 @@ mod tests {
         }
     }
 
-    fn sample_query(limit: usize) -> VectorEngineSearchRequest {
-        let mut query = VectorEngineSearchRequest::default();
+    fn sample_query(limit: usize) -> VectorSearchRequest {
+        let mut query = VectorSearchRequest::default();
         query.limit = limit;
         query.query_vectors.push(QueryVector {
             vector: StoredVector::new(

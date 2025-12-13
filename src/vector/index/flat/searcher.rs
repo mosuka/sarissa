@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::vector::core::vector::Vector;
 use crate::vector::reader::VectorIndexReader;
-use crate::vector::search::searcher::VectorSearcher;
-use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
+use crate::vector::search::searcher::VectorIndexSearcher;
+use crate::vector::search::searcher::{VectorIndexSearchRequest, VectorIndexSearchResults};
 
 /// Flat vector searcher that performs exact (brute force) search.
 #[derive(Debug)]
@@ -21,12 +21,12 @@ impl FlatVectorSearcher {
     }
 }
 
-impl VectorSearcher for FlatVectorSearcher {
-    fn search(&self, request: &VectorSearchRequest) -> Result<VectorSearchResults> {
+impl VectorIndexSearcher for FlatVectorSearcher {
+    fn search(&self, request: &VectorIndexSearchRequest) -> Result<VectorIndexSearchResults> {
         use std::time::Instant;
 
         let start = Instant::now();
-        let mut results = VectorSearchResults::new();
+        let mut results = VectorIndexSearchResults::new();
 
         // Get all vectors from the index
         let vector_count = self.index_reader.vector_count();
@@ -98,7 +98,7 @@ impl VectorSearcher for FlatVectorSearcher {
         Ok(results)
     }
 
-    fn count(&self, request: VectorSearchRequest) -> Result<u64> {
+    fn count(&self, request: VectorIndexSearchRequest) -> Result<u64> {
         // Get all vector IDs with field names
         let vector_ids = self.index_reader.vector_ids()?;
 

@@ -18,9 +18,10 @@ use crate::error::Result;
 use crate::storage::Storage;
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
 use crate::vector::engine::config::VectorIndexConfig;
-use crate::vector::engine::request::{QueryVector, VectorEngineSearchRequest};
-use crate::vector::engine::response::{VectorEngineSearchResults, VectorEngineStats};
+use crate::vector::engine::request::QueryVector;
+use crate::vector::engine::response::VectorStats;
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
+use crate::vector::search::searcher::VectorSearcher;
 
 /// Trait for vector collection implementations.
 ///
@@ -112,24 +113,20 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     // Search Operations
     // =========================================================================
 
-    /// Execute a search query.
-    fn search(&self, request: &VectorEngineSearchRequest) -> Result<VectorEngineSearchResults>;
-
-    /// Count documents matching the search criteria.
+    /// Create a searcher for this index.
     ///
-    /// Returns the number of documents that would match the given search request.
-    /// This is equivalent to performing a search and counting the results,
-    /// but may be more efficient for certain implementations.
+    /// Returns a boxed [`VectorSearcher`] capable of executing search and count operations.
+    /// This method is analogous to [`LexicalIndex::searcher()`](crate::lexical::index::LexicalIndex::searcher)
+    /// in the lexical search module.
     ///
-    /// # Arguments
+    /// # Example
     ///
-    /// * `request` - Search request defining the query vectors, filters, and min_score threshold.
-    ///               If `query_vectors` is empty, returns total document count.
-    ///
-    /// # Returns
-    ///
-    /// The count of matching documents.
-    fn count(&self, request: &VectorEngineSearchRequest) -> Result<usize>;
+    /// ```ignore
+    /// let searcher = index.searcher()?;
+    /// let results = searcher.search(&request)?;
+    /// let count = searcher.count(&request)?;
+    /// ```
+    fn searcher(&self) -> Result<Box<dyn VectorSearcher>>;
 
     // =========================================================================
     // Persistence Operations
@@ -143,7 +140,7 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     // =========================================================================
 
     /// Get collection statistics.
-    fn stats(&self) -> Result<VectorEngineStats>;
+    fn stats(&self) -> Result<VectorStats>;
 
     /// Get the storage backend.
     fn storage(&self) -> &Arc<dyn Storage>;

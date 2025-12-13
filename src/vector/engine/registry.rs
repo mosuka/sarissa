@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{PlatypusError, Result};
 use crate::vector::core::document::DocumentVector;
-use crate::vector::engine::filter::{RegistryFilterMatches, VectorEngineFilter};
+use crate::vector::engine::filter::{RegistryFilterMatches, VectorFilter};
 
 pub type RegistryVersion = u64;
 
@@ -103,7 +103,7 @@ impl DocumentVectorRegistry {
 
     pub fn filter_matches(
         &self,
-        filter: &VectorEngineFilter,
+        filter: &VectorFilter,
         target_fields: &[String],
     ) -> RegistryFilterMatches {
         let guard = self.entries.read();

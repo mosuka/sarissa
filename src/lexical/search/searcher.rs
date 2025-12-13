@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::lexical::index::inverted::query::{Query, SearchResults};
+use crate::lexical::index::inverted::query::{LexicalSearchResults, Query};
 
 /// Sort order for search results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,7 +213,7 @@ impl LexicalSearchRequest {
 /// This trait defines the interface for executing searches against lexical indexes.
 pub trait LexicalSearcher: Send + Sync + std::fmt::Debug {
     /// Execute a search with the given request.
-    fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults>;
+    fn search(&self, request: LexicalSearchRequest) -> Result<LexicalSearchResults>;
 
     /// Count the number of matching documents for a request.
     ///

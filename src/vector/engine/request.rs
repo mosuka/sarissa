@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::vector::core::document::{StoredVector, VectorType};
-use crate::vector::engine::filter::VectorEngineFilter;
+use crate::vector::engine::filter::VectorFilter;
 
 fn default_query_limit() -> usize {
     10
@@ -17,7 +17,7 @@ fn default_overfetch() -> f32 {
 
 /// Request model for collection-level search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorEngineSearchRequest {
+pub struct VectorSearchRequest {
     /// Query vectors to search with.
     #[serde(default)]
     pub query_vectors: Vec<QueryVector>,
@@ -35,14 +35,14 @@ pub struct VectorEngineSearchRequest {
     pub overfetch: f32,
     /// Metadata filter to apply.
     #[serde(default)]
-    pub filter: Option<VectorEngineFilter>,
+    pub filter: Option<VectorFilter>,
     /// Minimum score threshold. Results with scores below this value are filtered out.
     /// Default is 0.0 (no filtering).
     #[serde(default)]
     pub min_score: f32,
 }
 
-impl Default for VectorEngineSearchRequest {
+impl Default for VectorSearchRequest {
     fn default() -> Self {
         Self {
             query_vectors: Vec::new(),

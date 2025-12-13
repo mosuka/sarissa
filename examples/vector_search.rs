@@ -27,8 +27,8 @@ mod candle_vector_example {
             DistanceMetric,
             core::document::{DocumentPayload, FieldPayload, SegmentPayload, VectorType},
             engine::{
-                FieldSelector, VectorEngine, VectorEngineFilter, VectorEngineSearchRequest,
-                VectorFieldConfig, VectorIndexConfig, VectorIndexKind, VectorScoreMode,
+                FieldSelector, VectorEngine, VectorFieldConfig, VectorFilter, VectorIndexConfig,
+                VectorIndexKind, VectorScoreMode, VectorSearchRequest,
             },
         },
     };
@@ -149,15 +149,15 @@ mod candle_vector_example {
         engine.upsert_document_payload(3, doc3)?;
         println!("   -> Inserted {} docs\n", engine.stats()?.document_count);
 
-        println!("3) Build a VectorEngineSearchRequest directly from query text\n");
+        println!("3) Build a VectorSearchRequest directly from query text\n");
 
-        let mut doc_filter = VectorEngineFilter::default();
+        let mut doc_filter = VectorFilter::default();
         doc_filter
             .document
             .equals
             .insert("lang".into(), "en".into());
 
-        let mut query = VectorEngineSearchRequest::default();
+        let mut query = VectorSearchRequest::default();
         query.limit = 5;
         query.fields = Some(vec![
             FieldSelector::Exact(BODY_FIELD.into()),

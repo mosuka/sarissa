@@ -673,7 +673,7 @@ fn sample_documents() -> Vec<Document> {
 }
 
 /// Helper function to display search results in a formatted way
-fn display_results(results: &platypus::lexical::index::inverted::query::SearchResults) {
+fn display_results(results: &platypus::lexical::index::inverted::query::LexicalSearchResults) {
     for (i, hit) in results.hits.iter().enumerate() {
         println!("  {}. Score: {:.4}", i + 1, hit.score);
 

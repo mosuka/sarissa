@@ -53,7 +53,7 @@ pub struct SearchHit {
 
 /// Search results.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchResults {
+pub struct LexicalSearchResults {
     /// The search hits.
     pub hits: Vec<SearchHit>,
     /// Total number of matching documents.
