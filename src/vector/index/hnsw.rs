@@ -8,7 +8,8 @@ pub mod segment;
 pub mod writer;
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 use crate::error::{PlatypusError, Result};
 use crate::storage::Storage;
@@ -47,7 +48,6 @@ impl Default for IndexMetadata {
 }
 
 /// A concrete HNSW vector index implementation.
-#[derive(Debug)]
 pub struct HnswIndex {
     /// The storage backend.
     storage: Arc<dyn Storage>,
@@ -55,11 +55,22 @@ pub struct HnswIndex {
     /// HNSW index specific configuration.
     config: HnswIndexConfig,
 
-    /// Whether the index is closed.
-    closed: bool,
+    /// Whether the index is closed (thread-safe).
+    closed: AtomicBool,
 
-    /// Index metadata.
-    metadata: IndexMetadata,
+    /// Index metadata (thread-safe).
+    metadata: RwLock<IndexMetadata>,
+}
+
+impl std::fmt::Debug for HnswIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HnswIndex")
+            .field("storage", &self.storage)
+            .field("config", &self.config)
+            .field("closed", &self.closed.load(Ordering::SeqCst))
+            .field("metadata", &*self.metadata.read().unwrap())
+            .finish()
+    }
 }
 
 impl HnswIndex {
@@ -73,8 +84,8 @@ impl HnswIndex {
         let index = HnswIndex {
             storage,
             config,
-            closed: false,
-            metadata,
+            closed: AtomicBool::new(false),
+            metadata: RwLock::new(metadata),
         };
 
         index.write_metadata()?;
@@ -92,8 +103,8 @@ impl HnswIndex {
         Ok(HnswIndex {
             storage,
             config,
-            closed: false,
-            metadata,
+            closed: AtomicBool::new(false),
+            metadata: RwLock::new(metadata),
         })
     }
 
@@ -117,8 +128,13 @@ impl HnswIndex {
 
     /// Write metadata to storage.
     fn write_metadata(&self) -> Result<()> {
-        let metadata_json = serde_json::to_string_pretty(&self.metadata)
+        let metadata = self
+            .metadata
+            .read()
+            .map_err(|_| PlatypusError::index("Failed to acquire metadata read lock"))?;
+        let metadata_json = serde_json::to_string_pretty(&*metadata)
             .map_err(|e| PlatypusError::index(format!("Failed to serialize metadata: {e}")))?;
+        drop(metadata);
 
         let mut output = self.storage.create_output("metadata.json")?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
@@ -136,17 +152,23 @@ impl HnswIndex {
     }
 
     /// Update metadata.
-    fn update_metadata(&mut self) -> Result<()> {
-        self.metadata.modified = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+    fn update_metadata(&self) -> Result<()> {
+        {
+            let mut metadata = self
+                .metadata
+                .write()
+                .map_err(|_| PlatypusError::index("Failed to acquire metadata write lock"))?;
+            metadata.modified = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+        }
         self.write_metadata()
     }
 
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
-        if self.closed {
+        if self.closed.load(Ordering::SeqCst) {
             return Err(PlatypusError::InvalidOperation(
                 "Index is closed".to_string(),
             ));
@@ -184,30 +206,32 @@ impl VectorIndex for HnswIndex {
         &self.storage
     }
 
-    fn close(&mut self) -> Result<()> {
-        if !self.closed {
-            self.closed = true;
-        }
+    fn close(&self) -> Result<()> {
+        self.closed.store(true, Ordering::SeqCst);
         Ok(())
     }
 
     fn is_closed(&self) -> bool {
-        self.closed
+        self.closed.load(Ordering::SeqCst)
     }
 
     fn stats(&self) -> Result<VectorIndexStats> {
         self.check_closed()?;
 
+        let metadata = self
+            .metadata
+            .read()
+            .map_err(|_| PlatypusError::index("Failed to acquire metadata read lock"))?;
         Ok(VectorIndexStats {
-            vector_count: self.metadata.vector_count,
-            dimension: self.metadata.dimension,
+            vector_count: metadata.vector_count,
+            dimension: metadata.dimension,
             total_size: 0,
             deleted_count: 0,
-            last_modified: self.metadata.modified,
+            last_modified: metadata.modified,
         })
     }
 
-    fn optimize(&mut self) -> Result<()> {
+    fn optimize(&self) -> Result<()> {
         self.check_closed()?;
         self.update_metadata()?;
         Ok(())

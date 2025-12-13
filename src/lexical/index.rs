@@ -43,7 +43,8 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Close the index and release resources.
     ///
     /// This should flush any pending writes and release all resources.
-    fn close(&mut self) -> Result<()>;
+    /// Uses interior mutability for thread-safe access.
+    fn close(&self) -> Result<()>;
 
     /// Check if the index is closed.
     ///
@@ -58,7 +59,8 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Optimize the index (merge segments, etc.).
     ///
     /// Performs index optimization such as merging segments to improve query performance.
-    fn optimize(&mut self) -> Result<()>;
+    /// Uses interior mutability for thread-safe access.
+    fn optimize(&self) -> Result<()>;
 
     /// Create a searcher tailored for this index implementation.
     ///

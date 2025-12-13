@@ -166,7 +166,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         // Create index
-        let mut index = VectorIndexFactory::create(storage.clone(), config.clone()).unwrap();
+        let index = VectorIndexFactory::create(storage.clone(), config.clone()).unwrap();
         index.close().unwrap();
 
         // Open index
@@ -194,7 +194,7 @@ mod tests {
         let config = VectorIndexTypeConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let mut index = VectorIndexFactory::create(storage, config).unwrap();
+        let index = VectorIndexFactory::create(storage, config).unwrap();
 
         assert!(!index.is_closed());
 
