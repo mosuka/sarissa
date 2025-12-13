@@ -1358,12 +1358,41 @@ impl VectorIndex for MultiFieldVectorIndex {
         }
 
         let mut hits: Vec<VectorEngineHit> = doc_hits.into_values().collect();
+
+        // Apply min_score filtering if specified.
+        if request.min_score > 0.0 {
+            hits.retain(|hit| hit.score >= request.min_score);
+        }
+
         hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(CmpOrdering::Equal));
         if hits.len() > request.limit {
             hits.truncate(request.limit);
         }
 
         Ok(VectorEngineSearchResults { hits })
+    }
+
+    fn count(&self, request: &VectorEngineSearchRequest) -> Result<usize> {
+        // If no query vectors, return total document count.
+        if request.query_vectors.is_empty() {
+            let documents = self.documents.read();
+            return Ok(documents.len());
+        }
+
+        // For queries with vectors, perform a search with no limit and count results.
+        // Create a modified request with unlimited results.
+        let count_request = VectorEngineSearchRequest {
+            query_vectors: request.query_vectors.clone(),
+            fields: request.fields.clone(),
+            limit: usize::MAX,
+            score_mode: request.score_mode,
+            overfetch: 1.0, // No overfetch needed for counting.
+            filter: request.filter.clone(),
+            min_score: request.min_score,
+        };
+
+        let results = self.search(&count_request)?;
+        Ok(results.hits.len())
     }
 
     fn commit(&self) -> Result<()> {

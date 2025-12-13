@@ -16,9 +16,9 @@
 //! ```
 
 #[cfg(feature = "embeddings-openai")]
-use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
+use platypus::embedding::embedder::{EmbedInput, Embedder};
 #[cfg(feature = "embeddings-openai")]
-use platypus::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
 
 #[cfg(feature = "embeddings-openai")]
 #[tokio::main]
@@ -47,7 +47,7 @@ async fn main() -> platypus::error::Result<()> {
     println!("Text: \"{}\"", text);
     println!("Calling OpenAI API...");
 
-    let vector = embedder.embed(text).await?;
+    let vector = embedder.embed(&EmbedInput::Text(text)).await?;
     println!("Generated embedding with {} dimensions", vector.dimension());
     println!(
         "First 5 values: {:?}\n",
@@ -67,7 +67,8 @@ async fn main() -> platypus::error::Result<()> {
     ];
 
     println!("Processing {} texts in a single API call...", texts.len());
-    let vectors = embedder.embed_batch(&texts).await?;
+    let inputs: Vec<EmbedInput> = texts.iter().map(|t| EmbedInput::Text(t)).collect();
+    let vectors = embedder.embed_batch(&inputs).await?;
 
     for (i, (text, vector)) in texts.iter().zip(vectors.iter()).enumerate() {
         println!("Text {}: \"{}\"", i + 1, text);
@@ -90,8 +91,10 @@ async fn main() -> platypus::error::Result<()> {
     println!("Query: \"{}\"", query);
     println!("Generating embeddings for query and candidates...");
 
-    let query_vector = embedder.embed(query).await?;
-    let candidate_vectors = embedder.embed_batch(&candidates).await?;
+    let query_vector = embedder.embed(&EmbedInput::Text(query)).await?;
+    let candidate_inputs: Vec<EmbedInput> =
+        candidates.iter().map(|t| EmbedInput::Text(t)).collect();
+    let candidate_vectors = embedder.embed_batch(&candidate_inputs).await?;
 
     println!("\nSimilarity scores:");
     for (candidate, vector) in candidates.iter().zip(candidate_vectors.iter()) {
@@ -115,7 +118,7 @@ async fn main() -> platypus::error::Result<()> {
     let text = "Smaller embeddings save storage and costs";
     println!("Text: \"{}\"", text);
 
-    let custom_vector = custom_embedder.embed(text).await?;
+    let custom_vector = custom_embedder.embed(&EmbedInput::Text(text)).await?;
     println!(
         "Generated embedding with {} dimensions",
         custom_vector.dimension()

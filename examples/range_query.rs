@@ -331,7 +331,8 @@ fn main() -> Result<()> {
     // Example 8: Count books in price range
     println!("\n8. Counting books with price between $40.00 and $80.00:");
     let query = NumericRangeQuery::f64_range("price", Some(40.0), Some(80.0));
-    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count =
+        lexical_engine.count(LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>))?;
     println!("   Count: {count} books");
 
     // Example 9: Empty range (no results expected)

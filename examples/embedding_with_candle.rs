@@ -13,7 +13,7 @@
 #[cfg(feature = "embeddings-candle")]
 use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(feature = "embeddings-candle")]
-use platypus::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::embedder::{EmbedInput, Embedder};
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
@@ -34,7 +34,7 @@ async fn main() -> platypus::error::Result<()> {
     let text = "Rust is a systems programming language";
     println!("Text: \"{}\"", text);
 
-    let vector = embedder.embed(text).await?;
+    let vector = embedder.embed(&EmbedInput::Text(text)).await?;
     println!("Generated embedding with {} dimensions", vector.dimension());
     println!(
         "First 5 values: {:?}\n",
@@ -50,7 +50,8 @@ async fn main() -> platypus::error::Result<()> {
     ];
 
     println!("Processing {} texts...", texts.len());
-    let vectors = embedder.embed_batch(&texts).await?;
+    let inputs: Vec<EmbedInput> = texts.iter().map(|t| EmbedInput::Text(t)).collect();
+    let vectors = embedder.embed_batch(&inputs).await?;
 
     for (i, (text, vector)) in texts.iter().zip(vectors.iter()).enumerate() {
         println!("Text {}: \"{}\"", i + 1, text);
@@ -70,8 +71,10 @@ async fn main() -> platypus::error::Result<()> {
         "Software development requires good tools",
     ];
 
-    let query_vector = embedder.embed(query).await?;
-    let candidate_vectors = embedder.embed_batch(&candidates).await?;
+    let query_vector = embedder.embed(&EmbedInput::Text(query)).await?;
+    let candidate_inputs: Vec<EmbedInput> =
+        candidates.iter().map(|t| EmbedInput::Text(t)).collect();
+    let candidate_vectors = embedder.embed_batch(&candidate_inputs).await?;
 
     println!("Query: \"{}\"", query);
     println!("\nSimilarity scores:");

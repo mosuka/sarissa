@@ -56,8 +56,8 @@ use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::SearchResults;
 use crate::lexical::reader::LexicalIndexReader;
+use crate::lexical::search::searcher::LexicalSearchRequest;
 use crate::lexical::search::searcher::LexicalSearcher;
-use crate::lexical::search::searcher::{LexicalSearchQuery, LexicalSearchRequest};
 use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 
@@ -500,33 +500,42 @@ impl LexicalEngine {
         searcher.search(request)
     }
 
-    /// Count documents matching the query.
+    /// Count documents matching the request.
     ///
     /// Uses a cached searcher for improved performance.
+    /// If `min_score` is specified in the request parameters, only documents
+    /// with a score equal to or greater than the threshold are counted.
     ///
-    /// Accepts:
-    /// - `&str`: DSL query string
-    /// - `String`: DSL query string
-    /// - `Box<dyn Query>`: Query object
+    /// # Arguments
+    ///
+    /// * `request` - Search request containing the query and search parameters.
+    ///   Use `LexicalSearchRequest::new(query)` to create a request.
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # use platypus::lexical::engine::LexicalEngine;
     /// # use platypus::lexical::index::config::LexicalIndexConfig;
+    /// # use platypus::lexical::search::searcher::LexicalSearchRequest;
     /// # use platypus::storage::memory::MemoryStorage;
     /// # use platypus::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let config = LexicalIndexConfig::default();
     /// # let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     /// # let engine = LexicalEngine::new(storage, config).unwrap();
-    /// // Using DSL string
-    /// let count = engine.count("title:hello").unwrap();
+    /// // Count all matching documents
+    /// let count = engine.count(LexicalSearchRequest::new("title:hello")).unwrap();
     /// println!("Found {} documents", count);
+    ///
+    /// // Count with min_score threshold
+    /// let count = engine.count(
+    ///     LexicalSearchRequest::new("title:hello").min_score(0.5)
+    /// ).unwrap();
+    /// println!("Found {} documents with score >= 0.5", count);
     /// ```
-    pub fn count(&self, query: impl Into<LexicalSearchQuery>) -> Result<u64> {
+    pub fn count(&self, request: LexicalSearchRequest) -> Result<u64> {
         let searcher = self.get_or_create_searcher()?;
-        searcher.count(query.into())
+        searcher.count(request)
     }
 
     /// Close the search engine.
@@ -757,7 +766,7 @@ mod tests {
         let engine = LexicalEngine::new(storage, config).unwrap();
 
         let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
-        let count = engine.count(query).unwrap();
+        let count = engine.count(LexicalSearchRequest::new(query)).unwrap();
 
         // Should return 0 for empty index
         assert_eq!(count, 0);

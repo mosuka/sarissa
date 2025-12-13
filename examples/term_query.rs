@@ -228,7 +228,8 @@ fn main() -> Result<()> {
     // Example 7: Count matching documents
     println!("\n7. Counting documents containing 'programming':");
     let query = TermQuery::new("body", "programming");
-    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count =
+        lexical_engine.count(LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>))?;
     println!("   Count: {count} documents");
 
     lexical_engine.close()?;

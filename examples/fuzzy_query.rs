@@ -368,7 +368,8 @@ fn main() -> Result<()> {
     // Example 10: Count fuzzy matches
     println!("\n10. Counting documents with fuzzy match for 'developement' (extra 'e'):");
     let query = FuzzyQuery::new("body", "developement").max_edits(2);
-    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count =
+        lexical_engine.count(LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>))?;
     println!("    Count: {count} documents");
 
     lexical_engine.close()?;

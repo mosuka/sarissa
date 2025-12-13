@@ -1,7 +1,7 @@
-//! Example of dynamically switching between different TextEmbedder implementations
+//! Example of dynamically switching between different Embedder implementations
 //!
 //! This example demonstrates:
-//! - Using trait objects (Arc<dyn TextEmbedder>) for runtime polymorphism
+//! - Using trait objects (Arc<dyn Embedder>) for runtime polymorphism
 //! - Switching between Candle (local) and OpenAI (cloud) embedders
 //! - Comparing embeddings from different sources
 //!
@@ -20,9 +20,9 @@ use std::sync::Arc;
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
+use platypus::embedding::embedder::{EmbedInput, Embedder};
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use platypus::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 #[tokio::main]
@@ -30,7 +30,7 @@ async fn main() -> platypus::error::Result<()> {
     println!("=== Dynamic Embedder Switching Example ===\n");
 
     // Create a vector to hold different embedders
-    let mut embedders: Vec<Arc<dyn TextEmbedder>> = Vec::new();
+    let mut embedders: Vec<Arc<dyn Embedder>> = Vec::new();
 
     // Add Candle embedder (local inference)
     println!("Loading Candle embedder (local)...");
@@ -62,7 +62,7 @@ async fn main() -> platypus::error::Result<()> {
         println!("Dimension: {}", embedder.dimension());
 
         for text in &test_texts {
-            let vector = embedder.embed(text).await?;
+            let vector = embedder.embed(&EmbedInput::Text(text)).await?;
             println!(
                 "  \"{}\" → {} dimensions, first 3: {:?}",
                 text,
@@ -78,7 +78,7 @@ async fn main() -> platypus::error::Result<()> {
 
     let use_local = true; // Could be from config file or environment variable
 
-    let selected_embedder: Arc<dyn TextEmbedder> = if use_local {
+    let selected_embedder: Arc<dyn Embedder> = if use_local {
         println!("Selected: Local embedder (Candle)");
         embedders[0].clone()
     } else if embedders.len() > 1 {
@@ -91,7 +91,7 @@ async fn main() -> platypus::error::Result<()> {
 
     let query = "artificial intelligence and machine learning";
     println!("\nGenerating embedding for: \"{}\"", query);
-    let result = selected_embedder.embed(query).await?;
+    let result = selected_embedder.embed(&EmbedInput::Text(query)).await?;
     println!("Result: {} dimensions", result.dimension());
 
     // Example: Comparing embeddings from different sources
@@ -101,8 +101,12 @@ async fn main() -> platypus::error::Result<()> {
         let comparison_text = "natural language processing";
         println!("Text: \"{}\"", comparison_text);
 
-        let candle_vec = embedders[0].embed(comparison_text).await?;
-        let openai_vec = embedders[1].embed(comparison_text).await?;
+        let candle_vec = embedders[0]
+            .embed(&EmbedInput::Text(comparison_text))
+            .await?;
+        let openai_vec = embedders[1]
+            .embed(&EmbedInput::Text(comparison_text))
+            .await?;
 
         println!("\nCandle embedder:");
         println!("  Dimension: {}", candle_vec.dimension());
@@ -127,7 +131,8 @@ async fn main() -> platypus::error::Result<()> {
     ];
 
     println!("Processing batch of {} texts...", batch_texts.len());
-    let batch_results = selected_embedder.embed_batch(&batch_texts).await?;
+    let batch_inputs: Vec<EmbedInput> = batch_texts.iter().map(|t| EmbedInput::Text(t)).collect();
+    let batch_results = selected_embedder.embed_batch(&batch_inputs).await?;
 
     for (text, vector) in batch_texts.iter().zip(batch_results.iter()) {
         println!("  \"{}\" → {} dims", text, vector.dimension());

@@ -484,10 +484,12 @@ impl InvertedIndexSearcher {
         }
     }
 
-    /// Count documents matching the query.
-    pub fn count(&self, query: LexicalSearchQuery) -> Result<u64> {
-        // Use the provided LexicalSearchQuery
-        let lexical_query = query;
+    /// Count documents matching the request.
+    ///
+    /// If `min_score` is specified in the request parameters, only documents
+    /// with a score equal to or greater than the threshold are counted.
+    pub fn count(&self, request: LexicalSearchRequest) -> Result<u64> {
+        let lexical_query = request.query;
 
         // Parse DSL string if needed
         let query = if let LexicalSearchQuery::Dsl(_) = &lexical_query {
@@ -515,10 +517,14 @@ impl InvertedIndexSearcher {
             return Ok(0);
         }
 
-        // Use count collector
-        let collector = CountCollector::new();
-        let result_collector = self.search_with_collector(query, collector)?;
+        // Use count collector with min_score if specified
+        let collector = if request.params.min_score > 0.0 {
+            CountCollector::with_min_score(request.params.min_score)
+        } else {
+            CountCollector::new()
+        };
 
+        let result_collector = self.search_with_collector(query, collector)?;
         Ok(result_collector.total_hits())
     }
 }
@@ -616,7 +622,7 @@ mod tests {
         let searcher = create_test_searcher();
         let query = Box::new(TermQuery::new("title", "hello")) as Box<dyn Query>;
 
-        let count = searcher.count(query.into()).unwrap();
+        let count = searcher.count(LexicalSearchRequest::new(query)).unwrap();
 
         // Should return 0 for non-existent terms
         assert_eq!(count, 0);
@@ -668,7 +674,7 @@ mod tests {
         let searcher = create_test_searcher();
         let query = Box::new(BooleanQuery::new()) as Box<dyn Query>;
 
-        let count = searcher.count(query.into()).unwrap();
+        let count = searcher.count(LexicalSearchRequest::new(query)).unwrap();
 
         // Should return 0 for empty query
         assert_eq!(count, 0);
@@ -697,7 +703,10 @@ impl crate::lexical::search::searcher::LexicalSearcher for InvertedIndexSearcher
         InvertedIndexSearcher::search(self, request)
     }
 
-    fn count(&self, query: crate::lexical::search::searcher::LexicalSearchQuery) -> Result<u64> {
-        InvertedIndexSearcher::count(self, query)
+    fn count(
+        &self,
+        request: crate::lexical::search::searcher::LexicalSearchRequest,
+    ) -> Result<u64> {
+        InvertedIndexSearcher::count(self, request)
     }
 }

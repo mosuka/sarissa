@@ -251,7 +251,8 @@ fn main() -> Result<()> {
     // Example 8: Count phrase matches
     println!("\n8. Counting documents with phrase 'computer vision':");
     let query = PhraseQuery::new("body", vec!["computer".to_string(), "vision".to_string()]);
-    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count =
+        lexical_engine.count(LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>))?;
     println!("   Count: {count} documents");
 
     lexical_engine.close()?;

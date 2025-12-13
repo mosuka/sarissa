@@ -334,7 +334,8 @@ fn main() -> Result<()> {
     // Example 8: Count locations within a specific area
     println!("\n8. Counting locations within 50km of Los Angeles center:");
     let query = GeoQuery::within_radius("location", 34.0522, -118.2437, 50.0)?;
-    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count =
+        lexical_engine.count(LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>))?;
     println!("   Count: {count} locations");
 
     lexical_engine.close()?;
