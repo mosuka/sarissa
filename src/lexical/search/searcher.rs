@@ -215,6 +215,9 @@ pub trait LexicalSearcher: Send + Sync + std::fmt::Debug {
     /// Execute a search with the given request.
     fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults>;
 
-    /// Count the number of matching documents for a query.
-    fn count(&self, query: LexicalSearchQuery) -> Result<u64>;
+    /// Count the number of matching documents for a request.
+    ///
+    /// Returns the number of documents that match the given search request,
+    /// applying the min_score threshold if specified in the request parameters.
+    fn count(&self, request: LexicalSearchRequest) -> Result<u64>;
 }

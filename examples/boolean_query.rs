@@ -482,7 +482,8 @@ fn main() -> Result<()> {
     let mut query = BooleanQuery::new();
     query.add_should(Box::new(TermQuery::new("category", "data-science")));
     query.add_should(Box::new(TermQuery::new("category", "web-development")));
-    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count =
+        lexical_engine.count(LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>))?;
     println!("   Count: {count} books");
 
     lexical_engine.close()?;

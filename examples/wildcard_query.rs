@@ -376,7 +376,8 @@ fn main() -> Result<()> {
     // Example 11: Count matching documents
     println!("\n11. Counting files with 'data' in filename using '*data*':");
     let query = WildcardQuery::new("filename", "*data*")?;
-    let count = lexical_engine.count(Box::new(query) as Box<dyn Query>)?;
+    let count =
+        lexical_engine.count(LexicalSearchRequest::new(Box::new(query) as Box<dyn Query>))?;
     println!("    Count: {count} files");
 
     lexical_engine.close()?;

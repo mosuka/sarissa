@@ -15,8 +15,8 @@ mod candle_vector_example {
 
     use platypus::{
         embedding::{
-            candle_text_embedder::CandleTextEmbedder, per_field::PerFieldEmbedder,
-            text_embedder::TextEmbedder,
+            candle_text_embedder::CandleTextEmbedder, embedder::Embedder,
+            per_field::PerFieldEmbedder,
         },
         error::Result,
         storage::{
@@ -46,15 +46,14 @@ mod candle_vector_example {
         let storage =
             Arc::new(MemoryStorage::new(MemoryStorageConfig::default())) as Arc<dyn Storage>;
 
-        let title_embedder: Arc<dyn TextEmbedder> = Arc::new(CandleTextEmbedder::new(TITLE_MODEL)?);
-        let body_embedder: Arc<dyn TextEmbedder> = Arc::new(CandleTextEmbedder::new(BODY_MODEL)?);
+        let title_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(TITLE_MODEL)?);
+        let body_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(BODY_MODEL)?);
         let title_dim = title_embedder.dimension();
         let body_dim = body_embedder.dimension();
 
         // Configure PerFieldEmbedder so each vector field can transparently use Candle embedders.
-        let mut per_field_embedder =
-            PerFieldEmbedder::with_default_text(Arc::clone(&body_embedder));
-        per_field_embedder.add_text_embedder(TITLE_FIELD, Arc::clone(&title_embedder));
+        let mut per_field_embedder = PerFieldEmbedder::new(Arc::clone(&body_embedder));
+        per_field_embedder.add_embedder(TITLE_FIELD, Arc::clone(&title_embedder));
 
         // Build config using the new embedder field API
         let config = VectorIndexConfig::builder()

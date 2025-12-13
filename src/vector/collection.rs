@@ -115,6 +115,22 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     /// Execute a search query.
     fn search(&self, request: &VectorEngineSearchRequest) -> Result<VectorEngineSearchResults>;
 
+    /// Count documents matching the search criteria.
+    ///
+    /// Returns the number of documents that would match the given search request.
+    /// This is equivalent to performing a search and counting the results,
+    /// but may be more efficient for certain implementations.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Search request defining the query vectors, filters, and min_score threshold.
+    ///               If `query_vectors` is empty, returns total document count.
+    ///
+    /// # Returns
+    ///
+    /// The count of matching documents.
+    fn count(&self, request: &VectorEngineSearchRequest) -> Result<usize>;
+
     // =========================================================================
     // Persistence Operations
     // =========================================================================

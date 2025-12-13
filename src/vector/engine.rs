@@ -174,6 +174,53 @@ impl VectorEngine {
         self.index.add_document_payload(payload)
     }
 
+    /// Add multiple documents with automatically assigned doc_ids.
+    ///
+    /// Returns a vector of assigned document IDs in the same order as input.
+    ///
+    /// # Arguments
+    ///
+    /// * `docs` - Iterator of documents to add.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let docs = vec![doc1, doc2, doc3];
+    /// let doc_ids = engine.add_documents(docs)?;
+    /// assert_eq!(doc_ids.len(), 3);
+    /// ```
+    pub fn add_documents(
+        &self,
+        docs: impl IntoIterator<Item = DocumentVector>,
+    ) -> Result<Vec<u64>> {
+        docs.into_iter().map(|doc| self.add_document(doc)).collect()
+    }
+
+    /// Add multiple documents from payloads (will be embedded if configured).
+    ///
+    /// Returns a vector of assigned document IDs in the same order as input.
+    ///
+    /// # Arguments
+    ///
+    /// * `payloads` - Iterator of document payloads to add.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let payloads = vec![payload1, payload2, payload3];
+    /// let doc_ids = engine.add_documents_payload(payloads)?;
+    /// assert_eq!(doc_ids.len(), 3);
+    /// ```
+    pub fn add_documents_payload(
+        &self,
+        payloads: impl IntoIterator<Item = DocumentPayload>,
+    ) -> Result<Vec<u64>> {
+        payloads
+            .into_iter()
+            .map(|payload| self.add_document_payload(payload))
+            .collect()
+    }
+
     /// Upsert a document with a specific document ID.
     pub fn upsert_document(&self, doc_id: u64, doc: DocumentVector) -> Result<()> {
         self.index.upsert_document(doc_id, doc)
@@ -252,6 +299,31 @@ impl VectorEngine {
     // =========================================================================
     // Persistence Operations
     // =========================================================================
+
+    /// Count documents matching the search criteria.
+    ///
+    /// Returns the number of documents that would match the given search request.
+    /// If the request has no query vectors, returns the total document count.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Search request defining query vectors, filters, and min_score threshold.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Count all documents
+    /// let total = engine.count(VectorEngineSearchRequest::default())?;
+    ///
+    /// // Count documents matching a query with min_score threshold
+    /// let mut request = VectorEngineSearchRequest::default();
+    /// request.query_vectors = vec![query_vector];
+    /// request.min_score = 0.8;
+    /// let matching = engine.count(request)?;
+    /// ```
+    pub fn count(&self, request: VectorEngineSearchRequest) -> Result<usize> {
+        self.index.count(&request)
+    }
 
     /// Commit pending changes (persist state).
     pub fn commit(&self) -> Result<()> {

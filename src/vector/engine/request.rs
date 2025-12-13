@@ -16,21 +16,30 @@ fn default_overfetch() -> f32 {
 }
 
 /// Request model for collection-level search.
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorEngineSearchRequest {
+    /// Query vectors to search with.
     #[serde(default)]
     pub query_vectors: Vec<QueryVector>,
+    /// Fields to search in. If None, searches all default fields.
     #[serde(default)]
     pub fields: Option<Vec<FieldSelector>>,
+    /// Maximum number of results to return.
     #[serde(default = "default_query_limit")]
     pub limit: usize,
+    /// How to combine scores from multiple query vectors.
     #[serde(default)]
     pub score_mode: VectorScoreMode,
+    /// Overfetch factor for better result quality.
     #[serde(default = "default_overfetch")]
     pub overfetch: f32,
+    /// Metadata filter to apply.
     #[serde(default)]
     pub filter: Option<VectorEngineFilter>,
+    /// Minimum score threshold. Results with scores below this value are filtered out.
+    /// Default is 0.0 (no filtering).
+    #[serde(default)]
+    pub min_score: f32,
 }
 
 impl Default for VectorEngineSearchRequest {
@@ -42,6 +51,7 @@ impl Default for VectorEngineSearchRequest {
             score_mode: VectorScoreMode::default(),
             overfetch: default_overfetch(),
             filter: None,
+            min_score: 0.0,
         }
     }
 }
