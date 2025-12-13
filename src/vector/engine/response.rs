@@ -9,20 +9,20 @@ use serde::{Deserialize, Serialize};
 use crate::vector::field::{FieldHit, VectorFieldStats};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct VectorEngineSearchResults {
+pub struct VectorSearchResults {
     #[serde(default)]
-    pub hits: Vec<VectorEngineHit>,
+    pub hits: Vec<VectorHit>,
 }
 
 /// Aggregated statistics describing a collection and its fields.
 #[derive(Debug, Clone, Default)]
-pub struct VectorEngineStats {
+pub struct VectorStats {
     pub document_count: usize,
     pub fields: HashMap<String, VectorFieldStats>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorEngineHit {
+pub struct VectorHit {
     pub doc_id: u64,
     pub score: f32,
     #[serde(default)]

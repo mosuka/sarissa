@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::vector::core::vector::Vector;
 use crate::vector::reader::VectorIndexReader;
-use crate::vector::search::searcher::VectorSearcher;
-use crate::vector::search::searcher::{VectorSearchRequest, VectorSearchResults};
+use crate::vector::search::searcher::VectorIndexSearcher;
+use crate::vector::search::searcher::{VectorIndexSearchRequest, VectorIndexSearchResults};
 
 /// HNSW vector searcher that performs approximate nearest neighbor search.
 #[derive(Debug)]
@@ -32,12 +32,12 @@ impl HnswSearcher {
     }
 }
 
-impl VectorSearcher for HnswSearcher {
-    fn search(&self, request: &VectorSearchRequest) -> Result<VectorSearchResults> {
+impl VectorIndexSearcher for HnswSearcher {
+    fn search(&self, request: &VectorIndexSearchRequest) -> Result<VectorIndexSearchResults> {
         use std::time::Instant;
 
         let start = Instant::now();
-        let mut results = VectorSearchResults::new();
+        let mut results = VectorIndexSearchResults::new();
 
         let ef_search = self.ef_search;
 
@@ -101,7 +101,7 @@ impl VectorSearcher for HnswSearcher {
         Ok(results)
     }
 
-    fn count(&self, request: VectorSearchRequest) -> Result<u64> {
+    fn count(&self, request: VectorIndexSearchRequest) -> Result<u64> {
         // Get all vector IDs with field names
         let vector_ids = self.index_reader.vector_ids()?;
 

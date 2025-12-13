@@ -28,14 +28,14 @@ impl MetadataFilter {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct VectorEngineFilter {
+pub struct VectorFilter {
     #[serde(default)]
     pub document: MetadataFilter,
     #[serde(default)]
     pub field: MetadataFilter,
 }
 
-impl VectorEngineFilter {
+impl VectorFilter {
     pub(crate) fn is_empty(&self) -> bool {
         self.document.is_empty() && self.field.is_empty()
     }

@@ -4,7 +4,7 @@
 //! collection that manages multiple vector fields with different configurations.
 
 use std::cmp::Ordering as CmpOrdering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -29,11 +29,9 @@ use crate::vector::engine::filter::RegistryFilterMatches;
 use crate::vector::engine::memory::{FieldHandle, FieldRuntime, InMemoryVectorField};
 use crate::vector::engine::registry::{DocumentEntry, DocumentVectorRegistry, FieldEntry};
 use crate::vector::engine::request::{
-    FieldSelector, QueryVector, VectorEngineSearchRequest, VectorScoreMode,
+    FieldSelector, QueryVector, VectorScoreMode, VectorSearchRequest,
 };
-use crate::vector::engine::response::{
-    VectorEngineHit, VectorEngineSearchResults, VectorEngineStats,
-};
+use crate::vector::engine::response::{VectorHit, VectorSearchResults, VectorStats};
 use crate::vector::engine::snapshot::{
     COLLECTION_MANIFEST_FILE, COLLECTION_MANIFEST_VERSION, CollectionManifest,
     DOCUMENT_SNAPSHOT_FILE, DOCUMENT_SNAPSHOT_TEMP_FILE, DocumentSnapshot, FIELD_INDEX_BASENAME,
@@ -65,7 +63,7 @@ use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 /// - Configurable embedder integration
 pub struct MultiFieldVectorIndex {
     config: Arc<VectorIndexConfig>,
-    fields: RwLock<HashMap<String, FieldHandle>>,
+    fields: Arc<RwLock<HashMap<String, FieldHandle>>>,
     registry: Arc<DocumentVectorRegistry>,
     embedder_registry: Arc<VectorEmbedderRegistry>,
     embedder_executor: Mutex<Option<Arc<EmbedderExecutor>>>,
@@ -104,7 +102,7 @@ impl MultiFieldVectorIndex {
 
         let mut collection = Self {
             config: Arc::new(config),
-            fields: RwLock::new(HashMap::new()),
+            fields: Arc::new(RwLock::new(HashMap::new())),
             registry,
             embedder_registry,
             embedder_executor: Mutex::new(None),
@@ -450,162 +448,6 @@ impl MultiFieldVectorIndex {
         self.bump_next_doc_id(doc_id);
         self.maybe_compact_wal()?;
         Ok(version)
-    }
-
-    fn resolve_fields(&self, query: &VectorEngineSearchRequest) -> Result<Vec<String>> {
-        let fields = self.fields.read();
-        let mut candidates: Vec<String> = if let Some(selectors) = &query.fields {
-            self.apply_field_selectors(&fields, selectors)?
-        } else if !self.config.default_fields.is_empty() {
-            self.config.default_fields.clone()
-        } else {
-            fields.keys().cloned().collect()
-        };
-
-        if candidates.is_empty() {
-            return Err(PlatypusError::invalid_config(
-                "VectorEngine has no fields configured",
-            ));
-        }
-
-        let mut seen = HashSet::new();
-        candidates.retain(|field| seen.insert(field.clone()));
-        Ok(candidates)
-    }
-
-    fn build_filter_matches(
-        &self,
-        query: &VectorEngineSearchRequest,
-        target_fields: &[String],
-    ) -> Option<RegistryFilterMatches> {
-        query
-            .filter
-            .as_ref()
-            .filter(|filter| !filter.is_empty())
-            .map(|filter| self.registry.filter_matches(filter, target_fields))
-    }
-
-    fn apply_field_selectors(
-        &self,
-        fields: &HashMap<String, FieldHandle>,
-        selectors: &[FieldSelector],
-    ) -> Result<Vec<String>> {
-        if selectors.is_empty() {
-            return Err(PlatypusError::invalid_argument(
-                "VectorEngineSearchRequest fields selector list is empty",
-            ));
-        }
-
-        let mut resolved = Vec::new();
-        for selector in selectors {
-            match selector {
-                FieldSelector::Exact(name) => {
-                    if fields.contains_key(name) {
-                        resolved.push(name.clone());
-                    } else {
-                        return Err(PlatypusError::not_found(format!(
-                            "vector field '{name}' is not registered"
-                        )));
-                    }
-                }
-                FieldSelector::Prefix(prefix) => {
-                    let mut matched = false;
-                    for field in fields.keys() {
-                        if field.starts_with(prefix) {
-                            resolved.push(field.clone());
-                            matched = true;
-                        }
-                    }
-                    if !matched {
-                        return Err(PlatypusError::not_found(format!(
-                            "no vector fields match prefix '{prefix}'"
-                        )));
-                    }
-                }
-                FieldSelector::VectorType(vector_type) => {
-                    let mut matched = false;
-                    for (field_name, field_handle) in fields.iter() {
-                        if field_handle.field.config().vector_type == *vector_type {
-                            resolved.push(field_name.clone());
-                            matched = true;
-                        }
-                    }
-                    if !matched {
-                        return Err(PlatypusError::not_found(format!(
-                            "no vector fields registered with vector type '{vector_type:?}'"
-                        )));
-                    }
-                }
-            }
-        }
-        Ok(resolved)
-    }
-
-    fn scaled_field_limit(&self, limit: usize, overfetch: f32) -> usize {
-        let scaled = (limit as f32 * overfetch).ceil() as usize;
-        scaled.max(limit).max(1)
-    }
-
-    fn query_vectors_for_field(
-        &self,
-        config: &VectorFieldConfig,
-        query: &VectorEngineSearchRequest,
-    ) -> Vec<QueryVector> {
-        query
-            .query_vectors
-            .iter()
-            .filter(|candidate| {
-                candidate.vector.embedder_id == config.embedder_id
-                    && candidate.vector.vector_type == config.vector_type
-            })
-            .cloned()
-            .collect()
-    }
-
-    fn merge_field_hits(
-        &self,
-        doc_hits: &mut HashMap<u64, VectorEngineHit>,
-        hits: Vec<FieldHit>,
-        field_weight: f32,
-        score_mode: VectorScoreMode,
-        filter_matches: Option<&RegistryFilterMatches>,
-    ) -> Result<()> {
-        for hit in hits {
-            if let Some(matches) = filter_matches {
-                if !matches.contains_doc(hit.doc_id) {
-                    continue;
-                }
-                if !matches.field_allowed(hit.doc_id, &hit.field) {
-                    continue;
-                }
-            }
-
-            let weighted_score = hit.score * field_weight;
-            let entry = doc_hits
-                .entry(hit.doc_id)
-                .or_insert_with(|| VectorEngineHit {
-                    doc_id: hit.doc_id,
-                    score: 0.0,
-                    field_hits: Vec::new(),
-                });
-
-            match score_mode {
-                VectorScoreMode::WeightedSum => {
-                    entry.score += weighted_score;
-                }
-                VectorScoreMode::MaxSim => {
-                    entry.score = entry.score.max(weighted_score);
-                }
-                VectorScoreMode::LateInteraction => {
-                    return Err(PlatypusError::invalid_argument(
-                        "VectorScoreMode::LateInteraction is not supported yet",
-                    ));
-                }
-            }
-            entry.field_hits.push(hit);
-        }
-
-        Ok(())
     }
 
     fn instantiate_configured_fields(&mut self) -> Result<()> {
@@ -1284,20 +1126,243 @@ impl VectorIndex for MultiFieldVectorIndex {
         Ok(())
     }
 
-    fn search(&self, request: &VectorEngineSearchRequest) -> Result<VectorEngineSearchResults> {
+    fn searcher(&self) -> Result<Box<dyn crate::vector::search::searcher::VectorSearcher>> {
+        // This implementation cannot create a proper searcher because we need
+        // Arc<Self> to create MultiFieldVectorSearcher, but we only have &self.
+        //
+        // Use `impl VectorIndex for Arc<MultiFieldVectorIndex>` instead,
+        // or use `MultiFieldVectorSearcher::from_index_ref()` which creates
+        // a searcher with cloned internal state.
+        Ok(Box::new(MultiFieldVectorSearcher::from_index_ref(self)))
+    }
+
+    fn commit(&self) -> Result<()> {
+        self.persist_state()
+    }
+
+    fn stats(&self) -> Result<VectorStats> {
+        let fields = self.fields.read();
+        let mut field_stats = HashMap::with_capacity(fields.len());
+        for (name, field) in fields.iter() {
+            let stats = field.runtime.reader().stats()?;
+            field_stats.insert(name.clone(), stats);
+        }
+
+        Ok(VectorStats {
+            document_count: self.registry.document_count(),
+            fields: field_stats,
+        })
+    }
+
+    fn storage(&self) -> &Arc<dyn Storage> {
+        &self.storage
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.closed.store(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst) == 1
+    }
+}
+
+/// Searcher implementation for [`MultiFieldVectorIndex`].
+///
+/// This struct implements the [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
+/// trait, providing high-level search functionality for multi-field vector indexes.
+/// It handles multi-field queries, score aggregation, filtering, and result ranking.
+///
+/// # Architecture
+///
+/// The searcher holds shared references (via `Arc`) to the index's internal components:
+/// - `config`: Index configuration for field resolution
+/// - `fields`: Registered vector fields for searching
+/// - `registry`: Document registry for filtering
+/// - `documents`: Document storage for counting
+///
+/// This design allows creating a searcher from `&MultiFieldVectorIndex` without
+/// requiring `Arc<MultiFieldVectorIndex>`, which is important for the `VectorIndex::searcher()`
+/// trait method that only receives `&self`.
+///
+/// # Example
+///
+/// ```ignore
+/// let index: MultiFieldVectorIndex = /* ... */;
+/// let searcher = MultiFieldVectorSearcher::from_index_ref(&index);
+/// let results = searcher.search(&request)?;
+/// ```
+#[derive(Debug)]
+pub struct MultiFieldVectorSearcher {
+    config: Arc<VectorIndexConfig>,
+    fields: Arc<RwLock<HashMap<String, FieldHandle>>>,
+    registry: Arc<DocumentVectorRegistry>,
+    documents: Arc<RwLock<HashMap<u64, DocumentVector>>>,
+}
+
+impl MultiFieldVectorSearcher {
+    /// Create a new searcher from an index reference.
+    ///
+    /// This method clones the `Arc` references to the index's internal components,
+    /// allowing the searcher to operate independently while sharing the same underlying data.
+    pub fn from_index_ref(index: &MultiFieldVectorIndex) -> Self {
+        Self {
+            config: Arc::clone(&index.config),
+            fields: Arc::clone(&index.fields),
+            registry: Arc::clone(&index.registry),
+            documents: Arc::clone(&index.documents),
+        }
+    }
+
+    /// Resolve which fields to search based on the request.
+    fn resolve_fields(&self, request: &VectorSearchRequest) -> Result<Vec<String>> {
+        match &request.fields {
+            Some(selectors) => self.apply_field_selectors(selectors),
+            None => {
+                // Use default fields from config.
+                Ok(self.config.default_fields.clone())
+            }
+        }
+    }
+
+    /// Apply field selectors to determine which fields to search.
+    fn apply_field_selectors(&self, selectors: &[FieldSelector]) -> Result<Vec<String>> {
+        let fields = self.fields.read();
+        let mut result = Vec::new();
+
+        for selector in selectors {
+            match selector {
+                FieldSelector::Exact(name) => {
+                    if fields.contains_key(name) {
+                        if !result.contains(name) {
+                            result.push(name.clone());
+                        }
+                    } else {
+                        return Err(PlatypusError::not_found(format!(
+                            "vector field '{}' is not registered",
+                            name
+                        )));
+                    }
+                }
+                FieldSelector::Prefix(prefix) => {
+                    for field_name in fields.keys() {
+                        if field_name.starts_with(prefix) && !result.contains(field_name) {
+                            result.push(field_name.clone());
+                        }
+                    }
+                }
+                FieldSelector::VectorType(vector_type) => {
+                    for (field_name, handle) in fields.iter() {
+                        if &handle.field.config().vector_type == vector_type
+                            && !result.contains(field_name)
+                        {
+                            result.push(field_name.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Build filter matches based on request filters.
+    fn build_filter_matches(
+        &self,
+        request: &VectorSearchRequest,
+        target_fields: &[String],
+    ) -> Option<RegistryFilterMatches> {
+        request
+            .filter
+            .as_ref()
+            .filter(|filter| !filter.is_empty())
+            .map(|filter| self.registry.filter_matches(filter, target_fields))
+    }
+
+    /// Get the scaled field limit based on overfetch factor.
+    fn scaled_field_limit(&self, limit: usize, overfetch: f32) -> usize {
+        ((limit as f32) * overfetch).ceil() as usize
+    }
+
+    /// Get query vectors that match a specific field configuration.
+    fn query_vectors_for_field(
+        &self,
+        config: &VectorFieldConfig,
+        request: &VectorSearchRequest,
+    ) -> Vec<QueryVector> {
+        request
+            .query_vectors
+            .iter()
+            .filter(|candidate| {
+                candidate.vector.embedder_id == config.embedder_id
+                    && candidate.vector.vector_type == config.vector_type
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Merge field hits into document hits.
+    fn merge_field_hits(
+        &self,
+        doc_hits: &mut HashMap<u64, VectorHit>,
+        hits: Vec<FieldHit>,
+        field_weight: f32,
+        score_mode: VectorScoreMode,
+        filter_matches: Option<&RegistryFilterMatches>,
+    ) -> Result<()> {
+        for hit in hits {
+            if let Some(matches) = filter_matches {
+                if !matches.contains_doc(hit.doc_id) {
+                    continue;
+                }
+                if !matches.field_allowed(hit.doc_id, &hit.field) {
+                    continue;
+                }
+            }
+
+            let weighted_score = hit.score * field_weight;
+            let entry = doc_hits.entry(hit.doc_id).or_insert_with(|| VectorHit {
+                doc_id: hit.doc_id,
+                score: 0.0,
+                field_hits: Vec::new(),
+            });
+
+            match score_mode {
+                VectorScoreMode::WeightedSum => {
+                    entry.score += weighted_score;
+                }
+                VectorScoreMode::MaxSim => {
+                    entry.score = entry.score.max(weighted_score);
+                }
+                VectorScoreMode::LateInteraction => {
+                    return Err(PlatypusError::invalid_argument(
+                        "VectorScoreMode::LateInteraction is not supported yet",
+                    ));
+                }
+            }
+            entry.field_hits.push(hit);
+        }
+
+        Ok(())
+    }
+}
+
+impl crate::vector::search::searcher::VectorSearcher for MultiFieldVectorSearcher {
+    fn search(&self, request: &VectorSearchRequest) -> Result<VectorSearchResults> {
         if request.query_vectors.is_empty() {
             return Err(PlatypusError::invalid_argument(
-                "VectorEngineSearchRequest requires at least one query vector",
+                "VectorSearchRequest requires at least one query vector",
             ));
         }
 
         if request.limit == 0 {
-            return Ok(VectorEngineSearchResults::default());
+            return Ok(VectorSearchResults::default());
         }
 
         if request.overfetch < 1.0 {
             return Err(PlatypusError::invalid_argument(
-                "VectorEngineSearchRequest overfetch must be >= 1.0",
+                "VectorSearchRequest overfetch must be >= 1.0",
             ));
         }
 
@@ -1313,10 +1378,10 @@ impl VectorIndex for MultiFieldVectorIndex {
             .as_ref()
             .is_some_and(|matches| matches.is_empty())
         {
-            return Ok(VectorEngineSearchResults::default());
+            return Ok(VectorSearchResults::default());
         }
 
-        let mut doc_hits: HashMap<u64, VectorEngineHit> = HashMap::new();
+        let mut doc_hits: HashMap<u64, VectorHit> = HashMap::new();
         let mut fields_with_queries = 0_usize;
         let field_limit = self.scaled_field_limit(request.limit, request.overfetch);
 
@@ -1357,7 +1422,7 @@ impl VectorIndex for MultiFieldVectorIndex {
             ));
         }
 
-        let mut hits: Vec<VectorEngineHit> = doc_hits.into_values().collect();
+        let mut hits: Vec<VectorHit> = doc_hits.into_values().collect();
 
         // Apply min_score filtering if specified.
         if request.min_score > 0.0 {
@@ -1369,10 +1434,10 @@ impl VectorIndex for MultiFieldVectorIndex {
             hits.truncate(request.limit);
         }
 
-        Ok(VectorEngineSearchResults { hits })
+        Ok(VectorSearchResults { hits })
     }
 
-    fn count(&self, request: &VectorEngineSearchRequest) -> Result<usize> {
+    fn count(&self, request: &VectorSearchRequest) -> Result<usize> {
         // If no query vectors, return total document count.
         if request.query_vectors.is_empty() {
             let documents = self.documents.read();
@@ -1381,7 +1446,7 @@ impl VectorIndex for MultiFieldVectorIndex {
 
         // For queries with vectors, perform a search with no limit and count results.
         // Create a modified request with unlimited results.
-        let count_request = VectorEngineSearchRequest {
+        let count_request = VectorSearchRequest {
             query_vectors: request.query_vectors.clone(),
             fields: request.fields.clone(),
             limit: usize::MAX,
@@ -1393,37 +1458,6 @@ impl VectorIndex for MultiFieldVectorIndex {
 
         let results = self.search(&count_request)?;
         Ok(results.hits.len())
-    }
-
-    fn commit(&self) -> Result<()> {
-        self.persist_state()
-    }
-
-    fn stats(&self) -> Result<VectorEngineStats> {
-        let fields = self.fields.read();
-        let mut field_stats = HashMap::with_capacity(fields.len());
-        for (name, field) in fields.iter() {
-            let stats = field.runtime.reader().stats()?;
-            field_stats.insert(name.clone(), stats);
-        }
-
-        Ok(VectorEngineStats {
-            document_count: self.registry.document_count(),
-            fields: field_stats,
-        })
-    }
-
-    fn storage(&self) -> &Arc<dyn Storage> {
-        &self.storage
-    }
-
-    fn close(&mut self) -> Result<()> {
-        self.closed.store(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst) == 1
     }
 }
 

@@ -11,9 +11,9 @@ use crate::hybrid::search::searcher::{
 };
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
 use crate::vector::engine::{
-    FieldSelector, VectorEngine, VectorEngineSearchRequest, VectorEngineSearchResults,
+    FieldSelector, VectorEngine, VectorSearchRequest, VectorSearchResults,
 };
-use crate::vector::search::searcher::VectorSearchParams;
+use crate::vector::search::searcher::VectorIndexSearchParams;
 
 /// High-level hybrid search engine combining lexical and vector search.
 ///
@@ -262,12 +262,12 @@ impl HybridEngine {
 
     fn build_vector_engine_search_request(
         overrides: HybridVectorOptions,
-        query: Option<VectorEngineSearchRequest>,
+        query: Option<VectorSearchRequest>,
         vector_payloads: HashMap<String, FieldPayload>,
-        vector_params: &VectorSearchParams,
+        vector_params: &VectorIndexSearchParams,
         params: &HybridSearchParams,
         vector_engine: &VectorEngine,
-    ) -> Result<Option<VectorEngineSearchRequest>> {
+    ) -> Result<Option<VectorSearchRequest>> {
         let mut query = query.unwrap_or_default();
         let mut payload_fields: Vec<String> = Vec::new();
 
@@ -304,7 +304,7 @@ impl HybridEngine {
     }
 
     fn default_vector_limit(
-        vector_params: &VectorSearchParams,
+        vector_params: &VectorIndexSearchParams,
         params: &HybridSearchParams,
     ) -> usize {
         let mut candidates = Vec::new();
@@ -318,8 +318,8 @@ impl HybridEngine {
     }
 
     fn apply_vector_constraints(
-        results: &mut VectorEngineSearchResults,
-        vector_params: &VectorSearchParams,
+        results: &mut VectorSearchResults,
+        vector_params: &VectorIndexSearchParams,
     ) {
         if vector_params.min_similarity > 0.0 {
             results
@@ -355,8 +355,8 @@ mod tests {
     use crate::vector::core::document::{FieldPayload, StoredVector, VectorType};
     use crate::vector::core::vector::Vector;
     use crate::vector::engine::{
-        FieldSelector, MetadataFilter, QueryVector, VectorEngineFilter, VectorEngineHit,
-        VectorFieldConfig, VectorIndexConfig, VectorIndexKind, VectorScoreMode,
+        FieldSelector, MetadataFilter, QueryVector, VectorFieldConfig, VectorFilter, VectorHit,
+        VectorIndexConfig, VectorIndexKind, VectorScoreMode,
     };
     use crate::vector::field::FieldHit;
     use async_trait::async_trait;
@@ -375,12 +375,12 @@ mod tests {
         field_filter
             .equals
             .insert("section".to_string(), "body".to_string());
-        overrides.filter = Some(VectorEngineFilter {
+        overrides.filter = Some(VectorFilter {
             document: MetadataFilter::default(),
             field: field_filter.clone(),
         });
 
-        let mut query = VectorEngineSearchRequest::default();
+        let mut query = VectorSearchRequest::default();
         query.limit = 0;
         query.query_vectors.push(QueryVector {
             vector: StoredVector::new(
@@ -391,7 +391,7 @@ mod tests {
             weight: 1.0,
         });
 
-        let vector_params = VectorSearchParams {
+        let vector_params = VectorIndexSearchParams {
             top_k: 4,
             ..Default::default()
         };
@@ -422,9 +422,9 @@ mod tests {
 
     #[test]
     fn apply_vector_constraints_respects_similarity_and_topk() {
-        let mut results = VectorEngineSearchResults {
+        let mut results = VectorSearchResults {
             hits: vec![
-                VectorEngineHit {
+                VectorHit {
                     doc_id: 1,
                     score: 0.9,
                     field_hits: vec![FieldHit {
@@ -435,7 +435,7 @@ mod tests {
                         metadata: Default::default(),
                     }],
                 },
-                VectorEngineHit {
+                VectorHit {
                     doc_id: 2,
                     score: 0.4,
                     field_hits: vec![FieldHit {
@@ -449,7 +449,7 @@ mod tests {
             ],
         };
 
-        let params = VectorSearchParams {
+        let params = VectorIndexSearchParams {
             top_k: 1,
             min_similarity: 0.5,
             ..Default::default()
@@ -473,7 +473,7 @@ mod tests {
             HybridVectorOptions::default(),
             None,
             payloads,
-            &VectorSearchParams::default(),
+            &VectorIndexSearchParams::default(),
             &HybridSearchParams::default(),
             &engine,
         )

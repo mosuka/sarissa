@@ -19,7 +19,7 @@ use crate::lexical::index::inverted::query::collector::{
     Collector, CountCollector, TopDocsCollector, TopFieldCollector,
 };
 use crate::lexical::index::inverted::query::parser::QueryParser;
-use crate::lexical::index::inverted::query::{SearchHit, SearchResults};
+use crate::lexical::index::inverted::query::{LexicalSearchResults, SearchHit};
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::{
@@ -222,7 +222,7 @@ impl InvertedIndexSearcher {
         query: Box<dyn Query>,
         params: &LexicalSearchParams,
         timeout: Duration,
-    ) -> Result<SearchResults> {
+    ) -> Result<LexicalSearchResults> {
         let start_time = Instant::now();
 
         // Create collector based on sort type
@@ -276,7 +276,7 @@ impl InvertedIndexSearcher {
         // Calculate max score
         let max_score = hits.iter().map(|hit| hit.score).fold(0.0f32, f32::max);
 
-        Ok(SearchResults {
+        Ok(LexicalSearchResults {
             hits,
             total_hits,
             max_score,
@@ -284,7 +284,7 @@ impl InvertedIndexSearcher {
     }
 
     /// Search with the given request.
-    pub fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults> {
+    pub fn search(&self, request: LexicalSearchRequest) -> Result<LexicalSearchResults> {
         // Convert DSL query to Query object if necessary
         let query = match &request.query {
             LexicalSearchQuery::Dsl(dsl_string) => {
@@ -307,7 +307,7 @@ impl InvertedIndexSearcher {
 
         // Check if query is empty
         if query.is_empty(self.reader.as_ref())? {
-            return Ok(SearchResults {
+            return Ok(LexicalSearchResults {
                 hits: Vec::new(),
                 total_hits: 0,
                 max_score: 0.0,
@@ -351,7 +351,7 @@ impl InvertedIndexSearcher {
                     // Calculate max score
                     let max_score = hits.iter().map(|hit| hit.score).fold(0.0f32, f32::max);
 
-                    Ok(SearchResults {
+                    Ok(LexicalSearchResults {
                         hits,
                         total_hits,
                         max_score,
@@ -382,7 +382,7 @@ impl InvertedIndexSearcher {
                     // Calculate max score
                     let max_score = hits.iter().map(|hit| hit.score).fold(0.0f32, f32::max);
 
-                    Ok(SearchResults {
+                    Ok(LexicalSearchResults {
                         hits,
                         total_hits,
                         max_score,
@@ -699,7 +699,7 @@ mod tests {
 
 // Implement LexicalSearcher trait for InvertedIndexSearcher
 impl crate::lexical::search::searcher::LexicalSearcher for InvertedIndexSearcher {
-    fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults> {
+    fn search(&self, request: LexicalSearchRequest) -> Result<LexicalSearchResults> {
         InvertedIndexSearcher::search(self, request)
     }
 

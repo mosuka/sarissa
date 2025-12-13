@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::vector::search::searcher::VectorSearchResults;
+use crate::vector::search::searcher::VectorIndexSearchResults;
 
 /// Configuration for result ranking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,7 +78,7 @@ impl VectorRanker {
     /// # Returns
     ///
     /// `Ok(())` if ranking succeeds
-    pub fn rank_results(&self, results: &mut VectorSearchResults) -> Result<()> {
+    pub fn rank_results(&self, results: &mut VectorIndexSearchResults) -> Result<()> {
         match self.config.method {
             RankingMethod::Similarity => {
                 results.sort_by_similarity();
@@ -112,7 +112,7 @@ impl VectorRanker {
     /// # Returns
     ///
     /// `Ok(())` if weighting succeeds
-    fn apply_weighted_ranking(&self, results: &mut VectorSearchResults) -> Result<()> {
+    fn apply_weighted_ranking(&self, results: &mut VectorIndexSearchResults) -> Result<()> {
         for result in &mut results.results {
             let mut weighted_score = result.similarity;
 
@@ -141,7 +141,7 @@ impl VectorRanker {
     /// # Returns
     ///
     /// `Ok(())` - Currently a no-op placeholder
-    fn apply_custom_ranking(&self, _results: &mut VectorSearchResults) -> Result<()> {
+    fn apply_custom_ranking(&self, _results: &mut VectorIndexSearchResults) -> Result<()> {
         // Placeholder for custom ranking implementation
         Ok(())
     }
@@ -157,7 +157,7 @@ impl VectorRanker {
     /// # Returns
     ///
     /// `Ok(())` if normalization succeeds
-    fn normalize_scores(&self, results: &mut VectorSearchResults) -> Result<()> {
+    fn normalize_scores(&self, results: &mut VectorIndexSearchResults) -> Result<()> {
         if results.results.is_empty() {
             return Ok(());
         }

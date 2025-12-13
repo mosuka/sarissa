@@ -27,8 +27,8 @@ use platypus::vector::core::document::{
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, VectorEngine, VectorEngineSearchRequest, VectorFieldConfig, VectorIndexConfig,
-    VectorIndexKind, VectorScoreMode,
+    FieldSelector, VectorEngine, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
+    VectorScoreMode, VectorSearchRequest,
 };
 use tempfile::{Builder, NamedTempFile};
 
@@ -112,7 +112,7 @@ fn main() -> Result<()> {
     println!("   -> Docs indexed: {}\n", engine.stats()?.document_count);
 
     println!("3) Build one text query + one image query\n");
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 2;
     query.fields = Some(vec![
         FieldSelector::Exact(TEXT_FIELD.into()),

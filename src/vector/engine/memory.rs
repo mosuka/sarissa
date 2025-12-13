@@ -18,7 +18,7 @@ use crate::vector::field::{
     VectorFieldStats, VectorFieldWriter,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct FieldHandle {
     pub(crate) field: Arc<dyn VectorField>,
     pub(crate) runtime: Arc<FieldRuntime>,

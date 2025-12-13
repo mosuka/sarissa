@@ -18,9 +18,8 @@ use platypus::vector::core::document::{
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, MetadataFilter, QueryVector, VectorEngine, VectorEngineFilter,
-    VectorEngineSearchRequest, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
-    VectorScoreMode,
+    FieldSelector, MetadataFilter, QueryVector, VectorEngine, VectorFieldConfig, VectorFilter,
+    VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
 };
 use tempfile::NamedTempFile;
 
@@ -28,7 +27,7 @@ use tempfile::NamedTempFile;
 fn vector_engine_multi_field_search_prefers_relevant_documents() -> Result<()> {
     let engine = build_sample_engine()?;
 
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 2;
     query.score_mode = VectorScoreMode::WeightedSum;
     query.overfetch = 1.25;
@@ -58,7 +57,7 @@ fn vector_engine_multi_field_search_prefers_relevant_documents() -> Result<()> {
 fn vector_engine_respects_document_metadata_filters() -> Result<()> {
     let engine = build_sample_engine()?;
 
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 3;
     query.score_mode = VectorScoreMode::MaxSim;
     query.query_vectors.push(QueryVector {
@@ -68,7 +67,7 @@ fn vector_engine_respects_document_metadata_filters() -> Result<()> {
 
     let mut doc_filter = MetadataFilter::default();
     doc_filter.equals.insert("lang".into(), "ja".into());
-    query.filter = Some(VectorEngineFilter {
+    query.filter = Some(VectorFilter {
         document: doc_filter,
         field: MetadataFilter::default(),
     });
@@ -83,7 +82,7 @@ fn vector_engine_respects_document_metadata_filters() -> Result<()> {
 fn vector_engine_field_metadata_filters_limit_hits() -> Result<()> {
     let engine = build_sample_engine()?;
 
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 3;
     query.fields = Some(vec![
         FieldSelector::Exact("title_embedding".into()),
@@ -96,7 +95,7 @@ fn vector_engine_field_metadata_filters_limit_hits() -> Result<()> {
 
     let mut field_filter = MetadataFilter::default();
     field_filter.equals.insert("section".into(), "body".into());
-    query.filter = Some(VectorEngineFilter {
+    query.filter = Some(VectorFilter {
         document: MetadataFilter::default(),
         field: field_filter,
     });
@@ -122,7 +121,7 @@ fn vector_engine_upserts_and_queries_raw_payloads() -> Result<()> {
     payload.add_field("body_embedding", sample_payload("rust embeddings", "body"));
     engine.upsert_document_payload(42, payload)?;
 
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 1;
     query.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
     query.query_vectors.extend(engine.embed_query_field_payload(
@@ -144,7 +143,7 @@ fn vector_engine_payload_accepts_image_bytes_segments() -> Result<()> {
     payload.add_field("image_embedding", image_bytes_payload(&[1, 2, 3, 4]));
     engine.upsert_document_payload(99, payload)?;
 
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 1;
     query.fields = Some(vec![FieldSelector::Exact("image_embedding".into())]);
     query.query_vectors.extend(
@@ -173,7 +172,7 @@ fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
     query_file.write_all(&[4, 5, 6, 7])?;
     let query_uri = query_file.path().to_string_lossy().to_string();
 
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 1;
     query.fields = Some(vec![FieldSelector::Exact("image_embedding".into())]);
     query

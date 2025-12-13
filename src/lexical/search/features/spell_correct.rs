@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::lexical::engine::LexicalEngine;
-use crate::lexical::index::inverted::query::SearchResults;
+use crate::lexical::index::inverted::query::LexicalSearchResults;
 use crate::lexical::search::searcher::LexicalSearchRequest;
 use crate::spelling::corrector::{
     CorrectionResult, CorrectorConfig, DidYouMean, SpellingCorrector,
@@ -14,7 +14,7 @@ use crate::spelling::corrector::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpellCorrectedSearchResults {
     /// The original search results.
-    pub results: SearchResults,
+    pub results: LexicalSearchResults,
     /// Spelling correction information.
     pub correction: CorrectionResult,
     /// Whether the search was performed with the corrected query.
@@ -25,7 +25,7 @@ pub struct SpellCorrectedSearchResults {
 
 impl SpellCorrectedSearchResults {
     /// Create new spell-corrected search results.
-    pub fn new(results: SearchResults, correction: CorrectionResult) -> Self {
+    pub fn new(results: LexicalSearchResults, correction: CorrectionResult) -> Self {
         SpellCorrectedSearchResults {
             results,
             correction,
@@ -311,7 +311,7 @@ impl SpellCorrectedSearchEngine {
     /// Decide whether to use the spelling correction based on search results and correction quality.
     fn should_use_correction(
         &self,
-        original_results: &SearchResults,
+        original_results: &LexicalSearchResults,
         correction: &CorrectionResult,
     ) -> bool {
         // Don't use correction if auto-correction is disabled and no corrections suggested
@@ -504,9 +504,9 @@ mod tests {
 
     #[test]
     fn test_spell_corrected_results() {
-        use crate::lexical::index::inverted::query::SearchResults;
+        use crate::lexical::index::inverted::query::LexicalSearchResults;
 
-        let results = SearchResults {
+        let results = LexicalSearchResults {
             hits: vec![],
             total_hits: 0,
             max_score: 0.0,

@@ -54,7 +54,7 @@ use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::LexicalIndexConfig;
 use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
-use crate::lexical::index::inverted::query::SearchResults;
+use crate::lexical::index::inverted::query::LexicalSearchResults;
 use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::LexicalSearchRequest;
 use crate::lexical::search::searcher::LexicalSearcher;
@@ -495,7 +495,7 @@ impl LexicalEngine {
     /// let query = parser.parse("rust AND programming").unwrap();
     /// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
     /// ```
-    pub fn search(&self, request: LexicalSearchRequest) -> Result<SearchResults> {
+    pub fn search(&self, request: LexicalSearchRequest) -> Result<LexicalSearchResults> {
         let searcher = self.get_or_create_searcher()?;
         searcher.search(request)
     }

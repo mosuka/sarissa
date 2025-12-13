@@ -10,8 +10,8 @@ use crate::error::Result;
 use crate::hybrid::search::scorer::ScoreNormalizer;
 use crate::hybrid::search::searcher::HybridSearchParams;
 use crate::hybrid::search::searcher::{HybridSearchResult, HybridSearchResults};
-use crate::lexical::index::inverted::query::SearchResults;
-use crate::vector::engine::VectorEngineSearchResults;
+use crate::lexical::index::inverted::query::LexicalSearchResults;
+use crate::vector::engine::VectorSearchResults;
 
 /// Result merger for combining keyword and vector search results.
 ///
@@ -63,8 +63,8 @@ impl ResultMerger {
     /// Unified hybrid search results with combined scores
     pub async fn merge_results(
         &self,
-        keyword_results: SearchResults,
-        vector_results: Option<VectorEngineSearchResults>,
+        keyword_results: LexicalSearchResults,
+        vector_results: Option<VectorSearchResults>,
         query_text: String,
         query_time_ms: u64,
         document_store: &HashMap<u64, HashMap<String, String>>,
@@ -179,12 +179,12 @@ impl ResultMerger {
 mod tests {
     use super::*;
     use crate::lexical::index::inverted::query::SearchHit;
-    use crate::vector::engine::VectorEngineHit;
+    use crate::vector::engine::VectorHit;
     use crate::vector::field::FieldHit;
 
     #[tokio::test]
     async fn merge_results_preserves_vector_field_hits() {
-        let mut keyword_results = SearchResults {
+        let mut keyword_results = LexicalSearchResults {
             hits: Vec::new(),
             total_hits: 0,
             max_score: 0.0,
@@ -197,8 +197,8 @@ mod tests {
         keyword_results.total_hits = 1;
         keyword_results.max_score = 0.42;
 
-        let vector_results = VectorEngineSearchResults {
-            hits: vec![VectorEngineHit {
+        let vector_results = VectorSearchResults {
+            hits: vec![VectorHit {
                 doc_id: 7,
                 score: 0.91,
                 field_hits: vec![FieldHit {
