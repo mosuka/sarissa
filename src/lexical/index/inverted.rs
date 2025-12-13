@@ -12,7 +12,8 @@
 
 use std::io::Read;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -98,7 +99,6 @@ impl Default for IndexMetadata {
 }
 
 /// A concrete inverted index implementation for schema-less lexical indexing.
-#[derive(Debug)]
 pub struct InvertedIndex {
     /// The storage backend.
     storage: Arc<dyn Storage>,
@@ -106,11 +106,22 @@ pub struct InvertedIndex {
     /// Inverted index specific configuration.
     config: InvertedIndexConfig,
 
-    /// Whether the index is closed.
-    closed: bool,
+    /// Whether the index is closed (thread-safe).
+    closed: AtomicBool,
 
-    /// Index metadata.
-    metadata: IndexMetadata,
+    /// Index metadata (thread-safe).
+    metadata: RwLock<IndexMetadata>,
+}
+
+impl std::fmt::Debug for InvertedIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InvertedIndex")
+            .field("storage", &self.storage)
+            .field("config", &self.config)
+            .field("closed", &self.closed.load(Ordering::SeqCst))
+            .field("metadata", &*self.metadata.read().unwrap())
+            .finish()
+    }
 }
 
 impl InvertedIndex {
@@ -121,8 +132,8 @@ impl InvertedIndex {
         let index = InvertedIndex {
             storage,
             config,
-            closed: false,
-            metadata,
+            closed: AtomicBool::new(false),
+            metadata: RwLock::new(metadata),
         };
 
         index.write_metadata()?;
@@ -140,8 +151,8 @@ impl InvertedIndex {
         Ok(InvertedIndex {
             storage,
             config,
-            closed: false,
-            metadata,
+            closed: AtomicBool::new(false),
+            metadata: RwLock::new(metadata),
         })
     }
 
@@ -161,8 +172,13 @@ impl InvertedIndex {
 
     /// Write metadata to storage.
     fn write_metadata(&self) -> Result<()> {
-        let metadata_json = serde_json::to_string_pretty(&self.metadata)
+        let metadata = self
+            .metadata
+            .read()
+            .map_err(|_| PlatypusError::index("Failed to acquire metadata read lock"))?;
+        let metadata_json = serde_json::to_string_pretty(&*metadata)
             .map_err(|e| PlatypusError::index(format!("Failed to serialize metadata: {e}")))?;
+        drop(metadata);
 
         let mut output = self.storage.create_output("metadata.json")?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
@@ -184,25 +200,37 @@ impl InvertedIndex {
     }
 
     /// Update metadata and write to storage.
-    fn update_metadata(&mut self) -> Result<()> {
-        self.metadata.modified = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+    fn update_metadata(&self) -> Result<()> {
+        {
+            let mut metadata = self
+                .metadata
+                .write()
+                .map_err(|_| PlatypusError::index("Failed to acquire metadata write lock"))?;
+            metadata.modified = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+        }
 
         self.write_metadata()
     }
 
     /// Update the document count in the index metadata.
-    pub fn update_doc_count(&mut self, additional_docs: u64) -> Result<()> {
+    pub fn update_doc_count(&self, additional_docs: u64) -> Result<()> {
         self.check_closed()?;
-        self.metadata.doc_count += additional_docs;
+        {
+            let mut metadata = self
+                .metadata
+                .write()
+                .map_err(|_| PlatypusError::index("Failed to acquire metadata write lock"))?;
+            metadata.doc_count += additional_docs;
+        }
         self.update_metadata()
     }
 
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
-        if self.closed {
+        if self.closed.load(Ordering::SeqCst) {
             Err(PlatypusError::index("Index is closed"))
         } else {
             Ok(())
@@ -289,31 +317,33 @@ impl LexicalIndex for InvertedIndex {
         &self.storage
     }
 
-    fn close(&mut self) -> Result<()> {
-        if !self.closed {
-            self.closed = true;
-        }
+    fn close(&self) -> Result<()> {
+        self.closed.store(true, Ordering::SeqCst);
         Ok(())
     }
 
     fn is_closed(&self) -> bool {
-        self.closed
+        self.closed.load(Ordering::SeqCst)
     }
 
     fn stats(&self) -> Result<InvertedIndexStats> {
         self.check_closed()?;
 
+        let metadata = self
+            .metadata
+            .read()
+            .map_err(|_| PlatypusError::index("Failed to acquire metadata read lock"))?;
         Ok(InvertedIndexStats {
-            doc_count: self.metadata.doc_count,
+            doc_count: metadata.doc_count,
             term_count: 0,
             segment_count: 0,
             total_size: 0,
             deleted_count: 0,
-            last_modified: self.metadata.modified,
+            last_modified: metadata.modified,
         })
     }
 
-    fn optimize(&mut self) -> Result<()> {
+    fn optimize(&self) -> Result<()> {
         self.check_closed()?;
         self.update_metadata()?;
         Ok(())

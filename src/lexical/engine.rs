@@ -29,7 +29,7 @@
 //!
 //! // Create engine with storage and config
 //! let config = LexicalIndexConfig::default();
-//! let mut engine = LexicalEngine::new(storage, config).unwrap();
+//! let engine = LexicalEngine::new(storage, config).unwrap();
 //!
 //! // Add documents
 //! let doc = Document::builder()
@@ -44,8 +44,9 @@
 //! let results = engine.search(request).unwrap();
 //! ```
 
-use std::cell::{RefCell, RefMut};
 use std::sync::Arc;
+
+use parking_lot::{Mutex, RwLock};
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::error::Result;
@@ -93,7 +94,7 @@ use crate::storage::Storage;
 /// // Create storage and engine
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 /// let config = LexicalIndexConfig::default();
-/// let mut engine = LexicalEngine::new(storage, config).unwrap();
+/// let engine = LexicalEngine::new(storage, config).unwrap();
 ///
 /// // Add documents
 /// use platypus::document::field::TextOption;
@@ -110,11 +111,14 @@ pub struct LexicalEngine {
     /// The underlying lexical index.
     index: Box<dyn LexicalIndex>,
     /// The reader for executing queries (cached for efficiency).
-    reader: RefCell<Option<Arc<dyn LexicalIndexReader>>>,
+    /// Uses `RwLock` to allow concurrent reads while ensuring thread-safety.
+    reader: RwLock<Option<Arc<dyn LexicalIndexReader>>>,
     /// The writer for adding/updating documents (cached for efficiency).
-    writer: RefCell<Option<Box<dyn LexicalIndexWriter>>>,
+    /// Uses `Mutex` because write operations must be exclusive.
+    writer: Mutex<Option<Box<dyn LexicalIndexWriter>>>,
     /// The searcher for executing searches (cached for efficiency).
-    searcher: RefCell<Option<Box<dyn crate::lexical::search::searcher::LexicalSearcher>>>,
+    /// Uses `RwLock` to allow concurrent searches while ensuring thread-safety.
+    searcher: RwLock<Option<Box<dyn crate::lexical::search::searcher::LexicalSearcher>>>,
 }
 
 impl std::fmt::Debug for LexicalEngine {
@@ -175,58 +179,49 @@ impl LexicalEngine {
         let index = LexicalIndexFactory::create(storage, config)?;
         Ok(Self {
             index,
-            reader: RefCell::new(None),
-            writer: RefCell::new(None),
-            searcher: RefCell::new(None),
+            reader: RwLock::new(None),
+            writer: Mutex::new(None),
+            searcher: RwLock::new(None),
         })
     }
 
-    /// Get or create a reader for this engine.
-    #[allow(dead_code)]
-    fn get_or_create_reader(&self) -> Result<RefMut<'_, Arc<dyn LexicalIndexReader>>> {
-        {
-            let mut reader_ref = self.reader.borrow_mut();
-            if reader_ref.is_none() {
-                *reader_ref = Some(self.index.reader()?);
-            }
-        }
-
-        // Return a mutable reference to the reader
-        Ok(RefMut::map(self.reader.borrow_mut(), |opt| {
-            opt.as_mut().unwrap()
-        }))
-    }
-
-    /// Get or create a writer for this engine.
-    fn get_or_create_writer(&self) -> Result<RefMut<'_, Box<dyn LexicalIndexWriter>>> {
-        {
-            let mut writer_ref = self.writer.borrow_mut();
-            if writer_ref.is_none() {
-                *writer_ref = Some(self.index.writer()?);
-            }
-        }
-
-        // Return a mutable reference to the writer
-        Ok(RefMut::map(self.writer.borrow_mut(), |opt| {
-            opt.as_mut().unwrap()
-        }))
-    }
-
-    /// Get or create a searcher for this engine.
+    /// Ensure the writer is initialized and execute a function with it.
     ///
-    /// The searcher is provided by the underlying index implementation and cached for efficiency.
-    fn get_or_create_searcher(&self) -> Result<RefMut<'_, Box<dyn LexicalSearcher>>> {
+    /// This method lazily creates the writer on first use and caches it for subsequent calls.
+    /// Uses a `Mutex` to ensure exclusive write access.
+    fn with_writer<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut Box<dyn LexicalIndexWriter>) -> Result<R>,
+    {
+        let mut guard = self.writer.lock();
+        if guard.is_none() {
+            *guard = Some(self.index.writer()?);
+        }
+        f(guard.as_mut().unwrap())
+    }
+
+    /// Ensure the searcher is initialized and execute a function with it.
+    ///
+    /// This method lazily creates the searcher on first use and caches it for subsequent calls.
+    /// Uses a `RwLock` to allow concurrent search operations.
+    fn with_searcher<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&Box<dyn LexicalSearcher>) -> Result<R>,
+    {
+        // First, try to use the existing searcher with a read lock
         {
-            let mut searcher_ref = self.searcher.borrow_mut();
-            if searcher_ref.is_none() {
-                *searcher_ref = Some(self.index.searcher()?);
+            let guard = self.searcher.read();
+            if let Some(ref searcher) = *guard {
+                return f(searcher);
             }
         }
 
-        // Return a mutable reference to the searcher
-        Ok(RefMut::map(self.searcher.borrow_mut(), |opt| {
-            opt.as_mut().unwrap()
-        }))
+        // If no searcher exists, acquire a write lock to create one
+        let mut guard = self.searcher.write();
+        if guard.is_none() {
+            *guard = Some(self.index.searcher()?);
+        }
+        f(guard.as_ref().unwrap())
     }
 
     /// Add a document to the index.
@@ -257,7 +252,7 @@ impl LexicalEngine {
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// use platypus::document::field::TextOption;
     /// let doc = Document::builder()
@@ -267,43 +262,35 @@ impl LexicalEngine {
     /// let doc_id = engine.add_document(doc).unwrap();
     /// engine.commit().unwrap();  // Don't forget to commit!
     /// ```
-    pub fn add_document(&mut self, doc: Document) -> Result<u64> {
-        let mut writer = self.get_or_create_writer()?;
-        let doc_id = writer.add_document(doc)?;
-        Ok(doc_id)
+    pub fn add_document(&self, doc: Document) -> Result<u64> {
+        self.with_writer(|writer| writer.add_document(doc))
     }
 
     /// Upsert a document with a specific document ID.
     /// Note: You must call `commit()` to persist the changes.
-    pub fn upsert_document(&mut self, doc_id: u64, doc: Document) -> Result<()> {
-        let mut writer = self.get_or_create_writer()?;
-        writer.upsert_document(doc_id, doc)?;
-        Ok(())
+    pub fn upsert_document(&self, doc_id: u64, doc: Document) -> Result<()> {
+        self.with_writer(|writer| writer.upsert_document(doc_id, doc))
     }
 
     /// Add multiple documents to the index.
     /// Returns a vector of assigned document IDs.
     /// Note: You must call `commit()` to persist the changes.
-    pub fn add_documents(&mut self, docs: Vec<Document>) -> Result<Vec<u64>> {
-        let mut writer = self.get_or_create_writer()?;
-        let mut doc_ids = Vec::new();
-
-        for doc in docs {
-            let doc_id = writer.add_document(doc)?;
-            doc_ids.push(doc_id);
-        }
-
-        Ok(doc_ids)
+    pub fn add_documents(&self, docs: Vec<Document>) -> Result<Vec<u64>> {
+        self.with_writer(|writer| {
+            let mut doc_ids = Vec::with_capacity(docs.len());
+            for doc in docs {
+                let doc_id = writer.add_document(doc)?;
+                doc_ids.push(doc_id);
+            }
+            Ok(doc_ids)
+        })
     }
 
     /// Delete a document by ID.
     ///
     /// Note: You must call `commit()` to persist the changes.
-    pub fn delete_document(&mut self, doc_id: u64) -> Result<()> {
-        let mut writer = self.get_or_create_writer()?;
-        writer.delete_document(doc_id)?;
-
-        Ok(())
+    pub fn delete_document(&self, doc_id: u64) -> Result<()> {
+        self.with_writer(|writer| writer.delete_document(doc_id))
     }
 
     /// Commit any pending changes to the index.
@@ -333,7 +320,7 @@ impl LexicalEngine {
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// // Add multiple documents
     /// use platypus::document::field::TextOption;
@@ -348,15 +335,15 @@ impl LexicalEngine {
     /// // Commit all changes at once
     /// engine.commit().unwrap();
     /// ```
-    pub fn commit(&mut self) -> Result<()> {
-        // Take the cached writer if it exists
-        if let Some(mut writer) = self.writer.borrow_mut().take() {
+    pub fn commit(&self) -> Result<()> {
+        // Take the cached writer if it exists and commit
+        if let Some(mut writer) = self.writer.lock().take() {
             writer.commit()?;
         }
 
         // Invalidate reader and searcher caches to reflect the new changes
-        *self.reader.borrow_mut() = None;
-        *self.searcher.borrow_mut() = None;
+        *self.reader.write() = None;
+        *self.searcher.write() = None;
 
         Ok(())
     }
@@ -403,20 +390,20 @@ impl LexicalEngine {
     /// // Optimize the index for better performance
     /// engine.optimize().unwrap();
     /// ```
-    pub fn optimize(&mut self) -> Result<()> {
+    pub fn optimize(&self) -> Result<()> {
         self.index.optimize()?;
 
         // Invalidate reader and searcher caches
-        *self.reader.borrow_mut() = None;
-        *self.searcher.borrow_mut() = None;
+        *self.reader.write() = None;
+        *self.searcher.write() = None;
 
         Ok(())
     }
 
     /// Refresh the reader to see latest changes.
-    pub fn refresh(&mut self) -> Result<()> {
-        *self.reader.borrow_mut() = None;
-        *self.searcher.borrow_mut() = None;
+    pub fn refresh(&self) -> Result<()> {
+        *self.reader.write() = None;
+        *self.searcher.write() = None;
         Ok(())
     }
 
@@ -456,7 +443,7 @@ impl LexicalEngine {
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     /// # use platypus::document::field::TextOption;
     /// # let doc = Document::builder().add_text("title", "hello world", TextOption::default()).build();
     /// # engine.add_document(doc).unwrap();
@@ -488,7 +475,7 @@ impl LexicalEngine {
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
-    /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
+    /// # let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// let analyzer = Arc::new(StandardAnalyzer::default());
     /// let parser = QueryParser::new(analyzer).with_default_field("title");
@@ -496,8 +483,7 @@ impl LexicalEngine {
     /// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
     /// ```
     pub fn search(&self, request: LexicalSearchRequest) -> Result<LexicalSearchResults> {
-        let searcher = self.get_or_create_searcher()?;
-        searcher.search(request)
+        self.with_searcher(|searcher| searcher.search(request.clone()))
     }
 
     /// Count documents matching the request.
@@ -534,18 +520,17 @@ impl LexicalEngine {
     /// println!("Found {} documents with score >= 0.5", count);
     /// ```
     pub fn count(&self, request: LexicalSearchRequest) -> Result<u64> {
-        let searcher = self.get_or_create_searcher()?;
-        searcher.count(request)
+        self.with_searcher(|searcher| searcher.count(request.clone()))
     }
 
     /// Close the search engine.
-    pub fn close(&mut self) -> Result<()> {
+    pub fn close(&self) -> Result<()> {
         // Drop the cached writer
-        *self.writer.borrow_mut() = None;
+        *self.writer.lock() = None;
         // Drop the cached reader
-        *self.reader.borrow_mut() = None;
+        *self.reader.write() = None;
         // Drop the cached searcher
-        *self.searcher.borrow_mut() = None;
+        *self.searcher.write() = None;
         self.index.close()
     }
 
@@ -620,7 +605,7 @@ mod tests {
     fn test_search_engine_in_memory() {
         let config = LexicalIndexConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let mut engine = LexicalEngine::new(storage, config).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -650,7 +635,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let mut engine = LexicalEngine::new(storage, config.clone()).unwrap();
+        let engine = LexicalEngine::new(storage, config.clone()).unwrap();
         engine.close().unwrap();
 
         // Open engine
@@ -671,7 +656,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let mut engine = LexicalEngine::new(storage, config).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         let doc = create_test_document("Hello World", "This is a test document");
         engine.add_document(doc).unwrap();
@@ -692,7 +677,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let mut engine = LexicalEngine::new(storage, config).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         let docs = vec![
             create_test_document("First Document", "Content of first document"),
@@ -734,7 +719,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let mut engine = LexicalEngine::new(storage, config).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         // Add some documents
         let docs = vec![
@@ -780,7 +765,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let mut engine = LexicalEngine::new(storage, config).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         // Add a document
         let doc = create_test_document("Test Document", "Test content");
@@ -821,7 +806,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let mut engine = LexicalEngine::new(storage, config).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         assert!(!engine.is_closed());
 
@@ -861,7 +846,7 @@ mod tests {
         let storage = Arc::new(
             FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
         );
-        let mut engine = LexicalEngine::new(storage, config).unwrap();
+        let engine = LexicalEngine::new(storage, config).unwrap();
 
         // Add some documents with lowercase titles for testing
         let docs = vec![

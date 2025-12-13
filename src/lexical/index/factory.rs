@@ -146,7 +146,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         // Create index
-        let mut index = LexicalIndexFactory::create(storage.clone(), config.clone()).unwrap();
+        let index = LexicalIndexFactory::create(storage.clone(), config.clone()).unwrap();
         index.close().unwrap();
 
         // Open index
@@ -175,7 +175,7 @@ mod tests {
         let config = LexicalIndexConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let mut index = LexicalIndexFactory::create(storage, config).unwrap();
+        let index = LexicalIndexFactory::create(storage, config).unwrap();
 
         assert!(!index.is_closed());
 

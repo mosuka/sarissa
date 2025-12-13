@@ -47,8 +47,7 @@ use std::sync::Arc;
 use crate::embedding::embedder::Embedder;
 use crate::error::Result;
 use crate::storage::Storage;
-use crate::vector::collection::VectorIndex;
-use crate::vector::collection::multifield::MultiFieldVectorIndex;
+use crate::vector::collection::VectorCollection;
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
 
@@ -60,10 +59,10 @@ pub use response::{VectorHit, VectorSearchResults, VectorStats};
 
 /// A high-level vector search engine that provides both indexing and searching.
 ///
-/// The `VectorEngine` wraps a `VectorIndex` trait object and provides
+/// The `VectorEngine` wraps a `VectorCollection` and provides
 /// a simplified, unified interface for all vector operations.
 ///
-/// This design mirrors `LexicalEngine` which wraps `LexicalIndex` trait object.
+/// This design mirrors `LexicalEngine` which wraps a `LexicalIndex` implementation.
 ///
 /// # Example
 ///
@@ -87,13 +86,13 @@ pub use response::{VectorHit, VectorSearchResults, VectorStats};
 /// let results = engine.search(request)?;
 /// ```
 pub struct VectorEngine {
-    index: Box<dyn VectorIndex>,
+    collection: VectorCollection,
 }
 
 impl std::fmt::Debug for VectorEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VectorEngine")
-            .field("index", &self.index)
+            .field("collection", &self.collection)
             .finish()
     }
 }
@@ -106,7 +105,7 @@ impl VectorEngine {
     /// Create a new vector engine with the given storage and configuration.
     ///
     /// This is the primary constructor for `VectorEngine`. It creates the
-    /// underlying `MultiFieldVectorIndex` internally, providing a simple
+    /// underlying `VectorCollection` internally, providing a simple
     /// and consistent API that mirrors `LexicalEngine::new(storage, config)`.
     ///
     /// # Arguments
@@ -129,10 +128,8 @@ impl VectorEngine {
     /// let engine = VectorEngine::new(storage, config)?;
     /// ```
     pub fn new(storage: Arc<dyn Storage>, config: VectorIndexConfig) -> Result<Self> {
-        let index = MultiFieldVectorIndex::new(config, storage, None)?;
-        Ok(Self {
-            index: Box::new(index),
-        })
+        let collection = VectorCollection::new(config, storage, None)?;
+        Ok(Self { collection })
     }
 
     // =========================================================================
@@ -141,7 +138,7 @@ impl VectorEngine {
 
     /// Get the collection configuration.
     pub fn config(&self) -> &VectorIndexConfig {
-        self.index.config()
+        self.collection.config()
     }
 
     /// Get the embedder for this engine.
@@ -153,7 +150,7 @@ impl VectorEngine {
     ///
     /// Returns `Arc<dyn Embedder>` containing the embedder.
     pub fn embedder(&self) -> Arc<dyn Embedder> {
-        Arc::clone(self.index.config().get_embedder())
+        Arc::clone(self.collection.config().get_embedder())
     }
 
     // =========================================================================
@@ -164,14 +161,14 @@ impl VectorEngine {
     ///
     /// Returns the assigned document ID.
     pub fn add_document(&self, doc: DocumentVector) -> Result<u64> {
-        self.index.add_document(doc)
+        self.collection.add_document(doc)
     }
 
     /// Add a document from payload (will be embedded if configured).
     ///
     /// Returns the assigned document ID.
     pub fn add_document_payload(&self, payload: DocumentPayload) -> Result<u64> {
-        self.index.add_document_payload(payload)
+        self.collection.add_document_payload(payload)
     }
 
     /// Add multiple documents with automatically assigned doc_ids.
@@ -223,17 +220,17 @@ impl VectorEngine {
 
     /// Upsert a document with a specific document ID.
     pub fn upsert_document(&self, doc_id: u64, doc: DocumentVector) -> Result<()> {
-        self.index.upsert_document(doc_id, doc)
+        self.collection.upsert_document(doc_id, doc)
     }
 
     /// Upsert a document from payload (will be embedded if configured).
     pub fn upsert_document_payload(&self, doc_id: u64, payload: DocumentPayload) -> Result<()> {
-        self.index.upsert_document_payload(doc_id, payload)
+        self.collection.upsert_document_payload(doc_id, payload)
     }
 
     /// Delete a document by ID.
     pub fn delete_document(&self, doc_id: u64) -> Result<()> {
-        self.index.delete_document(doc_id)
+        self.collection.delete_document(doc_id)
     }
 
     // =========================================================================
@@ -242,7 +239,7 @@ impl VectorEngine {
 
     /// Embed a document payload into vectors.
     pub fn embed_document_payload(&self, payload: DocumentPayload) -> Result<DocumentVector> {
-        self.index.embed_document_payload(payload)
+        self.collection.embed_document_payload(payload)
     }
 
     /// Embed a field payload for query.
@@ -251,7 +248,8 @@ impl VectorEngine {
         field_name: &str,
         payload: FieldPayload,
     ) -> Result<Vec<QueryVector>> {
-        self.index.embed_query_field_payload(field_name, payload)
+        self.collection
+            .embed_query_field_payload(field_name, payload)
     }
 
     // =========================================================================
@@ -260,12 +258,12 @@ impl VectorEngine {
 
     /// Register an external field implementation.
     pub fn register_field(&self, name: String, field: Box<dyn VectorField>) -> Result<()> {
-        self.index.register_field(name, field)
+        self.collection.register_field(name, field)
     }
 
     /// Get statistics for a specific field.
     pub fn field_stats(&self, field_name: &str) -> Result<VectorFieldStats> {
-        self.index.field_stats(field_name)
+        self.collection.field_stats(field_name)
     }
 
     /// Replace the reader for a specific field.
@@ -274,17 +272,17 @@ impl VectorEngine {
         field_name: &str,
         reader: Box<dyn VectorFieldReader>,
     ) -> Result<()> {
-        self.index.replace_field_reader(field_name, reader)
+        self.collection.replace_field_reader(field_name, reader)
     }
 
     /// Reset the reader for a specific field to default.
     pub fn reset_field_reader(&self, field_name: &str) -> Result<()> {
-        self.index.reset_field_reader(field_name)
+        self.collection.reset_field_reader(field_name)
     }
 
     /// Materialize the delegate reader for a field (build persistent index).
     pub fn materialize_delegate_reader(&self, field_name: &str) -> Result<()> {
-        self.index.materialize_delegate_reader(field_name)
+        self.collection.materialize_delegate_reader(field_name)
     }
 
     // =========================================================================
@@ -294,9 +292,9 @@ impl VectorEngine {
     /// Execute a search query.
     ///
     /// This method creates a [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
-    /// from the underlying index and delegates the search operation to it.
+    /// from the underlying collection and delegates the search operation to it.
     pub fn search(&self, request: VectorSearchRequest) -> Result<VectorSearchResults> {
-        let searcher = self.index.searcher()?;
+        let searcher = self.collection.searcher()?;
         searcher.search(&request)
     }
 
@@ -310,7 +308,7 @@ impl VectorEngine {
     /// If the request has no query vectors, returns the total document count.
     ///
     /// This method creates a [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
-    /// from the underlying index and delegates the count operation to it.
+    /// from the underlying collection and delegates the count operation to it.
     ///
     /// # Arguments
     ///
@@ -328,14 +326,14 @@ impl VectorEngine {
     /// request.min_score = 0.8;
     /// let matching = engine.count(request)?;
     /// ```
-    pub fn count(&self, request: VectorSearchRequest) -> Result<usize> {
-        let searcher = self.index.searcher()?;
+    pub fn count(&self, request: VectorSearchRequest) -> Result<u64> {
+        let searcher = self.collection.searcher()?;
         searcher.count(&request)
     }
 
     /// Commit pending changes (persist state).
     pub fn commit(&self) -> Result<()> {
-        self.index.commit()
+        self.collection.commit()
     }
 
     // =========================================================================
@@ -344,22 +342,22 @@ impl VectorEngine {
 
     /// Get collection statistics.
     pub fn stats(&self) -> Result<VectorStats> {
-        self.index.stats()
+        self.collection.stats()
     }
 
     /// Get the storage backend.
     pub fn storage(&self) -> &Arc<dyn Storage> {
-        self.index.storage()
+        self.collection.storage()
     }
 
     /// Close the engine and release resources.
-    pub fn close(&mut self) -> Result<()> {
-        self.index.close()
+    pub fn close(&self) -> Result<()> {
+        self.collection.close()
     }
 
     /// Check if the engine is closed.
     pub fn is_closed(&self) -> bool {
-        self.index.is_closed()
+        self.collection.is_closed()
     }
 }
 

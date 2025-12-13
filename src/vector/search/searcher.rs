@@ -234,5 +234,5 @@ pub trait VectorSearcher: Send + Sync + std::fmt::Debug {
     fn count(
         &self,
         request: &crate::vector::engine::request::VectorSearchRequest,
-    ) -> crate::error::Result<usize>;
+    ) -> crate::error::Result<u64>;
 }

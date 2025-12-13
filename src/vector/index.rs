@@ -27,9 +27,14 @@ use crate::vector::writer::VectorIndexWriter;
 
 /// Trait for vector index implementations.
 ///
-/// This trait defines the high-level interface for vector indexes.
-/// Different index types (Flat, HNSW, IVF, etc.) implement this trait
-/// to provide their specific functionality while maintaining a common interface.
+/// This trait defines the low-level interface for individual vector indexes
+/// (Flat, HNSW, IVF, etc.). Each index type implements this trait to provide
+/// reader/writer access and basic lifecycle management.
+///
+/// This is analogous to [`crate::lexical::index::LexicalIndex`] in the lexical module.
+/// For high-level, document-centric operations, see
+/// [`crate::vector::collection::VectorCollection`] which manages multiple
+/// vector fields and is used by [`crate::vector::engine::VectorEngine`].
 pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     /// Get a reader for this index.
     ///
@@ -49,7 +54,8 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     /// Close the index and release resources.
     ///
     /// This should flush any pending writes and release all resources.
-    fn close(&mut self) -> Result<()>;
+    /// Uses interior mutability for thread-safe access.
+    fn close(&self) -> Result<()>;
 
     /// Check if the index is closed.
     ///
@@ -64,7 +70,8 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     /// Optimize the index.
     ///
     /// Performs index optimization to improve query performance.
-    fn optimize(&mut self) -> Result<()>;
+    /// Uses interior mutability for thread-safe access.
+    fn optimize(&self) -> Result<()>;
 }
 
 /// Statistics about a vector index.
