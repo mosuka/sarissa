@@ -18,8 +18,8 @@ use platypus::vector::core::document::{
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, MetadataFilter, QueryVector, VectorEngine, VectorFieldConfig, VectorFilter,
-    VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
+    FieldSelector, MetadataFilter, QueryPayload, QueryVector, VectorEngine, VectorFieldConfig,
+    VectorFilter, VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
 };
 use tempfile::NamedTempFile;
 
@@ -124,10 +124,10 @@ fn vector_engine_upserts_and_queries_raw_payloads() -> Result<()> {
     let mut query = VectorSearchRequest::default();
     query.limit = 1;
     query.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
-    query.query_vectors.extend(engine.embed_query_field_payload(
+    query.query_payloads.push(QueryPayload::new(
         "body_embedding",
         sample_payload("embeddings overview", "body"),
-    )?);
+    ));
 
     let results = engine.search(query)?;
     assert_eq!(results.hits.len(), 1);
@@ -146,9 +146,10 @@ fn vector_engine_payload_accepts_image_bytes_segments() -> Result<()> {
     let mut query = VectorSearchRequest::default();
     query.limit = 1;
     query.fields = Some(vec![FieldSelector::Exact("image_embedding".into())]);
-    query.query_vectors.extend(
-        engine.embed_query_field_payload("image_embedding", image_bytes_payload(&[4, 3, 2, 1]))?,
-    );
+    query.query_payloads.push(QueryPayload::new(
+        "image_embedding",
+        image_bytes_payload(&[4, 3, 2, 1]),
+    ));
 
     let results = engine.search(query)?;
     assert_eq!(results.hits.len(), 1);
@@ -175,9 +176,10 @@ fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
     let mut query = VectorSearchRequest::default();
     query.limit = 1;
     query.fields = Some(vec![FieldSelector::Exact("image_embedding".into())]);
-    query
-        .query_vectors
-        .extend(engine.embed_query_field_payload("image_embedding", image_uri_payload(query_uri))?);
+    query.query_payloads.push(QueryPayload::new(
+        "image_embedding",
+        image_uri_payload(query_uri),
+    ));
 
     let results = engine.search(query)?;
     assert_eq!(results.hits.len(), 1);

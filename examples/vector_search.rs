@@ -27,8 +27,8 @@ mod candle_vector_example {
             DistanceMetric,
             core::document::{DocumentPayload, FieldPayload, SegmentPayload, VectorType},
             engine::{
-                FieldSelector, VectorEngine, VectorFieldConfig, VectorFilter, VectorIndexConfig,
-                VectorIndexKind, VectorScoreMode, VectorSearchRequest,
+                FieldSelector, QueryPayload, VectorEngine, VectorFieldConfig, VectorFilter,
+                VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
             },
         },
     };
@@ -170,15 +170,15 @@ mod candle_vector_example {
         title_query.add_metadata("section".into(), "title".into());
         title_query.add_text_segment("systems programming");
         query
-            .query_vectors
-            .extend(engine.embed_query_field_payload(TITLE_FIELD, title_query)?);
+            .query_payloads
+            .push(QueryPayload::new(TITLE_FIELD, title_query));
 
         let mut body_query = FieldPayload::default();
         body_query.add_metadata("section".into(), "body".into());
         body_query.add_text_segment("memory safety");
         query
-            .query_vectors
-            .extend(engine.embed_query_field_payload(BODY_FIELD, body_query)?);
+            .query_payloads
+            .push(QueryPayload::new(BODY_FIELD, body_query));
 
         println!("4) Execute the search and inspect doc-centric hits\n");
         let results = engine.search(query)?;
