@@ -136,11 +136,6 @@ impl VectorEngine {
     // Configuration
     // =========================================================================
 
-    /// Get the collection configuration.
-    pub fn config(&self) -> &VectorIndexConfig {
-        self.collection.config()
-    }
-
     /// Get the embedder for this engine.
     ///
     /// This provides direct access to the embedder configured for this engine,
