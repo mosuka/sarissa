@@ -1475,6 +1475,7 @@ impl crate::vector::search::searcher::VectorSearcher for VectorCollectionSearche
         // Create a modified request with unlimited results.
         let count_request = VectorSearchRequest {
             query_vectors: request.query_vectors.clone(),
+            query_payloads: request.query_payloads.clone(),
             fields: request.fields.clone(),
             limit: usize::MAX,
             score_mode: request.score_mode,

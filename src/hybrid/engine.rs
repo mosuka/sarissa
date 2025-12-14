@@ -11,7 +11,7 @@ use crate::hybrid::search::searcher::{
 };
 use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
 use crate::vector::engine::{
-    FieldSelector, VectorEngine, VectorSearchRequest, VectorSearchResults,
+    FieldSelector, QueryPayload, VectorSearchRequest, VectorSearchResults,
 };
 use crate::vector::search::searcher::VectorIndexSearchParams;
 
@@ -230,8 +230,7 @@ impl HybridEngine {
             vector_payloads,
             &vector_params,
             &params,
-            &self.vector_engine,
-        )?;
+        );
 
         let vector_results = if let Some(query) = vector_query {
             let mut results = self.vector_engine.search(query)?;
@@ -266,25 +265,24 @@ impl HybridEngine {
         vector_payloads: HashMap<String, FieldPayload>,
         vector_params: &VectorIndexSearchParams,
         params: &HybridSearchParams,
-        vector_engine: &VectorEngine,
-    ) -> Result<Option<VectorSearchRequest>> {
+    ) -> Option<VectorSearchRequest> {
         let mut query = query.unwrap_or_default();
         let mut payload_fields: Vec<String> = Vec::new();
 
+        // Add payloads to query_payloads for automatic embedding during search.
         for (field_name, payload) in vector_payloads {
             if payload.is_empty() {
                 continue;
             }
-            let embedded = vector_engine.embed_query_field_payload(&field_name, payload)?;
-            if embedded.is_empty() {
-                continue;
-            }
-            payload_fields.push(field_name);
-            query.query_vectors.extend(embedded);
+            payload_fields.push(field_name.clone());
+            query
+                .query_payloads
+                .push(QueryPayload::new(field_name, payload));
         }
 
-        if query.query_vectors.is_empty() {
-            return Ok(None);
+        // If no query vectors and no payloads, skip vector search.
+        if query.query_vectors.is_empty() && query.query_payloads.is_empty() {
+            return None;
         }
 
         HybridSearchRequest::apply_overrides_to_query(&overrides, &mut query);
@@ -300,7 +298,7 @@ impl HybridEngine {
             }
             query.fields = Some(dedup.into_iter().map(FieldSelector::Exact).collect());
         }
-        Ok(Some(query))
+        Some(query)
     }
 
     fn default_vector_limit(
@@ -346,27 +344,16 @@ impl HybridEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
-    use crate::embedding::per_field::PerFieldEmbedder;
-    use crate::error::PlatypusError;
-    use crate::storage::Storage;
-    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    use crate::vector::DistanceMetric;
     use crate::vector::core::document::{FieldPayload, StoredVector, VectorType};
-    use crate::vector::core::vector::Vector;
     use crate::vector::engine::{
-        FieldSelector, MetadataFilter, QueryVector, VectorFieldConfig, VectorFilter, VectorHit,
-        VectorIndexConfig, VectorIndexKind, VectorScoreMode,
+        FieldSelector, MetadataFilter, QueryVector, VectorFilter, VectorHit, VectorScoreMode,
     };
     use crate::vector::field::FieldHit;
-    use async_trait::async_trait;
-    use std::any::Any;
     use std::collections::HashMap;
     use std::sync::Arc;
 
     #[test]
     fn build_query_apply_overrides_and_limits() {
-        let engine = mock_vector_engine();
         let mut overrides = HybridVectorOptions::default();
         overrides.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
         overrides.score_mode = Some(VectorScoreMode::MaxSim);
@@ -404,9 +391,7 @@ mod tests {
             HashMap::new(),
             &vector_params,
             &hybrid_params,
-            &engine,
         )
-        .expect("vector query")
         .expect("query present");
 
         assert_eq!(resolved.limit, 4);
@@ -462,8 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn build_query_from_payload_embeds_vectors() {
-        let engine = mock_vector_engine();
+    fn build_query_from_payload_adds_payloads() {
         let mut payloads = HashMap::new();
         let mut payload = FieldPayload::default();
         payload.add_text_segment("rust embeddings");
@@ -475,86 +459,13 @@ mod tests {
             payloads,
             &VectorIndexSearchParams::default(),
             &HybridSearchParams::default(),
-            &engine,
         )
-        .expect("payload query")
         .expect("query present");
 
-        assert!(!resolved.query_vectors.is_empty());
+        // Payloads are now added to query_payloads, not query_vectors.
+        // The embedding happens during search().
+        assert!(!resolved.query_payloads.is_empty());
         let fields = resolved.fields.expect("fields inferred");
         assert_eq!(fields.len(), 1);
-    }
-
-    fn mock_vector_engine() -> VectorEngine {
-        // Create the embedder
-        let embedder: Arc<dyn Embedder> = Arc::new(MockEmbedder::new(3));
-
-        // Create PerFieldEmbedder with the embedder as default
-        let per_field_embedder = PerFieldEmbedder::new(embedder);
-
-        // Build config using the new embedder field
-        // Note: `embedder` field in VectorFieldConfig is the embedder lookup key
-        // that PerFieldEmbedder uses to resolve embedders for each field
-        let config = VectorIndexConfig::builder()
-            .field(
-                "body",
-                VectorFieldConfig {
-                    dimension: 3,
-                    distance: DistanceMetric::Cosine,
-                    index: VectorIndexKind::Flat,
-                    embedder_id: "mock".into(),
-                    vector_type: VectorType::Text,
-                    embedder: Some("body".into()),
-                    base_weight: 1.0,
-                },
-            )
-            .default_field("body")
-            .embedder(per_field_embedder)
-            .build()
-            .expect("config");
-
-        let storage: Arc<dyn Storage> =
-            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        VectorEngine::new(storage, config).expect("engine")
-    }
-
-    #[derive(Debug)]
-    struct MockEmbedder {
-        dimension: usize,
-    }
-
-    impl MockEmbedder {
-        fn new(dimension: usize) -> Self {
-            Self { dimension }
-        }
-    }
-
-    #[async_trait]
-    impl Embedder for MockEmbedder {
-        async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
-            match input {
-                EmbedInput::Text(text) => {
-                    let value = text.len() as f32;
-                    Ok(Vector::new(vec![value; self.dimension]))
-                }
-                _ => Err(PlatypusError::invalid_argument("only text supported")),
-            }
-        }
-
-        fn dimension(&self) -> usize {
-            self.dimension
-        }
-
-        fn supported_input_types(&self) -> Vec<EmbedInputType> {
-            vec![EmbedInputType::Text]
-        }
-
-        fn name(&self) -> &str {
-            "mock-hybrid-embedder"
-        }
-
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
     }
 }

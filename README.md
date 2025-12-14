@@ -458,14 +458,11 @@ engine.upsert_document_payload(42, payload)?;
 
 let mut query = VectorEngineSearchRequest::default();
 query.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
-query.query_vectors.extend(engine.embed_query_field_payload(
-    "body_embedding",
-    {
-        let mut q = FieldPayload::default();
-        q.add_text_segment(RawTextSegment::new("systems programming"));
-        q
-    },
-)?);
+query.query_payloads.push(QueryPayload::new("body_embedding", {
+    let mut q = FieldPayload::default();
+    q.add_text_segment(RawTextSegment::new("systems programming"));
+    q
+}));
 let hits = engine.search(query)?;
 ```
 

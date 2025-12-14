@@ -18,14 +18,29 @@ pub const METADATA_VECTOR_TYPE: &str = "__platypus_vector_type";
 pub const METADATA_WEIGHT: &str = "__platypus_vector_weight";
 
 /// Semantic type associated with a stored vector.
+///
+/// This enum categorizes vectors by their source content type, enabling
+/// type-specific processing and filtering during search operations.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VectorType {
+    /// Vector derived from textual content (e.g., sentences, paragraphs, documents).
+    /// Most common type for natural language processing and semantic search.
     Text,
+    /// Vector derived from image content (e.g., photos, diagrams, screenshots).
+    /// Used for visual similarity search and multimodal applications.
     Image,
+    /// Vector representing user intent or query semantics.
+    /// Useful for intent classification and query understanding systems.
     Intent,
+    /// Vector derived from structured metadata (e.g., tags, categories, attributes).
+    /// Enables semantic matching on document properties.
     Metadata,
+    /// General-purpose vector without specific semantic categorization.
+    /// Default type when the source content type is unknown or mixed.
     Generic,
+    /// User-defined vector type with a custom label.
+    /// Allows extension for domain-specific vector categories.
     Custom(String),
 }
 

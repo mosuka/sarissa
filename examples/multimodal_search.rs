@@ -27,8 +27,8 @@ use platypus::vector::core::document::{
 };
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
-    FieldSelector, VectorEngine, VectorFieldConfig, VectorIndexConfig, VectorIndexKind,
-    VectorScoreMode, VectorSearchRequest,
+    FieldSelector, QueryPayload, VectorEngine, VectorFieldConfig, VectorIndexConfig,
+    VectorIndexKind, VectorScoreMode, VectorSearchRequest,
 };
 use tempfile::{Builder, NamedTempFile};
 
@@ -123,15 +123,15 @@ fn main() -> Result<()> {
     let mut text_query = FieldPayload::default();
     text_query.add_text_segment("portable developer setup");
     query
-        .query_vectors
-        .extend(engine.embed_query_field_payload(TEXT_FIELD, text_query)?);
+        .query_payloads
+        .push(QueryPayload::new(TEXT_FIELD, text_query));
 
     let query_image = embedder_choice.sample_image_bytes(12)?;
-    let (image_query_payload, temp_query_file) = image_uri_payload(query_image, "query");
+    let (image_query_payload, _temp_query_file) = image_uri_payload(query_image, "query");
     query
-        .query_vectors
-        .extend(engine.embed_query_field_payload(IMAGE_FIELD, image_query_payload)?);
-    drop(temp_query_file);
+        .query_payloads
+        .push(QueryPayload::new(IMAGE_FIELD, image_query_payload));
+    // Note: _temp_query_file must remain alive until search() completes (it reads the file).
 
     println!("4) Execute the blended search\n");
     let results = engine.search(query)?;

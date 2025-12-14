@@ -48,13 +48,14 @@ use crate::embedding::embedder::Embedder;
 use crate::error::Result;
 use crate::storage::Storage;
 use crate::vector::collection::VectorCollection;
-use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
-use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldStats};
+use crate::vector::core::document::{DocumentPayload, DocumentVector};
 
 pub use config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 pub use filter::{MetadataFilter, VectorFilter};
 pub use registry::{DocumentVectorRegistry, RegistryVersion};
-pub use request::{FieldSelector, QueryVector, VectorScoreMode, VectorSearchRequest};
+pub use request::{
+    FieldSelector, QueryPayload, QueryVector, VectorScoreMode, VectorSearchRequest,
+};
 pub use response::{VectorHit, VectorSearchResults, VectorStats};
 
 /// A high-level vector search engine that provides both indexing and searching.
@@ -229,66 +230,34 @@ impl VectorEngine {
     }
 
     // =========================================================================
-    // Embedding Operations
-    // =========================================================================
-
-    /// Embed a document payload into vectors.
-    pub fn embed_document_payload(&self, payload: DocumentPayload) -> Result<DocumentVector> {
-        self.collection.embed_document_payload(payload)
-    }
-
-    /// Embed a field payload for query.
-    pub fn embed_query_field_payload(
-        &self,
-        field_name: &str,
-        payload: FieldPayload,
-    ) -> Result<Vec<QueryVector>> {
-        self.collection
-            .embed_query_field_payload(field_name, payload)
-    }
-
-    // =========================================================================
-    // Field Operations
-    // =========================================================================
-
-    /// Register an external field implementation.
-    pub fn register_field(&self, name: String, field: Box<dyn VectorField>) -> Result<()> {
-        self.collection.register_field(name, field)
-    }
-
-    /// Get statistics for a specific field.
-    pub fn field_stats(&self, field_name: &str) -> Result<VectorFieldStats> {
-        self.collection.field_stats(field_name)
-    }
-
-    /// Replace the reader for a specific field.
-    pub fn replace_field_reader(
-        &self,
-        field_name: &str,
-        reader: Box<dyn VectorFieldReader>,
-    ) -> Result<()> {
-        self.collection.replace_field_reader(field_name, reader)
-    }
-
-    /// Reset the reader for a specific field to default.
-    pub fn reset_field_reader(&self, field_name: &str) -> Result<()> {
-        self.collection.reset_field_reader(field_name)
-    }
-
-    /// Materialize the delegate reader for a field (build persistent index).
-    pub fn materialize_delegate_reader(&self, field_name: &str) -> Result<()> {
-        self.collection.materialize_delegate_reader(field_name)
-    }
-
-    // =========================================================================
     // Search Operations
     // =========================================================================
 
     /// Execute a search query.
     ///
-    /// This method creates a [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
+    /// This method processes `query_payloads` by embedding them using the configured
+    /// embedder, then creates a [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
     /// from the underlying collection and delegates the search operation to it.
-    pub fn search(&self, request: VectorSearchRequest) -> Result<VectorSearchResults> {
+    ///
+    /// # Query Input
+    ///
+    /// You can provide queries in two ways:
+    /// - `query_vectors`: Pre-embedded vectors (use when you've already embedded the query)
+    /// - `query_payloads`: Raw payloads (text, images, etc.) that will be automatically embedded
+    ///
+    /// Both can be used together; all vectors will be combined for the search.
+    pub fn search(&self, mut request: VectorSearchRequest) -> Result<VectorSearchResults> {
+        // Embed query_payloads and add to query_vectors.
+        for query_payload in std::mem::take(&mut request.query_payloads) {
+            let embedded = self
+                .collection
+                .embed_query_field_payload(&query_payload.field, query_payload.payload)?;
+            for mut qv in embedded {
+                qv.weight = query_payload.weight;
+                request.query_vectors.push(qv);
+            }
+        }
+
         let searcher = self.collection.searcher()?;
         searcher.search(&request)
     }
@@ -300,14 +269,15 @@ impl VectorEngine {
     /// Count documents matching the search criteria.
     ///
     /// Returns the number of documents that would match the given search request.
-    /// If the request has no query vectors, returns the total document count.
+    /// If the request has no query vectors or payloads, returns the total document count.
     ///
-    /// This method creates a [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
+    /// This method processes `query_payloads` by embedding them, then creates a
+    /// [`VectorSearcher`](crate::vector::search::searcher::VectorSearcher)
     /// from the underlying collection and delegates the count operation to it.
     ///
     /// # Arguments
     ///
-    /// * `request` - Search request defining query vectors, filters, and min_score threshold.
+    /// * `request` - Search request defining query vectors/payloads, filters, and min_score threshold.
     ///
     /// # Example
     ///
@@ -321,7 +291,18 @@ impl VectorEngine {
     /// request.min_score = 0.8;
     /// let matching = engine.count(request)?;
     /// ```
-    pub fn count(&self, request: VectorSearchRequest) -> Result<u64> {
+    pub fn count(&self, mut request: VectorSearchRequest) -> Result<u64> {
+        // Embed query_payloads and add to query_vectors.
+        for query_payload in std::mem::take(&mut request.query_payloads) {
+            let embedded = self
+                .collection
+                .embed_query_field_payload(&query_payload.field, query_payload.payload)?;
+            for mut qv in embedded {
+                qv.weight = query_payload.weight;
+                request.query_vectors.push(qv);
+            }
+        }
+
         let searcher = self.collection.searcher()?;
         searcher.count(&request)
     }
