@@ -46,8 +46,6 @@
 
 use std::sync::Arc;
 
-use parking_lot::{Mutex, RwLock};
-
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::error::Result;
 use crate::lexical::document::document::Document;
@@ -56,10 +54,7 @@ use crate::lexical::index::config::LexicalIndexConfig;
 use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::LexicalSearchResults;
-use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::LexicalSearchRequest;
-use crate::lexical::search::searcher::LexicalSearcher;
-use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 
 /// A high-level lexical search engine that provides both indexing and searching capabilities.
@@ -110,24 +105,12 @@ use crate::storage::Storage;
 pub struct LexicalEngine {
     /// The underlying lexical index.
     index: Box<dyn LexicalIndex>,
-    /// The reader for executing queries (cached for efficiency).
-    /// Uses `RwLock` to allow concurrent reads while ensuring thread-safety.
-    reader: RwLock<Option<Arc<dyn LexicalIndexReader>>>,
-    /// The writer for adding/updating documents (cached for efficiency).
-    /// Uses `Mutex` because write operations must be exclusive.
-    writer: Mutex<Option<Box<dyn LexicalIndexWriter>>>,
-    /// The searcher for executing searches (cached for efficiency).
-    /// Uses `RwLock` to allow concurrent searches while ensuring thread-safety.
-    searcher: RwLock<Option<Box<dyn crate::lexical::search::searcher::LexicalSearcher>>>,
 }
 
 impl std::fmt::Debug for LexicalEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LexicalEngine")
             .field("index", &self.index)
-            .field("reader", &"<cached reader>")
-            .field("writer", &"<cached writer>")
-            .field("searcher", &"<cached searcher>")
             .finish()
     }
 }
@@ -177,51 +160,7 @@ impl LexicalEngine {
     /// ```
     pub fn new(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
         let index = LexicalIndexFactory::create(storage, config)?;
-        Ok(Self {
-            index,
-            reader: RwLock::new(None),
-            writer: Mutex::new(None),
-            searcher: RwLock::new(None),
-        })
-    }
-
-    /// Ensure the writer is initialized and execute a function with it.
-    ///
-    /// This method lazily creates the writer on first use and caches it for subsequent calls.
-    /// Uses a `Mutex` to ensure exclusive write access.
-    fn with_writer<F, R>(&self, f: F) -> Result<R>
-    where
-        F: FnOnce(&mut Box<dyn LexicalIndexWriter>) -> Result<R>,
-    {
-        let mut guard = self.writer.lock();
-        if guard.is_none() {
-            *guard = Some(self.index.writer()?);
-        }
-        f(guard.as_mut().unwrap())
-    }
-
-    /// Ensure the searcher is initialized and execute a function with it.
-    ///
-    /// This method lazily creates the searcher on first use and caches it for subsequent calls.
-    /// Uses a `RwLock` to allow concurrent search operations.
-    fn with_searcher<F, R>(&self, f: F) -> Result<R>
-    where
-        F: FnOnce(&Box<dyn LexicalSearcher>) -> Result<R>,
-    {
-        // First, try to use the existing searcher with a read lock
-        {
-            let guard = self.searcher.read();
-            if let Some(ref searcher) = *guard {
-                return f(searcher);
-            }
-        }
-
-        // If no searcher exists, acquire a write lock to create one
-        let mut guard = self.searcher.write();
-        if guard.is_none() {
-            *guard = Some(self.index.searcher()?);
-        }
-        f(guard.as_ref().unwrap())
+        Ok(Self { index })
     }
 
     /// Add a document to the index.
@@ -263,34 +202,27 @@ impl LexicalEngine {
     /// engine.commit().unwrap();  // Don't forget to commit!
     /// ```
     pub fn add_document(&self, doc: Document) -> Result<u64> {
-        self.with_writer(|writer| writer.add_document(doc))
+        self.index.add_document(doc)
     }
 
     /// Upsert a document with a specific document ID.
     /// Note: You must call `commit()` to persist the changes.
     pub fn upsert_document(&self, doc_id: u64, doc: Document) -> Result<()> {
-        self.with_writer(|writer| writer.upsert_document(doc_id, doc))
+        self.index.upsert_document(doc_id, doc)
     }
 
     /// Add multiple documents to the index.
     /// Returns a vector of assigned document IDs.
     /// Note: You must call `commit()` to persist the changes.
     pub fn add_documents(&self, docs: Vec<Document>) -> Result<Vec<u64>> {
-        self.with_writer(|writer| {
-            let mut doc_ids = Vec::with_capacity(docs.len());
-            for doc in docs {
-                let doc_id = writer.add_document(doc)?;
-                doc_ids.push(doc_id);
-            }
-            Ok(doc_ids)
-        })
+        self.index.add_documents(docs)
     }
 
     /// Delete a document by ID.
     ///
     /// Note: You must call `commit()` to persist the changes.
     pub fn delete_document(&self, doc_id: u64) -> Result<()> {
-        self.with_writer(|writer| writer.delete_document(doc_id))
+        self.index.delete_document(doc_id)
     }
 
     /// Commit any pending changes to the index.
@@ -336,16 +268,7 @@ impl LexicalEngine {
     /// engine.commit().unwrap();
     /// ```
     pub fn commit(&self) -> Result<()> {
-        // Take the cached writer if it exists and commit
-        if let Some(mut writer) = self.writer.lock().take() {
-            writer.commit()?;
-        }
-
-        // Invalidate reader and searcher caches to reflect the new changes
-        *self.reader.write() = None;
-        *self.searcher.write() = None;
-
-        Ok(())
+        self.index.commit()
     }
 
     /// Optimize the index.
@@ -391,20 +314,12 @@ impl LexicalEngine {
     /// engine.optimize().unwrap();
     /// ```
     pub fn optimize(&self) -> Result<()> {
-        self.index.optimize()?;
-
-        // Invalidate reader and searcher caches
-        *self.reader.write() = None;
-        *self.searcher.write() = None;
-
-        Ok(())
+        self.index.optimize()
     }
 
     /// Refresh the reader to see latest changes.
     pub fn refresh(&self) -> Result<()> {
-        *self.reader.write() = None;
-        *self.searcher.write() = None;
-        Ok(())
+        self.index.refresh()
     }
 
     /// Get index statistics.
@@ -483,7 +398,7 @@ impl LexicalEngine {
     /// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
     /// ```
     pub fn search(&self, request: LexicalSearchRequest) -> Result<LexicalSearchResults> {
-        self.with_searcher(|searcher| searcher.search(request.clone()))
+        self.index.search(request)
     }
 
     /// Count documents matching the request.
@@ -520,17 +435,11 @@ impl LexicalEngine {
     /// println!("Found {} documents with score >= 0.5", count);
     /// ```
     pub fn count(&self, request: LexicalSearchRequest) -> Result<u64> {
-        self.with_searcher(|searcher| searcher.count(request.clone()))
+        self.index.count(request)
     }
 
     /// Close the search engine.
     pub fn close(&self) -> Result<()> {
-        // Drop the cached writer
-        *self.writer.lock() = None;
-        // Drop the cached reader
-        *self.reader.write() = None;
-        // Drop the cached searcher
-        *self.searcher.write() = None;
         self.index.close()
     }
 
