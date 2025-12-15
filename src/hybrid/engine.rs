@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::hybrid::search::searcher::{
     HybridSearchParams, HybridSearchRequest, HybridSearchResults, HybridVectorOptions,
 };
-use crate::vector::core::document::{DocumentPayload, DocumentVector, FieldPayload};
+use crate::vector::core::document::{DocumentPayload, DocumentVector, Payload};
 use crate::vector::engine::{
     FieldSelector, QueryPayload, VectorSearchRequest, VectorSearchResults,
 };
@@ -147,7 +147,7 @@ impl HybridEngine {
     /// `DocumentVector` into the vector engine and advances `next_doc_id`
     /// if the given `doc_id` is new/highest.
     pub fn upsert_vector_document(&mut self, doc_id: u64, vectors: DocumentVector) -> Result<()> {
-        self.vector_engine.upsert_document(doc_id, vectors)?;
+        self.vector_engine.upsert_vectors(doc_id, vectors)?;
         if doc_id >= self.next_doc_id {
             self.next_doc_id = doc_id + 1;
         }
@@ -159,8 +159,7 @@ impl HybridEngine {
     /// This does not touch the lexical index. It embeds the payload and
     /// upserts into the vector engine, advancing `next_doc_id` if needed.
     pub fn upsert_vector_payload(&mut self, doc_id: u64, payload: DocumentPayload) -> Result<()> {
-        self.vector_engine
-            .upsert_document_payload(doc_id, payload)?;
+        self.vector_engine.upsert_payloads(doc_id, payload)?;
         if doc_id >= self.next_doc_id {
             self.next_doc_id = doc_id + 1;
         }
@@ -262,7 +261,7 @@ impl HybridEngine {
     fn build_vector_engine_search_request(
         overrides: HybridVectorOptions,
         query: Option<VectorSearchRequest>,
-        vector_payloads: HashMap<String, FieldPayload>,
+        vector_payloads: HashMap<String, Payload>,
         vector_params: &VectorIndexSearchParams,
         params: &HybridSearchParams,
     ) -> Option<VectorSearchRequest> {
@@ -271,9 +270,6 @@ impl HybridEngine {
 
         // Add payloads to query_payloads for automatic embedding during search.
         for (field_name, payload) in vector_payloads {
-            if payload.is_empty() {
-                continue;
-            }
             payload_fields.push(field_name.clone());
             query
                 .query_payloads
@@ -344,7 +340,7 @@ impl HybridEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::core::document::{FieldPayload, StoredVector, VectorType};
+    use crate::vector::core::document::{Payload, StoredVector, VectorType};
     use crate::vector::engine::{
         FieldSelector, MetadataFilter, QueryVector, VectorFilter, VectorHit, VectorScoreMode,
     };
@@ -449,9 +445,7 @@ mod tests {
     #[test]
     fn build_query_from_payload_adds_payloads() {
         let mut payloads = HashMap::new();
-        let mut payload = FieldPayload::default();
-        payload.add_text_segment("rust embeddings");
-        payloads.insert("body".into(), payload);
+        payloads.insert("body".into(), Payload::text("rust embeddings"));
 
         let resolved = HybridEngine::build_vector_engine_search_request(
             HybridVectorOptions::default(),

@@ -14,7 +14,6 @@
 
 pub mod collection;
 pub mod core;
-pub mod document;
 pub mod index;
 pub mod search;
 

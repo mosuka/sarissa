@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::vector::core::document::{FieldPayload, StoredVector, VectorType};
+use crate::vector::core::document::{Payload, StoredVector, VectorType};
 use crate::vector::engine::filter::VectorFilter;
 
 fn default_query_limit() -> usize {
@@ -23,8 +23,8 @@ pub struct VectorSearchRequest {
     pub query_vectors: Vec<QueryVector>,
     /// Query payloads to embed and search with.
     /// These will be embedded internally using the configured embedder.
-    /// Note: This field is skipped during serialization because `FieldPayload`
-    /// contains non-serializable data.
+    /// Note: This field is skipped during serialization because `Payload`
+    /// contains non-serializable data (e.g., `Arc<[u8]>`).
     #[serde(skip)]
     pub query_payloads: Vec<QueryPayload>,
     /// Fields to search in. If None, searches all default fields.
@@ -98,7 +98,7 @@ impl QueryVector {
 /// This allows users to pass raw payloads (text, images, etc.) that will be
 /// automatically embedded using the configured embedder during search.
 ///
-/// Note: This type is not serializable because `FieldPayload` contains
+/// Note: This type is not serializable because `Payload` contains
 /// non-serializable data (e.g., `Arc<[u8]>`). Use `QueryVector` for
 /// serialization scenarios with pre-embedded vectors.
 #[derive(Debug, Clone)]
@@ -106,14 +106,14 @@ pub struct QueryPayload {
     /// The field name to search in.
     pub field: String,
     /// The payload to embed.
-    pub payload: FieldPayload,
+    pub payload: Payload,
     /// Weight for this query vector (default: 1.0).
     pub weight: f32,
 }
 
 impl QueryPayload {
-    /// Create a new query field payload.
-    pub fn new(field: impl Into<String>, payload: FieldPayload) -> Self {
+    /// Create a new query payload from a `Payload`.
+    pub fn new(field: impl Into<String>, payload: Payload) -> Self {
         Self {
             field: field.into(),
             payload,
@@ -121,8 +121,8 @@ impl QueryPayload {
         }
     }
 
-    /// Create a new query field payload with a specific weight.
-    pub fn with_weight(field: impl Into<String>, payload: FieldPayload, weight: f32) -> Self {
+    /// Create a new query payload with a specific weight.
+    pub fn with_weight(field: impl Into<String>, payload: Payload, weight: f32) -> Self {
         Self {
             field: field.into(),
             payload,

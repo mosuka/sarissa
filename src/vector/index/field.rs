@@ -5,7 +5,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use crate::error::Result;
-use crate::vector::core::document::{FieldVectors, METADATA_WEIGHT};
+use crate::vector::core::document::StoredVector;
 use crate::vector::core::vector::Vector;
 use crate::vector::engine::VectorFieldConfig;
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldWriter};
@@ -32,40 +32,9 @@ impl<W: VectorIndexWriter> LegacyVectorFieldWriter<W> {
         &self.field_name
     }
 
-    fn to_legacy_vectors(
-        &self,
-        doc_id: u64,
-        field: &FieldVectors,
-        field_weight: f32,
-    ) -> Vec<(u64, String, Vector)> {
-        let mut vectors = Vec::with_capacity(field.vectors.len());
-        for stored in &field.vectors {
-            let mut vector = stored.to_vector();
-            Self::apply_weight_metadata(&mut vector, field_weight);
-            vectors.push((doc_id, self.field_name.clone(), vector));
-        }
-        vectors
-    }
-
-    fn apply_weight_metadata(vector: &mut Vector, field_weight: f32) {
-        let stored_weight = vector
-            .metadata
-            .get(METADATA_WEIGHT)
-            .and_then(|raw| raw.parse::<f32>().ok())
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .unwrap_or(1.0);
-        let combined = stored_weight * field_weight;
-        vector
-            .metadata
-            .insert(METADATA_WEIGHT.to_string(), combined.to_string());
-    }
-
-    fn effective_field_weight(weight: f32) -> f32 {
-        if weight.is_finite() && weight > 0.0 {
-            weight
-        } else {
-            1.0
-        }
+    fn to_legacy_vector(&self, doc_id: u64, stored: &StoredVector) -> (u64, String, Vector) {
+        let vector = stored.to_vector();
+        (doc_id, self.field_name.clone(), vector)
     }
 
     #[cfg(test)]
@@ -79,15 +48,10 @@ impl<W> VectorFieldWriter for LegacyVectorFieldWriter<W>
 where
     W: VectorIndexWriter,
 {
-    fn add_field_vectors(&self, doc_id: u64, field: &FieldVectors, _version: u64) -> Result<()> {
-        if field.vectors.is_empty() {
-            return Ok(());
-        }
-
+    fn add_stored_vector(&self, doc_id: u64, vector: &StoredVector, _version: u64) -> Result<()> {
         let mut guard = self.writer.lock();
-        let legacy =
-            self.to_legacy_vectors(doc_id, field, Self::effective_field_weight(field.weight));
-        guard.add_vectors(legacy)
+        let legacy = self.to_legacy_vector(doc_id, vector);
+        guard.add_vectors(vec![legacy])
     }
 
     fn delete_document(&self, _doc_id: u64, _version: u64) -> Result<()> {
@@ -170,7 +134,7 @@ impl VectorField for AdapterBackedVectorField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::core::document::{FieldVectors, StoredVector, VectorType};
+    use crate::vector::core::document::{StoredVector, VectorType};
     use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
     use crate::vector::index::flat::writer::FlatIndexWriter;
     use crate::vector::index::hnsw::writer::HnswIndexWriter;
@@ -178,14 +142,12 @@ mod tests {
     use crate::vector::writer::VectorIndexWriterConfig;
     use std::sync::Arc;
 
-    fn sample_field_vectors() -> FieldVectors {
-        let mut field = FieldVectors::default();
-        field.vectors.push(StoredVector::new(
+    fn sample_stored_vector() -> StoredVector {
+        StoredVector::new(
             Arc::<[f32]>::from([1.0_f32, 0.0_f32]),
             "embedder-a".into(),
             VectorType::Text,
-        ));
-        field
+        )
     }
 
     fn flat_writer() -> FlatIndexWriter {
@@ -212,9 +174,9 @@ mod tests {
     #[test]
     fn adapter_buffers_vectors_in_inner_writer() {
         let adapter = LegacyVectorFieldWriter::new("body", flat_writer());
-        let field = sample_field_vectors();
+        let vector = sample_stored_vector();
 
-        adapter.add_field_vectors(7, &field, 1).unwrap();
+        adapter.add_stored_vector(7, &vector, 1).unwrap();
 
         let pending = adapter.pending_vectors();
         assert_eq!(pending.len(), 1);
@@ -225,9 +187,9 @@ mod tests {
     #[test]
     fn adapter_supports_hnsw_writer() {
         let adapter = LegacyVectorFieldWriter::new("body", hnsw_writer());
-        let field = sample_field_vectors();
+        let vector = sample_stored_vector();
 
-        adapter.add_field_vectors(3, &field, 1).unwrap();
+        adapter.add_stored_vector(3, &vector, 1).unwrap();
 
         let pending = adapter.pending_vectors();
         assert_eq!(pending.len(), 1);
@@ -237,9 +199,9 @@ mod tests {
     #[test]
     fn adapter_supports_ivf_writer() {
         let adapter = LegacyVectorFieldWriter::new("body", ivf_writer());
-        let field = sample_field_vectors();
+        let vector = sample_stored_vector();
 
-        adapter.add_field_vectors(11, &field, 1).unwrap();
+        adapter.add_stored_vector(11, &vector, 1).unwrap();
 
         let pending = adapter.pending_vectors();
         assert_eq!(pending.len(), 1);
@@ -247,22 +209,19 @@ mod tests {
     }
 
     #[test]
-    fn adapter_propagates_field_weight_into_metadata() {
+    fn adapter_stores_vector_with_correct_doc_id() {
         let adapter = LegacyVectorFieldWriter::new("body", flat_writer());
-        let mut field = sample_field_vectors();
-        field.weight = 2.5;
-        field.vectors[0].weight = 0.4;
+        let mut vector = sample_stored_vector();
+        vector.weight = 2.5;
 
-        adapter.add_field_vectors(5, &field, 1).unwrap();
+        adapter.add_stored_vector(5, &vector, 1).unwrap();
 
         let pending = adapter.pending_vectors();
         assert_eq!(pending.len(), 1);
-        let stored_weight = pending[0]
-            .2
-            .metadata
-            .get(METADATA_WEIGHT)
-            .and_then(|raw| raw.parse::<f32>().ok())
-            .unwrap();
-        assert!((stored_weight - 1.0).abs() < f32::EPSILON);
+        // Verify doc_id and field_name
+        assert_eq!(pending[0].0, 5);
+        assert_eq!(pending[0].1, "body");
+        // Verify vector data was converted correctly
+        assert_eq!(pending[0].2.data.len(), 2);
     }
 }

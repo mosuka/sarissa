@@ -310,11 +310,10 @@ platypus = { version = "0.1", features = ["embeddings-candle"] }
 ```rust
 use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
-use platypus::vector::engine::request::{QueryVector, VectorEngineSearchRequest};
-use platypus::vector::core::document::{DocumentVector, FieldVectors, StoredVector, VectorType};
+use platypus::vector::engine::request::{QueryVector, VectorSearchRequest};
+use platypus::vector::core::document::{DocumentVector, StoredVector, VectorType};
 use platypus::vector::engine::VectorEngine;
-use platypus::vector::engine::config::{VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
-use platypus::vector::collection::factory::VectorCollectionFactory;
+use platypus::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 use platypus::vector::DistanceMetric;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
@@ -335,18 +334,17 @@ async fn main() -> platypus::error::Result<()> {
         embedder: None,
         base_weight: 1.0,
     };
-    let config = VectorEngineConfig {
+    let config = VectorIndexConfig {
         fields: HashMap::from([("body".into(), field_config)]),
-        embedders: HashMap::new(),
         default_fields: vec!["body".into()],
         metadata: HashMap::new(),
+        embedder: Arc::new(platypus::embedding::noop::NoOpEmbedder::new()),
     };
 
-    // Create storage and engine via factory
+    // Create storage and engine
     let storage: Arc<dyn platypus::storage::Storage> =
         Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let collection = VectorCollectionFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
 
     // Generate embeddings for documents
     let documents = vec![
@@ -355,24 +353,25 @@ async fn main() -> platypus::error::Result<()> {
         "Machine learning with neural networks",
     ];
 
-    // Add documents with their embeddings
+    // Add documents with their embeddings (1 field = 1 vector)
     for text in &documents {
         let vector = embedder.embed(text).await?;
         let mut doc = DocumentVector::new();
-        let mut field_vectors = FieldVectors::default();
-        field_vectors.vectors.push(StoredVector::new(
-            Arc::from(vector.as_slice()),
-            "candle".into(),
-            VectorType::Text,
-        ));
-        doc.add_field("body", field_vectors);
-        engine.add_document(doc)?;
+        doc.set_field(
+            "body",
+            StoredVector::new(
+                Arc::from(vector.as_slice()),
+                "candle".into(),
+                VectorType::Text,
+            ),
+        );
+        engine.add_vectors(doc)?;
     }
     engine.commit()?;
 
     // Search with query embedding
     let query_vector = embedder.embed("programming languages").await?;
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 10;
     query.query_vectors.push(QueryVector {
         vector: StoredVector::new(
@@ -446,27 +445,28 @@ Once the engine is populated, build `VectorEngineSearchRequest` objects (see `ex
 When you prefer not to precompute vectors yourself, hand the engine raw text payloads and let it run the configured embedder pipeline:
 
 ```rust
-use platypus::vector::core::document::{DocumentPayload, FieldPayload, RawTextSegment};
-use platypus::vector::engine::request::{FieldSelector, VectorEngineSearchRequest};
+use platypus::vector::core::document::{DocumentPayload, Payload};
+use platypus::vector::engine::request::{FieldSelector, QueryPayload, VectorSearchRequest};
 use platypus::vector::engine::VectorEngine;
 
+// Create a document with a text payload (1 field = 1 payload)
 let mut payload = DocumentPayload::new();
-let mut body = FieldPayload::default();
-body.add_text_segment(RawTextSegment::new("Rust balances safety with performance"));
-payload.add_field("body_embedding", body);
-engine.upsert_document_payload(42, payload)?;
+payload.set_text("body_embedding", "Rust balances safety with performance");
+engine.upsert_payloads(42, payload)?;
 
-let mut query = VectorEngineSearchRequest::default();
+// Search with a text query payload
+let mut query = VectorSearchRequest::default();
 query.fields = Some(vec![FieldSelector::Exact("body_embedding".into())]);
-query.query_payloads.push(QueryPayload::new("body_embedding", {
-    let mut q = FieldPayload::default();
-    q.add_text_segment(RawTextSegment::new("systems programming"));
-    q
-}));
+query.query_payloads.push(QueryPayload::new(
+    "body_embedding",
+    Payload::text("systems programming"),
+));
 let hits = engine.search(query)?;
 ```
 
 These helpers power `examples/vector_search.rs` and the `vector_engine_upserts_and_queries_raw_payloads` integration test, so you can follow the same pattern or wrap it through `HybridSearchRequest::with_vector_text` when composing hybrid searches.
+
+**Note**: The flattened data model requires 1 field = 1 payload = 1 vector. For long texts that require chunking, create separate documents for each chunk and use metadata (e.g., `parent_doc_id`, `chunk_index`) to track relationships. See `examples/vector_search.rs` for a demonstration of this pattern.
 
 #### Hybrid Search with VectorEngine
 
@@ -542,11 +542,10 @@ platypus = { version = "0.1", features = ["embeddings-multimodal"] }
 use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use platypus::embedding::text_embedder::TextEmbedder;
 use platypus::embedding::image_embedder::ImageEmbedder;
-use platypus::vector::engine::request::{QueryVector, VectorEngineSearchRequest};
-use platypus::vector::core::document::{DocumentVector, FieldVectors, StoredVector, VectorType};
+use platypus::vector::engine::request::{QueryVector, VectorSearchRequest};
+use platypus::vector::core::document::{DocumentVector, StoredVector, VectorType};
 use platypus::vector::engine::VectorEngine;
-use platypus::vector::engine::config::{VectorEngineConfig, VectorFieldConfig, VectorIndexKind};
-use platypus::vector::collection::factory::VectorCollectionFactory;
+use platypus::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 use platypus::vector::DistanceMetric;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
@@ -567,37 +566,37 @@ async fn main() -> platypus::error::Result<()> {
         embedder: None,
         base_weight: 1.0,
     };
-    let config = VectorEngineConfig {
+    let config = VectorIndexConfig {
         fields: HashMap::from([("image".into(), field_config)]),
-        embedders: HashMap::new(),
         default_fields: vec!["image".into()],
         metadata: HashMap::new(),
+        embedder: Arc::new(platypus::embedding::noop::NoOpEmbedder::new()),
     };
 
     let storage: Arc<dyn platypus::storage::Storage> =
         Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let collection = VectorCollectionFactory::create(config, storage, None)?;
-    let engine = VectorEngine::new(collection)?;
+    let engine = VectorEngine::new(storage, config)?;
 
-    // Index your image collection
+    // Index your image collection (1 field = 1 vector)
     let image_paths = vec!["image1.jpg", "image2.jpg", "image3.jpg"];
     for image_path in &image_paths {
         let vector = embedder.embed_image(image_path).await?;
         let mut doc = DocumentVector::new();
-        let mut field_vectors = FieldVectors::default();
-        field_vectors.vectors.push(StoredVector::new(
-            Arc::from(vector.as_slice()),
-            "clip".into(),
-            VectorType::Image,
-        ));
-        doc.add_field("image", field_vectors);
-        engine.add_document(doc)?;
+        doc.set_field(
+            "image",
+            StoredVector::new(
+                Arc::from(vector.as_slice()),
+                "clip".into(),
+                VectorType::Image,
+            ),
+        );
+        engine.add_vectors(doc)?;
     }
     engine.commit()?;
 
     // Search images using natural language
     let query_vector = embedder.embed("a photo of a cat playing").await?;
-    let mut query = VectorEngineSearchRequest::default();
+    let mut query = VectorSearchRequest::default();
     query.limit = 10;
     query.query_vectors.push(QueryVector {
         vector: StoredVector::new(
@@ -622,7 +621,7 @@ async fn main() -> platypus::error::Result<()> {
 ```rust
 // Find visually similar images using an image as query
 let query_image_vector = embedder.embed_image("query.jpg").await?;
-let mut query = VectorEngineSearchRequest::default();
+let mut query = VectorSearchRequest::default();
 query.limit = 5;
 query.query_vectors.push(QueryVector {
     vector: StoredVector::new(

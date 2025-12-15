@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{PlatypusError, Result};
-use crate::vector::core::document::{FieldPayload, FieldVectors};
+use crate::error::Result;
+use crate::vector::core::document::StoredVector;
 use crate::vector::engine::{QueryVector, VectorFieldConfig};
 
 /// Represents a single logical vector field backed by an index implementation.
@@ -31,19 +31,8 @@ pub trait VectorField: Send + Sync + Debug {
 
 /// Writer interface for ingesting doc-centric vectors into a single field index.
 pub trait VectorFieldWriter: Send + Sync + Debug {
-    /// Add or replace vectors for the given document and field version.
-    fn add_field_vectors(&self, doc_id: u64, field: &FieldVectors, version: u64) -> Result<()>;
-    /// Add raw payload that requires the engine to perform embedding before indexing.
-    fn add_raw_field_payload(
-        &self,
-        _doc_id: u64,
-        _payload: &FieldPayload,
-        _version: u64,
-    ) -> Result<()> {
-        Err(PlatypusError::InvalidOperation(
-            "raw payload ingestion is not supported by this writer".into(),
-        ))
-    }
+    /// Add or replace a vector for the given document and field version.
+    fn add_stored_vector(&self, doc_id: u64, vector: &StoredVector, version: u64) -> Result<()>;
     /// Delete the vectors associated with the provided document id.
     fn delete_document(&self, doc_id: u64, version: u64) -> Result<()>;
     /// Flush any buffered data to durable storage.

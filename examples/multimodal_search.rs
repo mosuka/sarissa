@@ -6,7 +6,6 @@
 //! Run with `cargo run --example multimodal_search`.
 
 use std::any::Any;
-use std::collections::HashMap;
 use std::fs;
 #[cfg(feature = "embeddings-multimodal")]
 use std::io::Cursor;
@@ -22,9 +21,7 @@ use platypus::error::{PlatypusError, Result};
 use platypus::storage::Storage;
 use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use platypus::vector::DistanceMetric;
-use platypus::vector::core::document::{
-    DocumentPayload, FieldPayload, PayloadSource, SegmentPayload, VectorType,
-};
+use platypus::vector::core::document::{DocumentPayload, Payload, PayloadSource, VectorType};
 use platypus::vector::core::vector::Vector;
 use platypus::vector::engine::{
     FieldSelector, QueryPayload, VectorEngine, VectorFieldConfig, VectorIndexConfig,
@@ -87,25 +84,22 @@ fn main() -> Result<()> {
 
     let engine = VectorEngine::new(storage, config)?;
 
-    println!("2) Upsert documents containing text and image segments\n");
+    println!("2) Upsert documents containing text and image payloads\n");
     let mut doc1 = DocumentPayload::new();
-    doc1.metadata.insert("category".into(), "notebook".into());
-    doc1.add_field(TEXT_FIELD, text_payload("Rust notebook overview"));
+    doc1.set_metadata("category", "notebook");
+    doc1.set_text(TEXT_FIELD, "Rust notebook overview");
     let doc1_image = embedder_choice.sample_image_bytes(3)?;
-    doc1.add_field(IMAGE_FIELD, image_bytes_payload(doc1_image, "rye-paper"));
+    doc1.set_field(IMAGE_FIELD, image_bytes_payload(doc1_image));
 
     let mut doc2 = DocumentPayload::new();
-    doc2.metadata.insert("category".into(), "camera".into());
-    doc2.add_field(
-        TEXT_FIELD,
-        text_payload("Mirrorless camera quickstart guide"),
-    );
+    doc2.set_metadata("category", "camera");
+    doc2.set_text(TEXT_FIELD, "Mirrorless camera quickstart guide");
     let doc2_image = embedder_choice.sample_image_bytes(9)?;
-    let (image_payload_doc2, temp_file_doc2) = image_uri_payload(doc2_image, "studio");
-    doc2.add_field(IMAGE_FIELD, image_payload_doc2);
+    let (image_payload_doc2, temp_file_doc2) = image_uri_payload(doc2_image);
+    doc2.set_field(IMAGE_FIELD, image_payload_doc2);
 
-    engine.upsert_document_payload(1, doc1)?;
-    engine.upsert_document_payload(2, doc2)?;
+    engine.upsert_payloads(1, doc1)?;
+    engine.upsert_payloads(2, doc2)?;
     // Ensure the temporary file lives until ingestion finishes.
     drop(temp_file_doc2);
 
@@ -120,14 +114,13 @@ fn main() -> Result<()> {
     ]);
     query.score_mode = VectorScoreMode::WeightedSum;
 
-    let mut text_query = FieldPayload::default();
-    text_query.add_text_segment("portable developer setup");
-    query
-        .query_payloads
-        .push(QueryPayload::new(TEXT_FIELD, text_query));
+    query.query_payloads.push(QueryPayload::new(
+        TEXT_FIELD,
+        Payload::text("portable developer setup"),
+    ));
 
     let query_image = embedder_choice.sample_image_bytes(12)?;
-    let (image_query_payload, _temp_query_file) = image_uri_payload(query_image, "query");
+    let (image_query_payload, _temp_query_file) = image_uri_payload(query_image);
     query
         .query_payloads
         .push(QueryPayload::new(IMAGE_FIELD, image_query_payload));
@@ -231,44 +224,23 @@ impl EmbedderChoice {
     }
 }
 
-fn text_payload(value: &str) -> FieldPayload {
-    let mut payload = FieldPayload::default();
-    payload.add_text_segment(value);
-    payload
+fn image_bytes_payload(bytes: Vec<u8>) -> Payload {
+    Payload::new(
+        PayloadSource::bytes(bytes, Some("image/png".into())),
+        VectorType::Image,
+    )
 }
 
-fn image_bytes_payload(bytes: Vec<u8>, label: &str) -> FieldPayload {
-    let mut payload = FieldPayload::default();
-    payload.add_segment(
-        SegmentPayload::new(
-            PayloadSource::Bytes {
-                bytes: Arc::<[u8]>::from(bytes),
-                mime: Some("image/png".into()),
-            },
-            VectorType::Image,
-        )
-        .with_metadata(HashMap::from([(String::from("variant"), label.into())])),
-    );
-    payload
-}
-
-fn image_uri_payload(bytes: Vec<u8>, label: &str) -> (FieldPayload, NamedTempFile) {
+fn image_uri_payload(bytes: Vec<u8>) -> (Payload, NamedTempFile) {
     let mut temp_file = Builder::new().suffix(".png").tempfile().expect("temp file");
     temp_file
         .write_all(&bytes)
         .expect("write sample image payload");
     let uri = temp_file.path().to_string_lossy().to_string();
 
-    let mut payload = FieldPayload::default();
-    payload.add_segment(
-        SegmentPayload::new(
-            PayloadSource::Uri {
-                uri,
-                media_hint: Some("image/png".into()),
-            },
-            VectorType::Image,
-        )
-        .with_metadata(HashMap::from([(String::from("variant"), label.into())])),
+    let payload = Payload::new(
+        PayloadSource::uri(uri, Some("image/png".into())),
+        VectorType::Image,
     );
     (payload, temp_file)
 }

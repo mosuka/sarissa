@@ -11,7 +11,7 @@ use parking_lot::RwLock;
 
 use crate::error::{PlatypusError, Result};
 use crate::vector::Vector;
-use crate::vector::core::document::FieldVectors;
+use crate::vector::core::document::StoredVector;
 use crate::vector::engine::config::VectorFieldConfig;
 use crate::vector::field::{
     FieldHit, FieldSearchInput, FieldSearchResults, VectorField, VectorFieldReader,
@@ -162,46 +162,39 @@ impl InMemoryFieldWriter {
         }
     }
 
-    fn convert_vectors(&self, field: &FieldVectors) -> Result<Vec<Vector>> {
-        let mut vectors = Vec::with_capacity(field.vector_count());
-        for stored in &field.vectors {
-            let vector = stored.to_vector();
-            if vector.dimension() != self.config.dimension {
-                return Err(PlatypusError::invalid_argument(format!(
-                    "vector dimension mismatch for field '{}': expected {}, got {}",
-                    self.field_name,
-                    self.config.dimension,
-                    vector.dimension()
-                )));
-            }
-            if !vector.is_valid() {
-                return Err(PlatypusError::invalid_argument(format!(
-                    "vector for field '{}' contains invalid values",
-                    self.field_name
-                )));
-            }
-            vectors.push(vector);
+    fn convert_vector(&self, stored: &StoredVector) -> Result<Vector> {
+        let vector = stored.to_vector();
+        if vector.dimension() != self.config.dimension {
+            return Err(PlatypusError::invalid_argument(format!(
+                "vector dimension mismatch for field '{}': expected {}, got {}",
+                self.field_name,
+                self.config.dimension,
+                vector.dimension()
+            )));
         }
-        Ok(vectors)
+        if !vector.is_valid() {
+            return Err(PlatypusError::invalid_argument(format!(
+                "vector for field '{}' contains invalid values",
+                self.field_name
+            )));
+        }
+        Ok(vector)
     }
 }
 
 impl VectorFieldWriter for InMemoryFieldWriter {
-    fn add_field_vectors(&self, doc_id: u64, field: &FieldVectors, version: u64) -> Result<()> {
-        if field.vectors.is_empty() {
-            self.store.remove(doc_id);
-            if let Some(delegate) = &self.delegate {
-                delegate.delete_document(doc_id, version)?;
-            }
-            return Ok(());
-        }
-
+    fn add_stored_vector(&self, doc_id: u64, vector: &StoredVector, version: u64) -> Result<()> {
         if let Some(delegate) = &self.delegate {
-            delegate.add_field_vectors(doc_id, field, version)?;
+            delegate.add_stored_vector(doc_id, vector, version)?;
         }
 
-        let vectors = self.convert_vectors(field)?;
-        self.store.replace(doc_id, FieldStoreEntry { vectors });
+        let converted = self.convert_vector(vector)?;
+        self.store.replace(
+            doc_id,
+            FieldStoreEntry {
+                vectors: vec![converted],
+            },
+        );
         Ok(())
     }
 
