@@ -28,7 +28,7 @@
 //!     .field("body", field_config)
 //!     .build()?;
 //! let engine = VectorEngine::new(storage, config)?;
-//! engine.add_document(doc)?;
+//! engine.add_vectors(doc)?;
 //! engine.commit()?;
 //! ```
 
@@ -53,9 +53,7 @@ use crate::vector::core::document::{DocumentPayload, DocumentVector};
 pub use config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 pub use filter::{MetadataFilter, VectorFilter};
 pub use registry::{DocumentVectorRegistry, RegistryVersion};
-pub use request::{
-    FieldSelector, QueryPayload, QueryVector, VectorScoreMode, VectorSearchRequest,
-};
+pub use request::{FieldSelector, QueryPayload, QueryVector, VectorScoreMode, VectorSearchRequest};
 pub use response::{VectorHit, VectorSearchResults, VectorStats};
 
 /// A high-level vector search engine that provides both indexing and searching.
@@ -79,8 +77,8 @@ pub use response::{VectorHit, VectorSearchResults, VectorStats};
 ///     .build()?;
 /// let engine = VectorEngine::new(storage, config)?;
 ///
-/// // Add documents
-/// engine.add_document(doc)?;
+/// // Add vectors
+/// engine.add_vectors(doc)?;
 /// engine.commit()?;
 ///
 /// // Search
@@ -150,82 +148,82 @@ impl VectorEngine {
     }
 
     // =========================================================================
-    // Document Operations
+    // Vector Operations
     // =========================================================================
 
-    /// Add a document with automatically assigned doc_id.
+    /// Add vectors with automatically assigned doc_id.
     ///
     /// Returns the assigned document ID.
-    pub fn add_document(&self, doc: DocumentVector) -> Result<u64> {
+    pub fn add_vectors(&self, doc: DocumentVector) -> Result<u64> {
         self.collection.add_document(doc)
     }
 
-    /// Add a document from payload (will be embedded if configured).
+    /// Add payloads (will be embedded if configured).
     ///
     /// Returns the assigned document ID.
-    pub fn add_document_payload(&self, payload: DocumentPayload) -> Result<u64> {
+    pub fn add_payloads(&self, payload: DocumentPayload) -> Result<u64> {
         self.collection.add_document_payload(payload)
     }
 
-    /// Add multiple documents with automatically assigned doc_ids.
+    /// Add multiple vectors with automatically assigned doc_ids.
     ///
     /// Returns a vector of assigned document IDs in the same order as input.
     ///
     /// # Arguments
     ///
-    /// * `docs` - Iterator of documents to add.
+    /// * `docs` - Iterator of document vectors to add.
     ///
     /// # Example
     ///
     /// ```ignore
     /// let docs = vec![doc1, doc2, doc3];
-    /// let doc_ids = engine.add_documents(docs)?;
+    /// let doc_ids = engine.add_vectors_batch(docs)?;
     /// assert_eq!(doc_ids.len(), 3);
     /// ```
-    pub fn add_documents(
+    pub fn add_vectors_batch(
         &self,
         docs: impl IntoIterator<Item = DocumentVector>,
     ) -> Result<Vec<u64>> {
-        docs.into_iter().map(|doc| self.add_document(doc)).collect()
+        docs.into_iter().map(|doc| self.add_vectors(doc)).collect()
     }
 
-    /// Add multiple documents from payloads (will be embedded if configured).
+    /// Add multiple payloads (will be embedded if configured).
     ///
     /// Returns a vector of assigned document IDs in the same order as input.
     ///
     /// # Arguments
     ///
-    /// * `payloads` - Iterator of document payloads to add.
+    /// * `payloads` - Iterator of payloads to add.
     ///
     /// # Example
     ///
     /// ```ignore
     /// let payloads = vec![payload1, payload2, payload3];
-    /// let doc_ids = engine.add_documents_payload(payloads)?;
+    /// let doc_ids = engine.add_payloads_batch(payloads)?;
     /// assert_eq!(doc_ids.len(), 3);
     /// ```
-    pub fn add_documents_payload(
+    pub fn add_payloads_batch(
         &self,
         payloads: impl IntoIterator<Item = DocumentPayload>,
     ) -> Result<Vec<u64>> {
         payloads
             .into_iter()
-            .map(|payload| self.add_document_payload(payload))
+            .map(|payload| self.add_payloads(payload))
             .collect()
     }
 
-    /// Upsert a document with a specific document ID.
-    pub fn upsert_document(&self, doc_id: u64, doc: DocumentVector) -> Result<()> {
+    /// Upsert vectors with a specific document ID.
+    pub fn upsert_vectors(&self, doc_id: u64, doc: DocumentVector) -> Result<()> {
         self.collection.upsert_document(doc_id, doc)
     }
 
-    /// Upsert a document from payload (will be embedded if configured).
-    pub fn upsert_document_payload(&self, doc_id: u64, payload: DocumentPayload) -> Result<()> {
+    /// Upsert payloads (will be embedded if configured).
+    pub fn upsert_payloads(&self, doc_id: u64, payload: DocumentPayload) -> Result<()> {
         self.collection.upsert_document_payload(doc_id, payload)
     }
 
-    /// Delete a document by ID.
-    pub fn delete_document(&self, doc_id: u64) -> Result<()> {
+    /// Delete vectors by document ID.
+    pub fn delete_vectors(&self, doc_id: u64) -> Result<()> {
         self.collection.delete_document(doc_id)
     }
 
@@ -249,13 +247,11 @@ impl VectorEngine {
     pub fn search(&self, mut request: VectorSearchRequest) -> Result<VectorSearchResults> {
         // Embed query_payloads and add to query_vectors.
         for query_payload in std::mem::take(&mut request.query_payloads) {
-            let embedded = self
+            let mut qv = self
                 .collection
-                .embed_query_field_payload(&query_payload.field, query_payload.payload)?;
-            for mut qv in embedded {
-                qv.weight = query_payload.weight;
-                request.query_vectors.push(qv);
-            }
+                .embed_query_payload(&query_payload.field, query_payload.payload)?;
+            qv.weight = query_payload.weight;
+            request.query_vectors.push(qv);
         }
 
         let searcher = self.collection.searcher()?;
@@ -294,13 +290,11 @@ impl VectorEngine {
     pub fn count(&self, mut request: VectorSearchRequest) -> Result<u64> {
         // Embed query_payloads and add to query_vectors.
         for query_payload in std::mem::take(&mut request.query_payloads) {
-            let embedded = self
+            let mut qv = self
                 .collection
-                .embed_query_field_payload(&query_payload.field, query_payload.payload)?;
-            for mut qv in embedded {
-                qv.weight = query_payload.weight;
-                request.query_vectors.push(qv);
-            }
+                .embed_query_payload(&query_payload.field, query_payload.payload)?;
+            qv.weight = query_payload.weight;
+            request.query_vectors.push(qv);
         }
 
         let searcher = self.collection.searcher()?;
@@ -342,7 +336,7 @@ mod tests {
     use super::*;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
-    use crate::vector::core::document::{FieldVectors, StoredVector, VectorType};
+    use crate::vector::core::document::{StoredVector, VectorType};
     use std::collections::HashMap;
 
     fn sample_config() -> VectorIndexConfig {
@@ -403,15 +397,16 @@ mod tests {
         let engine = create_engine(config, storage);
 
         let mut doc = DocumentVector::new();
-        let mut vectors = FieldVectors::default();
-        vectors.vectors.push(StoredVector::new(
-            Arc::<[f32]>::from([1.0, 0.0, 0.0]),
-            "mock".into(),
-            VectorType::Text,
-        ));
-        doc.add_field("body", vectors);
+        doc.set_field(
+            "body",
+            StoredVector::new(
+                Arc::<[f32]>::from([1.0, 0.0, 0.0]),
+                "mock".into(),
+                VectorType::Text,
+            ),
+        );
 
-        let doc_id = engine.add_document(doc).expect("add document");
+        let doc_id = engine.add_vectors(doc).expect("add vectors");
 
         let stats = engine.stats().expect("stats");
         assert_eq!(stats.document_count, 1);
@@ -429,19 +424,20 @@ mod tests {
         let engine = create_engine(config, storage);
 
         let mut doc = DocumentVector::new();
-        let mut vectors = FieldVectors::default();
-        vectors.vectors.push(StoredVector::new(
-            Arc::<[f32]>::from([0.5, 0.5, 0.0]),
-            "mock".into(),
-            VectorType::Text,
-        ));
-        doc.add_field("body", vectors);
+        doc.set_field(
+            "body",
+            StoredVector::new(
+                Arc::<[f32]>::from([0.5, 0.5, 0.0]),
+                "mock".into(),
+                VectorType::Text,
+            ),
+        );
 
-        engine.upsert_document(42, doc).expect("upsert");
+        engine.upsert_vectors(42, doc).expect("upsert");
         let stats = engine.stats().expect("stats");
         assert_eq!(stats.document_count, 1);
 
-        engine.delete_document(42).expect("delete");
+        engine.delete_vectors(42).expect("delete");
         let stats = engine.stats().expect("stats");
         assert_eq!(stats.document_count, 0);
     }
@@ -455,14 +451,15 @@ mod tests {
         {
             let engine = create_engine(config.clone(), storage.clone());
             let mut doc = DocumentVector::new();
-            let mut vectors = FieldVectors::default();
-            vectors.vectors.push(StoredVector::new(
-                Arc::<[f32]>::from([1.0, 0.0, 0.0]),
-                "mock".into(),
-                VectorType::Text,
-            ));
-            doc.add_field("body", vectors);
-            engine.upsert_document(10, doc).expect("upsert");
+            doc.set_field(
+                "body",
+                StoredVector::new(
+                    Arc::<[f32]>::from([1.0, 0.0, 0.0]),
+                    "mock".into(),
+                    VectorType::Text,
+                ),
+            );
+            engine.upsert_vectors(10, doc).expect("upsert");
         }
 
         let engine = create_engine(config, storage);

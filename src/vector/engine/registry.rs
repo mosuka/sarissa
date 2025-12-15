@@ -138,16 +138,12 @@ pub fn build_field_entries(document: &DocumentVector) -> Vec<FieldEntry> {
     document
         .fields
         .iter()
-        .map(|(name, field)| FieldEntry {
+        .map(|(name, vector)| FieldEntry {
             field_name: name.clone(),
             version: 0,
-            vector_count: field.vector_count(),
-            weight: if field.weight == 0.0 {
-                1.0
-            } else {
-                field.weight
-            },
-            metadata: field.metadata.clone(),
+            vector_count: 1, // Always 1 in flattened model
+            weight: vector.weight,
+            metadata: vector.attributes.clone(),
         })
         .collect()
 }

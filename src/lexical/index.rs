@@ -102,7 +102,7 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
 
     /// Get or create a cached searcher and count matching documents.
     fn count(&self, request: crate::lexical::search::searcher::LexicalSearchRequest)
-        -> Result<u64>;
+    -> Result<u64>;
 
     /// Commit pending writes and invalidate caches.
     ///

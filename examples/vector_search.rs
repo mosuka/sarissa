@@ -11,7 +11,7 @@ fn main() {
 
 #[cfg(feature = "embeddings-candle")]
 mod candle_vector_example {
-    use std::{collections::HashMap, sync::Arc};
+    use std::sync::Arc;
 
     use platypus::{
         embedding::{
@@ -25,7 +25,7 @@ mod candle_vector_example {
         },
         vector::{
             DistanceMetric,
-            core::document::{DocumentPayload, FieldPayload, SegmentPayload, VectorType},
+            core::document::{DocumentPayload, Payload, VectorType},
             engine::{
                 FieldSelector, QueryPayload, VectorEngine, VectorFieldConfig, VectorFilter,
                 VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
@@ -89,64 +89,59 @@ mod candle_vector_example {
         let engine = VectorEngine::new(storage, config)?;
 
         println!("2) Upsert documents with raw payloads that will be embedded automatically\n");
+
+        // Document 1: Rust programming article
         let mut doc1 = DocumentPayload::new();
-        doc1.add_metadata("lang".to_string(), "en".to_string());
-        doc1.add_metadata("category".to_string(), "programming".to_string());
+        doc1.set_metadata("lang", "en");
+        doc1.set_metadata("category", "programming");
+        doc1.set_text(TITLE_FIELD, "Rust overview");
+        doc1.set_text(BODY_FIELD, "Rust balances performance with memory safety");
 
-        let mut doc1_title = FieldPayload::default();
-        doc1_title.add_metadata("section".into(), "title".into());
-        doc1_title.add_text_segment("Rust overview");
-        doc1.add_field(TITLE_FIELD, doc1_title);
-
-        let mut doc1_body = FieldPayload::default();
-        doc1_body.add_metadata("section".into(), "body".into());
-        doc1_body.add_text_segment("Rust balances performance with memory safety");
-        doc1_body.add_metadata("chunk".into(), "rust-body".into());
-        doc1.add_field(BODY_FIELD, doc1_body);
-
+        // Document 2: LLM article in Japanese
         let mut doc2 = DocumentPayload::new();
-        doc2.add_metadata("lang".to_string(), "ja".to_string());
-        doc2.add_metadata("category".to_string(), "ai".to_string());
+        doc2.set_metadata("lang", "ja");
+        doc2.set_metadata("category", "ai");
+        doc2.set_text(TITLE_FIELD, "LLM primer");
+        doc2.set_text(BODY_FIELD, "LLM internals");
 
-        let mut doc2_title = FieldPayload::default();
-        doc2_title.add_metadata("section".into(), "title".into());
-        doc2_title.add_text_segment("LLM primer");
-        doc2.add_field(TITLE_FIELD, doc2_title);
-
-        let mut doc2_body = FieldPayload::default();
-        doc2_body.add_metadata("section".into(), "body".into());
-        doc2_body.add_text_segment("LLM internals");
-        doc2_body.add_metadata("chunk".into(), "llm-body".into());
-        doc2.add_field(BODY_FIELD, doc2_body);
-
-        // doc3 demonstrates splitting a long body into multiple text segments (e.g., per page).
+        // Documents 3-5: User guide pages (chunked as separate documents)
+        // In the flattened model, long documents should be split into separate documents
+        // with metadata linking them to the original document.
         let mut doc3 = DocumentPayload::new();
-        doc3.add_metadata("lang".to_string(), "en".to_string());
-        doc3.add_metadata("category".to_string(), "manual".to_string());
-
-        let mut doc3_body = FieldPayload::default();
-        doc3_body.add_metadata("section".into(), "body".into());
-        doc3_body.add_metadata("source".into(), "user-guide".into());
-
-        doc3_body.add_segment(
-            SegmentPayload::text("Page 1: Installation steps for the runtime environment")
-                .with_metadata(HashMap::from([(String::from("page"), String::from("1"))])),
+        doc3.set_metadata("lang", "en");
+        doc3.set_metadata("category", "manual");
+        doc3.set_metadata("parent_doc_id", "user-guide");
+        doc3.set_metadata("chunk_index", "0");
+        doc3.set_text(
+            BODY_FIELD,
+            "Page 1: Installation steps for the runtime environment",
         );
 
-        doc3_body.add_segment(
-            SegmentPayload::text("Page 2: Configuration references and tuning knobs")
-                .with_metadata(HashMap::from([(String::from("page"), String::from("2"))])),
+        let mut doc4 = DocumentPayload::new();
+        doc4.set_metadata("lang", "en");
+        doc4.set_metadata("category", "manual");
+        doc4.set_metadata("parent_doc_id", "user-guide");
+        doc4.set_metadata("chunk_index", "1");
+        doc4.set_text(
+            BODY_FIELD,
+            "Page 2: Configuration references and tuning knobs",
         );
 
-        doc3_body.add_segment(
-            SegmentPayload::text("Page 3: Troubleshooting common deployment issues")
-                .with_metadata(HashMap::from([(String::from("page"), String::from("3"))])),
+        let mut doc5 = DocumentPayload::new();
+        doc5.set_metadata("lang", "en");
+        doc5.set_metadata("category", "manual");
+        doc5.set_metadata("parent_doc_id", "user-guide");
+        doc5.set_metadata("chunk_index", "2");
+        doc5.set_text(
+            BODY_FIELD,
+            "Page 3: Troubleshooting common deployment issues",
         );
-        doc3.add_field(BODY_FIELD, doc3_body);
 
-        engine.upsert_document_payload(1, doc1)?;
-        engine.upsert_document_payload(2, doc2)?;
-        engine.upsert_document_payload(3, doc3)?;
+        engine.upsert_payloads(1, doc1)?;
+        engine.upsert_payloads(2, doc2)?;
+        engine.upsert_payloads(3, doc3)?;
+        engine.upsert_payloads(4, doc4)?;
+        engine.upsert_payloads(5, doc5)?;
         println!("   -> Inserted {} docs\n", engine.stats()?.document_count);
 
         println!("3) Build a VectorSearchRequest directly from query text\n");
@@ -166,19 +161,15 @@ mod candle_vector_example {
         query.filter = Some(doc_filter);
         query.score_mode = VectorScoreMode::WeightedSum;
 
-        let mut title_query = FieldPayload::default();
-        title_query.add_metadata("section".into(), "title".into());
-        title_query.add_text_segment("systems programming");
-        query
-            .query_payloads
-            .push(QueryPayload::new(TITLE_FIELD, title_query));
+        query.query_payloads.push(QueryPayload::new(
+            TITLE_FIELD,
+            Payload::text("systems programming"),
+        ));
 
-        let mut body_query = FieldPayload::default();
-        body_query.add_metadata("section".into(), "body".into());
-        body_query.add_text_segment("memory safety");
-        query
-            .query_payloads
-            .push(QueryPayload::new(BODY_FIELD, body_query));
+        query.query_payloads.push(QueryPayload::new(
+            BODY_FIELD,
+            Payload::text("memory safety"),
+        ));
 
         println!("4) Execute the search and inspect doc-centric hits\n");
         let results = engine.search(query)?;

@@ -85,73 +85,90 @@ pub enum PayloadSource {
 }
 
 impl PayloadSource {
+    /// Creates a text payload source.
     pub fn text(value: impl Into<String>) -> Self {
         PayloadSource::Text {
             value: value.into(),
         }
     }
+
+    /// Creates a bytes payload source with optional MIME type.
+    pub fn bytes(bytes: impl Into<Arc<[u8]>>, mime: Option<String>) -> Self {
+        PayloadSource::Bytes {
+            bytes: bytes.into(),
+            mime,
+        }
+    }
+
+    /// Creates a URI payload source with optional media hint.
+    pub fn uri(uri: impl Into<String>, media_hint: Option<String>) -> Self {
+        PayloadSource::Uri {
+            uri: uri.into(),
+            media_hint,
+        }
+    }
+
+    /// Creates a pre-embedded vector payload source.
+    pub fn vector(data: impl Into<Arc<[f32]>>, embedder_id: impl Into<String>) -> Self {
+        PayloadSource::Vector {
+            data: data.into(),
+            embedder_id: embedder_id.into(),
+        }
+    }
 }
 
-/// DSL unit describing a concrete segment slated for embedding.
+/// Single payload for a field (1 field = 1 payload).
+///
+/// This is the simplified payload type for the flattened data model.
+/// Each field in a document maps to exactly one `Payload`, which will
+/// produce exactly one vector after embedding.
+///
+/// For long texts that need chunking, create separate documents for each chunk
+/// and use metadata (e.g., `parent_doc_id`, `chunk_index`) to track relationships.
 #[derive(Debug, Clone)]
-pub struct SegmentPayload {
+pub struct Payload {
+    /// The source material to be embedded.
     pub source: PayloadSource,
+    /// The semantic type of the vector.
     pub vector_type: VectorType,
-    pub weight: f32,
-    pub metadata: HashMap<String, String>,
 }
 
-impl SegmentPayload {
+impl Payload {
+    /// Creates a new payload with the given source and vector type.
     pub fn new(source: PayloadSource, vector_type: VectorType) -> Self {
         Self {
             source,
             vector_type,
-            weight: 1.0,
-            metadata: HashMap::new(),
         }
     }
 
+    /// Creates a text payload with `VectorType::Text`.
     pub fn text(value: impl Into<String>) -> Self {
         Self::new(PayloadSource::text(value), VectorType::Text)
     }
 
-    pub fn with_weight(mut self, weight: f32) -> Self {
-        self.weight = if weight <= 0.0 { 1.0 } else { weight };
+    /// Creates a bytes payload with `VectorType::Image`.
+    pub fn bytes(bytes: impl Into<Arc<[u8]>>, mime: Option<String>) -> Self {
+        Self::new(PayloadSource::bytes(bytes, mime), VectorType::Image)
+    }
+
+    /// Creates a URI payload with `VectorType::Image`.
+    pub fn uri(uri: impl Into<String>, media_hint: Option<String>) -> Self {
+        Self::new(PayloadSource::uri(uri, media_hint), VectorType::Image)
+    }
+
+    /// Creates a pre-embedded vector payload with `VectorType::Generic`.
+    pub fn vector(data: impl Into<Arc<[f32]>>, embedder_id: impl Into<String>) -> Self {
+        Self::new(
+            PayloadSource::vector(data, embedder_id),
+            VectorType::Generic,
+        )
+    }
+
+    /// Sets the vector type for this payload.
+    pub fn with_vector_type(mut self, vector_type: VectorType) -> Self {
+        self.vector_type = vector_type;
         self
-    }
-
-    pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
-        self.metadata = metadata;
-        self
-    }
-}
-
-/// Unprocessed content destined for a vector field.
-#[derive(Debug, Clone, Default)]
-pub struct FieldPayload {
-    pub segments: Vec<SegmentPayload>,
-    pub metadata: HashMap<String, String>,
-}
-
-impl FieldPayload {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.segments.is_empty()
-    }
-
-    pub fn add_segment(&mut self, segment: SegmentPayload) {
-        self.segments.push(segment);
-    }
-
-    pub fn add_text_segment(&mut self, value: impl Into<String>) {
-        self.segments.push(SegmentPayload::text(value));
-    }
-
-    pub fn add_metadata(&mut self, key: String, value: String) {
-        self.metadata.insert(key, value);
     }
 }
 
@@ -289,44 +306,35 @@ where
     Ok(buffer.into())
 }
 
-/// All vectors associated with a single logical field.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct FieldVectors {
-    #[serde(default)]
-    pub vectors: Vec<StoredVector>,
-    #[serde(default = "FieldVectors::default_weight")]
-    pub weight: f32,
-    #[serde(default)]
-    pub metadata: HashMap<String, String>,
-}
-
-impl FieldVectors {
-    fn default_weight() -> f32 {
-        1.0
-    }
-
-    pub fn vector_count(&self) -> usize {
-        self.vectors.len()
-    }
-}
-
-/// Document-level wrapper around field vectors and metadata (doc_id is supplied separately).
+/// Document with embedded vectors for each field.
+///
+/// Each field maps to exactly one `StoredVector`. This is the flattened model
+/// where 1 field = 1 vector.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DocumentVector {
+    /// Fields with their embedded vectors.
     #[serde(default)]
-    pub fields: HashMap<String, FieldVectors>,
+    pub fields: HashMap<String, StoredVector>,
+    /// Document-level metadata.
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
 
 /// Document input model capturing raw payloads before embedding.
+///
+/// Each field maps to exactly one `Payload`, which will produce exactly one
+/// vector after embedding. For long texts that need chunking, create separate
+/// documents for each chunk with metadata linking them (e.g., `parent_doc_id`).
 #[derive(Debug, Clone, Default)]
 pub struct DocumentPayload {
-    pub fields: HashMap<String, FieldPayload>,
+    /// Fields to embed, each containing a single payload.
+    pub fields: HashMap<String, Payload>,
+    /// Document-level metadata (e.g., author, source, parent_doc_id).
     pub metadata: HashMap<String, String>,
 }
 
 impl DocumentPayload {
+    /// Creates a new empty document payload.
     pub fn new() -> Self {
         Self {
             fields: HashMap::new(),
@@ -334,16 +342,26 @@ impl DocumentPayload {
         }
     }
 
-    pub fn add_field(&mut self, field_name: impl Into<String>, payload: FieldPayload) {
-        self.fields.insert(field_name.into(), payload);
+    /// Sets a field with the given name and `Payload`.
+    pub fn set_field(&mut self, name: impl Into<String>, payload: Payload) {
+        self.fields.insert(name.into(), payload);
     }
 
-    pub fn add_metadata(&mut self, key: String, value: String) {
-        self.metadata.insert(key, value);
+    /// Sets a text field with `VectorType::Text`.
+    ///
+    /// Convenience method equivalent to `set_field(name, Payload::text(text))`.
+    pub fn set_text(&mut self, name: impl Into<String>, text: impl Into<String>) {
+        self.set_field(name, Payload::text(text));
+    }
+
+    /// Sets metadata for the document.
+    pub fn set_metadata(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.metadata.insert(key.into(), value.into());
     }
 }
 
 impl DocumentVector {
+    /// Creates a new empty document vector.
     pub fn new() -> Self {
         Self {
             fields: HashMap::new(),
@@ -351,12 +369,14 @@ impl DocumentVector {
         }
     }
 
-    pub fn add_field<V: Into<String>>(&mut self, field_name: V, field: FieldVectors) {
-        self.fields.insert(field_name.into(), field);
+    /// Sets a field with the given name and `StoredVector`.
+    pub fn set_field(&mut self, name: impl Into<String>, vector: StoredVector) {
+        self.fields.insert(name.into(), vector);
     }
 
-    pub fn add_metadata(&mut self, key: String, value: String) {
-        self.metadata.insert(key, value);
+    /// Sets metadata for the document.
+    pub fn set_metadata(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.metadata.insert(key.into(), value.into());
     }
 }
 
