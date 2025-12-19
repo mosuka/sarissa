@@ -61,17 +61,4 @@
 //! let analyzed = parser.parse(doc).unwrap();
 //! ```
 //!
-//! Converting files to documents:
-//!
-//! ```no_run
-//! use platypus::document::converter::DocumentConverter;
-//! use platypus::document::converter::csv::CsvDocumentConverter;
-//!
-//! let converter = CsvDocumentConverter::new();
-//! for doc in converter.convert("data.csv").unwrap() {
-//!     let doc = doc.unwrap();
-//!     println!("Document: {:?}", doc);
-//! }
-//! ```
-
-pub use crate::lexical::document::{analyzed, converter, document, field, parser};
+pub use crate::lexical::document::{analyzed, document, field, parser};
