@@ -42,7 +42,7 @@ fn main() -> platypus::error::Result<()> {
         analyzer: Arc::new(per_field_analyzer.clone()),
         ..InvertedIndexConfig::default()
     });
-    let mut lexical_engine = LexicalEngine::new(storage, lexical_index_config)?;
+    let lexical_engine = LexicalEngine::new(storage, lexical_index_config)?;
 
     // Configure per-field analyzers using PerFieldAnalyzer (Lucene-style)
     let mut per_field_analyzer = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new()?));

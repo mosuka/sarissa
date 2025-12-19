@@ -38,7 +38,7 @@ fn main() -> Result<()> {
         analyzer: Arc::new(per_field_analyzer.clone()),
         ..InvertedIndexConfig::default()
     });
-    let mut lexical_engine = LexicalEngine::new(storage, lexical_index_config)?;
+    let lexical_engine = LexicalEngine::new(storage, lexical_index_config)?;
 
     // Add documents with various spellings and terms for fuzzy matching
     let documents = vec![

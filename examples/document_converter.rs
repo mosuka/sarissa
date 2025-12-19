@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         temp_dir.path(),
         FileStorageConfig::new(temp_dir.path()),
     )?);
-    let mut engine = LexicalEngine::new(storage, config)?;
+    let engine = LexicalEngine::new(storage, config)?;
 
     // ===================================================================
     // Example 1: JSONL Format with nested GeoPoint objects
