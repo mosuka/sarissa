@@ -344,9 +344,8 @@ mod tests {
             dimension: 3,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            embedder_id: "mock".into(),
+            source_tag: "mock".into(),
             vector_type: VectorType::Text,
-            embedder: None,
             base_weight: 1.0,
         };
         use crate::embedding::noop::NoOpEmbedder;

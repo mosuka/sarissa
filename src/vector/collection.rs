@@ -133,22 +133,17 @@ impl VectorCollection {
     fn register_embedder_from_config(&self, embedder: Arc<dyn Embedder>) -> Result<()> {
         // Try to downcast to PerFieldEmbedder to get field-specific embedders
         if let Some(per_field) = embedder.as_any().downcast_ref::<PerFieldEmbedder>() {
-            // For each configured field, register the appropriate embedder
-            for (field_name, field_config) in &self.config.fields {
-                if let Some(embedder_id) = field_config.embedder.as_ref() {
-                    // Get the embedder for this field from PerFieldEmbedder
-                    let field_embedder = per_field.get_embedder(field_name);
-                    self.embedder_registry
-                        .register(embedder_id.clone(), field_embedder.clone());
-                }
+            // For each configured field, register the appropriate embedder using the field name as key
+            for (field_name, _field_config) in &self.config.fields {
+                let field_embedder = per_field.get_embedder(field_name);
+                self.embedder_registry
+                    .register(field_name.clone(), field_embedder.clone());
             }
         } else {
-            // If not PerFieldEmbedder, register the embedder for all fields that reference it
-            for field_config in self.config.fields.values() {
-                if let Some(embedder_id) = field_config.embedder.as_ref() {
-                    self.embedder_registry
-                        .register(embedder_id.clone(), embedder.clone());
-                }
+            // If not PerFieldEmbedder, register the shared embedder for each field name
+            for field_name in self.config.fields.keys() {
+                self.embedder_registry
+                    .register(field_name.clone(), embedder.clone());
             }
         }
 
@@ -227,22 +222,17 @@ impl VectorCollection {
 
         match source {
             PayloadSource::Text { value } => {
-                let embedder_name = field_config.embedder.as_ref().ok_or_else(|| {
-                    PlatypusError::invalid_config(format!(
-                        "vector field '{field_name}' must specify 'embedder' to ingest text payloads"
-                    ))
-                })?;
                 let executor = self.ensure_embedder_executor()?;
-                let embedder = self.embedder_registry.resolve(embedder_name)?;
+                let embedder = self.embedder_registry.resolve(field_name)?;
 
                 if !embedder.supports_text() {
                     return Err(PlatypusError::invalid_config(format!(
                         "embedder '{}' does not support text embedding",
-                        embedder_name
+                        field_name
                     )));
                 }
 
-                let embedder_name_owned = embedder_name.clone();
+                let embedder_name_owned = field_name.to_string();
                 let text_value = value;
                 let vector = executor
                     .run(async move { embedder.embed(&EmbedInput::Text(&text_value)).await })?;
@@ -254,27 +244,22 @@ impl VectorCollection {
                     )));
                 }
                 let mut stored: StoredVector = vector.into();
-                stored.embedder_id = field_config.embedder_id.clone();
+                stored.source_tag = field_config.source_tag.clone();
                 stored.vector_type = vector_type;
                 Ok(stored)
             }
             PayloadSource::Bytes { bytes, mime } => {
-                let embedder_name = field_config.embedder.as_ref().ok_or_else(|| {
-                    PlatypusError::invalid_config(format!(
-                        "vector field '{field_name}' must specify 'embedder' to ingest binary payloads"
-                    ))
-                })?;
                 let executor = self.ensure_embedder_executor()?;
-                let embedder = self.embedder_registry.resolve(embedder_name)?;
+                let embedder = self.embedder_registry.resolve(field_name)?;
 
                 if !embedder.supports_image() {
                     return Err(PlatypusError::invalid_config(format!(
                         "embedder '{}' does not support image embedding",
-                        embedder_name
+                        field_name
                     )));
                 }
 
-                let embedder_name_owned = embedder_name.clone();
+                let embedder_name_owned = field_name.to_string();
                 let payload_bytes = bytes.clone();
                 let mime_hint = mime.clone();
                 let vector = executor.run(async move {
@@ -293,27 +278,22 @@ impl VectorCollection {
                     )));
                 }
                 let mut stored: StoredVector = vector.into();
-                stored.embedder_id = field_config.embedder_id.clone();
+                stored.source_tag = field_config.source_tag.clone();
                 stored.vector_type = vector_type;
                 Ok(stored)
             }
             PayloadSource::Uri { uri, media_hint: _ } => {
-                let embedder_name = field_config.embedder.as_ref().ok_or_else(|| {
-                    PlatypusError::invalid_config(format!(
-                        "vector field '{field_name}' must specify 'embedder' to ingest URI payloads"
-                    ))
-                })?;
                 let executor = self.ensure_embedder_executor()?;
-                let embedder = self.embedder_registry.resolve(embedder_name)?;
+                let embedder = self.embedder_registry.resolve(field_name)?;
 
                 if !embedder.supports_image() {
                     return Err(PlatypusError::invalid_config(format!(
                         "embedder '{}' does not support image embedding",
-                        embedder_name
+                        field_name
                     )));
                 }
 
-                let embedder_name_owned = embedder_name.clone();
+                let embedder_name_owned = field_name.to_string();
                 let uri_value = uri;
                 let vector = executor
                     .run(async move { embedder.embed(&EmbedInput::ImageUri(&uri_value)).await })?;
@@ -325,15 +305,15 @@ impl VectorCollection {
                     )));
                 }
                 let mut stored: StoredVector = vector.into();
-                stored.embedder_id = field_config.embedder_id.clone();
+                stored.source_tag = field_config.source_tag.clone();
                 stored.vector_type = vector_type;
                 Ok(stored)
             }
-            PayloadSource::Vector { data, embedder_id } => {
-                if embedder_id != field_config.embedder_id {
+            PayloadSource::Vector { data, source_tag } => {
+                if source_tag != field_config.source_tag {
                     return Err(PlatypusError::invalid_argument(format!(
-                        "vector field '{field_name}' only accepts embedder_id '{}' but got '{}'",
-                        field_config.embedder_id, embedder_id
+                        "vector field '{field_name}' only accepts source_tag '{}' but got '{}'",
+                        field_config.source_tag, source_tag
                     )));
                 }
                 if data.len() != field_config.dimension {
@@ -345,7 +325,7 @@ impl VectorCollection {
                 }
                 Ok(StoredVector::new(
                     data.clone(),
-                    field_config.embedder_id.clone(),
+                    field_config.source_tag.clone(),
                     vector_type,
                 ))
             }
@@ -1261,7 +1241,7 @@ impl VectorCollectionSearcher {
             .query_vectors
             .iter()
             .filter(|candidate| {
-                candidate.vector.embedder_id == config.embedder_id
+                candidate.vector.source_tag == config.source_tag
                     && candidate.vector.vector_type == config.vector_type
             })
             .cloned()

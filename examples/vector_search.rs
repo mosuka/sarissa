@@ -33,11 +33,10 @@ mod candle_vector_example {
         },
     };
 
-    const EMBEDDER_CONFIG_ID: &str = "candle_text_embedder";
     const TITLE_FIELD: &str = "title_embedding";
     const BODY_FIELD: &str = "body_embedding";
-    const TITLE_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
-    const BODY_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
+    // const TITLE_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
+    // const BODY_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
 
     pub fn run() -> Result<()> {
         println!("1) Configure storage + VectorEngine fields with an embedder registry\n");
@@ -46,38 +45,43 @@ mod candle_vector_example {
         let storage =
             Arc::new(MemoryStorage::new(MemoryStorageConfig::default())) as Arc<dyn Storage>;
 
-        let title_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(TITLE_MODEL)?);
-        let body_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(BODY_MODEL)?);
-        let title_dim = title_embedder.dimension();
-        let body_dim = body_embedder.dimension();
+        let candle_text_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(
+            "sentence-transformers/all-MiniLM-L6-v2",
+        )?);
+        let dimension = candle_text_embedder.dimension();
+
+        // let title_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(TITLE_MODEL)?);
+        // let body_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(BODY_MODEL)?);
+        // let title_dim = title_embedder.dimension();
+        // let body_dim = body_embedder.dimension();
 
         // Configure PerFieldEmbedder so each vector field can transparently use Candle embedders.
-        let mut per_field_embedder = PerFieldEmbedder::new(Arc::clone(&body_embedder));
-        per_field_embedder.add_embedder(TITLE_FIELD, Arc::clone(&title_embedder));
+        let mut per_field_embedder = PerFieldEmbedder::new(Arc::clone(&candle_text_embedder));
+        per_field_embedder.add_embedder(TITLE_FIELD, Arc::clone(&candle_text_embedder));
 
-        // Build config using the new embedder field API
+        // Build config (PerFieldEmbedderはフィールド名で解決するためembedder_keyは不要)
         let config = VectorIndexConfig::builder()
             .field(
                 TITLE_FIELD,
                 VectorFieldConfig {
-                    dimension: title_dim,
+                    // dimension: title_dim,
+                    dimension, // embedderのdimensionを共通利用するからわざわざフィールドで持つ必要ある？
                     distance: DistanceMetric::Cosine,
                     index: VectorIndexKind::Flat,
-                    embedder_id: EMBEDDER_CONFIG_ID.to_string(),
+                    source_tag: TITLE_FIELD.to_string(),
                     vector_type: VectorType::Text,
-                    embedder: Some(EMBEDDER_CONFIG_ID.into()),
                     base_weight: 1.2,
                 },
             )
             .field(
                 BODY_FIELD,
                 VectorFieldConfig {
-                    dimension: body_dim,
+                    // dimension: body_dim,
+                    dimension,
                     distance: DistanceMetric::Cosine,
                     index: VectorIndexKind::Flat,
-                    embedder_id: EMBEDDER_CONFIG_ID.to_string(),
+                    source_tag: BODY_FIELD.to_string(),
                     vector_type: VectorType::Text,
-                    embedder: Some(EMBEDDER_CONFIG_ID.into()),
                     base_weight: 1.0,
                 },
             )

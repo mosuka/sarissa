@@ -74,9 +74,8 @@ use crate::vector::core::document::VectorType;
 ///         dimension: dim,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
-///         embedder_id: "default".to_string(),
+///         source_tag: "content_embedding".to_string(),
 ///         vector_type: VectorType::Text,
-///         embedder: None,
 ///         base_weight: 1.0,
 ///     })
 ///     .default_field("content_embedding")
@@ -170,9 +169,8 @@ impl VectorIndexConfig {
 ///         dimension: dim,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
-///         embedder_id: "default".to_string(),
+///         source_tag: "content_embedding".to_string(),
 ///         vector_type: VectorType::Text,
-///         embedder: None,
 ///         base_weight: 1.0,
 ///     })
 ///     .default_field("content_embedding")
@@ -231,9 +229,8 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            embedder_id: "default".to_string(),
+            source_tag: name.clone(),
             vector_type: VectorType::Text,
-            embedder: Some(name.clone()),
             base_weight: 1.0,
         };
 
@@ -256,9 +253,8 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            embedder_id: "default".to_string(),
+            source_tag: name.clone(),
             vector_type: VectorType::Image,
-            embedder: Some(name.clone()),
             base_weight: 1.0,
         };
 
@@ -396,13 +392,10 @@ pub struct VectorFieldConfig {
     pub distance: DistanceMetric,
     /// The type of index to use (Flat, HNSW, IVF).
     pub index: VectorIndexKind,
-    /// The ID of the embedder to use for this field.
-    pub embedder_id: String,
+    /// Logical label of vectors this field accepts.
+    pub source_tag: String,
     /// The type of vectors in this field (Text or Image).
     pub vector_type: VectorType,
-    /// Optional embedder key for PerFieldEmbedder lookup.
-    #[serde(default)]
-    pub embedder: Option<String>,
     /// Base weight for scoring (default: 1.0).
     #[serde(default = "VectorFieldConfig::default_weight")]
     pub base_weight: f32,

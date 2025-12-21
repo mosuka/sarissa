@@ -206,9 +206,8 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            embedder_id: "text-encoder-v1".into(),
+            source_tag: "text-encoder-v1".into(),
             vector_type: VectorType::Text,
-            embedder: None,
             base_weight: 1.4,
         },
     );
@@ -218,9 +217,8 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            embedder_id: "text-encoder-v1".into(),
+            source_tag: "text-encoder-v1".into(),
             vector_type: VectorType::Text,
-            embedder: None,
             base_weight: 1.0,
         },
     );
@@ -236,7 +234,7 @@ fn sample_engine_config() -> VectorIndexConfig {
 fn stored_query_vector(data: [f32; 4]) -> StoredVector {
     StoredVector {
         data: Arc::from(data),
-        embedder_id: "text-encoder-v1".into(),
+        source_tag: "text-encoder-v1".into(),
         vector_type: VectorType::Text,
         weight: 1.0,
         attributes: HashMap::new(),
@@ -325,9 +323,8 @@ fn build_payload_engine() -> Result<VectorEngine> {
                 dimension: 4,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-                embedder_id: "payload-encoder".into(),
+                source_tag: "payload-encoder".into(),
                 vector_type: VectorType::Text,
-                embedder: Some("body_embedding".into()),
                 base_weight: 1.0,
             },
         )
@@ -357,9 +354,8 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
                 dimension: 3,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-                embedder_id: "multimodal-encoder".into(),
+                source_tag: "multimodal-encoder".into(),
                 vector_type: VectorType::Image,
-                embedder: Some("image_embedding".into()),
                 base_weight: 1.0,
             },
         )
