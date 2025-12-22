@@ -35,4 +35,7 @@ pub(crate) struct CollectionManifest {
     pub(crate) version: u32,
     pub(crate) snapshot_wal_seq: SeqNumber,
     pub(crate) wal_last_seq: SeqNumber,
+    #[serde(default)]
+    pub(crate) field_configs:
+        std::collections::HashMap<String, crate::vector::engine::config::VectorFieldConfig>,
 }

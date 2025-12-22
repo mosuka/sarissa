@@ -329,9 +329,8 @@ async fn main() -> platypus::error::Result<()> {
         dimension: embedder.dimension(),
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
-        embedder_id: "candle".into(),
+        source_tag: "candle".into(),
         vector_type: VectorType::Text,
-        embedder: None,
         base_weight: 1.0,
     };
     let config = VectorIndexConfig {
@@ -561,9 +560,8 @@ async fn main() -> platypus::error::Result<()> {
         dimension: ImageEmbedder::dimension(&embedder), // 512 for CLIP ViT-Base-Patch32
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Hnsw,
-        embedder_id: "clip".into(),
+        source_tag: "clip".into(),
         vector_type: VectorType::Image,
-        embedder: None,
         base_weight: 1.0,
     };
     let config = VectorIndexConfig {

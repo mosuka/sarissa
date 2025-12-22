@@ -12,11 +12,9 @@ use tokio::runtime::Builder as TokioRuntimeBuilder;
 use crate::embedding::embedder::Embedder;
 use crate::error::{PlatypusError, Result};
 
-/// Registry for managing embedder instances.
+/// Registry for managing embedder instances keyed byフィールド名.
 ///
-/// This registry stores embedder instances that can be resolved by their ID.
-/// Embedders are registered via `VectorIndexConfig.embedder` field using
-/// `PerFieldEmbedder` or similar implementations.
+/// Embedders are registered via `VectorIndexConfig.embedder` (e.g., `PerFieldEmbedder`).
 pub(crate) struct VectorEmbedderRegistry {
     instances: RwLock<HashMap<String, Arc<dyn Embedder>>>,
 }
@@ -29,19 +27,19 @@ impl VectorEmbedderRegistry {
         }
     }
 
-    /// Register an embedder instance by its ID.
-    pub(crate) fn register(&self, embedder_id: impl Into<String>, embedder: Arc<dyn Embedder>) {
-        self.instances.write().insert(embedder_id.into(), embedder);
+    /// Register an embedder instance by its key（フィールド名）。
+    pub(crate) fn register(&self, field_name: impl Into<String>, embedder: Arc<dyn Embedder>) {
+        self.instances.write().insert(field_name.into(), embedder);
     }
 
     /// Resolve an embedder by its ID.
     ///
     /// Returns an error if the embedder is not registered.
-    pub(crate) fn resolve(&self, embedder_id: &str) -> Result<Arc<dyn Embedder>> {
+    pub(crate) fn resolve(&self, field_name: &str) -> Result<Arc<dyn Embedder>> {
         let instances = self.instances.read();
-        instances.get(embedder_id).cloned().ok_or_else(|| {
+        instances.get(field_name).cloned().ok_or_else(|| {
             PlatypusError::invalid_config(format!(
-                "embedder '{embedder_id}' is not registered. Use VectorIndexConfig.embedder field with PerFieldEmbedder to configure embedders."
+                "embedder '{field_name}' is not registered. Use VectorIndexConfig.embedder field with PerFieldEmbedder to configure embedders."
             ))
         })
     }

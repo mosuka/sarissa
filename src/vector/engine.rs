@@ -344,9 +344,8 @@ mod tests {
             dimension: 3,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            embedder_id: "mock".into(),
+            source_tag: "mock".into(),
             vector_type: VectorType::Text,
-            embedder: None,
             base_weight: 1.0,
         };
         use crate::embedding::noop::NoOpEmbedder;
@@ -355,6 +354,11 @@ mod tests {
             fields: HashMap::from([("body".into(), field_config)]),
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
+            default_distance: DistanceMetric::Cosine,
+            default_index_kind: VectorIndexKind::Flat,
+            default_vector_type: VectorType::Text,
+            default_base_weight: 1.0,
+            implicit_schema: false,
             embedder: Arc::new(NoOpEmbedder::new()),
         }
     }

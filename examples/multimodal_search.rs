@@ -31,7 +31,6 @@ use tempfile::{Builder, NamedTempFile};
 
 const DEMO_TEXT_DIM: usize = 4;
 const DEMO_IMAGE_DIM: usize = 3;
-const MULTIMODAL_EMBEDDER_ID: &str = "demo-multimodal";
 const TEXT_FIELD: &str = "body_embedding";
 const IMAGE_FIELD: &str = "image_embedding";
 #[cfg(feature = "embeddings-multimodal")]
@@ -50,8 +49,7 @@ fn main() -> Result<()> {
     per_field_embedder.add_embedder(TEXT_FIELD, Arc::clone(&embedder_choice.text_embedder));
     per_field_embedder.add_embedder(IMAGE_FIELD, Arc::clone(&embedder_choice.image_embedder));
 
-    // Build config using the new embedder field
-    // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
+    // Build config (PerFieldEmbedderはフィールド名で解決)
     let config = VectorIndexConfig::builder()
         .field(
             TEXT_FIELD,
@@ -59,9 +57,8 @@ fn main() -> Result<()> {
                 dimension: text_dim,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-                embedder_id: MULTIMODAL_EMBEDDER_ID.into(),
+                source_tag: TEXT_FIELD.into(),
                 vector_type: VectorType::Text,
-                embedder: Some(TEXT_FIELD.into()),
                 base_weight: 1.0,
             },
         )
@@ -71,9 +68,8 @@ fn main() -> Result<()> {
                 dimension: image_dim,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-                embedder_id: MULTIMODAL_EMBEDDER_ID.into(),
+                source_tag: IMAGE_FIELD.into(),
                 vector_type: VectorType::Image,
-                embedder: Some(IMAGE_FIELD.into()),
                 base_weight: 1.0,
             },
         )
@@ -142,7 +138,6 @@ fn main() -> Result<()> {
 }
 
 struct EmbedderChoice {
-    model_label: String,
     text_embedder: Arc<dyn Embedder>,
     image_embedder: Arc<dyn Embedder>,
     real_images: bool,
@@ -162,7 +157,6 @@ fn select_embedder() -> Result<EmbedderChoice> {
             let embedder: Arc<dyn Embedder> =
                 Arc::new(CandleMultimodalEmbedder::new(model.as_str())?);
             return Ok(EmbedderChoice {
-                model_label: model,
                 text_embedder: embedder.clone(),
                 image_embedder: embedder,
                 real_images: true,
@@ -180,7 +174,6 @@ fn select_embedder() -> Result<EmbedderChoice> {
     let text_embedder: Arc<dyn Embedder> = Arc::new(DemoTextEmbedder::new(DEMO_TEXT_DIM));
     let image_embedder: Arc<dyn Embedder> = Arc::new(DemoImageEmbedder::new(DEMO_IMAGE_DIM));
     Ok(EmbedderChoice {
-        model_label: "demo-multimodal".into(),
         text_embedder,
         image_embedder,
         real_images: false,

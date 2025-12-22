@@ -74,9 +74,8 @@ use crate::vector::core::document::VectorType;
 ///         dimension: dim,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
-///         embedder_id: "default".to_string(),
+///         source_tag: "content_embedding".to_string(),
 ///         vector_type: VectorType::Text,
-///         embedder: None,
 ///         base_weight: 1.0,
 ///     })
 ///     .default_field("content_embedding")
@@ -96,6 +95,21 @@ pub struct VectorIndexConfig {
     /// Metadata for the collection.
     pub metadata: HashMap<String, serde_json::Value>,
 
+    /// Default distance metric when auto-generating fields.
+    pub default_distance: DistanceMetric,
+
+    /// Default index kind when auto-generating fields.
+    pub default_index_kind: VectorIndexKind,
+
+    /// Default vector type when auto-generating fields.
+    pub default_vector_type: VectorType,
+
+    /// Default base weight when auto-generating fields.
+    pub default_base_weight: f32,
+
+    /// Whether to allow implicit schema generation for unseen fields.
+    pub implicit_schema: bool,
+
     /// Embedder for text and image fields.
     ///
     /// This is analogous to `analyzer` in `InvertedIndexConfig`.
@@ -110,6 +124,11 @@ impl std::fmt::Debug for VectorIndexConfig {
             .field("fields", &self.fields)
             .field("default_fields", &self.default_fields)
             .field("metadata", &self.metadata)
+            .field("default_distance", &self.default_distance)
+            .field("default_index_kind", &self.default_index_kind)
+            .field("default_vector_type", &self.default_vector_type)
+            .field("default_base_weight", &self.default_base_weight)
+            .field("implicit_schema", &self.implicit_schema)
             .field("embedder", &format_args!("{:?}", self.embedder))
             .finish()
     }
@@ -170,9 +189,8 @@ impl VectorIndexConfig {
 ///         dimension: dim,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
-///         embedder_id: "default".to_string(),
+///         source_tag: "content_embedding".to_string(),
 ///         vector_type: VectorType::Text,
-///         embedder: None,
 ///         base_weight: 1.0,
 ///     })
 ///     .default_field("content_embedding")
@@ -181,18 +199,32 @@ impl VectorIndexConfig {
 /// # }
 /// # }
 /// ```
-#[derive(Default)]
 pub struct VectorIndexConfigBuilder {
     fields: HashMap<String, VectorFieldConfig>,
     default_fields: Vec<String>,
     metadata: HashMap<String, serde_json::Value>,
     embedder: Option<Arc<dyn Embedder>>,
+    default_distance: DistanceMetric,
+    default_index_kind: VectorIndexKind,
+    default_vector_type: VectorType,
+    default_base_weight: f32,
+    implicit_schema: bool,
 }
 
 impl VectorIndexConfigBuilder {
     /// Create a new builder.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            fields: HashMap::new(),
+            default_fields: Vec::new(),
+            metadata: HashMap::new(),
+            embedder: None,
+            default_distance: DistanceMetric::Cosine,
+            default_index_kind: VectorIndexKind::Flat,
+            default_vector_type: VectorType::Text,
+            default_base_weight: VectorFieldConfig::default_weight(),
+            implicit_schema: false,
+        }
     }
 
     /// Set the embedder for all fields.
@@ -231,9 +263,8 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            embedder_id: "default".to_string(),
+            source_tag: name.clone(),
             vector_type: VectorType::Text,
-            embedder: Some(name.clone()),
             base_weight: 1.0,
         };
 
@@ -256,9 +287,8 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            embedder_id: "default".to_string(),
+            source_tag: name.clone(),
             vector_type: VectorType::Image,
-            embedder: Some(name.clone()),
             base_weight: 1.0,
         };
 
@@ -327,6 +357,36 @@ impl VectorIndexConfigBuilder {
         self
     }
 
+    /// Set default distance for implicit field generation.
+    pub fn default_distance(mut self, distance: DistanceMetric) -> Self {
+        self.default_distance = distance;
+        self
+    }
+
+    /// Set default index kind for implicit field generation.
+    pub fn default_index_kind(mut self, kind: VectorIndexKind) -> Self {
+        self.default_index_kind = kind;
+        self
+    }
+
+    /// Set default vector type for implicit field generation.
+    pub fn default_vector_type(mut self, vector_type: VectorType) -> Self {
+        self.default_vector_type = vector_type;
+        self
+    }
+
+    /// Set default base weight for implicit field generation.
+    pub fn default_base_weight(mut self, base_weight: f32) -> Self {
+        self.default_base_weight = base_weight;
+        self
+    }
+
+    /// Enable or disable implicit schema generation for unseen fields.
+    pub fn implicit_schema(mut self, enabled: bool) -> Self {
+        self.implicit_schema = enabled;
+        self
+    }
+
     /// Build the configuration.
     ///
     /// If no embedder is set, defaults to `NoOpEmbedder` for pre-computed vectors.
@@ -339,10 +399,21 @@ impl VectorIndexConfigBuilder {
             fields: self.fields,
             default_fields: self.default_fields,
             metadata: self.metadata,
+            default_distance: self.default_distance,
+            default_index_kind: self.default_index_kind,
+            default_vector_type: self.default_vector_type,
+            default_base_weight: self.default_base_weight,
+            implicit_schema: self.implicit_schema,
             embedder,
         };
         config.validate()?;
         Ok(config)
+    }
+}
+
+impl Default for VectorIndexConfigBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -354,10 +425,15 @@ impl Serialize for VectorIndexConfig {
     {
         use serde::ser::SerializeStruct;
 
-        let mut state = serializer.serialize_struct("VectorIndexConfig", 3)?;
+        let mut state = serializer.serialize_struct("VectorIndexConfig", 8)?;
         state.serialize_field("fields", &self.fields)?;
         state.serialize_field("default_fields", &self.default_fields)?;
         state.serialize_field("metadata", &self.metadata)?;
+        state.serialize_field("default_distance", &self.default_distance)?;
+        state.serialize_field("default_index_kind", &self.default_index_kind)?;
+        state.serialize_field("default_vector_type", &self.default_vector_type)?;
+        state.serialize_field("default_base_weight", &self.default_base_weight)?;
+        state.serialize_field("implicit_schema", &self.implicit_schema)?;
         state.end()
     }
 }
@@ -374,6 +450,16 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             default_fields: Vec<String>,
             #[serde(default)]
             metadata: HashMap<String, serde_json::Value>,
+            #[serde(default = "default_distance_metric")]
+            default_distance: DistanceMetric,
+            #[serde(default = "default_index_kind")]
+            default_index_kind: VectorIndexKind,
+            #[serde(default = "default_vector_type")]
+            default_vector_type: VectorType,
+            #[serde(default = "VectorFieldConfig::default_weight")]
+            default_base_weight: f32,
+            #[serde(default)]
+            implicit_schema: bool,
         }
 
         let helper = VectorIndexConfigHelper::deserialize(deserializer)?;
@@ -381,10 +467,27 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             fields: helper.fields,
             default_fields: helper.default_fields,
             metadata: helper.metadata,
+            default_distance: helper.default_distance,
+            default_index_kind: helper.default_index_kind,
+            default_vector_type: helper.default_vector_type,
+            default_base_weight: helper.default_base_weight,
+            implicit_schema: helper.implicit_schema,
             // Default to NoOpEmbedder; can be replaced programmatically
             embedder: Arc::new(NoOpEmbedder::new()),
         })
     }
+}
+
+fn default_distance_metric() -> DistanceMetric {
+    DistanceMetric::Cosine
+}
+
+fn default_index_kind() -> VectorIndexKind {
+    VectorIndexKind::Flat
+}
+
+fn default_vector_type() -> VectorType {
+    VectorType::Text
 }
 
 /// Configuration for a single vector field.
@@ -396,13 +499,10 @@ pub struct VectorFieldConfig {
     pub distance: DistanceMetric,
     /// The type of index to use (Flat, HNSW, IVF).
     pub index: VectorIndexKind,
-    /// The ID of the embedder to use for this field.
-    pub embedder_id: String,
+    /// Logical label of vectors this field accepts.
+    pub source_tag: String,
     /// The type of vectors in this field (Text or Image).
     pub vector_type: VectorType,
-    /// Optional embedder key for PerFieldEmbedder lookup.
-    #[serde(default)]
-    pub embedder: Option<String>,
     /// Base weight for scoring (default: 1.0).
     #[serde(default = "VectorFieldConfig::default_weight")]
     pub base_weight: f32,
