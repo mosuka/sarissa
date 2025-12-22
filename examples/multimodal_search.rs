@@ -138,7 +138,6 @@ fn main() -> Result<()> {
 }
 
 struct EmbedderChoice {
-    model_label: String,
     text_embedder: Arc<dyn Embedder>,
     image_embedder: Arc<dyn Embedder>,
     real_images: bool,
@@ -158,7 +157,6 @@ fn select_embedder() -> Result<EmbedderChoice> {
             let embedder: Arc<dyn Embedder> =
                 Arc::new(CandleMultimodalEmbedder::new(model.as_str())?);
             return Ok(EmbedderChoice {
-                model_label: model,
                 text_embedder: embedder.clone(),
                 image_embedder: embedder,
                 real_images: true,
@@ -176,7 +174,6 @@ fn select_embedder() -> Result<EmbedderChoice> {
     let text_embedder: Arc<dyn Embedder> = Arc::new(DemoTextEmbedder::new(DEMO_TEXT_DIM));
     let image_embedder: Arc<dyn Embedder> = Arc::new(DemoImageEmbedder::new(DEMO_IMAGE_DIM));
     Ok(EmbedderChoice {
-        model_label: "demo-multimodal".into(),
         text_embedder,
         image_embedder,
         real_images: false,

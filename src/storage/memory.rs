@@ -41,6 +41,12 @@ pub struct MemoryStorage {
     closed: bool,
 }
 
+impl Default for MemoryStorage {
+    fn default() -> Self {
+        Self::new(MemoryStorageConfig::default())
+    }
+}
+
 impl MemoryStorage {
     /// Create a new memory storage.
     pub fn new(config: MemoryStorageConfig) -> Self {
@@ -51,11 +57,6 @@ impl MemoryStorage {
             config,
             closed: false,
         }
-    }
-
-    /// Create a new memory storage with default configuration.
-    pub fn new_default() -> Self {
-        Self::new(MemoryStorageConfig::default())
     }
 
     /// Check if the storage is closed.
@@ -504,14 +505,14 @@ mod tests {
 
     #[test]
     fn test_memory_storage_creation() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
         assert_eq!(storage.file_count(), 0);
         assert_eq!(storage.total_size(), 0);
     }
 
     #[test]
     fn test_create_and_read_file() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
 
         // Create a file
         let mut output = storage.create_output("test.txt").unwrap();
@@ -531,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_file_operations() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
 
         // File doesn't exist initially
         assert!(!storage.file_exists("nonexistent.txt"));
@@ -564,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_multiple_files() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
 
         // Create multiple files
         for i in 0..5 {
@@ -586,7 +587,7 @@ mod tests {
 
     #[test]
     fn test_temp_file_creation() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
 
         let (temp_name, mut output) = storage.create_temp_output("test").unwrap();
 
@@ -602,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_input_clone() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
 
         // Create a file
         let mut output = storage.create_output("test.txt").unwrap();
@@ -627,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_seek_operations() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
 
         // Create a file
         let mut output = storage.create_output("test.txt").unwrap();
@@ -652,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_file_not_found() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
 
         let result = storage.open_input("nonexistent.txt");
         assert!(result.is_err());
@@ -663,7 +664,7 @@ mod tests {
 
     #[test]
     fn test_storage_close() {
-        let mut storage = MemoryStorage::new_default();
+        let mut storage = MemoryStorage::default();
 
         storage.close().unwrap();
         assert!(storage.closed);
@@ -675,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_clear_storage() {
-        let storage = MemoryStorage::new_default();
+        let storage = MemoryStorage::default();
 
         // Create some files
         for i in 0..3 {

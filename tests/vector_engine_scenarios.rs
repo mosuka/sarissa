@@ -188,7 +188,7 @@ fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
 
 fn build_sample_engine() -> Result<VectorEngine> {
     let config = sample_engine_config();
-    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::default());
     let engine = VectorEngine::new(storage, config)?;
 
     for (doc_id, document) in sample_documents() {
@@ -227,6 +227,11 @@ fn sample_engine_config() -> VectorIndexConfig {
         fields,
         default_fields: vec!["title_embedding".into(), "body_embedding".into()],
         metadata: HashMap::new(),
+        default_distance: DistanceMetric::Cosine,
+        default_index_kind: VectorIndexKind::Flat,
+        default_vector_type: VectorType::Text,
+        default_base_weight: 1.0,
+        implicit_schema: false,
         embedder: Arc::new(NoOpEmbedder::new()),
     }
 }
@@ -332,7 +337,7 @@ fn build_payload_engine() -> Result<VectorEngine> {
         .embedder(per_field_embedder)
         .build()?;
 
-    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::default());
     let engine = VectorEngine::new(storage, config)?;
     Ok(engine)
 }
@@ -363,7 +368,7 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
         .embedder(per_field_embedder)
         .build()?;
 
-    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new_default());
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::default());
     let engine = VectorEngine::new(storage, config)?;
     Ok(engine)
 }
