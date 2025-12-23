@@ -31,6 +31,7 @@ use tempfile::{Builder, NamedTempFile};
 
 const DEMO_TEXT_DIM: usize = 4;
 const DEMO_IMAGE_DIM: usize = 3;
+const DEFAULT_MULTIMODAL_DIM: usize = 512; // CLIP-base projection dim
 const TEXT_FIELD: &str = "body_embedding";
 const IMAGE_FIELD: &str = "image_embedding";
 #[cfg(feature = "embeddings-multimodal")]
@@ -38,8 +39,8 @@ const DEFAULT_CANDLE_MODEL: &str = "openai/clip-vit-base-patch32";
 
 fn main() -> Result<()> {
     let embedder_choice = select_embedder()?;
-    let text_dim = embedder_choice.text_embedder.dimension();
-    let image_dim = embedder_choice.image_embedder.dimension();
+    let text_dim = embedder_choice.text_dim;
+    let image_dim = embedder_choice.image_dim;
 
     println!("1) Configure an in-memory VectorEngine with text and image fields\n");
     let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default())) as Arc<dyn Storage>;
@@ -140,6 +141,8 @@ fn main() -> Result<()> {
 struct EmbedderChoice {
     text_embedder: Arc<dyn Embedder>,
     image_embedder: Arc<dyn Embedder>,
+    text_dim: usize,
+    image_dim: usize,
     real_images: bool,
 }
 
@@ -159,6 +162,8 @@ fn select_embedder() -> Result<EmbedderChoice> {
             return Ok(EmbedderChoice {
                 text_embedder: embedder.clone(),
                 image_embedder: embedder,
+                text_dim: DEFAULT_MULTIMODAL_DIM,
+                image_dim: DEFAULT_MULTIMODAL_DIM,
                 real_images: true,
             });
         }
@@ -176,6 +181,8 @@ fn select_embedder() -> Result<EmbedderChoice> {
     Ok(EmbedderChoice {
         text_embedder,
         image_embedder,
+        text_dim: DEMO_TEXT_DIM,
+        image_dim: DEMO_IMAGE_DIM,
         real_images: false,
     })
 }
@@ -273,10 +280,6 @@ impl Embedder for DemoTextEmbedder {
         }
     }
 
-    fn dimension(&self) -> usize {
-        self.dim
-    }
-
     fn supported_input_types(&self) -> Vec<EmbedInputType> {
         vec![EmbedInputType::Text]
     }
@@ -332,10 +335,6 @@ impl Embedder for DemoImageEmbedder {
                 "DemoImageEmbedder only supports image input",
             )),
         }
-    }
-
-    fn dimension(&self) -> usize {
-        self.dim
     }
 
     fn supported_input_types(&self) -> Vec<EmbedInputType> {

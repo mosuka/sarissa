@@ -69,7 +69,6 @@ use crate::vector::core::vector::Vector;
 /// let img2 = embedder.embed(&EmbedInput::ImagePath("dog.jpg")).await?;
 ///
 /// // Text and images are in the same vector space
-/// println!("Dimension: {}", embedder.dimension());
 /// # Ok(())
 /// # }
 /// ```
@@ -491,15 +490,6 @@ impl Embedder for CandleMultimodalEmbedder {
                 "CandleMultimodalEmbedder does not support image URI input",
             )),
         }
-    }
-
-    /// Get the dimension of generated embeddings.
-    ///
-    /// Returns the projection dimension of the CLIP model, which is the
-    /// dimension of the shared text-image embedding space. This is the same
-    /// for both text and image embeddings.
-    fn dimension(&self) -> usize {
-        self.dimension
     }
 
     /// Get the supported input types.

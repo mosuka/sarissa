@@ -228,6 +228,7 @@ fn sample_engine_config() -> VectorIndexConfig {
         default_fields: vec!["title_embedding".into(), "body_embedding".into()],
         metadata: HashMap::new(),
         default_distance: DistanceMetric::Cosine,
+        default_dimension: None,
         default_index_kind: VectorIndexKind::Flat,
         default_vector_type: VectorType::Text,
         default_base_weight: 1.0,
@@ -402,10 +403,6 @@ impl Embedder for IntegrationTestEmbedder {
         }
     }
 
-    fn dimension(&self) -> usize {
-        self.dimension
-    }
-
     fn supported_input_types(&self) -> Vec<EmbedInputType> {
         vec![EmbedInputType::Text]
     }
@@ -455,10 +452,6 @@ impl Embedder for IntegrationMultimodalEmbedder {
                 Ok(self.vector_from_bytes(&bytes))
             }
         }
-    }
-
-    fn dimension(&self) -> usize {
-        self.dimension
     }
 
     fn supported_input_types(&self) -> Vec<EmbedInputType> {

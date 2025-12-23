@@ -174,11 +174,6 @@ pub enum EmbedInputType {
 ///             )),
 ///         }
 ///     }
-///
-///     fn dimension(&self) -> usize {
-///         self.dimension
-///     }
-///
 ///     fn supported_input_types(&self) -> Vec<EmbedInputType> {
 ///         vec![EmbedInputType::Text]
 ///     }
@@ -231,13 +226,6 @@ pub trait Embedder: Send + Sync + Debug {
         }
         Ok(results)
     }
-
-    /// Get the dimension of generated embeddings.
-    ///
-    /// # Returns
-    ///
-    /// The number of dimensions in the embedding vectors
-    fn dimension(&self) -> usize;
 
     /// Get the input types supported by this embedder.
     ///
@@ -360,10 +348,6 @@ mod tests {
             }
         }
 
-        fn dimension(&self) -> usize {
-            self.dimension
-        }
-
         fn supported_input_types(&self) -> Vec<EmbedInputType> {
             vec![EmbedInputType::Text]
         }
@@ -378,23 +362,15 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct MockMultimodalEmbedder {
-        dimension: usize,
-    }
+    struct MockMultimodalEmbedder;
 
     #[async_trait]
     impl Embedder for MockMultimodalEmbedder {
         async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
             match input {
-                EmbedInput::Text(_) | EmbedInput::ImagePath(_) => {
-                    Ok(Vector::new(vec![0.0; self.dimension]))
-                }
+                EmbedInput::Text(_) | EmbedInput::ImagePath(_) => Ok(Vector::new(vec![0.0; 3])),
                 _ => Err(PlatypusError::invalid_argument("unsupported input type")),
             }
-        }
-
-        fn dimension(&self) -> usize {
-            self.dimension
         }
 
         fn supported_input_types(&self) -> Vec<EmbedInputType> {
@@ -430,17 +406,15 @@ mod tests {
         assert!(embedder.supports_text());
         assert!(!embedder.supports_image());
         assert!(!embedder.is_multimodal());
-        assert_eq!(embedder.dimension(), 384);
     }
 
     #[test]
     fn test_multimodal_embedder_supports() {
-        let embedder = MockMultimodalEmbedder { dimension: 512 };
+        let embedder = MockMultimodalEmbedder;
 
         assert!(embedder.supports_text());
         assert!(embedder.supports_image());
         assert!(embedder.is_multimodal());
-        assert_eq!(embedder.dimension(), 512);
     }
 
     #[tokio::test]
@@ -459,7 +433,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multimodal_embedder_embed() {
-        let embedder = MockMultimodalEmbedder { dimension: 512 };
+        let embedder = MockMultimodalEmbedder;
 
         // Both text and image should work
         let text_result = embedder.embed(&EmbedInput::Text("hello")).await;

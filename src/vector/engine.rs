@@ -355,6 +355,7 @@ mod tests {
             default_fields: vec!["body".into()],
             metadata: HashMap::new(),
             default_distance: DistanceMetric::Cosine,
+            default_dimension: None,
             default_index_kind: VectorIndexKind::Flat,
             default_vector_type: VectorType::Text,
             default_base_weight: 1.0,

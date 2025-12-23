@@ -48,12 +48,12 @@ mod candle_vector_example {
         let candle_text_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(
             "sentence-transformers/all-MiniLM-L6-v2",
         )?);
-        let dimension = candle_text_embedder.dimension();
+        let dimension: usize = 384; // 明示指定（モデルの出力次元）
 
         // let title_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(TITLE_MODEL)?);
         // let body_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(BODY_MODEL)?);
-        // let title_dim = title_embedder.dimension();
-        // let body_dim = body_embedder.dimension();
+        // let title_dim = 384; // 各モデルの出力次元を明示指定
+        // let body_dim = 384;
 
         // Configure PerFieldEmbedder so each vector field can transparently use Candle embedders.
         let mut per_field_embedder = PerFieldEmbedder::new(Arc::clone(&candle_text_embedder));

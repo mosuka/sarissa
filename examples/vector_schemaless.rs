@@ -41,10 +41,12 @@ mod candle_schemaless_example {
         let embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(
             "sentence-transformers/all-MiniLM-L6-v2",
         )?);
+        let default_dimension: usize = 384; // 使用モデルの出力次元を明示
 
         // 2) Config: implicit schema ON, no field definitions.
         let config = VectorIndexConfig::builder()
             .implicit_schema(true)
+            .default_dimension(default_dimension)
             .default_distance(DistanceMetric::Cosine)
             .embedder_arc(embedder)
             .build()?;
