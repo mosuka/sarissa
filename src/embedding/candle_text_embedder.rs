@@ -52,7 +52,6 @@ use crate::vector::core::vector::Vector;
 ///
 /// // Generate embedding
 /// let vector = embedder.embed(&EmbedInput::Text("Rust is awesome!")).await?;
-/// println!("Embedding dimension: {}", embedder.dimension());
 ///
 /// // Batch processing
 /// let inputs = vec![EmbedInput::Text("Hello"), EmbedInput::Text("World")];
@@ -288,11 +287,6 @@ impl Embedder for CandleTextEmbedder {
                 "CandleTextEmbedder only supports text input",
             )),
         }
-    }
-
-    /// Get the dimension of generated embeddings.
-    fn dimension(&self) -> usize {
-        self.dim
     }
 
     /// Get the supported input types.

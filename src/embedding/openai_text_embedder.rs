@@ -81,7 +81,6 @@ struct EmbeddingData {
 ///
 /// // Generate embedding
 /// let vector = embedder.embed(&EmbedInput::Text("Rust is awesome!")).await?;
-/// println!("Embedding dimension: {}", embedder.dimension());
 ///
 /// // Batch processing (more efficient)
 /// let inputs = vec![EmbedInput::Text("Hello"), EmbedInput::Text("World")];
@@ -375,11 +374,6 @@ impl Embedder for OpenAITextEmbedder {
             .collect::<Result<Vec<_>>>()?;
 
         self.embed_text_batch(&texts).await
-    }
-
-    /// Get the dimension of generated embeddings.
-    fn dimension(&self) -> usize {
-        self.dimension
     }
 
     /// Get the supported input types.

@@ -194,15 +194,6 @@ impl PerFieldEmbedder {
         self.get_embedder(field).embed(input).await
     }
 
-    /// Get the embedding dimension for a specific field.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name
-    pub fn dimension(&self, field: &str) -> usize {
-        self.get_embedder(field).dimension()
-    }
-
     /// List all configured field names.
     pub fn configured_fields(&self) -> Vec<&str> {
         self.field_embedders.keys().map(|s| s.as_str()).collect()
@@ -231,14 +222,6 @@ impl Embedder for PerFieldEmbedder {
 
     async fn embed_batch(&self, inputs: &[EmbedInput<'_>]) -> Result<Vec<Vector>> {
         self.default_embedder.embed_batch(inputs).await
-    }
-
-    /// Returns the dimension of the default embedder.
-    ///
-    /// Note: Different fields may have different dimensions.
-    /// Use `dimension(field)` to get the dimension for a specific field.
-    fn dimension(&self) -> usize {
-        self.default_embedder.dimension()
     }
 
     /// Returns the supported input types of the default embedder.
@@ -275,10 +258,6 @@ mod tests {
             }
         }
 
-        fn dimension(&self) -> usize {
-            self.dim
-        }
-
         fn supported_input_types(&self) -> Vec<EmbedInputType> {
             vec![EmbedInputType::Text]
         }
@@ -292,8 +271,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_per_field_embedder() {
+    #[tokio::test]
+    async fn test_per_field_embedder() {
         let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
             name: "default".into(),
             dim: 384,
@@ -307,38 +286,44 @@ mod tests {
         per_field.add_embedder("title", Arc::clone(&title_embedder));
         per_field.add_embedder("description", title_embedder);
 
-        // Test that different fields use different embedders
-        assert_eq!(per_field.dimension("title"), 768);
-        assert_eq!(per_field.dimension("description"), 768);
-        assert_eq!(per_field.dimension("content"), 384); // Uses default
-        assert_eq!(per_field.dimension("unknown"), 384); // Uses default
+        let input = EmbedInput::Text("hello");
+        let title_vec = per_field.embed_field("title", &input).await.unwrap();
+        assert_eq!(title_vec.dimension(), 768);
+
+        let desc_vec = per_field.embed_field("description", &input).await.unwrap();
+        assert_eq!(desc_vec.dimension(), 768);
+
+        let content_vec = per_field.embed_field("content", &input).await.unwrap();
+        assert_eq!(content_vec.dimension(), 384);
     }
 
-    #[test]
-    fn test_default_embedder_when_field_not_configured() {
+    #[tokio::test]
+    async fn test_default_embedder_when_field_not_configured() {
         let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
             name: "default".into(),
             dim: 384,
         });
         let per_field = PerFieldEmbedder::new(default);
 
-        // Should use default for unconfigured fields
-        assert_eq!(per_field.dimension("unknown_field"), 384);
+        let input = EmbedInput::Text("hello");
+        let vec = per_field.embed_field("unknown_field", &input).await.unwrap();
+        assert_eq!(vec.dimension(), 384);
         assert_eq!(per_field.get_embedder("unknown_field").name(), "default");
     }
 
-    #[test]
-    fn test_as_embedder_trait() {
+    #[tokio::test]
+    async fn test_as_embedder_trait() {
         let default: Arc<dyn Embedder> = Arc::new(MockEmbedder {
             name: "default".into(),
             dim: 384,
         });
         let per_field = PerFieldEmbedder::new(default);
 
-        // When used as Embedder trait, should use default embedder
         let embedder: &dyn Embedder = &per_field;
-        assert_eq!(embedder.dimension(), 384);
         assert!(embedder.supports_text());
+
+        let vec = embedder.embed(&EmbedInput::Text("hello")).await.unwrap();
+        assert_eq!(vec.dimension(), 384);
     }
 
     #[tokio::test]

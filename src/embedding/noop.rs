@@ -31,7 +31,6 @@
 //! - [`NoOpEmbedder::embed()`] returns an error for any input
 //! - [`NoOpEmbedder::supports_text()`] always returns `false`
 //! - [`NoOpEmbedder::supports_image()`] always returns `false`
-//! - [`NoOpEmbedder::dimension()`] returns `0`
 //!
 //! If you attempt to embed text or images, an error will be returned.
 
@@ -59,7 +58,6 @@ use crate::vector::core::vector::Vector;
 /// let embedder: Arc<dyn Embedder> = Arc::new(NoOpEmbedder::new());
 /// assert!(!embedder.supports_text());
 /// assert!(!embedder.supports_image());
-/// assert_eq!(embedder.dimension(), 0);
 /// ```
 ///
 /// # When to Use
@@ -92,11 +90,6 @@ impl Embedder for NoOpEmbedder {
         Err(PlatypusError::invalid_argument(
             "NoOpEmbedder does not support embedding - use pre-computed vectors",
         ))
-    }
-
-    /// Returns `0` as this embedder has no defined dimension.
-    fn dimension(&self) -> usize {
-        0
     }
 
     /// Returns an empty list as this embedder does not support any input types.
@@ -137,12 +130,6 @@ mod tests {
     }
 
     #[test]
-    fn test_default() {
-        let embedder = NoOpEmbedder::default();
-        assert_eq!(embedder.dimension(), 0);
-    }
-
-    #[test]
     fn test_supports_text() {
         let embedder = NoOpEmbedder::new();
         assert!(!embedder.supports_text());
@@ -152,12 +139,6 @@ mod tests {
     fn test_supports_image() {
         let embedder = NoOpEmbedder::new();
         assert!(!embedder.supports_image());
-    }
-
-    #[test]
-    fn test_dimension() {
-        let embedder = NoOpEmbedder::new();
-        assert_eq!(embedder.dimension(), 0);
     }
 
     #[test]
@@ -215,6 +196,5 @@ mod tests {
         let embedder: Arc<dyn Embedder> = Arc::new(NoOpEmbedder::new());
         assert!(!embedder.supports_text());
         assert!(!embedder.supports_image());
-        assert_eq!(embedder.dimension(), 0);
     }
 }

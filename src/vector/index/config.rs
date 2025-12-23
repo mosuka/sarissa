@@ -312,10 +312,6 @@ fn default_embedder() -> Arc<dyn Embedder> {
             Ok(Vector::new(vec![0.0; 384]))
         }
 
-        fn dimension(&self) -> usize {
-            384
-        }
-
         fn supported_input_types(&self) -> Vec<EmbedInputType> {
             vec![EmbedInputType::Text]
         }

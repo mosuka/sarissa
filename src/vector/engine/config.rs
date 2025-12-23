@@ -25,6 +25,7 @@
 //!
 //! let config = VectorIndexConfig::builder()
 //!     .embedder(embedder)
+//!     .text_field("title", 384)
 //!     .build()?;
 //! # Ok(())
 //! # }
@@ -64,21 +65,12 @@ use crate::vector::core::document::VectorType;
 /// let text_embedder: Arc<dyn Embedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
-/// let dim = text_embedder.dimension();
 ///
 /// let embedder = PerFieldEmbedder::new(text_embedder);
 ///
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
-///     .field("content_embedding", VectorFieldConfig {
-///         dimension: dim,
-///         distance: DistanceMetric::Cosine,
-///         index: VectorIndexKind::Flat,
-///         source_tag: "content_embedding".to_string(),
-///         vector_type: VectorType::Text,
-///         base_weight: 1.0,
-///     })
-///     .default_field("content_embedding")
+///     .text_field("title", 384)
 ///     .build()?;
 /// # Ok(())
 /// # }
@@ -97,6 +89,10 @@ pub struct VectorIndexConfig {
 
     /// Default distance metric when auto-generating fields.
     pub default_distance: DistanceMetric,
+
+    /// Default dimension when auto-generating fields (implicit schema).
+    /// Must be set when `implicit_schema` is true.
+    pub default_dimension: Option<usize>,
 
     /// Default index kind when auto-generating fields.
     pub default_index_kind: VectorIndexKind,
@@ -125,6 +121,7 @@ impl std::fmt::Debug for VectorIndexConfig {
             .field("default_fields", &self.default_fields)
             .field("metadata", &self.metadata)
             .field("default_distance", &self.default_distance)
+            .field("default_dimension", &self.default_dimension)
             .field("default_index_kind", &self.default_index_kind)
             .field("default_vector_type", &self.default_vector_type)
             .field("default_base_weight", &self.default_base_weight)
@@ -147,6 +144,17 @@ impl VectorIndexConfig {
                 return Err(PlatypusError::invalid_config(format!(
                     "default field '{field}' is not defined"
                 )));
+            }
+        }
+
+        if self.implicit_schema {
+            let dim = self.default_dimension.ok_or_else(|| {
+                PlatypusError::invalid_config("implicit_schema requires default_dimension")
+            })?;
+            if dim == 0 {
+                return Err(PlatypusError::invalid_config(
+                    "default_dimension must be greater than zero when implicit_schema is enabled",
+                ));
             }
         }
         Ok(())
@@ -179,14 +187,13 @@ impl VectorIndexConfig {
 /// let text_embedder: Arc<dyn Embedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
-/// let dim = text_embedder.dimension();
 ///
 /// let embedder = PerFieldEmbedder::new(text_embedder);
 ///
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
 ///     .field("content_embedding", VectorFieldConfig {
-///         dimension: dim,
+///         dimension: 384,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
 ///         source_tag: "content_embedding".to_string(),
@@ -205,6 +212,7 @@ pub struct VectorIndexConfigBuilder {
     metadata: HashMap<String, serde_json::Value>,
     embedder: Option<Arc<dyn Embedder>>,
     default_distance: DistanceMetric,
+    default_dimension: Option<usize>,
     default_index_kind: VectorIndexKind,
     default_vector_type: VectorType,
     default_base_weight: f32,
@@ -220,6 +228,7 @@ impl VectorIndexConfigBuilder {
             metadata: HashMap::new(),
             embedder: None,
             default_distance: DistanceMetric::Cosine,
+            default_dimension: None,
             default_index_kind: VectorIndexKind::Flat,
             default_vector_type: VectorType::Text,
             default_base_weight: VectorFieldConfig::default_weight(),
@@ -255,9 +264,8 @@ impl VectorIndexConfigBuilder {
     ///
     /// The dimension will be inferred from the embedder if available.
     /// For PerFieldEmbedder, the field-specific embedder will be used.
-    pub fn text_field(mut self, name: impl Into<String>) -> Result<Self> {
+    pub fn text_field(mut self, name: impl Into<String>, dimension: usize) -> Result<Self> {
         let name = name.into();
-        let dimension = self.get_field_dimension(&name)?;
 
         let config = VectorFieldConfig {
             dimension,
@@ -279,9 +287,8 @@ impl VectorIndexConfigBuilder {
     ///
     /// The dimension will be inferred from the embedder if available.
     /// For PerFieldEmbedder, the field-specific embedder will be used.
-    pub fn image_field(mut self, name: impl Into<String>) -> Result<Self> {
+    pub fn image_field(mut self, name: impl Into<String>, dimension: usize) -> Result<Self> {
         let name = name.into();
-        let dimension = self.get_field_dimension(&name)?;
 
         let config = VectorFieldConfig {
             dimension,
@@ -297,43 +304,6 @@ impl VectorIndexConfigBuilder {
         }
         self.fields.insert(name, config);
         Ok(self)
-    }
-
-    /// Get the dimension for a specific field from the embedder.
-    ///
-    /// If the embedder is a PerFieldEmbedder, it will try to get the
-    /// field-specific embedder's dimension. Otherwise, it uses the
-    /// default embedder's dimension.
-    fn get_field_dimension(&self, field_name: &str) -> Result<usize> {
-        let embedder = self.embedder.as_ref().ok_or_else(|| {
-            PlatypusError::invalid_config(format!(
-                "cannot infer dimension for field '{}': no embedder configured",
-                field_name
-            ))
-        })?;
-
-        // Try to downcast to PerFieldEmbedder for field-specific dimensions
-        if let Some(per_field) = embedder.as_any().downcast_ref::<PerFieldEmbedder>() {
-            let field_embedder = per_field.get_embedder(field_name);
-            let dim = field_embedder.dimension();
-            if dim == 0 {
-                return Err(PlatypusError::invalid_config(format!(
-                    "cannot infer dimension for field '{}': embedder returned dimension 0",
-                    field_name
-                )));
-            }
-            Ok(dim)
-        } else {
-            // Use the embedder's dimension directly
-            let dim = embedder.dimension();
-            if dim == 0 {
-                return Err(PlatypusError::invalid_config(format!(
-                    "cannot infer dimension for field '{}': embedder returned dimension 0",
-                    field_name
-                )));
-            }
-            Ok(dim)
-        }
     }
 
     /// Add a default field for search.
@@ -360,6 +330,12 @@ impl VectorIndexConfigBuilder {
     /// Set default distance for implicit field generation.
     pub fn default_distance(mut self, distance: DistanceMetric) -> Self {
         self.default_distance = distance;
+        self
+    }
+
+    /// Set default dimension for implicit field generation.
+    pub fn default_dimension(mut self, dimension: usize) -> Self {
+        self.default_dimension = Some(dimension);
         self
     }
 
@@ -400,6 +376,7 @@ impl VectorIndexConfigBuilder {
             default_fields: self.default_fields,
             metadata: self.metadata,
             default_distance: self.default_distance,
+            default_dimension: self.default_dimension,
             default_index_kind: self.default_index_kind,
             default_vector_type: self.default_vector_type,
             default_base_weight: self.default_base_weight,
@@ -425,11 +402,12 @@ impl Serialize for VectorIndexConfig {
     {
         use serde::ser::SerializeStruct;
 
-        let mut state = serializer.serialize_struct("VectorIndexConfig", 8)?;
+        let mut state = serializer.serialize_struct("VectorIndexConfig", 9)?;
         state.serialize_field("fields", &self.fields)?;
         state.serialize_field("default_fields", &self.default_fields)?;
         state.serialize_field("metadata", &self.metadata)?;
         state.serialize_field("default_distance", &self.default_distance)?;
+        state.serialize_field("default_dimension", &self.default_dimension)?;
         state.serialize_field("default_index_kind", &self.default_index_kind)?;
         state.serialize_field("default_vector_type", &self.default_vector_type)?;
         state.serialize_field("default_base_weight", &self.default_base_weight)?;
@@ -452,6 +430,8 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             metadata: HashMap<String, serde_json::Value>,
             #[serde(default = "default_distance_metric")]
             default_distance: DistanceMetric,
+            #[serde(default)]
+            default_dimension: Option<usize>,
             #[serde(default = "default_index_kind")]
             default_index_kind: VectorIndexKind,
             #[serde(default = "default_vector_type")]
@@ -468,6 +448,7 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             default_fields: helper.default_fields,
             metadata: helper.metadata,
             default_distance: helper.default_distance,
+            default_dimension: helper.default_dimension,
             default_index_kind: helper.default_index_kind,
             default_vector_type: helper.default_vector_type,
             default_base_weight: helper.default_base_weight,
