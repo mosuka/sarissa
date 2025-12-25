@@ -27,7 +27,7 @@ async fn main() -> platypus::error::Result<()> {
 
     println!("Model loaded successfully!");
     println!("Model name: {}", embedder.name());
-    println!("Embedding dimension: {}\n", embedder.dimension());
+    println!();
 
     // Example 1: Single text embedding
     println!("--- Example 1: Single Text Embedding ---");

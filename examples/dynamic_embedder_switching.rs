@@ -59,7 +59,6 @@ async fn main() -> platypus::error::Result<()> {
     println!("--- Processing with Different Embedders ---\n");
     for embedder in &embedders {
         println!("Using embedder: {}", embedder.name());
-        println!("Dimension: {}", embedder.dimension());
 
         for text in &test_texts {
             let vector = embedder.embed(&EmbedInput::Text(text)).await?;
