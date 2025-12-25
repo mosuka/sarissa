@@ -252,12 +252,11 @@ impl VectorCollection {
             PayloadSource::Text { .. }
             | PayloadSource::Bytes { .. }
             | PayloadSource::Uri { .. } => {
-                let dim = self
-                    .config
-                    .default_dimension
-                    .ok_or_else(|| PlatypusError::invalid_config(
+                let dim = self.config.default_dimension.ok_or_else(|| {
+                    PlatypusError::invalid_config(
                         "implicit schema requires default_dimension to be set",
-                    ))?;
+                    )
+                })?;
                 (dim, field_name.to_string())
             }
             PayloadSource::Vector { data, source_tag } => (data.len(), source_tag.clone()),
@@ -277,15 +276,6 @@ impl VectorCollection {
             vector_type,
             base_weight: self.config.default_base_weight,
         })
-    }
-
-    fn resolve_embedder_for_field(&self, field_name: &str) -> Arc<dyn Embedder> {
-        let embedder = self.config.embedder.clone();
-        if let Some(per_field) = embedder.as_any().downcast_ref::<PerFieldEmbedder>() {
-            per_field.get_embedder(field_name).clone()
-        } else {
-            embedder
-        }
     }
 
     fn register_embedder_for_field(

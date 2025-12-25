@@ -309,7 +309,8 @@ platypus = { version = "0.1", features = ["embeddings-candle"] }
 
 ```rust
 use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-use platypus::embedding::text_embedder::TextEmbedder;
+use platypus::embedding::embedder::EmbedInput;
+use platypus::embedding::noop::NoOpEmbedder;
 use platypus::vector::engine::request::{QueryVector, VectorSearchRequest};
 use platypus::vector::core::document::{DocumentVector, StoredVector, VectorType};
 use platypus::vector::engine::VectorEngine;
@@ -324,21 +325,20 @@ async fn main() -> platypus::error::Result<()> {
     // Initialize embedder with a sentence-transformers model
     let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
 
-    // Create vector engine configuration
+    // Create vector engine configuration (MiniLM-L6-v2 outputs 384-dim)
     let field_config = VectorFieldConfig {
-        dimension: embedder.dimension(),
+        dimension: 384,
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
         source_tag: "candle".into(),
         vector_type: VectorType::Text,
         base_weight: 1.0,
     };
-    let config = VectorIndexConfig {
-        fields: HashMap::from([("body".into(), field_config)]),
-        default_fields: vec!["body".into()],
-        metadata: HashMap::new(),
-        embedder: Arc::new(platypus::embedding::noop::NoOpEmbedder::new()),
-    };
+    let config = VectorIndexConfig::builder()
+        .embedder(NoOpEmbedder::new())
+        .field("body", field_config)
+        .default_field("body")
+        .build()?;
 
     // Create storage and engine
     let storage: Arc<dyn platypus::storage::Storage> =
@@ -354,27 +354,25 @@ async fn main() -> platypus::error::Result<()> {
 
     // Add documents with their embeddings (1 field = 1 vector)
     for text in &documents {
-        let vector = embedder.embed(text).await?;
-        let mut doc = DocumentVector::new();
-        doc.set_field(
-            "body",
-            StoredVector::new(
-                Arc::from(vector.as_slice()),
-                "candle".into(),
-                VectorType::Text,
-            ),
+        let vector = embedder.embed(&EmbedInput::Text(text)).await?;
+        let stored = StoredVector::new(
+            Arc::from(vector.data.clone()),
+            "candle".into(),
+            VectorType::Text,
         );
+        let mut doc = DocumentVector::new();
+        doc.set_field("body", stored);
         engine.add_vectors(doc)?;
     }
     engine.commit()?;
 
     // Search with query embedding
-    let query_vector = embedder.embed("programming languages").await?;
+    let query_vector = embedder.embed(&EmbedInput::Text("programming languages")).await?;
     let mut query = VectorSearchRequest::default();
     query.limit = 10;
     query.query_vectors.push(QueryVector {
         vector: StoredVector::new(
-            Arc::from(query_vector.as_slice()),
+            Arc::from(query_vector.data.clone()),
             "candle".into(),
             VectorType::Text,
         ),
@@ -539,8 +537,8 @@ platypus = { version = "0.1", features = ["embeddings-multimodal"] }
 
 ```rust
 use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-use platypus::embedding::text_embedder::TextEmbedder;
-use platypus::embedding::image_embedder::ImageEmbedder;
+use platypus::embedding::embedder::EmbedInput;
+use platypus::embedding::noop::NoOpEmbedder;
 use platypus::vector::engine::request::{QueryVector, VectorSearchRequest};
 use platypus::vector::core::document::{DocumentVector, StoredVector, VectorType};
 use platypus::vector::engine::VectorEngine;
@@ -557,19 +555,18 @@ async fn main() -> platypus::error::Result<()> {
 
     // Create vector engine configuration with CLIP's embedding dimension (512)
     let field_config = VectorFieldConfig {
-        dimension: ImageEmbedder::dimension(&embedder), // 512 for CLIP ViT-Base-Patch32
+        dimension: 512,
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Hnsw,
         source_tag: "clip".into(),
         vector_type: VectorType::Image,
         base_weight: 1.0,
     };
-    let config = VectorIndexConfig {
-        fields: HashMap::from([("image".into(), field_config)]),
-        default_fields: vec!["image".into()],
-        metadata: HashMap::new(),
-        embedder: Arc::new(platypus::embedding::noop::NoOpEmbedder::new()),
-    };
+    let config = VectorIndexConfig::builder()
+        .embedder(NoOpEmbedder::new())
+        .field("image", field_config)
+        .default_field("image")
+        .build()?;
 
     let storage: Arc<dyn platypus::storage::Storage> =
         Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
@@ -578,27 +575,27 @@ async fn main() -> platypus::error::Result<()> {
     // Index your image collection (1 field = 1 vector)
     let image_paths = vec!["image1.jpg", "image2.jpg", "image3.jpg"];
     for image_path in &image_paths {
-        let vector = embedder.embed_image(image_path).await?;
-        let mut doc = DocumentVector::new();
-        doc.set_field(
-            "image",
-            StoredVector::new(
-                Arc::from(vector.as_slice()),
-                "clip".into(),
-                VectorType::Image,
-            ),
+        let vector = embedder.embed(&EmbedInput::ImagePath(image_path)).await?;
+        let stored = StoredVector::new(
+            Arc::from(vector.data.clone()),
+            "clip".into(),
+            VectorType::Image,
         );
+        let mut doc = DocumentVector::new();
+        doc.set_field("image", stored);
         engine.add_vectors(doc)?;
     }
     engine.commit()?;
 
     // Search images using natural language
-    let query_vector = embedder.embed("a photo of a cat playing").await?;
+    let query_vector = embedder
+        .embed(&EmbedInput::Text("a photo of a cat playing"))
+        .await?;
     let mut query = VectorSearchRequest::default();
     query.limit = 10;
     query.query_vectors.push(QueryVector {
         vector: StoredVector::new(
-            Arc::from(query_vector.as_slice()),
+            Arc::from(query_vector.data.clone()),
             "clip".into(),
             VectorType::Text,
         ),

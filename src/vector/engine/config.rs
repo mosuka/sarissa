@@ -25,7 +25,7 @@
 //!
 //! let config = VectorIndexConfig::builder()
 //!     .embedder(embedder)
-//!     .text_field("title", 384)
+//!     .text_field("title", 384)?
 //!     .build()?;
 //! # Ok(())
 //! # }
@@ -39,7 +39,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::embedding::embedder::Embedder;
 use crate::embedding::noop::NoOpEmbedder;
-use crate::embedding::per_field::PerFieldEmbedder;
 use crate::error::{PlatypusError, Result};
 use crate::vector::DistanceMetric;
 use crate::vector::core::document::VectorType;
@@ -70,7 +69,7 @@ use crate::vector::core::document::VectorType;
 ///
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
-///     .text_field("title", 384)
+///     .text_field("title", 384)?
 ///     .build()?;
 /// # Ok(())
 /// # }
