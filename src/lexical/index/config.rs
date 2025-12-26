@@ -8,9 +8,9 @@
 //! with an `Analyzer`, similar to how `Embedder` is used in `VectorEngine`.
 //!
 //! ```no_run
-//! use platypus::lexical::index::config::LexicalIndexConfig;
-//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
-//! use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+//! use sarissa::lexical::index::config::LexicalIndexConfig;
+//! use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+//! use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
 //! use std::sync::Arc;
 //!
 //! // Simple configuration with default analyzer
@@ -63,7 +63,7 @@ use crate::analysis::analyzer::standard::StandardAnalyzer;
 /// # Example
 ///
 /// ```no_run
-/// use platypus::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
+/// use sarissa::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
 ///
 /// // Use default inverted index
 /// let config = LexicalIndexConfig::default();
@@ -99,8 +99,8 @@ impl LexicalIndexConfig {
     /// # Example
     ///
     /// ```no_run
-    /// use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
+    /// use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
     /// use std::sync::Arc;
     ///
     /// let config = LexicalIndexConfig::builder()
@@ -227,9 +227,9 @@ impl std::fmt::Debug for InvertedIndexConfig {
 /// # Example
 ///
 /// ```no_run
-/// use platypus::lexical::index::config::LexicalIndexConfig;
-/// use platypus::analysis::analyzer::standard::StandardAnalyzer;
-/// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use sarissa::lexical::index::config::LexicalIndexConfig;
+/// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+/// use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
 /// use std::sync::Arc;
 ///
 /// // Simple usage with defaults
@@ -275,9 +275,9 @@ impl LexicalIndexConfigBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
-    /// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
+    /// use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+    /// use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
     /// use std::sync::Arc;
     ///
     /// // With a single analyzer

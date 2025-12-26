@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "embeddings-openai")]
 use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 #[cfg(feature = "embeddings-openai")]
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 #[cfg(feature = "embeddings-openai")]
 use crate::vector::core::vector::Vector;
 
@@ -69,10 +69,10 @@ struct EmbeddingData {
 /// # Examples
 ///
 /// ```no_run
-/// use platypus::embedding::embedder::{Embedder, EmbedInput};
-/// use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
+/// use sarissa::embedding::embedder::{Embedder, EmbedInput};
+/// use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
 ///
-/// # async fn example() -> platypus::error::Result<()> {
+/// # async fn example() -> sarissa::error::Result<()> {
 /// // Create embedder with API key
 /// let embedder = OpenAITextEmbedder::new(
 ///     std::env::var("OPENAI_API_KEY").unwrap(),
@@ -136,9 +136,9 @@ impl OpenAITextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
+    /// use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
     ///
-    /// # fn example() -> platypus::error::Result<()> {
+    /// # fn example() -> sarissa::error::Result<()> {
     /// // Small model (recommended for most use cases)
     /// let embedder = OpenAITextEmbedder::new(
     ///     "sk-...".to_string(),
@@ -158,7 +158,7 @@ impl OpenAITextEmbedder {
         match model.as_str() {
             "text-embedding-3-small" | "text-embedding-3-large" | "text-embedding-ada-002" => {}
             _ => {
-                return Err(PlatypusError::InvalidOperation(format!(
+                return Err(SarissaError::InvalidOperation(format!(
                     "Unknown OpenAI embedding model: {}. Supported models: \
                      text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002",
                     model
@@ -189,9 +189,9 @@ impl OpenAITextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
+    /// use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
     ///
-    /// # fn example() -> platypus::error::Result<()> {
+    /// # fn example() -> sarissa::error::Result<()> {
     /// // Use smaller dimension for cost savings
     /// let embedder = OpenAITextEmbedder::with_dimension(
     ///     "sk-...".to_string(),
@@ -253,23 +253,23 @@ impl OpenAITextEmbedder {
             .send()
             .await
             .map_err(|e| {
-                PlatypusError::InvalidOperation(format!("OpenAI API request failed: {}", e))
+                SarissaError::InvalidOperation(format!("OpenAI API request failed: {}", e))
             })?;
 
         let status = http_response.status();
         let response_text = http_response.text().await.map_err(|e| {
-            PlatypusError::InvalidOperation(format!("Failed to read response text: {}", e))
+            SarissaError::InvalidOperation(format!("Failed to read response text: {}", e))
         })?;
 
         if !status.is_success() {
-            return Err(PlatypusError::InvalidOperation(format!(
+            return Err(SarissaError::InvalidOperation(format!(
                 "OpenAI API error (status {}): {}",
                 status, response_text
             )));
         }
 
         let response: EmbeddingResponse = serde_json::from_str(&response_text).map_err(|e| {
-            PlatypusError::InvalidOperation(format!(
+            SarissaError::InvalidOperation(format!(
                 "Failed to parse OpenAI response: {}. Response text: {}",
                 e, response_text
             ))
@@ -279,7 +279,7 @@ impl OpenAITextEmbedder {
             .data
             .into_iter()
             .next()
-            .ok_or_else(|| PlatypusError::InvalidOperation("No embedding in response".to_string()))?
+            .ok_or_else(|| SarissaError::InvalidOperation("No embedding in response".to_string()))?
             .embedding;
 
         Ok(Vector::new(embedding))
@@ -312,23 +312,23 @@ impl OpenAITextEmbedder {
             .send()
             .await
             .map_err(|e| {
-                PlatypusError::InvalidOperation(format!("OpenAI API request failed: {}", e))
+                SarissaError::InvalidOperation(format!("OpenAI API request failed: {}", e))
             })?;
 
         let status = http_response.status();
         let response_text = http_response.text().await.map_err(|e| {
-            PlatypusError::InvalidOperation(format!("Failed to read response text: {}", e))
+            SarissaError::InvalidOperation(format!("Failed to read response text: {}", e))
         })?;
 
         if !status.is_success() {
-            return Err(PlatypusError::InvalidOperation(format!(
+            return Err(SarissaError::InvalidOperation(format!(
                 "OpenAI API error (status {}): {}",
                 status, response_text
             )));
         }
 
         let response: EmbeddingResponse = serde_json::from_str(&response_text).map_err(|e| {
-            PlatypusError::InvalidOperation(format!(
+            SarissaError::InvalidOperation(format!(
                 "Failed to parse OpenAI response: {}. Response text: {}",
                 e, response_text
             ))
@@ -351,7 +351,7 @@ impl Embedder for OpenAITextEmbedder {
     async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
         match input {
             EmbedInput::Text(text) => self.embed_text(text).await,
-            _ => Err(PlatypusError::invalid_argument(
+            _ => Err(SarissaError::invalid_argument(
                 "OpenAITextEmbedder only supports text input",
             )),
         }
@@ -367,7 +367,7 @@ impl Embedder for OpenAITextEmbedder {
             .iter()
             .map(|input| match input {
                 EmbedInput::Text(text) => Ok(*text),
-                _ => Err(PlatypusError::invalid_argument(
+                _ => Err(SarissaError::invalid_argument(
                     "OpenAITextEmbedder only supports text input",
                 )),
             })

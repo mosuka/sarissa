@@ -7,9 +7,9 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::token_filter::Filter;
-//! use platypus::analysis::token_filter::lowercase::LowercaseFilter;
-//! use platypus::analysis::token::Token;
+//! use sarissa::analysis::token_filter::Filter;
+//! use sarissa::analysis::token_filter::lowercase::LowercaseFilter;
+//! use sarissa::analysis::token::Token;
 //!
 //! let filter = LowercaseFilter::new();
 //! let tokens = vec![Token::new("Hello", 0), Token::new("WORLD", 1)];
@@ -42,9 +42,9 @@ use crate::util::simd;
 /// # Examples
 ///
 /// ```
-/// use platypus::analysis::token_filter::Filter;
-/// use platypus::analysis::token_filter::lowercase::LowercaseFilter;
-/// use platypus::analysis::token::Token;
+/// use sarissa::analysis::token_filter::Filter;
+/// use sarissa::analysis::token_filter::lowercase::LowercaseFilter;
+/// use sarissa::analysis::token::Token;
 ///
 /// let filter = LowercaseFilter::new();
 /// let tokens = vec![

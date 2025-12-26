@@ -16,12 +16,12 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use platypus::document::document::Document;
-//! use platypus::document::field::TextOption;
-//! use platypus::lexical::engine::LexicalEngine;
-//! use platypus::lexical::index::config::LexicalIndexConfig;
-//! use platypus::lexical::search::searcher::LexicalSearchRequest;
-//! use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+//! use sarissa::document::document::Document;
+//! use sarissa::document::field::TextOption;
+//! use sarissa::lexical::engine::LexicalEngine;
+//! use sarissa::lexical::index::config::LexicalIndexConfig;
+//! use sarissa::lexical::search::searcher::LexicalSearchRequest;
+//! use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 //! use std::sync::Arc;
 //!
 //! // Create storage
@@ -79,11 +79,11 @@ use crate::storage::Storage;
 /// # Usage Example
 ///
 /// ```rust,no_run
-/// use platypus::document::document::Document;
-/// use platypus::lexical::engine::LexicalEngine;
-/// use platypus::lexical::index::config::LexicalIndexConfig;
-/// use platypus::lexical::search::searcher::LexicalSearchRequest;
-/// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+/// use sarissa::document::document::Document;
+/// use sarissa::lexical::engine::LexicalEngine;
+/// use sarissa::lexical::index::config::LexicalIndexConfig;
+/// use sarissa::lexical::search::searcher::LexicalSearchRequest;
+/// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use std::sync::Arc;
 ///
 /// // Create storage and engine
@@ -92,7 +92,7 @@ use crate::storage::Storage;
 /// let engine = LexicalEngine::new(storage, config).unwrap();
 ///
 /// // Add documents
-/// use platypus::document::field::TextOption;
+/// use sarissa::document::field::TextOption;
 /// let doc = Document::builder()
 ///     .add_text("title", "Rust Programming", TextOption::default())
 ///     .build();
@@ -134,10 +134,10 @@ impl LexicalEngine {
     /// # Example with Memory Storage
     ///
     /// ```rust,no_run
-    /// use platypus::lexical::engine::LexicalEngine;
-    /// use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::storage::{Storage, StorageConfig, StorageFactory};
-    /// use platypus::storage::memory::MemoryStorageConfig;
+    /// use sarissa::lexical::engine::LexicalEngine;
+    /// use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// use sarissa::storage::{Storage, StorageConfig, StorageFactory};
+    /// use sarissa::storage::memory::MemoryStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
@@ -148,10 +148,10 @@ impl LexicalEngine {
     /// # Example with File Storage
     ///
     /// ```rust,no_run
-    /// use platypus::lexical::engine::LexicalEngine;
-    /// use platypus::lexical::index::config::LexicalIndexConfig;
-    /// use platypus::storage::{Storage, StorageConfig, StorageFactory};
-    /// use platypus::storage::file::FileStorageConfig;
+    /// use sarissa::lexical::engine::LexicalEngine;
+    /// use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// use sarissa::storage::{Storage, StorageConfig, StorageFactory};
+    /// use sarissa::storage::file::FileStorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
@@ -183,17 +183,17 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use platypus::document::document::Document;
-    /// # use platypus::lexical::engine::LexicalEngine;
-    /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// # use platypus::storage::{StorageConfig, StorageFactory};
-    /// use platypus::storage::memory::MemoryStorageConfig;
+    /// use sarissa::document::document::Document;
+    /// # use sarissa::lexical::engine::LexicalEngine;
+    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::storage::{StorageConfig, StorageFactory};
+    /// use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
-    /// use platypus::document::field::TextOption;
+    /// use sarissa::document::field::TextOption;
     /// let doc = Document::builder()
     ///     .add_text("title", "Hello World", TextOption::default())
     ///     .add_text("body", "This is a test", TextOption::default())
@@ -244,18 +244,18 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use platypus::document::document::Document;
-    /// # use platypus::lexical::engine::LexicalEngine;
-    /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// # use platypus::storage::{StorageConfig, StorageFactory};
-    /// use platypus::storage::memory::MemoryStorageConfig;
+    /// use sarissa::document::document::Document;
+    /// # use sarissa::lexical::engine::LexicalEngine;
+    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::storage::{StorageConfig, StorageFactory};
+    /// use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// // Add multiple documents
-    /// use platypus::document::field::TextOption;
+    /// use sarissa::document::field::TextOption;
     /// for i in 0..10 {
     ///     let doc = Document::builder()
     ///         .add_text("id", &i.to_string(), TextOption::default())
@@ -290,18 +290,18 @@ impl LexicalEngine {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use platypus::document::document::Document;
-    /// # use platypus::lexical::engine::LexicalEngine;
-    /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// # use platypus::storage::{StorageConfig, StorageFactory};
-    /// use platypus::storage::memory::MemoryStorageConfig;
+    /// use sarissa::document::document::Document;
+    /// # use sarissa::lexical::engine::LexicalEngine;
+    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::storage::{StorageConfig, StorageFactory};
+    /// use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let mut engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     ///
     /// // Add and commit many documents
-    /// use platypus::document::field::TextOption;
+    /// use sarissa::document::field::TextOption;
     /// for i in 0..1000 {
     ///     let doc = Document::builder()
     ///         .add_text("id", &i.to_string(), TextOption::default())
@@ -348,18 +348,18 @@ impl LexicalEngine {
     /// # Example with TermQuery
     ///
     /// ```rust,no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::lexical::search::searcher::LexicalSearchRequest;
-    /// use platypus::lexical::index::inverted::query::term::TermQuery;
-    /// # use platypus::lexical::engine::LexicalEngine;
-    /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// # use platypus::storage::{StorageConfig, StorageFactory};
-    /// use platypus::storage::memory::MemoryStorageConfig;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::lexical::search::searcher::LexicalSearchRequest;
+    /// use sarissa::lexical::index::inverted::query::term::TermQuery;
+    /// # use sarissa::lexical::engine::LexicalEngine;
+    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::storage::{StorageConfig, StorageFactory};
+    /// use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
     /// # let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
-    /// # use platypus::document::field::TextOption;
+    /// # use sarissa::document::field::TextOption;
     /// # let doc = Document::builder().add_text("title", "hello world", TextOption::default()).build();
     /// # engine.add_document(doc).unwrap();
     /// # engine.commit().unwrap();
@@ -379,14 +379,14 @@ impl LexicalEngine {
     /// # Example with QueryParser
     ///
     /// ```rust,no_run
-    /// use platypus::lexical::index::inverted::query::parser::QueryParser;
-    /// use platypus::lexical::search::searcher::LexicalSearchRequest;
-    /// # use platypus::document::document::Document;
-    /// # use platypus::lexical::engine::LexicalEngine;
-    /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// # use platypus::storage::{StorageConfig, StorageFactory};
-    /// use platypus::storage::memory::MemoryStorageConfig;
-    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
+    /// use sarissa::lexical::index::inverted::query::parser::QueryParser;
+    /// use sarissa::lexical::search::searcher::LexicalSearchRequest;
+    /// # use sarissa::document::document::Document;
+    /// # use sarissa::lexical::engine::LexicalEngine;
+    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::storage::{StorageConfig, StorageFactory};
+    /// use sarissa::storage::memory::MemoryStorageConfig;
+    /// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
     /// # use std::sync::Arc;
     /// # let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// # let storage = StorageFactory::create(storage_config).unwrap();
@@ -415,11 +415,11 @@ impl LexicalEngine {
     /// # Examples
     ///
     /// ```no_run
-    /// # use platypus::lexical::engine::LexicalEngine;
-    /// # use platypus::lexical::index::config::LexicalIndexConfig;
-    /// # use platypus::lexical::search::searcher::LexicalSearchRequest;
-    /// # use platypus::storage::memory::MemoryStorage;
-    /// # use platypus::storage::memory::MemoryStorageConfig;
+    /// # use sarissa::lexical::engine::LexicalEngine;
+    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::lexical::search::searcher::LexicalSearchRequest;
+    /// # use sarissa::storage::memory::MemoryStorage;
+    /// # use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
     /// # let config = LexicalIndexConfig::default();
     /// # let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));

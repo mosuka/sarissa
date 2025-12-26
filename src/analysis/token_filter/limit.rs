@@ -7,9 +7,9 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::token_filter::Filter;
-//! use platypus::analysis::token_filter::limit::LimitFilter;
-//! use platypus::analysis::token::Token;
+//! use sarissa::analysis::token_filter::Filter;
+//! use sarissa::analysis::token_filter::limit::LimitFilter;
+//! use sarissa::analysis::token::Token;
 //!
 //! let filter = LimitFilter::new(3);
 //! let tokens = vec![
@@ -45,9 +45,9 @@ use crate::error::Result;
 /// # Examples
 ///
 /// ```
-/// use platypus::analysis::token_filter::Filter;
-/// use platypus::analysis::token_filter::limit::LimitFilter;
-/// use platypus::analysis::token::Token;
+/// use sarissa::analysis::token_filter::Filter;
+/// use sarissa::analysis::token_filter::limit::LimitFilter;
+/// use sarissa::analysis::token::Token;
 ///
 /// let filter = LimitFilter::new(2);
 /// let tokens = vec![
@@ -79,7 +79,7 @@ impl LimitFilter {
     /// # Examples
     ///
     /// ```
-    /// use platypus::analysis::token_filter::limit::LimitFilter;
+    /// use sarissa::analysis::token_filter::limit::LimitFilter;
     ///
     /// let filter = LimitFilter::new(100);
     /// assert_eq!(filter.limit(), 100);

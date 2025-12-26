@@ -1,17 +1,17 @@
-//! Error types for the Platypus library.
+//! Error types for the Sarissa library.
 //!
-//! This module provides comprehensive error handling for all Platypus operations.
-//! All errors are represented by the [`PlatypusError`] enum, which provides
+//! This module provides comprehensive error handling for all Sarissa operations.
+//! All errors are represented by the [`SarissaError`] enum, which provides
 //! detailed information about what went wrong.
 //!
 //! # Examples
 //!
 //! ```
-//! use platypus::error::{PlatypusError, Result};
+//! use sarissa::error::{SarissaError, Result};
 //!
 //! fn example_operation() -> Result<()> {
 //!     // Return an error
-//!     Err(PlatypusError::invalid_argument("Invalid input"))
+//!     Err(SarissaError::invalid_argument("Invalid input"))
 //! }
 //!
 //! match example_operation() {
@@ -25,13 +25,13 @@ use std::io;
 use anyhow;
 use thiserror::Error;
 
-/// The main error type for Platypus operations.
+/// The main error type for Sarissa operations.
 ///
-/// This enum represents all possible errors that can occur in the Platypus library.
+/// This enum represents all possible errors that can occur in the Sarissa library.
 /// It uses the `thiserror` crate for automatic `Error` trait implementation and
 /// provides convenient constructor methods for creating specific error types.
 #[derive(Error, Debug)]
-pub enum PlatypusError {
+pub enum SarissaError {
     /// I/O errors (file operations, network, etc.)
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
@@ -101,78 +101,78 @@ pub enum PlatypusError {
     Anyhow(#[from] anyhow::Error),
 }
 
-/// Result type alias for operations that may fail with PlatypusError.
-pub type Result<T> = std::result::Result<T, PlatypusError>;
+/// Result type alias for operations that may fail with SarissaError.
+pub type Result<T> = std::result::Result<T, SarissaError>;
 
-impl PlatypusError {
+impl SarissaError {
     /// Create a new index error.
     pub fn index<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Index(msg.into())
+        SarissaError::Index(msg.into())
     }
 
     /// Create a new schema error.
     pub fn schema<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Schema(msg.into())
+        SarissaError::Schema(msg.into())
     }
 
     /// Create a new analysis error.
     pub fn analysis<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Analysis(msg.into())
+        SarissaError::Analysis(msg.into())
     }
 
     /// Create a new query error.
     pub fn query<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Query(msg.into())
+        SarissaError::Query(msg.into())
     }
 
     /// Create a new parse error.
     pub fn parse<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Query(msg.into()) // Parse errors are treated as query errors
+        SarissaError::Query(msg.into()) // Parse errors are treated as query errors
     }
 
     /// Create a new storage error.
     pub fn storage<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Storage(msg.into())
+        SarissaError::Storage(msg.into())
     }
 
     /// Create a new field error.
     pub fn field<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Field(msg.into())
+        SarissaError::Field(msg.into())
     }
 
     /// Create a new generic error.
     pub fn other<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Other(msg.into())
+        SarissaError::Other(msg.into())
     }
 
     /// Create a new timeout error.
     pub fn timeout<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Other(format!("Timeout: {}", msg.into()))
+        SarissaError::Other(format!("Timeout: {}", msg.into()))
     }
 
     /// Create a new invalid config error.
     pub fn invalid_config<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Other(format!("Invalid configuration: {}", msg.into()))
+        SarissaError::Other(format!("Invalid configuration: {}", msg.into()))
     }
 
     /// Create a new invalid argument error.
     pub fn invalid_argument<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Other(format!("Invalid argument: {}", msg.into()))
+        SarissaError::Other(format!("Invalid argument: {}", msg.into()))
     }
 
     /// Create a new internal error.
     pub fn internal<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Other(format!("Internal error: {}", msg.into()))
+        SarissaError::Other(format!("Internal error: {}", msg.into()))
     }
 
     /// Create a new not found error.
     pub fn not_found<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::Other(format!("Not found: {}", msg.into()))
+        SarissaError::Other(format!("Not found: {}", msg.into()))
     }
 
     /// Create a new cancelled error.
     pub fn cancelled<S: Into<String>>(msg: S) -> Self {
-        PlatypusError::OperationCancelled(msg.into())
+        SarissaError::OperationCancelled(msg.into())
     }
 }
 
@@ -182,23 +182,23 @@ mod tests {
 
     #[test]
     fn test_error_construction() {
-        let error = PlatypusError::index("Test index error");
+        let error = SarissaError::index("Test index error");
         assert_eq!(error.to_string(), "Index error: Test index error");
 
-        let error = PlatypusError::schema("Test schema error");
+        let error = SarissaError::schema("Test schema error");
         assert_eq!(error.to_string(), "Schema error: Test schema error");
 
-        let error = PlatypusError::analysis("Test analysis error");
+        let error = SarissaError::analysis("Test analysis error");
         assert_eq!(error.to_string(), "Analysis error: Test analysis error");
     }
 
     #[test]
     fn test_io_error_conversion() {
         let io_error = io::Error::new(io::ErrorKind::NotFound, "File not found");
-        let platypus_error = PlatypusError::from(io_error);
+        let sarissa_error = SarissaError::from(io_error);
 
-        match platypus_error {
-            PlatypusError::Io(_) => {} // Expected
+        match sarissa_error {
+            SarissaError::Io(_) => {} // Expected
             _ => panic!("Expected IO error variant"),
         }
     }

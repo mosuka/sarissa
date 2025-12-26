@@ -8,8 +8,8 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::tokenizer::Tokenizer;
-//! use platypus::analysis::tokenizer::whole::WholeTokenizer;
+//! use sarissa::analysis::tokenizer::Tokenizer;
+//! use sarissa::analysis::tokenizer::whole::WholeTokenizer;
 //!
 //! let tokenizer = WholeTokenizer::new();
 //! let tokens: Vec<_> = tokenizer.tokenize("user-id-12345").unwrap().collect();
@@ -38,8 +38,8 @@ use crate::error::Result;
 /// # Examples
 ///
 /// ```
-/// use platypus::analysis::tokenizer::Tokenizer;
-/// use platypus::analysis::tokenizer::whole::WholeTokenizer;
+/// use sarissa::analysis::tokenizer::Tokenizer;
+/// use sarissa::analysis::tokenizer::whole::WholeTokenizer;
 ///
 /// let tokenizer = WholeTokenizer::new();
 ///

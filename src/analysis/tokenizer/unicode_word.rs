@@ -7,8 +7,8 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::tokenizer::Tokenizer;
-//! use platypus::analysis::tokenizer::unicode_word::UnicodeWordTokenizer;
+//! use sarissa::analysis::tokenizer::Tokenizer;
+//! use sarissa::analysis::tokenizer::unicode_word::UnicodeWordTokenizer;
 //!
 //! let tokenizer = UnicodeWordTokenizer::new();
 //! let tokens: Vec<_> = tokenizer.tokenize("Hello, world! 你好世界").unwrap().collect();
@@ -40,8 +40,8 @@ use crate::error::Result;
 /// # Examples
 ///
 /// ```
-/// use platypus::analysis::tokenizer::Tokenizer;
-/// use platypus::analysis::tokenizer::unicode_word::UnicodeWordTokenizer;
+/// use sarissa::analysis::tokenizer::Tokenizer;
+/// use sarissa::analysis::tokenizer::unicode_word::UnicodeWordTokenizer;
 ///
 /// let tokenizer = UnicodeWordTokenizer::new();
 /// let tokens: Vec<_> = tokenizer.tokenize("café résumé").unwrap().collect();

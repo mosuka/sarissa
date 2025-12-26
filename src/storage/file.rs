@@ -21,12 +21,12 @@
 //! # Example
 //!
 //! ```
-//! use platypus::storage::file::{FileStorage, FileStorageConfig};
-//! use platypus::storage::Storage;
+//! use sarissa::storage::file::{FileStorage, FileStorageConfig};
+//! use sarissa::storage::Storage;
 //! use std::io::Write;
 //! use tempfile::TempDir;
 //!
-//! # fn main() -> platypus::error::Result<()> {
+//! # fn main() -> sarissa::error::Result<()> {
 //! // Create storage with mmap enabled
 //! let temp_dir = TempDir::new().unwrap();
 //! let mut config = FileStorageConfig::new(temp_dir.path());
@@ -55,7 +55,7 @@ use std::time::SystemTime;
 
 use memmap2::{Mmap, MmapOptions};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::storage::{
     LockManager, Storage, StorageError, StorageInput, StorageLock, StorageOutput,
 };
@@ -81,7 +81,7 @@ use crate::storage::{
 /// # Example
 ///
 /// ```
-/// use platypus::storage::file::FileStorageConfig;
+/// use sarissa::storage::file::FileStorageConfig;
 ///
 /// // Basic file storage
 /// let config = FileStorageConfig::new("/data/index");
@@ -198,12 +198,12 @@ impl FileStorage {
         // Create directory if it doesn't exist
         if !directory.exists() {
             std::fs::create_dir_all(&directory)
-                .map_err(|e| PlatypusError::storage(format!("Failed to create directory: {e}")))?;
+                .map_err(|e| SarissaError::storage(format!("Failed to create directory: {e}")))?;
         }
 
         // Verify it's a directory
         if !directory.is_dir() {
-            return Err(PlatypusError::storage(format!(
+            return Err(SarissaError::storage(format!(
                 "Path is not a directory: {}",
                 directory.display()
             )));
@@ -267,7 +267,7 @@ impl FileStorage {
         let mmap = unsafe {
             mmap_opts
                 .map(&file)
-                .map_err(|e| PlatypusError::storage(format!("Failed to mmap file {name}: {e}")))?
+                .map_err(|e| SarissaError::storage(format!("Failed to mmap file {name}: {e}")))?
         };
 
         let mmap_arc = Arc::new(mmap);
@@ -290,7 +290,7 @@ impl FileStorage {
 
         if let Some(cached_meta) = metadata_cache.get(name) {
             let current_meta = std::fs::metadata(path)
-                .map_err(|e| PlatypusError::storage(format!("Failed to get metadata: {e}")))?;
+                .map_err(|e| SarissaError::storage(format!("Failed to get metadata: {e}")))?;
 
             let current_size = current_meta.len();
             let current_modified = current_meta
@@ -309,7 +309,7 @@ impl FileStorage {
     /// Update metadata cache for a memory-mapped file.
     fn update_mmap_metadata_cache(&self, name: &str, path: &Path) -> Result<()> {
         let metadata = std::fs::metadata(path)
-            .map_err(|e| PlatypusError::storage(format!("Failed to get metadata: {e}")))?;
+            .map_err(|e| SarissaError::storage(format!("Failed to get metadata: {e}")))?;
 
         let size = metadata.len();
         let modified = metadata
@@ -536,7 +536,7 @@ impl FileInput {
     fn new(file: File, buffer_size: usize) -> Result<Self> {
         let metadata = file
             .metadata()
-            .map_err(|e| PlatypusError::storage(format!("Failed to get file metadata: {e}")))?;
+            .map_err(|e| SarissaError::storage(format!("Failed to get file metadata: {e}")))?;
 
         let size = metadata.len();
         let reader = BufReader::with_capacity(buffer_size, file);
@@ -565,7 +565,7 @@ impl StorageInput for FileInput {
     fn clone_input(&self) -> Result<Box<dyn StorageInput>> {
         // For file inputs, we can't easily clone the underlying file
         // This would require reopening the file, which we'll implement later
-        Err(PlatypusError::storage(
+        Err(SarissaError::storage(
             "Clone not supported for file inputs",
         ))
     }
@@ -702,12 +702,12 @@ impl StorageOutput for FileOutput {
     fn flush_and_sync(&mut self) -> Result<()> {
         self.writer
             .flush()
-            .map_err(|e| PlatypusError::storage(format!("Failed to flush: {e}")))?;
+            .map_err(|e| SarissaError::storage(format!("Failed to flush: {e}")))?;
 
         self.writer
             .get_ref()
             .sync_all()
-            .map_err(|e| PlatypusError::storage(format!("Failed to sync: {e}")))?;
+            .map_err(|e| SarissaError::storage(format!("Failed to sync: {e}")))?;
 
         Ok(())
     }
@@ -774,7 +774,7 @@ impl LockManager for FileLockManager {
         match self.acquire_lock(name) {
             Ok(lock) => Ok(Some(lock)),
             Err(e) => {
-                if let PlatypusError::Storage(ref msg) = e
+                if let SarissaError::Storage(ref msg) = e
                     && msg.contains("Failed to acquire lock")
                 {
                     return Ok(None);
@@ -824,7 +824,7 @@ impl FileLock {
     fn release(&mut self) -> Result<()> {
         if !self.released {
             std::fs::remove_file(&self.path)
-                .map_err(|e| PlatypusError::storage(format!("Failed to release lock: {e}")))?;
+                .map_err(|e| SarissaError::storage(format!("Failed to release lock: {e}")))?;
             self.released = true;
         }
         Ok(())

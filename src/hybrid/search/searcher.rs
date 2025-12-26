@@ -24,8 +24,8 @@ use crate::vector::search::searcher::VectorIndexSearchParams;
 /// # Examples
 ///
 /// ```
-/// use platypus::hybrid::search::searcher::HybridSearchRequest;
-/// use platypus::vector::core::vector::Vector;
+/// use sarissa::hybrid::search::searcher::HybridSearchRequest;
+/// use sarissa::vector::core::vector::Vector;
 ///
 /// // Text-only search
 /// let request = HybridSearchRequest::new("rust programming");

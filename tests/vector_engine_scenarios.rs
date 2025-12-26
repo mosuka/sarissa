@@ -5,18 +5,18 @@ use std::io::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use platypus::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
-use platypus::embedding::noop::NoOpEmbedder;
-use platypus::embedding::per_field::PerFieldEmbedder;
-use platypus::error::{PlatypusError, Result};
-use platypus::storage::Storage;
-use platypus::storage::memory::MemoryStorage;
-use platypus::vector::DistanceMetric;
-use platypus::vector::core::document::{
+use sarissa::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
+use sarissa::embedding::noop::NoOpEmbedder;
+use sarissa::embedding::per_field::PerFieldEmbedder;
+use sarissa::error::{SarissaError, Result};
+use sarissa::storage::Storage;
+use sarissa::storage::memory::MemoryStorage;
+use sarissa::vector::DistanceMetric;
+use sarissa::vector::core::document::{
     DocumentPayload, DocumentVector, Payload, PayloadSource, StoredVector, VectorType,
 };
-use platypus::vector::core::vector::Vector;
-use platypus::vector::engine::{
+use sarissa::vector::core::vector::Vector;
+use sarissa::vector::engine::{
     FieldSelector, MetadataFilter, QueryPayload, QueryVector, VectorEngine, VectorFieldConfig,
     VectorFilter, VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
 };
@@ -397,7 +397,7 @@ impl Embedder for IntegrationTestEmbedder {
                 }
                 Ok(Vector::new(data))
             }
-            _ => Err(PlatypusError::invalid_argument(
+            _ => Err(SarissaError::invalid_argument(
                 "IntegrationTestEmbedder only supports text input",
             )),
         }

@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use ahash::AHashSet;
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::document::document::Document;
@@ -145,7 +145,7 @@ impl MergeEngine {
             .collect();
 
         if segments_to_merge.is_empty() {
-            return Err(PlatypusError::index("No segments found to merge"));
+            return Err(SarissaError::index("No segments found to merge"));
         }
 
         // Create new segment ID
@@ -497,7 +497,7 @@ impl MergeEngine {
 
         // Check document count matches
         if reader.doc_count() != segment.segment_info.doc_count {
-            return Err(PlatypusError::index("Document count mismatch after merge"));
+            return Err(SarissaError::index("Document count mismatch after merge"));
         }
 
         // TODO: Add more verification checks

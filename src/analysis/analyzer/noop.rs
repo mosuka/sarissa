@@ -14,8 +14,8 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::analyzer::analyzer::Analyzer;
-//! use platypus::analysis::analyzer::noop::NoOpAnalyzer;
+//! use sarissa::analysis::analyzer::analyzer::Analyzer;
+//! use sarissa::analysis::analyzer::noop::NoOpAnalyzer;
 //!
 //! let analyzer = NoOpAnalyzer::new();
 //! let tokens: Vec<_> = analyzer.analyze("any text here").unwrap().collect();

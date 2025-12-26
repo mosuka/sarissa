@@ -29,8 +29,8 @@ impl ScoreNormalizer {
     /// # Examples
     ///
     /// ```
-    /// use platypus::hybrid::search::searcher::ScoreNormalization;
-    /// use platypus::hybrid::search::scorer::ScoreNormalizer;
+    /// use sarissa::hybrid::search::searcher::ScoreNormalization;
+    /// use sarissa::hybrid::search::scorer::ScoreNormalizer;
     ///
     /// let normalizer = ScoreNormalizer::new(ScoreNormalization::MinMax);
     /// ```

@@ -13,7 +13,7 @@ fn main() {
 mod candle_vector_example {
     use std::sync::Arc;
 
-    use platypus::{
+    use sarissa::{
         embedding::{
             candle_text_embedder::CandleTextEmbedder, embedder::Embedder,
             per_field::PerFieldEmbedder,
@@ -192,6 +192,6 @@ mod candle_vector_example {
 }
 
 #[cfg(feature = "embeddings-candle")]
-fn main() -> platypus::error::Result<()> {
+fn main() -> sarissa::error::Result<()> {
     candle_vector_example::run()
 }

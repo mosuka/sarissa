@@ -4,22 +4,22 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use platypus::analysis::analyzer::analyzer::Analyzer;
-use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
-use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::document::document::Document;
-use platypus::document::field::{FloatOption, IntegerOption, TextOption};
-use platypus::error::Result;
-use platypus::lexical::engine::LexicalEngine;
-use platypus::lexical::index::config::InvertedIndexConfig;
-use platypus::lexical::index::config::LexicalIndexConfig;
-use platypus::lexical::index::inverted::query::Query;
-use platypus::lexical::index::inverted::query::range::NumericRangeQuery;
-use platypus::lexical::search::searcher::LexicalSearchRequest;
-use platypus::storage::StorageConfig;
-use platypus::storage::StorageFactory;
-use platypus::storage::file::FileStorageConfig;
+use sarissa::analysis::analyzer::analyzer::Analyzer;
+use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
+use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+use sarissa::document::document::Document;
+use sarissa::document::field::{FloatOption, IntegerOption, TextOption};
+use sarissa::error::Result;
+use sarissa::lexical::engine::LexicalEngine;
+use sarissa::lexical::index::config::InvertedIndexConfig;
+use sarissa::lexical::index::config::LexicalIndexConfig;
+use sarissa::lexical::index::inverted::query::Query;
+use sarissa::lexical::index::inverted::query::range::NumericRangeQuery;
+use sarissa::lexical::search::searcher::LexicalSearchRequest;
+use sarissa::storage::StorageConfig;
+use sarissa::storage::StorageFactory;
+use sarissa::storage::file::FileStorageConfig;
 
 fn main() -> Result<()> {
     println!("=== RangeQuery Example - Numeric and Date Range Search ===\n");
@@ -153,7 +153,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let platypus::document::field::FieldValue::Float(price) = &field.value
+                && let sarissa::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -181,7 +181,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("rating")
-                && let platypus::document::field::FieldValue::Float(rating) = &field.value
+                && let sarissa::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -209,7 +209,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("year")
-                && let platypus::document::field::FieldValue::Integer(year) = &field.value
+                && let sarissa::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -237,7 +237,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("pages")
-                && let platypus::document::field::FieldValue::Integer(pages) = &field.value
+                && let sarissa::document::field::FieldValue::Integer(pages) = &field.value
             {
                 println!("      Pages: {pages}");
             }
@@ -265,7 +265,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("year")
-                && let platypus::document::field::FieldValue::Integer(year) = &field.value
+                && let sarissa::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -293,7 +293,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let platypus::document::field::FieldValue::Float(price) = &field.value
+                && let sarissa::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -321,7 +321,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("pages")
-                && let platypus::document::field::FieldValue::Integer(pages) = &field.value
+                && let sarissa::document::field::FieldValue::Integer(pages) = &field.value
             {
                 println!("      Pages: {pages}");
             }

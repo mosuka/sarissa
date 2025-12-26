@@ -17,7 +17,7 @@ use parking_lot::{Mutex, RwLock};
 
 use crate::embedding::embedder::{EmbedInput, Embedder};
 use crate::embedding::per_field::PerFieldEmbedder;
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
 use crate::vector::core::document::{
@@ -155,7 +155,7 @@ impl VectorCollection {
         let name = field.name().to_string();
         let mut fields = self.fields.write();
         if fields.contains_key(&name) {
-            return Err(PlatypusError::invalid_config(format!(
+            return Err(SarissaError::invalid_config(format!(
                 "vector field '{name}' is already registered"
             )));
         }
@@ -209,7 +209,7 @@ impl VectorCollection {
         }
 
         if !self.config.implicit_schema {
-            return Err(PlatypusError::invalid_argument(format!(
+            return Err(SarissaError::invalid_argument(format!(
                 "vector field '{field_name}' is not registered"
             )));
         }
@@ -253,7 +253,7 @@ impl VectorCollection {
             | PayloadSource::Bytes { .. }
             | PayloadSource::Uri { .. } => {
                 let dim = self.config.default_dimension.ok_or_else(|| {
-                    PlatypusError::invalid_config(
+                    SarissaError::invalid_config(
                         "implicit schema requires default_dimension to be set",
                     )
                 })?;
@@ -263,7 +263,7 @@ impl VectorCollection {
         };
 
         if dimension == 0 {
-            return Err(PlatypusError::invalid_config(format!(
+            return Err(SarissaError::invalid_config(format!(
                 "cannot register field '{field_name}' with zero dimension"
             )));
         }
@@ -300,7 +300,7 @@ impl VectorCollection {
     fn embed_payload(&self, field_name: &str, payload: Payload) -> Result<StoredVector> {
         let fields = self.fields.read();
         let handle = fields.get(field_name).ok_or_else(|| {
-            PlatypusError::invalid_argument(format!(
+            SarissaError::invalid_argument(format!(
                 "vector field '{field_name}' is not registered"
             ))
         })?;
@@ -323,7 +323,7 @@ impl VectorCollection {
                 let embedder = self.embedder_registry.resolve(field_name)?;
 
                 if !embedder.supports_text() {
-                    return Err(PlatypusError::invalid_config(format!(
+                    return Err(SarissaError::invalid_config(format!(
                         "embedder '{}' does not support text embedding",
                         field_name
                     )));
@@ -335,7 +335,7 @@ impl VectorCollection {
                     .run(async move { embedder.embed(&EmbedInput::Text(&text_value)).await })?;
                 vector.validate_dimension(field_config.dimension)?;
                 if !vector.is_valid() {
-                    return Err(PlatypusError::InvalidOperation(format!(
+                    return Err(SarissaError::InvalidOperation(format!(
                         "embedder '{}' produced invalid values for field '{}'",
                         embedder_name_owned, field_name
                     )));
@@ -350,7 +350,7 @@ impl VectorCollection {
                 let embedder = self.embedder_registry.resolve(field_name)?;
 
                 if !embedder.supports_image() {
-                    return Err(PlatypusError::invalid_config(format!(
+                    return Err(SarissaError::invalid_config(format!(
                         "embedder '{}' does not support image embedding",
                         field_name
                     )));
@@ -369,7 +369,7 @@ impl VectorCollection {
                 })?;
                 vector.validate_dimension(field_config.dimension)?;
                 if !vector.is_valid() {
-                    return Err(PlatypusError::InvalidOperation(format!(
+                    return Err(SarissaError::InvalidOperation(format!(
                         "embedder '{}' produced invalid values for field '{}'",
                         embedder_name_owned, field_name
                     )));
@@ -384,7 +384,7 @@ impl VectorCollection {
                 let embedder = self.embedder_registry.resolve(field_name)?;
 
                 if !embedder.supports_image() {
-                    return Err(PlatypusError::invalid_config(format!(
+                    return Err(SarissaError::invalid_config(format!(
                         "embedder '{}' does not support image embedding",
                         field_name
                     )));
@@ -396,7 +396,7 @@ impl VectorCollection {
                     .run(async move { embedder.embed(&EmbedInput::ImageUri(&uri_value)).await })?;
                 vector.validate_dimension(field_config.dimension)?;
                 if !vector.is_valid() {
-                    return Err(PlatypusError::InvalidOperation(format!(
+                    return Err(SarissaError::InvalidOperation(format!(
                         "embedder '{}' produced invalid values for field '{}'",
                         embedder_name_owned, field_name
                     )));
@@ -408,13 +408,13 @@ impl VectorCollection {
             }
             PayloadSource::Vector { data, source_tag } => {
                 if source_tag != field_config.source_tag {
-                    return Err(PlatypusError::invalid_argument(format!(
+                    return Err(SarissaError::invalid_argument(format!(
                         "vector field '{field_name}' only accepts source_tag '{}' but got '{}'",
                         field_config.source_tag, source_tag
                     )));
                 }
                 if data.len() != field_config.dimension {
-                    return Err(PlatypusError::invalid_argument(format!(
+                    return Err(SarissaError::invalid_argument(format!(
                         "vector field '{field_name}' expects dimension {} but received {}",
                         field_config.dimension,
                         data.len()
@@ -532,7 +532,7 @@ impl VectorCollection {
         vectors: Vec<(u64, String, Vector)>,
     ) -> Result<()> {
         if config.dimension == 0 {
-            return Err(PlatypusError::invalid_config(format!(
+            return Err(SarissaError::invalid_config(format!(
                 "vector field '{field_name}' cannot materialize a zero-dimension index"
             )));
         }
@@ -661,7 +661,7 @@ impl VectorCollection {
         let fields = self.fields.read();
         for field_name in document.fields.keys() {
             if !fields.contains_key(field_name) {
-                return Err(PlatypusError::invalid_argument(format!(
+                return Err(SarissaError::invalid_argument(format!(
                     "vector field '{field_name}' is not registered"
                 )));
             }
@@ -690,7 +690,7 @@ impl VectorCollection {
         let fields = self.fields.read();
         for (field_name, field_entry) in &entry.fields {
             let field = fields.get(field_name).ok_or_else(|| {
-                PlatypusError::not_found(format!(
+                SarissaError::not_found(format!(
                     "vector field '{field_name}' not registered during delete"
                 ))
             })?;
@@ -711,7 +711,7 @@ impl VectorCollection {
         let fields = self.fields.read();
         for (field_name, stored_vector) in fields_data {
             let field = fields.get(field_name).ok_or_else(|| {
-                PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+                SarissaError::not_found(format!("vector field '{field_name}' is not registered"))
             })?;
             field
                 .runtime
@@ -842,7 +842,7 @@ impl VectorCollection {
 
         let manifest: CollectionManifest = serde_json::from_slice(&buffer)?;
         if manifest.version != COLLECTION_MANIFEST_VERSION {
-            return Err(PlatypusError::invalid_config(format!(
+            return Err(SarissaError::invalid_config(format!(
                 "collection manifest version mismatch: expected {}, found {}",
                 COLLECTION_MANIFEST_VERSION, manifest.version
             )));
@@ -850,14 +850,14 @@ impl VectorCollection {
 
         let snapshot_seq = self.snapshot_wal_seq.load(Ordering::SeqCst);
         if manifest.snapshot_wal_seq != snapshot_seq {
-            return Err(PlatypusError::invalid_config(format!(
+            return Err(SarissaError::invalid_config(format!(
                 "collection manifest snapshot sequence {} does not match persisted snapshot {}",
                 manifest.snapshot_wal_seq, snapshot_seq
             )));
         }
 
         if manifest.wal_last_seq < manifest.snapshot_wal_seq {
-            return Err(PlatypusError::invalid_config(
+            return Err(SarissaError::invalid_config(
                 "collection manifest WAL sequence regressed",
             ));
         }
@@ -1077,7 +1077,7 @@ impl VectorCollection {
         let entry = self
             .registry
             .get(doc_id)
-            .ok_or_else(|| PlatypusError::not_found(format!("doc_id {doc_id}")))?;
+            .ok_or_else(|| SarissaError::not_found(format!("doc_id {doc_id}")))?;
         self.delete_fields_for_entry(doc_id, &entry)?;
 
         self.registry.delete(doc_id)?;
@@ -1113,7 +1113,7 @@ impl VectorCollection {
     pub fn field_stats(&self, field_name: &str) -> Result<VectorFieldStats> {
         let fields = self.fields.read();
         let field = fields.get(field_name).ok_or_else(|| {
-            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+            SarissaError::not_found(format!("vector field '{field_name}' is not registered"))
         })?;
         field.runtime.reader().stats()
     }
@@ -1126,7 +1126,7 @@ impl VectorCollection {
     ) -> Result<()> {
         let fields = self.fields.read();
         let field = fields.get(field_name).ok_or_else(|| {
-            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+            SarissaError::not_found(format!("vector field '{field_name}' is not registered"))
         })?;
         let reader_arc: Arc<dyn VectorFieldReader> = Arc::from(reader);
         field.runtime.replace_reader(reader_arc);
@@ -1137,7 +1137,7 @@ impl VectorCollection {
     pub fn reset_field_reader(&self, field_name: &str) -> Result<()> {
         let fields = self.fields.read();
         let field = fields.get(field_name).ok_or_else(|| {
-            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+            SarissaError::not_found(format!("vector field '{field_name}' is not registered"))
         })?;
         field.runtime.reset_reader();
         Ok(())
@@ -1147,7 +1147,7 @@ impl VectorCollection {
     pub fn materialize_delegate_reader(&self, field_name: &str) -> Result<()> {
         let fields = self.fields.read();
         let handle = fields.get(field_name).ok_or_else(|| {
-            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+            SarissaError::not_found(format!("vector field '{field_name}' is not registered"))
         })?;
 
         let in_memory = handle
@@ -1155,7 +1155,7 @@ impl VectorCollection {
             .as_any()
             .downcast_ref::<InMemoryVectorField>()
             .ok_or_else(|| {
-                PlatypusError::InvalidOperation(format!(
+                SarissaError::InvalidOperation(format!(
                     "field '{field_name}' does not support delegate materialization"
                 ))
             })?;
@@ -1169,7 +1169,7 @@ impl VectorCollection {
 
         let fields = self.fields.read();
         let handle = fields.get(field_name).ok_or_else(|| {
-            PlatypusError::not_found(format!("vector field '{field_name}' is not registered"))
+            SarissaError::not_found(format!("vector field '{field_name}' is not registered"))
         })?;
         handle.runtime.replace_reader(reader);
         Ok(())
@@ -1293,7 +1293,7 @@ impl VectorCollectionSearcher {
                             result.push(name.clone());
                         }
                     } else {
-                        return Err(PlatypusError::not_found(format!(
+                        return Err(SarissaError::not_found(format!(
                             "vector field '{}' is not registered",
                             name
                         )));
@@ -1390,7 +1390,7 @@ impl VectorCollectionSearcher {
                     entry.score = entry.score.max(weighted_score);
                 }
                 VectorScoreMode::LateInteraction => {
-                    return Err(PlatypusError::invalid_argument(
+                    return Err(SarissaError::invalid_argument(
                         "VectorScoreMode::LateInteraction is not supported yet",
                     ));
                 }
@@ -1405,7 +1405,7 @@ impl VectorCollectionSearcher {
 impl crate::vector::search::searcher::VectorSearcher for VectorCollectionSearcher {
     fn search(&self, request: &VectorSearchRequest) -> Result<VectorSearchResults> {
         if request.query_vectors.is_empty() {
-            return Err(PlatypusError::invalid_argument(
+            return Err(SarissaError::invalid_argument(
                 "VectorSearchRequest requires at least one query vector",
             ));
         }
@@ -1415,13 +1415,13 @@ impl crate::vector::search::searcher::VectorSearcher for VectorCollectionSearche
         }
 
         if request.overfetch < 1.0 {
-            return Err(PlatypusError::invalid_argument(
+            return Err(SarissaError::invalid_argument(
                 "VectorSearchRequest overfetch must be >= 1.0",
             ));
         }
 
         if matches!(request.score_mode, VectorScoreMode::LateInteraction) {
-            return Err(PlatypusError::invalid_argument(
+            return Err(SarissaError::invalid_argument(
                 "VectorScoreMode::LateInteraction is not supported yet",
             ));
         }
@@ -1443,7 +1443,7 @@ impl crate::vector::search::searcher::VectorSearcher for VectorCollectionSearche
         for field_name in target_fields {
             let field = fields
                 .get(&field_name)
-                .ok_or_else(|| PlatypusError::not_found(format!("vector field '{field_name}'")))?;
+                .ok_or_else(|| SarissaError::not_found(format!("vector field '{field_name}'")))?;
             let matching_vectors = self.query_vectors_for_field(field.field.config(), request);
             if matching_vectors.is_empty() {
                 continue;
@@ -1471,7 +1471,7 @@ impl crate::vector::search::searcher::VectorSearcher for VectorCollectionSearche
         drop(fields);
 
         if fields_with_queries == 0 {
-            return Err(PlatypusError::invalid_argument(
+            return Err(SarissaError::invalid_argument(
                 "no query vectors matched the requested fields",
             ));
         }

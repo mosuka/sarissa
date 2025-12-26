@@ -16,7 +16,7 @@ fn main() {
 mod candle_schemaless_example {
     use std::sync::Arc;
 
-    use platypus::{
+    use sarissa::{
         embedding::{candle_text_embedder::CandleTextEmbedder, embedder::Embedder},
         error::Result,
         storage::{Storage, memory::MemoryStorage},
@@ -98,6 +98,6 @@ mod candle_schemaless_example {
 }
 
 #[cfg(feature = "embeddings-candle")]
-fn main() -> platypus::error::Result<()> {
+fn main() -> sarissa::error::Result<()> {
     candle_schemaless_example::run()
 }

@@ -34,8 +34,8 @@ impl ResultMerger {
     /// # Examples
     ///
     /// ```
-    /// use platypus::hybrid::search::searcher::HybridSearchParams;
-    /// use platypus::hybrid::search::merger::ResultMerger;
+    /// use sarissa::hybrid::search::searcher::HybridSearchParams;
+    /// use sarissa::hybrid::search::merger::ResultMerger;
     ///
     /// let config = HybridSearchParams::default();
     /// let merger = ResultMerger::new(config);

@@ -1,4 +1,4 @@
-//! Lexical search example demonstrating Platypus's keyword tooling.
+//! Lexical search example demonstrating Sarissa's keyword tooling.
 //!
 //! This walkthrough exercises every built-in query type exposed by the
 //! `lexical::index::inverted::query` module, including:
@@ -21,28 +21,28 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use platypus::analysis::analyzer::analyzer::Analyzer;
-use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
-use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::document::document::Document;
-use platypus::document::field::{FieldValue, GeoOption, IntegerOption, TextOption};
-use platypus::error::Result;
-use platypus::lexical::engine::LexicalEngine;
-use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use platypus::lexical::index::inverted::query::Query;
-use platypus::lexical::index::inverted::query::boolean::BooleanQuery;
-use platypus::lexical::index::inverted::query::fuzzy::FuzzyQuery;
-use platypus::lexical::index::inverted::query::geo::{
+use sarissa::analysis::analyzer::analyzer::Analyzer;
+use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
+use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+use sarissa::document::document::Document;
+use sarissa::document::field::{FieldValue, GeoOption, IntegerOption, TextOption};
+use sarissa::error::Result;
+use sarissa::lexical::engine::LexicalEngine;
+use sarissa::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use sarissa::lexical::index::inverted::query::Query;
+use sarissa::lexical::index::inverted::query::boolean::BooleanQuery;
+use sarissa::lexical::index::inverted::query::fuzzy::FuzzyQuery;
+use sarissa::lexical::index::inverted::query::geo::{
     GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint,
 };
-use platypus::lexical::index::inverted::query::phrase::PhraseQuery;
-use platypus::lexical::index::inverted::query::range::NumericRangeQuery;
-use platypus::lexical::index::inverted::query::term::TermQuery;
-use platypus::lexical::index::inverted::query::wildcard::WildcardQuery;
-use platypus::lexical::search::searcher::LexicalSearchRequest;
-use platypus::storage::file::FileStorageConfig;
-use platypus::storage::{StorageConfig, StorageFactory};
+use sarissa::lexical::index::inverted::query::phrase::PhraseQuery;
+use sarissa::lexical::index::inverted::query::range::NumericRangeQuery;
+use sarissa::lexical::index::inverted::query::term::TermQuery;
+use sarissa::lexical::index::inverted::query::wildcard::WildcardQuery;
+use sarissa::lexical::search::searcher::LexicalSearchRequest;
+use sarissa::storage::file::FileStorageConfig;
+use sarissa::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== Comprehensive Lexical Search Example ===\n");
@@ -673,7 +673,7 @@ fn sample_documents() -> Vec<Document> {
 }
 
 /// Helper function to display search results in a formatted way
-fn display_results(results: &platypus::lexical::index::inverted::query::LexicalSearchResults) {
+fn display_results(results: &sarissa::lexical::index::inverted::query::LexicalSearchResults) {
     for (i, hit) in results.hits.iter().enumerate() {
         println!("  {}. Score: {:.4}", i + 1, hit.score);
 

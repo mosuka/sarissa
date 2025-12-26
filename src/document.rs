@@ -28,8 +28,8 @@
 //! Creating a document:
 //!
 //! ```
-//! use platypus::document::document::Document;
-//! use platypus::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
+//! use sarissa::document::document::Document;
+//! use sarissa::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
 //!
 //! let doc = Document::builder()
 //!     .add_text("title", "Rust Programming Guide", TextOption::default())
@@ -46,10 +46,10 @@
 //! Parsing documents for indexing:
 //!
 //! ```
-//! use platypus::document::document::Document;
-//! use platypus::document::parser::DocumentParser;
-//! use platypus::document::field::TextOption;
-//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
+//! use sarissa::document::document::Document;
+//! use sarissa::document::parser::DocumentParser;
+//! use sarissa::document::field::TextOption;
+//! use sarissa::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));

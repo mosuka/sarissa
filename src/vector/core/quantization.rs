@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::vector::core::vector::Vector;
 
 /// Quantization methods for compressing vectors.
@@ -63,13 +63,13 @@ impl VectorQuantizer {
     /// Quantize a vector to compressed representation.
     pub fn quantize(&self, vector: &Vector) -> Result<QuantizedVector> {
         if !self.is_trained && self.method != QuantizationMethod::None {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Quantizer must be trained before use".to_string(),
             ));
         }
 
         if vector.dimension() != self.dimension {
-            return Err(PlatypusError::InvalidOperation(format!(
+            return Err(SarissaError::InvalidOperation(format!(
                 "Vector dimension mismatch: expected {}, got {}",
                 self.dimension,
                 vector.dimension()
@@ -101,7 +101,7 @@ impl VectorQuantizer {
     /// Dequantize a compressed vector back to full precision.
     pub fn dequantize(&self, quantized: &QuantizedVector) -> Result<Vector> {
         if quantized.method != self.method {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Quantization method mismatch".to_string(),
             ));
         }
@@ -118,7 +118,7 @@ impl VectorQuantizer {
     /// Train scalar quantization by finding min/max values per dimension.
     fn train_scalar_quantization(&mut self, vectors: &[Vector]) -> Result<()> {
         if vectors.is_empty() {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Cannot train on empty vector set".to_string(),
             ));
         }

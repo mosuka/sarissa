@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::storage::Storage;
 use crate::vector::index::config::FlatIndexConfig;
 use crate::vector::index::flat::writer::FlatIndexWriter;
@@ -95,7 +95,7 @@ impl FlatIndex {
     /// Open an existing flat index from storage.
     pub fn open(storage: Arc<dyn Storage>, config: FlatIndexConfig) -> Result<Self> {
         if !storage.file_exists("metadata.json") {
-            return Err(PlatypusError::index("Index does not exist"));
+            return Err(SarissaError::index("Index does not exist"));
         }
 
         let metadata = Self::read_metadata(storage.as_ref())?;
@@ -131,9 +131,9 @@ impl FlatIndex {
         let metadata = self
             .metadata
             .read()
-            .map_err(|_| PlatypusError::index("Failed to acquire metadata read lock"))?;
+            .map_err(|_| SarissaError::index("Failed to acquire metadata read lock"))?;
         let metadata_json = serde_json::to_string_pretty(&*metadata)
-            .map_err(|e| PlatypusError::index(format!("Failed to serialize metadata: {e}")))?;
+            .map_err(|e| SarissaError::index(format!("Failed to serialize metadata: {e}")))?;
         drop(metadata);
 
         let mut output = self.storage.create_output("metadata.json")?;
@@ -147,7 +147,7 @@ impl FlatIndex {
     fn read_metadata(storage: &dyn Storage) -> Result<IndexMetadata> {
         let input = storage.open_input("metadata.json")?;
         let metadata: IndexMetadata = serde_json::from_reader(input)
-            .map_err(|e| PlatypusError::index(format!("Failed to deserialize metadata: {e}")))?;
+            .map_err(|e| SarissaError::index(format!("Failed to deserialize metadata: {e}")))?;
         Ok(metadata)
     }
 
@@ -157,7 +157,7 @@ impl FlatIndex {
             let mut metadata = self
                 .metadata
                 .write()
-                .map_err(|_| PlatypusError::index("Failed to acquire metadata write lock"))?;
+                .map_err(|_| SarissaError::index("Failed to acquire metadata write lock"))?;
             metadata.modified = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -169,7 +169,7 @@ impl FlatIndex {
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed.load(Ordering::SeqCst) {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Index is closed".to_string(),
             ));
         }
@@ -223,7 +223,7 @@ impl VectorIndex for FlatIndex {
         let metadata = self
             .metadata
             .read()
-            .map_err(|_| PlatypusError::index("Failed to acquire metadata read lock"))?;
+            .map_err(|_| SarissaError::index("Failed to acquire metadata read lock"))?;
         Ok(VectorIndexStats {
             vector_count: metadata.vector_count,
             dimension: metadata.dimension,

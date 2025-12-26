@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::storage::Storage;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::IvfIndexConfig;
@@ -107,7 +107,7 @@ impl IvfIndexWriter {
         let _n_probe = u32::from_le_bytes(n_probe_buf) as usize;
 
         if dimension != index_config.dimension {
-            return Err(PlatypusError::InvalidOperation(format!(
+            return Err(SarissaError::InvalidOperation(format!(
                 "Dimension mismatch: expected {}, found {}",
                 index_config.dimension, dimension
             )));
@@ -145,7 +145,7 @@ impl IvfIndexWriter {
                 let mut field_name_buf = vec![0u8; field_name_len];
                 input.read_exact(&mut field_name_buf)?;
                 let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                    PlatypusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+                    SarissaError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                 })?;
 
                 // Read metadata and vector data
@@ -214,7 +214,7 @@ impl IvfIndexWriter {
 
         for (doc_id, _field_name, vector) in vectors {
             if vector.dimension() != self.index_config.dimension {
-                return Err(PlatypusError::InvalidOperation(format!(
+                return Err(SarissaError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
                     doc_id,
                     vector.dimension(),
@@ -223,7 +223,7 @@ impl IvfIndexWriter {
             }
 
             if !vector.is_valid() {
-                return Err(PlatypusError::InvalidOperation(format!(
+                return Err(SarissaError::InvalidOperation(format!(
                     "Vector {doc_id} contains invalid values (NaN or infinity)"
                 )));
             }
@@ -252,13 +252,13 @@ impl IvfIndexWriter {
     /// Train centroids using k-means clustering.
     fn train_centroids(&mut self) -> Result<()> {
         if self.vectors.is_empty() {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Cannot train centroids on empty vector set".to_string(),
             ));
         }
 
         if self.vectors.len() < self.index_config.n_clusters {
-            return Err(PlatypusError::InvalidOperation(format!(
+            return Err(SarissaError::InvalidOperation(format!(
                 "Cannot create {} clusters from {} vectors",
                 self.index_config.n_clusters,
                 self.vectors.len() as u64
@@ -468,7 +468,7 @@ impl IvfIndexWriter {
         if let Some(limit) = self.writer_config.memory_limit {
             let current_usage = self.estimated_memory_usage();
             if current_usage > limit {
-                return Err(PlatypusError::ResourceExhausted(format!(
+                return Err(SarissaError::ResourceExhausted(format!(
                     "Memory usage {current_usage} bytes exceeds limit {limit} bytes"
                 )));
             }
@@ -504,7 +504,7 @@ impl VectorIndexWriter for IvfIndexWriter {
 
     fn build(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
             ));
         }
@@ -533,7 +533,7 @@ impl VectorIndexWriter for IvfIndexWriter {
 
     fn add_vectors(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Cannot add vectors to finalized index".to_string(),
             ));
         }
@@ -559,7 +559,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         }
 
         if self.vectors.is_empty() {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Cannot finalize empty index".to_string(),
             ));
         }
@@ -618,7 +618,7 @@ impl VectorIndexWriter for IvfIndexWriter {
 
     fn optimize(&mut self) -> Result<()> {
         if !self.is_finalized {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Index must be finalized before optimization".to_string(),
             ));
         }
@@ -648,7 +648,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         use std::io::Write;
 
         if !self.is_finalized {
-            return Err(PlatypusError::InvalidOperation(
+            return Err(SarissaError::InvalidOperation(
                 "Index must be finalized before writing".to_string(),
             ));
         }
@@ -656,7 +656,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         let storage = self
             .storage
             .as_ref()
-            .ok_or_else(|| PlatypusError::InvalidOperation("No storage configured".to_string()))?;
+            .ok_or_else(|| SarissaError::InvalidOperation("No storage configured".to_string()))?;
 
         // Create the index file
         let file_name = format!("{}.ivf", path);

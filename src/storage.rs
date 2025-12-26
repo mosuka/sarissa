@@ -1,4 +1,4 @@
-//! Storage abstraction layer for Platypus.
+//! Storage abstraction layer for Sarissa.
 //!
 //! This module exposes a pluggable storage facade shared by the lexical, vector,
 //! and hybrid engines. File and memory backends can be swapped without touching
@@ -24,11 +24,11 @@
 //! # Example
 //!
 //! ```
-//! use platypus::storage::{StorageFactory, StorageConfig};
-//! use platypus::storage::file::FileStorageConfig;
-//! use platypus::storage::memory::MemoryStorageConfig;
+//! use sarissa::storage::{StorageFactory, StorageConfig};
+//! use sarissa::storage::file::FileStorageConfig;
+//! use sarissa::storage::memory::MemoryStorageConfig;
 //!
-//! # fn main() -> platypus::error::Result<()> {
+//! # fn main() -> sarissa::error::Result<()> {
 //! // Create file storage with mmap enabled
 //! let mut file_config = FileStorageConfig::new("/tmp/test_index");
 //! file_config.use_mmap = true;
@@ -43,7 +43,7 @@
 use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 
 pub mod column;
 pub mod file;
@@ -84,16 +84,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageInput>)` - A reader for accessing the file contents
-    /// * `Err(PlatypusError)` - If the file doesn't exist or cannot be opened
+    /// * `Err(SarissaError)` - If the file doesn't exist or cannot be opened
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::{Read, Write};
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // First create a file
@@ -123,16 +123,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageOutput>)` - A writer for writing data to the file
-    /// * `Err(PlatypusError)` - If the file cannot be created
+    /// * `Err(SarissaError)` - If the file cannot be created
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// let mut output = storage.create_output("index.bin")?;
@@ -157,16 +157,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Box<dyn StorageOutput>)` - A writer positioned at the end of the file
-    /// * `Err(PlatypusError)` - If the file cannot be opened or created
+    /// * `Err(SarissaError)` - If the file cannot be opened or created
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::{Read, Write};
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create file with initial content
@@ -207,11 +207,11 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// assert!(!storage.file_exists("index.bin"));
@@ -238,16 +238,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the file was successfully deleted
-    /// * `Err(PlatypusError)` - If the file cannot be deleted (e.g., permission denied)
+    /// * `Err(SarissaError)` - If the file cannot be deleted (e.g., permission denied)
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file
@@ -275,16 +275,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(Vec<String>)` - A list of all file names in the storage
-    /// * `Err(PlatypusError)` - If the storage cannot be read
+    /// * `Err(SarissaError)` - If the storage cannot be read
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create some files
@@ -318,16 +318,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(u64)` - The size of the file in bytes
-    /// * `Err(PlatypusError)` - If the file doesn't exist or cannot be accessed
+    /// * `Err(SarissaError)` - If the file doesn't exist or cannot be accessed
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file with known size
@@ -356,16 +356,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(FileMetadata)` - Metadata structure with file information
-    /// * `Err(PlatypusError)` - If the file doesn't exist or cannot be accessed
+    /// * `Err(SarissaError)` - If the file doesn't exist or cannot be accessed
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a file
@@ -396,17 +396,17 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the file was successfully renamed
-    /// * `Err(PlatypusError)` - If the source file doesn't exist, destination exists,
+    /// * `Err(SarissaError)` - If the source file doesn't exist, destination exists,
     ///   or the operation fails
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a temp file
@@ -438,16 +438,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ///
     /// * `Ok((String, Box<dyn StorageOutput>))` - A tuple of (filename, writer)
     ///   where filename is the unique generated name
-    /// * `Err(PlatypusError)` - If the temporary file cannot be created
+    /// * `Err(SarissaError)` - If the temporary file cannot be created
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Create a temp file with prefix
@@ -475,16 +475,16 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If all pending writes were successfully synced
-    /// * `Err(PlatypusError)` - If the sync operation fails
+    /// * `Err(SarissaError)` - If the sync operation fails
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Write some data
@@ -508,17 +508,17 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     /// # Returns
     ///
     /// * `Ok(())` - If the storage was successfully closed
-    /// * `Err(PlatypusError)` - If errors occur during cleanup (though resources
+    /// * `Err(SarissaError)` - If errors occur during cleanup (though resources
     ///   should still be released as much as possible)
     ///
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::Storage;
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::Storage;
     /// use std::io::Write;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let mut storage = MemoryStorage::new(MemoryStorageConfig::default());
     ///
     /// // Use storage
@@ -631,9 +631,9 @@ pub trait StorageLock: Send + std::fmt::Debug {
 /// # Example
 ///
 /// ```
-/// use platypus::storage::StorageConfig;
-/// use platypus::storage::file::FileStorageConfig;
-/// use platypus::storage::memory::MemoryStorageConfig;
+/// use sarissa::storage::StorageConfig;
+/// use sarissa::storage::file::FileStorageConfig;
+/// use sarissa::storage::memory::MemoryStorageConfig;
 ///
 /// // File storage with custom settings
 /// let mut file_config = FileStorageConfig::new("/data/index");
@@ -679,11 +679,11 @@ impl StorageFactory {
     /// # Example
     ///
     /// ```
-    /// use platypus::storage::{StorageFactory, StorageConfig};
-    /// use platypus::storage::file::FileStorageConfig;
-    /// use platypus::storage::memory::MemoryStorageConfig;
+    /// use sarissa::storage::{StorageFactory, StorageConfig};
+    /// use sarissa::storage::file::FileStorageConfig;
+    /// use sarissa::storage::memory::MemoryStorageConfig;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// // Create memory storage
     /// let config = StorageConfig::Memory(MemoryStorageConfig::default());
     /// let storage = StorageFactory::create(config)?;
@@ -759,9 +759,9 @@ impl std::fmt::Display for StorageError {
 
 impl std::error::Error for StorageError {}
 
-impl From<StorageError> for PlatypusError {
+impl From<StorageError> for SarissaError {
     fn from(err: StorageError) -> Self {
-        PlatypusError::storage(err.to_string())
+        SarissaError::storage(err.to_string())
     }
 }
 

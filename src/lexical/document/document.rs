@@ -18,8 +18,8 @@
 //! Basic document creation:
 //!
 //! ```
-//! use platypus::document::document::Document;
-//! use platypus::document::field::FieldValue;
+//! use sarissa::document::document::Document;
+//! use sarissa::document::field::FieldValue;
 //!
 //! let mut doc = Document::new();
 //! doc.add_field_value("title", FieldValue::Text("Rust Book".to_string()));
@@ -32,8 +32,8 @@
 //! Using the builder pattern:
 //!
 //! ```
-//! use platypus::document::document::Document;
-//! use platypus::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
+//! use sarissa::document::document::Document;
+//! use sarissa::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
 //!
 //! let doc = Document::builder()
 //!     .add_text("title", "Rust Programming", TextOption::default())
@@ -49,8 +49,8 @@
 //! With geographic data:
 //!
 //! ```
-//! use platypus::document::document::Document;
-//! use platypus::document::field::{TextOption, GeoOption};
+//! use sarissa::document::document::Document;
+//! use sarissa::document::field::{TextOption, GeoOption};
 //!
 //! let doc = Document::builder()
 //!     .add_text("name", "Tokyo Tower", TextOption::default())
@@ -93,8 +93,8 @@ use crate::lexical::index::inverted::query::geo::GeoPoint;
 /// # Examples
 ///
 /// ```no_run
-/// use platypus::document::document::Document;
-/// use platypus::document::field::{Field, FieldValue, FieldOption, TextOption};
+/// use sarissa::document::document::Document;
+/// use sarissa::document::field::{Field, FieldValue, FieldOption, TextOption};
 ///
 /// let mut doc = Document::new();
 /// doc.add_field("title", Field::new(
@@ -127,7 +127,7 @@ impl Document {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
+    /// use sarissa::document::document::Document;
     ///
     /// let doc = Document::new();
     /// assert_eq!(doc.len(), 0);
@@ -151,8 +151,8 @@ impl Document {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{Field, FieldValue};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{Field, FieldValue};
     ///
     /// let mut doc = Document::new();
     /// doc.add_field("title", Field::with_default_option(FieldValue::Text("Rust".to_string())));
@@ -177,8 +177,8 @@ impl Document {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::FieldValue;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field_value("title", FieldValue::Text("Rust".to_string()));
@@ -202,8 +202,8 @@ impl Document {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{Field, FieldValue};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{Field, FieldValue};
     ///
     /// let mut doc = Document::new();
     /// doc.add_field_value("title", FieldValue::Text("Rust".to_string()));
@@ -224,8 +224,8 @@ impl Document {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::FieldValue;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field_value("title", FieldValue::Text("Rust".to_string()));
@@ -248,8 +248,8 @@ impl Document {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::FieldValue;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field_value("title", FieldValue::Text("Rust".to_string()));
@@ -270,8 +270,8 @@ impl Document {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::FieldValue;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field_value("title", FieldValue::Text("Rust".to_string()));
@@ -293,8 +293,8 @@ impl Document {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::FieldValue;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::FieldValue;
     ///
     /// let mut doc = Document::new();
     /// doc.add_field_value("title", FieldValue::Text("Rust".to_string()));
@@ -312,8 +312,8 @@ impl Document {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, IntegerOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, IntegerOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("title", "Rust", TextOption::default())
@@ -331,8 +331,8 @@ impl Document {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::TextOption;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::TextOption;
     ///
     /// let doc = Document::new();
     /// assert!(doc.is_empty());
@@ -353,8 +353,8 @@ impl Document {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, IntegerOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, IntegerOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("title", "Rust Programming", TextOption::default())
@@ -383,8 +383,8 @@ impl Default for Document {
 /// # Examples
 ///
 /// ```
-/// use platypus::document::document::Document;
-/// use platypus::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
+/// use sarissa::document::document::Document;
+/// use sarissa::document::field::{TextOption, IntegerOption, FloatOption, BooleanOption};
 ///
 /// let doc = Document::builder()
 ///     .add_text("title", "Rust Programming", TextOption::default())
@@ -400,8 +400,8 @@ impl Default for Document {
 /// With geographic coordinates:
 ///
 /// ```
-/// use platypus::document::document::Document;
-/// use platypus::document::field::{TextOption, GeoOption};
+/// use sarissa::document::document::Document;
+/// use sarissa::document::field::{TextOption, GeoOption};
 ///
 /// let doc = Document::builder()
 ///     .add_text("name", "Tokyo", TextOption::default())
@@ -421,7 +421,7 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::DocumentBuilder;
+    /// use sarissa::document::document::DocumentBuilder;
     ///
     /// let builder = DocumentBuilder::new();
     /// let doc = builder.build();
@@ -447,8 +447,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::TextOption;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::TextOption;
     ///
     /// let doc = Document::builder()
     ///     .add_text("title", "Rust Programming", TextOption::default())
@@ -489,8 +489,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, IntegerOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, IntegerOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("title", "Book", TextOption::default())
@@ -527,8 +527,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, FloatOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, FloatOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("product", "Book", TextOption::default())
@@ -559,8 +559,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, BooleanOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, BooleanOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("product", "Book", TextOption::default())
@@ -597,8 +597,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, BinaryOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, BinaryOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("filename", "image.png", TextOption::default())
@@ -634,8 +634,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::FloatOption;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::FloatOption;
     ///
     /// let doc = Document::builder()
     ///     .add_numeric("temperature", 23.5, FloatOption::default())
@@ -670,8 +670,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, DateTimeOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, DateTimeOption};
     /// use chrono::Utc;
     ///
     /// let doc = Document::builder()
@@ -711,8 +711,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, GeoOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, GeoOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("name", "Tokyo Tower", TextOption::default())
@@ -754,8 +754,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, VectorOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, VectorOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("title", "Machine Learning Basics", TextOption::default())
@@ -796,8 +796,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::FieldValue;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::FieldValue;
     ///
     /// let value = FieldValue::Text("Dynamic value".to_string());
     /// let doc = Document::builder()
@@ -818,8 +818,8 @@ impl DocumentBuilder {
     /// # Examples
     ///
     /// ```
-    /// use platypus::document::document::Document;
-    /// use platypus::document::field::{TextOption, IntegerOption};
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::field::{TextOption, IntegerOption};
     ///
     /// let doc = Document::builder()
     ///     .add_text("title", "Rust", TextOption::default())

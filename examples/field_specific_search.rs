@@ -4,19 +4,19 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use platypus::analysis::analyzer::analyzer::Analyzer;
-use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
-use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::document::document::Document;
-use platypus::document::field::{IntegerOption, TextOption};
-use platypus::error::Result;
-use platypus::lexical::engine::LexicalEngine;
-use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use platypus::lexical::index::inverted::query::term::TermQuery;
-use platypus::lexical::search::searcher::LexicalSearchRequest;
-use platypus::storage::file::FileStorageConfig;
-use platypus::storage::{StorageConfig, StorageFactory};
+use sarissa::analysis::analyzer::analyzer::Analyzer;
+use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
+use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+use sarissa::document::document::Document;
+use sarissa::document::field::{IntegerOption, TextOption};
+use sarissa::error::Result;
+use sarissa::lexical::engine::LexicalEngine;
+use sarissa::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use sarissa::lexical::index::inverted::query::term::TermQuery;
+use sarissa::lexical::search::searcher::LexicalSearchRequest;
+use sarissa::storage::file::FileStorageConfig;
+use sarissa::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== Field-Specific Search Example ===\n");
@@ -127,7 +127,7 @@ fn main() -> Result<()> {
     // Example 2: Search by author with document loading
     println!("\n2. Search by author with document details (author:Orwell):");
     let request = LexicalSearchRequest::new(Box::new(TermQuery::new("author", "orwell"))
-        as Box<dyn platypus::lexical::index::inverted::query::Query>)
+        as Box<dyn sarissa::lexical::index::inverted::query::Query>)
     .load_documents(true);
     let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);
@@ -150,7 +150,7 @@ fn main() -> Result<()> {
                 println!("      Category: {category}");
             }
             if let Some(field) = doc.get_field("year")
-                && let platypus::document::field::FieldValue::Integer(year) = &field.value
+                && let sarissa::document::field::FieldValue::Integer(year) = &field.value
             {
                 println!("      Year: {year}");
             }
@@ -174,7 +174,7 @@ fn main() -> Result<()> {
     // Example 4: Search in tags field
     println!("\n4. Search in tags field (tags:british):");
     let request = LexicalSearchRequest::new(Box::new(TermQuery::new("tags", "british"))
-        as Box<dyn platypus::lexical::index::inverted::query::Query>)
+        as Box<dyn sarissa::lexical::index::inverted::query::Query>)
     .load_documents(true);
     let results = lexical_engine.search(request)?;
     println!("   Found {} results", results.total_hits);

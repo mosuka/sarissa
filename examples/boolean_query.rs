@@ -4,23 +4,23 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use platypus::analysis::analyzer::analyzer::Analyzer;
-use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
-use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::document::document::Document;
-use platypus::document::field::{FloatOption, TextOption};
-use platypus::error::Result;
-use platypus::lexical::engine::LexicalEngine;
-use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use platypus::lexical::index::inverted::query::Query;
-use platypus::lexical::index::inverted::query::boolean::BooleanQuery;
-use platypus::lexical::index::inverted::query::phrase::PhraseQuery;
-use platypus::lexical::index::inverted::query::range::NumericRangeQuery;
-use platypus::lexical::index::inverted::query::term::TermQuery;
-use platypus::lexical::search::searcher::LexicalSearchRequest;
-use platypus::storage::file::FileStorageConfig;
-use platypus::storage::{StorageConfig, StorageFactory};
+use sarissa::analysis::analyzer::analyzer::Analyzer;
+use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
+use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+use sarissa::document::document::Document;
+use sarissa::document::field::{FloatOption, TextOption};
+use sarissa::error::Result;
+use sarissa::lexical::engine::LexicalEngine;
+use sarissa::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use sarissa::lexical::index::inverted::query::Query;
+use sarissa::lexical::index::inverted::query::boolean::BooleanQuery;
+use sarissa::lexical::index::inverted::query::phrase::PhraseQuery;
+use sarissa::lexical::index::inverted::query::range::NumericRangeQuery;
+use sarissa::lexical::index::inverted::query::term::TermQuery;
+use sarissa::lexical::search::searcher::LexicalSearchRequest;
+use sarissa::storage::file::FileStorageConfig;
+use sarissa::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== BooleanQuery Example - Complex Boolean Logic ===\n");
@@ -224,12 +224,12 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let platypus::document::field::FieldValue::Float(price) = &field.value
+                && let sarissa::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
             if let Some(field) = doc.get_field("rating")
-                && let platypus::document::field::FieldValue::Float(rating) = &field.value
+                && let sarissa::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -319,7 +319,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let platypus::document::field::FieldValue::Float(price) = &field.value
+                && let sarissa::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
@@ -354,7 +354,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("rating")
-                && let platypus::document::field::FieldValue::Float(rating) = &field.value
+                && let sarissa::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -410,12 +410,12 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let platypus::document::field::FieldValue::Float(price) = &field.value
+                && let sarissa::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }
             if let Some(field) = doc.get_field("rating")
-                && let platypus::document::field::FieldValue::Float(rating) = &field.value
+                && let sarissa::document::field::FieldValue::Float(rating) = &field.value
             {
                 println!("      Rating: {rating:.1}");
             }
@@ -470,7 +470,7 @@ fn main() -> Result<()> {
                 println!("      Title: {title}");
             }
             if let Some(field) = doc.get_field("price")
-                && let platypus::document::field::FieldValue::Float(price) = &field.value
+                && let sarissa::document::field::FieldValue::Float(price) = &field.value
             {
                 println!("      Price: ${price:.2}");
             }

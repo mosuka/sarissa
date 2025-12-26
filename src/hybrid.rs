@@ -18,11 +18,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use platypus::hybrid::engine::HybridEngine;
-//! use platypus::hybrid::search::searcher::HybridSearchRequest;
-//! use platypus::lexical::engine::LexicalEngine;
-//! use platypus::vector::engine::VectorEngine;
-//! use platypus::error::Result;
+//! use sarissa::hybrid::engine::HybridEngine;
+//! use sarissa::hybrid::search::searcher::HybridSearchRequest;
+//! use sarissa::lexical::engine::LexicalEngine;
+//! use sarissa::vector::engine::VectorEngine;
+//! use sarissa::error::Result;
 //!
 //! async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> Result<()> {
 //!     // Create hybrid search engine

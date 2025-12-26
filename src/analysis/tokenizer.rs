@@ -16,8 +16,8 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::tokenizer::Tokenizer;
-//! use platypus::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+//! use sarissa::analysis::tokenizer::Tokenizer;
+//! use sarissa::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 //!
 //! let tokenizer = WhitespaceTokenizer::new();
 //! let tokens: Vec<_> = tokenizer.tokenize("Hello world").unwrap().collect();
@@ -37,9 +37,9 @@ use crate::error::Result;
 /// Implementing a custom tokenizer:
 ///
 /// ```
-/// use platypus::analysis::token::{Token, TokenStream};
-/// use platypus::analysis::tokenizer::Tokenizer;
-/// use platypus::error::Result;
+/// use sarissa::analysis::token::{Token, TokenStream};
+/// use sarissa::analysis::tokenizer::Tokenizer;
+/// use sarissa::error::Result;
 ///
 /// struct CustomTokenizer;
 ///
@@ -72,8 +72,8 @@ pub trait Tokenizer: Send + Sync {
     /// # Examples
     ///
     /// ```
-    /// use platypus::analysis::tokenizer::Tokenizer;
-    /// use platypus::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+    /// use sarissa::analysis::tokenizer::Tokenizer;
+    /// use sarissa::analysis::tokenizer::whitespace::WhitespaceTokenizer;
     ///
     /// let tokenizer = WhitespaceTokenizer::new();
     /// let tokens: Vec<_> = tokenizer.tokenize("Hello world").unwrap().collect();
@@ -91,8 +91,8 @@ pub trait Tokenizer: Send + Sync {
     /// # Examples
     ///
     /// ```
-    /// use platypus::analysis::tokenizer::Tokenizer;
-    /// use platypus::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+    /// use sarissa::analysis::tokenizer::Tokenizer;
+    /// use sarissa::analysis::tokenizer::whitespace::WhitespaceTokenizer;
     ///
     /// let tokenizer = WhitespaceTokenizer::new();
     /// assert_eq!(tokenizer.name(), "whitespace");

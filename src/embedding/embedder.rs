@@ -28,12 +28,12 @@
 //! ```no_run
 //! # #[cfg(feature = "embeddings-candle")]
 //! # {
-//! use platypus::embedding::embedder::{Embedder, EmbedInput};
-//! use platypus::embedding::per_field::PerFieldEmbedder;
-//! use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use sarissa::embedding::embedder::{Embedder, EmbedInput};
+//! use sarissa::embedding::per_field::PerFieldEmbedder;
+//! use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
 //! use std::sync::Arc;
 //!
-//! # async fn example() -> platypus::error::Result<()> {
+//! # async fn example() -> sarissa::error::Result<()> {
 //! let text_embedder = Arc::new(
 //!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 //! );
@@ -57,7 +57,7 @@ use std::io::Write;
 use async_trait::async_trait;
 use tempfile::NamedTempFile;
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::vector::core::vector::Vector;
 
 /// Input types for embedding operations.
@@ -152,9 +152,9 @@ pub enum EmbedInputType {
 ///
 /// ```
 /// use async_trait::async_trait;
-/// use platypus::embedding::embedder::{Embedder, EmbedInput, EmbedInputType};
-/// use platypus::error::{PlatypusError, Result};
-/// use platypus::vector::core::vector::Vector;
+/// use sarissa::embedding::embedder::{Embedder, EmbedInput, EmbedInputType};
+/// use sarissa::error::{SarissaError, Result};
+/// use sarissa::vector::core::vector::Vector;
 ///
 /// #[derive(Debug)]
 /// struct MyTextEmbedder {
@@ -169,7 +169,7 @@ pub enum EmbedInputType {
 ///                 // Generate embedding from text
 ///                 Ok(Vector::new(vec![0.0; self.dimension]))
 ///             }
-///             _ => Err(PlatypusError::invalid_argument(
+///             _ => Err(SarissaError::invalid_argument(
 ///                 "this embedder only supports text input"
 ///             )),
 ///         }
@@ -295,17 +295,17 @@ where
     E: Embedder + ?Sized,
 {
     let mut temp_file = NamedTempFile::new().map_err(|err| {
-        PlatypusError::internal(format!(
+        SarissaError::internal(format!(
             "failed to create temporary file for image embedding: {err}"
         ))
     })?;
     temp_file.write_all(bytes).map_err(|err| {
-        PlatypusError::internal(format!("failed to write temporary image payload: {err}"))
+        SarissaError::internal(format!("failed to write temporary image payload: {err}"))
     })?;
     let temp_path = temp_file.into_temp_path();
     let path_buf = temp_path.to_path_buf();
     let path_string = path_buf.to_str().ok_or_else(|| {
-        PlatypusError::invalid_argument("temporary image path contains invalid UTF-8 characters")
+        SarissaError::invalid_argument("temporary image path contains invalid UTF-8 characters")
     })?;
     let vector = embedder.embed(&EmbedInput::ImagePath(path_string)).await?;
     drop(temp_path);
@@ -320,7 +320,7 @@ where
     E: Embedder + ?Sized,
 {
     if uri.starts_with("http://") || uri.starts_with("https://") {
-        return Err(PlatypusError::invalid_argument(
+        return Err(SarissaError::invalid_argument(
             "remote HTTP(S) URIs are not supported yet—download to disk first",
         ));
     }
@@ -342,7 +342,7 @@ mod tests {
         async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
             match input {
                 EmbedInput::Text(_) => Ok(Vector::new(vec![0.0; self.dimension])),
-                _ => Err(PlatypusError::invalid_argument(
+                _ => Err(SarissaError::invalid_argument(
                     "this embedder only supports text input",
                 )),
             }
@@ -369,7 +369,7 @@ mod tests {
         async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
             match input {
                 EmbedInput::Text(_) | EmbedInput::ImagePath(_) => Ok(Vector::new(vec![0.0; 3])),
-                _ => Err(PlatypusError::invalid_argument("unsupported input type")),
+                _ => Err(SarissaError::invalid_argument("unsupported input type")),
             }
         }
 

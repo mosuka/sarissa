@@ -24,12 +24,12 @@ use crate::vector::index::ivf::IvfIndex;
 /// # Example with StorageFactory
 ///
 /// ```
-/// use platypus::vector::index::factory::VectorIndexFactory;
-/// use platypus::vector::index::config::VectorIndexTypeConfig;
-/// use platypus::storage::{StorageFactory, StorageConfig};
-/// use platypus::storage::memory::MemoryStorageConfig;
+/// use sarissa::vector::index::factory::VectorIndexFactory;
+/// use sarissa::vector::index::config::VectorIndexTypeConfig;
+/// use sarissa::storage::{StorageFactory, StorageConfig};
+/// use sarissa::storage::memory::MemoryStorageConfig;
 ///
-/// # fn main() -> platypus::error::Result<()> {
+/// # fn main() -> sarissa::error::Result<()> {
 /// // Create storage using factory
 /// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
 ///
@@ -57,12 +57,12 @@ impl VectorIndexFactory {
     /// # Example
     ///
     /// ```
-    /// use platypus::vector::index::factory::VectorIndexFactory;
-    /// use platypus::vector::index::config::{VectorIndexTypeConfig, FlatIndexConfig};
-    /// use platypus::storage::{StorageFactory, StorageConfig};
-    /// use platypus::storage::file::FileStorageConfig;
+    /// use sarissa::vector::index::factory::VectorIndexFactory;
+    /// use sarissa::vector::index::config::{VectorIndexTypeConfig, FlatIndexConfig};
+    /// use sarissa::storage::{StorageFactory, StorageConfig};
+    /// use sarissa::storage::file::FileStorageConfig;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// // Create file storage
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
     /// let storage = StorageFactory::create(storage_config)?;
@@ -107,12 +107,12 @@ impl VectorIndexFactory {
     /// # Example
     ///
     /// ```no_run
-    /// use platypus::vector::index::factory::VectorIndexFactory;
-    /// use platypus::vector::index::config::{VectorIndexTypeConfig, FlatIndexConfig};
-    /// use platypus::storage::file::{FileStorage, FileStorageConfig};
+    /// use sarissa::vector::index::factory::VectorIndexFactory;
+    /// use sarissa::vector::index::config::{VectorIndexTypeConfig, FlatIndexConfig};
+    /// use sarissa::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
     /// let config = VectorIndexTypeConfig::Flat(FlatIndexConfig::default());
     /// let index = VectorIndexFactory::open(storage, config)?;

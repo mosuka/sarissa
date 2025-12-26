@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::vector::core::document::DocumentVector;
 use crate::vector::engine::filter::{RegistryFilterMatches, VectorFilter};
 
@@ -67,7 +67,7 @@ impl DocumentVectorRegistry {
         let mut guard = self.entries.write();
         guard
             .remove(&doc_id)
-            .ok_or_else(|| PlatypusError::not_found(format!("doc_id {doc_id}")))?;
+            .ok_or_else(|| SarissaError::not_found(format!("doc_id {doc_id}")))?;
         Ok(())
     }
 
@@ -77,7 +77,7 @@ impl DocumentVectorRegistry {
 
     pub fn snapshot(&self) -> Result<Vec<u8>> {
         let guard = self.entries.read();
-        serde_json::to_vec(&*guard).map_err(PlatypusError::from)
+        serde_json::to_vec(&*guard).map_err(SarissaError::from)
     }
 
     pub fn from_snapshot(bytes: &[u8]) -> Result<Self> {

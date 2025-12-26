@@ -73,8 +73,8 @@ impl SynonymGraphFilter {
     ///
     /// # Example
     /// ```
-    /// use platypus::analysis::token_filter::synonym_graph::SynonymGraphFilter;
-    /// use platypus::analysis::synonym::dictionary::SynonymDictionary;
+    /// use sarissa::analysis::token_filter::synonym_graph::SynonymGraphFilter;
+    /// use sarissa::analysis::synonym::dictionary::SynonymDictionary;
     ///
     /// let mut dict = SynonymDictionary::new(None).unwrap();
     /// dict.add_synonym_group(vec!["ml".to_string(), "machine learning".to_string()]);

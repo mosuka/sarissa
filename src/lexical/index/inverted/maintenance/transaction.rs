@@ -1,4 +1,4 @@
-//! Transaction management for atomic lexical operations in Platypus.
+//! Transaction management for atomic lexical operations in Sarissa.
 //!
 //! This module coordinates schema-less indexing, merges, and deletions with
 //! explicit commit/rollback hooks so concurrent writers keep inverted indexes
@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ahash::AHashMap;
 use uuid::Uuid;
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::lexical::document::document::Document;
 use crate::lexical::index::inverted::maintenance::deletion::{
     DeletionManager, GlobalDeletionState,
@@ -114,7 +114,7 @@ impl Transaction {
     /// Add an operation to this transaction.
     pub fn add_operation(&mut self, operation: TransactionOperation) -> Result<()> {
         if self.state != TransactionState::Active {
-            return Err(PlatypusError::index(
+            return Err(SarissaError::index(
                 "Cannot add operations to inactive transaction",
             ));
         }
@@ -125,7 +125,7 @@ impl Transaction {
     /// Mark transaction as preparing for commit.
     pub fn prepare(&mut self) -> Result<()> {
         if self.state != TransactionState::Active {
-            return Err(PlatypusError::index("Cannot prepare inactive transaction"));
+            return Err(SarissaError::index("Cannot prepare inactive transaction"));
         }
         self.state = TransactionState::Preparing;
         Ok(())
@@ -134,7 +134,7 @@ impl Transaction {
     /// Mark transaction as committed.
     pub fn commit(&mut self) -> Result<()> {
         if self.state != TransactionState::Preparing {
-            return Err(PlatypusError::index("Cannot commit unprepared transaction"));
+            return Err(SarissaError::index("Cannot commit unprepared transaction"));
         }
         self.state = TransactionState::Committed;
         Ok(())
@@ -143,7 +143,7 @@ impl Transaction {
     /// Mark transaction as aborted.
     pub fn abort(&mut self) -> Result<()> {
         if self.state == TransactionState::Committed {
-            return Err(PlatypusError::index("Cannot abort committed transaction"));
+            return Err(SarissaError::index("Cannot abort committed transaction"));
         }
         self.state = TransactionState::Aborted;
         Ok(())

@@ -1,5 +1,5 @@
 [package]
-name = "platypus"
+name = "sarissa"
 version = "0.1.0"
 edition = "2024"
 description = "A fast, featureful full-text search library for Rust"

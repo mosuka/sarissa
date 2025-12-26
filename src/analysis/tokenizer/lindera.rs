@@ -14,8 +14,8 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::tokenizer::lindera::LinderaTokenizer;
-//! use platypus::analysis::tokenizer::Tokenizer;
+//! use sarissa::analysis::tokenizer::lindera::LinderaTokenizer;
+//! use sarissa::analysis::tokenizer::Tokenizer;
 //!
 //! // Japanese tokenization
 //! let tokenizer = LinderaTokenizer::new("normal", "embedded://unidic", None).unwrap();
@@ -34,7 +34,7 @@ use lindera::segmenter::Segmenter;
 
 use crate::analysis::token::{Token, TokenStream, TokenType};
 use crate::analysis::tokenizer::Tokenizer;
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 
 /// A tokenizer that uses Lindera for morphological analysis.
 ///
@@ -51,8 +51,8 @@ use crate::error::{PlatypusError, Result};
 /// # Examples
 ///
 /// ```
-/// use platypus::analysis::tokenizer::lindera::LinderaTokenizer;
-/// use platypus::analysis::tokenizer::Tokenizer;
+/// use sarissa::analysis::tokenizer::lindera::LinderaTokenizer;
+/// use sarissa::analysis::tokenizer::Tokenizer;
 ///
 /// // Japanese with UniDic
 /// let tokenizer = LinderaTokenizer::new("normal", "embedded://unidic", None).unwrap();
@@ -90,7 +90,7 @@ impl LinderaTokenizer {
     /// # Examples
     ///
     /// ```
-    /// use platypus::analysis::tokenizer::lindera::LinderaTokenizer;
+    /// use sarissa::analysis::tokenizer::lindera::LinderaTokenizer;
     ///
     /// // Japanese tokenizer
     /// let tokenizer = LinderaTokenizer::new(
@@ -108,13 +108,13 @@ impl LinderaTokenizer {
     /// ```
     pub fn new(mode_str: &str, dict_uri: &str, user_dict_uri: Option<&str>) -> Result<Self> {
         let mode = Mode::from_str(mode_str)
-            .map_err(|e| PlatypusError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
+            .map_err(|e| SarissaError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
         let dict = load_dictionary(dict_uri)
-            .map_err(|e| PlatypusError::analysis(format!("Failed to load dictionary: {}", e)))?;
+            .map_err(|e| SarissaError::analysis(format!("Failed to load dictionary: {}", e)))?;
         let metadata = &dict.metadata;
         let user_dict = match user_dict_uri {
             Some(uri) => Some(load_user_dictionary(uri, metadata).map_err(|e| {
-                PlatypusError::analysis(format!("Failed to load user dictionary: {}", e))
+                SarissaError::analysis(format!("Failed to load user dictionary: {}", e))
             })?),
             None => None,
         };
@@ -200,7 +200,7 @@ impl Tokenizer for LinderaTokenizer {
         for token in self
             .inner
             .segment(Cow::Borrowed(text))
-            .map_err(|e| PlatypusError::analysis(format!("Failed to segment text: {}", e)))?
+            .map_err(|e| SarissaError::analysis(format!("Failed to segment text: {}", e)))?
         {
             let token_type = Self::detect_token_type(&token.surface);
             tokens.push(

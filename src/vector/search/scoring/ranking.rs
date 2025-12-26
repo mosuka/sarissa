@@ -58,7 +58,7 @@ impl VectorRanker {
     /// # Examples
     ///
     /// ```
-    /// use platypus::vector::search::scoring::ranking::{VectorRanker, RankingConfig};
+    /// use sarissa::vector::search::scoring::ranking::{VectorRanker, RankingConfig};
     ///
     /// let config = RankingConfig::default();
     /// let ranker = VectorRanker::new(config);
