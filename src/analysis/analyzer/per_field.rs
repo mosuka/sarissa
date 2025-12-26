@@ -23,10 +23,10 @@ use crate::error::Result;
 /// # Example
 ///
 /// ```
-/// use platypus::analysis::analyzer::analyzer::Analyzer;
-/// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-/// use platypus::analysis::analyzer::standard::StandardAnalyzer;
-/// use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+/// use sarissa::analysis::analyzer::analyzer::Analyzer;
+/// use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+/// use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
 /// use std::sync::Arc;
 ///
 /// // Reuse analyzer instances to save memory

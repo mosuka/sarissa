@@ -12,7 +12,7 @@ use ahash::AHashMap;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::lexical::core::dictionary::HybridTermDictionary;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::core::doc_values::DocValuesReader;
@@ -377,7 +377,7 @@ impl SegmentReader {
         if let Ok(input) = self.storage.open_input(&dict_file) {
             let mut reader = StructReader::new(input)?;
             let dictionary = HybridTermDictionary::read_from_storage(&mut reader).map_err(|e| {
-                PlatypusError::index(format!(
+                SarissaError::index(format!(
                     "Failed to read term dictionary from {dict_file}: {e}"
                 ))
             })?;
@@ -397,7 +397,7 @@ impl SegmentReader {
             std::io::Read::read_to_string(&mut input, &mut json_data)?;
 
             let docs: Vec<Document> = serde_json::from_str(&json_data).map_err(|e| {
-                PlatypusError::index(format!("Failed to parse JSON documents: {e}"))
+                SarissaError::index(format!("Failed to parse JSON documents: {e}"))
             })?;
 
             let mut documents = BTreeMap::new();
@@ -460,7 +460,7 @@ impl SegmentReader {
                             let dt_str = reader.read_string()?;
                             let dt = chrono::DateTime::parse_from_rfc3339(&dt_str)
                                 .map_err(|e| {
-                                    PlatypusError::index(format!("Failed to parse DateTime: {e}"))
+                                    SarissaError::index(format!("Failed to parse DateTime: {e}"))
                                 })?
                                 .with_timezone(&chrono::Utc);
                             FieldValue::DateTime(dt)
@@ -484,7 +484,7 @@ impl SegmentReader {
                             FieldValue::Vector(text)
                         }
                         _ => {
-                            return Err(PlatypusError::index(format!(
+                            return Err(SarissaError::index(format!(
                                 "Unknown field type tag: {type_tag}"
                             )));
                         }
@@ -1035,7 +1035,7 @@ impl InvertedIndexReader {
     /// Check if the reader is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed.load(Ordering::Acquire) {
-            Err(PlatypusError::index("Reader is closed"))
+            Err(SarissaError::index("Reader is closed"))
         } else {
             Ok(())
         }

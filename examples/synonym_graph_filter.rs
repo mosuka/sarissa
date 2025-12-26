@@ -6,12 +6,12 @@
 //! - Use boost to adjust synonym weights
 //! - Observe how tokens are expanded with synonyms
 
-use platypus::analysis::synonym::dictionary::SynonymDictionary;
-use platypus::analysis::token_filter::Filter;
-use platypus::analysis::token_filter::synonym_graph::SynonymGraphFilter;
-use platypus::analysis::tokenizer::Tokenizer;
-use platypus::analysis::tokenizer::whitespace::WhitespaceTokenizer;
-use platypus::error::Result;
+use sarissa::analysis::synonym::dictionary::SynonymDictionary;
+use sarissa::analysis::token_filter::Filter;
+use sarissa::analysis::token_filter::synonym_graph::SynonymGraphFilter;
+use sarissa::analysis::tokenizer::Tokenizer;
+use sarissa::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+use sarissa::error::Result;
 
 fn main() -> Result<()> {
     println!("=== SynonymGraphFilter Usage Example ===\n");

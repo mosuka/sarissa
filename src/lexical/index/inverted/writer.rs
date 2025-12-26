@@ -12,7 +12,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
 use crate::lexical::core::doc_values::DocValuesWriter;
 use crate::lexical::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
@@ -236,13 +236,13 @@ impl InvertedIndexWriter {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use platypus::document::document::Document;
-    /// use platypus::document::parser::DocumentParser;
-    /// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-    /// use platypus::analysis::analyzer::standard::StandardAnalyzer;
-    /// use platypus::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
-    /// use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    /// use platypus::storage::StorageConfig;
+    /// use sarissa::document::document::Document;
+    /// use sarissa::document::parser::DocumentParser;
+    /// use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+    /// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+    /// use sarissa::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
+    /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    /// use sarissa::storage::StorageConfig;
     /// use std::sync::Arc;
     ///
     /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
@@ -253,7 +253,7 @@ impl InvertedIndexWriter {
     /// };
     /// let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
     ///
-    /// use platypus::document::field::TextOption;
+    /// use sarissa::document::field::TextOption;
     /// let doc = Document::builder()
     ///     .add_text("title", "Rust Programming", TextOption::default())
     ///     .build();
@@ -746,7 +746,7 @@ impl InvertedIndexWriter {
         let json_file = format!("{segment_name}.json");
         let mut output = self.storage.create_output(&json_file)?;
         let segment_data = serde_json::to_string_pretty(&documents)
-            .map_err(|e| PlatypusError::index(format!("Failed to serialize segment: {e}")))?;
+            .map_err(|e| SarissaError::index(format!("Failed to serialize segment: {e}")))?;
         std::io::Write::write_all(&mut output, segment_data.as_bytes())?;
         output.close()?;
 
@@ -769,7 +769,7 @@ impl InvertedIndexWriter {
         // Write as JSON for compatibility with InvertedIndex::load_segments()
         let meta_file = format!("{segment_name}.meta");
         let json_data = serde_json::to_string_pretty(&segment_info).map_err(|e| {
-            PlatypusError::index(format!("Failed to serialize segment metadata: {e}"))
+            SarissaError::index(format!("Failed to serialize segment metadata: {e}"))
         })?;
 
         let mut output = self.storage.create_output(&meta_file)?;
@@ -842,7 +842,7 @@ impl InvertedIndexWriter {
     /// Check if the writer is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed {
-            Err(PlatypusError::index("Writer is closed"))
+            Err(SarissaError::index("Writer is closed"))
         } else {
             Ok(())
         }
@@ -961,12 +961,12 @@ impl InvertedIndexWriter {
         let meta_file = format!("{segment_id}.meta");
         let input = self.storage.open_input(&meta_file)?;
         let mut meta: SegmentInfo = serde_json::from_reader(input)
-            .map_err(|e| PlatypusError::index(format!("Failed to read segment meta: {e}")))?;
+            .map_err(|e| SarissaError::index(format!("Failed to read segment meta: {e}")))?;
 
         if !meta.has_deletions {
             meta.has_deletions = true;
             let json = serde_json::to_string_pretty(&meta).map_err(|e| {
-                PlatypusError::index(format!("Failed to serialize segment meta: {e}"))
+                SarissaError::index(format!("Failed to serialize segment meta: {e}"))
             })?;
             let mut output = self.storage.create_output(&meta_file)?;
             std::io::Write::write_all(&mut output, json.as_bytes())?;

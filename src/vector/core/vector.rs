@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 
 /// Metadata key used to store the original (pre-embedded) text.
 pub const ORIGINAL_TEXT_METADATA_KEY: &str = "original_text";
@@ -86,7 +86,7 @@ impl Vector {
     /// Validate that this vector has the expected dimension.
     pub fn validate_dimension(&self, expected_dim: usize) -> Result<()> {
         if self.data.len() != expected_dim {
-            return Err(PlatypusError::InvalidOperation(format!(
+            return Err(SarissaError::InvalidOperation(format!(
                 "Vector dimension mismatch: expected {}, got {}",
                 expected_dim,
                 self.data.len()

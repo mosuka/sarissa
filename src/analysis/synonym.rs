@@ -28,7 +28,7 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::synonym::dictionary::SynonymDictionary;
+//! use sarissa::analysis::synonym::dictionary::SynonymDictionary;
 //!
 //! let mut dict = SynonymDictionary::new(None).unwrap();
 //! dict.add_synonym_group(vec!["quick".to_string(), "fast".to_string(), "rapid".to_string()]);

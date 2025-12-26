@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
 use super::vector::Vector;
 
 /// Metadata keys used when bridging to the legacy `Vector` representation.
-pub const METADATA_SOURCE_TAG: &str = "__platypus_vector_source_tag";
-pub const METADATA_VECTOR_TYPE: &str = "__platypus_vector_type";
-pub const METADATA_WEIGHT: &str = "__platypus_vector_weight";
+pub const METADATA_SOURCE_TAG: &str = "__sarissa_vector_source_tag";
+pub const METADATA_VECTOR_TYPE: &str = "__sarissa_vector_type";
+pub const METADATA_WEIGHT: &str = "__sarissa_vector_weight";
 
 /// Semantic type associated with a stored vector.
 ///

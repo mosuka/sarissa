@@ -17,8 +17,8 @@
 //!
 //! ```rust,ignore
 //! use std::sync::Arc;
-//! use platypus::embedding::noop::NoOpEmbedder;
-//! use platypus::vector::index::config::VectorIndexConfig;
+//! use sarissa::embedding::noop::NoOpEmbedder;
+//! use sarissa::vector::index::config::VectorIndexConfig;
 //!
 //! let config = VectorIndexConfig::builder()
 //!     .embedder(NoOpEmbedder::new())
@@ -39,7 +39,7 @@ use std::any::Any;
 use async_trait::async_trait;
 
 use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::vector::core::vector::Vector;
 
 /// A no-operation embedder that does not support text or image embedding.
@@ -52,8 +52,8 @@ use crate::vector::core::vector::Vector;
 ///
 /// ```rust
 /// use std::sync::Arc;
-/// use platypus::embedding::noop::NoOpEmbedder;
-/// use platypus::embedding::embedder::Embedder;
+/// use sarissa::embedding::noop::NoOpEmbedder;
+/// use sarissa::embedding::embedder::Embedder;
 ///
 /// let embedder: Arc<dyn Embedder> = Arc::new(NoOpEmbedder::new());
 /// assert!(!embedder.supports_text());
@@ -74,7 +74,7 @@ impl NoOpEmbedder {
     /// # Example
     ///
     /// ```rust
-    /// use platypus::embedding::noop::NoOpEmbedder;
+    /// use sarissa::embedding::noop::NoOpEmbedder;
     ///
     /// let embedder = NoOpEmbedder::new();
     /// ```
@@ -87,7 +87,7 @@ impl NoOpEmbedder {
 impl Embedder for NoOpEmbedder {
     /// Returns an error for any input, as this embedder does not support embedding.
     async fn embed(&self, _input: &EmbedInput<'_>) -> Result<Vector> {
-        Err(PlatypusError::invalid_argument(
+        Err(SarissaError::invalid_argument(
             "NoOpEmbedder does not support embedding - use pre-computed vectors",
         ))
     }

@@ -4,20 +4,20 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use platypus::analysis::analyzer::analyzer::Analyzer;
-use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
-use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::document::document::Document;
-use platypus::document::field::TextOption;
-use platypus::error::Result;
-use platypus::lexical::engine::LexicalEngine;
-use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use platypus::lexical::index::inverted::query::Query;
-use platypus::lexical::index::inverted::query::fuzzy::FuzzyQuery;
-use platypus::lexical::search::searcher::LexicalSearchRequest;
-use platypus::storage::file::FileStorageConfig;
-use platypus::storage::{StorageConfig, StorageFactory};
+use sarissa::analysis::analyzer::analyzer::Analyzer;
+use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
+use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+use sarissa::document::document::Document;
+use sarissa::document::field::TextOption;
+use sarissa::error::Result;
+use sarissa::lexical::engine::LexicalEngine;
+use sarissa::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use sarissa::lexical::index::inverted::query::Query;
+use sarissa::lexical::index::inverted::query::fuzzy::FuzzyQuery;
+use sarissa::lexical::search::searcher::LexicalSearchRequest;
+use sarissa::storage::file::FileStorageConfig;
+use sarissa::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     println!("=== FuzzyQuery Example - Approximate String Matching ===\n");

@@ -14,16 +14,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 #[cfg(feature = "embeddings-multimodal")]
-use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-use platypus::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
-use platypus::embedding::per_field::PerFieldEmbedder;
-use platypus::error::{PlatypusError, Result};
-use platypus::storage::Storage;
-use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
-use platypus::vector::DistanceMetric;
-use platypus::vector::core::document::{DocumentPayload, Payload, PayloadSource, VectorType};
-use platypus::vector::core::vector::Vector;
-use platypus::vector::engine::{
+use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use sarissa::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
+use sarissa::embedding::per_field::PerFieldEmbedder;
+use sarissa::error::{SarissaError, Result};
+use sarissa::storage::Storage;
+use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use sarissa::vector::DistanceMetric;
+use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource, VectorType};
+use sarissa::vector::core::vector::Vector;
+use sarissa::vector::engine::{
     FieldSelector, QueryPayload, VectorEngine, VectorFieldConfig, VectorIndexConfig,
     VectorIndexKind, VectorScoreMode, VectorSearchRequest,
 };
@@ -169,7 +169,7 @@ fn select_embedder() -> Result<EmbedderChoice> {
         }
         #[cfg(not(feature = "embeddings-multimodal"))]
         {
-            return Err(PlatypusError::invalid_argument(
+            return Err(SarissaError::invalid_argument(
                 "--use-candle requires the 'embeddings-multimodal' feature",
             ));
         }
@@ -206,7 +206,7 @@ impl EmbedderChoice {
                 PngEncoder::new(&mut cursor)
                     .write_image(img.as_raw(), 16, 16, ExtendedColorType::Rgb8)
                     .map_err(|err| {
-                        PlatypusError::internal(format!(
+                        SarissaError::internal(format!(
                             "failed to encode sample image payload: {err}"
                         ))
                     })?;
@@ -274,7 +274,7 @@ impl Embedder for DemoTextEmbedder {
     async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
         match input {
             EmbedInput::Text(text) => Ok(self.vector_from_bytes(text.as_bytes())),
-            _ => Err(PlatypusError::invalid_argument(
+            _ => Err(SarissaError::invalid_argument(
                 "DemoTextEmbedder only supports text input",
             )),
         }
@@ -331,7 +331,7 @@ impl Embedder for DemoImageEmbedder {
                 let bytes = fs::read(uri)?;
                 Ok(self.vector_from_bytes(&bytes))
             }
-            EmbedInput::Text(_) => Err(PlatypusError::invalid_argument(
+            EmbedInput::Text(_) => Err(SarissaError::invalid_argument(
                 "DemoImageEmbedder only supports image input",
             )),
         }

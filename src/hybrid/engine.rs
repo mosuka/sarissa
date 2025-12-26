@@ -24,13 +24,13 @@ use crate::vector::search::searcher::VectorIndexSearchParams;
 /// # Examples
 ///
 /// ```no_run
-/// use platypus::hybrid::engine::HybridEngine;
-/// use platypus::hybrid::search::searcher::HybridSearchRequest;
-/// use platypus::lexical::engine::LexicalEngine;
-/// use platypus::vector::engine::VectorEngine;
-/// use platypus::vector::Vector;
+/// use sarissa::hybrid::engine::HybridEngine;
+/// use sarissa::hybrid::search::searcher::HybridSearchRequest;
+/// use sarissa::lexical::engine::LexicalEngine;
+/// use sarissa::vector::engine::VectorEngine;
+/// use sarissa::vector::Vector;
 ///
-/// # async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> platypus::error::Result<()> {
+/// # async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> sarissa::error::Result<()> {
 /// // Create hybrid engine from existing engines
 /// let engine = HybridEngine::new(lexical_engine, vector_engine)?;
 ///
@@ -72,11 +72,11 @@ impl HybridEngine {
     /// # Examples
     ///
     /// ```no_run
-    /// use platypus::hybrid::engine::HybridEngine;
-    /// use platypus::lexical::engine::LexicalEngine;
-    /// use platypus::vector::engine::VectorEngine;
+    /// use sarissa::hybrid::engine::HybridEngine;
+    /// use sarissa::lexical::engine::LexicalEngine;
+    /// use sarissa::vector::engine::VectorEngine;
     ///
-    /// # fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> platypus::error::Result<()> {
+    /// # fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> sarissa::error::Result<()> {
     /// let engine = HybridEngine::new(lexical_engine, vector_engine)?;
     /// # Ok(())
     /// # }
@@ -188,9 +188,9 @@ impl HybridEngine {
     /// # Examples
     ///
     /// ```no_run
-    /// # use platypus::hybrid::engine::HybridEngine;
-    /// # use platypus::hybrid::search::searcher::HybridSearchRequest;
-    /// # async fn example(engine: HybridEngine) -> platypus::error::Result<()> {
+    /// # use sarissa::hybrid::engine::HybridEngine;
+    /// # use sarissa::hybrid::search::searcher::HybridSearchRequest;
+    /// # async fn example(engine: HybridEngine) -> sarissa::error::Result<()> {
     /// let request = HybridSearchRequest::new("rust programming");
     /// let results = engine.search(request).await?;
     /// # Ok(())

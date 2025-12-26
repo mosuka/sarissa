@@ -38,10 +38,10 @@
 //! Basic usage with default analyzer:
 //!
 //! ```
-//! use platypus::document::document::Document;
-//! use platypus::document::parser::DocumentParser;
-//! use platypus::document::field::{TextOption, IntegerOption};
-//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
+//! use sarissa::document::document::Document;
+//! use sarissa::document::parser::DocumentParser;
+//! use sarissa::document::field::{TextOption, IntegerOption};
+//! use sarissa::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
 //! let parser = DocumentParser::new(Arc::new(StandardAnalyzer::new().unwrap()));
@@ -59,12 +59,12 @@
 //! With per-field analyzers:
 //!
 //! ```
-//! use platypus::document::document::Document;
-//! use platypus::document::parser::DocumentParser;
-//! use platypus::document::field::TextOption;
-//! use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
-//! use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+//! use sarissa::document::document::Document;
+//! use sarissa::document::parser::DocumentParser;
+//! use sarissa::document::field::TextOption;
+//! use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+//! use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+//! use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
 //! use std::sync::Arc;
 //!
 //! // Configure per-field analyzers
@@ -104,12 +104,12 @@ use crate::lexical::document::field::FieldValue;
 /// # Example
 ///
 /// ```
-/// use platypus::document::document::Document;
-/// use platypus::document::parser::DocumentParser;
-/// use platypus::document::field::TextOption;
-/// use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-/// use platypus::analysis::analyzer::standard::StandardAnalyzer;
-/// use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
+/// use sarissa::document::document::Document;
+/// use sarissa::document::parser::DocumentParser;
+/// use sarissa::document::field::TextOption;
+/// use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+/// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+/// use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
 /// use std::sync::Arc;
 ///
 /// let mut per_field = PerFieldAnalyzer::new(Arc::new(StandardAnalyzer::new().unwrap()));

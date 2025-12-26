@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::vector::Vector;
 use crate::vector::core::document::StoredVector;
 use crate::vector::engine::config::VectorFieldConfig;
@@ -165,7 +165,7 @@ impl InMemoryFieldWriter {
     fn convert_vector(&self, stored: &StoredVector) -> Result<Vector> {
         let vector = stored.to_vector();
         if vector.dimension() != self.config.dimension {
-            return Err(PlatypusError::invalid_argument(format!(
+            return Err(SarissaError::invalid_argument(format!(
                 "vector dimension mismatch for field '{}': expected {}, got {}",
                 self.field_name,
                 self.config.dimension,
@@ -173,7 +173,7 @@ impl InMemoryFieldWriter {
             )));
         }
         if !vector.is_valid() {
-            return Err(PlatypusError::invalid_argument(format!(
+            return Err(SarissaError::invalid_argument(format!(
                 "vector for field '{}' contains invalid values",
                 self.field_name
             )));
@@ -234,7 +234,7 @@ impl InMemoryFieldReader {
 impl VectorFieldReader for InMemoryFieldReader {
     fn search(&self, request: FieldSearchInput) -> Result<FieldSearchResults> {
         if request.field != self.field_name {
-            return Err(PlatypusError::invalid_argument(format!(
+            return Err(SarissaError::invalid_argument(format!(
                 "field mismatch: expected '{}', got '{}'",
                 self.field_name, request.field
             )));
@@ -250,7 +250,7 @@ impl VectorFieldReader for InMemoryFieldReader {
         for query in &request.query_vectors {
             let query_vector = query.vector.to_vector();
             if query_vector.dimension() != self.config.dimension {
-                return Err(PlatypusError::invalid_argument(format!(
+                return Err(SarissaError::invalid_argument(format!(
                     "query vector dimension mismatch for field '{}': expected {}, got {}",
                     self.field_name,
                     self.config.dimension,

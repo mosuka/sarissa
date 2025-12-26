@@ -11,13 +11,13 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
-use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
 #[cfg(feature = "embeddings-candle")]
-use platypus::embedding::embedder::{EmbedInput, Embedder};
+use sarissa::embedding::embedder::{EmbedInput, Embedder};
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
-async fn main() -> platypus::error::Result<()> {
+async fn main() -> sarissa::error::Result<()> {
     println!("=== Candle Text Embedder Example ===\n");
 
     // Create embedder with a sentence-transformers model

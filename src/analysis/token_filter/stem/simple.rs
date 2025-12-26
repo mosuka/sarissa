@@ -15,8 +15,8 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::token_filter::stem::Stemmer;
-//! use platypus::analysis::token_filter::stem::simple::SimpleStemmer;
+//! use sarissa::analysis::token_filter::stem::Stemmer;
+//! use sarissa::analysis::token_filter::stem::simple::SimpleStemmer;
 //!
 //! let stemmer = SimpleStemmer::new();
 //!

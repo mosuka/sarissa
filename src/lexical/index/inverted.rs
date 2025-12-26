@@ -20,7 +20,7 @@ use parking_lot::{Mutex, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::InvertedIndexConfig;
 use crate::lexical::reader::LexicalIndexReader;
@@ -157,7 +157,7 @@ impl InvertedIndex {
     /// Open an existing index from storage.
     pub fn open(storage: Arc<dyn Storage>, config: InvertedIndexConfig) -> Result<Self> {
         if !storage.file_exists("metadata.json") {
-            return Err(PlatypusError::index("Index does not exist"));
+            return Err(SarissaError::index("Index does not exist"));
         }
 
         let metadata = Self::read_metadata(storage.as_ref())?;
@@ -190,7 +190,7 @@ impl InvertedIndex {
     fn write_metadata(&self) -> Result<()> {
         let metadata = self.metadata.read();
         let metadata_json = serde_json::to_string_pretty(&*metadata)
-            .map_err(|e| PlatypusError::index(format!("Failed to serialize metadata: {e}")))?;
+            .map_err(|e| SarissaError::index(format!("Failed to serialize metadata: {e}")))?;
         drop(metadata);
 
         let mut output = self.storage.create_output("metadata.json")?;
@@ -207,7 +207,7 @@ impl InvertedIndex {
         Read::read_to_string(&mut input, &mut metadata_json)?;
 
         let metadata: IndexMetadata = serde_json::from_str(&metadata_json)
-            .map_err(|e| PlatypusError::index(format!("Failed to deserialize metadata: {e}")))?;
+            .map_err(|e| SarissaError::index(format!("Failed to deserialize metadata: {e}")))?;
 
         Ok(metadata)
     }
@@ -238,7 +238,7 @@ impl InvertedIndex {
     /// Check if the index is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed.load(Ordering::SeqCst) {
-            Err(PlatypusError::index("Index is closed"))
+            Err(SarissaError::index("Index is closed"))
         } else {
             Ok(())
         }
@@ -256,7 +256,7 @@ impl InvertedIndex {
                 Read::read_to_end(&mut input, &mut data)?;
 
                 let segment_info: SegmentInfo = serde_json::from_slice(&data).map_err(|e| {
-                    PlatypusError::index(format!("Failed to parse segment metadata: {e}"))
+                    SarissaError::index(format!("Failed to parse segment metadata: {e}"))
                 })?;
 
                 segments.push(segment_info);

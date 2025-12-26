@@ -65,7 +65,7 @@ pub mod utils {
     /// Validate a vector against requirements.
     pub fn validate_vector(vector: &Vector, expected_dimension: Option<usize>) -> Result<()> {
         if vector.data.is_empty() {
-            return Err(crate::error::PlatypusError::InvalidOperation(
+            return Err(crate::error::SarissaError::InvalidOperation(
                 VectorValidationError::Empty.to_string(),
             ));
         }
@@ -73,7 +73,7 @@ pub mod utils {
         if let Some(expected_dim) = expected_dimension
             && vector.data.len() != expected_dim
         {
-            return Err(crate::error::PlatypusError::InvalidOperation(
+            return Err(crate::error::SarissaError::InvalidOperation(
                 VectorValidationError::DimensionMismatch {
                     expected: expected_dim,
                     actual: vector.data.len(),
@@ -83,7 +83,7 @@ pub mod utils {
         }
 
         if !vector.is_valid() {
-            return Err(crate::error::PlatypusError::InvalidOperation(
+            return Err(crate::error::SarissaError::InvalidOperation(
                 VectorValidationError::InvalidValues.to_string(),
             ));
         }
@@ -165,8 +165,8 @@ pub mod utils {
 /// # Example
 ///
 /// ```rust
-/// use platypus::vector::index::config::{VectorIndexTypeConfig, HnswIndexConfig};
-/// use platypus::vector::core::distance::DistanceMetric;
+/// use sarissa::vector::index::config::{VectorIndexTypeConfig, HnswIndexConfig};
+/// use sarissa::vector::core::distance::DistanceMetric;
 ///
 /// let hnsw_config = HnswIndexConfig {
 ///     dimension: 384,

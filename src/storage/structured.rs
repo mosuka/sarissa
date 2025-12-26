@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::storage::{StorageInput, StorageOutput};
 use crate::util::varint::{decode_u64, encode_u64};
 
@@ -260,7 +260,7 @@ impl<R: StorageInput> StructReader<R> {
         self.update_checksum(&bytes);
         self.position += length as u64;
 
-        String::from_utf8(bytes).map_err(|e| PlatypusError::storage(format!("Invalid UTF-8: {e}")))
+        String::from_utf8(bytes).map_err(|e| SarissaError::storage(format!("Invalid UTF-8: {e}")))
     }
 
     /// Read bytes with length prefix.
@@ -344,7 +344,7 @@ impl<R: StorageInput> StructReader<R> {
     /// Verify file integrity by checking final checksum.
     pub fn verify_checksum(&mut self) -> Result<bool> {
         if self.position + 4 > self.file_size {
-            return Err(PlatypusError::storage("File too short for checksum"));
+            return Err(SarissaError::storage("File too short for checksum"));
         }
 
         // Read the stored checksum from the end of file
@@ -454,7 +454,7 @@ impl<R: StorageInput> BlockReader<R> {
 
         // Verify block number
         if block_number != self.blocks_read {
-            return Err(PlatypusError::storage(format!(
+            return Err(SarissaError::storage(format!(
                 "Block number mismatch: expected {}, got {}",
                 self.blocks_read, block_number
             )));

@@ -18,9 +18,9 @@
 //! # Example
 //!
 //! ```ignore
-//! use platypus::vector::engine::VectorEngine;
-//! use platypus::vector::engine::config::VectorIndexConfig;
-//! use platypus::storage::memory::MemoryStorage;
+//! use sarissa::vector::engine::VectorEngine;
+//! use sarissa::vector::engine::config::VectorIndexConfig;
+//! use sarissa::storage::memory::MemoryStorage;
 //! use std::sync::Arc;
 //!
 //! let storage = Arc::new(MemoryStorage::new(Default::default()));
@@ -66,9 +66,9 @@ pub use response::{VectorHit, VectorSearchResults, VectorStats};
 /// # Example
 ///
 /// ```ignore
-/// use platypus::vector::engine::VectorEngine;
-/// use platypus::vector::engine::config::VectorIndexConfig;
-/// use platypus::storage::memory::MemoryStorage;
+/// use sarissa::vector::engine::VectorEngine;
+/// use sarissa::vector::engine::config::VectorIndexConfig;
+/// use sarissa::storage::memory::MemoryStorage;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(MemoryStorage::new(Default::default()));
@@ -115,9 +115,9 @@ impl VectorEngine {
     /// # Example
     ///
     /// ```ignore
-    /// use platypus::vector::engine::VectorEngine;
-    /// use platypus::vector::engine::config::VectorIndexConfig;
-    /// use platypus::storage::memory::MemoryStorage;
+    /// use sarissa::vector::engine::VectorEngine;
+    /// use sarissa::vector::engine::config::VectorIndexConfig;
+    /// use sarissa::storage::memory::MemoryStorage;
     /// use std::sync::Arc;
     ///
     /// let storage = Arc::new(MemoryStorage::new(Default::default()));

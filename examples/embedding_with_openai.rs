@@ -16,13 +16,13 @@
 //! ```
 
 #[cfg(feature = "embeddings-openai")]
-use platypus::embedding::embedder::{EmbedInput, Embedder};
+use sarissa::embedding::embedder::{EmbedInput, Embedder};
 #[cfg(feature = "embeddings-openai")]
-use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
+use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
 
 #[cfg(feature = "embeddings-openai")]
 #[tokio::main]
-async fn main() -> platypus::error::Result<()> {
+async fn main() -> sarissa::error::Result<()> {
     println!("=== OpenAI Text Embedder Example ===\n");
 
     // Get API key from environment

@@ -41,7 +41,7 @@ impl AdvancedSimilarityMetric {
     /// Returns error if vector dimensions don't match
     pub fn similarity(&self, a: &Vector, b: &Vector, weights: Option<&[f32]>) -> Result<f32> {
         if a.dimension() != b.dimension() {
-            return Err(crate::error::PlatypusError::InvalidOperation(
+            return Err(crate::error::SarissaError::InvalidOperation(
                 "Vector dimensions must match".to_string(),
             ));
         }
@@ -86,7 +86,7 @@ impl AdvancedSimilarityMetric {
         let weights = weights.unwrap_or(&default_weights);
 
         if weights.len() != a.len() {
-            return Err(crate::error::PlatypusError::InvalidOperation(
+            return Err(crate::error::SarissaError::InvalidOperation(
                 "Weight vector dimension mismatch".to_string(),
             ));
         }

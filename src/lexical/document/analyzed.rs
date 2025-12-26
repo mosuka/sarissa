@@ -21,8 +21,8 @@
 //! Creating an analyzed document (typically done by DocumentParser):
 //!
 //! ```
-//! use platypus::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
-//! use platypus::document::field::FieldValue;
+//! use sarissa::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
+//! use sarissa::document::field::FieldValue;
 //! use ahash::AHashMap;
 //!
 //! let mut field_terms = AHashMap::new();
@@ -105,7 +105,7 @@ pub struct AnalyzedDocument {
 /// # Examples
 ///
 /// ```
-/// use platypus::document::analyzed::AnalyzedTerm;
+/// use sarissa::document::analyzed::AnalyzedTerm;
 ///
 /// let term = AnalyzedTerm {
 ///     term: "search".to_string(),

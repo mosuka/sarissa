@@ -1,4 +1,4 @@
-//! Text and multimodal embedding support for Platypus vector search.
+//! Text and multimodal embedding support for Sarissa vector search.
 //!
 //! - Core traits: `Embedder`, `PerFieldEmbedder`, `NoOpEmbedder`
 //! - Feature flags: `embeddings-candle`, `embeddings-openai`, `embeddings-multimodal`, `embeddings-all`

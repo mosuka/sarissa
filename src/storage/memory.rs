@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::storage::{
     LockManager, Storage, StorageError, StorageInput, StorageLock, StorageOutput,
 };
@@ -173,7 +173,7 @@ impl Storage for MemoryStorage {
                 readonly: false,
             })
         } else {
-            Err(PlatypusError::storage(format!("File not found: {name}")))
+            Err(SarissaError::storage(format!("File not found: {name}")))
         }
     }
 
@@ -434,7 +434,7 @@ impl LockManager for MemoryLockManager {
         match self.acquire_lock(name) {
             Ok(lock) => Ok(Some(lock)),
             Err(e) => {
-                if let PlatypusError::Storage(ref msg) = e
+                if let SarissaError::Storage(ref msg) = e
                     && msg.contains("Failed to acquire lock")
                 {
                     return Ok(None);

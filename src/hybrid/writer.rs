@@ -56,10 +56,10 @@ impl HybridIndexWriter {
     /// # Examples
     ///
     /// ```no_run
-    /// # use platypus::hybrid::writer::HybridIndexWriter;
-    /// # use platypus::lexical::writer::LexicalIndexWriter;
-    /// # use platypus::vector::writer::VectorIndexWriter;
-    /// # fn example(lexical: Box<dyn LexicalIndexWriter>, vector: Box<dyn VectorIndexWriter>) -> platypus::error::Result<()> {
+    /// # use sarissa::hybrid::writer::HybridIndexWriter;
+    /// # use sarissa::lexical::writer::LexicalIndexWriter;
+    /// # use sarissa::vector::writer::VectorIndexWriter;
+    /// # fn example(lexical: Box<dyn LexicalIndexWriter>, vector: Box<dyn VectorIndexWriter>) -> sarissa::error::Result<()> {
     /// let mut writer = HybridIndexWriter::new(lexical, vector);
     /// // ... write documents ...
     /// writer.finalize()?;

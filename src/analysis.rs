@@ -1,4 +1,4 @@
-//! Text analysis module for Platypus.
+//! Text analysis module for Sarissa.
 //!
 //! This module provides comprehensive text analysis functionality for processing
 //! and transforming text before indexing or searching. It includes:
@@ -19,8 +19,8 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::analyzer::standard::StandardAnalyzer;
-//! use platypus::analysis::analyzer::analyzer::Analyzer;
+//! use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+//! use sarissa::analysis::analyzer::analyzer::Analyzer;
 //!
 //! let analyzer = StandardAnalyzer::new().unwrap();
 //! let tokens: Vec<_> = analyzer.analyze("Hello World!").unwrap().collect();

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use rayon::prelude::*;
 
 use crate::analysis::analyzer::standard::StandardAnalyzer;
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::lexical::document::field::FieldValue::{
     Binary, Boolean, DateTime, Float, Geo, Integer, Null, Text,
 };
@@ -259,7 +259,7 @@ impl InvertedIndexSearcher {
 
         // Check if we exceeded timeout
         if start_time.elapsed() > timeout {
-            return Err(PlatypusError::index("Search timeout exceeded"));
+            return Err(SarissaError::index("Search timeout exceeded"));
         }
 
         // Load documents if requested

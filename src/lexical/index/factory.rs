@@ -22,12 +22,12 @@ use crate::storage::Storage;
 /// # Example with StorageFactory
 ///
 /// ```
-/// use platypus::lexical::index::config::LexicalIndexConfig;
-/// use platypus::lexical::index::factory::LexicalIndexFactory;
-/// use platypus::storage::{StorageFactory, StorageConfig};
-/// use platypus::storage::memory::MemoryStorageConfig;
+/// use sarissa::lexical::index::config::LexicalIndexConfig;
+/// use sarissa::lexical::index::factory::LexicalIndexFactory;
+/// use sarissa::storage::{StorageFactory, StorageConfig};
+/// use sarissa::storage::memory::MemoryStorageConfig;
 ///
-/// # fn main() -> platypus::error::Result<()> {
+/// # fn main() -> sarissa::error::Result<()> {
 /// // Create storage using factory
 /// let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
 ///
@@ -55,12 +55,12 @@ impl LexicalIndexFactory {
     /// # Example
     ///
     /// ```
-    /// use platypus::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
-    /// use platypus::storage::{StorageFactory, StorageConfig};
-    /// use platypus::storage::file::FileStorageConfig;
+    /// use sarissa::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
+    /// use sarissa::lexical::index::factory::LexicalIndexFactory;
+    /// use sarissa::storage::{StorageFactory, StorageConfig};
+    /// use sarissa::storage::file::FileStorageConfig;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// // Create file storage
     /// let storage_config = StorageConfig::File(FileStorageConfig::new("/tmp/index"));
     /// let storage = StorageFactory::create(storage_config)?;
@@ -97,12 +97,12 @@ impl LexicalIndexFactory {
     /// # Example
     ///
     /// ```no_run
-    /// use platypus::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
-    /// use platypus::lexical::index::factory::LexicalIndexFactory;
-    /// use platypus::storage::file::{FileStorage, FileStorageConfig};
+    /// use sarissa::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
+    /// use sarissa::lexical::index::factory::LexicalIndexFactory;
+    /// use sarissa::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
     ///
-    /// # fn main() -> platypus::error::Result<()> {
+    /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
     /// let config = LexicalIndexConfig::Inverted(InvertedIndexConfig::default());
     /// let index = LexicalIndexFactory::open(storage, config)?;

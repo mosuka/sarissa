@@ -19,12 +19,12 @@
 //! ```no_run
 //! # #[cfg(feature = "embeddings-candle")]
 //! # {
-//! use platypus::embedding::per_field::PerFieldEmbedder;
-//! use platypus::embedding::embedder::{Embedder, EmbedInput};
-//! use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use sarissa::embedding::per_field::PerFieldEmbedder;
+//! use sarissa::embedding::embedder::{Embedder, EmbedInput};
+//! use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
 //! use std::sync::Arc;
 //!
-//! # async fn example() -> platypus::error::Result<()> {
+//! # async fn example() -> sarissa::error::Result<()> {
 //! // Create default embedder
 //! let default_embedder: Arc<dyn Embedder> = Arc::new(
 //!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
@@ -77,12 +77,12 @@ use crate::vector::core::vector::Vector;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
-/// use platypus::embedding::embedder::Embedder;
-/// use platypus::embedding::per_field::PerFieldEmbedder;
-/// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use sarissa::embedding::embedder::Embedder;
+/// use sarissa::embedding::per_field::PerFieldEmbedder;
+/// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
 /// use std::sync::Arc;
 ///
-/// # fn example() -> platypus::error::Result<()> {
+/// # fn example() -> sarissa::error::Result<()> {
 /// // Create default embedder
 /// let default_embedder: Arc<dyn Embedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
@@ -131,12 +131,12 @@ impl PerFieldEmbedder {
     /// ```no_run
     /// # #[cfg(feature = "embeddings-candle")]
     /// # {
-    /// use platypus::embedding::per_field::PerFieldEmbedder;
-    /// use platypus::embedding::embedder::Embedder;
-    /// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
+    /// use sarissa::embedding::per_field::PerFieldEmbedder;
+    /// use sarissa::embedding::embedder::Embedder;
+    /// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
     /// use std::sync::Arc;
     ///
-    /// # fn example() -> platypus::error::Result<()> {
+    /// # fn example() -> sarissa::error::Result<()> {
     /// let default: Arc<dyn Embedder> = Arc::new(
     ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
     /// );
@@ -241,7 +241,7 @@ impl Embedder for PerFieldEmbedder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::PlatypusError;
+    use crate::error::SarissaError;
 
     #[derive(Debug)]
     struct MockEmbedder {
@@ -254,7 +254,7 @@ mod tests {
         async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
             match input {
                 EmbedInput::Text(_) => Ok(Vector::new(vec![0.0; self.dim])),
-                _ => Err(PlatypusError::invalid_argument("only text supported")),
+                _ => Err(SarissaError::invalid_argument("only text supported")),
             }
         }
 

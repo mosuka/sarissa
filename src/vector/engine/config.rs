@@ -10,13 +10,13 @@
 //! ```no_run
 //! # #[cfg(feature = "embeddings-candle")]
 //! # {
-//! use platypus::embedding::per_field::PerFieldEmbedder;
-//! use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-//! use platypus::embedding::embedder::Embedder;
-//! use platypus::vector::engine::VectorIndexConfig;
+//! use sarissa::embedding::per_field::PerFieldEmbedder;
+//! use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use sarissa::embedding::embedder::Embedder;
+//! use sarissa::vector::engine::VectorIndexConfig;
 //! use std::sync::Arc;
 //!
-//! # fn example() -> platypus::error::Result<()> {
+//! # fn example() -> sarissa::error::Result<()> {
 //! let text_embedder: Arc<dyn Embedder> = Arc::new(
 //!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 //! );
@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::embedding::embedder::Embedder;
 use crate::embedding::noop::NoOpEmbedder;
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::vector::DistanceMetric;
 use crate::vector::core::document::VectorType;
 
@@ -52,15 +52,15 @@ use crate::vector::core::document::VectorType;
 /// ```no_run
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
-/// use platypus::embedding::per_field::PerFieldEmbedder;
-/// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-/// use platypus::embedding::embedder::Embedder;
-/// use platypus::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
-/// use platypus::vector::DistanceMetric;
-/// use platypus::vector::core::document::VectorType;
+/// use sarissa::embedding::per_field::PerFieldEmbedder;
+/// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use sarissa::embedding::embedder::Embedder;
+/// use sarissa::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
+/// use sarissa::vector::DistanceMetric;
+/// use sarissa::vector::core::document::VectorType;
 /// use std::sync::Arc;
 ///
-/// # fn example() -> platypus::error::Result<()> {
+/// # fn example() -> sarissa::error::Result<()> {
 /// let text_embedder: Arc<dyn Embedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
@@ -140,7 +140,7 @@ impl VectorIndexConfig {
     pub fn validate(&self) -> Result<()> {
         for field in &self.default_fields {
             if !self.fields.contains_key(field) {
-                return Err(PlatypusError::invalid_config(format!(
+                return Err(SarissaError::invalid_config(format!(
                     "default field '{field}' is not defined"
                 )));
             }
@@ -148,10 +148,10 @@ impl VectorIndexConfig {
 
         if self.implicit_schema {
             let dim = self.default_dimension.ok_or_else(|| {
-                PlatypusError::invalid_config("implicit_schema requires default_dimension")
+                SarissaError::invalid_config("implicit_schema requires default_dimension")
             })?;
             if dim == 0 {
-                return Err(PlatypusError::invalid_config(
+                return Err(SarissaError::invalid_config(
                     "default_dimension must be greater than zero when implicit_schema is enabled",
                 ));
             }
@@ -174,15 +174,15 @@ impl VectorIndexConfig {
 /// ```no_run
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
-/// use platypus::embedding::per_field::PerFieldEmbedder;
-/// use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-/// use platypus::embedding::embedder::Embedder;
-/// use platypus::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
-/// use platypus::vector::DistanceMetric;
-/// use platypus::vector::core::document::VectorType;
+/// use sarissa::embedding::per_field::PerFieldEmbedder;
+/// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use sarissa::embedding::embedder::Embedder;
+/// use sarissa::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
+/// use sarissa::vector::DistanceMetric;
+/// use sarissa::vector::core::document::VectorType;
 /// use std::sync::Arc;
 ///
-/// # fn example() -> platypus::error::Result<()> {
+/// # fn example() -> sarissa::error::Result<()> {
 /// let text_embedder: Arc<dyn Embedder> = Arc::new(
 ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );

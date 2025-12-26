@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 
 /// Write a UTF-8 string prefixed by its length as u32 little-endian.
 pub fn write_string<W: Write>(output: &mut W, value: &str) -> Result<()> {
@@ -19,7 +19,7 @@ pub fn read_string<R: Read>(input: &mut R) -> Result<String> {
     let mut buf = vec![0u8; len];
     input.read_exact(&mut buf)?;
     String::from_utf8(buf).map_err(|e| {
-        PlatypusError::InvalidOperation(format!("Invalid UTF-8 sequence in vector metadata: {e}"))
+        SarissaError::InvalidOperation(format!("Invalid UTF-8 sequence in vector metadata: {e}"))
     })
 }
 

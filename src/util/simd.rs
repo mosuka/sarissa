@@ -1,4 +1,4 @@
-//! SIMD-friendly helpers that power hot paths inside Platypus.
+//! SIMD-friendly helpers that power hot paths inside Sarissa.
 
 pub mod simd_wide;
 

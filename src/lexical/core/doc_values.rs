@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
 
-use crate::error::{PlatypusError, Result};
+use crate::error::{SarissaError, Result};
 use crate::lexical::document::field::FieldValue;
 use crate::storage::Storage;
 
@@ -128,7 +128,7 @@ impl DocValuesWriter {
             let serialized =
                 bincode::serde::encode_to_vec(&field_dv.values, bincode::config::standard())
                     .map_err(|e| {
-                        PlatypusError::Index(format!("Failed to serialize DocValues: {}", e))
+                        SarissaError::Index(format!("Failed to serialize DocValues: {}", e))
                     })?;
 
             output.write_all(&(serialized.len() as u64).to_le_bytes())?;
@@ -167,7 +167,7 @@ impl DocValuesReader {
         let mut magic = [0u8; 4];
         input.read_exact(&mut magic)?;
         if &magic != b"DVFF" {
-            return Err(PlatypusError::Index(
+            return Err(SarissaError::Index(
                 "Invalid DocValues file format".to_string(),
             ));
         }
@@ -176,7 +176,7 @@ impl DocValuesReader {
         let mut version = [0u8; 2];
         input.read_exact(&mut version)?;
         if version[0] != 1 {
-            return Err(PlatypusError::Index(format!(
+            return Err(SarissaError::Index(format!(
                 "Unsupported DocValues version: {}.{}",
                 version[0], version[1]
             )));
@@ -199,7 +199,7 @@ impl DocValuesReader {
             let mut name_bytes = vec![0u8; name_len];
             input.read_exact(&mut name_bytes)?;
             let field_name = String::from_utf8(name_bytes)
-                .map_err(|e| PlatypusError::Index(format!("Invalid field name: {}", e)))?;
+                .map_err(|e| SarissaError::Index(format!("Invalid field name: {}", e)))?;
 
             // Read number of values
             let mut num_values_bytes = [0u8; 8];
@@ -216,7 +216,7 @@ impl DocValuesReader {
 
             let (values, _): (Vec<Option<FieldValue>>, _) =
                 bincode::serde::decode_from_slice(&data, bincode::config::standard()).map_err(
-                    |e| PlatypusError::Index(format!("Failed to deserialize DocValues: {}", e)),
+                    |e| SarissaError::Index(format!("Failed to deserialize DocValues: {}", e)),
                 )?;
 
             fields.insert(field_name.clone(), FieldDocValues { field_name, values });

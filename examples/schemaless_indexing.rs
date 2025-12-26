@@ -1,4 +1,4 @@
-//! Schema-less indexing example using Platypus's PerFieldAnalyzer pipeline.
+//! Schema-less indexing example using Sarissa's PerFieldAnalyzer pipeline.
 //!
 //! Demonstrates how to ingest heterogeneous documents without predefined
 //! schemas. Analyzer selection happens per field at write time, mirroring
@@ -6,19 +6,19 @@
 
 use std::sync::Arc;
 
-use platypus::analysis::analyzer::analyzer::Analyzer;
-use platypus::analysis::analyzer::keyword::KeywordAnalyzer;
-use platypus::analysis::analyzer::per_field::PerFieldAnalyzer;
-use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::document::document::Document;
-use platypus::document::field::{Field, FieldValue, TextOption};
-use platypus::lexical::engine::LexicalEngine;
-use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use platypus::storage::file::FileStorageConfig;
-use platypus::storage::{StorageConfig, StorageFactory};
+use sarissa::analysis::analyzer::analyzer::Analyzer;
+use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
+use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
+use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+use sarissa::document::document::Document;
+use sarissa::document::field::{Field, FieldValue, TextOption};
+use sarissa::lexical::engine::LexicalEngine;
+use sarissa::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use sarissa::storage::file::FileStorageConfig;
+use sarissa::storage::{StorageConfig, StorageFactory};
 use tempfile::TempDir;
 
-fn main() -> platypus::error::Result<()> {
+fn main() -> sarissa::error::Result<()> {
     println!("=== Schema-less Indexing Example ===\n");
 
     // Create a storage backend

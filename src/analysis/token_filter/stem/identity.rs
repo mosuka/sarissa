@@ -13,8 +13,8 @@
 //! # Examples
 //!
 //! ```
-//! use platypus::analysis::token_filter::stem::Stemmer;
-//! use platypus::analysis::token_filter::stem::identity::IdentityStemmer;
+//! use sarissa::analysis::token_filter::stem::Stemmer;
+//! use sarissa::analysis::token_filter::stem::identity::IdentityStemmer;
 //!
 //! let stemmer = IdentityStemmer::new();
 //!

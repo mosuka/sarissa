@@ -71,11 +71,11 @@ impl HybridIndex {
     /// # Examples
     ///
     /// ```no_run
-    /// # use platypus::hybrid::index::HybridIndex;
-    /// # use platypus::lexical::reader::LexicalIndexReader;
-    /// # use platypus::vector::reader::VectorIndexReader;
+    /// # use sarissa::hybrid::index::HybridIndex;
+    /// # use sarissa::lexical::reader::LexicalIndexReader;
+    /// # use sarissa::vector::reader::VectorIndexReader;
     /// # use std::sync::Arc;
-    /// # fn example(lexical: Arc<dyn LexicalIndexReader>, vector: Arc<dyn VectorIndexReader>) -> platypus::error::Result<()> {
+    /// # fn example(lexical: Arc<dyn LexicalIndexReader>, vector: Arc<dyn VectorIndexReader>) -> sarissa::error::Result<()> {
     /// let hybrid_index = HybridIndex::new(lexical, vector);
     /// let stats = hybrid_index.stats()?;
     /// println!("Lexical docs: {}", stats.lexical_doc_count);

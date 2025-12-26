@@ -1,23 +1,20 @@
-# Platypus
+# Sarissa
 
-[![Crates.io](https://img.shields.io/crates/v/platypus.svg)](https://crates.io/crates/platypus)
-[![Documentation](https://docs.rs/platypus/badge.svg)](https://docs.rs/platypus)
+[![Crates.io](https://img.shields.io/crates/v/sarissa.svg)](https://crates.io/crates/sarissa)
+[![Documentation](https://docs.rs/sarissa/badge.svg)](https://docs.rs/sarissa)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Platypus is a Rust-based hybrid search engine that unifies Keyword Search, Semantic Search, and Multimodal Search into a single, cohesive system.
+Sarissa is a Rust-based search core designed to power modern information retrieval systems with speed, precision, and extensibility.
 
-The name comes from the platypus — one of the most remarkable real-world creatures, known for combining traits from mammals, birds, and reptiles into a single organism.
-This unique fusion of distinct evolutionary features mirrors the three complementary forms of understanding in modern search:
+Sarissa provides the foundational mechanisms that enable advanced search capabilities:
 
-Keyword Search — precise retrieval through lexical, symbolic, and linguistic matching.
+- **Lexical search primitives** for exact and high-precision retrieval
+- **Vector-based similarity search** for semantic understanding
+- **Hybrid scoring and ranking components** that combine multiple signals into coherent results
 
-Semantic Search — meaning-based retrieval powered by vector representations and embeddings.
+Rather than being a monolithic search engine, Sarissa is designed as a **composable search core** — a set of well-defined building blocks that can be embedded into larger systems, extended with custom logic, or integrated into distributed architectures.
 
-Multimodal Search — bridging text, images, and other modalities through shared latent representations.
-
-Together, these capabilities form a unified hybrid search architecture — much like the platypus itself, where diverse traits work in harmony to navigate complex environments.
-
-Built in Rust for performance, safety, and extensibility, Platypus aims to provide a next-generation information retrieval platform that supports a broad range of use cases, from research exploration to production deployment.
+Built in Rust for performance, safety, and control over memory and execution, Sarissa aims to serve as a next-generation information retrieval foundation, supporting a wide range of use cases from research experimentation to production-grade search systems.
 
 ## Features
 
@@ -67,11 +64,11 @@ Built in Rust for performance, safety, and extensibility, Platypus aims to provi
 
 ## Quick Start
 
-Add Platypus to your `Cargo.toml`:
+Add Sarissa to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-platypus = "0.1"
+sarissa = "0.1"
 ```
 
 ### Basic Usage
@@ -80,18 +77,18 @@ platypus = "0.1"
 use std::sync::Arc;
 
 use tempfile::TempDir;
-use platypus::analysis::analyzer::analyzer::Analyzer;
-use platypus::analysis::analyzer::standard::StandardAnalyzer;
-use platypus::lexical::document::document::Document;
-use platypus::lexical::document::field::{IntegerOption, TextOption};
-use platypus::error::Result;
-use platypus::lexical::engine::LexicalEngine;
-use platypus::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
-use platypus::lexical::index::factory::LexicalIndexFactory;
-use platypus::lexical::index::inverted::query::term::TermQuery;
-use platypus::lexical::search::searcher::LexicalSearchRequest;
-use platypus::storage::file::FileStorageConfig;
-use platypus::storage::{StorageConfig, StorageFactory};
+use sarissa::analysis::analyzer::analyzer::Analyzer;
+use sarissa::analysis::analyzer::standard::StandardAnalyzer;
+use sarissa::lexical::document::document::Document;
+use sarissa::lexical::document::field::{IntegerOption, TextOption};
+use sarissa::error::Result;
+use sarissa::lexical::engine::LexicalEngine;
+use sarissa::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use sarissa::lexical::index::factory::LexicalIndexFactory;
+use sarissa::lexical::index::inverted::query::term::TermQuery;
+use sarissa::lexical::search::searcher::LexicalSearchRequest;
+use sarissa::storage::file::FileStorageConfig;
+use sarissa::storage::{StorageConfig, StorageFactory};
 
 fn main() -> Result<()> {
     // Create storage in a temporary directory
@@ -166,7 +163,7 @@ fn main() -> Result<()> {
 
 ## Architecture
 
-Platypus is built with a modular architecture:
+Sarissa is built with a modular architecture:
 
 ### Core Components
 
@@ -194,12 +191,12 @@ let engine = VectorEngine::new(collection)?;
 
 ### Field Types
 
-Platypus supports the following field value types through the `Document` builder API:
+Sarissa supports the following field value types through the `Document` builder API:
 
 ```rust
 use chrono::Utc;
-use platypus::lexical::document::document::Document;
-use platypus::lexical::document::field::{
+use sarissa::lexical::document::document::Document;
+use sarissa::lexical::document::field::{
     BinaryOption, BooleanOption, DateTimeOption, FloatOption, GeoOption, IntegerOption,
     TextOption, VectorOption,
 };
@@ -235,15 +232,15 @@ let doc = Document::builder()
 ### Query Types
 
 ```rust
-use platypus::lexical::index::inverted::query::boolean::BooleanQuery;
-use platypus::lexical::index::inverted::query::fuzzy::FuzzyQuery;
-use platypus::lexical::index::inverted::query::geo::{
+use sarissa::lexical::index::inverted::query::boolean::BooleanQuery;
+use sarissa::lexical::index::inverted::query::fuzzy::FuzzyQuery;
+use sarissa::lexical::index::inverted::query::geo::{
     GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint,
 };
-use platypus::lexical::index::inverted::query::phrase::PhraseQuery;
-use platypus::lexical::index::inverted::query::range::NumericRangeQuery;
-use platypus::lexical::index::inverted::query::term::TermQuery;
-use platypus::lexical::index::inverted::query::wildcard::WildcardQuery;
+use sarissa::lexical::index::inverted::query::phrase::PhraseQuery;
+use sarissa::lexical::index::inverted::query::range::NumericRangeQuery;
+use sarissa::lexical::index::inverted::query::term::TermQuery;
+use sarissa::lexical::index::inverted::query::wildcard::WildcardQuery;
 
 // Term query - simple keyword matching
 let query = Box::new(TermQuery::new("field", "term"));
@@ -298,30 +295,30 @@ Both `LexicalEngine` and `VectorEngine` provide consistent document operations:
 
 ### Vector Search with Text Embeddings
 
-Platypus supports semantic search using text embeddings. You can use local BERT models via Candle or OpenAI's API.
+Sarissa supports semantic search using text embeddings. You can use local BERT models via Candle or OpenAI's API.
 
 #### Using Candle (Local BERT Models)
 
 ```toml
 [dependencies]
-platypus = { version = "0.1", features = ["embeddings-candle"] }
+sarissa = { version = "0.1", features = ["embeddings-candle"] }
 ```
 
 ```rust
-use platypus::embedding::candle_text_embedder::CandleTextEmbedder;
-use platypus::embedding::embedder::EmbedInput;
-use platypus::embedding::noop::NoOpEmbedder;
-use platypus::vector::engine::request::{QueryVector, VectorSearchRequest};
-use platypus::vector::core::document::{DocumentVector, StoredVector, VectorType};
-use platypus::vector::engine::VectorEngine;
-use platypus::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
-use platypus::vector::DistanceMetric;
-use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+use sarissa::embedding::embedder::EmbedInput;
+use sarissa::embedding::noop::NoOpEmbedder;
+use sarissa::vector::engine::request::{QueryVector, VectorSearchRequest};
+use sarissa::vector::core::document::{DocumentVector, StoredVector, VectorType};
+use sarissa::vector::engine::VectorEngine;
+use sarissa::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
+use sarissa::vector::DistanceMetric;
+use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
 use std::collections::HashMap;
 
 #[tokio::main]
-async fn main() -> platypus::error::Result<()> {
+async fn main() -> sarissa::error::Result<()> {
     // Initialize embedder with a sentence-transformers model
     let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
 
@@ -341,7 +338,7 @@ async fn main() -> platypus::error::Result<()> {
         .build()?;
 
     // Create storage and engine
-    let storage: Arc<dyn platypus::storage::Storage> =
+    let storage: Arc<dyn sarissa::storage::Storage> =
         Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     let engine = VectorEngine::new(storage, config)?;
 
@@ -392,12 +389,12 @@ async fn main() -> platypus::error::Result<()> {
 
 ```toml
 [dependencies]
-platypus = { version = "0.1", features = ["embeddings-openai"] }
+sarissa = { version = "0.1", features = ["embeddings-openai"] }
 ```
 
 ```rust
-use platypus::embedding::openai_text_embedder::OpenAITextEmbedder;
-use platypus::embedding::text_embedder::TextEmbedder;
+use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
+use sarissa::embedding::text_embedder::TextEmbedder;
 
 // Initialize with API key
 let embedder = OpenAITextEmbedder::new(
@@ -411,7 +408,7 @@ let vector = embedder.embed("your text here").await?;
 
 ### Doc-centric VectorEngine
 
-Platypus ships a document-centric vector flow where each `doc_id` owns multiple named vector fields and metadata. The full architecture is captured in `docs/vector_engine.md`, and two handy entry points are provided:
+Sarissa ships a document-centric vector flow where each `doc_id` owns multiple named vector fields and metadata. The full architecture is captured in `docs/vector_engine.md`, and two handy entry points are provided:
 
 - `resources/vector_engine_sample.json` — three synthetic `DocumentVector` entries with field-level and document-level metadata for trying out `MetadataFilter` / `FieldSelector` scenarios.
 - `cargo test --test vector_engine_scenarios` — spins up an in-memory engine, loads the sample, and verifies multi-field scoring plus metadata filters end to end.
@@ -419,10 +416,10 @@ Platypus ships a document-centric vector flow where each `doc_id` owns multiple 
 You can also use the sample data in your own experiments:
 
 ```rust
-use platypus::vector::engine::VectorEngine;
-use platypus::vector::engine::config::VectorEngineConfig;
-use platypus::vector::collection::factory::VectorCollectionFactory;
-use platypus::vector::core::document::DocumentVector;
+use sarissa::vector::engine::VectorEngine;
+use sarissa::vector::engine::config::VectorEngineConfig;
+use sarissa::vector::collection::factory::VectorCollectionFactory;
+use sarissa::vector::core::document::DocumentVector;
 
 let config: VectorEngineConfig = load_vector_engine_config()?; // see docs/vector_engine.md
 let sample_docs: Vec<DocumentVector> = serde_json::from_str(include_str!(
@@ -442,9 +439,9 @@ Once the engine is populated, build `VectorEngineSearchRequest` objects (see `ex
 When you prefer not to precompute vectors yourself, hand the engine raw text payloads and let it run the configured embedder pipeline:
 
 ```rust
-use platypus::vector::core::document::{DocumentPayload, Payload};
-use platypus::vector::engine::request::{FieldSelector, QueryPayload, VectorSearchRequest};
-use platypus::vector::engine::VectorEngine;
+use sarissa::vector::core::document::{DocumentPayload, Payload};
+use sarissa::vector::engine::request::{FieldSelector, QueryPayload, VectorSearchRequest};
+use sarissa::vector::engine::VectorEngine;
 
 // Create a document with a text payload (1 field = 1 payload)
 let mut payload = DocumentPayload::new();
@@ -470,13 +467,13 @@ These helpers power `examples/vector_search.rs` and the `vector_engine_upserts_a
 `HybridSearchRequest` now understands doc-centric overrides so you can keep using the lexical-first ergonomics while routing the vector side through `VectorEngine`:
 
 ```rust
-use platypus::hybrid::search::searcher::{HybridSearchRequest, ScoreNormalization};
-use platypus::vector::engine::request::{
+use sarissa::hybrid::search::searcher::{HybridSearchRequest, ScoreNormalization};
+use sarissa::vector::engine::request::{
     FieldSelector, QueryVector, VectorEngineSearchRequest, VectorScoreMode,
 };
-use platypus::vector::engine::filter::VectorEngineFilter;
-use platypus::vector::core::document::StoredVector;
-use platypus::vector::search::searcher::VectorSearchParams;
+use sarissa::vector::engine::filter::VectorEngineFilter;
+use sarissa::vector::core::document::StoredVector;
+use sarissa::vector::search::searcher::VectorSearchParams;
 
 let my_vector = Vector::new(vec![0.1, 0.2, 0.3]);
 
@@ -518,7 +515,7 @@ Key points:
 
 ### Multimodal Search (Text + Images)
 
-Platypus supports cross-modal search using CLIP (Contrastive Language-Image Pre-Training) models, enabling semantic search across text and images. This allows you to:
+Sarissa supports cross-modal search using CLIP (Contrastive Language-Image Pre-Training) models, enabling semantic search across text and images. This allows you to:
 
 - **Text-to-Image Search**: Find images using natural language queries
 - **Image-to-Image Search**: Find visually similar images using an image query
@@ -530,26 +527,26 @@ Add the `embeddings-multimodal` feature to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-platypus = { version = "0.1", features = ["embeddings-multimodal"] }
+sarissa = { version = "0.1", features = ["embeddings-multimodal"] }
 ```
 
 #### Text-to-Image Search Example
 
 ```rust
-use platypus::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
-use platypus::embedding::embedder::EmbedInput;
-use platypus::embedding::noop::NoOpEmbedder;
-use platypus::vector::engine::request::{QueryVector, VectorSearchRequest};
-use platypus::vector::core::document::{DocumentVector, StoredVector, VectorType};
-use platypus::vector::engine::VectorEngine;
-use platypus::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
-use platypus::vector::DistanceMetric;
-use platypus::storage::memory::{MemoryStorage, MemoryStorageConfig};
+use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use sarissa::embedding::embedder::EmbedInput;
+use sarissa::embedding::noop::NoOpEmbedder;
+use sarissa::vector::engine::request::{QueryVector, VectorSearchRequest};
+use sarissa::vector::core::document::{DocumentVector, StoredVector, VectorType};
+use sarissa::vector::engine::VectorEngine;
+use sarissa::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
+use sarissa::vector::DistanceMetric;
+use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
 use std::collections::HashMap;
 
 #[tokio::main]
-async fn main() -> platypus::error::Result<()> {
+async fn main() -> sarissa::error::Result<()> {
     // Initialize CLIP embedder (automatically downloads model from HuggingFace)
     let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
 
@@ -568,7 +565,7 @@ async fn main() -> platypus::error::Result<()> {
         .default_field("image")
         .build()?;
 
-    let storage: Arc<dyn platypus::storage::Storage> =
+    let storage: Arc<dyn sarissa::storage::Storage> =
         Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     let engine = VectorEngine::new(storage, config)?;
 
@@ -668,9 +665,9 @@ cargo run --example image_to_image_search --features embeddings-multimodal -- qu
 ### Faceted Search
 
 ```rust
-use platypus::lexical::index::inverted::query::term::TermQuery;
-use platypus::lexical::search::facet::{FacetConfig, FacetedSearchEngine};
-use platypus::lexical::search::searcher::LexicalSearchRequest;
+use sarissa::lexical::index::inverted::query::term::TermQuery;
+use sarissa::lexical::search::facet::{FacetConfig, FacetedSearchEngine};
+use sarissa::lexical::search::searcher::LexicalSearchRequest;
 
 // Create faceted search engine
 let facet_config = FacetConfig {
@@ -701,8 +698,8 @@ for facet in &results.facets {
 ### Spell Correction
 
 ```rust
-use platypus::spelling::corrector::{SpellingCorrector, CorrectorConfig};
-use platypus::spelling::dictionary::Dictionary;
+use sarissa::spelling::corrector::{SpellingCorrector, CorrectorConfig};
+use sarissa::spelling::dictionary::Dictionary;
 
 // Build a dictionary from your corpus
 let mut dictionary = Dictionary::new();
@@ -729,10 +726,10 @@ if let Some(correction) = corrector.correct("progamming") {
 ### Custom Analysis Pipeline
 
 ```rust
-use platypus::analysis::analyzer::pipeline::PipelineAnalyzer;
-use platypus::analysis::tokenizer::whitespace::WhitespaceTokenizer;
-use platypus::analysis::token_filter::lowercase::LowercaseFilter;
-use platypus::analysis::token_filter::stop::StopWordFilter;
+use sarissa::analysis::analyzer::pipeline::PipelineAnalyzer;
+use sarissa::analysis::tokenizer::whitespace::WhitespaceTokenizer;
+use sarissa::analysis::token_filter::lowercase::LowercaseFilter;
+use sarissa::analysis::token_filter::stop::StopWordFilter;
 
 // Create custom analyzer with multiple filters
 let mut analyzer = PipelineAnalyzer::new(Box::new(WhitespaceTokenizer));
@@ -751,8 +748,8 @@ for token in tokens {
 For language-specific tokenization (Japanese, Korean, Chinese):
 
 ```rust
-use platypus::analysis::tokenizer::lindera::LinderaTokenizer;
-use platypus::analysis::analyzer::pipeline::PipelineAnalyzer;
+use sarissa::analysis::tokenizer::lindera::LinderaTokenizer;
+use sarissa::analysis::analyzer::pipeline::PipelineAnalyzer;
 
 // Japanese tokenization with Lindera
 let tokenizer = LinderaTokenizer::japanese()?;
@@ -764,7 +761,7 @@ let tokens = analyzer.analyze(text)?;
 
 ## Performance
 
-Platypus is designed for high performance:
+Sarissa is designed for high performance:
 
 - **SIMD Acceleration** - Uses wide instruction sets for vector operations
 - **Memory-Mapped I/O** - Efficient file access with minimal memory overhead
@@ -776,8 +773,8 @@ Platypus is designed for high performance:
 ### Building from Source
 
 ```bash
-git clone https://github.com/mosuka/platypus.git
-cd platypus
+git clone https://github.com/mosuka/sarissa.git
+cd sarissa
 cargo build --release
 ```
 
@@ -802,7 +799,7 @@ cargo fmt --check
 
 ## Examples
 
-Platypus includes numerous examples demonstrating various features:
+Sarissa includes numerous examples demonstrating various features:
 
 ### Lexical Search Examples
 
@@ -849,21 +846,21 @@ cargo run --example image_to_image_search --features embeddings-multimodal
 
 ## Feature Flags
 
-Platypus uses feature flags to enable optional functionality:
+Sarissa uses feature flags to enable optional functionality:
 
 ```toml
 [dependencies]
 # Default features only
-platypus = "0.1"
+sarissa = "0.1"
 
 # With Candle embeddings (local BERT models)
-platypus = { version = "0.1", features = ["embeddings-candle"] }
+sarissa = { version = "0.1", features = ["embeddings-candle"] }
 
 # With OpenAI embeddings
-platypus = { version = "0.1", features = ["embeddings-openai"] }
+sarissa = { version = "0.1", features = ["embeddings-openai"] }
 
 # With all embedding features
-platypus = { version = "0.1", features = ["embeddings-all"] }
+sarissa = { version = "0.1", features = ["embeddings-all"] }
 ```
 
 Available features:
@@ -875,8 +872,8 @@ Available features:
 
 ## Documentation
 
-- [API Documentation](https://docs.rs/platypus)
-- [User Guide](https://github.com/mosuka/platypus/wiki)
+- [API Documentation](https://docs.rs/sarissa)
+- [User Guide](https://github.com/mosuka/sarissa/wiki)
 - [Examples](./examples/)
 
 ## Contributing
