@@ -284,4 +284,40 @@ mod tests {
         assert_eq!(tokens[0].text, "123456");
         assert_eq!(tokens[1].text, "789");
     }
+
+    #[test]
+    fn test_offset_correction_normalization() {
+        let tokenizer = Arc::new(WhitespaceTokenizer::new());
+        let analyzer = PipelineAnalyzer::new(tokenizer).add_char_filter(Arc::new(
+            UnicodeNormalizationCharFilter::new(NormalizationForm::NFKC),
+        ));
+
+        // "㌂" (U+3302, 3 bytes) -> "アンペア" (12 bytes)
+        // Offset in original: 0..3
+        // Offset in filtered: 0..12
+        // Corrected offset should be 0..3
+        let tokens: Vec<Token> = analyzer.analyze("㌂").unwrap().collect();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].text, "アンペア");
+        assert_eq!(tokens[0].start_offset, 0);
+        assert_eq!(tokens[0].end_offset, 3);
+    }
+
+    #[test]
+    fn test_offset_correction_pattern_replace() {
+        let tokenizer = Arc::new(WhitespaceTokenizer::new());
+        let analyzer = PipelineAnalyzer::new(tokenizer)
+            .add_char_filter(Arc::new(PatternReplaceCharFilter::new(r"-", "").unwrap()));
+
+        // "foo-bar" (7 bytes) -> "foobar" (6 bytes)
+        // "-" is removed.
+        // "foobar" token.
+        // Filtered offset: 0..6
+        // Original offset: 0..7
+        let tokens: Vec<Token> = analyzer.analyze("foo-bar").unwrap().collect();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].text, "foobar");
+        assert_eq!(tokens[0].start_offset, 0);
+        assert_eq!(tokens[0].end_offset, 7);
+    }
 }
