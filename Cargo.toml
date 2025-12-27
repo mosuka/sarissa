@@ -8,6 +8,7 @@ repository = "https://github.com/mosuka/platypus"
 
 [dependencies]
 ahash = "0.8.12"
+aho-corasick = "1.1.4"
 anyhow = "1.0.100"
 async-trait = "0.1.89"
 bincode = "2.0.1"
