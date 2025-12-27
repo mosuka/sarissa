@@ -130,14 +130,16 @@ impl UnicodeWordTokenizer {
 
 impl Tokenizer for UnicodeWordTokenizer {
     fn tokenize(&self, text: &str) -> Result<TokenStream> {
+        let mut current_offset = 0;
         let tokens: Vec<Token> = text
             .split_word_bounds()
             .enumerate()
             .filter_map(|(position, word)| {
+                let start_offset = current_offset;
+                current_offset += word.len();
+
                 // Only keep actual words (not whitespace or punctuation)
                 if word.chars().any(|c| c.is_alphanumeric()) {
-                    // Find the actual position in the original text
-                    let start_offset = text.find(word).unwrap_or(0);
                     let end_offset = start_offset + word.len();
                     let token_type = Self::detect_token_type(word);
                     Some(

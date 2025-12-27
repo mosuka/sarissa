@@ -1,4 +1,4 @@
-use aho_corasick::AhoCorasick;
+use aho_corasick::{AhoCorasick, MatchKind};
 use std::collections::HashMap;
 
 use super::{CharFilter, Transformation};
@@ -20,7 +20,9 @@ impl MappingCharFilter {
             replacements.push(v);
         }
 
-        let ac = AhoCorasick::new(&keys)
+        let ac = AhoCorasick::builder()
+            .match_kind(MatchKind::LeftmostLongest)
+            .build(&keys)
             .map_err(|e| crate::error::SarissaError::Anyhow(anyhow::Error::from(e)))?;
 
         Ok(Self { ac, replacements })
@@ -99,5 +101,66 @@ mod tests {
         assert_eq!(trans[1].original_end, 8);
         assert_eq!(trans[1].new_start, 5); // k
         assert_eq!(trans[1].new_end, 6);
+    }
+
+    #[test]
+    fn test_mapping_expansion() {
+        let mut mapping = HashMap::new();
+        mapping.insert("a".to_string(), "aaa".to_string());
+        let filter = MappingCharFilter::new(mapping).unwrap();
+        let (output, trans) = filter.filter("bab");
+        assert_eq!(output, "baaab");
+        assert_eq!(trans.len(), 1);
+        assert_eq!(trans[0].original_start, 1);
+        assert_eq!(trans[0].original_end, 2);
+        assert_eq!(trans[0].new_start, 1);
+        assert_eq!(trans[0].new_end, 4);
+    }
+
+    #[test]
+    fn test_mapping_deletion() {
+        let mut mapping = HashMap::new();
+        mapping.insert("foo".to_string(), "".to_string());
+        let filter = MappingCharFilter::new(mapping).unwrap();
+        let (output, trans) = filter.filter("afoob");
+        assert_eq!(output, "ab");
+        assert_eq!(trans.len(), 1);
+        assert_eq!(trans[0].original_start, 1);
+        assert_eq!(trans[0].original_end, 4);
+        assert_eq!(trans[0].new_start, 1);
+        assert_eq!(trans[0].new_end, 1);
+    }
+
+    #[test]
+    fn test_mapping_overlap() {
+        let mut mapping = HashMap::new();
+        mapping.insert("ab".to_string(), "1".to_string());
+        mapping.insert("abc".to_string(), "2".to_string());
+        let filter = MappingCharFilter::new(mapping).unwrap();
+
+        // "abc" should match "abc" -> "2" (longest match)
+        let (output, trans) = filter.filter("abc");
+        assert_eq!(output, "2");
+        assert_eq!(trans.len(), 1);
+        assert_eq!(trans[0].original_start, 0);
+        assert_eq!(trans[0].original_end, 3);
+        assert_eq!(trans[0].new_start, 0);
+        assert_eq!(trans[0].new_end, 1);
+    }
+
+    #[test]
+    fn test_mapping_multibyte() {
+        let mut mapping = HashMap::new();
+        mapping.insert("壱".to_string(), "1".to_string());
+        let filter = MappingCharFilter::new(mapping).unwrap();
+
+        let (output, trans) = filter.filter("第壱位");
+        assert_eq!(output, "第1位");
+        assert_eq!(trans.len(), 1);
+        // "壱" is 3 bytes (starts at 3)
+        assert_eq!(trans[0].original_start, 3);
+        assert_eq!(trans[0].original_end, 6);
+        assert_eq!(trans[0].new_start, 3);
+        assert_eq!(trans[0].new_end, 4);
     }
 }
