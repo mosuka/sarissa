@@ -40,3 +40,4 @@ pub mod synonym;
 pub mod token;
 pub mod token_filter;
 pub mod tokenizer;
+pub mod char_filter;

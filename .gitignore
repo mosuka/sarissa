@@ -17,4 +17,4 @@ Cargo.lock
 
 flamegraph.svg
 
-tmp/
+.tmp/
