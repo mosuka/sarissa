@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, hash_map::Entry};
 use std::sync::Arc;
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::core::document::METADATA_WEIGHT;
 use crate::vector::core::vector::Vector;
 use crate::vector::field::{

@@ -57,7 +57,7 @@ use std::io::Write;
 use async_trait::async_trait;
 use tempfile::NamedTempFile;
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::core::vector::Vector;
 
 /// Input types for embedding operations.

@@ -36,8 +36,8 @@
 //! - [`synonym`]: Synonym dictionary and graph building
 
 pub mod analyzer;
+pub mod char_filter;
 pub mod synonym;
 pub mod token;
 pub mod token_filter;
 pub mod tokenizer;
-pub mod char_filter;

@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::embedding::embedder::Embedder;
 use crate::embedding::noop::NoOpEmbedder;
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::DistanceMetric;
 use crate::vector::core::document::VectorType;
 

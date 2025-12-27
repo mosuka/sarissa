@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ahash::AHashMap;
 use uuid::Uuid;
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::lexical::document::document::Document;
 use crate::lexical::index::inverted::maintenance::deletion::{
     DeletionManager, GlobalDeletionState,

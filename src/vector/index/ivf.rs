@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::Storage;
 use crate::vector::index::config::IvfIndexConfig;
 use crate::vector::index::ivf::writer::IvfIndexWriter;

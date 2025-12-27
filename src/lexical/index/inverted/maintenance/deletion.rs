@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use bit_vec::BitVec;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{Storage, StorageInput, StorageOutput};
 

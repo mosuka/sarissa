@@ -20,7 +20,7 @@ use parking_lot::{Mutex, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::config::InvertedIndexConfig;
 use crate::lexical::reader::LexicalIndexReader;

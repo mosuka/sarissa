@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use ahash::AHashSet;
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::lexical::core::dictionary::TermDictionaryBuilder;
 use crate::lexical::core::dictionary::TermInfo;
 use crate::lexical::document::document::Document;

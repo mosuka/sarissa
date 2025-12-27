@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "embeddings-openai")]
 use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 #[cfg(feature = "embeddings-openai")]
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 #[cfg(feature = "embeddings-openai")]
 use crate::vector::core::vector::Vector;
 

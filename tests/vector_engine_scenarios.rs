@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use sarissa::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 use sarissa::embedding::noop::NoOpEmbedder;
 use sarissa::embedding::per_field::PerFieldEmbedder;
-use sarissa::error::{SarissaError, Result};
+use sarissa::error::{Result, SarissaError};
 use sarissa::storage::Storage;
 use sarissa::storage::memory::MemoryStorage;
 use sarissa::vector::DistanceMetric;

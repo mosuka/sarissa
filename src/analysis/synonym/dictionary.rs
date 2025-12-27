@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use fst::{Map, MapBuilder, Streamer};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 
 /// Synonym dictionary for token expansion.
 ///

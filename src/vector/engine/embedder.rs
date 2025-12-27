@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 
 use crate::embedding::embedder::Embedder;
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 
 /// Registry for managing embedder instances keyed byフィールド名.
 ///
@@ -77,8 +77,7 @@ impl EmbedderExecutor {
         handle.spawn(async move {
             let _ = tx.send(future.await);
         });
-        rx.recv().map_err(|err| {
-            SarissaError::internal(format!("embedder task channel closed: {err}"))
-        })?
+        rx.recv()
+            .map_err(|err| SarissaError::internal(format!("embedder task channel closed: {err}")))?
     }
 }

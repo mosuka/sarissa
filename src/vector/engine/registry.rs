@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::core::document::DocumentVector;
 use crate::vector::engine::filter::{RegistryFilterMatches, VectorFilter};
 

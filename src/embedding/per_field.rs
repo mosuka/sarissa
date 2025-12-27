@@ -306,7 +306,10 @@ mod tests {
         let per_field = PerFieldEmbedder::new(default);
 
         let input = EmbedInput::Text("hello");
-        let vec = per_field.embed_field("unknown_field", &input).await.unwrap();
+        let vec = per_field
+            .embed_field("unknown_field", &input)
+            .await
+            .unwrap();
         assert_eq!(vec.dimension(), 384);
         assert_eq!(per_field.get_embedder("unknown_field").name(), "default");
     }

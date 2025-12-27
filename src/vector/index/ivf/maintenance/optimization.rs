@@ -1,6 +1,6 @@
 //! Vector index optimization utilities.
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::writer::VectorIndexWriter;
 
 /// Optimizer for vector indexes after construction.

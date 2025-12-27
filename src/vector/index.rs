@@ -16,7 +16,7 @@ pub mod ivf;
 
 use std::sync::{Arc, RwLock};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::Storage;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::config::{

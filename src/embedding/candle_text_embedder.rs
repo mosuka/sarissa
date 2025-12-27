@@ -22,7 +22,7 @@ use tokenizers::Tokenizer;
 #[cfg(feature = "embeddings-candle")]
 use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 #[cfg(feature = "embeddings-candle")]
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 #[cfg(feature = "embeddings-candle")]
 use crate::vector::core::vector::Vector;
 
@@ -167,9 +167,8 @@ impl CandleTextEmbedder {
         let tokenizer_filename = repo.get("tokenizer.json").map_err(|e| {
             SarissaError::InvalidOperation(format!("Tokenizer download failed: {}", e))
         })?;
-        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(|e| {
-            SarissaError::InvalidOperation(format!("Tokenizer load failed: {}", e))
-        })?;
+        let tokenizer = Tokenizer::from_file(tokenizer_filename)
+            .map_err(|e| SarissaError::InvalidOperation(format!("Tokenizer load failed: {}", e)))?;
 
         let dim = config.hidden_size;
 

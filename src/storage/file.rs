@@ -55,7 +55,7 @@ use std::time::SystemTime;
 
 use memmap2::{Mmap, MmapOptions};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::{
     LockManager, Storage, StorageError, StorageInput, StorageLock, StorageOutput,
 };
@@ -565,9 +565,7 @@ impl StorageInput for FileInput {
     fn clone_input(&self) -> Result<Box<dyn StorageInput>> {
         // For file inputs, we can't easily clone the underlying file
         // This would require reopening the file, which we'll implement later
-        Err(SarissaError::storage(
-            "Clone not supported for file inputs",
-        ))
+        Err(SarissaError::storage("Clone not supported for file inputs"))
     }
 
     fn close(&mut self) -> Result<()> {

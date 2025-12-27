@@ -17,7 +17,7 @@ use parking_lot::{Mutex, RwLock};
 
 use crate::embedding::embedder::{EmbedInput, Embedder};
 use crate::embedding::per_field::PerFieldEmbedder;
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
 use crate::vector::core::document::{
@@ -300,9 +300,7 @@ impl VectorCollection {
     fn embed_payload(&self, field_name: &str, payload: Payload) -> Result<StoredVector> {
         let fields = self.fields.read();
         let handle = fields.get(field_name).ok_or_else(|| {
-            SarissaError::invalid_argument(format!(
-                "vector field '{field_name}' is not registered"
-            ))
+            SarissaError::invalid_argument(format!("vector field '{field_name}' is not registered"))
         })?;
         let field_config = handle.field.config().clone();
         drop(fields);

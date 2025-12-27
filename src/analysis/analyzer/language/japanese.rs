@@ -28,6 +28,9 @@ use std::sync::Arc;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::pipeline::PipelineAnalyzer;
+use crate::analysis::char_filter::japanese_iteration_mark::JapaneseIterationMarkCharFilter;
+use crate::analysis::char_filter::unicode_normalize::NormalizationForm;
+use crate::analysis::char_filter::unicode_normalize::UnicodeNormalizationCharFilter;
 use crate::analysis::token::TokenStream;
 use crate::analysis::token_filter::lowercase::LowercaseFilter;
 use crate::analysis::token_filter::stop::{DEFAULT_JAPANESE_STOP_WORDS_SET, StopFilter};
@@ -87,6 +90,10 @@ impl JapaneseAnalyzer {
     pub fn new() -> Result<Self> {
         let tokenizer = Arc::new(LinderaTokenizer::new("normal", "embedded://unidic", None)?);
         let analyzer = PipelineAnalyzer::new(tokenizer)
+            .add_char_filter(Arc::new(UnicodeNormalizationCharFilter::new(
+                NormalizationForm::NFKC,
+            )))
+            .add_char_filter(Arc::new(JapaneseIterationMarkCharFilter::new(true, true)))
             .add_filter(Arc::new(LowercaseFilter::new()))
             .add_filter(Arc::new(StopFilter::with_stop_words(
                 DEFAULT_JAPANESE_STOP_WORDS_SET.clone(),

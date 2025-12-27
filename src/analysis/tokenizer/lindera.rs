@@ -34,7 +34,7 @@ use lindera::segmenter::Segmenter;
 
 use crate::analysis::token::{Token, TokenStream, TokenType};
 use crate::analysis::tokenizer::Tokenizer;
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 
 /// A tokenizer that uses Lindera for morphological analysis.
 ///

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 
 /// Write a UTF-8 string prefixed by its length as u32 little-endian.
 pub fn write_string<W: Write>(output: &mut W, value: &str) -> Result<()> {

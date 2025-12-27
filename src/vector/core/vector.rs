@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 
 /// Metadata key used to store the original (pre-embedded) text.
 pub const ORIGINAL_TEXT_METADATA_KEY: &str = "original_text";

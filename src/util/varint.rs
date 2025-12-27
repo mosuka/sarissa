@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 
 use byteorder::ReadBytesExt;
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 
 /// Encode a u32 value using variable-length encoding.
 ///

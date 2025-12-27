@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 use crate::vector::Vector;
 use crate::vector::core::document::StoredVector;
 use crate::vector::engine::config::VectorFieldConfig;

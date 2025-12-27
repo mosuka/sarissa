@@ -43,7 +43,7 @@
 use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 
 pub mod column;
 pub mod file;

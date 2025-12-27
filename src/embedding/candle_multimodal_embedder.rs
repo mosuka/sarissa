@@ -23,7 +23,7 @@ use tokenizers::Tokenizer;
 #[cfg(feature = "embeddings-multimodal")]
 use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 #[cfg(feature = "embeddings-multimodal")]
-use crate::error::{SarissaError, Result};
+use crate::error::{Result, SarissaError};
 #[cfg(feature = "embeddings-multimodal")]
 use crate::vector::core::vector::Vector;
 
@@ -202,10 +202,7 @@ impl CandleMultimodalEmbedder {
             unsafe {
                 VarBuilder::from_mmaped_safetensors(&[weights_filename], DType::F32, &device)
                     .map_err(|e| {
-                        SarissaError::InvalidOperation(format!(
-                            "VarBuilder creation failed: {}",
-                            e
-                        ))
+                        SarissaError::InvalidOperation(format!("VarBuilder creation failed: {}", e))
                     })?
             }
         } else {
@@ -254,9 +251,8 @@ impl CandleMultimodalEmbedder {
         let tokenizer_filename = repo.get("tokenizer.json").map_err(|e| {
             SarissaError::InvalidOperation(format!("Tokenizer download failed: {}", e))
         })?;
-        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(|e| {
-            SarissaError::InvalidOperation(format!("Tokenizer load failed: {}", e))
-        })?;
+        let tokenizer = Tokenizer::from_file(tokenizer_filename)
+            .map_err(|e| SarissaError::InvalidOperation(format!("Tokenizer load failed: {}", e)))?;
 
         let dimension = projection_dim;
         let image_size = config.vision_config.image_size;
