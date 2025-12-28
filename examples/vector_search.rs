@@ -1,179 +1,104 @@
-//! Step-by-step doc-centric vector search example using automatic embeddings.
+//! Vector Search Example - Basic usage guide
 //!
-//! Run with `cargo run --example vector_search --features embeddings-candle`.
+//! This example demonstrates the fundamental steps to use Sarissa for vector search:
+//! 1. Setup storage
+//! 2. Configure the vector index (using NoOpEmbedder for direct vector input)
+//! 3. Add documents with pre-computed vectors using the `add_payloads` API
+//! 4. Perform a nearest neighbor search (KNN)
 
-#[cfg(not(feature = "embeddings-candle"))]
-fn main() {
-    eprintln!("This example requires the 'embeddings-candle' feature.");
-    eprintln!("Please rerun with: cargo run --example vector_search --features embeddings-candle");
-    std::process::exit(1);
-}
+use std::sync::Arc;
 
-#[cfg(feature = "embeddings-candle")]
-mod candle_vector_example {
-    use std::sync::Arc;
+use sarissa::embedding::precomputed::PrecomputedEmbedder;
+use sarissa::error::Result;
+use sarissa::storage::file::FileStorageConfig;
+use sarissa::storage::{StorageConfig, StorageFactory};
+use sarissa::vector::DistanceMetric;
+use sarissa::vector::core::document::{
+    DocumentPayload, Payload, PayloadSource, StoredVector, VectorType,
+};
+use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
+use sarissa::vector::engine::{QueryVector, VectorEngine, VectorSearchRequest};
+use tempfile::TempDir;
 
-    use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
-    use sarissa::embedding::embedder::Embedder;
-    use sarissa::embedding::per_field::PerFieldEmbedder;
-    use sarissa::error::Result;
-    use sarissa::storage::Storage;
-    use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
-    use sarissa::vector::DistanceMetric;
-    use sarissa::vector::core::document::{DocumentPayload, Payload, VectorType};
-    use sarissa::vector::engine::{
-        FieldSelector, QueryPayload, VectorEngine, VectorFieldConfig, VectorFilter,
-        VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
+fn main() -> Result<()> {
+    println!("=== Vector Search Basic Example ===\n");
+
+    // 1. Setup Storage
+    let temp_dir = TempDir::new().unwrap();
+    let storage_config = StorageConfig::File(FileStorageConfig::new(temp_dir.path()));
+    let storage = StorageFactory::create(storage_config)?;
+
+    // 2. Configure Index
+    // We use NoOpEmbedder because we will provide pre-computed vectors directly.
+    let field_config = VectorFieldConfig {
+        dimension: 3,
+        distance: DistanceMetric::Cosine,
+        index: VectorIndexKind::Flat,
+        vector_type: VectorType::Text,
+        base_weight: 1.0,
     };
 
-    const TITLE_FIELD: &str = "title_embedding";
-    const BODY_FIELD: &str = "body_embedding";
+    let index_config = VectorIndexConfig::builder()
+        .embedder(PrecomputedEmbedder::new()) // Configure NoOpEmbedder
+        .field("vector_data", field_config)
+        .build()?;
 
-    pub fn run() -> Result<()> {
-        println!("1) Configure storage + VectorEngine fields with an embedder registry\n");
-        println!("   Loading Candle embedders (downloads may occur on first run)...\n");
+    // 3. Create Engine
+    let engine = VectorEngine::new(storage, index_config)?;
 
-        let storage =
-            Arc::new(MemoryStorage::new(MemoryStorageConfig::default())) as Arc<dyn Storage>;
+    // 4. Add Documents with Vectors
+    // Even though we have raw vectors, we use the `add_payloads` API.
+    // This is the standard way to add data, allowing us to easily switch to
+    // an actual Embedder (e.g., OpenAI, Candle) later if needed.
+    let vectors = vec![
+        vec![1.0, 0.0, 0.0],
+        vec![0.0, 1.0, 0.0],
+        vec![0.0, 0.0, 1.0],
+    ];
 
-        let candle_text_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(
-            "sentence-transformers/all-MiniLM-L6-v2",
-        )?);
-        let dimension: usize = 384; // 明示指定（モデルの出力次元）
+    println!("Indexing {} vectors...", vectors.len());
+    for (_i, vec_data) in vectors.iter().enumerate() {
+        let mut doc = DocumentPayload::new();
 
-        // Configure PerFieldEmbedder so each vector field can transparently use Candle embedders.
-        let mut per_field_embedder = PerFieldEmbedder::new(Arc::clone(&candle_text_embedder));
-        per_field_embedder.add_embedder(TITLE_FIELD, Arc::clone(&candle_text_embedder));
-
-        // Build config (PerFieldEmbedderはフィールド名で解決するためembedder_keyは不要)
-        let config = VectorIndexConfig::builder()
-            .field(
-                TITLE_FIELD,
-                VectorFieldConfig {
-                    dimension,
-                    distance: DistanceMetric::Cosine,
-                    index: VectorIndexKind::Flat,
-                    vector_type: VectorType::Text,
-                    base_weight: 1.2,
+        // Use PayloadSource::Vector to provide the raw vector data
+        doc.set_field(
+            "vector_data",
+            Payload {
+                source: PayloadSource::Vector {
+                    data: Arc::<[f32]>::from(vec_data.as_slice()),
                 },
-            )
-            .field(
-                BODY_FIELD,
-                VectorFieldConfig {
-                    dimension,
-                    distance: DistanceMetric::Cosine,
-                    index: VectorIndexKind::Flat,
-                    vector_type: VectorType::Text,
-                    base_weight: 1.0,
-                },
-            )
-            .default_field(TITLE_FIELD)
-            .default_field(BODY_FIELD)
-            .embedder(per_field_embedder)
-            .build()?;
-
-        let engine = VectorEngine::new(storage, config)?;
-
-        println!("2) Upsert documents with raw payloads that will be embedded automatically\n");
-
-        // Document 1: Rust programming article
-        let mut doc1 = DocumentPayload::new();
-        doc1.set_metadata("lang", "en");
-        doc1.set_metadata("category", "programming");
-        doc1.set_text(TITLE_FIELD, "Rust overview");
-        doc1.set_text(BODY_FIELD, "Rust balances performance with memory safety");
-
-        // Document 2: LLM article in Japanese
-        let mut doc2 = DocumentPayload::new();
-        doc2.set_metadata("lang", "ja");
-        doc2.set_metadata("category", "ai");
-        doc2.set_text(TITLE_FIELD, "LLM primer");
-        doc2.set_text(BODY_FIELD, "LLM internals");
-
-        // Documents 3-5: User guide pages (chunked as separate documents)
-        // In the flattened model, long documents should be split into separate documents
-        // with metadata linking them to the original document.
-        let mut doc3 = DocumentPayload::new();
-        doc3.set_metadata("lang", "en");
-        doc3.set_metadata("category", "manual");
-        doc3.set_metadata("parent_doc_id", "user-guide");
-        doc3.set_metadata("chunk_index", "0");
-        doc3.set_text(
-            BODY_FIELD,
-            "Page 1: Installation steps for the runtime environment",
+                vector_type: VectorType::Text,
+            },
         );
 
-        let mut doc4 = DocumentPayload::new();
-        doc4.set_metadata("lang", "en");
-        doc4.set_metadata("category", "manual");
-        doc4.set_metadata("parent_doc_id", "user-guide");
-        doc4.set_metadata("chunk_index", "1");
-        doc4.set_text(
-            BODY_FIELD,
-            "Page 2: Configuration references and tuning knobs",
-        );
-
-        let mut doc5 = DocumentPayload::new();
-        doc5.set_metadata("lang", "en");
-        doc5.set_metadata("category", "manual");
-        doc5.set_metadata("parent_doc_id", "user-guide");
-        doc5.set_metadata("chunk_index", "2");
-        doc5.set_text(
-            BODY_FIELD,
-            "Page 3: Troubleshooting common deployment issues",
-        );
-
-        engine.upsert_payloads(1, doc1)?;
-        engine.upsert_payloads(2, doc2)?;
-        engine.upsert_payloads(3, doc3)?;
-        engine.upsert_payloads(4, doc4)?;
-        engine.upsert_payloads(5, doc5)?;
-        println!("   -> Inserted {} docs\n", engine.stats()?.document_count);
-
-        println!("3) Build a VectorSearchRequest directly from query text\n");
-
-        let mut doc_filter = VectorFilter::default();
-        doc_filter
-            .document
-            .equals
-            .insert("lang".into(), "en".into());
-
-        let mut query = VectorSearchRequest::default();
-        query.limit = 5;
-        query.fields = Some(vec![
-            FieldSelector::Exact(BODY_FIELD.into()),
-            FieldSelector::Exact(TITLE_FIELD.into()),
-        ]);
-        query.filter = Some(doc_filter);
-        query.score_mode = VectorScoreMode::WeightedSum;
-
-        query.query_payloads.push(QueryPayload::new(
-            TITLE_FIELD,
-            Payload::text("systems programming"),
-        ));
-
-        query.query_payloads.push(QueryPayload::new(
-            BODY_FIELD,
-            Payload::text("memory safety"),
-        ));
-
-        println!("4) Execute the search and inspect doc-centric hits\n");
-        let results = engine.search(query)?;
-        for (rank, hit) in results.hits.iter().enumerate() {
-            println!("{}. doc {} • score {:.3}", rank + 1, hit.doc_id, hit.score);
-            for field_hit in &hit.field_hits {
-                println!(
-                    "   field {:<15} distance {:.3} score {:.3}",
-                    field_hit.field, field_hit.distance, field_hit.score
-                );
-            }
-        }
-
-        Ok(())
+        // Use add_payloads instead of add_vectors
+        let doc_id = engine.add_payloads(doc)?;
+        println!("   Added Doc ID: {} -> {:?}", doc_id, vec_data);
     }
-}
+    engine.commit()?;
 
-#[cfg(feature = "embeddings-candle")]
-fn main() -> sarissa::error::Result<()> {
-    candle_vector_example::run()
+    // 5. Search
+    println!("\nSearching for nearest neighbor to [0.9, 0.1, 0.0]:");
+
+    let query_vector = vec![0.9, 0.1, 0.0];
+    let mut request = VectorSearchRequest::default();
+
+    // We can also use query vectors directly in the request
+    request.query_vectors.push(QueryVector {
+        vector: StoredVector::new(
+            Arc::<[f32]>::from(query_vector.as_slice()),
+            VectorType::Text,
+        ),
+        weight: 1.0,
+    });
+    request.limit = 3;
+
+    let results = engine.search(request)?;
+
+    println!("Found {} hits:", results.hits.len());
+    for (i, hit) in results.hits.iter().enumerate() {
+        println!("{}. Doc ID: {}, Score: {:.4}", i + 1, hit.doc_id, hit.score);
+    }
+
+    Ok(())
 }

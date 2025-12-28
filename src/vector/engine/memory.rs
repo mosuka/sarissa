@@ -268,14 +268,11 @@ impl VectorFieldReader for InMemoryFieldReader {
                         .config
                         .distance
                         .similarity(&query_vector.data, &vector.data)?;
+                    let weighted_score = similarity * effective_weight;
                     let distance = self
                         .config
                         .distance
                         .distance(&query_vector.data, &vector.data)?;
-                    let weighted_score = similarity * effective_weight;
-                    if weighted_score == 0.0 {
-                        continue;
-                    }
 
                     match merged.entry(*doc_id) {
                         Entry::Vacant(slot) => {
