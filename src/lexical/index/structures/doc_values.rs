@@ -13,7 +13,7 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 
 use crate::error::{Result, SarissaError};
-use crate::lexical::document::field::FieldValue;
+use crate::lexical::core::field::FieldValue;
 use crate::storage::Storage;
 
 /// DocValues file extension

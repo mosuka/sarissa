@@ -64,7 +64,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::lexical::document::field::{
+use crate::lexical::core::field::{
     BinaryOption, BooleanOption, DateTimeOption, Field, FieldOption, FieldValue, FloatOption,
     GeoOption, IntegerOption, TextOption, VectorOption,
 };

@@ -2,7 +2,7 @@
 //!
 //! This module provides the writer for building inverted indexes in schema-less mode.
 
-use crate::lexical::document::field::Field;
+use crate::lexical::core::field::Field;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,14 +13,14 @@ use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::error::{Result, SarissaError};
-use crate::lexical::core::dictionary::{TermDictionaryBuilder, TermInfo};
-use crate::lexical::core::doc_values::DocValuesWriter;
-use crate::lexical::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
-use crate::lexical::document::document::Document;
-use crate::lexical::document::field::FieldValue;
+use crate::lexical::core::analyzed::{AnalyzedDocument, AnalyzedTerm};
+use crate::lexical::core::document::Document;
+use crate::lexical::core::field::FieldValue;
 use crate::lexical::index::inverted::core::posting::{Posting, TermPostingIndex};
 use crate::lexical::index::inverted::maintenance::deletion::{DeletionConfig, DeletionManager};
 use crate::lexical::index::inverted::segment::SegmentInfo;
+use crate::lexical::index::structures::dictionary::{TermDictionaryBuilder, TermInfo};
+use crate::lexical::index::structures::doc_values::DocValuesWriter;
 use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;
@@ -282,7 +282,7 @@ impl InvertedIndexWriter {
 
         // Process each field in the document (schema-less mode)
         for (field_name, field) in doc.fields() {
-            use crate::lexical::document::field::{FieldOption, FieldValue};
+            use crate::lexical::core::field::{FieldOption, FieldValue};
 
             // Check field option to determine indexing and storage behavior
             let should_index = match &field.option {

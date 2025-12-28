@@ -194,7 +194,7 @@ impl TermsEnum for Box<dyn TermsEnum> {
 // Concrete Implementations for InvertedIndex
 // ============================================================================
 
-use crate::lexical::core::dictionary::{HybridTermDictionary, TermInfo};
+use crate::lexical::index::structures::dictionary::{HybridTermDictionary, TermInfo};
 use std::sync::Arc;
 
 /// Iterator over terms in a term dictionary.

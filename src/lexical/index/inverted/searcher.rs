@@ -1,7 +1,7 @@
 //! Searcher implementation for executing queries against an index.
 
-use crate::lexical::document::field::FieldValue;
-use crate::lexical::document::field::FieldValue::Vector;
+use crate::lexical::core::field::FieldValue;
+use crate::lexical::core::field::FieldValue::Vector;
 use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::error::{Result, SarissaError};
-use crate::lexical::document::field::FieldValue::{
+use crate::lexical::core::field::FieldValue::{
     Binary, Boolean, DateTime, Float, Geo, Integer, Null, Text,
 };
 use crate::lexical::index::inverted::query::Query;

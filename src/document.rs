@@ -61,4 +61,4 @@
 //! let analyzed = parser.parse(doc).unwrap();
 //! ```
 //!
-pub use crate::lexical::document::{analyzed, document, field, parser};
+pub use crate::lexical::core::{analyzed, document, field, parser};

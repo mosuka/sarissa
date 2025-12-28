@@ -3,22 +3,22 @@
 //! This module provides the core functionality for merging multiple segments
 //! into a single optimized segment with proper handling of deletions and updates.
 
-use crate::lexical::document::field::FieldValue;
+use crate::lexical::core::field::FieldValue;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use ahash::AHashSet;
 
 use crate::error::{Result, SarissaError};
-use crate::lexical::core::dictionary::TermDictionaryBuilder;
-use crate::lexical::core::dictionary::TermInfo;
-use crate::lexical::document::document::Document;
+use crate::lexical::core::document::Document;
 use crate::lexical::index::inverted::core::posting::TermPostingIndex;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::inverted::segment::manager::{
     ManagedSegmentInfo, MergeCandidate, MergeStrategy,
 };
+use crate::lexical::index::structures::dictionary::TermDictionaryBuilder;
+use crate::lexical::index::structures::dictionary::TermInfo;
 use crate::lexical::reader::LexicalIndexReader;
 use crate::storage::Storage;
 use crate::storage::structured::StructWriter;

@@ -21,7 +21,7 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::error::{Result, SarissaError};
-use crate::lexical::document::field::NumericType;
+use crate::lexical::core::field::NumericType;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::boolean::{BooleanClause, BooleanQuery, Occur};
 use crate::lexical::index::inverted::query::fuzzy::FuzzyQuery;

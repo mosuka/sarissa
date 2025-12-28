@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use chrono::{DateTime, Utc};
 
 use crate::error::Result;
-use crate::lexical::document::field::NumericType;
+use crate::lexical::core::field::NumericType;
 use crate::lexical::index::inverted::query::Query;
 use crate::lexical::index::inverted::query::matcher::{EmptyMatcher, Matcher, PreComputedMatcher};
 use crate::lexical::index::inverted::query::scorer::{BM25Scorer, Scorer};
@@ -461,8 +461,8 @@ impl NumericRangeQuery {
                 && let Some(field_value) = doc.get_field(&self.field)
             {
                 let numeric_value = match &field_value.value {
-                    crate::lexical::document::field::FieldValue::Float(f) => *f,
-                    crate::lexical::document::field::FieldValue::Integer(i) => *i as f64,
+                    crate::lexical::core::field::FieldValue::Float(f) => *f,
+                    crate::lexical::core::field::FieldValue::Integer(i) => *i as f64,
                     _ => continue, // Not a numeric field
                 };
 
@@ -650,10 +650,10 @@ impl Query for NumericRangeQuery {
                 && let Some(field_value) = doc.get_field(&self.field)
             {
                 let numeric_value = match &field_value.value {
-                    crate::lexical::document::field::FieldValue::Float(f) => Some(*f),
-                    crate::lexical::document::field::FieldValue::Integer(i) => Some(*i as f64),
+                    crate::lexical::core::field::FieldValue::Float(f) => Some(*f),
+                    crate::lexical::core::field::FieldValue::Integer(i) => Some(*i as f64),
                     // WORKAROUND: Parse text values as numbers (needed because stored docs lose type info)
-                    crate::lexical::document::field::FieldValue::Text(s) => s.parse::<f64>().ok(),
+                    crate::lexical::core::field::FieldValue::Text(s) => s.parse::<f64>().ok(),
                     _ => None,
                 };
 
@@ -856,8 +856,8 @@ impl NumericRangeFilterMatcher {
                 if let Some(field_value) = doc.get_field(&self.query.field) {
                     // Check if it's a numeric field and extract the value
                     let numeric_value = match &field_value.value {
-                        crate::lexical::document::field::FieldValue::Float(f) => *f,
-                        crate::lexical::document::field::FieldValue::Integer(i) => *i as f64,
+                        crate::lexical::core::field::FieldValue::Float(f) => *f,
+                        crate::lexical::core::field::FieldValue::Integer(i) => *i as f64,
                         _ => return false, // Not a numeric field
                     };
 
@@ -1427,7 +1427,7 @@ mod tests {
         fn document(
             &self,
             _doc_id: u64,
-        ) -> crate::error::Result<Option<crate::lexical::document::document::Document>> {
+        ) -> crate::error::Result<Option<crate::lexical::core::document::Document>> {
             Ok(None)
         }
         fn term_info(

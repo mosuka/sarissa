@@ -38,9 +38,9 @@
 //! Basic usage with default analyzer:
 //!
 //! ```
-//! use sarissa::document::document::Document;
-//! use sarissa::document::parser::DocumentParser;
-//! use sarissa::document::field::{TextOption, IntegerOption};
+//! use sarissa::lexical::core::document::Document;
+//! use sarissa::lexical::core::parser::DocumentParser;
+//! use sarissa::lexical::core::field::{TextOption, IntegerOption};
 //! use sarissa::analysis::analyzer::standard::StandardAnalyzer;
 //! use std::sync::Arc;
 //!
@@ -59,9 +59,9 @@
 //! With per-field analyzers:
 //!
 //! ```
-//! use sarissa::document::document::Document;
-//! use sarissa::document::parser::DocumentParser;
-//! use sarissa::document::field::TextOption;
+//! use sarissa::lexical::core::document::Document;
+//! use sarissa::lexical::core::parser::DocumentParser;
+//! use sarissa::lexical::core::field::TextOption;
 //! use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
 //! use sarissa::analysis::analyzer::standard::StandardAnalyzer;
 //! use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
@@ -91,9 +91,9 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::token::Token;
 use crate::error::Result;
-use crate::lexical::document::analyzed::{AnalyzedDocument, AnalyzedTerm};
-use crate::lexical::document::document::Document;
-use crate::lexical::document::field::FieldValue;
+use crate::lexical::core::analyzed::{AnalyzedDocument, AnalyzedTerm};
+use crate::lexical::core::document::Document;
+use crate::lexical::core::field::FieldValue;
 
 /// A document parser that converts Documents into AnalyzedDocuments.
 ///
@@ -104,9 +104,9 @@ use crate::lexical::document::field::FieldValue;
 /// # Example
 ///
 /// ```
-/// use sarissa::document::document::Document;
-/// use sarissa::document::parser::DocumentParser;
-/// use sarissa::document::field::TextOption;
+/// use sarissa::lexical::core::document::Document;
+/// use sarissa::lexical::core::parser::DocumentParser;
+/// use sarissa::lexical::core::field::TextOption;
 /// use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
 /// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
 /// use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
@@ -314,7 +314,7 @@ mod tests {
     use super::*;
     use crate::analysis::analyzer::keyword::KeywordAnalyzer;
     use crate::analysis::analyzer::standard::StandardAnalyzer;
-    use crate::lexical::document::field::{BooleanOption, FloatOption, IntegerOption, TextOption};
+    use crate::lexical::core::field::{BooleanOption, FloatOption, IntegerOption, TextOption};
 
     #[test]
     fn test_basic_parsing() {

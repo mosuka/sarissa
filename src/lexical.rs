@@ -20,5 +20,3 @@ pub mod search;
 pub mod engine;
 pub mod reader;
 pub mod writer;
-
-pub mod document;

@@ -4,8 +4,8 @@
 //! implementations must follow. The primary implementation is `InvertedIndexWriter`.
 
 use crate::error::Result;
-use crate::lexical::document::analyzed::AnalyzedDocument;
-use crate::lexical::document::document::Document;
+use crate::lexical::core::analyzed::AnalyzedDocument;
+use crate::lexical::core::document::Document;
 
 /// Trait for lexical index writers.
 ///
