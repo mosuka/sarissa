@@ -67,6 +67,11 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Returns a boxed [`LexicalSearcher`] capable of executing search/count operations.
     fn searcher(&self) -> Result<Box<dyn LexicalSearcher>>;
 
+    /// Get the default fields configured for this index.
+    fn default_fields(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
     // =========================================================================
     // Cached access methods (for LexicalEngine delegation)
     // =========================================================================
