@@ -433,6 +433,28 @@ impl LexicalEngine {
             Ok(Arc::new(StandardAnalyzer::new()?))
         }
     }
+
+    /// Create a query parser configured for this index.
+    ///
+    /// The parser uses the index's analyzer and default fields configuration.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<QueryParser>` containing the configured parser.
+    pub fn query_parser(
+        &self,
+    ) -> Result<crate::lexical::index::inverted::query::parser::QueryParser> {
+        let analyzer = self.analyzer()?;
+        let mut parser = crate::lexical::index::inverted::query::parser::QueryParser::new(analyzer);
+
+        if let Ok(fields) = self.index.default_fields() {
+            if !fields.is_empty() {
+                parser = parser.with_default_fields(fields);
+            }
+        }
+
+        Ok(parser)
+    }
 }
 
 #[cfg(test)]

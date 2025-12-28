@@ -182,6 +182,10 @@ pub struct InvertedIndexConfig {
     #[serde(skip)]
     #[serde(default = "default_analyzer")]
     pub analyzer: Arc<dyn Analyzer>,
+
+    /// Default fields to search when no field is specified.
+    #[serde(default)]
+    pub default_fields: Vec<String>,
 }
 
 fn default_analyzer() -> Arc<dyn Analyzer> {
@@ -201,6 +205,7 @@ impl Default for InvertedIndexConfig {
                 crate::analysis::analyzer::standard::StandardAnalyzer::new()
                     .expect("StandardAnalyzer should be creatable"),
             ),
+            default_fields: Vec::new(),
         }
     }
 }
@@ -215,6 +220,7 @@ impl std::fmt::Debug for InvertedIndexConfig {
             .field("merge_factor", &self.merge_factor)
             .field("max_segments", &self.max_segments)
             .field("analyzer", &self.analyzer.name())
+            .field("default_fields", &self.default_fields)
             .finish()
     }
 }
@@ -250,7 +256,6 @@ impl std::fmt::Debug for InvertedIndexConfig {
 ///     .compress_stored_fields(true)
 ///     .build();
 /// ```
-#[derive(Default)]
 pub struct LexicalIndexConfigBuilder {
     analyzer: Option<Arc<dyn Analyzer>>,
     max_docs_per_segment: Option<u64>,
@@ -259,12 +264,28 @@ pub struct LexicalIndexConfigBuilder {
     store_term_vectors: Option<bool>,
     merge_factor: Option<u32>,
     max_segments: Option<u32>,
+    default_fields: Vec<String>,
+}
+
+impl Default for LexicalIndexConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LexicalIndexConfigBuilder {
     /// Create a new builder.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            analyzer: None,
+            max_docs_per_segment: None,
+            write_buffer_size: None,
+            compress_stored_fields: None,
+            store_term_vectors: None,
+            merge_factor: None,
+            max_segments: None,
+            default_fields: Vec::new(),
+        }
     }
 
     /// Set the analyzer for text fields.
@@ -357,6 +378,23 @@ impl LexicalIndexConfigBuilder {
         self
     }
 
+    /// Add a default field to search when no field is specified.
+    pub fn default_field(mut self, field: impl Into<String>) -> Self {
+        let field = field.into();
+        if !self.default_fields.contains(&field) {
+            self.default_fields.push(field);
+        }
+        self
+    }
+
+    /// Set the default fields to search when no field is specified.
+    ///
+    /// This replaces any previously set default fields.
+    pub fn default_fields(mut self, fields: Vec<String>) -> Self {
+        self.default_fields = fields;
+        self
+    }
+
     /// Build the configuration.
     ///
     /// Returns `LexicalIndexConfig::Inverted` with the configured settings.
@@ -384,6 +422,9 @@ impl LexicalIndexConfigBuilder {
         }
         if let Some(max) = self.max_segments {
             config.max_segments = max;
+        }
+        if !self.default_fields.is_empty() {
+            config.default_fields = self.default_fields;
         }
 
         LexicalIndexConfig::Inverted(config)

@@ -364,6 +364,10 @@ impl LexicalIndex for InvertedIndex {
         Ok(Box::new(InvertedIndexSearcher::from_arc(reader)))
     }
 
+    fn default_fields(&self) -> Result<Vec<String>> {
+        Ok(self.config.default_fields.clone())
+    }
+
     // =========================================================================
     // Cached access methods
     // =========================================================================

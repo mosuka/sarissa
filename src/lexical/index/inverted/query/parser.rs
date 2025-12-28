@@ -42,7 +42,8 @@ pub struct QueryParser {
     /// Analyzer for tokenizing and normalizing query terms.
     /// Required - following Lucene's design where Analyzer is mandatory.
     analyzer: Arc<dyn Analyzer>,
-    default_field: Option<String>,
+    /// Default fields to search when no field is specified.
+    default_fields: Vec<String>,
     default_occur: Occur,
 }
 
@@ -50,7 +51,7 @@ impl std::fmt::Debug for QueryParser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueryParser")
             .field("analyzer", &self.analyzer.name())
-            .field("default_field", &self.default_field)
+            .field("default_fields", &self.default_fields)
             .field("default_occur", &self.default_occur)
             .finish()
     }
@@ -76,7 +77,7 @@ impl QueryParser {
     pub fn new(analyzer: Arc<dyn Analyzer>) -> Self {
         Self {
             analyzer,
-            default_field: None,
+            default_fields: Vec::new(),
             default_occur: Occur::Should,
         }
     }
@@ -89,8 +90,16 @@ impl QueryParser {
     }
 
     /// Sets the default field.
+    ///
+    /// This overwrites any existing default fields.
     pub fn with_default_field(mut self, field: impl Into<String>) -> Self {
-        self.default_field = Some(field.into());
+        self.default_fields = vec![field.into()];
+        self
+    }
+
+    /// Sets multiple default fields.
+    pub fn with_default_fields(mut self, fields: Vec<String>) -> Self {
+        self.default_fields = fields;
         self
     }
 
@@ -100,9 +109,33 @@ impl QueryParser {
         self
     }
 
-    /// Get the default field.
-    pub fn default_field(&self) -> Option<&str> {
-        self.default_field.as_deref()
+    /// Get the default fields.
+    pub fn default_fields(&self) -> &[String] {
+        &self.default_fields
+    }
+
+    fn create_query_over_fields<F>(&self, field: Option<&str>, creator: F) -> Result<Box<dyn Query>>
+    where
+        F: Fn(&str) -> Result<Box<dyn Query>>,
+    {
+        if let Some(field_name) = field {
+            return creator(field_name);
+        }
+
+        if self.default_fields.is_empty() {
+            return Err(SarissaError::parse("No field specified".to_string()));
+        }
+
+        if self.default_fields.len() == 1 {
+            return creator(&self.default_fields[0]);
+        }
+
+        let mut bool_query = BooleanQuery::new();
+        for field_name in &self.default_fields {
+            let q = creator(field_name)?;
+            bool_query.add_clause(BooleanClause::new(q, Occur::Should));
+        }
+        Ok(Box::new(bool_query))
     }
 
     /// Parse a field-specific query.
@@ -297,10 +330,6 @@ impl QueryParser {
         pair: pest::iterators::Pair<Rule>,
         field: Option<&str>,
     ) -> Result<Box<dyn Query>> {
-        let field_name = field
-            .or(self.default_field.as_deref())
-            .ok_or_else(|| SarissaError::parse("No field specified".to_string()))?;
-
         let mut lower_inclusive = true;
         let mut upper_inclusive = true;
         let mut lower: Option<String> = None;
@@ -338,32 +367,33 @@ impl QueryParser {
             }
         }
 
-        // Try to parse as numeric range, fallback to term query for text ranges
         let lower_num = lower.as_ref().and_then(|s| s.parse::<f64>().ok());
         let upper_num = upper.as_ref().and_then(|s| s.parse::<f64>().ok());
 
-        if lower_num.is_some() || upper_num.is_some() {
-            // Numeric range query
-            let query = NumericRangeQuery::new(
-                field_name,
-                NumericType::Float,
-                lower_num,
-                upper_num,
-                lower_inclusive,
-                upper_inclusive,
-            );
-            Ok(Box::new(query))
-        } else {
-            // Text range - use a term query as fallback
-            let term = format!(
-                "{}{} TO {}{}",
-                if lower_inclusive { "[" } else { "{" },
-                lower.as_deref().unwrap_or("*"),
-                upper.as_deref().unwrap_or("*"),
-                if upper_inclusive { "]" } else { "}" }
-            );
-            Ok(Box::new(TermQuery::new(field_name, &term)))
-        }
+        self.create_query_over_fields(field, |field_name| {
+            if lower_num.is_some() || upper_num.is_some() {
+                // Numeric range query
+                let query = NumericRangeQuery::new(
+                    field_name,
+                    NumericType::Float,
+                    lower_num,
+                    upper_num,
+                    lower_inclusive,
+                    upper_inclusive,
+                );
+                Ok(Box::new(query))
+            } else {
+                // Text range - use a term query as fallback
+                let term = format!(
+                    "{}{} TO {}{}",
+                    if lower_inclusive { "[" } else { "{" },
+                    lower.as_deref().unwrap_or("*"),
+                    upper.as_deref().unwrap_or("*"),
+                    if upper_inclusive { "]" } else { "}" }
+                );
+                Ok(Box::new(TermQuery::new(field_name, &term)))
+            }
+        })
     }
 
     fn parse_range_value(&self, pair: pest::iterators::Pair<Rule>) -> Result<String> {
@@ -380,10 +410,6 @@ impl QueryParser {
         pair: pest::iterators::Pair<Rule>,
         field: Option<&str>,
     ) -> Result<Box<dyn Query>> {
-        let field_name = field
-            .or(self.default_field.as_deref())
-            .ok_or_else(|| SarissaError::parse("No field specified".to_string()))?;
-
         let mut phrase_content = String::new();
         let mut slop: Option<u32> = None;
         let mut boost = 1.0;
@@ -407,18 +433,20 @@ impl QueryParser {
             }
         }
 
-        let terms = self.analyze_term(Some(field_name), &phrase_content)?;
-        let mut phrase_query = PhraseQuery::new(field_name, terms);
+        self.create_query_over_fields(field, |field_name| {
+            let terms = self.analyze_term(Some(field_name), &phrase_content)?;
+            let mut phrase_query = PhraseQuery::new(field_name, terms);
 
-        if let Some(slop_value) = slop {
-            phrase_query = phrase_query.with_slop(slop_value);
-        }
+            if let Some(slop_value) = slop {
+                phrase_query = phrase_query.with_slop(slop_value);
+            }
 
-        if boost != 1.0 {
-            phrase_query = phrase_query.with_boost(boost);
-        }
+            if boost != 1.0 {
+                phrase_query = phrase_query.with_boost(boost);
+            }
 
-        Ok(Box::new(phrase_query))
+            Ok(Box::new(phrase_query))
+        })
     }
 
     fn parse_fuzzy_term(
@@ -426,10 +454,6 @@ impl QueryParser {
         pair: pest::iterators::Pair<Rule>,
         field: Option<&str>,
     ) -> Result<Box<dyn Query>> {
-        let field_name = field
-            .or(self.default_field.as_deref())
-            .ok_or_else(|| SarissaError::parse("No field specified".to_string()))?;
-
         let mut term = String::new();
         let mut fuzziness: u8 = 2; // Default fuzziness
 
@@ -449,20 +473,22 @@ impl QueryParser {
             }
         }
 
-        // ✅ Normalize the term using the analyzer (like Lucene does)
-        // This ensures the query term is in the same form as indexed terms
-        let terms = self.analyze_term(Some(field_name), &term)?;
-        let normalized_term = if terms.is_empty() {
-            // Fallback to original term if analyzer produces no tokens
-            &term
-        } else {
-            // Use the first token (following Lucene's behavior)
-            &terms[0]
-        };
+        self.create_query_over_fields(field, |field_name| {
+            // ✅ Normalize the term using the analyzer (like Lucene does)
+            // This ensures the query term is in the same form as indexed terms
+            let terms = self.analyze_term(Some(field_name), &term)?;
+            let normalized_term = if terms.is_empty() {
+                // Fallback to original term if analyzer produces no tokens
+                &term
+            } else {
+                // Use the first token (following Lucene's behavior)
+                &terms[0]
+            };
 
-        Ok(Box::new(
-            FuzzyQuery::new(field_name, normalized_term).max_edits(fuzziness as u32),
-        ))
+            Ok(Box::new(
+                FuzzyQuery::new(field_name, normalized_term).max_edits(fuzziness as u32),
+            ))
+        })
     }
 
     fn parse_wildcard_term(
@@ -470,10 +496,6 @@ impl QueryParser {
         pair: pest::iterators::Pair<Rule>,
         field: Option<&str>,
     ) -> Result<Box<dyn Query>> {
-        let field_name = field
-            .or(self.default_field.as_deref())
-            .ok_or_else(|| SarissaError::parse("No field specified".to_string()))?;
-
         let mut pattern = String::new();
 
         for inner_pair in pair.into_inner() {
@@ -482,7 +504,9 @@ impl QueryParser {
             }
         }
 
-        Ok(Box::new(WildcardQuery::new(field_name, &pattern)?))
+        self.create_query_over_fields(field, |field_name| {
+            Ok(Box::new(WildcardQuery::new(field_name, &pattern)?))
+        })
     }
 
     fn parse_simple_term(
@@ -490,10 +514,6 @@ impl QueryParser {
         pair: pest::iterators::Pair<Rule>,
         field: Option<&str>,
     ) -> Result<Box<dyn Query>> {
-        let field_name = field
-            .or(self.default_field.as_deref())
-            .ok_or_else(|| SarissaError::parse("No field specified".to_string()))?;
-
         let mut term = String::new();
         let mut boost = 1.0;
 
@@ -509,28 +529,30 @@ impl QueryParser {
             }
         }
 
-        let terms = self.analyze_term(Some(field_name), &term)?;
+        self.create_query_over_fields(field, |field_name| {
+            let terms = self.analyze_term(Some(field_name), &term)?;
 
-        if terms.is_empty() {
-            return Err(SarissaError::parse("No terms after analysis".to_string()));
-        }
+            if terms.is_empty() {
+                return Err(SarissaError::parse("No terms after analysis".to_string()));
+            }
 
-        if terms.len() == 1 {
-            let query = TermQuery::new(field_name, &terms[0]);
-            if boost != 1.0 {
-                Ok(Box::new(query.with_boost(boost)))
+            if terms.len() == 1 {
+                let query = TermQuery::new(field_name, &terms[0]);
+                if boost != 1.0 {
+                    Ok(Box::new(query.with_boost(boost)))
+                } else {
+                    Ok(Box::new(query))
+                }
             } else {
-                Ok(Box::new(query))
+                // Multiple terms - create a phrase query
+                let query = PhraseQuery::new(field_name, terms);
+                if boost != 1.0 {
+                    Ok(Box::new(query.with_boost(boost)))
+                } else {
+                    Ok(Box::new(query))
+                }
             }
-        } else {
-            // Multiple terms - create a phrase query
-            let query = PhraseQuery::new(field_name, terms);
-            if boost != 1.0 {
-                Ok(Box::new(query.with_boost(boost)))
-            } else {
-                Ok(Box::new(query))
-            }
-        }
+        })
     }
 
     fn parse_boost(&self, pair: pest::iterators::Pair<Rule>) -> Result<f32> {
@@ -562,7 +584,7 @@ impl QueryParser {
 /// Builder for QueryParser.
 pub struct QueryParserBuilder {
     analyzer: Arc<dyn Analyzer>,
-    default_field: Option<String>,
+    default_fields: Vec<String>,
     default_occur: Occur,
 }
 
@@ -571,14 +593,20 @@ impl QueryParserBuilder {
     pub fn new(analyzer: Arc<dyn Analyzer>) -> Self {
         Self {
             analyzer,
-            default_field: None,
+            default_fields: Vec::new(),
             default_occur: Occur::Should,
         }
     }
 
     /// Sets the default field.
     pub fn default_field(mut self, field: impl Into<String>) -> Self {
-        self.default_field = Some(field.into());
+        self.default_fields = vec![field.into()];
+        self
+    }
+
+    /// Sets multiple default fields.
+    pub fn default_fields(mut self, fields: Vec<String>) -> Self {
+        self.default_fields = fields;
         self
     }
 
@@ -592,7 +620,7 @@ impl QueryParserBuilder {
     pub fn build(self) -> Result<QueryParser> {
         Ok(QueryParser {
             analyzer: self.analyzer,
-            default_field: self.default_field,
+            default_fields: self.default_fields,
             default_occur: self.default_occur,
         })
     }
@@ -677,5 +705,18 @@ mod tests {
         let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("\"hello world\"~10").unwrap();
         assert!(format!("{query:?}").contains("PhraseQuery"));
+    }
+
+    #[test]
+    fn test_multiple_default_fields() {
+        let parser =
+            create_test_parser().with_default_fields(vec!["title".to_string(), "body".to_string()]);
+        let query = parser.parse("hello").unwrap();
+        let query_debug = format!("{:?}", query);
+        // Should be a BooleanQuery combining matches on title and body
+        assert!(query_debug.contains("BooleanQuery"));
+
+        // Unfortunately standard debug format might be opaque, but we can assume BooleanQuery is created if multiple fields.
+        // If it was single field, it would be TermQuery.
     }
 }
