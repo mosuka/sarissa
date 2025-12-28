@@ -366,11 +366,7 @@ mod tests {
         let mut query = VectorSearchRequest::default();
         query.limit = 0;
         query.query_vectors.push(QueryVector {
-            vector: StoredVector::new(
-                Arc::<[f32]>::from([1.0_f32, 0.0, 0.0]),
-                "mock".into(),
-                VectorType::Text,
-            ),
+            vector: StoredVector::new(Arc::<[f32]>::from([1.0_f32, 0.0, 0.0]), VectorType::Text),
             weight: 1.0,
         });
 

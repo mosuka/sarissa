@@ -58,7 +58,7 @@ fn main() -> Result<()> {
                 dimension: text_dim,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-                source_tag: TEXT_FIELD.into(),
+
                 vector_type: VectorType::Text,
                 base_weight: 1.0,
             },
@@ -69,7 +69,7 @@ fn main() -> Result<()> {
                 dimension: image_dim,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-                source_tag: IMAGE_FIELD.into(),
+
                 vector_type: VectorType::Image,
                 base_weight: 1.0,
             },

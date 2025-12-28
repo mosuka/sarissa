@@ -184,7 +184,7 @@ mod tests {
     }
 
     fn create_query_vector(data: Vec<f32>) -> QueryVector {
-        let stored = StoredVector::new(data.into(), String::new(), VectorType::Generic);
+        let stored = StoredVector::new(data.into(), VectorType::Generic);
         QueryVector {
             vector: stored,
             weight: 1.0,

@@ -248,18 +248,13 @@ impl VectorCollection {
             vt => vt,
         };
 
-        let (dimension, source_tag) = match &payload.source {
+        let dimension = match &payload.source {
             PayloadSource::Text { .. }
             | PayloadSource::Bytes { .. }
-            | PayloadSource::Uri { .. } => {
-                let dim = self.config.default_dimension.ok_or_else(|| {
-                    SarissaError::invalid_config(
-                        "implicit schema requires default_dimension to be set",
-                    )
-                })?;
-                (dim, field_name.to_string())
-            }
-            PayloadSource::Vector { data, source_tag } => (data.len(), source_tag.clone()),
+            | PayloadSource::Uri { .. } => self.config.default_dimension.ok_or_else(|| {
+                SarissaError::invalid_config("implicit schema requires default_dimension to be set")
+            })?,
+            PayloadSource::Vector { data } => data.len(),
         };
 
         if dimension == 0 {
@@ -272,7 +267,6 @@ impl VectorCollection {
             dimension,
             distance: self.config.default_distance,
             index: self.config.default_index_kind,
-            source_tag,
             vector_type,
             base_weight: self.config.default_base_weight,
         })
@@ -339,7 +333,7 @@ impl VectorCollection {
                     )));
                 }
                 let mut stored: StoredVector = vector.into();
-                stored.source_tag = field_config.source_tag.clone();
+
                 stored.vector_type = vector_type;
                 Ok(stored)
             }
@@ -373,7 +367,7 @@ impl VectorCollection {
                     )));
                 }
                 let mut stored: StoredVector = vector.into();
-                stored.source_tag = field_config.source_tag.clone();
+
                 stored.vector_type = vector_type;
                 Ok(stored)
             }
@@ -400,17 +394,11 @@ impl VectorCollection {
                     )));
                 }
                 let mut stored: StoredVector = vector.into();
-                stored.source_tag = field_config.source_tag.clone();
+
                 stored.vector_type = vector_type;
                 Ok(stored)
             }
-            PayloadSource::Vector { data, source_tag } => {
-                if source_tag != field_config.source_tag {
-                    return Err(SarissaError::invalid_argument(format!(
-                        "vector field '{field_name}' only accepts source_tag '{}' but got '{}'",
-                        field_config.source_tag, source_tag
-                    )));
-                }
+            PayloadSource::Vector { data } => {
                 if data.len() != field_config.dimension {
                     return Err(SarissaError::invalid_argument(format!(
                         "vector field '{field_name}' expects dimension {} but received {}",
@@ -418,11 +406,7 @@ impl VectorCollection {
                         data.len()
                     )));
                 }
-                Ok(StoredVector::new(
-                    data.clone(),
-                    field_config.source_tag.clone(),
-                    vector_type,
-                ))
+                Ok(StoredVector::new(data.clone(), vector_type))
             }
         }
     }
@@ -1346,10 +1330,7 @@ impl VectorCollectionSearcher {
         request
             .query_vectors
             .iter()
-            .filter(|candidate| {
-                candidate.vector.source_tag == config.source_tag
-                    && candidate.vector.vector_type == config.vector_type
-            })
+            .filter(|candidate| candidate.vector.vector_type == config.vector_type)
             .cloned()
             .collect()
     }

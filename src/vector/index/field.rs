@@ -143,11 +143,7 @@ mod tests {
     use std::sync::Arc;
 
     fn sample_stored_vector() -> StoredVector {
-        StoredVector::new(
-            Arc::<[f32]>::from([1.0_f32, 0.0_f32]),
-            "embedder-a".into(),
-            VectorType::Text,
-        )
+        StoredVector::new(Arc::<[f32]>::from([1.0_f32, 0.0_f32]), VectorType::Text)
     }
 
     fn flat_writer() -> FlatIndexWriter {

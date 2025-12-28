@@ -68,7 +68,7 @@ mod candle_vector_example {
                     dimension, // embedderのdimensionを共通利用するからわざわざフィールドで持つ必要ある？
                     distance: DistanceMetric::Cosine,
                     index: VectorIndexKind::Flat,
-                    source_tag: TITLE_FIELD.to_string(),
+
                     vector_type: VectorType::Text,
                     base_weight: 1.2,
                 },
@@ -80,7 +80,7 @@ mod candle_vector_example {
                     dimension,
                     distance: DistanceMetric::Cosine,
                     index: VectorIndexKind::Flat,
-                    source_tag: BODY_FIELD.to_string(),
+
                     vector_type: VectorType::Text,
                     base_weight: 1.0,
                 },
