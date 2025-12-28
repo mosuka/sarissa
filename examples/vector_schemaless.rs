@@ -16,18 +16,16 @@ fn main() {
 mod candle_schemaless_example {
     use std::sync::Arc;
 
-    use sarissa::{
-        embedding::{candle_text_embedder::CandleTextEmbedder, embedder::Embedder},
-        error::Result,
-        storage::{Storage, memory::MemoryStorage},
-        vector::{
-            DistanceMetric,
-            core::document::{DocumentPayload, Payload},
-            engine::{
-                FieldSelector, QueryPayload, VectorEngine, VectorIndexConfig, VectorScoreMode,
-                VectorSearchRequest,
-            },
-        },
+    use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+    use sarissa::embedding::embedder::Embedder;
+    use sarissa::error::Result;
+    use sarissa::storage::Storage;
+    use sarissa::storage::memory::MemoryStorage;
+    use sarissa::vector::DistanceMetric;
+    use sarissa::vector::core::document::{DocumentPayload, Payload};
+    use sarissa::vector::engine::{
+        FieldSelector, QueryPayload, VectorEngine, VectorIndexConfig, VectorScoreMode,
+        VectorSearchRequest,
     };
 
     const TITLE: &str = "title";

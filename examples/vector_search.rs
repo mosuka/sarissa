@@ -13,30 +13,21 @@ fn main() {
 mod candle_vector_example {
     use std::sync::Arc;
 
-    use sarissa::{
-        embedding::{
-            candle_text_embedder::CandleTextEmbedder, embedder::Embedder,
-            per_field::PerFieldEmbedder,
-        },
-        error::Result,
-        storage::{
-            Storage,
-            memory::{MemoryStorage, MemoryStorageConfig},
-        },
-        vector::{
-            DistanceMetric,
-            core::document::{DocumentPayload, Payload, VectorType},
-            engine::{
-                FieldSelector, QueryPayload, VectorEngine, VectorFieldConfig, VectorFilter,
-                VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
-            },
-        },
+    use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+    use sarissa::embedding::embedder::Embedder;
+    use sarissa::embedding::per_field::PerFieldEmbedder;
+    use sarissa::error::Result;
+    use sarissa::storage::Storage;
+    use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use sarissa::vector::DistanceMetric;
+    use sarissa::vector::core::document::{DocumentPayload, Payload, VectorType};
+    use sarissa::vector::engine::{
+        FieldSelector, QueryPayload, VectorEngine, VectorFieldConfig, VectorFilter,
+        VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
     };
 
     const TITLE_FIELD: &str = "title_embedding";
     const BODY_FIELD: &str = "body_embedding";
-    // const TITLE_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
-    // const BODY_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
 
     pub fn run() -> Result<()> {
         println!("1) Configure storage + VectorEngine fields with an embedder registry\n");
@@ -50,11 +41,6 @@ mod candle_vector_example {
         )?);
         let dimension: usize = 384; // 明示指定（モデルの出力次元）
 
-        // let title_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(TITLE_MODEL)?);
-        // let body_embedder: Arc<dyn Embedder> = Arc::new(CandleTextEmbedder::new(BODY_MODEL)?);
-        // let title_dim = 384; // 各モデルの出力次元を明示指定
-        // let body_dim = 384;
-
         // Configure PerFieldEmbedder so each vector field can transparently use Candle embedders.
         let mut per_field_embedder = PerFieldEmbedder::new(Arc::clone(&candle_text_embedder));
         per_field_embedder.add_embedder(TITLE_FIELD, Arc::clone(&candle_text_embedder));
@@ -64,11 +50,9 @@ mod candle_vector_example {
             .field(
                 TITLE_FIELD,
                 VectorFieldConfig {
-                    // dimension: title_dim,
-                    dimension, // embedderのdimensionを共通利用するからわざわざフィールドで持つ必要ある？
+                    dimension,
                     distance: DistanceMetric::Cosine,
                     index: VectorIndexKind::Flat,
-
                     vector_type: VectorType::Text,
                     base_weight: 1.2,
                 },
@@ -76,11 +60,9 @@ mod candle_vector_example {
             .field(
                 BODY_FIELD,
                 VectorFieldConfig {
-                    // dimension: body_dim,
                     dimension,
                     distance: DistanceMetric::Cosine,
                     index: VectorIndexKind::Flat,
-
                     vector_type: VectorType::Text,
                     base_weight: 1.0,
                 },
