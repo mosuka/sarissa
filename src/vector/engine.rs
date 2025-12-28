@@ -344,7 +344,6 @@ mod tests {
             dimension: 3,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            source_tag: "mock".into(),
             vector_type: VectorType::Text,
             base_weight: 1.0,
         };
@@ -368,11 +367,7 @@ mod tests {
         let mut query = VectorSearchRequest::default();
         query.limit = limit;
         query.query_vectors.push(QueryVector {
-            vector: StoredVector::new(
-                Arc::<[f32]>::from([1.0, 0.0, 0.0]),
-                "mock".into(),
-                VectorType::Text,
-            ),
+            vector: StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0]), VectorType::Text),
             weight: 1.0,
         });
         query
@@ -404,11 +399,7 @@ mod tests {
         let mut doc = DocumentVector::new();
         doc.set_field(
             "body",
-            StoredVector::new(
-                Arc::<[f32]>::from([1.0, 0.0, 0.0]),
-                "mock".into(),
-                VectorType::Text,
-            ),
+            StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0]), VectorType::Text),
         );
 
         let doc_id = engine.add_vectors(doc).expect("add vectors");
@@ -431,11 +422,7 @@ mod tests {
         let mut doc = DocumentVector::new();
         doc.set_field(
             "body",
-            StoredVector::new(
-                Arc::<[f32]>::from([0.5, 0.5, 0.0]),
-                "mock".into(),
-                VectorType::Text,
-            ),
+            StoredVector::new(Arc::<[f32]>::from([0.5, 0.5, 0.0]), VectorType::Text),
         );
 
         engine.upsert_vectors(42, doc).expect("upsert");
@@ -458,11 +445,7 @@ mod tests {
             let mut doc = DocumentVector::new();
             doc.set_field(
                 "body",
-                StoredVector::new(
-                    Arc::<[f32]>::from([1.0, 0.0, 0.0]),
-                    "mock".into(),
-                    VectorType::Text,
-                ),
+                StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0]), VectorType::Text),
             );
             engine.upsert_vectors(10, doc).expect("upsert");
         }

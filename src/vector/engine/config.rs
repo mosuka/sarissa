@@ -270,7 +270,6 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            source_tag: name.clone(),
             vector_type: VectorType::Text,
             base_weight: 1.0,
         };
@@ -293,7 +292,6 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            source_tag: name.clone(),
             vector_type: VectorType::Image,
             base_weight: 1.0,
         };
@@ -479,8 +477,6 @@ pub struct VectorFieldConfig {
     pub distance: DistanceMetric,
     /// The type of index to use (Flat, HNSW, IVF).
     pub index: VectorIndexKind,
-    /// Logical label of vectors this field accepts.
-    pub source_tag: String,
     /// The type of vectors in this field (Text or Image).
     pub vector_type: VectorType,
     /// Base weight for scoring (default: 1.0).

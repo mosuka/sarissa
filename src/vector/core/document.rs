@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
 use super::vector::Vector;
 
 /// Metadata keys used when bridging to the legacy `Vector` representation.
-pub const METADATA_SOURCE_TAG: &str = "__sarissa_vector_source_tag";
 pub const METADATA_VECTOR_TYPE: &str = "__sarissa_vector_type";
 pub const METADATA_WEIGHT: &str = "__sarissa_vector_weight";
 
@@ -80,7 +79,6 @@ pub enum PayloadSource {
     },
     Vector {
         data: Arc<[f32]>,
-        source_tag: String,
     },
 }
 
@@ -109,11 +107,8 @@ impl PayloadSource {
     }
 
     /// Creates a pre-embedded vector payload source.
-    pub fn vector(data: impl Into<Arc<[f32]>>, source_tag: impl Into<String>) -> Self {
-        PayloadSource::Vector {
-            data: data.into(),
-            source_tag: source_tag.into(),
-        }
+    pub fn vector(data: impl Into<Arc<[f32]>>) -> Self {
+        PayloadSource::Vector { data: data.into() }
     }
 }
 
@@ -158,8 +153,8 @@ impl Payload {
     }
 
     /// Creates a pre-embedded vector payload with `VectorType::Generic`.
-    pub fn vector(data: impl Into<Arc<[f32]>>, source_tag: impl Into<String>) -> Self {
-        Self::new(PayloadSource::vector(data, source_tag), VectorType::Generic)
+    pub fn vector(data: impl Into<Arc<[f32]>>) -> Self {
+        Self::new(PayloadSource::vector(data), VectorType::Generic)
     }
 
     /// Sets the vector type for this payload.
@@ -177,7 +172,6 @@ pub struct StoredVector {
         deserialize_with = "deserialize_vector_data"
     )]
     pub data: Arc<[f32]>,
-    pub source_tag: String,
     pub vector_type: VectorType,
     pub weight: f32,
     #[serde(default)]
@@ -185,10 +179,9 @@ pub struct StoredVector {
 }
 
 impl StoredVector {
-    pub fn new(data: Arc<[f32]>, source_tag: String, vector_type: VectorType) -> Self {
+    pub fn new(data: Arc<[f32]>, vector_type: VectorType) -> Self {
         Self {
             data,
-            source_tag,
             vector_type,
             weight: 1.0,
             attributes: HashMap::new(),
@@ -205,7 +198,7 @@ impl From<Vector> for StoredVector {
         let data: Arc<[f32]> = vector.data.into();
         Self {
             data,
-            source_tag: String::new(),
+
             vector_type: VectorType::Generic,
             weight: 1.0,
             attributes: vector.metadata,
@@ -218,7 +211,7 @@ impl From<&Vector> for StoredVector {
         let data: Arc<[f32]> = vector.data.clone().into();
         Self {
             data,
-            source_tag: String::new(),
+
             vector_type: VectorType::Generic,
             weight: 1.0,
             attributes: vector.metadata.clone(),
@@ -241,12 +234,7 @@ impl From<&StoredVector> for Vector {
 impl StoredVector {
     pub fn to_vector(&self) -> Vector {
         let mut metadata = self.attributes.clone();
-        enrich_metadata(
-            &mut metadata,
-            &self.source_tag,
-            &self.vector_type,
-            self.weight,
-        );
+        enrich_metadata(&mut metadata, &self.vector_type, self.weight);
         Vector {
             data: self.data.as_ref().to_vec(),
             metadata,
@@ -256,12 +244,11 @@ impl StoredVector {
     pub fn into_vector(self) -> Vector {
         let StoredVector {
             data,
-            source_tag,
             vector_type,
             weight,
             mut attributes,
         } = self;
-        enrich_metadata(&mut attributes, &source_tag, &vector_type, weight);
+        enrich_metadata(&mut attributes, &vector_type, weight);
         Vector {
             data: data.as_ref().to_vec(),
             metadata: attributes,
@@ -269,17 +256,7 @@ impl StoredVector {
     }
 }
 
-fn enrich_metadata(
-    metadata: &mut HashMap<String, String>,
-    source_tag: &str,
-    vector_type: &VectorType,
-    weight: f32,
-) {
-    if !source_tag.is_empty() {
-        metadata
-            .entry(METADATA_SOURCE_TAG.to_string())
-            .or_insert_with(|| source_tag.to_string());
-    }
+fn enrich_metadata(metadata: &mut HashMap<String, String>, vector_type: &VectorType, weight: f32) {
     metadata
         .entry(METADATA_VECTOR_TYPE.to_string())
         .or_insert_with(|| vector_type.to_string());
@@ -385,7 +362,6 @@ mod tests {
     fn stored_vector_conversion_enriches_metadata() {
         let stored = StoredVector {
             data: Arc::<[f32]>::from([1.0_f32, 2.0_f32]),
-            source_tag: "embedder-x".into(),
             vector_type: VectorType::Intent,
             weight: 2.5,
             attributes: HashMap::from([(String::from("chunk"), String::from("a"))]),
@@ -394,10 +370,7 @@ mod tests {
         let vector = stored.to_vector();
 
         assert_eq!(vector.data, vec![1.0, 2.0]);
-        assert_eq!(
-            vector.metadata.get(METADATA_SOURCE_TAG),
-            Some(&"embedder-x".to_string())
-        );
+
         assert_eq!(
             vector.metadata.get(METADATA_VECTOR_TYPE),
             Some(&"intent".to_string())

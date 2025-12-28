@@ -206,7 +206,7 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            source_tag: "text-encoder-v1".into(),
+
             vector_type: VectorType::Text,
             base_weight: 1.4,
         },
@@ -217,7 +217,7 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            source_tag: "text-encoder-v1".into(),
+
             vector_type: VectorType::Text,
             base_weight: 1.0,
         },
@@ -240,7 +240,7 @@ fn sample_engine_config() -> VectorIndexConfig {
 fn stored_query_vector(data: [f32; 4]) -> StoredVector {
     StoredVector {
         data: Arc::from(data),
-        source_tag: "text-encoder-v1".into(),
+
         vector_type: VectorType::Text,
         weight: 1.0,
         attributes: HashMap::new(),
@@ -329,7 +329,7 @@ fn build_payload_engine() -> Result<VectorEngine> {
                 dimension: 4,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-                source_tag: "payload-encoder".into(),
+
                 vector_type: VectorType::Text,
                 base_weight: 1.0,
             },
@@ -360,7 +360,7 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
                 dimension: 3,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-                source_tag: "multimodal-encoder".into(),
+
                 vector_type: VectorType::Image,
                 base_weight: 1.0,
             },
