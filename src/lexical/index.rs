@@ -74,13 +74,13 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Get or create a cached writer and add a document.
     ///
     /// This method lazily creates a writer on first use and caches it for subsequent calls.
-    fn add_document(&self, doc: crate::lexical::document::document::Document) -> Result<u64>;
+    fn add_document(&self, doc: crate::lexical::core::document::Document) -> Result<u64>;
 
     /// Get or create a cached writer and upsert a document.
     fn upsert_document(
         &self,
         doc_id: u64,
-        doc: crate::lexical::document::document::Document,
+        doc: crate::lexical::core::document::Document,
     ) -> Result<()>;
 
     /// Get or create a cached writer and delete a document.
@@ -91,7 +91,7 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Returns a vector of assigned document IDs.
     fn add_documents(
         &self,
-        docs: Vec<crate::lexical::document::document::Document>,
+        docs: Vec<crate::lexical::core::document::Document>,
     ) -> Result<Vec<u64>>;
 
     /// Get or create a cached searcher and execute a search.
@@ -121,3 +121,4 @@ pub mod config;
 pub mod factory;
 
 pub mod inverted;
+pub mod structures;

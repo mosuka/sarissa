@@ -13,17 +13,17 @@ use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::analysis::token::Token;
 use crate::error::{Result, SarissaError};
-use crate::lexical::core::dictionary::HybridTermDictionary;
-use crate::lexical::core::dictionary::TermInfo;
-use crate::lexical::core::doc_values::DocValuesReader;
-use crate::lexical::document::document::Document;
-use crate::lexical::document::field::FieldValue;
+use crate::lexical::core::document::Document;
+use crate::lexical::core::field::FieldValue;
 use crate::lexical::index::inverted::core::posting::{Posting, PostingList};
 use crate::lexical::index::inverted::core::terms::{
     InvertedIndexTerms, TermDictionaryAccess, Terms,
 };
 use crate::lexical::index::inverted::maintenance::deletion::DeletionBitmap;
 use crate::lexical::index::inverted::segment::SegmentInfo;
+use crate::lexical::index::structures::dictionary::HybridTermDictionary;
+use crate::lexical::index::structures::dictionary::TermInfo;
+use crate::lexical::index::structures::doc_values::DocValuesReader;
 use crate::lexical::reader::FieldStats;
 use crate::lexical::reader::PostingIterator;
 use crate::storage::Storage;
@@ -491,7 +491,7 @@ impl SegmentReader {
 
                     doc.add_field(
                         field_name,
-                        crate::lexical::document::field::Field::with_default_option(field_value),
+                        crate::lexical::core::field::Field::with_default_option(field_value),
                     );
                 }
 

@@ -107,7 +107,7 @@ impl HybridEngine {
     /// The assigned document ID
     pub async fn add_document(
         &mut self,
-        doc: crate::lexical::document::document::Document,
+        doc: crate::lexical::core::document::Document,
     ) -> Result<u64> {
         let doc_id = self.next_doc_id;
         self.upsert_document(doc_id, doc).await?;
@@ -123,7 +123,7 @@ impl HybridEngine {
     pub async fn upsert_document(
         &mut self,
         doc_id: u64,
-        doc: crate::lexical::document::document::Document,
+        doc: crate::lexical::core::document::Document,
     ) -> Result<()> {
         self.lexical_engine.upsert_document(doc_id, doc.clone())?;
 

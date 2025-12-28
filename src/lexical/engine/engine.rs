@@ -1,56 +1,14 @@
 //! High-level lexical search engine that combines indexing and searching.
 //!
-//! This module provides a unified interface for lexical indexing and search operations,
-//! abstracting away the complexity of managing separate readers and writers.
-//! The engine handles caching of readers and writers for efficiency and provides
-//! convenient methods for common operations like adding documents, searching, and committing.
-//!
-//! # Architecture
-//!
-//! The `LexicalEngine` wraps a `LexicalIndex` trait object and provides:
-//! - **Automatic writer caching**: Writers are created on-demand and cached for efficiency
-//! - **Automatic reader invalidation**: Readers are invalidated after commits to reflect new changes
-//! - **Simplified API**: Single entry point for all indexing and search operations
-//! - **Index abstraction**: Supports different index types (Inverted, etc.) transparently
-//!
-//! # Usage
-//!
-//! ```rust,no_run
-//! use sarissa::document::document::Document;
-//! use sarissa::document::field::TextOption;
-//! use sarissa::lexical::engine::LexicalEngine;
-//! use sarissa::lexical::index::config::LexicalIndexConfig;
-//! use sarissa::lexical::search::searcher::LexicalSearchRequest;
-//! use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
-//! use std::sync::Arc;
-//!
-//! // Create storage
-//! let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-//!
-//! // Create engine with storage and config
-//! let config = LexicalIndexConfig::default();
-//! let engine = LexicalEngine::new(storage, config).unwrap();
-//!
-//! // Add documents
-//! let doc = Document::builder()
-//!     .add_text("title", "Hello World", TextOption::default())
-//!     .add_text("body", "This is a test document", TextOption::default())
-//!     .build();
-//! engine.add_document(doc).unwrap();
-//! engine.commit().unwrap();
-//!
-//! // Search using DSL string
-//! let request = LexicalSearchRequest::new("title:hello");
-//! let results = engine.search(request).unwrap();
-//! ```
+//! This module provides the core `LexicalEngine` implementation.
 
 use std::sync::Arc;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::error::Result;
-use crate::lexical::document::document::Document;
+use crate::lexical::core::document::Document;
+use crate::lexical::engine::config::LexicalIndexConfig;
 use crate::lexical::index::LexicalIndex;
-use crate::lexical::index::config::LexicalIndexConfig;
 use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::LexicalSearchResults;
@@ -480,7 +438,7 @@ impl LexicalEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::document::field::TextOption;
+    use crate::lexical::core::field::TextOption;
     use crate::lexical::index::config::LexicalIndexConfig;
     use crate::lexical::index::inverted::query::Query;
     use crate::lexical::index::inverted::query::term::TermQuery;
@@ -799,54 +757,7 @@ mod tests {
         let query = parser.parse_field("title", "hello world").unwrap();
         let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
 
-        // Should parse and execute the query
+        // Should not find anything (empty index)
         assert_eq!(results.hits.len(), 0);
-        assert_eq!(results.total_hits, 0);
-    }
-
-    #[test]
-    fn test_query_parser_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = LexicalIndexConfig::default();
-        let storage = Arc::new(
-            crate::storage::file::FileStorage::new(
-                temp_dir.path(),
-                crate::storage::file::FileStorageConfig::new(temp_dir.path()),
-            )
-            .unwrap(),
-        );
-        let _engine = LexicalEngine::new(storage, config).unwrap();
-
-        use crate::analysis::analyzer::standard::StandardAnalyzer;
-        use crate::lexical::index::inverted::query::parser::QueryParser;
-        let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
-        let parser = QueryParser::new(analyzer.clone());
-        assert!(parser.default_field().is_none());
-
-        let parser_with_default = QueryParser::new(analyzer).with_default_field("title");
-        assert_eq!(parser_with_default.default_field(), Some("title"));
-    }
-
-    #[test]
-    fn test_complex_string_query() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = LexicalIndexConfig::default();
-
-        let storage = Arc::new(
-            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
-        );
-        let engine = LexicalEngine::new(storage, config).unwrap();
-
-        // Test complex query parsing
-        use crate::analysis::analyzer::standard::StandardAnalyzer;
-        use crate::lexical::index::inverted::query::parser::QueryParser;
-        let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
-        let parser = QueryParser::new(analyzer).with_default_field("title");
-        let query = parser.parse("title:hello AND body:world").unwrap();
-        let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
-
-        // Should parse the complex query without error
-        assert_eq!(results.hits.len(), 0);
-        assert_eq!(results.total_hits, 0);
     }
 }

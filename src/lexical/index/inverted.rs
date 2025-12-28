@@ -368,7 +368,7 @@ impl LexicalIndex for InvertedIndex {
     // Cached access methods
     // =========================================================================
 
-    fn add_document(&self, doc: crate::lexical::document::document::Document) -> Result<u64> {
+    fn add_document(&self, doc: crate::lexical::core::document::Document) -> Result<u64> {
         let mut guard = self.cached_writer.lock();
         if guard.is_none() {
             *guard = Some(self.writer()?);
@@ -379,7 +379,7 @@ impl LexicalIndex for InvertedIndex {
     fn upsert_document(
         &self,
         doc_id: u64,
-        doc: crate::lexical::document::document::Document,
+        doc: crate::lexical::core::document::Document,
     ) -> Result<()> {
         let mut guard = self.cached_writer.lock();
         if guard.is_none() {
@@ -398,7 +398,7 @@ impl LexicalIndex for InvertedIndex {
 
     fn add_documents(
         &self,
-        docs: Vec<crate::lexical::document::document::Document>,
+        docs: Vec<crate::lexical::core::document::Document>,
     ) -> Result<Vec<u64>> {
         let mut guard = self.cached_writer.lock();
         if guard.is_none() {
@@ -474,8 +474,8 @@ impl LexicalIndex for InvertedIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexical::document::document::Document;
-    use crate::lexical::document::field::{FloatOption, TextOption};
+    use crate::lexical::core::document::Document;
+    use crate::lexical::core::field::{FloatOption, TextOption};
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use std::sync::Arc;
 

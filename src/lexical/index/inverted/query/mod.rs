@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 #[allow(unused_imports)]
-use crate::lexical::document::document::Document;
+use crate::lexical::core::document::Document;
 use crate::lexical::reader::LexicalIndexReader;
 
 use self::matcher::Matcher;
