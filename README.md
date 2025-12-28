@@ -159,7 +159,7 @@ fn main() -> Result<()> {
 ### Upsert / Hybrid Ingestion
 
 - To replace an existing document with a specific ID, use `LexicalEngine::upsert_document(doc_id, doc)`. The `add_document` method only performs automatic ID assignment.
-- In hybrid configurations, lexical and vector data are registered separately. First use `HybridEngine::add_document`/`upsert_document` to write lexical data, then use `HybridEngine::upsert_vector_document` for pre-embedded vectors, or `HybridEngine::upsert_vector_payload` to register raw text and embed it on the fly.
+- In hybrid configurations, lexical and vector data are registered separately. First use `HybridEngine::add_document`/`upsert_document` to write lexical data, then use `HybridEngine::upsert_vector_document` for pre-computed vectors., or `HybridEngine::upsert_vector_payload` to register raw text and embed it on the fly.
 
 ## Architecture
 
@@ -307,7 +307,7 @@ sarissa = { version = "0.1", features = ["embeddings-candle"] }
 ```rust
 use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
 use sarissa::embedding::embedder::EmbedInput;
-use sarissa::embedding::noop::NoOpEmbedder;
+use sarissa::embedding::precomputed::PrecomputedEmbedder;
 use sarissa::vector::engine::request::{QueryVector, VectorSearchRequest};
 use sarissa::vector::core::document::{DocumentVector, StoredVector, VectorType};
 use sarissa::vector::engine::VectorEngine;
@@ -332,7 +332,7 @@ async fn main() -> sarissa::error::Result<()> {
         base_weight: 1.0,
     };
     let config = VectorIndexConfig::builder()
-        .embedder(NoOpEmbedder::new())
+        .embedder(PrecomputedEmbedder::new())
         .field("body", field_config)
         .default_field("body")
         .build()?;
@@ -535,7 +535,7 @@ sarissa = { version = "0.1", features = ["embeddings-multimodal"] }
 ```rust
 use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
 use sarissa::embedding::embedder::EmbedInput;
-use sarissa::embedding::noop::NoOpEmbedder;
+use sarissa::embedding::precomputed::PrecomputedEmbedder;
 use sarissa::vector::engine::request::{QueryVector, VectorSearchRequest};
 use sarissa::vector::core::document::{DocumentVector, StoredVector, VectorType};
 use sarissa::vector::engine::VectorEngine;
@@ -560,7 +560,7 @@ async fn main() -> sarissa::error::Result<()> {
         base_weight: 1.0,
     };
     let config = VectorIndexConfig::builder()
-        .embedder(NoOpEmbedder::new())
+        .embedder(PrecomputedEmbedder::new())
         .field("image", field_config)
         .default_field("image")
         .build()?;

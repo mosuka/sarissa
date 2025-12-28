@@ -347,7 +347,7 @@ mod tests {
             vector_type: VectorType::Text,
             base_weight: 1.0,
         };
-        use crate::embedding::noop::NoOpEmbedder;
+        use crate::embedding::precomputed::PrecomputedEmbedder;
 
         VectorIndexConfig {
             fields: HashMap::from([("body".into(), field_config)]),
@@ -359,7 +359,7 @@ mod tests {
             default_vector_type: VectorType::Text,
             default_base_weight: 1.0,
             implicit_schema: false,
-            embedder: Arc::new(NoOpEmbedder::new()),
+            embedder: Arc::new(PrecomputedEmbedder::new()),
         }
     }
 

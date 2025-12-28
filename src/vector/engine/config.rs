@@ -38,7 +38,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::embedding::embedder::Embedder;
-use crate::embedding::noop::NoOpEmbedder;
+use crate::embedding::precomputed::PrecomputedEmbedder;
 use crate::error::{Result, SarissaError};
 use crate::vector::DistanceMetric;
 use crate::vector::core::document::VectorType;
@@ -109,7 +109,7 @@ pub struct VectorIndexConfig {
     ///
     /// This is analogous to `analyzer` in `InvertedIndexConfig`.
     /// Use `PerFieldEmbedder` for field-specific embedders.
-    /// Use `NoOpEmbedder` when using pre-computed vectors.
+    /// Use `PrecomputedEmbedder` when using pre-computed vectors.
     pub embedder: Arc<dyn Embedder>,
 }
 
@@ -366,7 +366,7 @@ impl VectorIndexConfigBuilder {
     pub fn build(self) -> Result<VectorIndexConfig> {
         let embedder = self
             .embedder
-            .unwrap_or_else(|| Arc::new(NoOpEmbedder::new()));
+            .unwrap_or_else(|| Arc::new(PrecomputedEmbedder::new()));
 
         let config = VectorIndexConfig {
             fields: self.fields,
@@ -450,8 +450,8 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             default_vector_type: helper.default_vector_type,
             default_base_weight: helper.default_base_weight,
             implicit_schema: helper.implicit_schema,
-            // Default to NoOpEmbedder; can be replaced programmatically
-            embedder: Arc::new(NoOpEmbedder::new()),
+            // Default to PrecomputedEmbedder; can be replaced programmatically
+            embedder: Arc::new(PrecomputedEmbedder::new()),
         })
     }
 }

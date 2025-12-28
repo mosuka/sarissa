@@ -38,10 +38,8 @@
 //!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 //! );
 //!
-//! let per_field = PerFieldEmbedder::new(text_embedder);
-//!
-//! // Use per_field as an Embedder
-//! let embedder: Arc<dyn Embedder> = Arc::new(per_field);
+//! // Document-level embedder (common case)
+//! let embedder: Arc<dyn Embedder> = Arc::new(PrecomputedEmbedder::new());
 //!
 //! // Embed text
 //! let vector = embedder.embed(&EmbedInput::Text("Hello, world!")).await?;

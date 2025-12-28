@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use sarissa::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
-use sarissa::embedding::noop::NoOpEmbedder;
 use sarissa::embedding::per_field::PerFieldEmbedder;
+use sarissa::embedding::precomputed::PrecomputedEmbedder;
 use sarissa::error::{Result, SarissaError};
 use sarissa::storage::Storage;
 use sarissa::storage::memory::MemoryStorage;
@@ -199,7 +199,7 @@ fn build_sample_engine() -> Result<VectorEngine> {
 }
 
 fn sample_engine_config() -> VectorIndexConfig {
-    let mut fields = HashMap::new();
+    let mut fields: HashMap<String, VectorFieldConfig> = HashMap::new();
     fields.insert(
         "title_embedding".into(),
         VectorFieldConfig {
@@ -223,18 +223,20 @@ fn sample_engine_config() -> VectorIndexConfig {
         },
     );
 
-    VectorIndexConfig {
-        fields,
-        default_fields: vec!["title_embedding".into(), "body_embedding".into()],
-        metadata: HashMap::new(),
-        default_distance: DistanceMetric::Cosine,
-        default_dimension: None,
-        default_index_kind: VectorIndexKind::Flat,
-        default_vector_type: VectorType::Text,
-        default_base_weight: 1.0,
-        implicit_schema: false,
-        embedder: Arc::new(NoOpEmbedder::new()),
+    let mut builder = VectorIndexConfig::builder()
+        .default_fields(vec!["title_embedding".into(), "body_embedding".into()])
+        .default_distance(DistanceMetric::Cosine)
+        .default_index_kind(VectorIndexKind::Flat)
+        .default_vector_type(VectorType::Text)
+        .default_base_weight(1.0)
+        .implicit_schema(false)
+        .embedder(PrecomputedEmbedder::new());
+
+    for (name, config) in fields {
+        builder = builder.field(name, config);
     }
+
+    builder.build().expect("build config")
 }
 
 fn stored_query_vector(data: [f32; 4]) -> StoredVector {
