@@ -82,7 +82,7 @@ fn main() -> Result<()> {
 
     // New simplified API using VectorSearchRequestBuilder
     let request = VectorSearchRequestBuilder::new()
-        .add_vector(query_vector)
+        .add_vector("vector_data", query_vector)
         .limit(3)
         .build();
 
