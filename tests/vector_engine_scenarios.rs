@@ -37,6 +37,7 @@ fn vector_engine_multi_field_search_prefers_relevant_documents() -> Result<()> {
     query.query_vectors.push(QueryVector {
         vector: stored_query_vector([0.9, 0.1, 0.0, 0.0]),
         weight: 1.0,
+        fields: None,
     });
 
     let results = engine.search(query)?;
@@ -62,6 +63,7 @@ fn vector_engine_respects_document_metadata_filters() -> Result<()> {
     query.query_vectors.push(QueryVector {
         vector: stored_query_vector([0.2, 0.1, 0.9, 0.05]),
         weight: 1.0,
+        fields: None,
     });
 
     let mut doc_filter = MetadataFilter::default();
@@ -90,6 +92,7 @@ fn vector_engine_field_metadata_filters_limit_hits() -> Result<()> {
     query.query_vectors.push(QueryVector {
         vector: stored_query_vector([0.8, 0.05, 0.05, 0.1]),
         weight: 1.0,
+        fields: None,
     });
 
     let mut field_filter = MetadataFilter::default();

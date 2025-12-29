@@ -1082,6 +1082,7 @@ impl VectorCollection {
         Ok(QueryVector {
             vector,
             weight: 1.0,
+            fields: None, // Will be set by caller if needed
         })
     }
 
@@ -1324,13 +1325,28 @@ impl VectorCollectionSearcher {
     /// Get query vectors that match a specific field configuration.
     fn query_vectors_for_field(
         &self,
+        field_name: &str,
         config: &VectorFieldConfig,
         request: &VectorSearchRequest,
     ) -> Vec<QueryVector> {
         request
             .query_vectors
             .iter()
-            .filter(|candidate| candidate.vector.vector_type == config.vector_type)
+            .filter(|candidate| {
+                // Check if vector type matches
+                if candidate.vector.vector_type != config.vector_type {
+                    return false;
+                }
+
+                // Check if this query vector is restricted to specific fields
+                if let Some(fields) = &candidate.fields {
+                    if !fields.contains(&field_name.to_string()) {
+                        return false;
+                    }
+                }
+
+                true
+            })
             .cloned()
             .collect()
     }
@@ -1423,7 +1439,8 @@ impl crate::vector::search::searcher::VectorSearcher for VectorCollectionSearche
             let field = fields
                 .get(&field_name)
                 .ok_or_else(|| SarissaError::not_found(format!("vector field '{field_name}'")))?;
-            let matching_vectors = self.query_vectors_for_field(field.field.config(), request);
+            let matching_vectors =
+                self.query_vectors_for_field(&field_name, field.field.config(), request);
             if matching_vectors.is_empty() {
                 continue;
             }

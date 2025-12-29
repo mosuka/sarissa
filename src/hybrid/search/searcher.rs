@@ -200,6 +200,7 @@ impl HybridSearchRequest {
         let query_vector = QueryVector {
             vector: stored,
             weight: 1.0,
+            fields: None,
         };
         VectorSearchRequest {
             query_vectors: vec![query_vector],

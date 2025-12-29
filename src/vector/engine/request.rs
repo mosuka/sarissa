@@ -85,6 +85,10 @@ pub struct QueryVector {
     pub vector: StoredVector,
     #[serde(default = "QueryVector::default_weight")]
     pub weight: f32,
+    /// Optional list of fields to restrict this query vector to.
+    /// If None, it applies to all target fields.
+    #[serde(default)]
+    pub fields: Option<Vec<String>>,
 }
 
 impl QueryVector {

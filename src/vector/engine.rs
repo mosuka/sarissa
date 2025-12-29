@@ -371,6 +371,7 @@ mod tests {
         query.query_vectors.push(QueryVector {
             vector: StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0]), VectorType::Text),
             weight: 1.0,
+            fields: None,
         });
         query
     }

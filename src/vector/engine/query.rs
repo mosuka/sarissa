@@ -18,7 +18,7 @@ use crate::vector::engine::request::{
 /// use sarissa::vector::engine::VectorSearchRequestBuilder;
 ///
 /// let request = VectorSearchRequestBuilder::new()
-///     .add_vector(vec![0.1, 0.2, 0.3])
+///     .add_vector("content", vec![0.1, 0.2, 0.3])
 ///     .limit(5)
 ///     .build();
 /// ```
@@ -35,20 +35,22 @@ impl VectorSearchRequestBuilder {
         }
     }
 
-    /// Add a raw query vector.
+    /// Add a raw query vector for a specific field.
     ///
     /// The vector type defaults to `VectorType::Text`.
-    pub fn add_vector(mut self, vector: Vec<f32>) -> Self {
+    pub fn add_vector(mut self, field: impl Into<String>, vector: Vec<f32>) -> Self {
         self.request.query_vectors.push(QueryVector {
             vector: StoredVector::new(Arc::<[f32]>::from(vector.as_slice()), VectorType::Text),
             weight: 1.0,
+            fields: Some(vec![field.into()]),
         });
         self
     }
 
-    /// Add a raw query vector with explicit type and weight.
+    /// Add a raw query vector with explicit type and weight for a specific field.
     pub fn add_vector_with_options(
         mut self,
+        field: impl Into<String>,
         vector: Vec<f32>,
         vector_type: VectorType,
         weight: f32,
@@ -56,6 +58,7 @@ impl VectorSearchRequestBuilder {
         self.request.query_vectors.push(QueryVector {
             vector: StoredVector::new(Arc::<[f32]>::from(vector.as_slice()), vector_type),
             weight,
+            fields: Some(vec![field.into()]),
         });
         self
     }
@@ -77,6 +80,19 @@ impl VectorSearchRequestBuilder {
     /// Set the fields to search in.
     pub fn fields(mut self, fields: Vec<String>) -> Self {
         self.request.fields = Some(fields.into_iter().map(FieldSelector::Exact).collect());
+        self
+    }
+
+    /// Add a field to search in.
+    ///
+    /// This is a convenience method to add a single field.
+    pub fn field(mut self, field: impl Into<String>) -> Self {
+        let field = field.into();
+        if let Some(fields) = &mut self.request.fields {
+            fields.push(FieldSelector::Exact(field));
+        } else {
+            self.request.fields = Some(vec![FieldSelector::Exact(field)]);
+        }
         self
     }
 

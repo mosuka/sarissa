@@ -188,6 +188,7 @@ mod tests {
         QueryVector {
             vector: stored,
             weight: 1.0,
+            fields: None,
         }
     }
 
