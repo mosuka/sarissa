@@ -195,7 +195,6 @@ impl VectorIndexConfig {
 ///         dimension: 384,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
-///         source_tag: "content_embedding".to_string(),
 ///         vector_type: VectorType::Text,
 ///         base_weight: 1.0,
 ///     })

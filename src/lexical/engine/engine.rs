@@ -39,7 +39,7 @@ use crate::storage::Storage;
 /// ```rust,no_run
 /// use sarissa::document::document::Document;
 /// use sarissa::lexical::engine::LexicalEngine;
-/// use sarissa::lexical::index::config::LexicalIndexConfig;
+/// use sarissa::lexical::engine::config::LexicalIndexConfig;
 /// use sarissa::lexical::search::searcher::LexicalSearchRequest;
 /// use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 /// use std::sync::Arc;
@@ -93,7 +93,7 @@ impl LexicalEngine {
     ///
     /// ```rust,no_run
     /// use sarissa::lexical::engine::LexicalEngine;
-    /// use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// use sarissa::lexical::engine::config::LexicalIndexConfig;
     /// use sarissa::storage::{Storage, StorageConfig, StorageFactory};
     /// use sarissa::storage::memory::MemoryStorageConfig;
     /// use std::sync::Arc;
@@ -107,7 +107,7 @@ impl LexicalEngine {
     ///
     /// ```rust,no_run
     /// use sarissa::lexical::engine::LexicalEngine;
-    /// use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// use sarissa::lexical::engine::config::LexicalIndexConfig;
     /// use sarissa::storage::{Storage, StorageConfig, StorageFactory};
     /// use sarissa::storage::file::FileStorageConfig;
     /// use std::sync::Arc;
@@ -143,7 +143,7 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use sarissa::document::document::Document;
     /// # use sarissa::lexical::engine::LexicalEngine;
-    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::lexical::engine::config::LexicalIndexConfig;
     /// # use sarissa::storage::{StorageConfig, StorageFactory};
     /// use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -204,7 +204,7 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use sarissa::document::document::Document;
     /// # use sarissa::lexical::engine::LexicalEngine;
-    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::lexical::engine::config::LexicalIndexConfig;
     /// # use sarissa::storage::{StorageConfig, StorageFactory};
     /// use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -250,7 +250,7 @@ impl LexicalEngine {
     /// ```rust,no_run
     /// use sarissa::document::document::Document;
     /// # use sarissa::lexical::engine::LexicalEngine;
-    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::lexical::engine::config::LexicalIndexConfig;
     /// # use sarissa::storage::{StorageConfig, StorageFactory};
     /// use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -310,7 +310,7 @@ impl LexicalEngine {
     /// use sarissa::lexical::search::searcher::LexicalSearchRequest;
     /// use sarissa::lexical::index::inverted::query::term::TermQuery;
     /// # use sarissa::lexical::engine::LexicalEngine;
-    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::lexical::engine::config::LexicalIndexConfig;
     /// # use sarissa::storage::{StorageConfig, StorageFactory};
     /// use sarissa::storage::memory::MemoryStorageConfig;
     /// # use std::sync::Arc;
@@ -341,7 +341,7 @@ impl LexicalEngine {
     /// use sarissa::lexical::search::searcher::LexicalSearchRequest;
     /// # use sarissa::document::document::Document;
     /// # use sarissa::lexical::engine::LexicalEngine;
-    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::lexical::engine::config::LexicalIndexConfig;
     /// # use sarissa::storage::{StorageConfig, StorageFactory};
     /// use sarissa::storage::memory::MemoryStorageConfig;
     /// use sarissa::analysis::analyzer::standard::StandardAnalyzer;
@@ -374,7 +374,7 @@ impl LexicalEngine {
     ///
     /// ```no_run
     /// # use sarissa::lexical::engine::LexicalEngine;
-    /// # use sarissa::lexical::index::config::LexicalIndexConfig;
+    /// # use sarissa::lexical::engine::config::LexicalIndexConfig;
     /// # use sarissa::lexical::search::searcher::LexicalSearchRequest;
     /// # use sarissa::storage::memory::MemoryStorage;
     /// # use sarissa::storage::memory::MemoryStorageConfig;
@@ -461,7 +461,7 @@ impl LexicalEngine {
 mod tests {
     use super::*;
     use crate::lexical::core::field::TextOption;
-    use crate::lexical::index::config::LexicalIndexConfig;
+    use crate::lexical::engine::config::LexicalIndexConfig;
     use crate::lexical::index::inverted::query::Query;
     use crate::lexical::index::inverted::query::term::TermQuery;
     use crate::storage::file::{FileStorage, FileStorageConfig};

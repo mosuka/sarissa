@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::error::Result;
+use crate::lexical::engine::config::LexicalIndexConfig;
 use crate::lexical::index::LexicalIndex;
-use crate::lexical::index::config::LexicalIndexConfig;
 use crate::lexical::index::inverted::InvertedIndex;
 use crate::storage::Storage;
 
@@ -22,7 +22,7 @@ use crate::storage::Storage;
 /// # Example with StorageFactory
 ///
 /// ```
-/// use sarissa::lexical::index::config::LexicalIndexConfig;
+/// use sarissa::lexical::engine::config::LexicalIndexConfig;
 /// use sarissa::lexical::index::factory::LexicalIndexFactory;
 /// use sarissa::storage::{StorageFactory, StorageConfig};
 /// use sarissa::storage::memory::MemoryStorageConfig;
@@ -55,7 +55,8 @@ impl LexicalIndexFactory {
     /// # Example
     ///
     /// ```
-    /// use sarissa::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
+    /// use sarissa::lexical::engine::config::LexicalIndexConfig;
+    /// use sarissa::lexical::index::config::InvertedIndexConfig;
     /// use sarissa::lexical::index::factory::LexicalIndexFactory;
     /// use sarissa::storage::{StorageFactory, StorageConfig};
     /// use sarissa::storage::file::FileStorageConfig;
@@ -97,7 +98,8 @@ impl LexicalIndexFactory {
     /// # Example
     ///
     /// ```no_run
-    /// use sarissa::lexical::index::config::{LexicalIndexConfig, InvertedIndexConfig};
+    /// use sarissa::lexical::engine::config::LexicalIndexConfig;
+    /// use sarissa::lexical::index::config::InvertedIndexConfig;
     /// use sarissa::lexical::index::factory::LexicalIndexFactory;
     /// use sarissa::storage::file::{FileStorage, FileStorageConfig};
     /// use std::sync::Arc;
@@ -126,7 +128,7 @@ impl LexicalIndexFactory {
 mod tests {
     use super::*;
 
-    use crate::lexical::index::config::LexicalIndexConfig;
+    use crate::lexical::engine::config::LexicalIndexConfig;
     use crate::storage::memory::MemoryStorage;
     use crate::storage::memory::MemoryStorageConfig;
 
