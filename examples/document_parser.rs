@@ -23,7 +23,7 @@ use sarissa::document::field::TextOption;
 use sarissa::document::parser::DocumentParser;
 use sarissa::error::Result;
 use sarissa::lexical::engine::LexicalEngine;
-use sarissa::lexical::index::config::LexicalIndexConfig;
+use sarissa::lexical::engine::config::LexicalIndexConfig;
 use sarissa::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use sarissa::lexical::search::searcher::LexicalSearchRequest;
 use sarissa::storage::file::FileStorage;

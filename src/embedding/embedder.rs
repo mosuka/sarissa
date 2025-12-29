@@ -31,6 +31,7 @@
 //! use sarissa::embedding::embedder::{Embedder, EmbedInput};
 //! use sarissa::embedding::per_field::PerFieldEmbedder;
 //! use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use sarissa::embedding::precomputed::PrecomputedEmbedder;
 //! use std::sync::Arc;
 //!
 //! # async fn example() -> sarissa::error::Result<()> {
