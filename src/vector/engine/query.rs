@@ -63,13 +63,44 @@ impl VectorSearchRequestBuilder {
         self
     }
 
-    /// Add a text query to be embedded.
+    /// Add a payload to be embedded.
     ///
-    /// This requires an embedder to be configured in the VectorEngine.
-    pub fn add_text(mut self, field: impl Into<String>, text: impl Into<String>) -> Self {
-        let text = text.into();
-        // Use the helper method which handles PayloadSource details
-        let payload = Payload::text(text);
+    /// This is the unified method for all modalities (text, image, video, etc.).
+    /// The bytes will be processed by the configured embedder.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The target field name
+    /// * `bytes` - Raw bytes of the content (text as UTF-8, image bytes, etc.)
+    /// * `vector_type` - The type of content being embedded
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use sarissa::vector::engine::VectorSearchRequestBuilder;
+    /// use sarissa::vector::core::document::VectorType;
+    ///
+    /// // Text search
+    /// let request = VectorSearchRequestBuilder::new()
+    ///     .add_payload("title", "search query".as_bytes(), VectorType::Text)
+    ///     .build();
+    ///
+    /// // Image search (with image bytes)
+    /// let image_bytes: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header
+    /// let request = VectorSearchRequestBuilder::new()
+    ///     .add_payload("image", image_bytes, VectorType::Image)
+    ///     .build();
+    /// ```
+    pub fn add_payload(
+        mut self,
+        field: impl Into<String>,
+        bytes: impl Into<Vec<u8>>,
+        vector_type: VectorType,
+    ) -> Self {
+        let payload = Payload::new(
+            crate::vector::core::document::PayloadSource::bytes(bytes.into(), None),
+            vector_type,
+        );
 
         self.request
             .query_payloads

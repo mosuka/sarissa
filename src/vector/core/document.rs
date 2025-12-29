@@ -29,12 +29,6 @@ pub enum VectorType {
     /// Vector derived from image content (e.g., photos, diagrams, screenshots).
     /// Used for visual similarity search and multimodal applications.
     Image,
-    /// Vector representing user intent or query semantics.
-    /// Useful for intent classification and query understanding systems.
-    Intent,
-    /// Vector derived from structured metadata (e.g., tags, categories, attributes).
-    /// Enables semantic matching on document properties.
-    Metadata,
     /// General-purpose vector without specific semantic categorization.
     /// Default type when the source content type is unknown or mixed.
     Generic,
@@ -55,8 +49,6 @@ impl fmt::Display for VectorType {
         match self {
             VectorType::Text => write!(f, "text"),
             VectorType::Image => write!(f, "image"),
-            VectorType::Intent => write!(f, "intent"),
-            VectorType::Metadata => write!(f, "metadata"),
             VectorType::Generic => write!(f, "generic"),
             VectorType::Custom(label) => write!(f, "{label}"),
         }
@@ -362,7 +354,7 @@ mod tests {
     fn stored_vector_conversion_enriches_metadata() {
         let stored = StoredVector {
             data: Arc::<[f32]>::from([1.0_f32, 2.0_f32]),
-            vector_type: VectorType::Intent,
+            vector_type: VectorType::Text,
             weight: 2.5,
             attributes: HashMap::from([(String::from("chunk"), String::from("a"))]),
         };
@@ -373,7 +365,7 @@ mod tests {
 
         assert_eq!(
             vector.metadata.get(METADATA_VECTOR_TYPE),
-            Some(&"intent".to_string())
+            Some(&"text".to_string())
         );
         assert_eq!(
             vector.metadata.get(METADATA_WEIGHT),
