@@ -36,6 +36,7 @@ pub mod config;
 pub mod embedder;
 pub mod filter;
 pub mod memory;
+pub mod query;
 pub mod registry;
 pub mod request;
 pub mod response;
@@ -52,6 +53,7 @@ use crate::vector::core::document::{DocumentPayload, DocumentVector};
 
 pub use config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 pub use filter::{MetadataFilter, VectorFilter};
+pub use query::VectorSearchRequestBuilder;
 pub use registry::{DocumentVectorRegistry, RegistryVersion};
 pub use request::{FieldSelector, QueryPayload, QueryVector, VectorScoreMode, VectorSearchRequest};
 pub use response::{VectorHit, VectorSearchResults, VectorStats};

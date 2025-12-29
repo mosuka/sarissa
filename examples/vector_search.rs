@@ -13,11 +13,9 @@ use sarissa::error::Result;
 use sarissa::storage::file::FileStorageConfig;
 use sarissa::storage::{StorageConfig, StorageFactory};
 use sarissa::vector::DistanceMetric;
-use sarissa::vector::core::document::{
-    DocumentPayload, Payload, PayloadSource, StoredVector, VectorType,
-};
+use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource, VectorType};
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
-use sarissa::vector::engine::{QueryVector, VectorEngine, VectorSearchRequest};
+use sarissa::vector::engine::{VectorEngine, VectorSearchRequestBuilder};
 use tempfile::TempDir;
 
 fn main() -> Result<()> {
@@ -81,17 +79,12 @@ fn main() -> Result<()> {
     println!("\nSearching for nearest neighbor to [0.9, 0.1, 0.0]:");
 
     let query_vector = vec![0.9, 0.1, 0.0];
-    let mut request = VectorSearchRequest::default();
 
-    // We can also use query vectors directly in the request
-    request.query_vectors.push(QueryVector {
-        vector: StoredVector::new(
-            Arc::<[f32]>::from(query_vector.as_slice()),
-            VectorType::Text,
-        ),
-        weight: 1.0,
-    });
-    request.limit = 3;
+    // New simplified API using VectorSearchRequestBuilder
+    let request = VectorSearchRequestBuilder::new()
+        .add_vector(query_vector)
+        .limit(3)
+        .build();
 
     let results = engine.search(request)?;
 
