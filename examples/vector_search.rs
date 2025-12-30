@@ -2,6 +2,7 @@
 //!
 //! This example demonstrates the fundamental steps to use Sarissa for vector search:
 //! 1. Setup storage
+<<<<<<< HEAD
 //! 2. Configure the vector index with an Embedder (CandleBertEmbedder via PerFieldEmbedder)
 //! 3. Add documents with text content (vectors are generated automatically)
 //! 4. Perform a nearest neighbor search (KNN) using text query
@@ -10,6 +11,11 @@
 //! ```bash
 //! cargo run --example vector_search --features embeddings-candle
 //! ```
+=======
+//! 2. Configure the vector index (using PrecomputedEmbedder for direct vector input)
+//! 3. Add documents with pre-computed vectors using the `add_payloads` API
+//! 4. Perform a nearest neighbor search (KNN)
+>>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
 
 #[cfg(feature = "embeddings-candle")]
 use std::collections::HashMap;
@@ -30,9 +36,13 @@ use sarissa::storage::file::FileStorageConfig;
 use sarissa::storage::{StorageConfig, StorageFactory};
 #[cfg(feature = "embeddings-candle")]
 use sarissa::vector::DistanceMetric;
+<<<<<<< HEAD
 #[cfg(feature = "embeddings-candle")]
 use sarissa::vector::core::document::DocumentPayload;
 #[cfg(feature = "embeddings-candle")]
+=======
+use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource};
+>>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 #[cfg(feature = "embeddings-candle")]
 use sarissa::vector::engine::{VectorEngine, VectorSearchRequestBuilder};
@@ -48,6 +58,7 @@ fn main() -> Result<()> {
     let storage_config = StorageConfig::File(FileStorageConfig::new(temp_dir.path()));
     let storage = StorageFactory::create(storage_config)?;
 
+<<<<<<< HEAD
     // 2. Configure Embedder (CandleBertEmbedder wrapped in PerFieldEmbedder)
     // We use "sentence-transformers/all-MiniLM-L6-v2" which outputs 384-dimensional vectors.
     println!("Loading BERT model (this may take a while on first run)...");
@@ -64,18 +75,31 @@ fn main() -> Result<()> {
     let embedder_arc: Arc<dyn Embedder> = Arc::new(per_field_embedder);
 
     // 3. Configure Index
+=======
+    // 2. Configure Index
+    // We use PrecomputedEmbedder because we will provide pre-computed vectors directly.
+>>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
     let field_config = VectorFieldConfig {
         dimension: 384, // Dimension for all-MiniLM-L6-v2
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
+<<<<<<< HEAD
         metadata: HashMap::new(),
+=======
+
+>>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
         base_weight: 1.0,
     };
 
     let index_config = VectorIndexConfig::builder()
+<<<<<<< HEAD
         .embedder_arc(embedder_arc)
         .field("title_vector", field_config.clone())
         .field("body_vector", field_config)
+=======
+        .embedder(PrecomputedEmbedder::new()) // Configure PrecomputedEmbedder
+        .field("vector_data", field_config)
+>>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
         .build()?;
 
     // 4. Create Engine
@@ -114,6 +138,18 @@ fn main() -> Result<()> {
         doc.set_text("title_vector", data.title);
         doc.set_text("body_vector", data.body);
 
+<<<<<<< HEAD
+=======
+        // Use PayloadSource::Vector to provide the raw vector data
+        doc.set_field(
+            "vector_data",
+            Payload::new(PayloadSource::Vector {
+                data: Arc::<[f32]>::from(vec_data.as_slice()),
+            }),
+        );
+
+        // Use add_payloads instead of add_vectors
+>>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
         let doc_id = engine.add_payloads(doc)?;
         println!("   Added Doc ID: {} -> Title: \"{}\"", doc_id, data.title);
     }
@@ -124,8 +160,16 @@ fn main() -> Result<()> {
     println!("\n--- Search 1: 'Rust' in 'title_vector' ---");
     let query_text = "Rust";
 
+<<<<<<< HEAD
     let request = VectorSearchRequestBuilder::new()
         .add_text("title_vector", query_text)
+=======
+    let query_vector = vec![0.9, 0.1, 0.0];
+
+    // Simplified API using VectorSearchRequestBuilder
+    let request = VectorSearchRequestBuilder::new()
+        .add_vector("vector_data", query_vector)
+>>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
         .limit(3)
         .build();
 

@@ -348,6 +348,7 @@ impl VectorCollection {
                     )));
                 }
                 let stored: StoredVector = vector.into();
+
                 Ok(stored)
             }
             PayloadSource::Vector { data } => {
@@ -580,14 +581,14 @@ impl VectorCollection {
                 let flat_config = crate::vector::index::config::FlatIndexConfig {
                     dimension: config.dimension,
                     distance_metric: config.distance,
-                    loading_mode: config.loading_mode,
+                    loading_mode: crate::vector::index::config::IndexLoadingMode::default(),
                     ..Default::default()
                 };
                 let reader = Arc::new(FlatVectorIndexReader::load(
                     &*storage,
                     FIELD_INDEX_BASENAME,
                     flat_config.distance_metric,
-                    flat_config.loading_mode,
+                    crate::vector::index::config::IndexLoadingMode::default(),
                 )?);
                 Arc::new(FlatFieldReader::new(field_name.to_string(), reader))
             }
@@ -596,7 +597,7 @@ impl VectorCollection {
                     &*storage,
                     FIELD_INDEX_BASENAME,
                     config.distance,
-                    config.loading_mode,
+                    crate::vector::index::config::IndexLoadingMode::default(),
                 )?);
                 Arc::new(HnswFieldReader::new(field_name.to_string(), reader))
             }
