@@ -51,12 +51,10 @@
 
 use std::any::Any;
 use std::fmt::Debug;
-use std::io::Write;
 
 use async_trait::async_trait;
-use tempfile::NamedTempFile;
 
-use crate::error::{Result, SarissaError};
+use crate::error::Result;
 use crate::vector::core::vector::Vector;
 
 /// Input types for embedding operations.
@@ -68,15 +66,9 @@ pub enum EmbedInput<'a> {
     /// Text input for text embedding.
     Text(&'a str),
 
-    /// Image file path for image embedding.
-    ImagePath(&'a str),
-
-    /// Raw image bytes for image embedding.
-    /// The optional string is a MIME type hint (e.g., "image/png").
-    ImageBytes(&'a [u8], Option<&'a str>),
-
-    /// URI reference (file:// or path) for image embedding.
-    ImageUri(&'a str),
+    /// Raw bytes for embedding.
+    /// The optional string is a MIME type hint (e.g., "image/png", "text/plain").
+    Bytes(&'a [u8], Option<&'a str>),
 }
 
 impl<'a> EmbedInput<'a> {
@@ -84,7 +76,12 @@ impl<'a> EmbedInput<'a> {
     pub fn input_type(&self) -> EmbedInputType {
         match self {
             EmbedInput::Text(_) => EmbedInputType::Text,
-            EmbedInput::ImagePath(_) | EmbedInput::ImageBytes(_, _) | EmbedInput::ImageUri(_) => {
+            EmbedInput::Bytes(_, mime) => {
+                if let Some(mime) = mime {
+                    if mime.starts_with("text/") {
+                        return EmbedInputType::Text;
+                    }
+                }
                 EmbedInputType::Image
             }
         }
@@ -92,29 +89,24 @@ impl<'a> EmbedInput<'a> {
 
     /// Check if this is a text input.
     pub fn is_text(&self) -> bool {
-        matches!(self, EmbedInput::Text(_))
+        match self {
+            EmbedInput::Text(_) => true,
+            EmbedInput::Bytes(_, mime) => mime.map_or(false, |m| m.starts_with("text/")),
+        }
     }
 
     /// Check if this is an image input.
     pub fn is_image(&self) -> bool {
-        matches!(
-            self,
-            EmbedInput::ImagePath(_) | EmbedInput::ImageBytes(_, _) | EmbedInput::ImageUri(_)
-        )
+        match self {
+            EmbedInput::Bytes(_, mime) => mime.map_or(true, |m| m.starts_with("image/")),
+            _ => false,
+        }
     }
 
     /// Get the text content if this is a text input.
     pub fn as_text(&self) -> Option<&'a str> {
         match self {
             EmbedInput::Text(text) => Some(text),
-            _ => None,
-        }
-    }
-
-    /// Get the image path if this is an image path input.
-    pub fn as_image_path(&self) -> Option<&'a str> {
-        match self {
-            EmbedInput::ImagePath(path) => Some(path),
             _ => None,
         }
     }
@@ -278,57 +270,10 @@ pub trait Embedder: Send + Sync + Debug {
     fn as_any(&self) -> &dyn Any;
 }
 
-// =============================================================================
-// Helper functions for embedder implementations
-// =============================================================================
-
-/// Helper function to embed image bytes by writing to a temporary file.
-///
-/// This is useful for embedders that only support file path input.
-pub async fn embed_image_bytes_via_temp_file<E>(
-    embedder: &E,
-    bytes: &[u8],
-    _mime: Option<&str>,
-) -> Result<Vector>
-where
-    E: Embedder + ?Sized,
-{
-    let mut temp_file = NamedTempFile::new().map_err(|err| {
-        SarissaError::internal(format!(
-            "failed to create temporary file for image embedding: {err}"
-        ))
-    })?;
-    temp_file.write_all(bytes).map_err(|err| {
-        SarissaError::internal(format!("failed to write temporary image payload: {err}"))
-    })?;
-    let temp_path = temp_file.into_temp_path();
-    let path_buf = temp_path.to_path_buf();
-    let path_string = path_buf.to_str().ok_or_else(|| {
-        SarissaError::invalid_argument("temporary image path contains invalid UTF-8 characters")
-    })?;
-    let vector = embedder.embed(&EmbedInput::ImagePath(path_string)).await?;
-    drop(temp_path);
-    Ok(vector)
-}
-
-/// Helper function to embed an image URI.
-///
-/// This handles `file://` URIs and plain file paths.
-pub async fn embed_image_uri<E>(embedder: &E, uri: &str) -> Result<Vector>
-where
-    E: Embedder + ?Sized,
-{
-    if uri.starts_with("http://") || uri.starts_with("https://") {
-        return Err(SarissaError::invalid_argument(
-            "remote HTTP(S) URIs are not supported yet—download to disk first",
-        ));
-    }
-    let path = uri.strip_prefix("file://").unwrap_or(uri);
-    embedder.embed(&EmbedInput::ImagePath(path)).await
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::error::SarissaError;
+
     use super::*;
 
     #[derive(Debug)]
@@ -367,8 +312,7 @@ mod tests {
     impl Embedder for MockMultimodalEmbedder {
         async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
             match input {
-                EmbedInput::Text(_) | EmbedInput::ImagePath(_) => Ok(Vector::new(vec![0.0; 3])),
-                _ => Err(SarissaError::invalid_argument("unsupported input type")),
+                EmbedInput::Text(_) | EmbedInput::Bytes(_, _) => Ok(Vector::new(vec![0.0; 3])),
             }
         }
 
@@ -389,12 +333,12 @@ mod tests {
     fn test_embed_input_type() {
         assert_eq!(EmbedInput::Text("hello").input_type(), EmbedInputType::Text);
         assert_eq!(
-            EmbedInput::ImagePath("/path/to/image.jpg").input_type(),
+            EmbedInput::Bytes(&[0, 1, 2], None).input_type(),
             EmbedInputType::Image
         );
         assert_eq!(
-            EmbedInput::ImageBytes(&[0, 1, 2], None).input_type(),
-            EmbedInputType::Image
+            EmbedInput::Bytes(&[0, 1, 2], Some("text/plain")).input_type(),
+            EmbedInputType::Text
         );
     }
 
@@ -426,7 +370,7 @@ mod tests {
         assert_eq!(result.unwrap().data.len(), 384);
 
         // Image input should fail
-        let result = embedder.embed(&EmbedInput::ImagePath("/path")).await;
+        let result = embedder.embed(&EmbedInput::Bytes(&[], None)).await;
         assert!(result.is_err());
     }
 
@@ -438,7 +382,7 @@ mod tests {
         let text_result = embedder.embed(&EmbedInput::Text("hello")).await;
         assert!(text_result.is_ok());
 
-        let image_result = embedder.embed(&EmbedInput::ImagePath("/path")).await;
+        let image_result = embedder.embed(&EmbedInput::Bytes(&[], None)).await;
         assert!(image_result.is_ok());
     }
 }

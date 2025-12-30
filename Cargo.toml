@@ -87,6 +87,10 @@ required-features = ["embeddings-candle"]
 name = "embedding_with_openai"
 required-features = ["embeddings-openai"]
 
+[[example]]
+name = "multimodal_search"
+required-features = ["embeddings-multimodal"]
+
 [[bench]]
 name = "bench"
 harness = false

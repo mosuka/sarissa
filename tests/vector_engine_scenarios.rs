@@ -1,7 +1,5 @@
 use std::any::Any;
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -20,7 +18,6 @@ use sarissa::vector::engine::{
     FieldSelector, MetadataFilter, QueryPayload, QueryVector, VectorEngine, VectorFieldConfig,
     VectorFilter, VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
 };
-use tempfile::NamedTempFile;
 
 #[test]
 fn vector_engine_multi_field_search_prefers_relevant_documents() -> Result<()> {
@@ -159,36 +156,6 @@ fn vector_engine_payload_accepts_image_bytes_segments() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn vector_engine_payload_accepts_image_uri_segments() -> Result<()> {
-    let engine = build_multimodal_payload_engine()?;
-
-    let mut document_file = NamedTempFile::new()?;
-    document_file.write_all(&[7, 6, 5, 4])?;
-    let document_uri = document_file.path().to_string_lossy().to_string();
-
-    let mut payload = DocumentPayload::new();
-    payload.set_field("image_embedding", image_uri_payload(document_uri));
-    engine.upsert_payloads(314, payload)?;
-
-    let mut query_file = NamedTempFile::new()?;
-    query_file.write_all(&[4, 5, 6, 7])?;
-    let query_uri = query_file.path().to_string_lossy().to_string();
-
-    let mut query = VectorSearchRequest::default();
-    query.limit = 1;
-    query.fields = Some(vec![FieldSelector::Exact("image_embedding".into())]);
-    query.query_payloads.push(QueryPayload::new(
-        "image_embedding",
-        image_uri_payload(query_uri),
-    ));
-
-    let results = engine.search(query)?;
-    assert_eq!(results.hits.len(), 1);
-    assert_eq!(results.hits[0].doc_id, 314);
-    Ok(())
-}
-
 fn build_sample_engine() -> Result<VectorEngine> {
     let config = sample_engine_config();
     let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::default());
@@ -302,10 +269,6 @@ fn image_bytes_payload(bytes: &[u8]) -> Payload {
         bytes.to_vec(),
         Some("image/png".into()),
     ))
-}
-
-fn image_uri_payload(uri: String) -> Payload {
-    Payload::new(PayloadSource::uri(uri, Some("image/png".into())))
 }
 
 fn build_payload_engine() -> Result<VectorEngine> {
@@ -430,16 +393,7 @@ impl Embedder for IntegrationMultimodalEmbedder {
     async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
         match input {
             EmbedInput::Text(text) => Ok(self.vector_from_bytes(text.as_bytes())),
-            EmbedInput::ImagePath(path) => {
-                let bytes = fs::read(path)?;
-                Ok(self.vector_from_bytes(&bytes))
-            }
-            EmbedInput::ImageBytes(bytes, _) => Ok(self.vector_from_bytes(bytes)),
-            EmbedInput::ImageUri(uri) => {
-                // For test purposes, treat URI as file path
-                let bytes = fs::read(uri)?;
-                Ok(self.vector_from_bytes(&bytes))
-            }
+            EmbedInput::Bytes(bytes, _) => Ok(self.vector_from_bytes(bytes)),
         }
     }
 
