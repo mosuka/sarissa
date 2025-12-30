@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::vector::core::document::{Payload, StoredVector, VectorType};
+use crate::vector::core::document::{Payload, PayloadSource, StoredVector};
 use crate::vector::engine::filter::VectorFilter;
 use crate::vector::engine::request::{
     FieldSelector, QueryPayload, QueryVector, VectorScoreMode, VectorSearchRequest,
@@ -36,27 +36,24 @@ impl VectorSearchRequestBuilder {
     }
 
     /// Add a raw query vector for a specific field.
-    ///
-    /// The vector type defaults to `VectorType::Text`.
     pub fn add_vector(mut self, field: impl Into<String>, vector: Vec<f32>) -> Self {
         self.request.query_vectors.push(QueryVector {
-            vector: StoredVector::new(Arc::<[f32]>::from(vector.as_slice()), VectorType::Text),
+            vector: StoredVector::new(Arc::<[f32]>::from(vector.as_slice())),
             weight: 1.0,
             fields: Some(vec![field.into()]),
         });
         self
     }
 
-    /// Add a raw query vector with explicit type and weight for a specific field.
-    pub fn add_vector_with_options(
+    /// Add a raw query vector with explicit weight for a specific field.
+    pub fn add_vector_with_weight(
         mut self,
         field: impl Into<String>,
         vector: Vec<f32>,
-        vector_type: VectorType,
         weight: f32,
     ) -> Self {
         self.request.query_vectors.push(QueryVector {
-            vector: StoredVector::new(Arc::<[f32]>::from(vector.as_slice()), vector_type),
+            vector: StoredVector::new(Arc::<[f32]>::from(vector.as_slice())).with_weight(weight),
             weight,
             fields: Some(vec![field.into()]),
         });
@@ -72,35 +69,25 @@ impl VectorSearchRequestBuilder {
     ///
     /// * `field` - The target field name
     /// * `bytes` - Raw bytes of the content (text as UTF-8, image bytes, etc.)
-    /// * `vector_type` - The type of content being embedded
     ///
     /// # Example
     ///
     /// ```
     /// use sarissa::vector::engine::VectorSearchRequestBuilder;
-    /// use sarissa::vector::core::document::VectorType;
     ///
     /// // Text search
     /// let request = VectorSearchRequestBuilder::new()
-    ///     .add_payload("title", "search query".as_bytes(), VectorType::Text)
+    ///     .add_payload("title", "search query".as_bytes())
     ///     .build();
     ///
     /// // Image search (with image bytes)
     /// let image_bytes: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header
     /// let request = VectorSearchRequestBuilder::new()
-    ///     .add_payload("image", image_bytes, VectorType::Image)
+    ///     .add_payload("image", image_bytes)
     ///     .build();
     /// ```
-    pub fn add_payload(
-        mut self,
-        field: impl Into<String>,
-        bytes: impl Into<Vec<u8>>,
-        vector_type: VectorType,
-    ) -> Self {
-        let payload = Payload::new(
-            crate::vector::core::document::PayloadSource::bytes(bytes.into(), None),
-            vector_type,
-        );
+    pub fn add_payload(mut self, field: impl Into<String>, bytes: impl Into<Vec<u8>>) -> Self {
+        let payload = Payload::new(PayloadSource::bytes(bytes.into(), None));
 
         self.request
             .query_payloads

@@ -134,7 +134,7 @@ impl VectorField for AdapterBackedVectorField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::core::document::{StoredVector, VectorType};
+    use crate::vector::core::document::StoredVector;
     use crate::vector::index::config::{FlatIndexConfig, HnswIndexConfig, IvfIndexConfig};
     use crate::vector::index::flat::writer::FlatIndexWriter;
     use crate::vector::index::hnsw::writer::HnswIndexWriter;
@@ -143,7 +143,7 @@ mod tests {
     use std::sync::Arc;
 
     fn sample_stored_vector() -> StoredVector {
-        StoredVector::new(Arc::<[f32]>::from([1.0_f32, 0.0_f32]), VectorType::Text)
+        StoredVector::new(Arc::<[f32]>::from([1.0_f32, 0.0_f32]))
     }
 
     fn flat_writer() -> FlatIndexWriter {

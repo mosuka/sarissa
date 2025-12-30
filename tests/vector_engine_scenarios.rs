@@ -13,7 +13,7 @@ use sarissa::storage::Storage;
 use sarissa::storage::memory::MemoryStorage;
 use sarissa::vector::DistanceMetric;
 use sarissa::vector::core::document::{
-    DocumentPayload, DocumentVector, Payload, PayloadSource, StoredVector, VectorType,
+    DocumentPayload, DocumentVector, Payload, PayloadSource, StoredVector,
 };
 use sarissa::vector::core::vector::Vector;
 use sarissa::vector::engine::{
@@ -209,8 +209,6 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-
-            vector_type: VectorType::Text,
             base_weight: 1.4,
         },
     );
@@ -220,8 +218,6 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-
-            vector_type: VectorType::Text,
             base_weight: 1.0,
         },
     );
@@ -230,7 +226,6 @@ fn sample_engine_config() -> VectorIndexConfig {
         .default_fields(vec!["title_embedding".into(), "body_embedding".into()])
         .default_distance(DistanceMetric::Cosine)
         .default_index_kind(VectorIndexKind::Flat)
-        .default_vector_type(VectorType::Text)
         .default_base_weight(1.0)
         .implicit_schema(false)
         .embedder(PrecomputedEmbedder::new());
@@ -245,8 +240,6 @@ fn sample_engine_config() -> VectorIndexConfig {
 fn stored_query_vector(data: [f32; 4]) -> StoredVector {
     StoredVector {
         data: Arc::from(data),
-
-        vector_type: VectorType::Text,
         weight: 1.0,
         attributes: HashMap::new(),
     }
@@ -305,17 +298,14 @@ fn sample_documents() -> Vec<(u64, DocumentVector)> {
 }
 
 fn image_bytes_payload(bytes: &[u8]) -> Payload {
-    Payload::new(
-        PayloadSource::bytes(bytes.to_vec(), Some("image/png".into())),
-        VectorType::Image,
-    )
+    Payload::new(PayloadSource::bytes(
+        bytes.to_vec(),
+        Some("image/png".into()),
+    ))
 }
 
 fn image_uri_payload(uri: String) -> Payload {
-    Payload::new(
-        PayloadSource::uri(uri, Some("image/png".into())),
-        VectorType::Image,
-    )
+    Payload::new(PayloadSource::uri(uri, Some("image/png".into())))
 }
 
 fn build_payload_engine() -> Result<VectorEngine> {
@@ -326,7 +316,6 @@ fn build_payload_engine() -> Result<VectorEngine> {
     let per_field_embedder = PerFieldEmbedder::new(embedder);
 
     // Build config using the new embedder field
-    // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
     let config = VectorIndexConfig::builder()
         .field(
             "body_embedding",
@@ -334,8 +323,6 @@ fn build_payload_engine() -> Result<VectorEngine> {
                 dimension: 4,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-
-                vector_type: VectorType::Text,
                 base_weight: 1.0,
             },
         )
@@ -357,7 +344,6 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
     per_field_embedder.add_embedder("image_embedding", multimodal_embedder);
 
     // Build config using the new embedder field
-    // Note: `embedder` field is the lookup key that PerFieldEmbedder uses
     let config = VectorIndexConfig::builder()
         .field(
             "image_embedding",
@@ -365,8 +351,6 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
                 dimension: 3,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-
-                vector_type: VectorType::Image,
                 base_weight: 1.0,
             },
         )

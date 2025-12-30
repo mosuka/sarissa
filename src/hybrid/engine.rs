@@ -340,7 +340,7 @@ impl HybridEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::core::document::{Payload, StoredVector, VectorType};
+    use crate::vector::core::document::{Payload, StoredVector};
     use crate::vector::engine::{
         FieldSelector, MetadataFilter, QueryVector, VectorFilter, VectorHit, VectorScoreMode,
     };
@@ -366,7 +366,7 @@ mod tests {
         let mut query = VectorSearchRequest::default();
         query.limit = 0;
         query.query_vectors.push(QueryVector {
-            vector: StoredVector::new(Arc::<[f32]>::from([1.0_f32, 0.0, 0.0]), VectorType::Text),
+            vector: StoredVector::new(Arc::<[f32]>::from([1.0_f32, 0.0, 0.0])),
             weight: 1.0,
             fields: None,
         });

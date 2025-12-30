@@ -25,7 +25,7 @@
 //!
 //! let config = VectorIndexConfig::builder()
 //!     .embedder(embedder)
-//!     .text_field("title", 384)?
+//!     .add_field("title", 384)?
 //!     .build()?;
 //! # Ok(())
 //! # }
@@ -41,7 +41,6 @@ use crate::embedding::embedder::Embedder;
 use crate::embedding::precomputed::PrecomputedEmbedder;
 use crate::error::{Result, SarissaError};
 use crate::vector::DistanceMetric;
-use crate::vector::core::document::VectorType;
 
 /// Configuration for a single vector collection.
 ///
@@ -57,7 +56,6 @@ use crate::vector::core::document::VectorType;
 /// use sarissa::embedding::embedder::Embedder;
 /// use sarissa::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use sarissa::vector::DistanceMetric;
-/// use sarissa::vector::core::document::VectorType;
 /// use std::sync::Arc;
 ///
 /// # fn example() -> sarissa::error::Result<()> {
@@ -69,7 +67,7 @@ use crate::vector::core::document::VectorType;
 ///
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
-///     .text_field("title", 384)?
+///     .add_field("title", 384)?
 ///     .build()?;
 /// # Ok(())
 /// # }
@@ -96,9 +94,6 @@ pub struct VectorIndexConfig {
     /// Default index kind when auto-generating fields.
     pub default_index_kind: VectorIndexKind,
 
-    /// Default vector type when auto-generating fields.
-    pub default_vector_type: VectorType,
-
     /// Default base weight when auto-generating fields.
     pub default_base_weight: f32,
 
@@ -122,7 +117,6 @@ impl std::fmt::Debug for VectorIndexConfig {
             .field("default_distance", &self.default_distance)
             .field("default_dimension", &self.default_dimension)
             .field("default_index_kind", &self.default_index_kind)
-            .field("default_vector_type", &self.default_vector_type)
             .field("default_base_weight", &self.default_base_weight)
             .field("implicit_schema", &self.implicit_schema)
             .field("embedder", &format_args!("{:?}", self.embedder))
@@ -179,7 +173,6 @@ impl VectorIndexConfig {
 /// use sarissa::embedding::embedder::Embedder;
 /// use sarissa::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use sarissa::vector::DistanceMetric;
-/// use sarissa::vector::core::document::VectorType;
 /// use std::sync::Arc;
 ///
 /// # fn example() -> sarissa::error::Result<()> {
@@ -195,7 +188,6 @@ impl VectorIndexConfig {
 ///         dimension: 384,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
-///         vector_type: VectorType::Text,
 ///         base_weight: 1.0,
 ///     })
 ///     .default_field("content_embedding")
@@ -212,7 +204,6 @@ pub struct VectorIndexConfigBuilder {
     default_distance: DistanceMetric,
     default_dimension: Option<usize>,
     default_index_kind: VectorIndexKind,
-    default_vector_type: VectorType,
     default_base_weight: f32,
     implicit_schema: bool,
 }
@@ -228,7 +219,6 @@ impl VectorIndexConfigBuilder {
             default_distance: DistanceMetric::Cosine,
             default_dimension: None,
             default_index_kind: VectorIndexKind::Flat,
-            default_vector_type: VectorType::Text,
             default_base_weight: VectorFieldConfig::default_weight(),
             implicit_schema: false,
         }
@@ -258,40 +248,16 @@ impl VectorIndexConfigBuilder {
         self
     }
 
-    /// Add a text field with automatic configuration from the embedder.
+    /// Add a field with dimension only (uses default settings).
     ///
-    /// The dimension will be inferred from the embedder if available.
-    /// For PerFieldEmbedder, the field-specific embedder will be used.
-    pub fn text_field(mut self, name: impl Into<String>, dimension: usize) -> Result<Self> {
+    /// This is the simplified API for adding fields.
+    pub fn add_field(mut self, name: impl Into<String>, dimension: usize) -> Result<Self> {
         let name = name.into();
 
         let config = VectorFieldConfig {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            vector_type: VectorType::Text,
-            base_weight: 1.0,
-        };
-
-        if !self.default_fields.contains(&name) {
-            self.default_fields.push(name.clone());
-        }
-        self.fields.insert(name, config);
-        Ok(self)
-    }
-
-    /// Add an image field with automatic configuration from the embedder.
-    ///
-    /// The dimension will be inferred from the embedder if available.
-    /// For PerFieldEmbedder, the field-specific embedder will be used.
-    pub fn image_field(mut self, name: impl Into<String>, dimension: usize) -> Result<Self> {
-        let name = name.into();
-
-        let config = VectorFieldConfig {
-            dimension,
-            distance: DistanceMetric::Cosine,
-            index: VectorIndexKind::Flat,
-            vector_type: VectorType::Image,
             base_weight: 1.0,
         };
 
@@ -341,12 +307,6 @@ impl VectorIndexConfigBuilder {
         self
     }
 
-    /// Set default vector type for implicit field generation.
-    pub fn default_vector_type(mut self, vector_type: VectorType) -> Self {
-        self.default_vector_type = vector_type;
-        self
-    }
-
     /// Set default base weight for implicit field generation.
     pub fn default_base_weight(mut self, base_weight: f32) -> Self {
         self.default_base_weight = base_weight;
@@ -361,7 +321,7 @@ impl VectorIndexConfigBuilder {
 
     /// Build the configuration.
     ///
-    /// If no embedder is set, defaults to `NoOpEmbedder` for pre-computed vectors.
+    /// If no embedder is set, defaults to `PrecomputedEmbedder` for pre-computed vectors.
     pub fn build(self) -> Result<VectorIndexConfig> {
         let embedder = self
             .embedder
@@ -374,7 +334,6 @@ impl VectorIndexConfigBuilder {
             default_distance: self.default_distance,
             default_dimension: self.default_dimension,
             default_index_kind: self.default_index_kind,
-            default_vector_type: self.default_vector_type,
             default_base_weight: self.default_base_weight,
             implicit_schema: self.implicit_schema,
             embedder,
@@ -398,14 +357,13 @@ impl Serialize for VectorIndexConfig {
     {
         use serde::ser::SerializeStruct;
 
-        let mut state = serializer.serialize_struct("VectorIndexConfig", 9)?;
+        let mut state = serializer.serialize_struct("VectorIndexConfig", 8)?;
         state.serialize_field("fields", &self.fields)?;
         state.serialize_field("default_fields", &self.default_fields)?;
         state.serialize_field("metadata", &self.metadata)?;
         state.serialize_field("default_distance", &self.default_distance)?;
         state.serialize_field("default_dimension", &self.default_dimension)?;
         state.serialize_field("default_index_kind", &self.default_index_kind)?;
-        state.serialize_field("default_vector_type", &self.default_vector_type)?;
         state.serialize_field("default_base_weight", &self.default_base_weight)?;
         state.serialize_field("implicit_schema", &self.implicit_schema)?;
         state.end()
@@ -430,8 +388,6 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             default_dimension: Option<usize>,
             #[serde(default = "default_index_kind")]
             default_index_kind: VectorIndexKind,
-            #[serde(default = "default_vector_type")]
-            default_vector_type: VectorType,
             #[serde(default = "VectorFieldConfig::default_weight")]
             default_base_weight: f32,
             #[serde(default)]
@@ -446,7 +402,6 @@ impl<'de> Deserialize<'de> for VectorIndexConfig {
             default_distance: helper.default_distance,
             default_dimension: helper.default_dimension,
             default_index_kind: helper.default_index_kind,
-            default_vector_type: helper.default_vector_type,
             default_base_weight: helper.default_base_weight,
             implicit_schema: helper.implicit_schema,
             // Default to PrecomputedEmbedder; can be replaced programmatically
@@ -463,10 +418,6 @@ fn default_index_kind() -> VectorIndexKind {
     VectorIndexKind::Flat
 }
 
-fn default_vector_type() -> VectorType {
-    VectorType::Text
-}
-
 /// Configuration for a single vector field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorFieldConfig {
@@ -476,8 +427,6 @@ pub struct VectorFieldConfig {
     pub distance: DistanceMetric,
     /// The type of index to use (Flat, HNSW, IVF).
     pub index: VectorIndexKind,
-    /// The type of vectors in this field (Text or Image).
-    pub vector_type: VectorType,
     /// Base weight for scoring (default: 1.0).
     #[serde(default = "VectorFieldConfig::default_weight")]
     pub base_weight: f32,

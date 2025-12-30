@@ -206,7 +206,7 @@ impl VectorFieldReader for HnswFieldReader {
 mod tests {
     use super::*;
     use crate::vector::core::distance::DistanceMetric;
-    use crate::vector::core::document::{StoredVector, VectorType};
+    use crate::vector::core::document::StoredVector;
     use crate::vector::core::vector::Vector;
     use crate::vector::engine::QueryVector;
     use crate::vector::reader::SimpleVectorReader;
@@ -221,7 +221,7 @@ mod tests {
     }
 
     fn create_query_vector(data: Vec<f32>) -> QueryVector {
-        let stored = StoredVector::new(data.into(), VectorType::Generic);
+        let stored = StoredVector::new(data.into());
         QueryVector {
             vector: stored,
             weight: 1.0,

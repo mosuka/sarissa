@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::vector::core::document::{Payload, StoredVector, VectorType};
+use crate::vector::core::document::{Payload, StoredVector};
 use crate::vector::engine::filter::VectorFilter;
 
 fn default_query_limit() -> usize {
@@ -68,7 +68,6 @@ impl Default for VectorSearchRequest {
 pub enum FieldSelector {
     Exact(String),
     Prefix(String),
-    VectorType(VectorType),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
