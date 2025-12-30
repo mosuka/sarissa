@@ -5,7 +5,6 @@
 //! field-level weights, and document-wide groupings.
 
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
@@ -13,47 +12,7 @@ use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
 use super::vector::Vector;
 
 /// Metadata keys used when bridging to the legacy `Vector` representation.
-pub const METADATA_VECTOR_TYPE: &str = "__sarissa_vector_type";
 pub const METADATA_WEIGHT: &str = "__sarissa_vector_weight";
-
-/// Semantic type associated with a stored vector.
-///
-/// This enum categorizes vectors by their source content type, enabling
-/// type-specific processing and filtering during search operations.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VectorType {
-    /// Vector derived from textual content (e.g., sentences, paragraphs, documents).
-    /// Most common type for natural language processing and semantic search.
-    Text,
-    /// Vector derived from image content (e.g., photos, diagrams, screenshots).
-    /// Used for visual similarity search and multimodal applications.
-    Image,
-    /// General-purpose vector without specific semantic categorization.
-    /// Default type when the source content type is unknown or mixed.
-    Generic,
-    /// User-defined vector type with a custom label.
-    /// Allows extension for domain-specific vector categories.
-    Custom(String),
-}
-
-impl VectorType {
-    /// Create a custom vector type label.
-    pub fn custom<S: Into<String>>(label: S) -> Self {
-        VectorType::Custom(label.into())
-    }
-}
-
-impl fmt::Display for VectorType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            VectorType::Text => write!(f, "text"),
-            VectorType::Image => write!(f, "image"),
-            VectorType::Generic => write!(f, "generic"),
-            VectorType::Custom(label) => write!(f, "{label}"),
-        }
-    }
-}
 
 /// Source material used to produce a vector embedding.
 #[derive(Debug, Clone)]
@@ -116,43 +75,32 @@ impl PayloadSource {
 pub struct Payload {
     /// The source material to be embedded.
     pub source: PayloadSource,
-    /// The semantic type of the vector.
-    pub vector_type: VectorType,
 }
 
 impl Payload {
-    /// Creates a new payload with the given source and vector type.
-    pub fn new(source: PayloadSource, vector_type: VectorType) -> Self {
-        Self {
-            source,
-            vector_type,
-        }
+    /// Creates a new payload with the given source.
+    pub fn new(source: PayloadSource) -> Self {
+        Self { source }
     }
 
-    /// Creates a text payload with `VectorType::Text`.
+    /// Creates a text payload.
     pub fn text(value: impl Into<String>) -> Self {
-        Self::new(PayloadSource::text(value), VectorType::Text)
+        Self::new(PayloadSource::text(value))
     }
 
-    /// Creates a bytes payload with `VectorType::Image`.
+    /// Creates a bytes payload.
     pub fn bytes(bytes: impl Into<Arc<[u8]>>, mime: Option<String>) -> Self {
-        Self::new(PayloadSource::bytes(bytes, mime), VectorType::Image)
+        Self::new(PayloadSource::bytes(bytes, mime))
     }
 
-    /// Creates a URI payload with `VectorType::Image`.
+    /// Creates a URI payload.
     pub fn uri(uri: impl Into<String>, media_hint: Option<String>) -> Self {
-        Self::new(PayloadSource::uri(uri, media_hint), VectorType::Image)
+        Self::new(PayloadSource::uri(uri, media_hint))
     }
 
-    /// Creates a pre-embedded vector payload with `VectorType::Generic`.
+    /// Creates a pre-embedded vector payload.
     pub fn vector(data: impl Into<Arc<[f32]>>) -> Self {
-        Self::new(PayloadSource::vector(data), VectorType::Generic)
-    }
-
-    /// Sets the vector type for this payload.
-    pub fn with_vector_type(mut self, vector_type: VectorType) -> Self {
-        self.vector_type = vector_type;
-        self
+        Self::new(PayloadSource::vector(data))
     }
 }
 
@@ -164,20 +112,23 @@ pub struct StoredVector {
         deserialize_with = "deserialize_vector_data"
     )]
     pub data: Arc<[f32]>,
-    pub vector_type: VectorType,
     pub weight: f32,
     #[serde(default)]
     pub attributes: HashMap<String, String>,
 }
 
 impl StoredVector {
-    pub fn new(data: Arc<[f32]>, vector_type: VectorType) -> Self {
+    pub fn new(data: Arc<[f32]>) -> Self {
         Self {
             data,
-            vector_type,
             weight: 1.0,
             attributes: HashMap::new(),
         }
+    }
+
+    pub fn with_weight(mut self, weight: f32) -> Self {
+        self.weight = weight;
+        self
     }
 
     pub fn dimension(&self) -> usize {
@@ -190,8 +141,6 @@ impl From<Vector> for StoredVector {
         let data: Arc<[f32]> = vector.data.into();
         Self {
             data,
-
-            vector_type: VectorType::Generic,
             weight: 1.0,
             attributes: vector.metadata,
         }
@@ -203,8 +152,6 @@ impl From<&Vector> for StoredVector {
         let data: Arc<[f32]> = vector.data.clone().into();
         Self {
             data,
-
-            vector_type: VectorType::Generic,
             weight: 1.0,
             attributes: vector.metadata.clone(),
         }
@@ -226,7 +173,7 @@ impl From<&StoredVector> for Vector {
 impl StoredVector {
     pub fn to_vector(&self) -> Vector {
         let mut metadata = self.attributes.clone();
-        enrich_metadata(&mut metadata, &self.vector_type, self.weight);
+        enrich_metadata(&mut metadata, self.weight);
         Vector {
             data: self.data.as_ref().to_vec(),
             metadata,
@@ -236,11 +183,10 @@ impl StoredVector {
     pub fn into_vector(self) -> Vector {
         let StoredVector {
             data,
-            vector_type,
             weight,
             mut attributes,
         } = self;
-        enrich_metadata(&mut attributes, &vector_type, weight);
+        enrich_metadata(&mut attributes, weight);
         Vector {
             data: data.as_ref().to_vec(),
             metadata: attributes,
@@ -248,10 +194,7 @@ impl StoredVector {
     }
 }
 
-fn enrich_metadata(metadata: &mut HashMap<String, String>, vector_type: &VectorType, weight: f32) {
-    metadata
-        .entry(METADATA_VECTOR_TYPE.to_string())
-        .or_insert_with(|| vector_type.to_string());
+fn enrich_metadata(metadata: &mut HashMap<String, String>, weight: f32) {
     metadata
         .entry(METADATA_WEIGHT.to_string())
         .or_insert_with(|| weight.to_string());
@@ -313,7 +256,7 @@ impl DocumentPayload {
         self.fields.insert(name.into(), payload);
     }
 
-    /// Sets a text field with `VectorType::Text`.
+    /// Sets a text field.
     ///
     /// Convenience method equivalent to `set_field(name, Payload::text(text))`.
     pub fn set_text(&mut self, name: impl Into<String>, text: impl Into<String>) {
@@ -354,7 +297,6 @@ mod tests {
     fn stored_vector_conversion_enriches_metadata() {
         let stored = StoredVector {
             data: Arc::<[f32]>::from([1.0_f32, 2.0_f32]),
-            vector_type: VectorType::Text,
             weight: 2.5,
             attributes: HashMap::from([(String::from("chunk"), String::from("a"))]),
         };
@@ -363,10 +305,6 @@ mod tests {
 
         assert_eq!(vector.data, vec![1.0, 2.0]);
 
-        assert_eq!(
-            vector.metadata.get(METADATA_VECTOR_TYPE),
-            Some(&"text".to_string())
-        );
         assert_eq!(
             vector.metadata.get(METADATA_WEIGHT),
             Some(&2.5_f32.to_string())

@@ -338,7 +338,7 @@ mod tests {
     use super::*;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
-    use crate::vector::core::document::{StoredVector, VectorType};
+    use crate::vector::core::document::StoredVector;
     use std::collections::HashMap;
 
     fn sample_config() -> VectorIndexConfig {
@@ -346,7 +346,6 @@ mod tests {
             dimension: 3,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-            vector_type: VectorType::Text,
             base_weight: 1.0,
         };
         use crate::embedding::precomputed::PrecomputedEmbedder;
@@ -358,7 +357,6 @@ mod tests {
             default_distance: DistanceMetric::Cosine,
             default_dimension: None,
             default_index_kind: VectorIndexKind::Flat,
-            default_vector_type: VectorType::Text,
             default_base_weight: 1.0,
             implicit_schema: false,
             embedder: Arc::new(PrecomputedEmbedder::new()),
@@ -369,7 +367,7 @@ mod tests {
         let mut query = VectorSearchRequest::default();
         query.limit = limit;
         query.query_vectors.push(QueryVector {
-            vector: StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0]), VectorType::Text),
+            vector: StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0])),
             weight: 1.0,
             fields: None,
         });
@@ -402,7 +400,7 @@ mod tests {
         let mut doc = DocumentVector::new();
         doc.set_field(
             "body",
-            StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0]), VectorType::Text),
+            StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0])),
         );
 
         let doc_id = engine.add_vectors(doc).expect("add vectors");
@@ -425,7 +423,7 @@ mod tests {
         let mut doc = DocumentVector::new();
         doc.set_field(
             "body",
-            StoredVector::new(Arc::<[f32]>::from([0.5, 0.5, 0.0]), VectorType::Text),
+            StoredVector::new(Arc::<[f32]>::from([0.5, 0.5, 0.0])),
         );
 
         engine.upsert_vectors(42, doc).expect("upsert");
@@ -448,7 +446,7 @@ mod tests {
             let mut doc = DocumentVector::new();
             doc.set_field(
                 "body",
-                StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0]), VectorType::Text),
+                StoredVector::new(Arc::<[f32]>::from([1.0, 0.0, 0.0])),
             );
             engine.upsert_vectors(10, doc).expect("upsert");
         }

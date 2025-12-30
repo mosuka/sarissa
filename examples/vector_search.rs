@@ -2,7 +2,7 @@
 //!
 //! This example demonstrates the fundamental steps to use Sarissa for vector search:
 //! 1. Setup storage
-//! 2. Configure the vector index (using NoOpEmbedder for direct vector input)
+//! 2. Configure the vector index (using PrecomputedEmbedder for direct vector input)
 //! 3. Add documents with pre-computed vectors using the `add_payloads` API
 //! 4. Perform a nearest neighbor search (KNN)
 
@@ -13,7 +13,7 @@ use sarissa::error::Result;
 use sarissa::storage::file::FileStorageConfig;
 use sarissa::storage::{StorageConfig, StorageFactory};
 use sarissa::vector::DistanceMetric;
-use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource, VectorType};
+use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource};
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 use sarissa::vector::engine::{VectorEngine, VectorSearchRequestBuilder};
 use tempfile::TempDir;
@@ -27,17 +27,16 @@ fn main() -> Result<()> {
     let storage = StorageFactory::create(storage_config)?;
 
     // 2. Configure Index
-    // We use NoOpEmbedder because we will provide pre-computed vectors directly.
+    // We use PrecomputedEmbedder because we will provide pre-computed vectors directly.
     let field_config = VectorFieldConfig {
         dimension: 3,
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
-        vector_type: VectorType::Text,
         base_weight: 1.0,
     };
 
     let index_config = VectorIndexConfig::builder()
-        .embedder(PrecomputedEmbedder::new()) // Configure NoOpEmbedder
+        .embedder(PrecomputedEmbedder::new()) // Configure PrecomputedEmbedder
         .field("vector_data", field_config)
         .build()?;
 
@@ -61,12 +60,9 @@ fn main() -> Result<()> {
         // Use PayloadSource::Vector to provide the raw vector data
         doc.set_field(
             "vector_data",
-            Payload {
-                source: PayloadSource::Vector {
-                    data: Arc::<[f32]>::from(vec_data.as_slice()),
-                },
-                vector_type: VectorType::Text,
-            },
+            Payload::new(PayloadSource::Vector {
+                data: Arc::<[f32]>::from(vec_data.as_slice()),
+            }),
         );
 
         // Use add_payloads instead of add_vectors
@@ -80,9 +76,9 @@ fn main() -> Result<()> {
 
     let query_vector = vec![0.9, 0.1, 0.0];
 
-    // New simplified API using VectorSearchRequestBuilder
+    // Simplified API using VectorSearchRequestBuilder
     let request = VectorSearchRequestBuilder::new()
-        .add_vector_with_options("vector_data", query_vector, VectorType::Text, 1.0)
+        .add_vector("vector_data", query_vector)
         .limit(3)
         .build();
 

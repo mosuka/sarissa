@@ -21,7 +21,7 @@ use crate::error::{Result, SarissaError};
 use crate::storage::Storage;
 use crate::storage::prefixed::PrefixedStorage;
 use crate::vector::core::document::{
-    DocumentPayload, DocumentVector, Payload, PayloadSource, StoredVector, VectorType,
+    DocumentPayload, DocumentVector, Payload, PayloadSource, StoredVector,
 };
 use crate::vector::core::vector::Vector;
 use crate::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
@@ -243,11 +243,6 @@ impl VectorCollection {
         field_name: &str,
         payload: &Payload,
     ) -> Result<VectorFieldConfig> {
-        let vector_type = match payload.vector_type.clone() {
-            VectorType::Generic => self.config.default_vector_type.clone(),
-            vt => vt,
-        };
-
         let dimension = match &payload.source {
             PayloadSource::Text { .. }
             | PayloadSource::Bytes { .. }
@@ -267,7 +262,6 @@ impl VectorCollection {
             dimension,
             distance: self.config.default_distance,
             index: self.config.default_index_kind,
-            vector_type,
             base_weight: self.config.default_base_weight,
         })
     }
@@ -299,15 +293,7 @@ impl VectorCollection {
         let field_config = handle.field.config().clone();
         drop(fields);
 
-        let Payload {
-            source,
-            vector_type: payload_vector_type,
-        } = payload;
-
-        let vector_type = match payload_vector_type {
-            VectorType::Generic => field_config.vector_type.clone(),
-            explicit => explicit,
-        };
+        let Payload { source } = payload;
 
         match source {
             PayloadSource::Text { value } => {
@@ -332,9 +318,7 @@ impl VectorCollection {
                         embedder_name_owned, field_name
                     )));
                 }
-                let mut stored: StoredVector = vector.into();
-
-                stored.vector_type = vector_type;
+                let stored: StoredVector = vector.into();
                 Ok(stored)
             }
             PayloadSource::Bytes { bytes, mime } => {
@@ -366,9 +350,7 @@ impl VectorCollection {
                         embedder_name_owned, field_name
                     )));
                 }
-                let mut stored: StoredVector = vector.into();
-
-                stored.vector_type = vector_type;
+                let stored: StoredVector = vector.into();
                 Ok(stored)
             }
             PayloadSource::Uri { uri, media_hint: _ } => {
@@ -393,9 +375,7 @@ impl VectorCollection {
                         embedder_name_owned, field_name
                     )));
                 }
-                let mut stored: StoredVector = vector.into();
-
-                stored.vector_type = vector_type;
+                let stored: StoredVector = vector.into();
                 Ok(stored)
             }
             PayloadSource::Vector { data } => {
@@ -406,7 +386,7 @@ impl VectorCollection {
                         data.len()
                     )));
                 }
-                Ok(StoredVector::new(data.clone(), vector_type))
+                Ok(StoredVector::new(data.clone()))
             }
         }
     }
@@ -1289,15 +1269,6 @@ impl VectorCollectionSearcher {
                         }
                     }
                 }
-                FieldSelector::VectorType(vector_type) => {
-                    for (field_name, handle) in fields.iter() {
-                        if &handle.field.config().vector_type == vector_type
-                            && !result.contains(field_name)
-                        {
-                            result.push(field_name.clone());
-                        }
-                    }
-                }
             }
         }
 
@@ -1322,22 +1293,17 @@ impl VectorCollectionSearcher {
         ((limit as f32) * overfetch).ceil() as usize
     }
 
-    /// Get query vectors that match a specific field configuration.
+    /// Get query vectors that match a specific field.
     fn query_vectors_for_field(
         &self,
         field_name: &str,
-        config: &VectorFieldConfig,
+        _config: &VectorFieldConfig,
         request: &VectorSearchRequest,
     ) -> Vec<QueryVector> {
         request
             .query_vectors
             .iter()
             .filter(|candidate| {
-                // Check if vector type matches
-                if candidate.vector.vector_type != config.vector_type {
-                    return false;
-                }
-
                 // Check if this query vector is restricted to specific fields
                 if let Some(fields) = &candidate.fields {
                     if !fields.contains(&field_name.to_string()) {
