@@ -244,11 +244,13 @@ impl VectorCollection {
         payload: &Payload,
     ) -> Result<VectorFieldConfig> {
         let dimension = match &payload.source {
-            PayloadSource::Text { .. }
-            | PayloadSource::Bytes { .. }
-            | PayloadSource::Uri { .. } => self.config.default_dimension.ok_or_else(|| {
-                SarissaError::invalid_config("implicit schema requires default_dimension to be set")
-            })?,
+            PayloadSource::Text { .. } | PayloadSource::Bytes { .. } => {
+                self.config.default_dimension.ok_or_else(|| {
+                    SarissaError::invalid_config(
+                        "implicit schema requires default_dimension to be set",
+                    )
+                })?
+            }
             PayloadSource::Vector { data } => data.len(),
         };
 
@@ -337,37 +339,9 @@ impl VectorCollection {
                 let mime_hint = mime.clone();
                 let vector = executor.run(async move {
                     embedder
-                        .embed(&EmbedInput::ImageBytes(
-                            &payload_bytes,
-                            mime_hint.as_deref(),
-                        ))
+                        .embed(&EmbedInput::Bytes(&payload_bytes, mime_hint.as_deref()))
                         .await
                 })?;
-                vector.validate_dimension(field_config.dimension)?;
-                if !vector.is_valid() {
-                    return Err(SarissaError::InvalidOperation(format!(
-                        "embedder '{}' produced invalid values for field '{}'",
-                        embedder_name_owned, field_name
-                    )));
-                }
-                let stored: StoredVector = vector.into();
-                Ok(stored)
-            }
-            PayloadSource::Uri { uri, media_hint: _ } => {
-                let executor = self.ensure_embedder_executor()?;
-                let embedder = self.embedder_registry.resolve(field_name)?;
-
-                if !embedder.supports_image() {
-                    return Err(SarissaError::invalid_config(format!(
-                        "embedder '{}' does not support image embedding",
-                        field_name
-                    )));
-                }
-
-                let embedder_name_owned = field_name.to_string();
-                let uri_value = uri;
-                let vector = executor
-                    .run(async move { embedder.embed(&EmbedInput::ImageUri(&uri_value)).await })?;
                 vector.validate_dimension(field_config.dimension)?;
                 if !vector.is_valid() {
                     return Err(SarissaError::InvalidOperation(format!(

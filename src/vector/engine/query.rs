@@ -69,30 +69,32 @@ impl VectorSearchRequestBuilder {
     ///
     /// * `field` - The target field name
     /// * `bytes` - Raw bytes of the content (text as UTF-8, image bytes, etc.)
+    /// Add a generic payload to be embedded.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use sarissa::vector::engine::VectorSearchRequestBuilder;
-    ///
-    /// // Text search
-    /// let request = VectorSearchRequestBuilder::new()
-    ///     .add_payload("title", "search query".as_bytes())
-    ///     .build();
-    ///
-    /// // Image search (with image bytes)
-    /// let image_bytes: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header
-    /// let request = VectorSearchRequestBuilder::new()
-    ///     .add_payload("image", image_bytes)
-    ///     .build();
-    /// ```
-    pub fn add_payload(mut self, field: impl Into<String>, bytes: impl Into<Vec<u8>>) -> Self {
-        let payload = Payload::new(PayloadSource::bytes(bytes.into(), None));
-
+    /// This is the low-level method used by `add_text`, `add_image`, etc.
+    pub fn add_payload(mut self, field: impl Into<String>, payload: Payload) -> Self {
         self.request
             .query_payloads
             .push(QueryPayload::new(field, payload));
         self
+    }
+
+    /// Add a raw bytes payload (e.g. image bytes).
+    pub fn add_bytes(
+        self,
+        field: impl Into<String>,
+        bytes: impl Into<Vec<u8>>,
+        mime: Option<impl Into<String>>,
+    ) -> Self {
+        self.add_payload(
+            field,
+            Payload::new(PayloadSource::bytes(bytes.into(), mime.map(|m| m.into()))),
+        )
+    }
+
+    /// Add a text payload to be embedded.
+    pub fn add_text(self, field: impl Into<String>, text: impl Into<String>) -> Self {
+        self.add_payload(field, Payload::new(PayloadSource::text(text.into())))
     }
 
     /// Set the fields to search in.

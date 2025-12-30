@@ -24,10 +24,6 @@ pub enum PayloadSource {
         bytes: Arc<[u8]>,
         mime: Option<String>,
     },
-    Uri {
-        uri: String,
-        media_hint: Option<String>,
-    },
     Vector {
         data: Arc<[f32]>,
     },
@@ -46,14 +42,6 @@ impl PayloadSource {
         PayloadSource::Bytes {
             bytes: bytes.into(),
             mime,
-        }
-    }
-
-    /// Creates a URI payload source with optional media hint.
-    pub fn uri(uri: impl Into<String>, media_hint: Option<String>) -> Self {
-        PayloadSource::Uri {
-            uri: uri.into(),
-            media_hint,
         }
     }
 
@@ -91,11 +79,6 @@ impl Payload {
     /// Creates a bytes payload.
     pub fn bytes(bytes: impl Into<Arc<[u8]>>, mime: Option<String>) -> Self {
         Self::new(PayloadSource::bytes(bytes, mime))
-    }
-
-    /// Creates a URI payload.
-    pub fn uri(uri: impl Into<String>, media_hint: Option<String>) -> Self {
-        Self::new(PayloadSource::uri(uri, media_hint))
     }
 
     /// Creates a pre-embedded vector payload.

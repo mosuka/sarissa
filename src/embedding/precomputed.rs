@@ -160,7 +160,7 @@ mod tests {
         let result = embedder.embed(&EmbedInput::Text("hello")).await;
         assert!(result.is_err());
 
-        let result = embedder.embed(&EmbedInput::ImagePath("/path")).await;
+        let result = embedder.embed(&EmbedInput::Bytes(&[], None)).await;
         assert!(result.is_err());
     }
 

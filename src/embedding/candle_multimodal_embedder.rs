@@ -55,6 +55,7 @@ use crate::vector::core::vector::Vector;
 /// ```no_run
 /// use sarissa::embedding::embedder::{Embedder, EmbedInput};
 /// use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use std::fs;
 ///
 /// # async fn example() -> sarissa::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
@@ -65,8 +66,12 @@ use crate::vector::core::vector::Vector;
 /// let text_vec = embedder.embed(&EmbedInput::Text("a photo of a cat")).await?;
 ///
 /// // Embed images
-/// let img1 = embedder.embed(&EmbedInput::ImagePath("cat.jpg")).await?;
-/// let img2 = embedder.embed(&EmbedInput::ImagePath("dog.jpg")).await?;
+/// // Loading files is now the responsibility of the caller
+/// let cat_bytes = fs::read("cat.jpg")?;
+/// let img1 = embedder.embed(&EmbedInput::Bytes(&cat_bytes, None)).await?;
+///
+/// let dog_bytes = fs::read("dog.jpg")?;
+/// let img2 = embedder.embed(&EmbedInput::Bytes(&dog_bytes, None)).await?;
 ///
 /// // Text and images are in the same vector space
 /// # Ok(())
@@ -78,6 +83,7 @@ use crate::vector::core::vector::Vector;
 /// ```no_run
 /// use sarissa::embedding::embedder::{Embedder, EmbedInput};
 /// use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use std::fs;
 ///
 /// # async fn example() -> sarissa::error::Result<()> {
 /// let embedder = CandleMultimodalEmbedder::new(
@@ -85,11 +91,15 @@ use crate::vector::core::vector::Vector;
 /// )?;
 ///
 /// // Find similar images
-/// let query = embedder.embed(&EmbedInput::ImagePath("query.jpg")).await?;
+/// let query_bytes = fs::read("query.jpg")?;
+/// let query = embedder.embed(&EmbedInput::Bytes(&query_bytes, None)).await?;
+///
+/// let img1_bytes = fs::read("img1.jpg")?;
+/// let img2_bytes = fs::read("img2.jpg")?;
+///
 /// let inputs = vec![
-///     EmbedInput::ImagePath("img1.jpg"),
-///     EmbedInput::ImagePath("img2.jpg"),
-///     EmbedInput::ImagePath("img3.jpg"),
+///     EmbedInput::Bytes(&img1_bytes, None),
+///     EmbedInput::Bytes(&img2_bytes, None),
 /// ];
 /// let images = embedder.embed_batch(&inputs).await?;
 /// # Ok(())
@@ -309,10 +319,10 @@ impl CandleMultimodalEmbedder {
         Ok(Vector::new(vector_data))
     }
 
-    /// Embed image using CLIP vision encoder.
-    async fn embed_image(&self, image_path: &str) -> Result<Vector> {
-        // Preprocess image
-        let image_tensor = self.preprocess_image(image_path)?;
+    /// Embed image bytes using CLIP vision encoder.
+    async fn embed_image_bytes(&self, bytes: &[u8]) -> Result<Vector> {
+        // Preprocess image from bytes
+        let image_tensor = self.preprocess_image_bytes(bytes)?;
 
         // Forward pass through vision model
         let vision_features = self.vision_model.forward(&image_tensor).map_err(|e| {
@@ -340,35 +350,13 @@ impl CandleMultimodalEmbedder {
         Ok(Vector::new(vector_data))
     }
 
-    /// Preprocess image to the format expected by CLIP vision model.
-    ///
-    /// This method performs standard CLIP image preprocessing:
-    /// 1. Load image from file
-    /// 2. Resize to expected size (e.g., 224x224)
-    /// 3. Convert to RGB
-    /// 4. Normalize using ImageNet mean/std
-    /// 5. Convert to tensor format (C, H, W)
-    ///
-    /// # Arguments
-    ///
-    /// * `image_path` - Path to the image file
-    ///
-    /// # Returns
-    ///
-    /// Preprocessed image tensor ready for CLIP vision model
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Image file cannot be opened
-    /// - Image cannot be decoded
-    /// - Tensor creation fails
-    fn preprocess_image(&self, image_path: &str) -> Result<Tensor> {
-        use image::{DynamicImage, ImageReader};
+    /// Preprocess image bytes to the format expected by CLIP vision model.
+    fn preprocess_image_bytes(&self, bytes: &[u8]) -> Result<Tensor> {
+        use image::ImageReader;
+        use std::io::Cursor;
 
-        // Load image
-        let img_reader = ImageReader::open(image_path)
-            .map_err(|e| SarissaError::InvalidOperation(format!("Image open failed: {}", e)))?
+        // Load image from bytes
+        let img_reader = ImageReader::new(Cursor::new(bytes))
             .with_guessed_format()
             .map_err(|e| {
                 SarissaError::InvalidOperation(format!("Image format guess failed: {}", e))
@@ -387,7 +375,7 @@ impl CandleMultimodalEmbedder {
 
         // Convert to RGB
         let img = match img {
-            DynamicImage::ImageRgb8(img) => img,
+            image::DynamicImage::ImageRgb8(img) => img,
             img => img.to_rgb8(),
         };
 
@@ -478,13 +466,21 @@ impl Embedder for CandleMultimodalEmbedder {
     async fn embed(&self, input: &EmbedInput<'_>) -> Result<Vector> {
         match input {
             EmbedInput::Text(text) => self.embed_text(text).await,
-            EmbedInput::ImagePath(path) => self.embed_image(path).await,
-            EmbedInput::ImageBytes(_, _) => Err(SarissaError::invalid_argument(
-                "CandleMultimodalEmbedder does not yet support image bytes input",
-            )),
-            EmbedInput::ImageUri(_) => Err(SarissaError::invalid_argument(
-                "CandleMultimodalEmbedder does not support image URI input",
-            )),
+            EmbedInput::Bytes(bytes, mime) => {
+                if let Some(mime_type) = mime {
+                    if mime_type.starts_with("text/") {
+                        let text = std::str::from_utf8(bytes).map_err(|e| {
+                            SarissaError::invalid_argument(format!(
+                                "invalid utf-8 for text bytes: {}",
+                                e
+                            ))
+                        })?;
+                        return self.embed_text(text).await;
+                    }
+                }
+                // Default to image processing for other mime types or if no mime type is provided
+                self.embed_image_bytes(bytes).await
+            }
         }
     }
 
