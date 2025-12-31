@@ -1,17 +1,16 @@
 //! HNSW vector index reader implementation.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::error::{Result, SarissaError};
-use crate::storage::Storage;
+use crate::storage::{Storage, StorageInput};
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::io::read_metadata;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
-use std::sync::Mutex;
 
 /// Storage for vectors (in-memory or on-demand).
 use crate::vector::index::storage::VectorStorage;
@@ -42,7 +41,7 @@ impl HnswIndexReader {
         path: &str,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
-        use std::io::Read;
+        use std::io::{Read, Seek};
 
         // Open the index file
         let file_name = format!("{}.hnsw", path);
@@ -149,7 +148,6 @@ impl HnswIndexReader {
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-
                     let mut field_name_buf = vec![0u8; field_name_len];
                     input.read_exact(&mut field_name_buf)?;
                     let field_name = String::from_utf8(field_name_buf).map_err(|e| {
@@ -191,7 +189,6 @@ impl HnswIndexReader {
 
                 for _ in 0..num_vectors {
                     let start_offset = input.stream_position().map_err(SarissaError::Io)?;
-
                     let mut doc_id_buf = [0u8; 8];
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
@@ -289,7 +286,7 @@ impl VectorIndexReader for HnswIndexReader {
     }
 
     fn vector_count(&self) -> usize {
-        self.vectors.len()
+        self.vector_ids.len()
     }
 
     fn dimension(&self) -> usize {
@@ -301,16 +298,31 @@ impl VectorIndexReader for HnswIndexReader {
     }
 
     fn stats(&self) -> VectorStats {
+        let memory_usage = match &self.vectors {
+            VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
+            VectorStorage::OnDemand { offsets, .. } => {
+                // Estimate memory for offsets map + ID list
+                offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
+            }
+        };
+
         VectorStats {
-            vector_count: self.vectors.len(),
+            vector_count: self.vector_ids.len(),
             dimension: self.dimension,
-            memory_usage: self.vectors.len() * (8 + self.dimension * 4),
+            memory_usage,
             build_time_ms: 0,
         }
     }
 
     fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool {
-        self.vectors.contains_key(&(doc_id, field_name.to_string()))
+        match &self.vectors {
+            VectorStorage::Owned(vectors) => {
+                vectors.contains_key(&(doc_id, field_name.to_string()))
+            }
+            VectorStorage::OnDemand { offsets, .. } => {
+                offsets.contains_key(&(doc_id, field_name.to_string()))
+            }
+        }
     }
 
     fn get_vector_range(
@@ -375,7 +387,7 @@ impl VectorIndexReader for HnswIndexReader {
             errors.push(format!(
                 "Mismatch between vector_ids count ({}) and vectors count ({})",
                 self.vector_ids.len(),
-                self.vectors.len()
+                self.storage_len()
             ));
         }
 
@@ -431,11 +443,20 @@ impl VectorIndexReader for HnswIndexReader {
         }
 
         Ok(ValidationReport {
-            repair_suggestions: Vec::new(),
             is_valid: errors.is_empty(),
             errors,
             warnings,
+            repair_suggestions: vec![],
         })
+    }
+}
+
+impl HnswIndexReader {
+    fn storage_len(&self) -> usize {
+        match &self.storage {
+            VectorStorage::Owned(vectors) => vectors.len(),
+            VectorStorage::OnDemand { offsets, .. } => offsets.len(),
+        }
     }
 }
 

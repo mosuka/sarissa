@@ -185,6 +185,7 @@ impl VectorIndexConfig {
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
 ///     .field("content_embedding", VectorFieldConfig {
+///         loading_mode: sarissa::vector::index::config::IndexLoadingMode::default(),
 ///         dimension: 384,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
@@ -258,9 +259,30 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-
-            base_weight: 1.0,
             metadata: HashMap::new(),
+            base_weight: 1.0,
+        };
+
+        if !self.default_fields.contains(&name) {
+            self.default_fields.push(name.clone());
+        }
+        self.fields.insert(name, config);
+        Ok(self)
+    }
+
+    /// Add an image field with automatic configuration from the embedder.
+    ///
+    /// The dimension will be inferred from the embedder if available.
+    /// For PerFieldEmbedder, the field-specific embedder will be used.
+    pub fn image_field(mut self, name: impl Into<String>, dimension: usize) -> Result<Self> {
+        let name = name.into();
+
+        let config = VectorFieldConfig {
+            dimension,
+            distance: DistanceMetric::Cosine,
+            index: VectorIndexKind::Flat,
+            metadata: HashMap::new(),
+            base_weight: 1.0,
         };
 
         if !self.default_fields.contains(&name) {
