@@ -32,6 +32,7 @@ fn main() -> Result<()> {
         dimension: 3,
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
+
         base_weight: 1.0,
     };
 

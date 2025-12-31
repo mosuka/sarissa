@@ -186,7 +186,7 @@ impl VectorIndex for FlatIndex {
         // Load the index data from storage
         // For now, use a default path. In the future, this should be configurable.
         let reader = FlatVectorIndexReader::load(
-            self.storage.clone(),
+            &*self.storage,
             "default_index",
             self.config.distance_metric,
         )?;

@@ -183,11 +183,8 @@ impl VectorIndex for HnswIndex {
 
         use crate::vector::index::hnsw::reader::HnswIndexReader;
 
-        let reader = HnswIndexReader::load(
-            self.storage.clone(),
-            "default_index",
-            self.config.distance_metric,
-        )?;
+        let reader =
+            HnswIndexReader::load(&*self.storage, "default_index", self.config.distance_metric)?;
         Ok(Arc::new(reader))
     }
 

@@ -57,6 +57,7 @@ fn main() -> Result<()> {
         dimension: 512, // CLIP ViT-B/32 output dimension
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
+
         base_weight: 1.0,
     };
 

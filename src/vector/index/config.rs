@@ -333,6 +333,7 @@ impl Default for FlatIndexConfig {
         Self {
             dimension: 128,
             distance_metric: DistanceMetric::Cosine,
+
             normalize_vectors: true,
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
@@ -420,6 +421,7 @@ impl Default for HnswIndexConfig {
         Self {
             dimension: 128,
             distance_metric: DistanceMetric::Cosine,
+
             normalize_vectors: true,
             m: 16,
             ef_construction: 200,
@@ -512,6 +514,7 @@ impl Default for IvfIndexConfig {
         Self {
             dimension: 128,
             distance_metric: DistanceMetric::Cosine,
+
             normalize_vectors: true,
             n_clusters: 100,
             n_probe: 1,

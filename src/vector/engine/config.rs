@@ -258,6 +258,7 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
+
             base_weight: 1.0,
         };
 
@@ -427,6 +428,7 @@ pub struct VectorFieldConfig {
     pub distance: DistanceMetric,
     /// The type of index to use (Flat, HNSW, IVF).
     pub index: VectorIndexKind,
+
     /// Base weight for scoring (default: 1.0).
     #[serde(default = "VectorFieldConfig::default_weight")]
     pub base_weight: f32,
@@ -435,6 +437,18 @@ pub struct VectorFieldConfig {
 impl VectorFieldConfig {
     fn default_weight() -> f32 {
         1.0
+    }
+}
+
+impl Default for VectorFieldConfig {
+    fn default() -> Self {
+        Self {
+            dimension: 128,
+            distance: DistanceMetric::Cosine,
+            index: VectorIndexKind::Flat,
+
+            base_weight: Self::default_weight(),
+        }
     }
 }
 
