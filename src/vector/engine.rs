@@ -346,6 +346,7 @@ mod tests {
             dimension: 3,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
+            loading_mode: crate::vector::index::config::IndexLoadingMode::default(),
             vector_type: VectorType::Text,
             base_weight: 1.0,
         };

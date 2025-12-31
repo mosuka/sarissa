@@ -32,6 +32,7 @@ fn main() -> Result<()> {
         dimension: 3,
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
+        loading_mode: sarissa::vector::index::config::IndexLoadingMode::InMemory,
         vector_type: VectorType::Text,
         base_weight: 1.0,
     };

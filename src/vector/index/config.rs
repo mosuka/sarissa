@@ -157,6 +157,31 @@ pub mod utils {
     }
 }
 
+/// Mode of index loading.
+///
+/// Controls how the index data is loaded from storage.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexLoadingMode {
+    /// Load the entire index into memory (RAM).
+    ///
+    /// This provides the fastest search speed but requires memory
+    /// proportional to the index size.
+    InMemory,
+    /// Use memory-mapped files (mmap) to access the index.
+    ///
+    /// This allows accessing the index without loading the entire
+    /// data into RAM, relying on the OS page cache. This is ideal
+    /// for large datasets that exceed available RAM.
+    Mmap,
+}
+
+impl Default for IndexLoadingMode {
+    fn default() -> Self {
+        Self::InMemory
+    }
+}
+
 /// Vector index configuration enum that specifies which index type to use.
 ///
 /// This enum provides a unified way to configure different vector index types.
@@ -250,6 +275,10 @@ pub struct FlatIndexConfig {
     /// Vector dimension.
     pub dimension: usize,
 
+    /// Index loading mode.
+    #[serde(default)]
+    pub loading_mode: IndexLoadingMode,
+
     /// Distance metric to use.
     pub distance_metric: DistanceMetric,
 
@@ -332,6 +361,7 @@ impl Default for FlatIndexConfig {
     fn default() -> Self {
         Self {
             dimension: 128,
+            loading_mode: IndexLoadingMode::default(),
             distance_metric: DistanceMetric::Cosine,
             normalize_vectors: true,
             max_vectors_per_segment: 1000000,
@@ -349,6 +379,9 @@ impl std::fmt::Debug for FlatIndexConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlatIndexConfig")
             .field("dimension", &self.dimension)
+            .field("dimension", &self.dimension)
+            .field("loading_mode", &self.loading_mode)
+            .field("distance_metric", &self.distance_metric)
             .field("distance_metric", &self.distance_metric)
             .field("normalize_vectors", &self.normalize_vectors)
             .field("max_vectors_per_segment", &self.max_vectors_per_segment)
@@ -370,6 +403,10 @@ impl std::fmt::Debug for FlatIndexConfig {
 pub struct HnswIndexConfig {
     /// Vector dimension.
     pub dimension: usize,
+
+    /// Index loading mode.
+    #[serde(default)]
+    pub loading_mode: IndexLoadingMode,
 
     /// Distance metric to use.
     pub distance_metric: DistanceMetric,
@@ -419,6 +456,7 @@ impl Default for HnswIndexConfig {
     fn default() -> Self {
         Self {
             dimension: 128,
+            loading_mode: IndexLoadingMode::default(),
             distance_metric: DistanceMetric::Cosine,
             normalize_vectors: true,
             m: 16,
@@ -438,6 +476,9 @@ impl std::fmt::Debug for HnswIndexConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HnswIndexConfig")
             .field("dimension", &self.dimension)
+            .field("dimension", &self.dimension)
+            .field("loading_mode", &self.loading_mode)
+            .field("distance_metric", &self.distance_metric)
             .field("distance_metric", &self.distance_metric)
             .field("normalize_vectors", &self.normalize_vectors)
             .field("m", &self.m)
@@ -461,6 +502,10 @@ impl std::fmt::Debug for HnswIndexConfig {
 pub struct IvfIndexConfig {
     /// Vector dimension.
     pub dimension: usize,
+
+    /// Index loading mode.
+    #[serde(default)]
+    pub loading_mode: IndexLoadingMode,
 
     /// Distance metric to use.
     pub distance_metric: DistanceMetric,
@@ -511,6 +556,7 @@ impl Default for IvfIndexConfig {
     fn default() -> Self {
         Self {
             dimension: 128,
+            loading_mode: IndexLoadingMode::default(),
             distance_metric: DistanceMetric::Cosine,
             normalize_vectors: true,
             n_clusters: 100,
@@ -530,6 +576,7 @@ impl std::fmt::Debug for IvfIndexConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IvfIndexConfig")
             .field("dimension", &self.dimension)
+            .field("loading_mode", &self.loading_mode)
             .field("distance_metric", &self.distance_metric)
             .field("normalize_vectors", &self.normalize_vectors)
             .field("n_clusters", &self.n_clusters)

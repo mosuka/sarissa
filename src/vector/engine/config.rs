@@ -42,6 +42,7 @@ use crate::embedding::precomputed::PrecomputedEmbedder;
 use crate::error::{Result, SarissaError};
 use crate::vector::DistanceMetric;
 use crate::vector::core::document::VectorType;
+use crate::vector::index::config::IndexLoadingMode;
 
 /// Configuration for a single vector collection.
 ///
@@ -192,6 +193,7 @@ impl VectorIndexConfig {
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
 ///     .field("content_embedding", VectorFieldConfig {
+///         loading_mode: sarissa::vector::index::config::IndexLoadingMode::default(),
 ///         dimension: 384,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
@@ -269,6 +271,7 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
+            loading_mode: IndexLoadingMode::default(),
             vector_type: VectorType::Text,
             base_weight: 1.0,
         };
@@ -291,6 +294,7 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
+            loading_mode: IndexLoadingMode::default(),
             vector_type: VectorType::Image,
             base_weight: 1.0,
         };
@@ -476,6 +480,9 @@ pub struct VectorFieldConfig {
     pub distance: DistanceMetric,
     /// The type of index to use (Flat, HNSW, IVF).
     pub index: VectorIndexKind,
+    /// The loading mode for the index (InMemory or Mmap).
+    #[serde(default)]
+    pub loading_mode: IndexLoadingMode,
     /// The type of vectors in this field (Text or Image).
     pub vector_type: VectorType,
     /// Base weight for scoring (default: 1.0).

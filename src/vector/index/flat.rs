@@ -189,6 +189,7 @@ impl VectorIndex for FlatIndex {
             self.storage.clone(),
             "default_index",
             self.config.distance_metric,
+            self.config.loading_mode,
         )?;
         Ok(Arc::new(reader))
     }

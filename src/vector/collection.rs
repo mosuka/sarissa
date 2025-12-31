@@ -267,6 +267,7 @@ impl VectorCollection {
             dimension,
             distance: self.config.default_distance,
             index: self.config.default_index_kind,
+            loading_mode: crate::vector::index::config::IndexLoadingMode::default(),
             vector_type,
             base_weight: self.config.default_base_weight,
         })
@@ -583,10 +584,17 @@ impl VectorCollection {
         let storage = self.field_storage(field_name);
         Ok(match config.index {
             VectorIndexKind::Flat => {
+                let flat_config = crate::vector::index::config::FlatIndexConfig {
+                    dimension: config.dimension,
+                    distance_metric: config.distance,
+                    loading_mode: config.loading_mode,
+                    ..Default::default()
+                };
                 let reader = Arc::new(FlatVectorIndexReader::load(
                     storage.clone(),
                     FIELD_INDEX_BASENAME,
-                    config.distance,
+                    flat_config.distance_metric,
+                    flat_config.loading_mode,
                 )?);
                 Arc::new(FlatFieldReader::new(field_name.to_string(), reader))
             }
@@ -595,6 +603,7 @@ impl VectorCollection {
                     storage.clone(),
                     FIELD_INDEX_BASENAME,
                     config.distance,
+                    config.loading_mode,
                 )?);
                 Arc::new(HnswFieldReader::new(field_name.to_string(), reader))
             }
