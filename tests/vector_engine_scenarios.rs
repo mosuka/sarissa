@@ -176,6 +176,7 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
+
             base_weight: 1.4,
         },
     );
@@ -185,6 +186,7 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
+
             base_weight: 1.0,
         },
     );
@@ -286,6 +288,7 @@ fn build_payload_engine() -> Result<VectorEngine> {
                 dimension: 4,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
+
                 base_weight: 1.0,
             },
         )
@@ -314,6 +317,7 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
                 dimension: 3,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
+
                 base_weight: 1.0,
             },
         )

@@ -13,6 +13,7 @@ pub mod flat;
 pub mod hnsw;
 pub mod io;
 pub mod ivf;
+pub mod storage;
 
 use std::sync::{Arc, RwLock};
 

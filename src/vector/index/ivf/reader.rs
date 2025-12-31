@@ -8,13 +8,16 @@ use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::io::read_metadata;
+use crate::vector::index::storage::VectorStorage;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
+use std::io::SeekFrom;
+use std::sync::Mutex;
 
 /// Reader for IVF (Inverted File) vector indexes.
 #[derive(Debug)]
 pub struct IvfIndexReader {
-    vectors: HashMap<(u64, String), Vector>,
+    vectors: VectorStorage,
     vector_ids: Vec<(u64, String)>,
     dimension: usize,
     distance_metric: DistanceMetric,
@@ -33,11 +36,11 @@ impl IvfIndexReader {
 
     /// Load an IVF vector index from storage.
     pub fn load(
-        storage: Arc<dyn Storage>,
+        storage: &dyn Storage,
         path: &str,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
-        use std::io::Read;
+        use std::io::{Read, Seek};
 
         // Open the index file
         let file_name = format!("{}.ivf", path);
@@ -73,46 +76,101 @@ impl IvfIndexReader {
         }
 
         // Read inverted lists
-        let mut vectors = HashMap::with_capacity(num_vectors);
-        let mut vector_ids = Vec::with_capacity(num_vectors);
+        let (vectors, vector_ids) = match storage.loading_mode() {
+            crate::storage::LoadingMode::Eager => {
+                let mut vectors = HashMap::with_capacity(num_vectors);
+                let mut vector_ids = Vec::with_capacity(num_vectors);
 
-        for _ in 0..n_clusters {
-            let mut list_size_buf = [0u8; 4];
-            input.read_exact(&mut list_size_buf)?;
-            let list_size = u32::from_le_bytes(list_size_buf) as usize;
+                for _ in 0..n_clusters {
+                    let mut list_size_buf = [0u8; 4];
+                    input.read_exact(&mut list_size_buf)?;
+                    let list_size = u32::from_le_bytes(list_size_buf) as usize;
 
-            for _ in 0..list_size {
-                let mut doc_id_buf = [0u8; 8];
-                input.read_exact(&mut doc_id_buf)?;
-                let doc_id = u64::from_le_bytes(doc_id_buf);
+                    for _ in 0..list_size {
+                        let mut doc_id_buf = [0u8; 8];
+                        input.read_exact(&mut doc_id_buf)?;
+                        let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                // Read field name
-                let mut field_name_len_buf = [0u8; 4];
-                input.read_exact(&mut field_name_len_buf)?;
-                let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                        let mut field_name_len_buf = [0u8; 4];
+                        input.read_exact(&mut field_name_len_buf)?;
+                        let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
 
-                let mut field_name_buf = vec![0u8; field_name_len];
-                input.read_exact(&mut field_name_buf)?;
-                let field_name = String::from_utf8(field_name_buf).map_err(|e| {
-                    SarissaError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
-                })?;
+                        let mut field_name_buf = vec![0u8; field_name_len];
+                        input.read_exact(&mut field_name_buf)?;
+                        let field_name = String::from_utf8(field_name_buf).map_err(|e| {
+                            SarissaError::InvalidOperation(format!(
+                                "Invalid UTF-8 in field name: {}",
+                                e
+                            ))
+                        })?;
 
-                let metadata = read_metadata(&mut input)?;
-                // Read vector data
-                let mut values = vec![0.0f32; dimension];
-                for value in &mut values {
-                    let mut value_buf = [0u8; 4];
-                    input.read_exact(&mut value_buf)?;
-                    *value = f32::from_le_bytes(value_buf);
+                        let metadata = read_metadata(&mut input)?;
+                        let mut values = vec![0.0f32; dimension];
+                        for value in &mut values {
+                            let mut value_buf = [0u8; 4];
+                            input.read_exact(&mut value_buf)?;
+                            *value = f32::from_le_bytes(value_buf);
+                        }
+
+                        vector_ids.push((doc_id, field_name.clone()));
+                        vectors.insert(
+                            (doc_id, field_name),
+                            Vector::with_metadata(values, metadata),
+                        );
+                    }
                 }
-
-                vector_ids.push((doc_id, field_name.clone()));
-                vectors.insert(
-                    (doc_id, field_name),
-                    Vector::with_metadata(values, metadata),
-                );
+                (VectorStorage::Owned(Arc::new(vectors)), vector_ids)
             }
-        }
+            crate::storage::LoadingMode::Lazy => {
+                let mut offsets = HashMap::with_capacity(num_vectors);
+                let mut vector_ids = Vec::with_capacity(num_vectors);
+
+                for _ in 0..n_clusters {
+                    let mut list_size_buf = [0u8; 4];
+                    input.read_exact(&mut list_size_buf)?;
+                    let list_size = u32::from_le_bytes(list_size_buf) as usize;
+
+                    for _ in 0..list_size {
+                        let start_offset = input.stream_position().map_err(SarissaError::Io)?;
+
+                        let mut doc_id_buf = [0u8; 8];
+                        input.read_exact(&mut doc_id_buf)?;
+                        let doc_id = u64::from_le_bytes(doc_id_buf);
+
+                        let mut field_name_len_buf = [0u8; 4];
+                        input.read_exact(&mut field_name_len_buf)?;
+                        let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+
+                        let mut field_name_buf = vec![0u8; field_name_len];
+                        input.read_exact(&mut field_name_buf)?;
+                        let field_name = String::from_utf8(field_name_buf).map_err(|e| {
+                            SarissaError::InvalidOperation(format!(
+                                "Invalid UTF-8 in field name: {}",
+                                e
+                            ))
+                        })?;
+
+                        offsets.insert((doc_id, field_name.clone()), start_offset);
+                        vector_ids.push((doc_id, field_name));
+
+                        // Skip metadata
+                        let _ = read_metadata(&mut input)?;
+
+                        // Skip vector
+                        input
+                            .seek(SeekFrom::Current((dimension * 4) as i64))
+                            .map_err(SarissaError::Io)?;
+                    }
+                }
+                (
+                    VectorStorage::OnDemand {
+                        input: Arc::new(Mutex::new(input)),
+                        offsets: Arc::new(offsets),
+                    },
+                    vector_ids,
+                )
+            }
+        };
 
         Ok(Self {
             vectors,
@@ -142,23 +200,28 @@ impl VectorIndexReader for IvfIndexReader {
     }
 
     fn get_vector(&self, doc_id: u64, field_name: &str) -> Result<Option<Vector>> {
-        Ok(self.vectors.get(&(doc_id, field_name.to_string())).cloned())
+        self.vectors
+            .get(&(doc_id, field_name.to_string()), self.dimension)
     }
 
     fn get_vectors_for_doc(&self, doc_id: u64) -> Result<Vec<(String, Vector)>> {
-        Ok(self
-            .vectors
-            .iter()
-            .filter(|((id, _), _)| *id == doc_id)
-            .map(|((_, field), vec)| (field.clone(), vec.clone()))
-            .collect())
+        let mut result = Vec::new();
+        for (id, field) in &self.vector_ids {
+            if *id == doc_id {
+                if let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)? {
+                    result.push((field.clone(), vec));
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn get_vectors(&self, doc_ids: &[(u64, String)]) -> Result<Vec<Option<Vector>>> {
-        Ok(doc_ids
-            .iter()
-            .map(|(id, field)| self.vectors.get(&(*id, field.clone())).cloned())
-            .collect())
+        let mut result = Vec::with_capacity(doc_ids.len());
+        for (id, field) in doc_ids {
+            result.push(self.vectors.get(&(*id, field.clone()), self.dimension)?);
+        }
+        Ok(result)
     }
 
     fn vector_ids(&self) -> Result<Vec<(u64, String)>> {
@@ -196,49 +259,41 @@ impl VectorIndexReader for IvfIndexReader {
         start_doc_id: u64,
         end_doc_id: u64,
     ) -> Result<Vec<(u64, String, Vector)>> {
-        Ok(self
-            .vector_ids
-            .iter()
-            .filter(|(id, _)| *id >= start_doc_id && *id < end_doc_id)
-            .filter_map(|(id, field)| {
-                self.vectors
-                    .get(&(*id, field.clone()))
-                    .map(|v| (*id, field.clone(), v.clone()))
-            })
-            .collect())
+        let mut result = Vec::new();
+        for (id, field) in &self.vector_ids {
+            if *id >= start_doc_id && *id < end_doc_id {
+                if let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)? {
+                    result.push((*id, field.clone(), vec));
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn get_vectors_by_field(&self, field_name: &str) -> Result<Vec<(u64, Vector)>> {
-        Ok(self
-            .vectors
-            .iter()
-            .filter(|((_, field), _)| field == field_name)
-            .map(|((id, _), vec)| (*id, vec.clone()))
-            .collect())
+        let mut result = Vec::new();
+        for (id, field) in &self.vector_ids {
+            if field == field_name {
+                if let Some(vec) = self.vectors.get(&(*id, field.clone()), self.dimension)? {
+                    result.push((*id, vec));
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn field_names(&self) -> Result<Vec<String>> {
         use std::collections::HashSet;
-        let fields: HashSet<String> = self
-            .vectors
-            .keys()
-            .map(|(_, field)| field.clone())
-            .collect();
+        let fields: HashSet<String> = self.vector_ids.iter().map(|val| val.1.clone()).collect();
         Ok(fields.into_iter().collect())
     }
 
     fn vector_iterator(&self) -> Result<Box<dyn VectorIterator>> {
         Ok(Box::new(IvfVectorIterator {
-            vectors: self
-                .vector_ids
-                .iter()
-                .filter_map(|(id, field)| {
-                    self.vectors
-                        .get(&(*id, field.clone()))
-                        .map(|v| (*id, field.clone(), v.clone()))
-                })
-                .collect(),
+            storage: self.vectors.clone(),
+            keys: self.vector_ids.clone(),
             current: 0,
+            dimension: self.dimension,
         }))
     }
 
@@ -265,22 +320,37 @@ impl VectorIndexReader for IvfIndexReader {
             ));
         }
 
-        for ((id, field), vector) in &self.vectors {
-            if vector.dimension() != self.dimension {
-                errors.push(format!(
-                    "Vector {}:{} has dimension {}, expected {}",
-                    id,
-                    field,
-                    vector.dimension(),
-                    self.dimension
-                ));
-            }
+        match &self.vectors {
+            VectorStorage::Owned(map) => {
+                for ((id, field), vector) in map.iter() {
+                    if vector.dimension() != self.dimension {
+                        errors.push(format!(
+                            "Vector {}:{} has dimension {}, expected {}",
+                            id,
+                            field,
+                            vector.dimension(),
+                            self.dimension
+                        ));
+                    }
 
-            if !vector.is_valid() {
-                errors.push(format!(
-                    "Vector {}:{} contains invalid values (NaN or infinity)",
-                    id, field
-                ));
+                    if !vector.is_valid() {
+                        errors.push(format!(
+                            "Vector {}:{} contains invalid values (NaN or infinity)",
+                            id, field
+                        ));
+                    }
+                }
+            }
+            VectorStorage::OnDemand { offsets, .. } => {
+                for (id, field) in &self.vector_ids {
+                    if !offsets.contains_key(&(*id, field.clone())) {
+                        errors.push(format!(
+                            "Vector {}:{} in ids but missing in storage",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push("OnDemand mode: Deep vector validation skipped".to_string());
             }
         }
 
@@ -325,25 +395,38 @@ impl VectorIndexReader for IvfIndexReader {
     }
 }
 
+/// Iterator for IVF vector index.
 struct IvfVectorIterator {
-    vectors: Vec<(u64, String, Vector)>,
+    storage: VectorStorage,
+    keys: Vec<(u64, String)>,
     current: usize,
+    dimension: usize,
 }
 
 impl VectorIterator for IvfVectorIterator {
     fn next(&mut self) -> Result<Option<(u64, String, Vector)>> {
-        if self.current < self.vectors.len() {
-            let result = self.vectors[self.current].clone();
-            self.current += 1;
-            Ok(Some(result))
+        if self.current < self.keys.len() {
+            let (doc_id, field) = &self.keys[self.current];
+            if let Some(vec) = self
+                .storage
+                .get(&(*doc_id, field.clone()), self.dimension)?
+            {
+                self.current += 1;
+                Ok(Some((*doc_id, field.clone(), vec)))
+            } else {
+                Err(SarissaError::internal(format!(
+                    "Vector {}:{} found in keys but missing in storage",
+                    doc_id, field
+                )))
+            }
         } else {
             Ok(None)
         }
     }
 
     fn skip_to(&mut self, doc_id: u64, field_name: &str) -> Result<bool> {
-        while self.current < self.vectors.len() {
-            let (id, field, _) = &self.vectors[self.current];
+        while self.current < self.keys.len() {
+            let (id, field) = &self.keys[self.current];
             if *id > doc_id || (*id == doc_id && field.as_str() >= field_name) {
                 return Ok(true);
             }
@@ -353,9 +436,8 @@ impl VectorIterator for IvfVectorIterator {
     }
 
     fn position(&self) -> (u64, String) {
-        if self.current < self.vectors.len() {
-            let (id, field, _) = &self.vectors[self.current];
-            (*id, field.clone())
+        if self.current < self.keys.len() {
+            self.keys[self.current].clone()
         } else {
             (u64::MAX, String::new())
         }

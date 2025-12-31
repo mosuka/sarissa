@@ -327,6 +327,14 @@ impl FileStorage {
 }
 
 impl Storage for FileStorage {
+    fn loading_mode(&self) -> crate::storage::LoadingMode {
+        if self.config.use_mmap {
+            crate::storage::LoadingMode::Lazy
+        } else {
+            crate::storage::LoadingMode::Eager
+        }
+    }
+
     fn open_input(&self, name: &str) -> Result<Box<dyn StorageInput>> {
         self.check_closed()?;
 

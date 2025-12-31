@@ -67,11 +67,27 @@ pub struct FileMetadata {
     pub readonly: bool,
 }
 
+/// Preferred data loading mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadingMode {
+    /// Eagerly load data into memory (eager deserialization).
+    /// Best for raw performance when memory is sufficient.
+    Eager,
+    /// Lazily load data on command (e.g., via mmap).
+    /// Best for large datasets to reduce memory usage.
+    Lazy,
+}
+
 /// A trait for storage backends that can store and retrieve data.
 ///
 /// This provides a pluggable interface for different storage implementations
 /// like file system, memory, or remote storage.
 pub trait Storage: Send + Sync + std::fmt::Debug {
+    /// Get the preferred loading mode for this storage.
+    fn loading_mode(&self) -> LoadingMode {
+        LoadingMode::Eager
+    }
+
     /// Open a file for reading.
     ///
     /// Opens an existing file and returns a `StorageInput` for reading its contents.
@@ -535,7 +551,7 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
 }
 
 /// A trait for reading data from storage.
-pub trait StorageInput: Read + Seek + Send + std::fmt::Debug {
+pub trait StorageInput: Read + Seek + Send + Sync + std::fmt::Debug {
     /// Get the size of the input stream.
     fn size(&self) -> Result<u64>;
 
