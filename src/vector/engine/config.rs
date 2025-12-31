@@ -259,7 +259,11 @@ impl VectorIndexConfigBuilder {
             dimension,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
+<<<<<<< HEAD
             metadata: HashMap::new(),
+=======
+
+>>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
             base_weight: 1.0,
         };
 

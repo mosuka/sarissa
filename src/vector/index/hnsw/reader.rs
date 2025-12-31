@@ -1,16 +1,17 @@
 //! HNSW vector index reader implementation.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::error::{Result, SarissaError};
-use crate::storage::{Storage, StorageInput};
+use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::io::read_metadata;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
+use std::sync::Mutex;
 
 /// Storage for vectors (in-memory or on-demand).
 use crate::vector::index::storage::VectorStorage;
@@ -41,7 +42,7 @@ impl HnswIndexReader {
         path: &str,
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
-        use std::io::{Read, Seek};
+        use std::io::Read;
 
         // Open the index file
         let file_name = format!("{}.hnsw", path);
@@ -172,9 +173,13 @@ impl HnswIndexReader {
                         Vector::with_metadata(values, metadata),
                     );
                 }
+<<<<<<< HEAD
 
                 let graph = read_graph(&mut input)?;
                 (VectorStorage::Owned(Arc::new(vectors)), vector_ids, graph)
+=======
+                (VectorStorage::Owned(Arc::new(vectors)), vector_ids)
+>>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
             }
             crate::storage::LoadingMode::Lazy => {
                 let mut offsets = HashMap::with_capacity(num_vectors);
@@ -189,6 +194,10 @@ impl HnswIndexReader {
 
                 for _ in 0..num_vectors {
                     let start_offset = input.stream_position().map_err(SarissaError::Io)?;
+<<<<<<< HEAD
+=======
+
+>>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
                     let mut doc_id_buf = [0u8; 8];
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
@@ -220,16 +229,22 @@ impl HnswIndexReader {
                         .seek(std::io::SeekFrom::Current((dimension * 4) as i64))
                         .map_err(SarissaError::Io)?;
                 }
+<<<<<<< HEAD
 
                 let graph = read_graph(&mut input)?;
 
+=======
+>>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
                 (
                     VectorStorage::OnDemand {
                         input: Arc::new(Mutex::new(input)),
                         offsets: Arc::new(offsets),
                     },
                     vector_ids,
+<<<<<<< HEAD
                     graph,
+=======
+>>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
                 )
             }
         };
@@ -286,7 +301,7 @@ impl VectorIndexReader for HnswIndexReader {
     }
 
     fn vector_count(&self) -> usize {
-        self.vector_ids.len()
+        self.vectors.len()
     }
 
     fn dimension(&self) -> usize {
@@ -298,6 +313,7 @@ impl VectorIndexReader for HnswIndexReader {
     }
 
     fn stats(&self) -> VectorStats {
+<<<<<<< HEAD
         let memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
             VectorStorage::OnDemand { offsets, .. } => {
@@ -306,15 +322,18 @@ impl VectorIndexReader for HnswIndexReader {
             }
         };
 
+=======
+>>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
         VectorStats {
-            vector_count: self.vector_ids.len(),
+            vector_count: self.vectors.len(),
             dimension: self.dimension,
-            memory_usage,
+            memory_usage: self.vectors.len() * (8 + self.dimension * 4),
             build_time_ms: 0,
         }
     }
 
     fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool {
+<<<<<<< HEAD
         match &self.vectors {
             VectorStorage::Owned(vectors) => {
                 vectors.contains_key(&(doc_id, field_name.to_string()))
@@ -323,6 +342,9 @@ impl VectorIndexReader for HnswIndexReader {
                 offsets.contains_key(&(doc_id, field_name.to_string()))
             }
         }
+=======
+        self.vectors.contains_key(&(doc_id, field_name.to_string()))
+>>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
     }
 
     fn get_vector_range(
@@ -387,7 +409,7 @@ impl VectorIndexReader for HnswIndexReader {
             errors.push(format!(
                 "Mismatch between vector_ids count ({}) and vectors count ({})",
                 self.vector_ids.len(),
-                self.storage_len()
+                self.vectors.len()
             ));
         }
 
@@ -443,20 +465,11 @@ impl VectorIndexReader for HnswIndexReader {
         }
 
         Ok(ValidationReport {
+            repair_suggestions: Vec::new(),
             is_valid: errors.is_empty(),
             errors,
             warnings,
-            repair_suggestions: vec![],
         })
-    }
-}
-
-impl HnswIndexReader {
-    fn storage_len(&self) -> usize {
-        match &self.storage {
-            VectorStorage::Owned(vectors) => vectors.len(),
-            VectorStorage::OnDemand { offsets, .. } => offsets.len(),
-        }
     }
 }
 

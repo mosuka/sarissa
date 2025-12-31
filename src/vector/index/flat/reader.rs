@@ -5,10 +5,8 @@ use std::sync::Arc;
 
 use crate::error::{Result, SarissaError};
 use crate::storage::Storage;
-use crate::storage::StorageInput;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
-use crate::vector::index::config::IndexLoadingMode;
 use crate::vector::index::io::read_metadata;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
@@ -41,7 +39,6 @@ impl FlatVectorIndexReader {
         distance_metric: DistanceMetric,
     ) -> Result<Self> {
         use std::io::Read;
-        use std::io::Seek;
 
         // Open the index file
         let file_name = format!("{}.flat", path);
@@ -107,11 +104,11 @@ impl FlatVectorIndexReader {
 
                 for _ in 0..num_vectors {
                     let start_offset = input.stream_position().map_err(SarissaError::Io)?;
+
                     let mut doc_id_buf = [0u8; 8];
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    // Read field name
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
@@ -209,7 +206,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
     }
 
     fn vector_count(&self) -> usize {
-        self.vector_ids.len()
+        self.vectors.len()
     }
 
     fn dimension(&self) -> usize {
@@ -228,11 +225,10 @@ impl VectorIndexReader for FlatVectorIndexReader {
                 offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
             }
         };
-
         VectorStats {
-            vector_count: self.vector_ids.len(),
+            vector_count: self.vectors.len(),
             dimension: self.dimension,
-            memory_usage,
+            memory_usage: self.vectors.len() * (8 + self.dimension * 4),
             build_time_ms: 0,
         }
     }
@@ -353,11 +349,15 @@ impl VectorIndexReader for FlatVectorIndexReader {
                 warnings.push("OnDemand mode: Deep vector validation skipped".to_string());
             }
         }
+<<<<<<< HEAD
+=======
+
+>>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
         Ok(ValidationReport {
-            is_valid: true,
-            errors: vec![],
-            warnings: vec![],
-            repair_suggestions: vec![],
+            repair_suggestions: Vec::new(),
+            is_valid: errors.is_empty(),
+            errors,
+            warnings,
         })
     }
 }
