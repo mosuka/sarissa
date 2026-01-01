@@ -1301,7 +1301,20 @@ impl VectorCollectionSearcher {
         score_mode: VectorScoreMode,
         filter_matches: Option<&RegistryFilterMatches>,
     ) -> Result<()> {
+        // Optimize existence check: batch check at the beginning
+        // If we have filter_matches, that implies existence check is also done via Filter (if filter covers all documents).
+        // However, registry.contains check is for Deleted documents primarily.
+        // It's safer to always check existence, unless we are sure Filter implied existence.
+
+        let doc_ids: Vec<u64> = hits.iter().map(|h| h.doc_id).collect();
+        let existing_ids = self.registry.filter_existing(&doc_ids);
+
         for hit in hits {
+            // Logical deletion check (Batch optimized)
+            if !existing_ids.contains(&hit.doc_id) {
+                continue;
+            }
+
             if let Some(matches) = filter_matches {
                 if !matches.contains_doc(hit.doc_id) {
                     continue;
