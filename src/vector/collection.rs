@@ -437,7 +437,11 @@ impl VectorCollection {
                 };
                 let writer =
                     FlatIndexWriter::with_storage(flat, writer_config.clone(), storage.clone())?;
-                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
+                Arc::new(LegacyVectorFieldWriter::new(
+                    field_name.to_string(),
+                    writer,
+                    Some("vectors.index".to_string()),
+                ))
             }
             VectorIndexKind::Hnsw => {
                 let hnsw = HnswIndexConfig {
@@ -447,7 +451,11 @@ impl VectorCollection {
                 };
                 let writer =
                     HnswIndexWriter::with_storage(hnsw, writer_config.clone(), storage.clone())?;
-                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
+                Arc::new(LegacyVectorFieldWriter::new(
+                    field_name.to_string(),
+                    writer,
+                    Some("vectors.index".to_string()),
+                ))
             }
             VectorIndexKind::Ivf => {
                 let ivf = IvfIndexConfig {
@@ -456,7 +464,11 @@ impl VectorCollection {
                     ..IvfIndexConfig::default()
                 };
                 let writer = IvfIndexWriter::with_storage(ivf, writer_config, storage)?;
-                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
+                Arc::new(LegacyVectorFieldWriter::new(
+                    field_name.to_string(),
+                    writer,
+                    Some("vectors.index".to_string()),
+                ))
             }
         };
         Ok(Some(delegate))
