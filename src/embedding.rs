@@ -15,7 +15,7 @@ pub mod precomputed;
 
 // Candle implementation (requires feature flag)
 #[cfg(feature = "embeddings-candle")]
-pub mod candle_text_embedder;
+pub mod candle_bert_embedder;
 
 // OpenAI implementation (requires feature flag)
 #[cfg(feature = "embeddings-openai")]
@@ -23,4 +23,4 @@ pub mod openai_text_embedder;
 
 // Multimodal embedding (requires embeddings-multimodal feature flag)
 #[cfg(feature = "embeddings-multimodal")]
-pub mod candle_multimodal_embedder;
+pub mod candle_clip_embedder;

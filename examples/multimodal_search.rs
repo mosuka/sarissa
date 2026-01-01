@@ -1,7 +1,7 @@
 //! Multimodal Search Example - Search across text and images
 //!
 //! This example demonstrates:
-//! 1. Configuring a vector index with CandleMultimodalEmbedder (CLIP)
+//! 1. Configuring a vector index with CandleClipEmbedder (CLIP)
 //! 2. Indexing images from local file system
 //! 3. Indexing text descriptions
 //! 4. Performing multimodal search:
@@ -18,7 +18,7 @@
 use std::path::Path;
 
 #[cfg(feature = "embeddings-multimodal")]
-use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use sarissa::embedding::candle_clip_embedder::CandleClipEmbedder;
 #[cfg(feature = "embeddings-multimodal")]
 use sarissa::embedding::embedder::Embedder;
 #[cfg(feature = "embeddings-multimodal")]
@@ -47,10 +47,10 @@ fn main() -> Result<()> {
     let storage_config = StorageConfig::File(FileStorageConfig::new(temp_dir.path()));
     let storage = StorageFactory::create(storage_config)?;
 
-    // 2. Configure Index with CandleMultimodalEmbedder (CLIP)
+    // 2. Configure Index with CandleClipEmbedder (CLIP)
     // We use "openai/clip-vit-base-patch32" which is a good balance of speed and quality
     println!("Loading CLIP model (this may take a while on first run)...");
-    let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
+    let embedder = CandleClipEmbedder::new("openai/clip-vit-base-patch32")?;
     println!("Model loaded: {}", embedder.name());
 
     let field_config = VectorFieldConfig {

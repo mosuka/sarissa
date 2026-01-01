@@ -327,7 +327,7 @@ sarissa = { version = "0.1", features = ["embeddings-candle"] }
 ```
 
 ```rust
-use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 use sarissa::embedding::embedder::Embedder;
 use sarissa::embedding::per_field::PerFieldEmbedder;
 use sarissa::vector::core::document::DocumentPayload;
@@ -340,9 +340,9 @@ use std::sync::Arc;
 
 #[cfg(feature = "embeddings-candle")]
 fn main() -> sarissa::error::Result<()> {
-    // 1. Initialize Embedder (CandleTextEmbedder)
+    // 1. Initialize Embedder (CandleBertEmbedder)
     // We use "sentence-transformers/all-MiniLM-L6-v2" which outputs 384-dim vectors.
-    let candle_embedder = Arc::new(CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?);
+    let candle_embedder = Arc::new(CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?);
 
     // 2. Configure PerFieldEmbedder
     // Map specific fields (e.g., "body_vector") to the embedder.
@@ -549,7 +549,7 @@ sarissa = { version = "0.1", features = ["embeddings-multimodal"] }
 #### Text-to-Image Search Example
 
 ```rust
-use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+use sarissa::embedding::candle_clip_embedder::CandleClipEmbedder;
 use sarissa::embedding::embedder::EmbedInput;
 use sarissa::embedding::precomputed::PrecomputedEmbedder;
 use sarissa::vector::engine::request::{QueryVector, VectorSearchRequest};
@@ -564,7 +564,7 @@ use std::collections::HashMap;
 #[tokio::main]
 async fn main() -> sarissa::error::Result<()> {
     // Initialize CLIP embedder (automatically downloads model from HuggingFace)
-    let embedder = CandleMultimodalEmbedder::new("openai/clip-vit-base-patch32")?;
+    let embedder = CandleClipEmbedder::new("openai/clip-vit-base-patch32")?;
 
     // Create vector engine configuration with CLIP's embedding dimension (512)
     let field_config = VectorFieldConfig {

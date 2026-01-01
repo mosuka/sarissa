@@ -63,7 +63,7 @@ struct EmbeddingData {
 ///
 /// # Cost Considerations
 ///
-/// OpenAI charges per token processed. Consider using `CandleTextEmbedder`
+/// OpenAI charges per token processed. Consider using `CandleBertEmbedder`
 /// for cost-sensitive applications or when processing large volumes.
 ///
 /// # Examples

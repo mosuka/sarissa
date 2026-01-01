@@ -2,7 +2,7 @@
 //!
 //! This example demonstrates the fundamental steps to use Sarissa for vector search:
 //! 1. Setup storage
-//! 2. Configure the vector index with an Embedder (CandleTextEmbedder via PerFieldEmbedder)
+//! 2. Configure the vector index with an Embedder (CandleBertEmbedder via PerFieldEmbedder)
 //! 3. Add documents with text content (vectors are generated automatically)
 //! 4. Perform a nearest neighbor search (KNN) using text query
 //!
@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 #[cfg(feature = "embeddings-candle")]
-use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use sarissa::embedding::embedder::Embedder;
 #[cfg(feature = "embeddings-candle")]
@@ -46,10 +46,10 @@ fn main() -> Result<()> {
     let storage_config = StorageConfig::File(FileStorageConfig::new(temp_dir.path()));
     let storage = StorageFactory::create(storage_config)?;
 
-    // 2. Configure Embedder (CandleTextEmbedder wrapped in PerFieldEmbedder)
+    // 2. Configure Embedder (CandleBertEmbedder wrapped in PerFieldEmbedder)
     // We use "sentence-transformers/all-MiniLM-L6-v2" which outputs 384-dimensional vectors.
     println!("Loading BERT model (this may take a while on first run)...");
-    let candle_embedder = Arc::new(CandleTextEmbedder::new(
+    let candle_embedder = Arc::new(CandleBertEmbedder::new(
         "sentence-transformers/all-MiniLM-L6-v2",
     )?);
 

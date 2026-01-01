@@ -1,4 +1,4 @@
-//! Candle-based multimodal embedder implementation using CLIP.
+//! Candle-based CLIP embedder implementation.
 //!
 //! This module provides a multimodal embedder using HuggingFace Candle framework
 //! with CLIP (Contrastive Language-Image Pre-Training) models.
@@ -27,7 +27,7 @@ use crate::error::{Result, SarissaError};
 #[cfg(feature = "embeddings-multimodal")]
 use crate::vector::core::vector::Vector;
 
-/// Candle-based multimodal embedder using CLIP models from HuggingFace.
+/// Candle-based CLIP embedder using CLIP models from HuggingFace.
 ///
 /// This embedder uses the Candle framework to run CLIP models locally,
 /// providing embeddings for both text and images in the same vector space.
@@ -54,11 +54,11 @@ use crate::vector::core::vector::Vector;
 ///
 /// ```no_run
 /// use sarissa::embedding::embedder::{Embedder, EmbedInput};
-/// use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use sarissa::embedding::candle_clip_embedder::CandleClipEmbedder;
 /// use std::fs;
 ///
 /// # async fn example() -> sarissa::error::Result<()> {
-/// let embedder = CandleMultimodalEmbedder::new(
+/// let embedder = CandleClipEmbedder::new(
 ///     "openai/clip-vit-base-patch32"
 /// )?;
 ///
@@ -82,11 +82,11 @@ use crate::vector::core::vector::Vector;
 ///
 /// ```no_run
 /// use sarissa::embedding::embedder::{Embedder, EmbedInput};
-/// use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+/// use sarissa::embedding::candle_clip_embedder::CandleClipEmbedder;
 /// use std::fs;
 ///
 /// # async fn example() -> sarissa::error::Result<()> {
-/// let embedder = CandleMultimodalEmbedder::new(
+/// let embedder = CandleClipEmbedder::new(
 ///     "openai/clip-vit-base-patch32"
 /// )?;
 ///
@@ -106,7 +106,7 @@ use crate::vector::core::vector::Vector;
 /// # }
 /// ```
 #[cfg(feature = "embeddings-multimodal")]
-pub struct CandleMultimodalEmbedder {
+pub struct CandleClipEmbedder {
     /// CLIP text transformer model.
     text_model: clip::text_model::ClipTextTransformer,
     /// CLIP vision transformer model.
@@ -128,9 +128,9 @@ pub struct CandleMultimodalEmbedder {
 }
 
 #[cfg(feature = "embeddings-multimodal")]
-impl std::fmt::Debug for CandleMultimodalEmbedder {
+impl std::fmt::Debug for CandleClipEmbedder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CandleMultimodalEmbedder")
+        f.debug_struct("CandleClipEmbedder")
             .field("model_name", &self.model_name)
             .field("dimension", &self.dimension)
             .field("image_size", &self.image_size)
@@ -139,8 +139,8 @@ impl std::fmt::Debug for CandleMultimodalEmbedder {
 }
 
 #[cfg(feature = "embeddings-multimodal")]
-impl CandleMultimodalEmbedder {
-    /// Create a new Candle-based multimodal embedder from a HuggingFace CLIP model.
+impl CandleClipEmbedder {
+    /// Create a new Candle-based CLIP embedder from a HuggingFace CLIP model.
     ///
     /// The model will be automatically downloaded from HuggingFace Hub if not cached.
     ///
@@ -150,7 +150,7 @@ impl CandleMultimodalEmbedder {
     ///
     /// # Returns
     ///
-    /// A new `CandleMultimodalEmbedder` instance
+    /// A new `CandleClipEmbedder` instance
     ///
     /// # Errors
     ///
@@ -162,16 +162,16 @@ impl CandleMultimodalEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sarissa::embedding::candle_multimodal_embedder::CandleMultimodalEmbedder;
+    /// use sarissa::embedding::candle_clip_embedder::CandleClipEmbedder;
     ///
     /// # fn example() -> sarissa::error::Result<()> {
     /// // Fast and efficient
-    /// let embedder = CandleMultimodalEmbedder::new(
+    /// let embedder = CandleClipEmbedder::new(
     ///     "openai/clip-vit-base-patch32"
     /// )?;
     ///
     /// // Higher quality
-    /// let embedder = CandleMultimodalEmbedder::new(
+    /// let embedder = CandleClipEmbedder::new(
     ///     "openai/clip-vit-large-patch14"
     /// )?;
     /// # Ok(())
@@ -450,7 +450,7 @@ impl CandleMultimodalEmbedder {
 
 #[cfg(feature = "embeddings-multimodal")]
 #[async_trait]
-impl Embedder for CandleMultimodalEmbedder {
+impl Embedder for CandleClipEmbedder {
     /// Generate an embedding vector for the given input.
     ///
     /// Supports both text and image inputs. Text and images are embedded into
@@ -486,7 +486,7 @@ impl Embedder for CandleMultimodalEmbedder {
 
     /// Get the supported input types.
     ///
-    /// CandleMultimodalEmbedder supports both text and image inputs.
+    /// CandleClipEmbedder supports both text and image inputs.
     fn supported_input_types(&self) -> Vec<EmbedInputType> {
         vec![EmbedInputType::Text, EmbedInputType::Image]
     }

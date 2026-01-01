@@ -21,13 +21,13 @@
 //! # {
 //! use sarissa::embedding::per_field::PerFieldEmbedder;
 //! use sarissa::embedding::embedder::{Embedder, EmbedInput};
-//! use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 //! use std::sync::Arc;
 //!
 //! # async fn example() -> sarissa::error::Result<()> {
 //! // Create default embedder
 //! let default_embedder: Arc<dyn Embedder> = Arc::new(
-//!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+//!     CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 //! );
 //!
 //! // Create per-field embedder with default
@@ -35,7 +35,7 @@
 //!
 //! // Add specialized embedder for title field
 //! let title_embedder: Arc<dyn Embedder> = Arc::new(
-//!     CandleTextEmbedder::new("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")?
+//!     CandleBertEmbedder::new("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")?
 //! );
 //! per_field.add_embedder("title_embedding", Arc::clone(&title_embedder));
 //!
@@ -79,13 +79,13 @@ use crate::vector::core::vector::Vector;
 /// # {
 /// use sarissa::embedding::embedder::Embedder;
 /// use sarissa::embedding::per_field::PerFieldEmbedder;
-/// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 /// use std::sync::Arc;
 ///
 /// # fn example() -> sarissa::error::Result<()> {
 /// // Create default embedder
 /// let default_embedder: Arc<dyn Embedder> = Arc::new(
-///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+///     CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
 ///
 /// // Create per-field embedder
@@ -93,7 +93,7 @@ use crate::vector::core::vector::Vector;
 ///
 /// // Reuse embedder instances to save memory
 /// let keyword_embedder: Arc<dyn Embedder> = Arc::new(
-///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+///     CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
 /// per_field.add_embedder("id", Arc::clone(&keyword_embedder));
 /// per_field.add_embedder("category", Arc::clone(&keyword_embedder));
@@ -133,12 +133,12 @@ impl PerFieldEmbedder {
     /// # {
     /// use sarissa::embedding::per_field::PerFieldEmbedder;
     /// use sarissa::embedding::embedder::Embedder;
-    /// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+    /// use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
     /// use std::sync::Arc;
     ///
     /// # fn example() -> sarissa::error::Result<()> {
     /// let default: Arc<dyn Embedder> = Arc::new(
-    ///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+    ///     CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
     /// );
     /// let per_field = PerFieldEmbedder::new(default);
     /// # Ok(())

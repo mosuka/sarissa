@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 use sarissa::embedding::embedder::{EmbedInput, Embedder};
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
@@ -34,7 +34,7 @@ async fn main() -> sarissa::error::Result<()> {
 
     // Add Candle embedder (local inference)
     println!("Loading Candle embedder (local)...");
-    let candle_embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
+    let candle_embedder = CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
     embedders.push(Arc::new(candle_embedder));
     println!("✓ Candle embedder loaded\n");
 

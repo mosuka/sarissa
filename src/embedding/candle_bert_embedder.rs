@@ -1,4 +1,4 @@
-//! Candle-based text embedder implementation.
+//! Candle-based BERT embedder implementation.
 //!
 //! This module provides a text embedder using HuggingFace Candle framework.
 //! Requires the `embeddings-candle` feature to be enabled.
@@ -26,7 +26,7 @@ use crate::error::{Result, SarissaError};
 #[cfg(feature = "embeddings-candle")]
 use crate::vector::core::vector::Vector;
 
-/// Candle-based text embedder using BERT models from HuggingFace.
+/// Candle-based BERT embedder using BERT models from HuggingFace.
 ///
 /// This embedder uses the Candle framework to run BERT models locally,
 /// providing high-quality embeddings without external API dependencies.
@@ -42,11 +42,11 @@ use crate::vector::core::vector::Vector;
 ///
 /// ```no_run
 /// use sarissa::embedding::embedder::{Embedder, EmbedInput};
-/// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 ///
 /// # async fn example() -> sarissa::error::Result<()> {
 /// // Create embedder with a sentence-transformers model
-/// let embedder = CandleTextEmbedder::new(
+/// let embedder = CandleBertEmbedder::new(
 ///     "sentence-transformers/all-MiniLM-L6-v2"
 /// )?;
 ///
@@ -60,7 +60,7 @@ use crate::vector::core::vector::Vector;
 /// # }
 /// ```
 #[cfg(feature = "embeddings-candle")]
-pub struct CandleTextEmbedder {
+pub struct CandleBertEmbedder {
     /// The BERT model for generating embeddings.
     model: BertModel,
     /// Tokenizer for converting text to token IDs.
@@ -74,9 +74,9 @@ pub struct CandleTextEmbedder {
 }
 
 #[cfg(feature = "embeddings-candle")]
-impl std::fmt::Debug for CandleTextEmbedder {
+impl std::fmt::Debug for CandleBertEmbedder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CandleTextEmbedder")
+        f.debug_struct("CandleBertEmbedder")
             .field("model_name", &self.model_name)
             .field("dimension", &self.dim)
             .finish()
@@ -84,8 +84,8 @@ impl std::fmt::Debug for CandleTextEmbedder {
 }
 
 #[cfg(feature = "embeddings-candle")]
-impl CandleTextEmbedder {
-    /// Create a new Candle-based embedder from a HuggingFace model.
+impl CandleBertEmbedder {
+    /// Create a new Candle-based BERT embedder from a HuggingFace model.
     ///
     /// The model will be automatically downloaded from HuggingFace Hub if not cached.
     ///
@@ -95,7 +95,7 @@ impl CandleTextEmbedder {
     ///
     /// # Returns
     ///
-    /// A new `CandleTextEmbedder` instance
+    /// A new `CandleBertEmbedder` instance
     ///
     /// # Errors
     ///
@@ -107,16 +107,16 @@ impl CandleTextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+    /// use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
     ///
     /// # fn example() -> sarissa::error::Result<()> {
     /// // Small and fast model
-    /// let embedder = CandleTextEmbedder::new(
+    /// let embedder = CandleBertEmbedder::new(
     ///     "sentence-transformers/all-MiniLM-L6-v2"
     /// )?;
     ///
     /// // Larger, more accurate model
-    /// let embedder = CandleTextEmbedder::new(
+    /// let embedder = CandleBertEmbedder::new(
     ///     "sentence-transformers/all-mpnet-base-v2"
     /// )?;
     /// # Ok(())
@@ -275,7 +275,7 @@ impl CandleTextEmbedder {
 
 #[cfg(feature = "embeddings-candle")]
 #[async_trait]
-impl Embedder for CandleTextEmbedder {
+impl Embedder for CandleBertEmbedder {
     /// Generate an embedding vector for the given input.
     ///
     /// Only text input is supported. Image input will return an error.
@@ -283,7 +283,7 @@ impl Embedder for CandleTextEmbedder {
         match input {
             EmbedInput::Text(text) => self.embed_text(text).await,
             _ => Err(SarissaError::invalid_argument(
-                "CandleTextEmbedder only supports text input",
+                "CandleBertEmbedder only supports text input",
             )),
         }
     }
