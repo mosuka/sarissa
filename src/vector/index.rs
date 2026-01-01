@@ -94,6 +94,11 @@ pub struct VectorIndexStats {
     pub last_modified: u64,
 }
 
+// Add imports for readers
+use crate::vector::index::flat::reader::FlatVectorIndexReader;
+use crate::vector::index::hnsw::reader::HnswIndexReader;
+use crate::vector::index::ivf::reader::IvfIndexReader;
+
 /// Internal implementation for managing vector index lifecycle.
 ///
 /// This structure wraps a vector index writer and manages its state.
@@ -108,6 +113,7 @@ pub struct ManagedVectorIndex {
     builder: Arc<RwLock<Box<dyn VectorIndexWriter>>>,
     is_finalized: Arc<RwLock<bool>>,
     storage: Option<Arc<dyn Storage>>,
+    index_path: Arc<RwLock<Option<String>>>,
 }
 
 impl ManagedVectorIndex {
@@ -151,6 +157,7 @@ impl ManagedVectorIndex {
             builder: Arc::new(RwLock::new(builder)),
             is_finalized: Arc::new(RwLock::new(false)),
             storage: Some(storage),
+            index_path: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -241,7 +248,10 @@ impl ManagedVectorIndex {
             ));
         }
 
-        builder.write(path)
+        builder.write(path)?;
+        // Store path for reader
+        *self.index_path.write().unwrap() = Some(path.to_string());
+        Ok(())
     }
 
     /// Check if this index has storage configured.
@@ -260,11 +270,35 @@ impl ManagedVectorIndex {
         }
 
         // If storage is available, load from storage
-        if self.storage.is_some() {
-            // We need a path to load from - for now, we'll use a default
-            // In a real implementation, this would be stored in the VectorIndex
+        if let Some(storage) = &self.storage {
+            let path_guard = self.index_path.read().unwrap();
+            if let Some(path) = &*path_guard {
+                return match &self.config {
+                    VectorIndexTypeConfig::Flat(c) => Ok(Arc::new(FlatVectorIndexReader::load(
+                        &**storage,
+                        path,
+                        c.distance_metric,
+                    )?)),
+                    VectorIndexTypeConfig::HNSW(c) => Ok(Arc::new(HnswIndexReader::load(
+                        &**storage,
+                        path,
+                        c.distance_metric,
+                    )?)),
+                    VectorIndexTypeConfig::IVF(c) => Ok(Arc::new(IvfIndexReader::load(
+                        &**storage,
+                        path,
+                        c.distance_metric,
+                    )?)),
+                };
+            }
+
+            // Fallback for cases where write() wasn't called but storage exists?
+            // Or maybe default to "default_index" if not set?
+            // For now, let's error if path is not known, or fallback to in-memory if possible?
+            // But writer might have flushed to disk.
+            // Let's assume if storage is present, we should have written or we should error if not written.
             return Err(SarissaError::InvalidOperation(
-                "Reader creation from storage not yet implemented. Use load() instead.".to_string(),
+                "Index has not been written to storage, cannot create reader from storage without path.".to_string(),
             ));
         }
 

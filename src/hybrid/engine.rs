@@ -243,8 +243,26 @@ impl HybridEngine {
         let merger = crate::hybrid::search::merger::ResultMerger::new(params.clone());
         let query_time_ms = start.elapsed().as_millis() as u64;
 
-        // TODO: Implement proper document store
-        let document_store = HashMap::new();
+        // Populate document store from keyword results
+        let mut document_store = HashMap::new();
+        for hit in &keyword_results.hits {
+            if let Some(ref doc) = hit.document {
+                let mut content = HashMap::new();
+                for (name, field) in doc.fields() {
+                    // Convert field value to string representation
+                    let val_str = match &field.value {
+                        crate::lexical::core::field::FieldValue::Text(s) => s.clone(),
+                        crate::lexical::core::field::FieldValue::Integer(i) => i.to_string(),
+                        crate::lexical::core::field::FieldValue::Float(f) => f.to_string(),
+                        crate::lexical::core::field::FieldValue::Boolean(b) => b.to_string(),
+                        crate::lexical::core::field::FieldValue::DateTime(dt) => dt.to_rfc3339(),
+                        _ => continue, // Skip binary, geo, vector for now as string representation
+                    };
+                    content.insert(name.clone(), val_str);
+                }
+                document_store.insert(hit.doc_id, content);
+            }
+        }
 
         // merge_results is async, use .await directly
         merger

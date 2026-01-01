@@ -321,10 +321,10 @@ Sarissa supports semantic search using text embeddings. You can use local BERT m
 
 #### Using Candle (Local BERT Models)
 
-```toml
-[dependencies]
 sarissa = { version = "0.1", features = ["embeddings-candle"] }
 ```
+
+See [examples/vector_search.rs](examples/vector_search.rs) for a basic `Flat` index example, and [examples/hnsw_search.rs](examples/hnsw_search.rs) for a high-performance `Hnsw` index example.
 
 ```rust
 use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;

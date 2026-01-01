@@ -32,13 +32,45 @@ impl IvfSearcher {
     }
 
     /// Find the nearest centroids to the query vector.
-    fn find_nearest_centroids(&self, _query: &Vector, n_probe: usize) -> Result<Vec<usize>> {
-        // In a full implementation, we would:
-        // 1. Get centroids from the index
-        // 2. Calculate distances to all centroids
-        // 3. Return indices of nearest n_probe centroids
-        // For now, return a placeholder
-        Ok((0..n_probe).collect())
+    fn find_nearest_centroids(&self, query: &Vector, n_probe: usize) -> Result<Vec<usize>> {
+        use super::reader::IvfIndexReader;
+
+        // Try to downcast the reader to IvfIndexReader to get centroids
+        if let Some(ivf_reader) = self.index_reader.as_any().downcast_ref::<IvfIndexReader>() {
+            let centroids = ivf_reader.centroids();
+            let distance_metric = self.index_reader.distance_metric();
+
+            if centroids.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            // Calculate distances to all centroids
+            let mut centroid_distances: Vec<(usize, f32)> = centroids
+                .iter()
+                .enumerate()
+                .map(|(i, centroid)| {
+                    let dist = distance_metric
+                        .distance(&query.data, &centroid.data)
+                        .unwrap_or(f32::MAX);
+                    (i, dist)
+                })
+                .collect();
+
+            // Sort by distance (ascending)
+            centroid_distances
+                .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+            // Return n_probe nearest centroid indices
+            Ok(centroid_distances
+                .into_iter()
+                .take(n_probe)
+                .map(|(i, _)| i)
+                .collect())
+        } else {
+            // Fallback: return first n_probe indices
+            let n_clusters = 10; // Default assumption
+            Ok((0..n_probe.min(n_clusters)).collect())
+        }
     }
 }
 

@@ -95,6 +95,14 @@ required-features = ["embeddings-multimodal"]
 name = "bench"
 harness = false
 
+[[bench]]
+name = "hnsw_benchmark"
+harness = false
+
+[[bench]]
+name = "distance_bench"
+harness = false
+
 [dev-dependencies]
 criterion = "0.7.0"
 tokio-test = "0.4.4"
