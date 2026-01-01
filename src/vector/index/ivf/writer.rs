@@ -73,8 +73,12 @@ impl IvfIndexWriter {
     }
 
     /// Convert this writer into a doc-centric field writer adapter.
-    pub fn into_field_writer(self, field_name: impl Into<String>) -> LegacyVectorFieldWriter<Self> {
-        LegacyVectorFieldWriter::new(field_name, self)
+    pub fn into_field_writer(
+        self,
+        field_name: impl Into<String>,
+        path: Option<String>,
+    ) -> LegacyVectorFieldWriter<Self> {
+        LegacyVectorFieldWriter::new(field_name, self, path)
     }
 
     /// Load an existing IVF index from storage.
