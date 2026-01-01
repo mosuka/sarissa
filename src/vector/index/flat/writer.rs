@@ -414,14 +414,17 @@ impl VectorIndexWriter for FlatIndexWriter {
         self.storage.is_some()
     }
 
-    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
-        // For flat index, we match based on field name and vector similarity
-        // In practice, this would require metadata storage to match text values
-        // For now, return 0 as this is a simplified implementation
-        // TODO: Implement proper deletion with metadata storage
-        let _field = field;
-        let _value = value;
-        Ok(0)
+    fn delete_document(&mut self, doc_id: u64) -> Result<()> {
+        if self.is_finalized {
+            return Err(SarissaError::InvalidOperation(
+                "Cannot delete documents from finalized index".to_string(),
+            ));
+        }
+
+        // Logical deletion from buffer
+        // Note: usage of retain might be slow for large buffers, but acceptable for this stage
+        self.vectors.retain(|(id, _, _)| *id != doc_id);
+        Ok(())
     }
 
     fn rollback(&mut self) -> Result<()> {

@@ -117,12 +117,10 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     /// Check if this writer has storage configured.
     fn has_storage(&self) -> bool;
 
-    /// Delete documents matching the given field and value.
-    /// Returns the number of documents deleted.
+    /// Delete a document by its ID.
     ///
-    /// This method marks documents for deletion based on field matching.
-    /// The actual deletion occurs during commit or optimize.
-    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64>;
+    /// This removes the document from the index buffer if it hasn't been finalized.
+    fn delete_document(&mut self, doc_id: u64) -> Result<()>;
 
     /// Commit pending changes to the index.
     ///
