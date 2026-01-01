@@ -75,6 +75,15 @@ impl DocumentVectorRegistry {
         self.entries.read().contains_key(&doc_id)
     }
 
+    pub fn filter_existing(&self, doc_ids: &[u64]) -> HashSet<u64> {
+        let guard = self.entries.read();
+        doc_ids
+            .iter()
+            .filter(|id| guard.contains_key(id))
+            .copied()
+            .collect()
+    }
+
     pub fn get(&self, doc_id: u64) -> Option<DocumentEntry> {
         self.entries.read().get(&doc_id).cloned()
     }
