@@ -997,12 +997,16 @@ impl VectorIndexWriter for IvfIndexWriter {
         self.storage.is_some()
     }
 
-    fn delete_documents(&mut self, field: &str, value: &str) -> Result<u64> {
-        // Simplified implementation - returns 0
-        // TODO: Implement proper deletion with metadata storage
-        let _field = field;
-        let _value = value;
-        Ok(0)
+    fn delete_document(&mut self, doc_id: u64) -> Result<()> {
+        if self.is_finalized {
+            return Err(SarissaError::InvalidOperation(
+                "Cannot delete documents from finalized index".to_string(),
+            ));
+        }
+
+        // Logical deletion from buffer
+        self.vectors.retain(|(id, _, _)| *id != doc_id);
+        Ok(())
     }
 
     fn rollback(&mut self) -> Result<()> {

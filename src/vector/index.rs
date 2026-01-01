@@ -195,6 +195,12 @@ impl ManagedVectorIndex {
         Ok(())
     }
 
+    /// Delete a document by its ID.
+    pub fn delete_document(&self, doc_id: u64) -> Result<()> {
+        let mut builder = self.builder.write().unwrap();
+        builder.delete_document(doc_id)
+    }
+
     /// Get the configuration.
     pub fn config(&self) -> &VectorIndexTypeConfig {
         &self.config
