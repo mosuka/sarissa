@@ -75,19 +75,20 @@ impl VectorIndexFactory {
     /// ```
     pub fn create(
         storage: Arc<dyn Storage>,
+        name: &str,
         config: VectorIndexTypeConfig,
     ) -> Result<Box<dyn VectorIndex>> {
         match config {
             VectorIndexTypeConfig::Flat(flat_config) => {
-                let index = FlatIndex::create(storage, flat_config)?;
+                let index = FlatIndex::create(storage, name, flat_config)?;
                 Ok(Box::new(index))
             }
             VectorIndexTypeConfig::HNSW(hnsw_config) => {
-                let index = HnswIndex::create(storage, hnsw_config)?;
+                let index = HnswIndex::create(storage, name, hnsw_config)?;
                 Ok(Box::new(index))
             }
             VectorIndexTypeConfig::IVF(ivf_config) => {
-                let index = IvfIndex::create(storage, ivf_config)?;
+                let index = IvfIndex::create(storage, name, ivf_config)?;
                 Ok(Box::new(index))
             }
         }
@@ -121,19 +122,20 @@ impl VectorIndexFactory {
     /// ```
     pub fn open(
         storage: Arc<dyn Storage>,
+        name: &str,
         config: VectorIndexTypeConfig,
     ) -> Result<Box<dyn VectorIndex>> {
         match config {
             VectorIndexTypeConfig::Flat(flat_config) => {
-                let index = FlatIndex::open(storage, flat_config)?;
+                let index = FlatIndex::open(storage, name, flat_config)?;
                 Ok(Box::new(index))
             }
             VectorIndexTypeConfig::HNSW(hnsw_config) => {
-                let index = HnswIndex::open(storage, hnsw_config)?;
+                let index = HnswIndex::open(storage, name, hnsw_config)?;
                 Ok(Box::new(index))
             }
             VectorIndexTypeConfig::IVF(ivf_config) => {
-                let index = IvfIndex::open(storage, ivf_config)?;
+                let index = IvfIndex::open(storage, name, ivf_config)?;
                 Ok(Box::new(index))
             }
         }
@@ -155,7 +157,7 @@ mod tests {
         let config = VectorIndexTypeConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let index = VectorIndexFactory::create(storage, config).unwrap();
+        let index = VectorIndexFactory::create(storage, "test_index", config).unwrap();
 
         assert!(!index.is_closed());
     }
@@ -166,11 +168,12 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
         // Create index
-        let index = VectorIndexFactory::create(storage.clone(), config.clone()).unwrap();
+        let index =
+            VectorIndexFactory::create(storage.clone(), "test_index", config.clone()).unwrap();
         index.close().unwrap();
 
         // Open index
-        let index = VectorIndexFactory::open(storage, config).unwrap();
+        let index = VectorIndexFactory::open(storage, "test_index", config).unwrap();
 
         assert!(!index.is_closed());
     }
@@ -180,7 +183,7 @@ mod tests {
         let config = VectorIndexTypeConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let index = VectorIndexFactory::create(storage, config).unwrap();
+        let index = VectorIndexFactory::create(storage, "test_index", config).unwrap();
         let stats = index.stats().unwrap();
 
         assert_eq!(stats.vector_count, 0);
@@ -194,7 +197,7 @@ mod tests {
         let config = VectorIndexTypeConfig::default();
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        let index = VectorIndexFactory::create(storage, config).unwrap();
+        let index = VectorIndexFactory::create(storage, "test_index", config).unwrap();
 
         assert!(!index.is_closed());
 
@@ -225,7 +228,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = VectorIndexTypeConfig::Flat(FlatIndexConfig::default());
 
-        let index = VectorIndexFactory::create(storage, config).unwrap();
+        let index = VectorIndexFactory::create(storage, "flat_index", config).unwrap();
 
         assert!(!index.is_closed());
     }
@@ -235,7 +238,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = VectorIndexTypeConfig::HNSW(HnswIndexConfig::default());
 
-        let index = VectorIndexFactory::create(storage, config).unwrap();
+        let index = VectorIndexFactory::create(storage, "hnsw_index", config).unwrap();
 
         assert!(!index.is_closed());
     }
@@ -245,7 +248,7 @@ mod tests {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let config = VectorIndexTypeConfig::IVF(IvfIndexConfig::default());
 
-        let index = VectorIndexFactory::create(storage, config).unwrap();
+        let index = VectorIndexFactory::create(storage, "ivf_index", config).unwrap();
 
         assert!(!index.is_closed());
     }

@@ -5,6 +5,7 @@ pub mod maintenance;
 pub mod reader;
 pub mod searcher;
 pub mod segment;
+pub mod tests;
 pub mod writer;
 
 use std::path::Path;
@@ -49,6 +50,9 @@ impl Default for IndexMetadata {
 
 /// A concrete IVF vector index implementation.
 pub struct IvfIndex {
+    /// The name of the index.
+    name: String,
+
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
@@ -65,6 +69,7 @@ pub struct IvfIndex {
 impl std::fmt::Debug for IvfIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IvfIndex")
+            .field("name", &self.name)
             .field("storage", &self.storage)
             .field("config", &self.config)
             .field("closed", &self.closed.load(Ordering::SeqCst))
@@ -75,13 +80,14 @@ impl std::fmt::Debug for IvfIndex {
 
 impl IvfIndex {
     /// Create a new IVF index in the given storage.
-    pub fn create(storage: Arc<dyn Storage>, config: IvfIndexConfig) -> Result<Self> {
+    pub fn create(storage: Arc<dyn Storage>, name: &str, config: IvfIndexConfig) -> Result<Self> {
         let metadata = IndexMetadata {
             dimension: config.dimension,
             ..Default::default()
         };
 
         let index = IvfIndex {
+            name: name.to_string(),
             storage,
             config,
             closed: AtomicBool::new(false),
@@ -93,14 +99,16 @@ impl IvfIndex {
     }
 
     /// Open an existing IVF index from storage.
-    pub fn open(storage: Arc<dyn Storage>, config: IvfIndexConfig) -> Result<Self> {
-        if !storage.file_exists("metadata.json") {
+    pub fn open(storage: Arc<dyn Storage>, name: &str, config: IvfIndexConfig) -> Result<Self> {
+        let metadata_file = format!("{}.json", name);
+        if !storage.file_exists(&metadata_file) {
             return Err(SarissaError::index("Index does not exist"));
         }
 
-        let metadata = Self::read_metadata(storage.as_ref())?;
+        let metadata = Self::read_metadata(storage.as_ref(), name)?;
 
         Ok(IvfIndex {
+            name: name.to_string(),
             storage,
             config,
             closed: AtomicBool::new(false),
@@ -109,21 +117,25 @@ impl IvfIndex {
     }
 
     /// Create an index in a directory.
-    pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: IvfIndexConfig) -> Result<Self> {
+    pub fn create_in_dir<P: AsRef<Path>>(
+        dir: P,
+        name: &str,
+        config: IvfIndexConfig,
+    ) -> Result<Self> {
         use crate::storage::file::{FileStorage, FileStorageConfig};
 
         let storage_config = FileStorageConfig::new(&dir);
         let storage = Arc::new(FileStorage::new(&dir, storage_config)?);
-        Self::create(storage, config)
+        Self::create(storage, name, config)
     }
 
     /// Open an index from a directory.
-    pub fn open_dir<P: AsRef<Path>>(dir: P, config: IvfIndexConfig) -> Result<Self> {
+    pub fn open_dir<P: AsRef<Path>>(dir: P, name: &str, config: IvfIndexConfig) -> Result<Self> {
         use crate::storage::file::{FileStorage, FileStorageConfig};
 
         let storage_config = FileStorageConfig::new(&dir);
         let storage = Arc::new(FileStorage::new(&dir, storage_config)?);
-        Self::open(storage, config)
+        Self::open(storage, name, config)
     }
 
     /// Write metadata to storage.
@@ -136,7 +148,8 @@ impl IvfIndex {
             .map_err(|e| SarissaError::index(format!("Failed to serialize metadata: {e}")))?;
         drop(metadata);
 
-        let mut output = self.storage.create_output("metadata.json")?;
+        let metadata_file = format!("{}.json", self.name);
+        let mut output = self.storage.create_output(&metadata_file)?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
         output.close()?;
 
@@ -144,8 +157,9 @@ impl IvfIndex {
     }
 
     /// Read metadata from storage.
-    fn read_metadata(storage: &dyn Storage) -> Result<IndexMetadata> {
-        let input = storage.open_input("metadata.json")?;
+    fn read_metadata(storage: &dyn Storage, name: &str) -> Result<IndexMetadata> {
+        let metadata_file = format!("{}.json", name);
+        let input = storage.open_input(&metadata_file)?;
         let metadata: IndexMetadata = serde_json::from_reader(input)
             .map_err(|e| SarissaError::index(format!("Failed to deserialize metadata: {e}")))?;
         Ok(metadata)
@@ -183,8 +197,7 @@ impl VectorIndex for IvfIndex {
 
         use crate::vector::index::ivf::reader::IvfIndexReader;
 
-        let reader =
-            IvfIndexReader::load(&*self.storage, "default_index", self.config.distance_metric)?;
+        let reader = IvfIndexReader::load(&*self.storage, &self.name, self.config.distance_metric)?;
         Ok(Arc::new(reader))
     }
 

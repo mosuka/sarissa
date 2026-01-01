@@ -7,6 +7,7 @@ use crate::error::{Result, SarissaError};
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
+use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::io::read_metadata;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
@@ -24,6 +25,7 @@ pub struct HnswIndexReader {
     distance_metric: DistanceMetric,
     m: usize,
     ef_construction: usize,
+    pub graph: Option<Arc<HnswGraph>>,
 }
 
 impl HnswIndexReader {
@@ -67,7 +69,72 @@ impl HnswIndexReader {
         input.read_exact(&mut ef_construction_buf)?;
         let ef_construction = u32::from_le_bytes(ef_construction_buf) as usize;
 
-        let (vectors, vector_ids) = match storage.loading_mode() {
+        // Helper to read graph
+        let read_graph =
+            |input: &mut dyn crate::storage::StorageInput| -> Result<Option<Arc<HnswGraph>>> {
+                let mut has_graph_buf = [0u8; 1];
+                if input.read_exact(&mut has_graph_buf).is_ok() && has_graph_buf[0] == 1 {
+                    let mut entry_point_buf = [0u8; 8];
+                    input.read_exact(&mut entry_point_buf)?;
+                    let entry_point_raw = u64::from_le_bytes(entry_point_buf);
+                    let entry_point = if entry_point_raw == u64::MAX {
+                        None
+                    } else {
+                        Some(entry_point_raw)
+                    };
+
+                    let mut max_level_buf = [0u8; 4];
+                    input.read_exact(&mut max_level_buf)?;
+                    let max_level = u32::from_le_bytes(max_level_buf) as usize;
+
+                    let mut node_count_buf = [0u8; 4];
+                    input.read_exact(&mut node_count_buf)?;
+                    let node_count = u32::from_le_bytes(node_count_buf) as usize;
+
+                    let mut nodes = HashMap::with_capacity(node_count);
+
+                    for _ in 0..node_count {
+                        let mut doc_id_buf = [0u8; 8];
+                        input.read_exact(&mut doc_id_buf)?;
+                        let doc_id = u64::from_le_bytes(doc_id_buf);
+
+                        let mut layer_count_buf = [0u8; 4];
+                        input.read_exact(&mut layer_count_buf)?;
+                        let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
+
+                        let mut layers = Vec::with_capacity(layer_count);
+                        for _ in 0..layer_count {
+                            let mut neighbor_count_buf = [0u8; 4];
+                            input.read_exact(&mut neighbor_count_buf)?;
+                            let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
+
+                            let mut neighbors = Vec::with_capacity(neighbor_count);
+                            for _ in 0..neighbor_count {
+                                let mut neighbor_buf = [0u8; 8];
+                                input.read_exact(&mut neighbor_buf)?;
+                                neighbors.push(u64::from_le_bytes(neighbor_buf));
+                            }
+                            layers.push(neighbors);
+                        }
+                        nodes.insert(doc_id, layers);
+                    }
+
+                    Ok(Some(Arc::new(HnswGraph {
+                        entry_point,
+                        max_level,
+                        nodes,
+                        m,
+                        m_max: m,
+                        m_max_0: m * 2,
+                        ef_construction,
+                        level_mult: 1.0 / (m as f64).ln(),
+                    })))
+                } else {
+                    Ok(None)
+                }
+            };
+
+        let (vectors, vector_ids, graph) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
                 // Read vectors with field names
                 let mut vectors = HashMap::with_capacity(num_vectors);
@@ -107,7 +174,9 @@ impl HnswIndexReader {
                         Vector::with_metadata(values, metadata),
                     );
                 }
-                (VectorStorage::Owned(Arc::new(vectors)), vector_ids)
+
+                let graph = read_graph(&mut input)?;
+                (VectorStorage::Owned(Arc::new(vectors)), vector_ids, graph)
             }
             crate::storage::LoadingMode::Lazy => {
                 let mut offsets = HashMap::with_capacity(num_vectors);
@@ -154,12 +223,16 @@ impl HnswIndexReader {
                         .seek(std::io::SeekFrom::Current((dimension * 4) as i64))
                         .map_err(SarissaError::Io)?;
                 }
+
+                let graph = read_graph(&mut input)?;
+
                 (
                     VectorStorage::OnDemand {
                         input: Arc::new(Mutex::new(input)),
                         offsets: Arc::new(offsets),
                     },
                     vector_ids,
+                    graph,
                 )
             }
         };
@@ -171,6 +244,7 @@ impl HnswIndexReader {
             distance_metric,
             m,
             ef_construction,
+            graph,
         })
     }
 

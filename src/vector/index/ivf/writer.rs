@@ -11,6 +11,7 @@ use crate::vector::index::IvfIndexConfig;
 use crate::vector::index::field::LegacyVectorFieldWriter;
 use crate::vector::index::io::{read_metadata, write_metadata};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 /// Builder for IVF vector indexes (memory-efficient search).
@@ -497,6 +498,288 @@ impl IvfIndexWriter {
     }
 }
 
+/// Statistics for a single IVF cluster.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterStats {
+    pub cluster_id: usize,
+    pub count: usize,
+    pub avg_distance: f32,
+}
+
+impl IvfIndexWriter {
+    /// Get statistics for each cluster in the index.
+    pub fn get_cluster_stats(&self) -> Vec<ClusterStats> {
+        if !self.is_finalized || self.centroids.is_empty() {
+            return Vec::new();
+        }
+
+        let mut stats = Vec::with_capacity(self.centroids.len());
+
+        for (i, (centroid, list)) in self
+            .centroids
+            .iter()
+            .zip(self.inverted_lists.iter())
+            .enumerate()
+        {
+            let count = list.len();
+            let total_dist: f32 = list
+                .iter()
+                .map(|(_, _, vec)| {
+                    self.index_config
+                        .distance_metric
+                        .distance(&vec.data, &centroid.data)
+                        .unwrap_or(0.0)
+                })
+                .sum();
+
+            stats.push(ClusterStats {
+                cluster_id: i,
+                count,
+                avg_distance: if count > 0 {
+                    total_dist / count as f32
+                } else {
+                    0.0
+                },
+            });
+        }
+
+        stats
+    }
+
+    /// Merge sparse clusters into their nearest neighbors.
+    pub fn merge_sparse_clusters(&mut self, threshold: usize) -> Result<usize> {
+        if !self.is_finalized || self.centroids.is_empty() {
+            return Ok(0);
+        }
+
+        let stats = self.get_cluster_stats();
+        let sparse_indices: Vec<usize> = stats
+            .iter()
+            .filter(|s| s.count < threshold)
+            .map(|s| s.cluster_id)
+            .collect();
+
+        if sparse_indices.is_empty() || sparse_indices.len() == self.centroids.len() {
+            return Ok(0);
+        }
+
+        let non_sparse_indices: Vec<usize> = stats
+            .iter()
+            .filter(|s| s.count >= threshold)
+            .map(|s| s.cluster_id)
+            .collect();
+
+        let merged_count = sparse_indices.len();
+        let mut moves = Vec::new();
+
+        for &sparse_idx in &sparse_indices {
+            let sparse_centroid = &self.centroids[sparse_idx];
+            let mut best_target = non_sparse_indices[0];
+            let mut best_dist = f32::INFINITY;
+
+            for &target_idx in &non_sparse_indices {
+                if let Ok(dist) = self
+                    .index_config
+                    .distance_metric
+                    .distance(&sparse_centroid.data, &self.centroids[target_idx].data)
+                {
+                    if dist < best_dist {
+                        best_dist = dist;
+                        best_target = target_idx;
+                    }
+                }
+            }
+            moves.push((sparse_idx, best_target));
+        }
+
+        // Apply moves
+        for (sparse_idx, target_idx) in moves {
+            let mut vectors_to_move = std::mem::take(&mut self.inverted_lists[sparse_idx]);
+            self.inverted_lists[target_idx].append(&mut vectors_to_move);
+        }
+
+        // Rebuild centroids and inverted lists
+        let mut new_centroids = Vec::new();
+        let mut new_inverted_lists = Vec::new();
+
+        for i in 0..self.centroids.len() {
+            if !sparse_indices.contains(&i) {
+                new_centroids.push(self.centroids[i].clone());
+                new_inverted_lists.push(std::mem::take(&mut self.inverted_lists[i]));
+            }
+        }
+
+        self.centroids = new_centroids;
+        self.inverted_lists = new_inverted_lists;
+        self.index_config.n_clusters = self.centroids.len();
+
+        // Update centroids for the merged clusters (re-average)
+        for (i, list) in self.inverted_lists.iter().enumerate() {
+            if !list.is_empty() {
+                let dim = self.index_config.dimension;
+                let mut sum = vec![0.0; dim];
+                for (_, _, vec) in list {
+                    for (j, &val) in vec.data.iter().enumerate() {
+                        sum[j] += val;
+                    }
+                }
+                let new_data: Vec<f32> = sum.iter().map(|&s| s / list.len() as f32).collect();
+                self.centroids[i] = Vector::new(new_data);
+            }
+        }
+
+        Ok(merged_count)
+    }
+
+    /// Split dense clusters into multiple clusters using K-means (k=2).
+    pub fn split_dense_clusters(&mut self, threshold: usize) -> Result<usize> {
+        if !self.is_finalized || self.centroids.is_empty() {
+            return Ok(0);
+        }
+
+        let stats = self.get_cluster_stats();
+        let dense_indices: Vec<usize> = stats
+            .iter()
+            .filter(|s| s.count > threshold)
+            .map(|s| s.cluster_id)
+            .collect();
+
+        if dense_indices.is_empty() {
+            return Ok(0);
+        }
+
+        let mut additional_clusters = 0;
+        let mut new_centroids = Vec::new();
+        let mut new_inverted_lists = Vec::new();
+
+        for i in 0..self.centroids.len() {
+            if dense_indices.contains(&i) {
+                let list = std::mem::take(&mut self.inverted_lists[i]);
+                if list.len() < 2 {
+                    // Cannot split
+                    new_centroids.push(self.centroids[i].clone());
+                    new_inverted_lists.push(list);
+                    continue;
+                }
+
+                // Perform k=2 split
+                let (c1, l1, c2, l2) = self.split_cluster_kmeans_k2(list)?;
+                new_centroids.push(c1);
+                new_inverted_lists.push(l1);
+                new_centroids.push(c2);
+                new_inverted_lists.push(l2);
+                additional_clusters += 1;
+            } else {
+                new_centroids.push(self.centroids[i].clone());
+                new_inverted_lists.push(std::mem::take(&mut self.inverted_lists[i]));
+            }
+        }
+
+        self.centroids = new_centroids;
+        self.inverted_lists = new_inverted_lists;
+        self.index_config.n_clusters = self.centroids.len();
+
+        Ok(additional_clusters)
+    }
+
+    /// Split a cluster into two using K-means.
+    fn split_cluster_kmeans_k2(
+        &self,
+        vectors: Vec<(u64, String, Vector)>,
+    ) -> Result<(
+        Vector,
+        Vec<(u64, String, Vector)>,
+        Vector,
+        Vec<(u64, String, Vector)>,
+    )> {
+        use rand::prelude::*;
+        let mut rng = rand::rng();
+
+        // Pick two initial centroids
+        let idx1 = rng.random_range(0..vectors.len());
+        let mut idx2 = rng.random_range(0..vectors.len());
+        while idx1 == idx2 && vectors.len() > 1 {
+            idx2 = rng.random_range(0..vectors.len());
+        }
+
+        let mut c1 = vectors[idx1].2.clone();
+        let mut c2 = vectors[idx2].2.clone();
+
+        let mut l1 = Vec::new();
+        let mut l2 = Vec::new();
+
+        // Simple 10 iterations of K-means
+        for _ in 0..10 {
+            l1.clear();
+            l2.clear();
+
+            for (_, _, vec) in &vectors {
+                let d1 = self
+                    .index_config
+                    .distance_metric
+                    .distance(&vec.data, &c1.data)
+                    .unwrap_or(f32::INFINITY);
+                let d2 = self
+                    .index_config
+                    .distance_metric
+                    .distance(&vec.data, &c2.data)
+                    .unwrap_or(f32::INFINITY);
+
+                if d1 < d2 {
+                    l1.push((0, String::new(), vec.clone())); // We'll restore the actual IDs later
+                } else {
+                    l2.push((0, String::new(), vec.clone()));
+                }
+            }
+
+            // Update centroids
+            if !l1.is_empty() {
+                c1 = self.calculate_mean_vector(&l1);
+            }
+            if !l2.is_empty() {
+                c2 = self.calculate_mean_vector(&l2);
+            }
+        }
+
+        // Final assignment with original vectors to preserve IDs
+        l1.clear();
+        l2.clear();
+        for item in vectors {
+            let d1 = self
+                .index_config
+                .distance_metric
+                .distance(&item.2.data, &c1.data)
+                .unwrap_or(f32::INFINITY);
+            let d2 = self
+                .index_config
+                .distance_metric
+                .distance(&item.2.data, &c2.data)
+                .unwrap_or(f32::INFINITY);
+
+            if d1 < d2 {
+                l1.push(item);
+            } else {
+                l2.push(item);
+            }
+        }
+
+        Ok((c1, l1, c2, l2))
+    }
+
+    /// Calculate the mean vector for a list of vectors.
+    fn calculate_mean_vector(&self, list: &[(u64, String, Vector)]) -> Vector {
+        let dim = self.index_config.dimension;
+        let mut sum = vec![0.0; dim];
+        for (_, _, vec) in list {
+            for (j, &val) in vec.data.iter().enumerate() {
+                sum[j] += val;
+            }
+        }
+        let data: Vec<f32> = sum.iter().map(|&s| s / list.len() as f32).collect();
+        Vector::new(data)
+    }
+}
+
 impl VectorIndexWriter for IvfIndexWriter {
     fn next_vector_id(&self) -> u64 {
         self.next_vec_id
@@ -623,12 +906,23 @@ impl VectorIndexWriter for IvfIndexWriter {
             ));
         }
 
-        // IVF optimization could include:
-        // 1. Rebalancing clusters if they're too uneven
-        // 2. Memory compaction
-        // 3. Quantization of vectors within clusters
-
         println!("Optimizing IVF index...");
+
+        // Rebalance clusters if they're too uneven
+        let total_vectors = self.vectors.len();
+        let avg_vectors_per_cluster = total_vectors / self.index_config.n_clusters.max(1);
+        let sparse_threshold = avg_vectors_per_cluster / 4;
+        let dense_threshold = avg_vectors_per_cluster * 4;
+
+        let merged = self.merge_sparse_clusters(sparse_threshold.max(2))?;
+        if merged > 0 {
+            println!("Merged {} sparse clusters", merged);
+        }
+
+        let split = self.split_dense_clusters(dense_threshold)?;
+        if split > 0 {
+            println!("Split {} dense clusters", split);
+        }
 
         // For now, just compact memory
         self.vectors.shrink_to_fit();

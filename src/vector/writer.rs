@@ -128,9 +128,9 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     ///
     /// This method finalizes the index and writes it to storage.
     /// After commit, all changes are persisted and visible to readers.
-    fn commit(&mut self) -> Result<()> {
+    fn commit(&mut self, path: &str) -> Result<()> {
         self.finalize()?;
-        self.write("default_index")
+        self.write(path)
     }
 
     /// Rollback pending changes.

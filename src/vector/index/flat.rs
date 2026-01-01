@@ -49,6 +49,9 @@ impl Default for IndexMetadata {
 
 /// A concrete flat vector index implementation.
 pub struct FlatIndex {
+    /// The name of the index.
+    name: String,
+
     /// The storage backend.
     storage: Arc<dyn Storage>,
 
@@ -65,6 +68,7 @@ pub struct FlatIndex {
 impl std::fmt::Debug for FlatIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlatIndex")
+            .field("name", &self.name)
             .field("storage", &self.storage)
             .field("config", &self.config)
             .field("closed", &self.closed.load(Ordering::SeqCst))
@@ -75,13 +79,14 @@ impl std::fmt::Debug for FlatIndex {
 
 impl FlatIndex {
     /// Create a new flat index in the given storage.
-    pub fn create(storage: Arc<dyn Storage>, config: FlatIndexConfig) -> Result<Self> {
+    pub fn create(storage: Arc<dyn Storage>, name: &str, config: FlatIndexConfig) -> Result<Self> {
         let metadata = IndexMetadata {
             dimension: config.dimension,
             ..Default::default()
         };
 
         let index = FlatIndex {
+            name: name.to_string(),
             storage,
             config,
             closed: AtomicBool::new(false),
@@ -93,14 +98,16 @@ impl FlatIndex {
     }
 
     /// Open an existing flat index from storage.
-    pub fn open(storage: Arc<dyn Storage>, config: FlatIndexConfig) -> Result<Self> {
-        if !storage.file_exists("metadata.json") {
+    pub fn open(storage: Arc<dyn Storage>, name: &str, config: FlatIndexConfig) -> Result<Self> {
+        let metadata_file = format!("{}.json", name);
+        if !storage.file_exists(&metadata_file) {
             return Err(SarissaError::index("Index does not exist"));
         }
 
-        let metadata = Self::read_metadata(storage.as_ref())?;
+        let metadata = Self::read_metadata(storage.as_ref(), name)?;
 
         Ok(FlatIndex {
+            name: name.to_string(),
             storage,
             config,
             closed: AtomicBool::new(false),
@@ -109,21 +116,25 @@ impl FlatIndex {
     }
 
     /// Create an index in a directory.
-    pub fn create_in_dir<P: AsRef<Path>>(dir: P, config: FlatIndexConfig) -> Result<Self> {
+    pub fn create_in_dir<P: AsRef<Path>>(
+        dir: P,
+        name: &str,
+        config: FlatIndexConfig,
+    ) -> Result<Self> {
         use crate::storage::file::{FileStorage, FileStorageConfig};
 
         let storage_config = FileStorageConfig::new(&dir);
         let storage = Arc::new(FileStorage::new(&dir, storage_config)?);
-        Self::create(storage, config)
+        Self::create(storage, name, config)
     }
 
     /// Open an index from a directory.
-    pub fn open_dir<P: AsRef<Path>>(dir: P, config: FlatIndexConfig) -> Result<Self> {
+    pub fn open_dir<P: AsRef<Path>>(dir: P, name: &str, config: FlatIndexConfig) -> Result<Self> {
         use crate::storage::file::{FileStorage, FileStorageConfig};
 
         let storage_config = FileStorageConfig::new(&dir);
         let storage = Arc::new(FileStorage::new(&dir, storage_config)?);
-        Self::open(storage, config)
+        Self::open(storage, name, config)
     }
 
     /// Write metadata to storage.
@@ -136,7 +147,8 @@ impl FlatIndex {
             .map_err(|e| SarissaError::index(format!("Failed to serialize metadata: {e}")))?;
         drop(metadata);
 
-        let mut output = self.storage.create_output("metadata.json")?;
+        let metadata_file = format!("{}.json", self.name);
+        let mut output = self.storage.create_output(&metadata_file)?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
         output.close()?;
 
@@ -144,8 +156,9 @@ impl FlatIndex {
     }
 
     /// Read metadata from storage.
-    fn read_metadata(storage: &dyn Storage) -> Result<IndexMetadata> {
-        let input = storage.open_input("metadata.json")?;
+    fn read_metadata(storage: &dyn Storage, name: &str) -> Result<IndexMetadata> {
+        let metadata_file = format!("{}.json", name);
+        let input = storage.open_input(&metadata_file)?;
         let metadata: IndexMetadata = serde_json::from_reader(input)
             .map_err(|e| SarissaError::index(format!("Failed to deserialize metadata: {e}")))?;
         Ok(metadata)
@@ -183,13 +196,9 @@ impl VectorIndex for FlatIndex {
 
         use crate::vector::index::flat::reader::FlatVectorIndexReader;
 
-        // Load the index data from storage
-        // For now, use a default path. In the future, this should be configurable.
-        let reader = FlatVectorIndexReader::load(
-            &*self.storage,
-            "default_index",
-            self.config.distance_metric,
-        )?;
+        // Load the index data from storage using the index name
+        let reader =
+            FlatVectorIndexReader::load(&*self.storage, &self.name, self.config.distance_metric)?;
         Ok(Arc::new(reader))
     }
 
