@@ -22,7 +22,7 @@ use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 use sarissa::embedding::embedder::{EmbedInput, Embedder};
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
-use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
+use sarissa::embedding::openai_embedder::OpenAIEmbedder;
 
 #[cfg(all(feature = "embeddings-candle", feature = "embeddings-openai"))]
 #[tokio::main]
@@ -42,7 +42,7 @@ async fn main() -> sarissa::error::Result<()> {
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
         println!("Loading OpenAI embedder (cloud)...");
         let openai_embedder =
-            OpenAITextEmbedder::new(api_key, "text-embedding-3-small".to_string())?;
+            OpenAIEmbedder::new(api_key, "text-embedding-3-small".to_string()).await?;
         embedders.push(Arc::new(openai_embedder));
         println!("✓ OpenAI embedder loaded\n");
     } else {

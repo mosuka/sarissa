@@ -409,14 +409,15 @@ sarissa = { version = "0.1", features = ["embeddings-openai"] }
 ```
 
 ```rust
-use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
-use sarissa::embedding::text_embedder::TextEmbedder;
+use sarissa::embedding::openai_embedder::OpenAIEmbedder;
+use sarissa::embedding::embedder::Embedder;
+use std::sync::Arc;
 
 // Initialize with API key
-let embedder = OpenAITextEmbedder::new(
-    "your-api-key".to_string(),
+let embedder = Arc::new(OpenAIEmbedder::new(
+    "sk-proj-...".to_string(),
     "text-embedding-3-small".to_string()
-)?;
+)?);
 
 // Generate embeddings
 let vector = embedder.embed("your text here").await?;
