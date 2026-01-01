@@ -18,7 +18,7 @@
 #[cfg(feature = "embeddings-openai")]
 use sarissa::embedding::embedder::{EmbedInput, Embedder};
 #[cfg(feature = "embeddings-openai")]
-use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
+use sarissa::embedding::openai_embedder::OpenAIEmbedder;
 
 #[cfg(feature = "embeddings-openai")]
 #[tokio::main]
@@ -35,7 +35,7 @@ async fn main() -> sarissa::error::Result<()> {
 
     // Create embedder with text-embedding-3-small model
     println!("Creating OpenAI embedder with model: text-embedding-3-small");
-    let embedder = OpenAITextEmbedder::new(api_key, "text-embedding-3-small".to_string())?;
+    let embedder = OpenAIEmbedder::new(api_key, "text-embedding-3-small".to_string()).await?;
 
     println!("Embedder created successfully!");
     println!("Model name: {}", embedder.name());
@@ -113,7 +113,7 @@ async fn main() -> sarissa::error::Result<()> {
     println!("Creating embedder with reduced dimension (512 instead of 1536)");
     let api_key2 = std::env::var("OPENAI_API_KEY").unwrap();
     let custom_embedder =
-        OpenAITextEmbedder::with_dimension(api_key2, "text-embedding-3-small".to_string(), 512)?;
+        OpenAIEmbedder::with_dimension(api_key2, "text-embedding-3-small".to_string(), 512).await?;
 
     let text = "Smaller embeddings save storage and costs";
     println!("Text: \"{}\"", text);

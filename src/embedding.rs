@@ -19,7 +19,7 @@ pub mod candle_bert_embedder;
 
 // OpenAI implementation (requires feature flag)
 #[cfg(feature = "embeddings-openai")]
-pub mod openai_text_embedder;
+pub mod openai_embedder;
 
 // Multimodal embedding (requires embeddings-multimodal feature flag)
 #[cfg(feature = "embeddings-multimodal")]

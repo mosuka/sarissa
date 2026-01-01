@@ -49,10 +49,10 @@ struct EmbeddingData {
     embedding: Vec<f32>,
 }
 
-/// OpenAI API-based text embedder.
+/// OpenAI API-based embedder.
 ///
 /// This embedder uses OpenAI's Embeddings API to generate high-quality
-/// text embeddings. Requires an API key and internet connection.
+/// embeddings. Requires an API key and internet connection.
 ///
 /// # Features
 ///
@@ -70,14 +70,14 @@ struct EmbeddingData {
 ///
 /// ```no_run
 /// use sarissa::embedding::embedder::{Embedder, EmbedInput};
-/// use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
+/// use sarissa::embedding::openai_embedder::OpenAIEmbedder;
 ///
 /// # async fn example() -> sarissa::error::Result<()> {
 /// // Create embedder with API key
-/// let embedder = OpenAITextEmbedder::new(
+/// let embedder = OpenAIEmbedder::new(
 ///     std::env::var("OPENAI_API_KEY").unwrap(),
 ///     "text-embedding-3-small".to_string()
-/// )?;
+/// ).await?;
 ///
 /// // Generate embedding
 /// let vector = embedder.embed(&EmbedInput::Text("Rust is awesome!")).await?;
@@ -89,7 +89,7 @@ struct EmbeddingData {
 /// # }
 /// ```
 #[cfg(feature = "embeddings-openai")]
-pub struct OpenAITextEmbedder {
+pub struct OpenAIEmbedder {
     /// HTTP client for making API requests.
     client: Client,
     /// OpenAI API key for authentication.
@@ -101,9 +101,9 @@ pub struct OpenAITextEmbedder {
 }
 
 #[cfg(feature = "embeddings-openai")]
-impl std::fmt::Debug for OpenAITextEmbedder {
+impl std::fmt::Debug for OpenAIEmbedder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenAITextEmbedder")
+        f.debug_struct("OpenAIEmbedder")
             .field("model", &self.model)
             .field("dimension", &self.dimension)
             .finish()
@@ -111,65 +111,68 @@ impl std::fmt::Debug for OpenAITextEmbedder {
 }
 
 #[cfg(feature = "embeddings-openai")]
-impl OpenAITextEmbedder {
+impl OpenAIEmbedder {
     /// Create a new OpenAI embedder.
+    ///
+    /// Validates the API key and model availability by making a request to OpenAI's API.
     ///
     /// # Arguments
     ///
     /// * `api_key` - OpenAI API key (get from https://platform.openai.com/api-keys)
     /// * `model` - Model name to use
     ///
-    /// # Supported Models
-    ///
-    /// - `text-embedding-3-small` - 1536 dimensions, fast and cost-effective
-    /// - `text-embedding-3-large` - 3072 dimensions, highest quality
-    /// - `text-embedding-ada-002` - 1536 dimensions, legacy model
-    ///
     /// # Returns
     ///
-    /// A new `OpenAITextEmbedder` instance
+    /// A new `OpenAIEmbedder` instance if validation succeeds.
     ///
     /// # Errors
     ///
-    /// Returns an error if the model name is not recognized
+    /// Returns an error if:
+    /// - The API key is invalid
+    /// - The model does not exist or is not available
+    /// - Network request fails
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
+    /// use sarissa::embedding::openai_embedder::OpenAIEmbedder;
     ///
-    /// # fn example() -> sarissa::error::Result<()> {
+    /// # async fn example() -> sarissa::error::Result<()> {
     /// // Small model (recommended for most use cases)
-    /// let embedder = OpenAITextEmbedder::new(
+    /// let embedder = OpenAIEmbedder::new(
     ///     "sk-...".to_string(),
     ///     "text-embedding-3-small".to_string()
-    /// )?;
-    ///
-    /// // Large model (best quality)
-    /// let embedder = OpenAITextEmbedder::new(
-    ///     "sk-...".to_string(),
-    ///     "text-embedding-3-large".to_string()
-    /// )?;
+    /// ).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(api_key: String, model: String) -> Result<Self> {
-        // Validate model
-        match model.as_str() {
-            "text-embedding-3-small" | "text-embedding-3-large" | "text-embedding-ada-002" => {}
-            _ => {
-                return Err(SarissaError::InvalidOperation(format!(
-                    "Unknown OpenAI embedding model: {}. Supported models: \
-                     text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002",
-                    model
-                )));
-            }
+    pub async fn new(api_key: String, model: String) -> Result<Self> {
+        let client = Client::new();
+
+        // Validate model existence via API
+        let url = format!("https://api.openai.com/v1/models/{}", model);
+        let response = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .send()
+            .await
+            .map_err(|e| {
+                SarissaError::InvalidOperation(format!("Failed to connect to OpenAI API: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(SarissaError::InvalidOperation(format!(
+                "Failed to validate OpenAI model '{}'. Status: {}. Response: {}",
+                model, status, text
+            )));
         }
 
         let dimension = Self::default_dimension(&model);
 
         Ok(Self {
-            client: Client::new(),
+            client,
             api_key,
             model,
             dimension,
@@ -179,6 +182,7 @@ impl OpenAITextEmbedder {
     /// Create an embedder with a custom dimension.
     ///
     /// OpenAI's newer models support custom dimensions for reduced cost and storage.
+    /// Validates the API key and model availability via API.
     ///
     /// # Arguments
     ///
@@ -189,25 +193,28 @@ impl OpenAITextEmbedder {
     /// # Examples
     ///
     /// ```no_run
-    /// use sarissa::embedding::openai_text_embedder::OpenAITextEmbedder;
+    /// use sarissa::embedding::openai_embedder::OpenAIEmbedder;
     ///
-    /// # fn example() -> sarissa::error::Result<()> {
+    /// # async fn example() -> sarissa::error::Result<()> {
     /// // Use smaller dimension for cost savings
-    /// let embedder = OpenAITextEmbedder::with_dimension(
+    /// let embedder = OpenAIEmbedder::with_dimension(
     ///     "sk-...".to_string(),
     ///     "text-embedding-3-small".to_string(),
     ///     512  // Reduced from 1536
-    /// )?;
+    /// ).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_dimension(api_key: String, model: String, dimension: usize) -> Result<Self> {
-        Ok(Self {
-            client: Client::new(),
-            api_key,
-            model,
-            dimension,
-        })
+    pub async fn with_dimension(api_key: String, model: String, dimension: usize) -> Result<Self> {
+        // Reuse validation logic from new() by calling it and then modifying the dimension
+        // This is slightly inefficient as it creates a client twice, but clean for now.
+        // Alternatively, refactor validation into a private helper.
+        // For simplicity, let's just duplicate the validation logic or better yet,
+        // extract validation to a helper. Given constraints, let's reuse new().
+
+        let mut embedder = Self::new(api_key, model).await?;
+        embedder.dimension = dimension;
+        Ok(embedder)
     }
 
     /// Get the default dimension for a given model.
@@ -344,7 +351,7 @@ impl OpenAITextEmbedder {
 
 #[cfg(feature = "embeddings-openai")]
 #[async_trait]
-impl Embedder for OpenAITextEmbedder {
+impl Embedder for OpenAIEmbedder {
     /// Generate an embedding vector for the given input.
     ///
     /// Only text input is supported. Image input will return an error.
@@ -352,7 +359,7 @@ impl Embedder for OpenAITextEmbedder {
         match input {
             EmbedInput::Text(text) => self.embed_text(text).await,
             _ => Err(SarissaError::invalid_argument(
-                "OpenAITextEmbedder only supports text input",
+                "OpenAIEmbedder only supports text input",
             )),
         }
     }
@@ -368,7 +375,7 @@ impl Embedder for OpenAITextEmbedder {
             .map(|input| match input {
                 EmbedInput::Text(text) => Ok(*text),
                 _ => Err(SarissaError::invalid_argument(
-                    "OpenAITextEmbedder only supports text input",
+                    "OpenAIEmbedder only supports text input",
                 )),
             })
             .collect::<Result<Vec<_>>>()?;
@@ -378,7 +385,7 @@ impl Embedder for OpenAITextEmbedder {
 
     /// Get the supported input types.
     ///
-    /// OpenAITextEmbedder only supports text input.
+    /// OpenAIEmbedder only supports text input.
     fn supported_input_types(&self) -> Vec<EmbedInputType> {
         vec![EmbedInputType::Text]
     }
