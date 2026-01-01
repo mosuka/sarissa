@@ -16,16 +16,14 @@ use crate::vector::writer::VectorIndexWriter;
 pub struct LegacyVectorFieldWriter<W: VectorIndexWriter> {
     field_name: String,
     writer: Mutex<W>,
-    path: Option<String>,
 }
 
 impl<W: VectorIndexWriter> LegacyVectorFieldWriter<W> {
     /// Create a new adapter for the provided field name and index writer.
-    pub fn new(field_name: impl Into<String>, writer: W, path: Option<String>) -> Self {
+    pub fn new(field_name: impl Into<String>, writer: W) -> Self {
         Self {
             field_name: field_name.into(),
             writer: Mutex::new(writer),
-            path,
         }
     }
 
@@ -103,9 +101,7 @@ where
     }
 
     fn flush(&self) -> Result<()> {
-        if let Some(path) = &self.path {
-            self.writer.lock().commit(path)?;
-        }
+        self.writer.lock().commit()?;
         Ok(())
     }
 }
@@ -195,26 +191,30 @@ mod tests {
         let mut config = FlatIndexConfig::default();
         config.dimension = 2;
         config.normalize_vectors = false;
-        FlatIndexWriter::new(config, VectorIndexWriterConfig::default()).unwrap()
+        config.dimension = 2;
+        config.normalize_vectors = false;
+        FlatIndexWriter::new(config, VectorIndexWriterConfig::default(), "test_flat").unwrap()
     }
 
     fn hnsw_writer() -> HnswIndexWriter {
         let mut config = HnswIndexConfig::default();
         config.dimension = 2;
         config.normalize_vectors = false;
-        HnswIndexWriter::new(config, VectorIndexWriterConfig::default()).unwrap()
+        HnswIndexWriter::new(config, VectorIndexWriterConfig::default(), "test_hnsw").unwrap()
     }
 
     fn ivf_writer() -> IvfIndexWriter {
         let mut config = IvfIndexConfig::default();
         config.dimension = 2;
         config.normalize_vectors = false;
-        IvfIndexWriter::new(config, VectorIndexWriterConfig::default()).unwrap()
+        config.dimension = 2;
+        config.normalize_vectors = false;
+        IvfIndexWriter::new(config, VectorIndexWriterConfig::default(), "test_ivf").unwrap()
     }
 
     #[test]
     fn test_adapter_flat() {
-        let adapter = LegacyVectorFieldWriter::new("body", flat_writer(), None);
+        let adapter = LegacyVectorFieldWriter::new("body", flat_writer());
         assert_eq!(adapter.field_name(), "body");
         assert!(!adapter.has_storage());
     }
@@ -224,19 +224,19 @@ mod tests {
         // For HNSW, we need to handle HnswIndexWriter type availability if feature gated?
         // Assuming HnswIndexWriter is available since we are editing it.
         // But the test helper hnsw_writer() logic is hidden.
-        let adapter = LegacyVectorFieldWriter::new("body", hnsw_writer(), None);
+        let adapter = LegacyVectorFieldWriter::new("body", hnsw_writer());
         assert_eq!(adapter.field_name(), "body");
     }
 
     #[test]
     fn test_adapter_ivf() {
-        let adapter = LegacyVectorFieldWriter::new("body", ivf_writer(), None);
+        let adapter = LegacyVectorFieldWriter::new("body", ivf_writer());
         assert_eq!(adapter.field_name(), "body");
     }
 
     #[test]
     fn test_adapter_deletion_error_handling() {
-        let adapter = LegacyVectorFieldWriter::new("body", flat_writer(), None);
+        let adapter = LegacyVectorFieldWriter::new("body", flat_writer());
         let vector = sample_stored_vector();
 
         adapter.add_stored_vector(3, &vector, 1).unwrap();
@@ -246,20 +246,8 @@ mod tests {
     }
 
     #[test]
-    fn adapter_supports_ivf_writer() {
-        let adapter = LegacyVectorFieldWriter::new("body", ivf_writer(), None);
-        let vector = sample_stored_vector();
-
-        adapter.add_stored_vector(11, &vector, 1).unwrap();
-
-        let pending = adapter.pending_vectors();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].0, 11);
-    }
-
-    #[test]
     fn adapter_stores_vector_with_correct_doc_id() {
-        let adapter = LegacyVectorFieldWriter::new("body", flat_writer(), None);
+        let adapter = LegacyVectorFieldWriter::new("body", flat_writer());
         let mut vector = sample_stored_vector();
         vector.weight = 2.5;
 

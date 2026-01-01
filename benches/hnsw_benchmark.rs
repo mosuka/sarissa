@@ -6,6 +6,8 @@ use sarissa::vector::core::distance::DistanceMetric;
 use sarissa::vector::core::vector::Vector;
 use sarissa::vector::index::ManagedVectorIndex;
 use sarissa::vector::index::config::{HnswIndexConfig, VectorIndexTypeConfig};
+use sarissa::vector::index::hnsw::writer::HnswIndexWriter;
+use sarissa::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 fn generate_random_vector(dim: usize) -> Vector {
     let mut rng = rand::rng();
@@ -43,7 +45,8 @@ fn bench_hnsw_construction(c: &mut Criterion) {
                     ..Default::default()
                 };
                 let type_config = VectorIndexTypeConfig::HNSW(config);
-                let mut index = ManagedVectorIndex::new(type_config, storage).unwrap();
+                let mut index =
+                    ManagedVectorIndex::new(type_config, storage, "bench_vectors").unwrap();
 
                 // Clone vectors for each iteration because add_vectors takes ownership? No, it takes Vec
                 // Actually add_vectors takes Vec.
@@ -74,11 +77,15 @@ fn bench_hnsw_search(c: &mut Criterion) {
         distance_metric: DistanceMetric::Cosine,
         ..Default::default()
     };
-    let type_config = VectorIndexTypeConfig::HNSW(config);
-    let mut index = ManagedVectorIndex::new(type_config, storage).unwrap();
+    let type_config = VectorIndexTypeConfig::HNSW(config.clone());
+    let mut index = ManagedVectorIndex::new(type_config, storage, "bench_vectors_search").unwrap();
     index.add_vectors(vectors).unwrap();
     index.finalize().unwrap();
-    index.write("bench_search_idx").unwrap();
+
+    // New persistence mechanism
+    let writer_config = VectorIndexWriterConfig::default();
+    let mut writer = HnswIndexWriter::new(config, writer_config, "bench_vectors_hnsw").unwrap();
+    let _ = writer.commit().unwrap();
 
     let reader = index.reader().unwrap();
 

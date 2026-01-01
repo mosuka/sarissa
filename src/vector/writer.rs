@@ -112,7 +112,7 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
 
     /// Write the index to storage.
     /// This method must be called after finalize() to persist the index.
-    fn write(&self, path: &str) -> Result<()>;
+    fn write(&self) -> Result<()>;
 
     /// Check if this writer has storage configured.
     fn has_storage(&self) -> bool;
@@ -126,9 +126,9 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     ///
     /// This method finalizes the index and writes it to storage.
     /// After commit, all changes are persisted and visible to readers.
-    fn commit(&mut self, path: &str) -> Result<()> {
+    fn commit(&mut self) -> Result<()> {
         self.finalize()?;
-        self.write(path)
+        self.write()
     }
 
     /// Rollback pending changes.

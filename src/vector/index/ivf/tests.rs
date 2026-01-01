@@ -21,7 +21,9 @@ mod tests {
         };
         let writer_config = VectorIndexWriterConfig::default();
 
-        let mut writer = IvfIndexWriter::with_storage(config, writer_config, storage).unwrap();
+        let mut writer =
+            IvfIndexWriter::with_storage(config, writer_config, "test_ivf_vectors", storage)
+                .unwrap();
 
         // Create imbalanced clusters
         // Cluster 0: 1 vector (sparse)

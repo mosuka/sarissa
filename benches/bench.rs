@@ -140,7 +140,7 @@ fn bench_vector_search(c: &mut Criterion) {
                     ..Default::default()
                 };
                 let writer_config = sarissa::vector::writer::VectorIndexWriterConfig::default();
-                HnswIndexWriter::new(index_config, writer_config).unwrap()
+                HnswIndexWriter::new(index_config, writer_config, "bench_vectors").unwrap()
             },
             |mut builder| {
                 let field_name = "default".to_string();
@@ -338,7 +338,12 @@ fn bench_scalability(c: &mut Criterion) {
                         };
                         let writer_config =
                             sarissa::vector::writer::VectorIndexWriterConfig::default();
-                        HnswIndexWriter::new(index_config, writer_config).unwrap()
+                        HnswIndexWriter::new(
+                            index_config,
+                            writer_config,
+                            "bench_scalability_vectors",
+                        )
+                        .unwrap()
                     },
                     |mut builder| {
                         let field_name = "default".to_string();

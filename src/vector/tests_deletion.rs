@@ -11,14 +11,15 @@ mod tests {
     fn test_vector_deletion() {
         // Test FlatIndexWriter deletion
         let storage = Arc::new(MemoryStorage::default());
-        let index_config = FlatIndexConfig {
+        let config = FlatIndexConfig {
             dimension: 3,
             ..FlatIndexConfig::default()
         };
         let writer_config = VectorIndexWriterConfig::default();
 
         let mut writer =
-            FlatIndexWriter::with_storage(index_config, writer_config, storage).unwrap();
+            FlatIndexWriter::with_storage(config, writer_config, "test_deletion_vectors", storage)
+                .unwrap();
 
         // Add 3 vectors
         let vectors = vec![
