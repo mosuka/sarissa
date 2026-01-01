@@ -435,13 +435,13 @@ impl VectorCollection {
                     distance_metric: config.distance,
                     ..FlatIndexConfig::default()
                 };
-                let writer =
-                    FlatIndexWriter::with_storage(flat, writer_config.clone(), storage.clone())?;
-                Arc::new(LegacyVectorFieldWriter::new(
-                    field_name.to_string(),
-                    writer,
-                    Some("vectors.index".to_string()),
-                ))
+                let writer = FlatIndexWriter::with_storage(
+                    flat,
+                    writer_config.clone(),
+                    "vectors.index",
+                    storage.clone(),
+                )?;
+                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
             }
             VectorIndexKind::Hnsw => {
                 let hnsw = HnswIndexConfig {
@@ -449,13 +449,13 @@ impl VectorCollection {
                     distance_metric: config.distance,
                     ..HnswIndexConfig::default()
                 };
-                let writer =
-                    HnswIndexWriter::with_storage(hnsw, writer_config.clone(), storage.clone())?;
-                Arc::new(LegacyVectorFieldWriter::new(
-                    field_name.to_string(),
-                    writer,
-                    Some("vectors.index".to_string()),
-                ))
+                let writer = HnswIndexWriter::with_storage(
+                    hnsw,
+                    writer_config.clone(),
+                    "vectors.index",
+                    storage.clone(),
+                )?;
+                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
             }
             VectorIndexKind::Ivf => {
                 let ivf = IvfIndexConfig {
@@ -463,12 +463,9 @@ impl VectorCollection {
                     distance_metric: config.distance,
                     ..IvfIndexConfig::default()
                 };
-                let writer = IvfIndexWriter::with_storage(ivf, writer_config, storage)?;
-                Arc::new(LegacyVectorFieldWriter::new(
-                    field_name.to_string(),
-                    writer,
-                    Some("vectors.index".to_string()),
-                ))
+                let writer =
+                    IvfIndexWriter::with_storage(ivf, writer_config, "vectors.index", storage)?;
+                Arc::new(LegacyVectorFieldWriter::new(field_name.to_string(), writer))
             }
         };
         Ok(Some(delegate))
@@ -498,12 +495,13 @@ impl VectorCollection {
                 let mut writer = FlatIndexWriter::with_storage(
                     flat,
                     VectorIndexWriterConfig::default(),
+                    FIELD_INDEX_BASENAME,
                     storage.clone(),
                 )?;
                 let vectors = pending_vectors.take().unwrap_or_default();
                 writer.build(vectors)?;
                 writer.finalize()?;
-                writer.write(FIELD_INDEX_BASENAME)?;
+                writer.write()?;
             }
             VectorIndexKind::Hnsw => {
                 let hnsw = HnswIndexConfig {
@@ -514,12 +512,13 @@ impl VectorCollection {
                 let mut writer = HnswIndexWriter::with_storage(
                     hnsw,
                     VectorIndexWriterConfig::default(),
+                    FIELD_INDEX_BASENAME,
                     storage.clone(),
                 )?;
                 let vectors = pending_vectors.take().unwrap_or_default();
                 writer.build(vectors)?;
                 writer.finalize()?;
-                writer.write(FIELD_INDEX_BASENAME)?;
+                writer.write()?;
             }
             VectorIndexKind::Ivf => {
                 let ivf = IvfIndexConfig {
@@ -530,12 +529,13 @@ impl VectorCollection {
                 let mut writer = IvfIndexWriter::with_storage(
                     ivf,
                     VectorIndexWriterConfig::default(),
+                    FIELD_INDEX_BASENAME,
                     storage.clone(),
                 )?;
                 let vectors = pending_vectors.take().unwrap_or_default();
                 writer.build(vectors)?;
                 writer.finalize()?;
-                writer.write(FIELD_INDEX_BASENAME)?;
+                writer.write()?;
             }
         }
 

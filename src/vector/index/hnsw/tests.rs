@@ -40,7 +40,7 @@ mod tests {
         // Note: commit is handled by VectorIndexWriter trait default which calls write("default_index")
         // Since we are using HnswIndexWriter directly via trait object or concrete?
         // index.writer() returns Box<dyn VectorIndexWriter>.
-        writer.commit("default_index")?;
+        writer.commit()?;
 
         // Read back
         let reader = index.reader()?;

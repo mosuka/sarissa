@@ -11,6 +11,7 @@ use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::io::{read_metadata, write_metadata};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 use parking_lot::RwLock;
+use rand::Rng;
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
@@ -100,10 +101,13 @@ pub struct HnswIndexWriter {
     index_config: HnswIndexConfig,
     writer_config: VectorIndexWriterConfig,
     storage: Option<Arc<dyn Storage>>,
+    path: String,
     _ml: f64, // Level normalization factor
     vectors: Vec<(u64, String, Vector)>,
     // Map from doc_id to index in vectors for fast access
-    doc_id_map: std::collections::HashMap<u64, usize>,
+    doc_id_map: HashMap<u64, usize>,
+    levels: Vec<Vec<u64>>,
+    entry_point: Option<u64>,
     graph: Option<HnswGraph>,
     is_finalized: bool,
     total_vectors_to_add: Option<usize>,
@@ -144,14 +148,21 @@ impl HnswIndexWriter {
     pub fn new(
         index_config: HnswIndexConfig,
         writer_config: VectorIndexWriterConfig,
+        path: impl Into<String>,
     ) -> Result<Self> {
+        let max_level = Self::calculate_max_level(index_config.m, index_config.ef_construction);
+        let _ml = 1.0 / (index_config.m as f64).ln();
+
         Ok(Self {
             index_config,
             writer_config,
             storage: None,
-            _ml: 1.0 / (2.0_f64).ln(), // 1/ln(2)
+            path: path.into(),
+            _ml,
+            levels: vec![Vec::new(); max_level + 1],
+            entry_point: None,
             vectors: Vec::new(),
-            doc_id_map: std::collections::HashMap::new(),
+            doc_id_map: HashMap::new(),
             graph: None,
             is_finalized: false,
             total_vectors_to_add: None,
@@ -163,15 +174,22 @@ impl HnswIndexWriter {
     pub fn with_storage(
         index_config: HnswIndexConfig,
         writer_config: VectorIndexWriterConfig,
+        path: impl Into<String>,
         storage: Arc<dyn Storage>,
     ) -> Result<Self> {
+        let max_level = Self::calculate_max_level(index_config.m, index_config.ef_construction);
+        let _ml = 1.0 / (index_config.m as f64).ln();
+
         Ok(Self {
             index_config,
             writer_config,
             storage: Some(storage),
-            _ml: 1.0 / (2.0_f64).ln(),
+            path: path.into(),
+            _ml,
+            levels: vec![Vec::new(); max_level + 1],
+            entry_point: None,
             vectors: Vec::new(),
-            doc_id_map: std::collections::HashMap::new(),
+            doc_id_map: HashMap::new(),
             graph: None,
             is_finalized: false,
             total_vectors_to_add: None,
@@ -180,12 +198,8 @@ impl HnswIndexWriter {
     }
 
     /// Convert this writer into a doc-centric field writer adapter.
-    pub fn into_field_writer(
-        self,
-        field_name: impl Into<String>,
-        path: Option<String>,
-    ) -> LegacyVectorFieldWriter<Self> {
-        LegacyVectorFieldWriter::new(field_name, self, path)
+    pub fn into_field_writer(self, field_name: impl Into<String>) -> LegacyVectorFieldWriter<Self> {
+        LegacyVectorFieldWriter::new(field_name, self)
     }
 
     /// Load an existing HNSW index from storage.
@@ -255,21 +269,33 @@ impl HnswIndexWriter {
             vectors.push((doc_id, field_name, Vector::with_metadata(values, metadata)));
         }
 
+        // Rebuild doc_id_map
+        let mut doc_id_map = HashMap::new();
+        for (i, (doc_id, _, _)) in vectors.iter().enumerate() {
+            doc_id_map.insert(*doc_id, i);
+        }
+
         // Calculate next_vec_id from loaded vectors
         let max_id = vectors.iter().map(|(id, _, _)| *id).max().unwrap_or(0);
         let next_vec_id = if num_vectors > 0 { max_id + 1 } else { 0 };
+
+        let max_level = Self::calculate_max_level(index_config.m, index_config.ef_construction);
+        let _ml = 1.0 / (index_config.m as f64).ln();
 
         Ok(Self {
             index_config,
             writer_config,
             storage: Some(storage),
-            _ml: 1.0 / (2.0_f64).ln(),
+            path: path.to_string(),
+            _ml,
+            levels: vec![Vec::new(); max_level + 1], // TODO: Load levels from disk
+            entry_point: None,                       // TODO: Load entry point from disk
             vectors,
             is_finalized: true,
             total_vectors_to_add: Some(num_vectors),
             next_vec_id,
-            doc_id_map: std::collections::HashMap::new(), // TODO: populate if needed for append
-            graph: None,                                  // TODO: Load graph if needed for append
+            doc_id_map,
+            graph: None, // TODO: Load graph if needed for append
         })
     }
 
@@ -288,22 +314,41 @@ impl HnswIndexWriter {
     /// Calculate the layer for a new vector.
     fn select_layer(&self) -> usize {
         let mut layer = 0;
-        let mut rng = rand::rng();
+        let mut rng = rand::thread_rng();
 
-        while rand::Rng::random::<f64>(&mut rng) < 0.5 && layer < 16 {
+        while rng.gen_range(0.0..1.0) < self._ml && layer < 16 {
             layer += 1;
         }
 
         layer
     }
 
+    /// Calculate the maximum level based on M and ef_construction.
+    /// This is a heuristic, often 1/ln(M) or 1/ln(2) is used for probability.
+    /// For simplicity, we can cap it or use a fixed formula.
+    /// A common formula for max_level is based on the number of elements and M.
+    /// For now, let's use a simple heuristic or a fixed max.
+    fn calculate_max_level(m: usize, _ef_construction: usize) -> usize {
+        // A common heuristic is to have max_level around log_M(N) or a fixed small number.
+        // For now, let's use a fixed small number or a simple formula.
+        // The original code used 1/ln(2) for probability, which implies levels grow with log_2(N).
+        // Let's set a reasonable cap, e.g., 16 or 32.
+        // Or, based on the probability p = 1/ln(M), the expected max level for N elements is log_p(N).
+        // For simplicity, let's use a fixed max level for now, or a simple calculation.
+        // The `select_layer` uses `1.0 / (self.index_config.m as f64).ln()` as probability.
+        // Let's assume a max level that allows for a reasonable number of layers.
+        // For example, if M=16, 1/ln(16) approx 0.36.
+        // A max level of 16-32 is common.
+        16 // A reasonable default max level
+    }
+
     /// Validate vectors before adding them.
-    fn validate_vectors(&self, vectors: &[(u64, String, Vector)]) -> Result<()> {
+    fn validate_vectors(&self, vectors: &Vec<(u64, String, Vector)>) -> Result<()> {
         if vectors.is_empty() {
             return Ok(());
         }
 
-        for (doc_id, _field_name, vector) in vectors {
+        for (doc_id, _, vector) in vectors {
             if vector.dimension() != self.index_config.dimension {
                 return Err(SarissaError::InvalidOperation(format!(
                     "Vector {} has dimension {}, expected {}",
@@ -324,14 +369,17 @@ impl HnswIndexWriter {
     }
 
     /// Normalize vectors if configured to do so.
-    fn normalize_vectors(&self, vectors: &mut [(u64, String, Vector)]) {
-        if !self.index_config.normalize_vectors {
+    /// Normalize vectors if configured to do so.
+    fn normalize_vectors_internal(
+        index_config: &HnswIndexConfig,
+        writer_config: &VectorIndexWriterConfig,
+        vectors: &mut Vec<(u64, String, Vector)>,
+    ) {
+        if !index_config.normalize_vectors {
             return;
         }
 
-        use rayon::prelude::*;
-
-        if self.writer_config.parallel_build && vectors.len() > 100 {
+        if writer_config.parallel_build && vectors.len() > 100 {
             vectors.par_iter_mut().for_each(|(_, _, vector)| {
                 vector.normalize();
             });
@@ -373,12 +421,12 @@ impl HnswIndexWriter {
 
         // 1. Assign levels to all vectors
         let mut node_levels = Vec::with_capacity(count);
-        // We can't use par_iter easily with rng unless we use thread_rng or seeded per thread
-        // Pre-calculating levels serially is fast enough.
-        for i in 0..count {
-            let (doc_id, _, _) = self.vectors[i];
+        let mut doc_ids_in_order: Vec<u64> = self.vectors.iter().map(|(id, _, _)| *id).collect();
+        doc_ids_in_order.sort_unstable(); // Ensure consistent order for level assignment
+
+        for doc_id in &doc_ids_in_order {
             let level = self.select_layer();
-            node_levels.push((doc_id, level));
+            node_levels.push((*doc_id, level));
         }
 
         let max_level = node_levels.iter().map(|(_, l)| *l).max().unwrap_or(0);
@@ -391,92 +439,103 @@ impl HnswIndexWriter {
         let graph = ConcurrentHnswGraph::new(node_levels.clone(), max_level);
 
         // 3. Parallel Insertion
-        // We iterate indices 0..count. doc_id is self.vectors[i].0.
-        // We skip the entry point during insertion as it's already "in" the graph (implicitly, via new)
-
+        // We iterate over the sorted doc_ids.
         let writer_ref = &*self; // Immutable reference for threads
 
-        // Use par_iter on indices
-        (0..count).into_par_iter().try_for_each(|i| -> Result<()> {
-            let (doc_id, _, ref vector) = writer_ref.vectors[i];
+        doc_ids_in_order
+            .into_par_iter()
+            .try_for_each(|doc_id| -> Result<()> {
+                let doc_vector_idx = *writer_ref.doc_id_map.get(&doc_id).ok_or_else(|| {
+                    SarissaError::internal(format!("Doc ID {} not found in doc_id_map", doc_id))
+                })?;
+                let vector = &writer_ref.vectors[doc_vector_idx].2;
 
-            if let Some(ep) = entry_point {
-                // If this is the entry point, it's already added.
-                if ep == doc_id {
-                    return Ok(());
-                }
+                if let Some(ep) = entry_point {
+                    // If this is the entry point, it's already added.
+                    if ep == doc_id {
+                        return Ok(());
+                    }
 
-                // Get the level assigned to this node
-                // We need to find it directly. node_levels is aligned with vectors if we iterate 0..count
-                let level = node_levels[i].1;
+                    // Get the level assigned to this node
+                    let level = node_levels
+                        .iter()
+                        .find(|(id, _)| *id == doc_id)
+                        .map(|(_, l)| *l)
+                        .unwrap_or(0);
 
-                let max_level = graph.max_level;
-                let mut curr_obj = ep;
-                let mut dist = writer_ref.calc_dist(vector, curr_obj)?;
+                    let max_level = graph.max_level;
+                    let mut curr_obj = ep;
+                    let mut dist = writer_ref.calc_dist(vector, curr_obj)?;
 
-                // 4. Search from top layer down to level + 1
-                for lc in (level + 1..=max_level).rev() {
-                    let mut changed = true;
-                    while changed {
-                        changed = false;
-                        if let Some(neighbors) = graph.get_neighbors_view(curr_obj, lc) {
-                            for neighbor_id in neighbors {
-                                let d = writer_ref.calc_dist(vector, neighbor_id)?;
-                                if d < dist {
-                                    dist = d;
-                                    curr_obj = neighbor_id;
-                                    changed = true;
+                    // 4. Search from top layer down to level + 1
+                    for lc in (level + 1..=max_level).rev() {
+                        let mut changed = true;
+                        while changed {
+                            changed = false;
+                            if let Some(neighbors) = graph.get_neighbors_view(curr_obj, lc) {
+                                for neighbor_id in neighbors {
+                                    let d = writer_ref.calc_dist(vector, neighbor_id)?;
+                                    if d < dist {
+                                        dist = d;
+                                        curr_obj = neighbor_id;
+                                        changed = true;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // 5. Search & Connect from min(max_level, level) down to 0
-                let top_level = usize::min(max_level, level);
-                for lc in (0..=top_level).rev() {
-                    // search_layer: greedy search to find ef_construction candidates
-                    let candidates =
-                        writer_ref.search_layer(&graph, curr_obj, vector, ef_construction, lc)?;
-
-                    // Select greedy neighbor as the best candidate for next layer
-                    // Note: candidates is a MAX-heap (furthest at top).
-                    // We need the nearest one to proceed to the next layer.
-                    // Since BinaryHeap doesn't support random access/min-element efficiently without draining,
-                    // and select_neighbors needs the heap, we iterate.
-                    let nearest = candidates.iter().min_by(|a, b| {
-                        a.distance
-                            .partial_cmp(&b.distance)
-                            .unwrap_or(Ordering::Equal)
-                    });
-
-                    if let Some(min_cand) = nearest {
-                        curr_obj = min_cand.id;
-                    }
-
-                    // Heuristic: select neighbors
-                    let neighbors = writer_ref.select_neighbors(&candidates, m, lc, m_max, m_max_0);
-
-                    // Add connections bidirectionally
-                    // 1. From doc_id to neighbors
-                    graph.set_neighbors(doc_id, lc, neighbors.clone());
-
-                    // 2. From neighbors to doc_id
-                    for neighbor_id in neighbors {
-                        // Add doc_id to neighbor's list and prune if necessary
-                        let current_m_max = if lc == 0 { m_max_0 } else { m_max };
-                        graph.add_neighbor_with_pruning(
-                            neighbor_id,
+                    // 5. Search & Connect from min(max_level, level) down to 0
+                    let top_level = usize::min(max_level, level);
+                    for lc in (0..=top_level).rev() {
+                        // search_layer: greedy search to find ef_construction candidates
+                        let candidates = writer_ref.search_layer(
+                            &graph,
+                            curr_obj,
+                            vector,
+                            ef_construction,
                             lc,
-                            doc_id,
-                            current_m_max,
-                            writer_ref,
                         )?;
+
+                        // Select greedy neighbor as the best candidate for next layer
+                        // Note: candidates is a MAX-heap (furthest at top).
+                        // We need the nearest one to proceed to the next layer.
+                        // Since BinaryHeap doesn't support random access/min-element efficiently without draining,
+                        // and select_neighbors needs the heap, we iterate.
+                        let nearest = candidates.iter().min_by(|a, b| {
+                            a.distance
+                                .partial_cmp(&b.distance)
+                                .unwrap_or(Ordering::Equal)
+                        });
+
+                        if let Some(min_cand) = nearest {
+                            curr_obj = min_cand.id;
+                        }
+
+                        // Heuristic: select neighbors
+                        let neighbors =
+                            writer_ref.select_neighbors(&candidates, m, lc, m_max, m_max_0);
+
+                        // Add connections bidirectionally
+                        // 1. From doc_id to neighbors
+                        graph.set_neighbors(doc_id, lc, neighbors.clone());
+
+                        // 2. From neighbors to doc_id
+                        for neighbor_id in neighbors {
+                            // Add doc_id to neighbor's list and prune if necessary
+                            let current_m_max = if lc == 0 { m_max_0 } else { m_max };
+                            graph.add_neighbor_with_pruning(
+                                neighbor_id,
+                                lc,
+                                doc_id,
+                                current_m_max,
+                                writer_ref,
+                            )?;
+                        }
                     }
                 }
-            }
-            Ok(())
-        })?;
+                Ok(())
+            })?;
 
         // 4. Convert ConcurrentGraph to HnswGraph
         // This consumes the ConcurrentGraph and creates HnswGraph
@@ -497,8 +556,16 @@ impl HnswIndexWriter {
             m_max,
             m_max_0,
             ef_construction,
-            level_mult: self._ml,
+            level_mult: 1.0 / (self.index_config.m as f64).ln(), // Use M for level_mult
         });
+        self.entry_point = entry_point; // Store entry point in writer
+        self.levels = node_levels.into_iter().fold(
+            vec![Vec::new(); max_level + 1],
+            |mut acc, (doc_id, level)| {
+                acc[level].push(doc_id);
+                acc
+            },
+        );
 
         Ok(())
     }
@@ -641,7 +708,7 @@ impl HnswIndexWriter {
 
     fn prune_neighbors(
         &self,
-        _doc_id: u64,
+        doc_id: u64,
         neighbors: Vec<u64>,
         max_conn: usize,
     ) -> Result<Vec<u64>> {
@@ -650,7 +717,8 @@ impl HnswIndexWriter {
         }
 
         // Sort by distance from doc_id
-        let doc_vec = &self.vectors[*self.doc_id_map.get(&_doc_id).unwrap()].2;
+        let idx = *self.doc_id_map.get(&doc_id).unwrap();
+        let doc_vec = &self.vectors[idx].2;
 
         let mut candidates = Vec::new();
         for nid in neighbors {
@@ -702,7 +770,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         self.next_vec_id
     }
 
-    fn build(&mut self, mut vectors: Vec<(u64, String, Vector)>) -> Result<()> {
+    fn build(&mut self, vectors: Vec<(u64, String, Vector)>) -> Result<()> {
         if self.is_finalized {
             return Err(SarissaError::InvalidOperation(
                 "Cannot build on finalized index".to_string(),
@@ -710,16 +778,22 @@ impl VectorIndexWriter for HnswIndexWriter {
         }
 
         self.validate_vectors(&vectors)?;
-        self.normalize_vectors(&mut vectors);
-
-        // Update next_vec_id
-        if let Some(max_id) = vectors.iter().map(|(id, _, _)| *id).max()
-            && max_id >= self.next_vec_id
-        {
-            self.next_vec_id = max_id + 1;
-        }
 
         self.vectors = vectors;
+        Self::normalize_vectors_internal(
+            &self.index_config,
+            &self.writer_config,
+            &mut self.vectors,
+        );
+        self.rebuild_doc_id_map();
+
+        // Update next_vec_id
+        if let Some((max_id, _, _)) = self.vectors.iter().max_by_key(|(id, _, _)| id) {
+            if *max_id >= self.next_vec_id {
+                self.next_vec_id = *max_id + 1;
+            }
+        }
+
         self.total_vectors_to_add = Some(self.vectors.len());
 
         self.check_memory_limit()?;
@@ -734,16 +808,18 @@ impl VectorIndexWriter for HnswIndexWriter {
         }
 
         self.validate_vectors(&vectors)?;
-        self.normalize_vectors(&mut vectors);
-
-        // Update next_vec_id
-        if let Some(max_id) = vectors.iter().map(|(id, _, _)| *id).max()
-            && max_id >= self.next_vec_id
-        {
-            self.next_vec_id = max_id + 1;
-        }
+        Self::normalize_vectors_internal(&self.index_config, &self.writer_config, &mut vectors);
 
         self.vectors.extend(vectors);
+        self.rebuild_doc_id_map();
+
+        // Update next_vec_id
+        if let Some((max_id, _, _)) = self.vectors.iter().max_by_key(|(id, _, _)| id) {
+            if *max_id >= self.next_vec_id {
+                self.next_vec_id = *max_id + 1;
+            }
+        }
+
         self.check_memory_limit()?;
         Ok(())
     }
@@ -783,10 +859,10 @@ impl VectorIndexWriter for HnswIndexWriter {
     fn estimated_memory_usage(&self) -> usize {
         let vector_memory = self.vectors.len()
             * (
-                8 + // doc_id
-            self.index_config.dimension * 4 + // f32 values
-            std::mem::size_of::<Vector>()
-                // Vector struct overhead
+                8 + // doc_id (tuple element)
+            32 + // field_name string overhead (approx)
+            self.index_config.dimension * 4
+                // f32 values
             );
 
         // HNSW graph overhead (rough estimate)
@@ -825,7 +901,7 @@ impl VectorIndexWriter for HnswIndexWriter {
         &self.vectors
     }
 
-    fn write(&self, path: &str) -> Result<()> {
+    fn write(&self) -> Result<()> {
         use std::io::Write;
 
         if !self.is_finalized {
@@ -840,7 +916,7 @@ impl VectorIndexWriter for HnswIndexWriter {
             .ok_or_else(|| SarissaError::InvalidOperation("No storage configured".to_string()))?;
 
         // Create the index file
-        let file_name = format!("{}.hnsw", path);
+        let file_name = format!("{}.hnsw", self.path);
         let mut output = storage.create_output(&file_name)?;
 
         // Write metadata
@@ -849,8 +925,19 @@ impl VectorIndexWriter for HnswIndexWriter {
         output.write_all(&(self.index_config.m as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.ef_construction as u32).to_le_bytes())?;
 
+        // Write vectors
+        // Note: In a real implementation, we would write the graph structure here
+        // For now, we just write the vectors like FlatIndexWriter but with HNSW metadata
+
+        // Write vector count (again? metadata above has it) - sticking to Flat format + HNSW params
+
         // Write vectors with field names and metadata
-        for (doc_id, field_name, vector) in &self.vectors {
+        // Write vectors with field names and metadata
+        // We need to iterate in some order. Sorted by doc_id is best.
+        let mut sorted_vectors: Vec<_> = self.vectors.iter().collect();
+        sorted_vectors.sort_by_key(|(doc_id, _, _)| *doc_id);
+
+        for (doc_id, field_name, vector) in sorted_vectors {
             output.write_all(&doc_id.to_le_bytes())?;
 
             // Write field name length and field name
@@ -872,11 +959,6 @@ impl VectorIndexWriter for HnswIndexWriter {
             let has_graph = 1u8;
             output.write_all(&[has_graph])?;
 
-            // Serialize graph
-            // Since HnswGraph is Serialize, we can just use serde_json or binary
-            // For efficiency, let's use serde_json for now as it's easier and we have it
-            // Or manual binary for speed. Let's use serde_json for simplicity of implementation given struct.
-            // But strict binary is better for indexes.
             // Let's stick to simple manual binary as per other parts.
 
             // Entry point

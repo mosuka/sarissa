@@ -208,6 +208,7 @@ impl VectorIndex for FlatIndex {
         let writer = FlatIndexWriter::with_storage(
             self.config.clone(),
             VectorIndexWriterConfig::default(),
+            self.name.clone(),
             self.storage.clone(),
         )?;
         Ok(Box::new(writer))

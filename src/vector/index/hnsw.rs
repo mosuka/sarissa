@@ -208,6 +208,7 @@ impl VectorIndex for HnswIndex {
         let writer = HnswIndexWriter::with_storage(
             self.config.clone(),
             VectorIndexWriterConfig::default(),
+            self.name.clone(),
             self.storage.clone(),
         )?;
         Ok(Box::new(writer))

@@ -122,8 +122,15 @@ impl ManagedVectorIndex {
     /// # Arguments
     ///
     /// * `config` - Vector index configuration including index type
+    /// * `config` - Vector index configuration including index type
     /// * `storage` - Storage backend (MemoryStorage, FileStorage, etc.)
-    pub fn new(config: VectorIndexTypeConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+    /// * `path` - Base path/name for the index files
+    pub fn new(
+        config: VectorIndexTypeConfig,
+        storage: Arc<dyn Storage>,
+        path: impl Into<String>,
+    ) -> Result<Self> {
+        let path = path.into();
         // Create builder based on config type
         let builder: Box<dyn VectorIndexWriter> = match &config {
             VectorIndexTypeConfig::Flat(flat_config) => {
@@ -131,6 +138,7 @@ impl ManagedVectorIndex {
                 Box::new(flat::writer::FlatIndexWriter::with_storage(
                     flat_config.clone(),
                     writer_config,
+                    path.clone(),
                     storage.clone(),
                 )?)
             }
@@ -139,6 +147,7 @@ impl ManagedVectorIndex {
                 Box::new(hnsw::writer::HnswIndexWriter::with_storage(
                     hnsw_config.clone(),
                     writer_config,
+                    path.clone(),
                     storage.clone(),
                 )?)
             }
@@ -147,6 +156,7 @@ impl ManagedVectorIndex {
                 Box::new(ivf::writer::IvfIndexWriter::with_storage(
                     ivf_config.clone(),
                     writer_config,
+                    path.clone(),
                     storage.clone(),
                 )?)
             }
@@ -157,7 +167,7 @@ impl ManagedVectorIndex {
             builder: Arc::new(RwLock::new(builder)),
             is_finalized: Arc::new(RwLock::new(false)),
             storage: Some(storage),
-            index_path: Arc::new(RwLock::new(None)),
+            index_path: Arc::new(RwLock::new(Some(path))),
         })
     }
 
@@ -239,7 +249,7 @@ impl ManagedVectorIndex {
 
     /// Write the index to storage.
     /// The index must be finalized before calling this method.
-    pub fn write(&self, path: &str) -> Result<()> {
+    pub fn write(&self) -> Result<()> {
         let finalized = *self.is_finalized.read().unwrap();
         if !finalized {
             return Err(SarissaError::InvalidOperation(
@@ -254,9 +264,7 @@ impl ManagedVectorIndex {
             ));
         }
 
-        builder.write(path)?;
-        // Store path for reader
-        *self.index_path.write().unwrap() = Some(path.to_string());
+        builder.write()?;
         Ok(())
     }
 

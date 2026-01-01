@@ -207,6 +207,7 @@ impl VectorIndex for IvfIndex {
         let writer = IvfIndexWriter::with_storage(
             self.config.clone(),
             VectorIndexWriterConfig::default(),
+            self.name.clone(),
             self.storage.clone(),
         )?;
         Ok(Box::new(writer))

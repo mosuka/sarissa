@@ -19,6 +19,7 @@ pub struct IvfIndexWriter {
     index_config: IvfIndexConfig,
     writer_config: VectorIndexWriterConfig,
     storage: Option<Arc<dyn Storage>>,
+    path: String,
     centroids: Vec<Vector>,                          // Cluster centroids
     inverted_lists: Vec<Vec<(u64, String, Vector)>>, // Inverted lists for each cluster
     vectors: Vec<(u64, String, Vector)>,             // All vectors (used during construction)
@@ -38,11 +39,13 @@ impl IvfIndexWriter {
     pub fn new(
         index_config: IvfIndexConfig,
         writer_config: VectorIndexWriterConfig,
+        path: impl Into<String>,
     ) -> Result<Self> {
         Ok(Self {
             index_config,
             writer_config,
             storage: None,
+            path: path.into(),
 
             centroids: Vec::new(),
             inverted_lists: Vec::new(),
@@ -57,12 +60,14 @@ impl IvfIndexWriter {
     pub fn with_storage(
         index_config: IvfIndexConfig,
         writer_config: VectorIndexWriterConfig,
+        path: impl Into<String>,
         storage: Arc<dyn Storage>,
     ) -> Result<Self> {
         Ok(Self {
             index_config,
             writer_config,
             storage: Some(storage),
+            path: path.into(),
             centroids: Vec::new(),
             inverted_lists: Vec::new(),
             vectors: Vec::new(),
@@ -73,12 +78,8 @@ impl IvfIndexWriter {
     }
 
     /// Convert this writer into a doc-centric field writer adapter.
-    pub fn into_field_writer(
-        self,
-        field_name: impl Into<String>,
-        path: Option<String>,
-    ) -> LegacyVectorFieldWriter<Self> {
-        LegacyVectorFieldWriter::new(field_name, self, path)
+    pub fn into_field_writer(self, field_name: impl Into<String>) -> LegacyVectorFieldWriter<Self> {
+        LegacyVectorFieldWriter::new(field_name, self)
     }
 
     /// Load an existing IVF index from storage.
@@ -180,6 +181,7 @@ impl IvfIndexWriter {
             index_config,
             writer_config,
             storage: Some(storage),
+            path: path.to_string(),
 
             centroids,
             inverted_lists,
@@ -942,7 +944,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         &self.vectors
     }
 
-    fn write(&self, path: &str) -> Result<()> {
+    fn write(&self) -> Result<()> {
         use std::io::Write;
 
         if !self.is_finalized {
@@ -957,7 +959,7 @@ impl VectorIndexWriter for IvfIndexWriter {
             .ok_or_else(|| SarissaError::InvalidOperation("No storage configured".to_string()))?;
 
         // Create the index file
-        let file_name = format!("{}.ivf", path);
+        let file_name = format!("{}.ivf", self.path);
         let mut output = storage.create_output(&file_name)?;
 
         // Write metadata
@@ -976,6 +978,7 @@ impl VectorIndexWriter for IvfIndexWriter {
         // Write inverted lists
         for list in &self.inverted_lists {
             output.write_all(&(list.len() as u32).to_le_bytes())?;
+
             for (doc_id, field_name, vector) in list {
                 output.write_all(&doc_id.to_le_bytes())?;
 
