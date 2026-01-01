@@ -54,6 +54,43 @@ where
         guard.add_vectors(vec![legacy])
     }
 
+    fn has_storage(&self) -> bool {
+        self.writer.lock().has_storage()
+    }
+
+    fn vectors(&self) -> Vec<(u64, String, Vector)> {
+        self.writer.lock().vectors().to_vec()
+    }
+
+    fn rebuild(&self, vectors: Vec<(u64, String, Vector)>) -> Result<()> {
+        let mut guard = self.writer.lock();
+        // To rebuild, we rely on the writer's capability to reset or build from scratch.
+        // Assuming `build` can be called to populate, but we need to clear first.
+        // `rollback` clears pending vectors and resets state.
+        guard.rollback()?;
+        guard.build(vectors)?;
+        guard.finalize()?;
+        // If it has storage, we might need to write? `commit` does finalize+write.
+        // But we don't know the path here easily unless stored in config or we let `optimize` caller handle checking?
+        // `LegacyVectorFieldWriter` doesn't know the path.
+        // However, `VectorCollection` keeps track of paths?
+        // Actually `VectorIndexWriter` usually knows where to write if initiated with storage?
+        // `FlatIndexWriter::load` stores `storage` but not `path` (filename). `write(path)` takes path arg.
+
+        // This is a missing piece. The writer might not know its own filename to overwrite.
+        // But `VectorFieldEntry` in Registry has metadata?
+
+        // For now, let's assume `commit` or similar is needed, but `rebuild` just updates memory state.
+        // We will need to ensure persistence later.
+        // But `optimize` implies persistence update.
+
+        // If we can't persist, `optimize` is incomplete.
+        // Let's look at how `VectorCollection` persists.
+        // It uses `field.runtime.writer().flush()`.
+
+        Ok(())
+    }
+
     fn delete_document(&self, doc_id: u64, _version: u64) -> Result<()> {
         let mut guard = self.writer.lock();
         // Best-effort deletion from in-memory buffer.

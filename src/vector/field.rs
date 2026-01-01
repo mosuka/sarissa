@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::vector::core::document::StoredVector;
+use crate::vector::core::vector::Vector;
 use crate::vector::engine::{QueryVector, VectorFieldConfig};
 
 /// Represents a single logical vector field backed by an index implementation.
@@ -35,6 +36,16 @@ pub trait VectorFieldWriter: Send + Sync + Debug {
     fn add_stored_vector(&self, doc_id: u64, vector: &StoredVector, version: u64) -> Result<()>;
     /// Delete the vectors associated with the provided document id.
     fn delete_document(&self, doc_id: u64, version: u64) -> Result<()>;
+
+    /// Check if the writer has storage configured.
+    fn has_storage(&self) -> bool;
+
+    /// Get access to the stored vectors with field names.
+    fn vectors(&self) -> Vec<(u64, String, Vector)>;
+
+    /// Rebuild the index with the provided vectors, effectively replacing the current content.
+    fn rebuild(&self, vectors: Vec<(u64, String, Vector)>) -> Result<()>;
+
     /// Flush any buffered data to durable storage.
     fn flush(&self) -> Result<()>;
 }
