@@ -983,6 +983,10 @@ impl InvertedIndexWriter {
     pub fn delete_document(&mut self, doc_id: u64) -> Result<()> {
         // Remove from buffered documents if present
         self.buffered_docs.retain(|(id, _)| *id != doc_id);
+
+        // Also mark as deleted in persisted segments
+        self.mark_persisted_doc_deleted(doc_id)?;
+
         Ok(())
     }
 }

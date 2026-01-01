@@ -71,6 +71,10 @@ impl DocumentVectorRegistry {
         Ok(())
     }
 
+    pub fn contains(&self, doc_id: u64) -> bool {
+        self.entries.read().contains_key(&doc_id)
+    }
+
     pub fn get(&self, doc_id: u64) -> Option<DocumentEntry> {
         self.entries.read().get(&doc_id).cloned()
     }

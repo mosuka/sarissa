@@ -54,8 +54,12 @@ where
         guard.add_vectors(vec![legacy])
     }
 
-    fn delete_document(&self, _doc_id: u64, _version: u64) -> Result<()> {
-        // Full delete semantics will be wired once the registry tracks per-field segments.
+    fn delete_document(&self, doc_id: u64, _version: u64) -> Result<()> {
+        let mut guard = self.writer.lock();
+        // Best-effort deletion from in-memory buffer.
+        // We ignore errors here because the index might be finalized/immutable.
+        // Logical deletion is handled by the Registry filter in VectorCollection.
+        let _ = guard.delete_document(doc_id);
         Ok(())
     }
 
