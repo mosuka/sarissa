@@ -69,7 +69,7 @@ impl VectorIndexFactory {
     ///
     /// // Create flat index
     /// let index_config = VectorIndexTypeConfig::Flat(FlatIndexConfig::default());
-    /// let index = VectorIndexFactory::create(storage, index_config)?;
+    /// let index = VectorIndexFactory::create(storage, "test_index", index_config)?;
     /// # Ok(())
     /// # }
     /// ```
@@ -116,7 +116,7 @@ impl VectorIndexFactory {
     /// # fn main() -> sarissa::error::Result<()> {
     /// let storage = Arc::new(FileStorage::new("./index", FileStorageConfig::new("./index"))?);
     /// let config = VectorIndexTypeConfig::Flat(FlatIndexConfig::default());
-    /// let index = VectorIndexFactory::open(storage, config)?;
+    /// let index = VectorIndexFactory::open(storage, "test_index", config)?;
     /// # Ok(())
     /// # }
     /// ```
