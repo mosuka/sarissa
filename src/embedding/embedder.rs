@@ -30,13 +30,13 @@
 //! # {
 //! use sarissa::embedding::embedder::{Embedder, EmbedInput};
 //! use sarissa::embedding::per_field::PerFieldEmbedder;
-//! use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 //! use sarissa::embedding::precomputed::PrecomputedEmbedder;
 //! use std::sync::Arc;
 //!
 //! # async fn example() -> sarissa::error::Result<()> {
 //! let text_embedder = Arc::new(
-//!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+//!     CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 //! );
 //!
 //! // Document-level embedder (common case)

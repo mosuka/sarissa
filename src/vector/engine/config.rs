@@ -52,7 +52,7 @@ use crate::vector::DistanceMetric;
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
 /// use sarissa::embedding::per_field::PerFieldEmbedder;
-/// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 /// use sarissa::embedding::embedder::Embedder;
 /// use sarissa::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use sarissa::vector::DistanceMetric;
@@ -60,7 +60,7 @@ use crate::vector::DistanceMetric;
 ///
 /// # fn example() -> sarissa::error::Result<()> {
 /// let text_embedder: Arc<dyn Embedder> = Arc::new(
-///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+///     CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
 ///
 /// let embedder = PerFieldEmbedder::new(text_embedder);
@@ -169,7 +169,7 @@ impl VectorIndexConfig {
 /// # #[cfg(feature = "embeddings-candle")]
 /// # {
 /// use sarissa::embedding::per_field::PerFieldEmbedder;
-/// use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+/// use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 /// use sarissa::embedding::embedder::Embedder;
 /// use sarissa::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use sarissa::vector::DistanceMetric;
@@ -177,7 +177,7 @@ impl VectorIndexConfig {
 ///
 /// # fn example() -> sarissa::error::Result<()> {
 /// let text_embedder: Arc<dyn Embedder> = Arc::new(
-///     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+///     CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 /// );
 ///
 /// let embedder = PerFieldEmbedder::new(text_embedder);

@@ -1,4 +1,4 @@
-//! Example of using CandleTextEmbedder with local BERT models
+//! Example of using CandleBertEmbedder with local BERT models
 //!
 //! This example demonstrates:
 //! - Loading a sentence-transformers model from HuggingFace Hub
@@ -11,19 +11,19 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
-use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 #[cfg(feature = "embeddings-candle")]
 use sarissa::embedding::embedder::{EmbedInput, Embedder};
 
 #[cfg(feature = "embeddings-candle")]
 #[tokio::main]
 async fn main() -> sarissa::error::Result<()> {
-    println!("=== Candle Text Embedder Example ===\n");
+    println!("=== Candle BERT Embedder Example ===\n");
 
     // Create embedder with a sentence-transformers model
     // This will download the model from HuggingFace Hub on first run
     println!("Loading model: sentence-transformers/all-MiniLM-L6-v2");
-    let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
+    let embedder = CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
 
     println!("Model loaded successfully!");
     println!("Model name: {}", embedder.name());
