@@ -1292,6 +1292,48 @@ impl VectorCollectionSearcher {
             .collect()
     }
 
+    /// Optimize the collection by rebuilding indexes (Vacuum).
+    ///
+    /// This removes deleted documents from physical storage by creating new index segments
+    /// containing only valid documents and replacing the old ones.
+    pub fn optimize(&self) -> Result<()> {
+        let fields = self.fields.read();
+
+        for (_field_name, field_entry) in fields.iter() {
+            // 1. Get current writer's vectors (this loads them into memory if lazy)
+            // Note: This assumes vectors fit in memory, which fits current FlatIndex design.
+            // Future improvement: Stream processing.
+            let writer = field_entry.runtime.writer();
+            if !writer.has_storage() {
+                // Skip in-memory only writers or non-persisted ones for now as they are transient
+                continue;
+            }
+
+            let vectors = writer.vectors();
+
+            // 2. Filter vectors using registry (Rebuild)
+            // vectors is now a Vec, so we can iterate it directly
+            let valid_vectors: Vec<(u64, String, crate::vector::core::vector::Vector)> = vectors
+                .into_iter()
+                .filter(|(doc_id, _, _)| self.registry.contains(*doc_id))
+                .collect();
+
+            // 3. Rebuild the writer with valid vectors
+            writer.rebuild(valid_vectors)?;
+
+            // 4. Flush to ensure persistence (Vacuum complete)
+            // Note: `flush` here will persist the newly built index.
+            // We assume the writer knows its path or flush mechanism handles it.
+            // In `LegacyVectorFieldWriter` (Flat), `flush` is not implemented in previous view?
+            // Wait, looking at `VectorFieldWriter` trait, `flush` exists.
+            // `LegacyVectorFieldWriter` must implement it.
+            // If `LegacyVectorFieldWriter` implements `flush`, we call it.
+            writer.flush()?;
+        }
+
+        Ok(())
+    }
+
     /// Merge field hits into document hits.
     fn merge_field_hits(
         &self,

@@ -198,6 +198,48 @@ impl VectorFieldWriter for InMemoryFieldWriter {
         Ok(())
     }
 
+    fn has_storage(&self) -> bool {
+        // InMemoryFieldWriter usually doesn't have disk storage in the same sense
+        if let Some(delegate) = &self.delegate {
+            delegate.has_storage()
+        } else {
+            false
+        }
+    }
+
+    fn rebuild(&self, vectors: Vec<(u64, String, Vector)>) -> Result<()> {
+        let vectors_clone = vectors.clone();
+
+        if let Some(delegate) = &self.delegate {
+            delegate.rebuild(vectors)?;
+        }
+
+        let mut guard = self.store.entries.write();
+        guard.clear();
+        for (doc_id, _, vector) in vectors_clone {
+            guard.insert(
+                doc_id,
+                FieldStoreEntry {
+                    vectors: vec![vector],
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn vectors(&self) -> Vec<(u64, String, Vector)> {
+        // InMemoryFieldWriter stores vectors in self.store/field_store
+        // But the trait expects a slice reference, which we can't easily return if it's in a HashMap/BTreeMap
+        // For now, delegate or return empty.
+        // If we want accurate Vacuum, we need access.
+        // However, optimize() usually targets the persistent storage (delegate).
+        if let Some(delegate) = &self.delegate {
+            delegate.vectors()
+        } else {
+            Vec::new()
+        }
+    }
+
     fn delete_document(&self, doc_id: u64, version: u64) -> Result<()> {
         self.store.remove(doc_id);
         if let Some(delegate) = &self.delegate {
