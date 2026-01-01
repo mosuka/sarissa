@@ -78,12 +78,15 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 use sarissa::analysis::analyzer::analyzer::Analyzer;
+use sarissa::analysis::analyzer::keyword::KeywordAnalyzer;
+use sarissa::analysis::analyzer::per_field::PerFieldAnalyzer;
 use sarissa::analysis::analyzer::standard::StandardAnalyzer;
-use sarissa::lexical::document::document::Document;
-use sarissa::lexical::document::field::{IntegerOption, TextOption};
+use sarissa::lexical::core::document::Document;
+use sarissa::lexical::core::field::{IntegerOption, TextOption};
 use sarissa::error::Result;
 use sarissa::lexical::engine::LexicalEngine;
-use sarissa::lexical::index::config::{InvertedIndexConfig, LexicalIndexConfig};
+use sarissa::lexical::engine::config::LexicalIndexConfig;
+use sarissa::lexical::index::config::InvertedIndexConfig;
 use sarissa::lexical::index::factory::LexicalIndexFactory;
 use sarissa::lexical::index::inverted::query::term::TermQuery;
 use sarissa::lexical::search::searcher::LexicalSearchRequest;
@@ -97,10 +100,17 @@ fn main() -> Result<()> {
         temp_dir.path(),
     )))?;
 
-    // Configure the inverted index with a StandardAnalyzer
-    let analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::new()?);
+    // Configure the analyzer (PerFieldAnalyzer)
+    // - Default: StandardAnalyzer (tokenizes, lowercases)
+    // - "category": KeywordAnalyzer (exact match, case-sensitive)
+    let default_analyzer = Arc::new(StandardAnalyzer::new()?);
+    let mut analyzer = PerFieldAnalyzer::new(default_analyzer);
+    analyzer.add_analyzer("category", Arc::new(KeywordAnalyzer::new()));
+    
+    let analyzer_arc: Arc<dyn Analyzer> = Arc::new(analyzer);
+
     let config = LexicalIndexConfig::Inverted(InvertedIndexConfig {
-        analyzer: Arc::clone(&analyzer),
+        analyzer: analyzer_arc,
         ..InvertedIndexConfig::default()
     });
     let index = LexicalIndexFactory::create(storage, config)?;
@@ -108,7 +118,7 @@ fn main() -> Result<()> {
     // Create a lexical search engine
     let mut engine = LexicalEngine::new(index)?;
 
-    // Add documents with explicit field options
+    // Add documents
     let documents = vec![
         Document::builder()
             .add_text("title", "Rust Programming", TextOption::default())
@@ -117,6 +127,7 @@ fn main() -> Result<()> {
                 "Rust is a systems programming language",
                 TextOption::default(),
             )
+            .add_text("category", "TECHNOLOGY", TextOption::default())
             .add_integer("year", 2024, IntegerOption::default())
             .build(),
         Document::builder()
@@ -126,6 +137,7 @@ fn main() -> Result<()> {
                 "Python is a versatile programming language",
                 TextOption::default(),
             )
+            .add_text("category", "TECHNOLOGY", TextOption::default())
             .add_integer("year", 2023, IntegerOption::default())
             .build(),
     ];
@@ -135,9 +147,10 @@ fn main() -> Result<()> {
     }
     engine.commit()?;
 
-    // Search documents
+    // Search 1: Keyword search in 'content' (StandardAnalyzer)
+    println!("--- Search 'programming' in 'content' ---");
     let query = Box::new(TermQuery::new("content", "programming"));
-    let request = LexicalSearchRequest::new(query)
+    let mut request = LexicalSearchRequest::new(query)
         .load_documents(true)
         .max_docs(10);
     let results = engine.search(request)?;
@@ -146,11 +159,20 @@ fn main() -> Result<()> {
     for hit in results.hits {
         if let Some(doc) = hit.document {
             println!("Score: {:.2}, Doc ID: {}", hit.score, hit.doc_id);
-            if let Some(title) = doc.get_text("title") {
+            if let Some(title) = doc.get_field("title").and_then(|f| f.value.as_text()) {
                 println!("  -> {}", title);
             }
         }
     }
+
+    // Search 2: Exact match in 'category' (KeywordAnalyzer)
+    println!("\n--- Search 'TECHNOLOGY' in 'category' ---");
+    let query = Box::new(TermQuery::new("category", "TECHNOLOGY"));
+    let mut request = LexicalSearchRequest::new(query)
+        .load_documents(true)
+        .max_docs(10);
+    let results = engine.search(request)?;
+    println!("Found {} matches in category", results.total_hits);
 
     Ok(())
 }
@@ -159,7 +181,7 @@ fn main() -> Result<()> {
 ### Upsert / Hybrid Ingestion
 
 - To replace an existing document with a specific ID, use `LexicalEngine::upsert_document(doc_id, doc)`. The `add_document` method only performs automatic ID assignment.
-- In hybrid configurations, lexical and vector data are registered separately. First use `HybridEngine::add_document`/`upsert_document` to write lexical data, then use `HybridEngine::upsert_vector_document` for pre-computed vectors., or `HybridEngine::upsert_vector_payload` to register raw text and embed it on the fly.
+- In hybrid configurations, lexical and vector data are registered separately. First use `HybridEngine::add_document`/`upsert_document` to write lexical data, then use `HybridEngine::upsert_vector_document` for pre-computed vectors, or `HybridEngine::upsert_vector_payload` to register raw text and embed it on the fly.
 
 ## Architecture
 
@@ -306,76 +328,70 @@ sarissa = { version = "0.1", features = ["embeddings-candle"] }
 
 ```rust
 use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
-use sarissa::embedding::embedder::EmbedInput;
-use sarissa::embedding::precomputed::PrecomputedEmbedder;
-use sarissa::vector::engine::request::{QueryVector, VectorSearchRequest};
-use sarissa::vector::core::document::{DocumentVector, StoredVector, VectorType};
+use sarissa::embedding::embedder::Embedder;
+use sarissa::embedding::per_field::PerFieldEmbedder;
+use sarissa::vector::core::document::DocumentPayload;
 use sarissa::vector::engine::VectorEngine;
 use sarissa::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
+use sarissa::vector::engine::request::VectorSearchRequestBuilder;
 use sarissa::vector::DistanceMetric;
 use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::sync::Arc;
-use std::collections::HashMap;
 
-#[tokio::main]
-async fn main() -> sarissa::error::Result<()> {
-    // Initialize embedder with a sentence-transformers model
-    let embedder = CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?;
+#[cfg(feature = "embeddings-candle")]
+fn main() -> sarissa::error::Result<()> {
+    // 1. Initialize Embedder (CandleTextEmbedder)
+    // We use "sentence-transformers/all-MiniLM-L6-v2" which outputs 384-dim vectors.
+    let candle_embedder = Arc::new(CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?);
 
-    // Create vector engine configuration (MiniLM-L6-v2 outputs 384-dim)
+    // 2. Configure PerFieldEmbedder
+    // Map specific fields (e.g., "body_vector") to the embedder.
+    let mut per_field_embedder = PerFieldEmbedder::new(candle_embedder.clone());
+    per_field_embedder.add_embedder("body_vector", candle_embedder.clone());
+    let embedder = Arc::new(per_field_embedder);
+
+    // 3. Create vector engine configuration
     let field_config = VectorFieldConfig {
         dimension: 384,
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
-        source_tag: "candle".into(),
-        vector_type: VectorType::Text,
         base_weight: 1.0,
     };
+    
     let config = VectorIndexConfig::builder()
-        .embedder(PrecomputedEmbedder::new())
-        .field("body", field_config)
-        .default_field("body")
+        .embedder_arc(embedder) // Register the embedder
+        .field("body_vector", field_config)
         .build()?;
 
-    // Create storage and engine
+    // 4. Create storage and engine
     let storage: Arc<dyn sarissa::storage::Storage> =
         Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     let engine = VectorEngine::new(storage, config)?;
 
-    // Generate embeddings for documents
+    // 5. Add documents with text content (automatic embedding)
     let documents = vec![
         "Rust is a systems programming language",
         "Python is great for data science",
         "Machine learning with neural networks",
     ];
 
-    // Add documents with their embeddings (1 field = 1 vector)
+    println!("Indexing {} documents...", documents.len());
     for text in &documents {
-        let vector = embedder.embed(&EmbedInput::Text(text)).await?;
-        let stored = StoredVector::new(
-            Arc::from(vector.data.clone()),
-            "candle".into(),
-            VectorType::Text,
-        );
-        let mut doc = DocumentVector::new();
-        doc.set_field("body", stored);
-        engine.add_vectors(doc)?;
+        let mut doc = DocumentPayload::new();
+        // Just set the text, the engine will embed it using the configured embedder
+        doc.set_text("body_vector", text);
+        engine.add_payloads(doc)?;
     }
     engine.commit()?;
 
-    // Search with query embedding
-    let query_vector = embedder.embed(&EmbedInput::Text("programming languages")).await?;
-    let mut query = VectorSearchRequest::default();
-    query.limit = 10;
-    query.query_vectors.push(QueryVector {
-        vector: StoredVector::new(
-            Arc::from(query_vector.data.clone()),
-            "candle".into(),
-            VectorType::Text,
-        ),
-        weight: 1.0,
-    });
-    let results = engine.search(query)?;
+    // 6. Search with text query
+    println!("Searching for 'programming languages'...");
+    let request = VectorSearchRequestBuilder::new()
+        .add_text("body_vector", "programming languages")
+        .limit(3)
+        .build();
+
+    let results = engine.search(request)?;
 
     for hit in results.hits {
         println!("Doc ID: {}, Score: {:.4}", hit.doc_id, hit.score);
@@ -649,17 +665,15 @@ Currently supports CLIP ViT-Base-Patch32 architecture:
 
 See working examples with detailed explanations:
 
-- [examples/text_to_image_search.rs](examples/text_to_image_search.rs) - Full text-to-image search implementation
-- [examples/image_to_image_search.rs](examples/image_to_image_search.rs) - Full image similarity search implementation
+- [examples/multimodal_search.rs](examples/multimodal_search.rs) - Combined text-to-image and image-to-image search implementation
 
-Run the examples:
+Run the example:
 
 ```bash
-# Text-to-image search
-cargo run --example text_to_image_search --features embeddings-multimodal
-
-# Image-to-image search
-cargo run --example image_to_image_search --features embeddings-multimodal -- query.jpg
+# Multimodal search (includes text-to-image and image-to-image demos)
+cargo run --example multimodal_search --features embeddings-multimodal
+# Note: This example requires resource files (images) which may reference local paths.
+# Ensure you have the required resources or adjust the example code.
 ```
 
 ### Faceted Search
@@ -820,8 +834,7 @@ Sarissa includes numerous examples demonstrating various features:
 - [embedding_with_candle](examples/embedding_with_candle.rs) - Local BERT model embeddings
 - [embedding_with_openai](examples/embedding_with_openai.rs) - OpenAI API embeddings
 - [dynamic_embedder_switching](examples/dynamic_embedder_switching.rs) - Switch between embedding providers
-- [text_to_image_search](examples/text_to_image_search.rs) - Text-to-image search with CLIP
-- [image_to_image_search](examples/image_to_image_search.rs) - Image similarity search
+- [multimodal_search](examples/multimodal_search.rs) - Text-to-image and image-to-image search with CLIP
 
 ### Advanced Features
 
@@ -840,8 +853,7 @@ cargo run --example <example_name>
 cargo run --example vector_search
 cargo run --example vector_search --features embeddings-candle
 cargo run --example embedding_with_openai --features embeddings-openai
-cargo run --example text_to_image_search --features embeddings-multimodal
-cargo run --example image_to_image_search --features embeddings-multimodal
+cargo run --example multimodal_search --features embeddings-multimodal
 ```
 
 ## Feature Flags
