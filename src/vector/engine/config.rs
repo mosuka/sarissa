@@ -260,6 +260,7 @@ impl VectorIndexConfigBuilder {
             index: VectorIndexKind::Flat,
 
             base_weight: 1.0,
+            metadata: HashMap::new(),
         };
 
         if !self.default_fields.contains(&name) {
@@ -432,6 +433,10 @@ pub struct VectorFieldConfig {
     /// Base weight for scoring (default: 1.0).
     #[serde(default = "VectorFieldConfig::default_weight")]
     pub base_weight: f32,
+
+    /// Optional metadata for the field (e.g., HNSW parameters).
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
 }
 
 impl VectorFieldConfig {
@@ -448,6 +453,7 @@ impl Default for VectorFieldConfig {
             index: VectorIndexKind::Flat,
 
             base_weight: Self::default_weight(),
+            metadata: HashMap::new(),
         }
     }
 }

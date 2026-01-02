@@ -1,5 +1,6 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use sarissa::vector::core::distance::DistanceMetric;
+use std::hint::black_box;
 
 fn generate_test_vectors(count: usize, dimension: usize) -> Vec<Vec<f32>> {
     let mut vectors = Vec::with_capacity(count);

@@ -47,12 +47,14 @@ use crate::vector::index::field::{AdapterBackedVectorField, LegacyVectorFieldWri
 use crate::vector::index::flat::{
     field_reader::FlatFieldReader, reader::FlatVectorIndexReader, writer::FlatIndexWriter,
 };
+use crate::vector::index::hnsw::segment::manager::{SegmentManager, SegmentManagerConfig};
 use crate::vector::index::hnsw::{
     field_reader::HnswFieldReader, reader::HnswIndexReader, writer::HnswIndexWriter,
 };
 use crate::vector::index::ivf::{
     field_reader::IvfFieldReader, reader::IvfIndexReader, writer::IvfIndexWriter,
 };
+use crate::vector::index::segmented_field::SegmentedVectorField;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// A document-centric vector collection with multiple vector fields.
@@ -222,12 +224,7 @@ impl VectorCollection {
             .insert(field_name.to_string(), field_config.clone());
 
         // Build field runtime
-        let delegate = self.build_delegate_writer(field_name, &field_config)?;
-        let field = Arc::new(InMemoryVectorField::new(
-            field_name.to_string(),
-            field_config,
-            delegate,
-        )?);
+        let field = self.create_vector_field(field_name.to_string(), field_config)?;
         self.register_field_impl(field)?;
 
         // Register embedder for this field
@@ -264,7 +261,7 @@ impl VectorCollection {
             dimension,
             distance: self.config.default_distance,
             index: self.config.default_index_kind,
-
+            metadata: HashMap::new(),
             base_weight: self.config.default_base_weight,
         })
     }
@@ -410,11 +407,41 @@ impl VectorCollection {
             if self.fields.read().contains_key(&name) {
                 continue;
             }
-            let delegate = self.build_delegate_writer(&name, &config)?;
-            let field = Arc::new(InMemoryVectorField::new(name, config, delegate)?);
+            let field = self.create_vector_field(name, config)?;
             self.register_field_impl(field)?;
         }
         Ok(())
+    }
+
+    fn create_vector_field(
+        &self,
+        name: String,
+        config: VectorFieldConfig,
+    ) -> Result<Arc<dyn VectorField>> {
+        match config.index {
+            VectorIndexKind::Hnsw => {
+                let storage = self.field_storage(&name);
+                // Load or create segment manager config.
+                // Currently we use default, but ideally this should come from collection config or field config metadata.
+                let manager_config = SegmentManagerConfig::default();
+
+                // Initialize SegmentManager (loads state if exists)
+                let segment_manager =
+                    Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+
+                Ok(Arc::new(SegmentedVectorField::create(
+                    name,
+                    config,
+                    segment_manager,
+                    storage,
+                )?))
+            }
+            _ => {
+                // Fallback for other index types (Flat, IVF) using legacy InMemoryVectorField
+                let delegate = self.build_delegate_writer(&name, &config)?;
+                Ok(Arc::new(InMemoryVectorField::new(name, config, delegate)?))
+            }
+        }
     }
 
     fn build_delegate_writer(

@@ -5,13 +5,11 @@ mod tests {
     use sarissa::lexical::index::inverted::writer::{
         InvertedIndexWriter, InvertedIndexWriterConfig,
     };
-    use sarissa::lexical::writer::LexicalIndexWriter;
     use sarissa::storage::memory::MemoryStorageConfig;
     use sarissa::storage::{StorageConfig, StorageFactory};
     use sarissa::vector::collection::VectorCollection;
     use sarissa::vector::core::distance::DistanceMetric;
     use sarissa::vector::core::document::{DocumentVector, StoredVector};
-    use sarissa::vector::core::vector::Vector;
     use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
     use sarissa::vector::engine::{VectorScoreMode, VectorSearchRequest};
     use std::collections::HashMap;
@@ -25,6 +23,7 @@ mod tests {
             dimension: 128,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
+            metadata: HashMap::new(),
             base_weight: 1.0,
         };
 
@@ -105,7 +104,7 @@ mod tests {
         // Add document
         let doc_id = 100;
 
-        let mut doc = Document::builder()
+        let doc = Document::builder()
             .add_text("title", "hello world", TextOption::default())
             .build();
 

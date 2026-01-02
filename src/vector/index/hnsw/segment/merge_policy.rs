@@ -1,202 +1,140 @@
-//! Merge policies for vector index segments.
+//! Merge policy for vector index segments.
 //!
-//! This module defines policies for when and how to merge segments.
+//! This module defines the strategy for selecting which segments to merge.
 
-use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 
-use super::manager::{ManagedSegmentInfo, SegmentManagerConfig};
+use crate::vector::index::hnsw::segment::manager::{ManagedSegmentInfo, SegmentManagerConfig};
 
-/// Merge policy configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MergePolicyConfig {
-    /// Maximum number of segments before triggering merge.
-    pub max_segments: u32,
-
-    /// Minimum segment size (in vectors) to consider for merging.
-    pub min_segment_size: u64,
-
-    /// Maximum segment size (in vectors) after merging.
-    pub max_segment_size: u64,
-
-    /// Deletion ratio threshold for triggering compaction.
-    pub deletion_ratio_threshold: f64,
-
-    /// Merge factor (number of segments to merge at once).
-    pub merge_factor: u32,
-}
-
-impl Default for MergePolicyConfig {
-    fn default() -> Self {
-        Self {
-            max_segments: 100,
-            min_segment_size: 10000,
-            max_segment_size: 1000000,
-            deletion_ratio_threshold: 0.3,
-            merge_factor: 10,
-        }
-    }
-}
-
-/// Merge policy trait for determining merge behavior.
-pub trait MergePolicy: Send + Sync {
-    /// Check if segments should be merged based on current state.
-    fn should_merge(&self, segments: &[ManagedSegmentInfo], config: &SegmentManagerConfig) -> bool;
-
+/// Trait for merge policies.
+pub trait MergePolicy: Debug + Send + Sync {
     /// Select segments to merge.
-    fn select_merge_candidates(
+    ///
+    /// Returns a list of segment IDs to merge, or `None` if no merge is needed.
+    fn candidates(
         &self,
         segments: &[ManagedSegmentInfo],
         config: &SegmentManagerConfig,
-    ) -> Vec<String>;
+    ) -> Option<Vec<String>>;
 }
 
-/// Tiered merge policy (similar to Lucene's TieredMergePolicy).
-///
-/// This policy merges segments of similar sizes together.
-pub struct TieredMergePolicy {
-    config: MergePolicyConfig,
-}
+/// Simple merge policy based on segment count and size.
+#[derive(Debug, Default)]
+pub struct SimpleMergePolicy;
 
-impl TieredMergePolicy {
-    /// Create a new tiered merge policy.
-    pub fn new(config: MergePolicyConfig) -> Self {
-        Self { config }
+impl SimpleMergePolicy {
+    /// Create a new simple merge policy.
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl MergePolicy for TieredMergePolicy {
-    fn should_merge(
+impl MergePolicy for SimpleMergePolicy {
+    fn candidates(
         &self,
         segments: &[ManagedSegmentInfo],
-        _config: &SegmentManagerConfig,
-    ) -> bool {
-        // Merge if we have too many segments
-        if segments.len() > self.config.max_segments as usize {
-            return true;
+        config: &SegmentManagerConfig,
+    ) -> Option<Vec<String>> {
+        // If we don't have enough segments, don't merge.
+        // We trigger merge only when we exceed max_segments or soft limit?
+        // Let's say we trigger if we have more than max_segments / 2?
+        // Or strictly strictly max_segments?
+        // Currently config.max_segments is the trigger threshold.
+
+        if segments.len() < config.max_segments as usize {
+            return None;
         }
 
-        // Merge if any segment has high deletion ratio
-        segments
+        // Strategy:
+        // 1. Sort segments by generation (oldest first)? Or just use existing order (usually chronological)?
+        //    ManagedSegmentInfo doesn't imply order, but SegmentManager keeps them in Vec.
+        // 2. Look for sequence of segments that are candidates.
+        // 3. Simple approach: Pick the smallest segments to merge.
+
+        // Let's try finding the "best" window of segments to merge.
+        // We want to merge `merge_factor` segments.
+
+        let merge_factor = config.merge_factor as usize;
+        if segments.len() < merge_factor {
+            return None;
+        }
+
+        // Find a window of `merge_factor` segments with the smallest total size?
+        // Or smallest vector count.
+
+        // We only look at contiguous segments to preserve some locality/generation order if implicitly there.
+        // Merging non-adjacent segments might change logical order if that matters (it might not for vectors).
+        // But assuming we want to keep older/newer distinct if possible.
+        // For simplicity, we assume vectors are unordered collection, so any segments can merge.
+        // BUT, usually we want to merge small -> medium -> large.
+
+        // Let's pick N smallest segments regardless of position?
+        // If we pick arbitrary segments, we create a new segment.
+
+        // Let's stick to "Smallest First" regardless of adjacency for now,
+        // as vector Search is global across all segments.
+
+        let mut sorted_segments: Vec<(usize, &ManagedSegmentInfo)> =
+            segments.iter().enumerate().collect();
+        sorted_segments.sort_by_key(|(_, s)| s.vector_count);
+
+        // Take top `merge_factor` smallest segments
+        let candidates: Vec<String> = sorted_segments
             .iter()
-            .any(|s| s.has_deletions && s.vector_count < self.config.min_segment_size)
-    }
+            .take(merge_factor)
+            .map(|(_, s)| s.segment_id.clone())
+            .collect();
 
-    fn select_merge_candidates(
-        &self,
-        segments: &[ManagedSegmentInfo],
-        _config: &SegmentManagerConfig,
-    ) -> Vec<String> {
-        let mut segments = segments.to_vec();
-
-        // Sort by size (ascending)
-        segments.sort_by_key(|s| s.vector_count);
-
-        // Select smallest segments up to merge_factor
-        let count = self.config.merge_factor.min(segments.len() as u32) as usize;
-        segments
-            .iter()
-            .take(count)
-            .map(|s| s.segment_id.clone())
-            .collect()
-    }
-}
-
-/// Log-structured merge policy.
-///
-/// This policy merges segments in levels, similar to LSM trees.
-pub struct LogStructuredMergePolicy {
-    config: MergePolicyConfig,
-}
-
-impl LogStructuredMergePolicy {
-    /// Create a new log-structured merge policy.
-    pub fn new(config: MergePolicyConfig) -> Self {
-        Self { config }
-    }
-}
-
-impl MergePolicy for LogStructuredMergePolicy {
-    fn should_merge(
-        &self,
-        segments: &[ManagedSegmentInfo],
-        _config: &SegmentManagerConfig,
-    ) -> bool {
-        segments.len() > self.config.merge_factor as usize
-    }
-
-    fn select_merge_candidates(
-        &self,
-        segments: &[ManagedSegmentInfo],
-        _config: &SegmentManagerConfig,
-    ) -> Vec<String> {
-        let mut segments = segments.to_vec();
-
-        // Sort by generation (oldest first)
-        segments.sort_by_key(|s| s.generation);
-
-        // Select oldest segments up to merge_factor
-        let count = self.config.merge_factor.min(segments.len() as u32) as usize;
-        segments
-            .iter()
-            .take(count)
-            .map(|s| s.segment_id.clone())
-            .collect()
+        if candidates.is_empty() {
+            None
+        } else {
+            Some(candidates)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vector::index::hnsw::segment::manager::ManagedSegmentInfo;
 
-    fn create_test_segment(id: &str, vector_count: u64, generation: u64) -> ManagedSegmentInfo {
+    fn create_info(id: &str, count: u64) -> ManagedSegmentInfo {
         ManagedSegmentInfo {
             segment_id: id.to_string(),
-            vector_count,
+            vector_count: count,
             vector_offset: 0,
-            generation,
+            generation: 1,
             has_deletions: false,
-            size_bytes: vector_count * 128,
+            size_bytes: count * 100,
         }
     }
 
     #[test]
-    fn test_tiered_merge_policy() {
-        let config = MergePolicyConfig::default();
-        let policy = TieredMergePolicy::new(config);
-        let manager_config = SegmentManagerConfig::default();
+    fn test_simple_merge_policy_candidates() {
+        let policy = SimpleMergePolicy::new();
+        let mut config = SegmentManagerConfig::default();
+        config.max_segments = 5;
+        config.merge_factor = 3;
 
+        // Case 1: Not enough segments
+        let segments = vec![create_info("1", 100), create_info("2", 100)];
+        assert!(policy.candidates(&segments, &config).is_none());
+
+        // Case 2: Enough segments, trigger merge
         let segments = vec![
-            create_test_segment("seg1", 1000, 0),
-            create_test_segment("seg2", 2000, 1),
-            create_test_segment("seg3", 3000, 2),
-        ];
+            create_info("1", 1000), // Large
+            create_info("2", 100),  // Small
+            create_info("3", 100),  // Small
+            create_info("4", 100),  // Small
+            create_info("5", 1000), // Large
+            create_info("6", 1000), // Large
+        ]; // Total 6 > max 5
 
-        assert!(!policy.should_merge(&segments, &manager_config));
-
-        let candidates = policy.select_merge_candidates(&segments, &manager_config);
+        let candidates = policy.candidates(&segments, &config).unwrap();
         assert_eq!(candidates.len(), 3);
-        assert_eq!(candidates[0], "seg1"); // Smallest first
-    }
-
-    #[test]
-    fn test_log_structured_merge_policy() {
-        let config = MergePolicyConfig {
-            merge_factor: 2,
-            ..Default::default()
-        };
-        let policy = LogStructuredMergePolicy::new(config);
-        let manager_config = SegmentManagerConfig::default();
-
-        let segments = vec![
-            create_test_segment("seg1", 1000, 0),
-            create_test_segment("seg2", 2000, 1),
-            create_test_segment("seg3", 3000, 2),
-        ];
-
-        assert!(policy.should_merge(&segments, &manager_config));
-
-        let candidates = policy.select_merge_candidates(&segments, &manager_config);
-        assert_eq!(candidates.len(), 2);
-        assert_eq!(candidates[0], "seg1"); // Oldest first
+        // Should pick smallest: 2, 3, 4
+        assert!(candidates.contains(&"2".to_string()));
+        assert!(candidates.contains(&"3".to_string()));
+        assert!(candidates.contains(&"4".to_string()));
     }
 }

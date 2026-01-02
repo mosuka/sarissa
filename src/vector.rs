@@ -21,6 +21,7 @@ pub mod engine;
 pub mod reader;
 #[cfg(test)]
 mod tests_deletion;
+pub mod wal;
 pub mod writer;
 
 pub mod field;

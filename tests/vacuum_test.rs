@@ -20,6 +20,7 @@ fn test_vacuum_reduces_file_size() {
         dimension: 128,
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
+        metadata: HashMap::new(),
         base_weight: 1.0,
     };
 

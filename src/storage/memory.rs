@@ -376,7 +376,11 @@ impl Seek for MemoryOutput {
 
 impl StorageOutput for MemoryOutput {
     fn flush_and_sync(&mut self) -> Result<()> {
-        // For memory output, sync is a no-op
+        // Update the shared storage with current buffer content
+        // This mimics filesystem behavior where flushed data is visible to readers
+        // even if the writer is still open.
+        let mut files = self.files.lock().unwrap();
+        files.insert(self.name.clone(), self.buffer.clone().into_boxed_slice());
         Ok(())
     }
 
