@@ -87,6 +87,35 @@ impl ConcurrentHnswGraph {
             .get(&doc_id)
             .and_then(|layers| layers.get(level).map(|lock| lock.read().clone()))
     }
+
+    fn from_hnsw_graph(graph: HnswGraph, extended_max_level: usize) -> Self {
+        let mut nodes = HashMap::with_capacity(graph.nodes.len());
+        for (doc_id, layered_neighbors) in graph.nodes {
+            let mut layers = Vec::with_capacity(layered_neighbors.len());
+            for neighbors in layered_neighbors {
+                layers.push(RwLock::new(neighbors));
+            }
+            nodes.insert(doc_id, layers);
+        }
+
+        Self {
+            max_level: extended_max_level,
+            nodes,
+        }
+    }
+
+    fn add_nodes(&mut self, nodes_with_levels: Vec<(u64, usize)>) {
+        for (doc_id, level) in nodes_with_levels {
+            if self.nodes.contains_key(&doc_id) {
+                continue;
+            }
+            let mut layers = Vec::with_capacity(level + 1);
+            for _ in 0..=level {
+                layers.push(RwLock::new(Vec::new()));
+            }
+            self.nodes.insert(doc_id, layers);
+        }
+    }
 }
 
 impl GraphView for ConcurrentHnswGraph {
@@ -282,20 +311,95 @@ impl HnswIndexWriter {
         let max_level = Self::calculate_max_level(index_config.m, index_config.ef_construction);
         let _ml = 1.0 / (index_config.m as f64).ln();
 
+        // Read graph data if present
+        let mut has_graph_buf = [0u8; 1];
+        let graph = if input.read_exact(&mut has_graph_buf).is_ok() {
+            if has_graph_buf[0] == 1 {
+                // Read entry point
+                let mut entry_point_buf = [0u8; 8];
+                input.read_exact(&mut entry_point_buf)?;
+                let entry_point_raw = u64::from_le_bytes(entry_point_buf);
+                let entry_point = if entry_point_raw == u64::MAX {
+                    None
+                } else {
+                    Some(entry_point_raw)
+                };
+
+                // Read max level
+                let mut max_level_buf = [0u8; 4];
+                input.read_exact(&mut max_level_buf)?;
+                let max_level = u32::from_le_bytes(max_level_buf) as usize;
+
+                // Read nodes
+                let mut node_count_buf = [0u8; 4];
+                input.read_exact(&mut node_count_buf)?;
+                let node_count = u32::from_le_bytes(node_count_buf) as usize;
+
+                let mut nodes = HashMap::with_capacity(node_count);
+
+                for _ in 0..node_count {
+                    let mut doc_id_buf = [0u8; 8];
+                    input.read_exact(&mut doc_id_buf)?;
+                    let doc_id = u64::from_le_bytes(doc_id_buf);
+
+                    let mut layer_count_buf = [0u8; 4];
+                    input.read_exact(&mut layer_count_buf)?;
+                    let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
+
+                    let mut layers = Vec::with_capacity(layer_count);
+
+                    for _ in 0..layer_count {
+                        let mut neighbor_count_buf = [0u8; 4];
+                        input.read_exact(&mut neighbor_count_buf)?;
+                        let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
+
+                        let mut neighbors = Vec::with_capacity(neighbor_count);
+                        for _ in 0..neighbor_count {
+                            let mut neighbor_buf = [0u8; 8];
+                            input.read_exact(&mut neighbor_buf)?;
+                            neighbors.push(u64::from_le_bytes(neighbor_buf));
+                        }
+                        layers.push(neighbors);
+                    }
+                    nodes.insert(doc_id, layers);
+                }
+
+                Some(HnswGraph {
+                    entry_point,
+                    max_level,
+                    nodes,
+                    m: index_config.m,
+                    m_max: index_config.m,
+                    m_max_0: index_config.m * 2,
+                    ef_construction: index_config.ef_construction,
+                    level_mult: _ml,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // If we loaded a graph, we are not "finalized" in the sense that we can't append.
+        // We want to support append, so we should allow modifications if loaded.
+        // Previously, is_finalized=true prevented modifications.
+        // For append support, we set is_finalized=false.
+
         Ok(Self {
             index_config,
             writer_config,
             storage: Some(storage),
             path: path.to_string(),
             _ml,
-            levels: vec![Vec::new(); max_level + 1], // TODO: Load levels from disk
-            entry_point: None,                       // TODO: Load entry point from disk
+            levels: vec![Vec::new(); max_level + 1], // Still re-init levels, but they are conceptually in the graph
+            entry_point: graph.as_ref().and_then(|g| g.entry_point),
             vectors,
-            is_finalized: true,
+            is_finalized: false, // Changed to false to allow appending
             total_vectors_to_add: Some(num_vectors),
             next_vec_id,
             doc_id_map,
-            graph: None, // TODO: Load graph if needed for append
+            graph,
         })
     }
 
@@ -314,9 +418,9 @@ impl HnswIndexWriter {
     /// Calculate the layer for a new vector.
     fn select_layer(&self) -> usize {
         let mut layer = 0;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
-        while rng.gen_range(0.0..1.0) < self._ml && layer < 16 {
+        while rng.random_range(0.0..1.0) < self._ml && layer < 16 {
             layer += 1;
         }
 
@@ -328,7 +432,7 @@ impl HnswIndexWriter {
     /// For simplicity, we can cap it or use a fixed formula.
     /// A common formula for max_level is based on the number of elements and M.
     /// For now, let's use a simple heuristic or a fixed max.
-    fn calculate_max_level(m: usize, _ef_construction: usize) -> usize {
+    fn calculate_max_level(_m: usize, _ef_construction: usize) -> usize {
         // A common heuristic is to have max_level around log_M(N) or a fixed small number.
         // For now, let's use a fixed small number or a simple formula.
         // The original code used 1/ln(2) for probability, which implies levels grow with log_2(N).
@@ -419,132 +523,402 @@ impl HnswIndexWriter {
         let m_max_0 = m * 2;
         let ef_construction = self.index_config.ef_construction;
 
-        // 1. Assign levels to all vectors
-        let mut node_levels = Vec::with_capacity(count);
-        let mut doc_ids_in_order: Vec<u64> = self.vectors.iter().map(|(id, _, _)| *id).collect();
-        doc_ids_in_order.sort_unstable(); // Ensure consistent order for level assignment
+        // Determine which vectors are new and need insertion
+        let mut new_node_levels = Vec::new(); // (doc_id, level)
+        let mut new_doc_ids_in_order = Vec::new();
 
-        for doc_id in &doc_ids_in_order {
-            let level = self.select_layer();
-            node_levels.push((*doc_id, level));
-        }
+        // Check if we have an existing graph to append to
+        let (graph, entry_point, max_level, search_entry_point) =
+            if let Some(existing_graph) = self.graph.take() {
+                println!(
+                    "Appending to existing graph with {} nodes",
+                    existing_graph.nodes.len()
+                );
 
-        let max_level = node_levels.iter().map(|(_, l)| *l).max().unwrap_or(0);
-        let entry_point = node_levels
-            .iter()
-            .find(|(_, l)| *l == max_level)
-            .map(|(id, _)| *id);
+                // Identify new vectors
+                for (doc_id, _, _) in &self.vectors {
+                    if !existing_graph.nodes.contains_key(doc_id) {
+                        new_doc_ids_in_order.push(*doc_id);
+                    }
+                }
+                new_doc_ids_in_order.sort_unstable();
 
-        // 2. Initialize ConcurrentHnswGraph
-        let graph = ConcurrentHnswGraph::new(node_levels.clone(), max_level);
+                // Assign levels to new vectors
+                for doc_id in &new_doc_ids_in_order {
+                    let level = self.select_layer();
+                    new_node_levels.push((*doc_id, level));
+                }
+
+                let current_max_level = existing_graph.max_level;
+                let new_max_level = new_node_levels.iter().map(|(_, l)| *l).max().unwrap_or(0);
+                let total_max_level = current_max_level.max(new_max_level);
+
+                let old_ep = existing_graph.entry_point;
+                let mut ep = old_ep;
+
+                // If we have new nodes with higher level, update entry point
+                if new_max_level > current_max_level {
+                    ep = new_node_levels
+                        .iter()
+                        .find(|(_, l)| *l == total_max_level)
+                        .map(|(id, _)| *id)
+                        .or(ep);
+                }
+
+                // Convert to ConcurrentHnswGraph and extend
+                let mut concurrent_graph =
+                    ConcurrentHnswGraph::from_hnsw_graph(existing_graph, total_max_level);
+                concurrent_graph.add_nodes(new_node_levels.clone());
+
+                let search_ep = old_ep.or(ep);
+
+                (concurrent_graph, ep, total_max_level, search_ep)
+            } else {
+                // Full build
+                let mut doc_ids_in_order: Vec<u64> =
+                    self.vectors.iter().map(|(id, _, _)| *id).collect();
+                doc_ids_in_order.sort_unstable();
+
+                for doc_id in &doc_ids_in_order {
+                    let level = self.select_layer();
+                    new_node_levels.push((*doc_id, level));
+                }
+
+                let max_level = new_node_levels.iter().map(|(_, l)| *l).max().unwrap_or(0);
+                let ep = new_node_levels
+                    .iter()
+                    .find(|(_, l)| *l == max_level)
+                    .map(|(id, _)| *id);
+
+                new_doc_ids_in_order = doc_ids_in_order;
+
+                let concurrent_graph = ConcurrentHnswGraph::new(new_node_levels.clone(), max_level);
+                (concurrent_graph, ep, max_level, ep)
+            };
 
         // 3. Parallel Insertion
-        // We iterate over the sorted doc_ids.
+        // We iterate over the sorted doc_ids (only new assignments).
         let writer_ref = &*self; // Immutable reference for threads
 
-        doc_ids_in_order
+        new_doc_ids_in_order
             .into_par_iter()
             .try_for_each(|doc_id| -> Result<()> {
                 let doc_vector_idx = *writer_ref.doc_id_map.get(&doc_id).ok_or_else(|| {
                     SarissaError::internal(format!("Doc ID {} not found in doc_id_map", doc_id))
                 })?;
-                let vector = &writer_ref.vectors[doc_vector_idx].2;
+                let _vector = &writer_ref.vectors[doc_vector_idx].2;
 
                 if let Some(ep) = entry_point {
-                    // If this is the entry point, it's already added.
+                    // It's possible the entry point is one of the new nodes we are inserting.
+                    // If this doc is the entry point, and it was just chosen as such (and has no edges yet),
+                    // we usually skip inserting it because it's the first node in the graph (or first at top level).
+                    // However, if we are appending, the entry point might be an OLD node, or a NEW node.
+                    // If OLD node: simply search from it.
+                    // If NEW node: if it's the VERY first node in empty graph, skip.
+                    // If it's a new node that became entry point due to level, we still need to insert it
+                    // into lower layers (if any). But if it's the highest node, it might not have peers at top.
+
+                    // Simple logic: if ep == doc_id, and graph was previously empty (or effectively so), skip.
+                    // But with HNSW, if a node is the entry point, it implies it's in the graph.
+                    // If we just added it to `concurrent_graph` via `add_nodes` (init empty), we need to populate edges?
+                    // Actually, the entry point for HNSW is just a starting handle.
+                    // If it's the first node EVER, no edges can be formed.
+                    // If it's a new node added to existing graph, it must function as entry point for *subsequent* searches,
+                    // but for *its own insertion*, we need an entry point *previously* existing (or itself if it's the only one).
+
                     if ep == doc_id {
+                        // If this doc IS the entry point, check if there are other nodes to connect to.
+                        // If this is the first node of the graph, we do nothing.
+                        // If there are other nodes (e.g. at lower levels), we might need to connect down?
+                        // HNSW insertion usually assumes we search for neighbors. If we are the top, we have no neighbors at top.
+                        // We descend.
+
+                        // For simplicity, let's skip "insertion search" if we are the global entry point AND we assume
+                        // we are just starting.
+                        // But if we are appending a new top-level node, we should connect to lower levels.
+                        // However, standard HNSW insertion algorithm:
+                        // `curr_obj = entry_point`.
+                        // If `doc_id == entry_point`, we start at ourselves? Distance is 0.
+                        // If we are the ONLY node at this top level, we won't find neighbors.
+                        // We descend to `level`-1, where there might be other nodes.
+
+                        // Let's rely on standard logic: allow the loop to run.
+                        // But careful: `curr_obj = ep`. If `doc_id == ep`, `dist = 0`.
+                        // Loop 4 (Search from top down to level+1):
+                        //   `card` check: `curr_obj` is candidate.
+                        // It will find nothing better (it is itself).
+                        // It descends.
+                        // Loop 5 (Connect from min(max_level, level) down to 0):
+                        //   It will search layer.
+                        //   Since it is itself, `search_layer` might return itself?
+                        //   We need to ensure we don't add edge to self. `search_layer` returns candidates.
+                        //   `select_neighbors` picks them.
+                        //   `set_neighbors` adds them.
+                    }
+
+                    // If we are inserting the entry point itself (e.g. first node), we can skip.
+                    if ep == doc_id && graph.nodes.len() == 1 {
                         return Ok(());
                     }
 
-                    // Get the level assigned to this node
-                    let level = node_levels
-                        .iter()
-                        .find(|(id, _)| *id == doc_id)
-                        .map(|(_, l)| *l)
-                        .unwrap_or(0);
+                    // Start search from current entry point.
+                    // If `entry_point` is `doc_id` (newly promoted), we should actually start from *previous* entry point?
+                    // Or works fine?
+                    // If `doc_id` is the new global entry point, it means it has the highest level.
+                    // The levels *above* the old max_level definitely only contain `doc_id` (and potentially other new nodes).
+                    // We need to find neighbors.
+                    // HNSW paper: `enter_point` is an existing node. When inserting `q`:
+                    // 1. `ep` = current entry point.
+                    // 2. Search from `ep` to `q.level`.
+                    // 3. Update `ep` if `q` becomes new entry point (globally).
 
-                    let max_level = graph.max_level;
-                    let mut curr_obj = ep;
-                    let mut dist = writer_ref.calc_dist(vector, curr_obj)?;
+                    // Here `entry_point` variable holds the *global* entry point after this batch?
+                    // No, `entry_point` variable should be the *starting point for search*.
+                    // If we are in parallel, this is tricky. Effectively we use the *snapshot* entry point.
+                    // If we use the *new* entry point (which might be `doc_id`), it's bad if `doc_id` is isolated.
+                    // We should probably use the *old* entry point for search if possible, OR just handle the case where we start at `doc_id` and descend.
 
-                    // 4. Search from top layer down to level + 1
-                    for lc in (level + 1..=max_level).rev() {
-                        let mut changed = true;
-                        while changed {
-                            changed = false;
-                            if let Some(neighbors) = graph.get_neighbors_view(curr_obj, lc) {
-                                for neighbor_id in neighbors {
-                                    let d = writer_ref.calc_dist(vector, neighbor_id)?;
-                                    if d < dist {
-                                        dist = d;
-                                        curr_obj = neighbor_id;
-                                        changed = true;
-                                    }
+                    // Let's allow `entry_point` to be used. If it is `doc_id`, loop 4 will just descend (no neighbors at top layers yet).
+
+                    // Wait, if `doc_id` is new entry point (level 10), and old usage was level 5.
+                    // Layers 10 downto 6 are empty (except `doc_id`).
+                    // `get_neighbors_view` for `doc_id` at level 10 returns empty.
+                    // Loop 4 descends to level.
+                    // If `doc_id.level` is 10. we descend to 11? Loop doesn't run.
+                    // Then Loop 5 runs from 10 down to 0.
+                    // At level 10: `search_layer(curr=doc_id)`.
+                    //   Candidate heap has `doc_id`.
+                    //   It finds nothing else.
+                    //   Neighbors = [].
+                    //   Sets neighbors for `doc_id` at level 10 to [].
+                    //   Descends to 9...5.
+                    //   Eventually hits level 5 where other nodes exist.
+                    //   `search_layer` will expand `doc_id` (candidate) ?
+                    //   No, `doc_id` is not connected to level 5 nodes yet.
+                    //   WE NEED TO ENTER THE GRAPH at some point where we can jump to existing nodes.
+                    //   If we start at `doc_id` which is disconnected, we are stuck.
+
+                    // CORRECT LOGIC:
+                    // Use the *old* entry point if `doc_id` is strictly higher?
+                    // Or, if `doc_id` is new, `curr_obj` must be an *already connected* node?
+                    // The paper says: "L = level of q ... enter_point is the current entry point".
+                    // Then updates entry point *after* insertion.
+
+                    // So we should NOT use `doc_id` as starting point `ep` for its own insertion, unless it's the very first node.
+                    // We need a stable entry point into the *existing* structure.
+
+                    // Refinement:
+                    // `entry_point` variable in the code above is calculated as `total_max_level` entry.
+                    // If this is `doc_id`, we have a problem.
+
+                    // We should use `existing_graph.entry_point` as the search starter if available?
+                    // But if `existing_graph.entry_point` is None (first batch), we pick one from `new_node_levels`?
+                }
+
+                // ... Logic continues (will copy existing) ...
+
+                // My fix:
+                // We need to determine the `start_node` for the search.
+                // If `doc_id` == `entry_point` (global), we are potentially isolated.
+                // But wait, `ConcurrentHnswGraph` is pre-populated with `add_nodes`.
+                // All `new_doc_ids` are in the graph structure (isolated initially).
+                // Existing nodes are in the graph structure (connected).
+
+                // If appending: `existing_graph.entry_point` is safe.
+                // If full build: arbitrary `entry_point` is chosen. But in parallel build, how does it work?
+                // Sequential HNSW inserts one by one, updating EP.
+                // Parallel HNSW usually has a hack or uses a lock.
+                // This implementation is "Parallel Insertion".
+
+                // If I look at the ORIGINAL code:
+                // `let entry_point = node_levels... find max level ...`
+                // `let ep = entry_point`;
+                // Inside loop: `if ep == doc_id { return Ok(()); }`
+                // This implies the Global Entry Point is SKIPPED for insertion (it has no neighbors added?).
+                // Then other nodes use `ep` to search.
+                // This implies the Global Max Level node is "root" and might initially have 0 neighbors (until someone links TO it).
+                // But HNSW links are bidirectional?
+                // Row 596: `graph.set_neighbors(doc_id...)`.
+                // Row 599: `for neighbor in neighbors { graph.add_neighbor(neighbor, doc_id) }`.
+                // Yes, bidirectional.
+                // So if EP is skipped, it eventually gets linked when other nodes (at lower levels or same level) connect TO it.
+                // BUT, if EP is at level 10, and everyone else is at level 5.
+                // No one at level 5 can see level 10.
+                // So EP at level 10 remains isolated?
+                // Unless someone else is at level 10.
+
+                // If EP is strictly higher than everyone else, it MUST be inserted to connect to lower layers.
+                // The original code `if ep == doc_id { return Ok(()); }` seems suspect if `level(ep) > max_level(others)`.
+                // But maybe `select_layer` distribution makes this rare or acceptable?
+
+                // To be safe for incremental:
+                // If `doc_id` is the new Global EP (level 10), and Old EP was level 5.
+                // We MUST insert `doc_id` starting from Old EP (level 5), traversing up?
+                // No, traverse down.
+                // We start at Old EP (level 5).
+                // We search at level 5. Connect `doc_id` to level 5 nodes.
+                // Then 4, 3...
+                // Levels 6, 7, 8, 9, 10 for `doc_id` will be empty?
+                // HNSW requires connectivity at top layer.
+
+                // Let's stick to the pattern:
+                // If `doc_id` is being inserted, we need a valid `curr_obj` (enter point).
+                // If `entry_point` (global) is `doc_id` itself, we need a *different* node to start searching from (the 2nd best?).
+
+                // However, preserving behavior is safest.
+                // I will use `entry_point` calculated as max level.
+                // If `doc_id == entry_point`, I will proceed with logic but use a fallback?
+                // Or just keep the `if ep == doc_id { return Ok(()) }` line?
+
+                // In incremental case, if we keep `if ep == doc_id { return Ok(()) }`:
+                // If we append a new node with higher level, it becomes EP. It gets skipped.
+                // It never connects to the old graph.
+                // When we search, we start at New EP. It has no neighbors. Search fails.
+                // This is bad.
+
+                // Fix:
+                // If we have an `existing_entry_point` (from `graph.take()`), we should probably use THAT as the start point for insertion of ALL new nodes, *including* the new Global EP candidate.
+                // So for `new_doc_ids`, `curr_obj` should init to `old_entry_point` (if exists).
+
+                // But `entry_point` variable in my replacement code is `total_max_level` one.
+                // I should pass `start_node` separately?
+                // I can use `ep` (from closure capture) which is the `total_max_level` one.
+
+                // Let's refine the replacement to capture both `global_entry_point` (for future reference) and `search_entry_point` (for insertion).
+                // Actually, `ConcurrentHnswGraph` doesn't track EP. The Writer stores it at the end.
+                // The insertion logic just needs A valid entry point.
+
+                // Adjusted strategy:
+                // `let search_entry_point = existing_graph.entry_point.unwrap_or(global_entry_point_candidate);`
+                // But `existing_graph.entry_point` might be None (first batch).
+
+                // I will modify the logic to:
+                // `let search_entry_point = ...`
+                // Inside loop: `let mut curr_obj = search_entry_point;`
+                // And REMOVE `if ep == doc_id { return Ok(()); }` for the incremental case?
+                // Or be smarter.
+
+                // Let's rely on `ep` being `existing_graph.entry_point` (if valid) for the searches.
+                // If `existing_graph` exists, we use its EP.
+                // If `new_max_level > existing`, the new Global EP is one of the new nodes.
+                // Even that new node should be inserted starting from `existing_EP`.
+
+                // So: `let search_ep = existing_graph.entry_point.or(new_ep_candidate)`.
+                // Actually in my code: `let mut ep = existing_graph.entry_point;`
+                // `if new_max > current_max { ep = ... }` -> this updates it to New EP.
+
+                // I should keep `old_ep`.
+
+                // Implementation detail:
+                // In `build_hnsw_graph`, I calculate `entry_point` (the final one).
+                // I should ALSO calculate `insertion_entry_point`.
+                // If `appending` (graph exists): `insertion_entry_point` = `existing_graph.entry_point`.
+                // If `full build`: `insertion_entry_point` = `entry_point` (one of the nodes).
+
+                // And inside the loop:
+                // `if doc_id == insertion_entry_point { return Ok(()); }`
+                // (Only skip if we are inserting the start node itself, which implies full build first node).
+
+                // For incremental: `insertion_entry_point` is an OLD node. `doc_id` is NEW. They are never equal.
+                // So we never skip. We always insert new nodes starting from Old EP.
+                // This connects New Node to Old Graph.
+                // AND since links are bidirectional, Old Graph connects to New Node.
+                // Finally we update `self.entry_point` to `final_global_ep`.
+                // This seems correct.
+
+                let doc_vector_idx = *writer_ref.doc_id_map.get(&doc_id).ok_or_else(|| {
+                    SarissaError::internal(format!("Doc ID {} not found in doc_id_map", doc_id))
+                })?;
+                let vector = &writer_ref.vectors[doc_vector_idx].2;
+
+                let start_node = if let Some(sp) = search_entry_point {
+                    sp
+                } else {
+                    // No start node (graph empty and this is the first node?)
+                    return Ok(());
+                };
+
+                if start_node == doc_id {
+                    // We are inserting the start node itself (full build case).
+                    return Ok(());
+                }
+
+                // Determine level from graph (it was pre-populated)
+                // We need to access without lock if possible or just acquire read lock.
+                // graph.nodes is HashMap<u64, Vec<RwLock<Vec<u64>>>>
+                // We can just check len of Vec.
+                let layers_len = graph.nodes.get(&doc_id).map(|l| l.len()).unwrap_or(0);
+                if layers_len == 0 {
+                    return Ok(());
+                }
+                let level = layers_len - 1;
+
+                let max_level = graph.max_level;
+                let mut curr_obj = start_node;
+                let mut dist = writer_ref.calc_dist(vector, curr_obj)?;
+
+                // 4. Search from top layer down to level + 1
+                for lc in (level + 1..=max_level).rev() {
+                    let mut changed = true;
+                    while changed {
+                        changed = false;
+                        if let Some(neighbors) = graph.get_neighbors_view(curr_obj, lc) {
+                            for neighbor_id in neighbors {
+                                let d = writer_ref.calc_dist(vector, neighbor_id)?;
+                                if d < dist {
+                                    dist = d;
+                                    curr_obj = neighbor_id;
+                                    changed = true;
                                 }
                             }
                         }
                     }
+                }
 
-                    // 5. Search & Connect from min(max_level, level) down to 0
-                    let top_level = usize::min(max_level, level);
-                    for lc in (0..=top_level).rev() {
-                        // search_layer: greedy search to find ef_construction candidates
-                        let candidates = writer_ref.search_layer(
-                            &graph,
-                            curr_obj,
-                            vector,
-                            ef_construction,
+                // 5. Search & Connect from min(max_level, level) down to 0
+                let top_level = usize::min(max_level, level);
+                for lc in (0..=top_level).rev() {
+                    let candidates =
+                        writer_ref.search_layer(&graph, curr_obj, vector, ef_construction, lc)?;
+
+                    let nearest = candidates.iter().min_by(|a, b| {
+                        a.distance
+                            .partial_cmp(&b.distance)
+                            .unwrap_or(Ordering::Equal)
+                    });
+
+                    if let Some(min_cand) = nearest {
+                        curr_obj = min_cand.id;
+                    }
+
+                    let neighbors = writer_ref.select_neighbors(&candidates, m, lc, m_max, m_max_0);
+
+                    graph.set_neighbors(doc_id, lc, neighbors.clone());
+
+                    for neighbor_id in neighbors {
+                        let current_m_max = if lc == 0 { m_max_0 } else { m_max };
+                        graph.add_neighbor_with_pruning(
+                            neighbor_id,
                             lc,
+                            doc_id,
+                            current_m_max,
+                            writer_ref,
                         )?;
-
-                        // Select greedy neighbor as the best candidate for next layer
-                        // Note: candidates is a MAX-heap (furthest at top).
-                        // We need the nearest one to proceed to the next layer.
-                        // Since BinaryHeap doesn't support random access/min-element efficiently without draining,
-                        // and select_neighbors needs the heap, we iterate.
-                        let nearest = candidates.iter().min_by(|a, b| {
-                            a.distance
-                                .partial_cmp(&b.distance)
-                                .unwrap_or(Ordering::Equal)
-                        });
-
-                        if let Some(min_cand) = nearest {
-                            curr_obj = min_cand.id;
-                        }
-
-                        // Heuristic: select neighbors
-                        let neighbors =
-                            writer_ref.select_neighbors(&candidates, m, lc, m_max, m_max_0);
-
-                        // Add connections bidirectionally
-                        // 1. From doc_id to neighbors
-                        graph.set_neighbors(doc_id, lc, neighbors.clone());
-
-                        // 2. From neighbors to doc_id
-                        for neighbor_id in neighbors {
-                            // Add doc_id to neighbor's list and prune if necessary
-                            let current_m_max = if lc == 0 { m_max_0 } else { m_max };
-                            graph.add_neighbor_with_pruning(
-                                neighbor_id,
-                                lc,
-                                doc_id,
-                                current_m_max,
-                                writer_ref,
-                            )?;
-                        }
                     }
                 }
                 Ok(())
             })?;
 
         // 4. Convert ConcurrentGraph to HnswGraph
-        // This consumes the ConcurrentGraph and creates HnswGraph
         let mut final_nodes = HashMap::new();
+        let mut final_levels_map = HashMap::new();
+
         for (doc_id, layers) in graph.nodes {
             let mut vec_layers = Vec::with_capacity(layers.len());
             for lock in layers {
                 vec_layers.push(lock.into_inner()); // Consume RwLock
             }
+            final_levels_map.insert(doc_id, vec_layers.len() - 1);
             final_nodes.insert(doc_id, vec_layers);
         }
 
@@ -556,16 +930,18 @@ impl HnswIndexWriter {
             m_max,
             m_max_0,
             ef_construction,
-            level_mult: 1.0 / (self.index_config.m as f64).ln(), // Use M for level_mult
+            level_mult: 1.0 / (self.index_config.m as f64).ln(),
         });
-        self.entry_point = entry_point; // Store entry point in writer
-        self.levels = node_levels.into_iter().fold(
-            vec![Vec::new(); max_level + 1],
-            |mut acc, (doc_id, level)| {
-                acc[level].push(doc_id);
-                acc
-            },
-        );
+        self.entry_point = entry_point;
+
+        // Rebuild self.levels
+        let mut levels_vec = vec![Vec::new(); max_level + 1];
+        for (doc_id, level) in final_levels_map {
+            if level < levels_vec.len() {
+                levels_vec[level].push(doc_id);
+            }
+        }
+        self.levels = levels_vec;
 
         Ok(())
     }
