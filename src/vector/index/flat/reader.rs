@@ -77,7 +77,6 @@ impl FlatVectorIndexReader {
                             e
                         ))
                     })?;
-
                     let metadata = read_metadata(&mut input)?;
                     // Read vector data
                     let mut values = vec![0.0f32; dimension];
@@ -219,6 +218,13 @@ impl VectorIndexReader for FlatVectorIndexReader {
     }
 
     fn stats(&self) -> VectorStats {
+        let _memory_usage = match &self.vectors {
+            VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
+            VectorStorage::OnDemand { offsets, .. } => {
+                // Estimate memory for offsets map + ID list
+                offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
+            }
+        };
         VectorStats {
             vector_count: self.vectors.len(),
             dimension: self.dimension,
@@ -228,7 +234,14 @@ impl VectorIndexReader for FlatVectorIndexReader {
     }
 
     fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool {
-        self.vectors.contains_key(&(doc_id, field_name.to_string()))
+        match &self.vectors {
+            VectorStorage::Owned(vectors) => {
+                vectors.contains_key(&(doc_id, field_name.to_string()))
+            }
+            VectorStorage::OnDemand { offsets, .. } => {
+                offsets.contains_key(&(doc_id, field_name.to_string()))
+            }
+        }
     }
 
     fn get_vector_range(

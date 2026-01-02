@@ -15,7 +15,7 @@ use crate::vector::engine::request::{
 /// # Example
 ///
 /// ```
-/// use sarissa::vector::engine::VectorSearchRequestBuilder;
+/// use sarissa::vector::engine::query::VectorSearchRequestBuilder;
 ///
 /// let request = VectorSearchRequestBuilder::new()
 ///     .add_vector("content", vec![0.1, 0.2, 0.3])

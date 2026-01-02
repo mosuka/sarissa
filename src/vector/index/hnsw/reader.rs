@@ -149,7 +149,6 @@ impl HnswIndexReader {
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
-
                     let mut field_name_buf = vec![0u8; field_name_len];
                     input.read_exact(&mut field_name_buf)?;
                     let field_name = String::from_utf8(field_name_buf).map_err(|e| {
@@ -174,7 +173,6 @@ impl HnswIndexReader {
                         Vector::with_metadata(values, metadata),
                     );
                 }
-
                 let graph = read_graph(&mut input)?;
                 (VectorStorage::Owned(Arc::new(vectors)), vector_ids, graph)
             }
@@ -223,7 +221,6 @@ impl HnswIndexReader {
                         .seek(std::io::SeekFrom::Current((dimension * 4) as i64))
                         .map_err(SarissaError::Io)?;
                 }
-
                 let graph = read_graph(&mut input)?;
 
                 (
@@ -301,16 +298,31 @@ impl VectorIndexReader for HnswIndexReader {
     }
 
     fn stats(&self) -> VectorStats {
+        let memory_usage = match &self.vectors {
+            VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
+            VectorStorage::OnDemand { offsets, .. } => {
+                // Estimate memory for offsets map + ID list
+                offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
+            }
+        };
+
         VectorStats {
             vector_count: self.vectors.len(),
             dimension: self.dimension,
-            memory_usage: self.vectors.len() * (8 + self.dimension * 4),
+            memory_usage,
             build_time_ms: 0,
         }
     }
 
     fn contains_vector(&self, doc_id: u64, field_name: &str) -> bool {
-        self.vectors.contains_key(&(doc_id, field_name.to_string()))
+        match &self.vectors {
+            VectorStorage::Owned(vectors) => {
+                vectors.contains_key(&(doc_id, field_name.to_string()))
+            }
+            VectorStorage::OnDemand { offsets, .. } => {
+                offsets.contains_key(&(doc_id, field_name.to_string()))
+            }
+        }
     }
 
     fn get_vector_range(

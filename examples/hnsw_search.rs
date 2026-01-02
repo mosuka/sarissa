@@ -33,9 +33,11 @@ use sarissa::vector::DistanceMetric;
 #[cfg(feature = "embeddings-candle")]
 use sarissa::vector::core::document::DocumentPayload;
 #[cfg(feature = "embeddings-candle")]
+use sarissa::vector::engine::VectorEngine;
+#[cfg(feature = "embeddings-candle")]
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 #[cfg(feature = "embeddings-candle")]
-use sarissa::vector::engine::{VectorEngine, VectorSearchRequestBuilder};
+use sarissa::vector::engine::query::VectorSearchRequestBuilder;
 #[cfg(feature = "embeddings-candle")]
 use tempfile::TempDir;
 

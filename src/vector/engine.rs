@@ -51,12 +51,9 @@ use crate::storage::Storage;
 use crate::vector::collection::VectorCollection;
 use crate::vector::core::document::{DocumentPayload, DocumentVector};
 
-pub use config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
-pub use filter::{MetadataFilter, VectorFilter};
-pub use query::VectorSearchRequestBuilder;
-pub use registry::{DocumentVectorRegistry, RegistryVersion};
-pub use request::{FieldSelector, QueryPayload, QueryVector, VectorScoreMode, VectorSearchRequest};
-pub use response::{VectorHit, VectorSearchResults, VectorStats};
+use config::VectorIndexConfig;
+use request::VectorSearchRequest;
+use response::{VectorSearchResults, VectorStats};
 
 /// A high-level vector search engine that provides both indexing and searching.
 ///
@@ -339,6 +336,8 @@ mod tests {
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use crate::vector::DistanceMetric;
     use crate::vector::core::document::StoredVector;
+    use crate::vector::engine::config::{VectorFieldConfig, VectorIndexKind};
+    use crate::vector::engine::request::QueryVector;
     use std::collections::HashMap;
 
     fn sample_config() -> VectorIndexConfig {

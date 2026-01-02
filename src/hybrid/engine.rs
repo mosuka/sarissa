@@ -10,9 +10,8 @@ use crate::hybrid::search::searcher::{
     HybridSearchParams, HybridSearchRequest, HybridSearchResults, HybridVectorOptions,
 };
 use crate::vector::core::document::{DocumentPayload, DocumentVector, Payload};
-use crate::vector::engine::{
-    FieldSelector, QueryPayload, VectorSearchRequest, VectorSearchResults,
-};
+use crate::vector::engine::request::{FieldSelector, QueryPayload, VectorSearchRequest};
+use crate::vector::engine::response::VectorSearchResults;
 use crate::vector::search::searcher::VectorIndexSearchParams;
 
 /// High-level hybrid search engine combining lexical and vector search.
@@ -359,9 +358,11 @@ impl HybridEngine {
 mod tests {
     use super::*;
     use crate::vector::core::document::{Payload, StoredVector};
-    use crate::vector::engine::{
-        FieldSelector, MetadataFilter, QueryVector, VectorFilter, VectorHit, VectorScoreMode,
+    use crate::vector::engine::filter::{MetadataFilter, VectorFilter};
+    use crate::vector::engine::request::{
+        FieldSelector, QueryVector, VectorScoreMode, VectorSearchRequest,
     };
+    use crate::vector::engine::response::{VectorHit, VectorSearchResults};
     use crate::vector::field::FieldHit;
     use std::collections::HashMap;
     use std::sync::Arc;

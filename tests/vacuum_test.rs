@@ -8,7 +8,7 @@ use sarissa::vector::collection::VectorCollection;
 use sarissa::vector::core::distance::DistanceMetric;
 use sarissa::vector::core::document::{DocumentVector, StoredVector};
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
-use sarissa::vector::engine::{VectorScoreMode, VectorSearchRequest};
+use sarissa::vector::engine::request::{VectorScoreMode, VectorSearchRequest};
 
 #[test]
 fn test_vacuum_reduces_file_size() {
@@ -115,7 +115,7 @@ fn test_vacuum_reduces_file_size() {
     // 5. Verify Search
     // Deleted (even) should not match. Odd should match.
     let request = VectorSearchRequest {
-        query_vectors: vec![sarissa::vector::engine::QueryVector {
+        query_vectors: vec![sarissa::vector::engine::request::QueryVector {
             vector: StoredVector::new(Arc::from(vec![0.1f32; dim])),
             weight: 1.0,
             fields: None,

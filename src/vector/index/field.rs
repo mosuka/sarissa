@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use crate::error::Result;
 use crate::vector::core::document::StoredVector;
 use crate::vector::core::vector::Vector;
-use crate::vector::engine::VectorFieldConfig;
+use crate::vector::engine::config::VectorFieldConfig;
 use crate::vector::field::{VectorField, VectorFieldReader, VectorFieldWriter};
 use crate::vector::writer::VectorIndexWriter;
 

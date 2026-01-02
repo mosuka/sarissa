@@ -82,6 +82,7 @@ impl SegmentedVectorField {
                     match entry {
                         WalEntry::Insert { doc_id, vector } => {
                             // Replay insert
+                            // Replay insert
                             writer.add_vectors(vec![(doc_id, field.name.clone(), vector)])?;
                         }
                         WalEntry::Delete { doc_id } => {
@@ -128,6 +129,8 @@ impl SegmentedVectorField {
             distance_metric: self.config.distance,
             m,
             ef_construction,
+            normalize_vectors: self.config.distance
+                == crate::vector::core::distance::DistanceMetric::Cosine,
             ..Default::default()
         };
 

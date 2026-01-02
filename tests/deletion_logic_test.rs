@@ -11,7 +11,7 @@ mod tests {
     use sarissa::vector::core::distance::DistanceMetric;
     use sarissa::vector::core::document::{DocumentVector, StoredVector};
     use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
-    use sarissa::vector::engine::{VectorScoreMode, VectorSearchRequest};
+    use sarissa::vector::engine::request::{VectorScoreMode, VectorSearchRequest};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -55,7 +55,7 @@ mod tests {
         // 3. Verify it exists
         // Search request
         let request = VectorSearchRequest {
-            query_vectors: vec![sarissa::vector::engine::QueryVector {
+            query_vectors: vec![sarissa::vector::engine::request::QueryVector {
                 vector: StoredVector::new(Arc::from(vec![0.1f32; 128])),
                 weight: 1.0,
                 fields: None,

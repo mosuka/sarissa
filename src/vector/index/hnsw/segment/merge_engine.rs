@@ -158,7 +158,7 @@ impl MergeEngine {
                 &segment.segment_id,
                 self.index_config.distance_metric,
             )?;
-            vectors_merged += reader.vector_count() as u64;
+            // vectors_merged += reader.vector_count() as u64;
 
             let mut iterator = reader.vector_iterator()?;
             while let Some((doc_id, field, vector)) = iterator.next()? {

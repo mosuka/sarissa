@@ -3,8 +3,9 @@ use sarissa::storage::file::FileStorageConfig;
 use sarissa::storage::{StorageConfig, StorageFactory};
 
 use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource};
+use sarissa::vector::engine::VectorEngine;
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig};
-use sarissa::vector::engine::{VectorEngine, VectorSearchRequestBuilder};
+use sarissa::vector::engine::query::VectorSearchRequestBuilder;
 
 use std::sync::Arc;
 use tempfile::tempdir;

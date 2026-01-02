@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::lexical::search::searcher::LexicalSearchParams;
 use crate::vector::core::document::{Payload, StoredVector};
 use crate::vector::core::vector::Vector;
-use crate::vector::engine::{
-    FieldSelector, QueryVector, VectorFilter, VectorScoreMode, VectorSearchRequest,
+use crate::vector::engine::filter::VectorFilter;
+use crate::vector::engine::request::{
+    FieldSelector, QueryVector, VectorScoreMode, VectorSearchRequest,
 };
 use crate::vector::field::FieldHit;
 use crate::vector::search::searcher::VectorIndexSearchParams;

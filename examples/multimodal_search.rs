@@ -34,9 +34,11 @@ use sarissa::vector::DistanceMetric;
 #[cfg(feature = "embeddings-multimodal")]
 use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource};
 #[cfg(feature = "embeddings-multimodal")]
+use sarissa::vector::engine::VectorEngine;
+#[cfg(feature = "embeddings-multimodal")]
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 #[cfg(feature = "embeddings-multimodal")]
-use sarissa::vector::engine::{VectorEngine, VectorSearchRequestBuilder};
+use sarissa::vector::engine::query::VectorSearchRequestBuilder;
 #[cfg(feature = "embeddings-multimodal")]
 use tempfile::TempDir;
 
@@ -194,7 +196,7 @@ fn main() -> Result<()> {
 }
 
 #[cfg(feature = "embeddings-multimodal")]
-fn print_results(results: &sarissa::vector::engine::VectorSearchResults) {
+fn print_results(results: &sarissa::vector::engine::response::VectorSearchResults) {
     for (i, hit) in results.hits.iter().enumerate() {
         println!("{}. Doc ID: {}, Score: {:.4}", i + 1, hit.doc_id, hit.score);
     }
