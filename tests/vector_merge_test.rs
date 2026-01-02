@@ -1,7 +1,7 @@
 use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use sarissa::vector::DistanceMetric;
 use sarissa::vector::core::document::StoredVector;
-use sarissa::vector::engine::{VectorFieldConfig, VectorIndexKind};
+use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexKind};
 use sarissa::vector::field::{VectorFieldReader, VectorFieldWriter};
 use sarissa::vector::index::hnsw::segment::manager::{SegmentManager, SegmentManagerConfig};
 use sarissa::vector::index::segmented_field::SegmentedVectorField;

@@ -11,7 +11,7 @@ use crate::hybrid::search::scorer::ScoreNormalizer;
 use crate::hybrid::search::searcher::HybridSearchParams;
 use crate::hybrid::search::searcher::{HybridSearchResult, HybridSearchResults};
 use crate::lexical::index::inverted::query::LexicalSearchResults;
-use crate::vector::engine::VectorSearchResults;
+use crate::vector::engine::response::VectorSearchResults;
 
 /// Result merger for combining keyword and vector search results.
 ///
@@ -227,7 +227,7 @@ mod tests {
     use super::*;
     use crate::hybrid::search::searcher::{ScoreCombination, ScoreNormalization};
     use crate::lexical::index::inverted::query::SearchHit;
-    use crate::vector::engine::VectorHit;
+    use crate::vector::engine::response::VectorHit;
     use crate::vector::field::FieldHit;
 
     #[tokio::test]

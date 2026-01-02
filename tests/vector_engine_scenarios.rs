@@ -14,9 +14,11 @@ use sarissa::vector::core::document::{
     DocumentPayload, DocumentVector, Payload, PayloadSource, StoredVector,
 };
 use sarissa::vector::core::vector::Vector;
-use sarissa::vector::engine::{
-    FieldSelector, MetadataFilter, QueryPayload, QueryVector, VectorEngine, VectorFieldConfig,
-    VectorFilter, VectorIndexConfig, VectorIndexKind, VectorScoreMode, VectorSearchRequest,
+use sarissa::vector::engine::VectorEngine;
+use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
+use sarissa::vector::engine::filter::{MetadataFilter, VectorFilter};
+use sarissa::vector::engine::request::{
+    FieldSelector, QueryPayload, QueryVector, VectorScoreMode, VectorSearchRequest,
 };
 
 #[test]

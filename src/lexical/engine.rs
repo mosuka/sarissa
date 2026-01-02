@@ -2,6 +2,8 @@
 //!
 //! This module provides the core `LexicalEngine` implementation.
 
+pub mod config;
+
 use std::sync::Arc;
 
 use crate::analysis::analyzer::analyzer::Analyzer;

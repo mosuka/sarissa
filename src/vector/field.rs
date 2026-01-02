@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::vector::core::document::StoredVector;
 use crate::vector::core::vector::Vector;
-use crate::vector::engine::{QueryVector, VectorFieldConfig};
+use crate::vector::engine::config::VectorFieldConfig;
+use crate::vector::engine::request::QueryVector;
 
 /// Represents a single logical vector field backed by an index implementation.
 pub trait VectorField: Send + Sync + Debug {

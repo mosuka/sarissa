@@ -171,7 +171,7 @@ mod tests {
     use crate::vector::core::distance::DistanceMetric;
     use crate::vector::core::document::StoredVector;
     use crate::vector::core::vector::Vector;
-    use crate::vector::engine::QueryVector;
+    use crate::vector::engine::request::QueryVector;
     use crate::vector::reader::SimpleVectorReader;
 
     fn create_test_reader() -> Arc<dyn VectorIndexReader> {
