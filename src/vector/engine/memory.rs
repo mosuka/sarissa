@@ -254,6 +254,17 @@ impl VectorFieldWriter for InMemoryFieldWriter {
         }
         Ok(())
     }
+
+    fn optimize(&self) -> Result<()> {
+        if let Some(delegate) = &self.delegate {
+            // Rebuild delegate using vectors from RAM store
+            // This ensures delegate reflects the current in-memory state
+            let vectors = self.store.vector_tuples(&self.field_name);
+            delegate.rebuild(vectors)?;
+            delegate.flush()?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]

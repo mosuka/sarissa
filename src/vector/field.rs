@@ -29,6 +29,11 @@ pub trait VectorField: Send + Sync + Debug {
     fn reader_handle(&self) -> Arc<dyn VectorFieldReader>;
     /// Returns a type-erased reference for downcasting to concrete implementations.
     fn as_any(&self) -> &dyn Any;
+
+    /// Optimize the field storage/index.
+    fn optimize(&self) -> Result<()> {
+        self.writer().optimize()
+    }
 }
 
 /// Writer interface for ingesting doc-centric vectors into a single field index.
@@ -49,6 +54,9 @@ pub trait VectorFieldWriter: Send + Sync + Debug {
 
     /// Flush any buffered data to durable storage.
     fn flush(&self) -> Result<()>;
+
+    /// Optimize the index (e.g. rebuild, vacuum).
+    fn optimize(&self) -> Result<()>;
 }
 
 /// Reader interface that exposes field-local search/statistics.

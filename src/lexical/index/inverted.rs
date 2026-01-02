@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -113,14 +113,6 @@ pub struct InvertedIndex {
 
     /// Index metadata (thread-safe).
     metadata: RwLock<IndexMetadata>,
-
-    /// Cached writer for efficient document operations.
-    /// Uses `Mutex` because write operations must be exclusive.
-    cached_writer: Mutex<Option<Box<dyn LexicalIndexWriter>>>,
-
-    /// Cached searcher for efficient search operations.
-    /// Uses `RwLock` to allow concurrent searches while ensuring thread-safety.
-    cached_searcher: RwLock<Option<Box<dyn LexicalSearcher>>>,
 }
 
 impl std::fmt::Debug for InvertedIndex {
@@ -130,8 +122,6 @@ impl std::fmt::Debug for InvertedIndex {
             .field("config", &self.config)
             .field("closed", &self.closed.load(Ordering::SeqCst))
             .field("metadata", &*self.metadata.read())
-            .field("cached_writer", &"<cached writer>")
-            .field("cached_searcher", &"<cached searcher>")
             .finish()
     }
 }
@@ -146,8 +136,6 @@ impl InvertedIndex {
             config,
             closed: AtomicBool::new(false),
             metadata: RwLock::new(metadata),
-            cached_writer: Mutex::new(None),
-            cached_searcher: RwLock::new(None),
         };
 
         index.write_metadata()?;
@@ -167,8 +155,6 @@ impl InvertedIndex {
             config,
             closed: AtomicBool::new(false),
             metadata: RwLock::new(metadata),
-            cached_writer: Mutex::new(None),
-            cached_searcher: RwLock::new(None),
         })
     }
 
@@ -325,9 +311,6 @@ impl LexicalIndex for InvertedIndex {
     }
 
     fn close(&self) -> Result<()> {
-        // Clear caches before closing
-        *self.cached_writer.lock() = None;
-        *self.cached_searcher.write() = None;
         self.closed.store(true, Ordering::SeqCst);
         Ok(())
     }
@@ -353,8 +336,6 @@ impl LexicalIndex for InvertedIndex {
     fn optimize(&self) -> Result<()> {
         self.check_closed()?;
         self.update_metadata()?;
-        // Invalidate searcher cache after optimization
-        *self.cached_searcher.write() = None;
         Ok(())
     }
 
@@ -366,112 +347,6 @@ impl LexicalIndex for InvertedIndex {
 
     fn default_fields(&self) -> Result<Vec<String>> {
         Ok(self.config.default_fields.clone())
-    }
-
-    // =========================================================================
-    // Cached access methods
-    // =========================================================================
-
-    fn add_document(&self, doc: crate::lexical::core::document::Document) -> Result<u64> {
-        let mut guard = self.cached_writer.lock();
-        if guard.is_none() {
-            *guard = Some(self.writer()?);
-        }
-        guard.as_mut().unwrap().add_document(doc)
-    }
-
-    fn upsert_document(
-        &self,
-        doc_id: u64,
-        doc: crate::lexical::core::document::Document,
-    ) -> Result<()> {
-        let mut guard = self.cached_writer.lock();
-        if guard.is_none() {
-            *guard = Some(self.writer()?);
-        }
-        guard.as_mut().unwrap().upsert_document(doc_id, doc)
-    }
-
-    fn delete_document(&self, doc_id: u64) -> Result<()> {
-        let mut guard = self.cached_writer.lock();
-        if guard.is_none() {
-            *guard = Some(self.writer()?);
-        }
-        guard.as_mut().unwrap().delete_document(doc_id)
-    }
-
-    fn add_documents(
-        &self,
-        docs: Vec<crate::lexical::core::document::Document>,
-    ) -> Result<Vec<u64>> {
-        let mut guard = self.cached_writer.lock();
-        if guard.is_none() {
-            *guard = Some(self.writer()?);
-        }
-        let writer = guard.as_mut().unwrap();
-        let mut doc_ids = Vec::with_capacity(docs.len());
-        for doc in docs {
-            let doc_id = writer.add_document(doc)?;
-            doc_ids.push(doc_id);
-        }
-        Ok(doc_ids)
-    }
-
-    fn search(
-        &self,
-        request: crate::lexical::search::searcher::LexicalSearchRequest,
-    ) -> Result<crate::lexical::index::inverted::query::LexicalSearchResults> {
-        // First, try to use the existing searcher with a read lock
-        {
-            let guard = self.cached_searcher.read();
-            if let Some(ref searcher) = *guard {
-                return searcher.search(request);
-            }
-        }
-
-        // If no searcher exists, acquire a write lock to create one
-        let mut guard = self.cached_searcher.write();
-        if guard.is_none() {
-            *guard = Some(self.searcher()?);
-        }
-        guard.as_ref().unwrap().search(request)
-    }
-
-    fn count(
-        &self,
-        request: crate::lexical::search::searcher::LexicalSearchRequest,
-    ) -> Result<u64> {
-        // First, try to use the existing searcher with a read lock
-        {
-            let guard = self.cached_searcher.read();
-            if let Some(ref searcher) = *guard {
-                return searcher.count(request);
-            }
-        }
-
-        // If no searcher exists, acquire a write lock to create one
-        let mut guard = self.cached_searcher.write();
-        if guard.is_none() {
-            *guard = Some(self.searcher()?);
-        }
-        guard.as_ref().unwrap().count(request)
-    }
-
-    fn commit(&self) -> Result<()> {
-        // Take the cached writer if it exists and commit
-        if let Some(mut writer) = self.cached_writer.lock().take() {
-            writer.commit()?;
-        }
-
-        // Invalidate searcher cache to reflect the new changes
-        *self.cached_searcher.write() = None;
-
-        Ok(())
-    }
-
-    fn refresh(&self) -> Result<()> {
-        *self.cached_searcher.write() = None;
-        Ok(())
     }
 }
 

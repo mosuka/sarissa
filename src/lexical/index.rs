@@ -71,55 +71,6 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     fn default_fields(&self) -> Result<Vec<String>> {
         Ok(Vec::new())
     }
-
-    // =========================================================================
-    // Cached access methods (for LexicalEngine delegation)
-    // =========================================================================
-
-    /// Get or create a cached writer and add a document.
-    ///
-    /// This method lazily creates a writer on first use and caches it for subsequent calls.
-    fn add_document(&self, doc: crate::lexical::core::document::Document) -> Result<u64>;
-
-    /// Get or create a cached writer and upsert a document.
-    fn upsert_document(
-        &self,
-        doc_id: u64,
-        doc: crate::lexical::core::document::Document,
-    ) -> Result<()>;
-
-    /// Get or create a cached writer and delete a document.
-    fn delete_document(&self, doc_id: u64) -> Result<()>;
-
-    /// Get or create a cached writer and add multiple documents.
-    ///
-    /// Returns a vector of assigned document IDs.
-    fn add_documents(
-        &self,
-        docs: Vec<crate::lexical::core::document::Document>,
-    ) -> Result<Vec<u64>>;
-
-    /// Get or create a cached searcher and execute a search.
-    fn search(
-        &self,
-        request: crate::lexical::search::searcher::LexicalSearchRequest,
-    ) -> Result<crate::lexical::index::inverted::query::LexicalSearchResults>;
-
-    /// Get or create a cached searcher and count matching documents.
-    fn count(&self, request: crate::lexical::search::searcher::LexicalSearchRequest)
-    -> Result<u64>;
-
-    /// Commit pending writes and invalidate caches.
-    ///
-    /// This method commits any pending write operations from the cached writer,
-    /// then invalidates the searcher cache to ensure subsequent searches see the new data.
-    fn commit(&self) -> Result<()>;
-
-    /// Invalidate searcher cache to see latest changes.
-    ///
-    /// This method clears the cached searcher so that the next search operation
-    /// will create a fresh searcher with the latest index state.
-    fn refresh(&self) -> Result<()>;
 }
 
 pub mod config;

@@ -14,8 +14,10 @@ use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::LexicalSearchResults;
-use crate::lexical::search::searcher::LexicalSearchRequest;
+use crate::lexical::search::searcher::{LexicalSearchRequest, LexicalSearcher};
+use crate::lexical::writer::LexicalIndexWriter;
 use crate::storage::Storage;
+use parking_lot::{Mutex, RwLock};
 
 /// A high-level lexical search engine that provides both indexing and searching capabilities.
 ///
@@ -65,6 +67,8 @@ use crate::storage::Storage;
 pub struct LexicalEngine {
     /// The underlying lexical index.
     index: Box<dyn LexicalIndex>,
+    writer_cache: Mutex<Option<Box<dyn LexicalIndexWriter>>>,
+    searcher_cache: RwLock<Option<Box<dyn LexicalSearcher>>>,
 }
 
 impl std::fmt::Debug for LexicalEngine {
@@ -120,7 +124,11 @@ impl LexicalEngine {
     /// ```
     pub fn new(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
         let index = LexicalIndexFactory::create(storage, config)?;
-        Ok(Self { index })
+        Ok(Self {
+            index,
+            writer_cache: Mutex::new(None),
+            searcher_cache: RwLock::new(None),
+        })
     }
 
     /// Add a document to the index.
@@ -162,27 +170,49 @@ impl LexicalEngine {
     /// engine.commit().unwrap();  // Don't forget to commit!
     /// ```
     pub fn add_document(&self, doc: Document) -> Result<u64> {
-        self.index.add_document(doc)
+        let mut guard = self.writer_cache.lock();
+        if guard.is_none() {
+            *guard = Some(self.index.writer()?);
+        }
+        guard.as_mut().unwrap().add_document(doc)
     }
 
     /// Upsert a document with a specific document ID.
     /// Note: You must call `commit()` to persist the changes.
     pub fn upsert_document(&self, doc_id: u64, doc: Document) -> Result<()> {
-        self.index.upsert_document(doc_id, doc)
+        let mut guard = self.writer_cache.lock();
+        if guard.is_none() {
+            *guard = Some(self.index.writer()?);
+        }
+        guard.as_mut().unwrap().upsert_document(doc_id, doc)
     }
 
     /// Add multiple documents to the index.
     /// Returns a vector of assigned document IDs.
     /// Note: You must call `commit()` to persist the changes.
     pub fn add_documents(&self, docs: Vec<Document>) -> Result<Vec<u64>> {
-        self.index.add_documents(docs)
+        let mut guard = self.writer_cache.lock();
+        if guard.is_none() {
+            *guard = Some(self.index.writer()?);
+        }
+        let writer = guard.as_mut().unwrap();
+        let mut doc_ids = Vec::with_capacity(docs.len());
+        for doc in docs {
+            let doc_id = writer.add_document(doc)?;
+            doc_ids.push(doc_id);
+        }
+        Ok(doc_ids)
     }
 
     /// Delete a document by ID.
     ///
     /// Note: You must call `commit()` to persist the changes.
     pub fn delete_document(&self, doc_id: u64) -> Result<()> {
-        self.index.delete_document(doc_id)
+        let mut guard = self.writer_cache.lock();
+        if guard.is_none() {
+            *guard = Some(self.index.writer()?);
+        }
+        guard.as_mut().unwrap().delete_document(doc_id)
     }
 
     /// Commit any pending changes to the index.
@@ -228,7 +258,11 @@ impl LexicalEngine {
     /// engine.commit().unwrap();
     /// ```
     pub fn commit(&self) -> Result<()> {
-        self.index.commit()
+        if let Some(mut writer) = self.writer_cache.lock().take() {
+            writer.commit()?;
+        }
+        *self.searcher_cache.write() = None;
+        Ok(())
     }
 
     /// Optimize the index.
@@ -274,12 +308,15 @@ impl LexicalEngine {
     /// engine.optimize().unwrap();
     /// ```
     pub fn optimize(&self) -> Result<()> {
-        self.index.optimize()
+        self.index.optimize()?;
+        *self.searcher_cache.write() = None;
+        Ok(())
     }
 
     /// Refresh the reader to see latest changes.
     pub fn refresh(&self) -> Result<()> {
-        self.index.refresh()
+        *self.searcher_cache.write() = None;
+        Ok(())
     }
 
     /// Get index statistics.
@@ -358,7 +395,17 @@ impl LexicalEngine {
     /// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
     /// ```
     pub fn search(&self, request: LexicalSearchRequest) -> Result<LexicalSearchResults> {
-        self.index.search(request)
+        {
+            let guard = self.searcher_cache.read();
+            if let Some(ref searcher) = *guard {
+                return searcher.search(request);
+            }
+        }
+        let mut guard = self.searcher_cache.write();
+        if guard.is_none() {
+            *guard = Some(self.index.searcher()?);
+        }
+        guard.as_ref().unwrap().search(request)
     }
 
     /// Count documents matching the request.
@@ -395,11 +442,23 @@ impl LexicalEngine {
     /// println!("Found {} documents with score >= 0.5", count);
     /// ```
     pub fn count(&self, request: LexicalSearchRequest) -> Result<u64> {
-        self.index.count(request)
+        {
+            let guard = self.searcher_cache.read();
+            if let Some(ref searcher) = *guard {
+                return searcher.count(request);
+            }
+        }
+        let mut guard = self.searcher_cache.write();
+        if guard.is_none() {
+            *guard = Some(self.index.searcher()?);
+        }
+        guard.as_ref().unwrap().count(request)
     }
 
     /// Close the search engine.
     pub fn close(&self) -> Result<()> {
+        *self.writer_cache.lock() = None;
+        *self.searcher_cache.write() = None;
         self.index.close()
     }
 

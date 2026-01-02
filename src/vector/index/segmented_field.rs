@@ -298,6 +298,10 @@ impl VectorFieldWriter for SegmentedVectorField {
         }
         Ok(())
     }
+
+    fn optimize(&self) -> Result<()> {
+        self.perform_merge()
+    }
 }
 
 impl SegmentedVectorField {
