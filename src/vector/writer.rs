@@ -74,7 +74,7 @@ impl Default for VectorIndexWriterConfig {
 /// let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 /// let index_config = HnswIndexConfig::default();
 /// let writer_config = VectorIndexWriterConfig::default();
-/// let mut writer = HnswIndexWriter::with_storage(index_config, writer_config, storage).unwrap();
+/// let mut writer = HnswIndexWriter::with_storage(index_config, writer_config, "test_index", storage).unwrap();
 ///
 /// // Use VectorIndexWriter trait methods
 /// // writer.add_vectors(vectors).unwrap();

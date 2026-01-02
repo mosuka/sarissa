@@ -35,7 +35,7 @@ use crate::vector::index::ivf::IvfIndex;
 ///
 /// // Create index using factory
 /// let config = VectorIndexTypeConfig::default();
-/// let index = VectorIndexFactory::create(storage, config)?;
+/// let index = VectorIndexFactory::create(storage, "test_index", config)?;
 /// # Ok(())
 /// # }
 /// ```

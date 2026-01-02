@@ -588,7 +588,6 @@ impl VectorCollection {
                     &*storage,
                     FIELD_INDEX_BASENAME,
                     flat_config.distance_metric,
-                    crate::vector::index::config::IndexLoadingMode::default(),
                 )?);
                 Arc::new(FlatFieldReader::new(field_name.to_string(), reader))
             }
@@ -597,7 +596,6 @@ impl VectorCollection {
                     &*storage,
                     FIELD_INDEX_BASENAME,
                     config.distance,
-                    crate::vector::index::config::IndexLoadingMode::default(),
                 )?);
                 Arc::new(HnswFieldReader::new(field_name.to_string(), reader))
             }

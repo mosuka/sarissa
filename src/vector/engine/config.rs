@@ -287,6 +287,7 @@ impl VectorIndexConfigBuilder {
             index: VectorIndexKind::Flat,
             metadata: HashMap::new(),
             base_weight: 1.0,
+            metadata: HashMap::new(),
         };
 
         if !self.default_fields.contains(&name) {
