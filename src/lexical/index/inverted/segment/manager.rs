@@ -498,7 +498,8 @@ impl SegmentManager {
 
         // Check if merge is needed
         if self.config.auto_merge_enabled && self.should_trigger_merge() {
-            // TODO: Trigger background merge
+            // Note: Background merge should be triggered by the caller (LexicalCollection)
+            // to avoid circular dependencies.
         }
 
         Ok(())
@@ -601,6 +602,15 @@ impl SegmentManager {
         self.maybe_write_manifest()?;
         self.update_stats();
 
+        Ok(())
+    }
+
+    /// Delete files from storage.
+    pub fn delete_files(&self, file_paths: &[String]) -> Result<()> {
+        for path in file_paths {
+            // Ignore errors during deletion (best effort)
+            let _ = self.storage.delete_file(path);
+        }
         Ok(())
     }
 
