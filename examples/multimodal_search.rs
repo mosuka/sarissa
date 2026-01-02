@@ -15,6 +15,8 @@
 //! ```
 
 #[cfg(feature = "embeddings-multimodal")]
+use std::collections::HashMap;
+#[cfg(feature = "embeddings-multimodal")]
 use std::path::Path;
 
 #[cfg(feature = "embeddings-multimodal")]
@@ -57,7 +59,7 @@ fn main() -> Result<()> {
         dimension: 512, // CLIP ViT-B/32 output dimension
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
-
+        metadata: HashMap::new(),
         base_weight: 1.0,
     };
 

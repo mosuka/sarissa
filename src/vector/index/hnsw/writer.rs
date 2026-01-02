@@ -1186,8 +1186,20 @@ impl VectorIndexWriter for HnswIndexWriter {
         self.validate_vectors(&vectors)?;
         Self::normalize_vectors_internal(&self.index_config, &self.writer_config, &mut vectors);
 
-        self.vectors.extend(vectors);
+        // Ensure doc_id_map is up to date
         self.rebuild_doc_id_map();
+
+        for (doc_id, field, vector) in vectors {
+            if let Some(&idx) = self.doc_id_map.get(&doc_id) {
+                // Update existing vector
+                self.vectors[idx] = (doc_id, field, vector);
+            } else {
+                // Add new vector
+                let idx = self.vectors.len();
+                self.vectors.push((doc_id, field, vector));
+                self.doc_id_map.insert(doc_id, idx);
+            }
+        }
 
         // Update next_vec_id
         if let Some((max_id, _, _)) = self.vectors.iter().max_by_key(|(id, _, _)| id) {

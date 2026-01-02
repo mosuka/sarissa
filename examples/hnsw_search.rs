@@ -12,6 +12,8 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
+use std::collections::HashMap;
+#[cfg(feature = "embeddings-candle")]
 use std::sync::Arc;
 
 #[cfg(feature = "embeddings-candle")]
@@ -63,6 +65,7 @@ fn main() -> Result<()> {
         dimension: 384,
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Hnsw, // Use HNSW index
+        metadata: HashMap::new(),
         base_weight: 1.0,
     };
 

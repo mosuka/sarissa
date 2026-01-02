@@ -4,10 +4,13 @@
 //! merging strategies, and segment lifecycle.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::io::Write;
 use std::sync::{Arc, RwLock};
 
 use crate::error::Result;
+use crate::storage::Storage;
+
+use super::merge_policy::MergePolicy;
 
 /// Configuration for segment manager.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,8 +83,8 @@ impl ManagedSegmentInfo {
 /// Candidate segments for merging.
 #[derive(Debug, Clone)]
 pub struct MergeCandidate {
-    /// Segment IDs to merge.
-    pub segment_ids: Vec<String>,
+    /// Segments to merge.
+    pub segments: Vec<ManagedSegmentInfo>,
 
     /// Total vector count.
     pub total_vectors: u64,
@@ -149,46 +152,190 @@ pub struct SegmentManagerStats {
 }
 
 /// Manages segments for vector indexes.
+#[derive(Debug)]
 pub struct SegmentManager {
     config: SegmentManagerConfig,
-    segments: Arc<RwLock<HashMap<String, ManagedSegmentInfo>>>,
+    storage: Arc<dyn Storage>,
+    segments: Arc<RwLock<Vec<ManagedSegmentInfo>>>,
     next_segment_id: Arc<RwLock<u64>>,
 }
 
 impl SegmentManager {
     /// Create a new segment manager with the given configuration.
-    pub fn new(config: SegmentManagerConfig) -> Self {
-        Self {
+    pub fn new(config: SegmentManagerConfig, storage: Arc<dyn Storage>) -> Result<Self> {
+        let manager = Self {
             config,
-            segments: Arc::new(RwLock::new(HashMap::new())),
+            storage,
+            segments: Arc::new(RwLock::new(Vec::new())),
             next_segment_id: Arc::new(RwLock::new(0)),
+        };
+
+        let _ = manager.load_state();
+
+        Ok(manager)
+    }
+
+    fn load_state(&self) -> Result<()> {
+        let mut reader = match self.storage.open_input("segments.json") {
+            Ok(r) => r,
+            Err(_) => return Ok(()),
+        };
+
+        let mut content = Vec::new();
+        reader.read_to_end(&mut content)?;
+        // If empty file, ignore
+        if content.is_empty() {
+            return Ok(());
         }
+
+        let segments_info: Vec<ManagedSegmentInfo> = serde_json::from_slice(&content)?;
+
+        let mut segments = self.segments.write().unwrap();
+        *segments = segments_info;
+
+        let max_id = segments
+            .iter()
+            .filter_map(|s| s.segment_id.strip_prefix("segment_"))
+            .filter_map(|s| s.parse::<u64>().ok())
+            .max()
+            .unwrap_or(0);
+
+        *self.next_segment_id.write().unwrap() = max_id + 1;
+
+        Ok(())
+    }
+
+    pub fn save_state(&self) -> Result<()> {
+        let segments = self.segments.read().unwrap();
+        let content = serde_json::to_vec_pretty(&*segments)?;
+
+        let mut writer = self.storage.create_output("segments.json")?;
+        writer.write_all(&content)?;
+        writer.flush()?;
+
+        Ok(())
     }
 
     /// Add a new segment.
     pub fn add_segment(&self, info: ManagedSegmentInfo) -> Result<()> {
         let mut segments = self.segments.write().unwrap();
-        segments.insert(info.segment_id.clone(), info);
-        Ok(())
+        segments.push(info);
+        drop(segments);
+        self.save_state()
     }
 
     /// Remove a segment.
     pub fn remove_segment(&self, segment_id: &str) -> Result<()> {
         let mut segments = self.segments.write().unwrap();
-        segments.remove(segment_id);
+        if let Some(pos) = segments.iter().position(|s| s.segment_id == segment_id) {
+            segments.remove(pos);
+            drop(segments);
+            self.save_state()
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Delete physical files associated with a segment.
+    pub fn delete_segment_files(&self, segment_id: &str) -> Result<()> {
+        // HNSW index writer uses segment_id as the main file name
+        self.storage.delete_file(segment_id)?;
         Ok(())
+    }
+
+    /// Update a segment info.
+    pub fn update_segment(&self, info: ManagedSegmentInfo) -> Result<()> {
+        let mut segments = self.segments.write().unwrap();
+        if let Some(idx) = segments
+            .iter()
+            .position(|s| s.segment_id == info.segment_id)
+        {
+            segments[idx] = info;
+        }
+        drop(segments);
+        self.save_state()
     }
 
     /// Get segment information.
     pub fn get_segment(&self, segment_id: &str) -> Option<ManagedSegmentInfo> {
         let segments = self.segments.read().unwrap();
-        segments.get(segment_id).cloned()
+        segments
+            .iter()
+            .find(|s| s.segment_id == segment_id)
+            .cloned()
     }
 
     /// List all segments.
     pub fn list_segments(&self) -> Vec<ManagedSegmentInfo> {
         let segments = self.segments.read().unwrap();
-        segments.values().cloned().collect()
+        segments.clone()
+    }
+
+    /// Check if any segments need merging.
+    pub fn check_merge(&self, policy: &dyn MergePolicy) -> Option<MergeCandidate> {
+        let segments_lock = self.segments.read().unwrap();
+
+        if let Some(candidate_ids) = policy.candidates(&segments_lock, &self.config) {
+            let mut total_vectors = 0;
+            let mut total_size = 0;
+            let mut candidates = Vec::new();
+
+            for id in &candidate_ids {
+                if let Some(segment) = segments_lock.iter().find(|s| s.segment_id == *id) {
+                    total_vectors += segment.vector_count;
+                    total_size += segment.size_bytes;
+                    candidates.push(segment.clone());
+                }
+            }
+
+            return Some(MergeCandidate {
+                segments: candidates,
+                total_vectors,
+                total_size,
+            });
+        }
+        None
+    }
+
+    /// Apply a merge result by replacing source segments with the merged segment.
+    pub fn apply_merge(
+        &self,
+        candidate: MergeCandidate,
+        merged_segment: ManagedSegmentInfo,
+    ) -> Result<()> {
+        let mut segments_lock = self.segments.write().unwrap();
+
+        // 1. Remove source segments
+        let ids_to_remove: std::collections::HashSet<_> =
+            candidate.segments.iter().map(|s| &s.segment_id).collect();
+
+        segments_lock.retain(|s| !ids_to_remove.contains(&s.segment_id));
+
+        // 2. Add new segment
+        segments_lock.push(merged_segment);
+
+        // 3. Save state
+        drop(segments_lock);
+        self.save_state()?;
+
+        // 4. Cleanup physical files of source segments
+        for segment in candidate.segments {
+            self.delete_segment_files(&segment.segment_id)?;
+        }
+
+        Ok(())
+    }
+    pub fn total_vectors(&self) -> u64 {
+        self.segments
+            .read()
+            .unwrap()
+            .iter()
+            .map(|s| s.vector_count)
+            .sum()
+    }
+
+    pub fn total_deleted(&self) -> u64 {
+        0 // TODO: Track deleted count in ManagedSegmentInfo
     }
 
     /// Generate a new segment ID.
@@ -213,7 +360,7 @@ impl SegmentManager {
             return None;
         }
 
-        let mut segment_list: Vec<_> = segments.values().cloned().collect();
+        let mut segment_list: Vec<_> = segments.iter().cloned().collect();
 
         // Sort based on strategy
         match strategy {
@@ -233,7 +380,7 @@ impl SegmentManager {
         let to_merge = &segment_list[..merge_count];
 
         let candidate = MergeCandidate {
-            segment_ids: to_merge.iter().map(|s| s.segment_id.clone()).collect(),
+            segments: to_merge.to_vec(),
             total_vectors: to_merge.iter().map(|s| s.vector_count).sum(),
             total_size: to_merge.iter().map(|s| s.size_bytes).sum(),
         };
@@ -258,9 +405,9 @@ impl SegmentManager {
     pub fn stats(&self) -> SegmentManagerStats {
         let segments = self.segments.read().unwrap();
         let segment_count = segments.len() as u32;
-        let total_vectors: u64 = segments.values().map(|s| s.vector_count).sum();
-        let total_size: u64 = segments.values().map(|s| s.size_bytes).sum();
-        let segments_with_deletions = segments.values().filter(|s| s.has_deletions).count() as u32;
+        let total_vectors: u64 = segments.iter().map(|s| s.vector_count).sum();
+        let total_size: u64 = segments.iter().map(|s| s.size_bytes).sum();
+        let segments_with_deletions = segments.iter().filter(|s| s.has_deletions).count() as u32;
         let avg_vectors_per_segment = if segment_count > 0 {
             total_vectors as f64 / segment_count as f64
         } else {
@@ -280,11 +427,25 @@ impl SegmentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+    use crate::vector::index::hnsw::segment::merge_policy::SimpleMergePolicy;
+
+    fn create_info(id: &str, count: u64) -> ManagedSegmentInfo {
+        ManagedSegmentInfo {
+            segment_id: id.to_string(),
+            vector_count: count,
+            vector_offset: 0,
+            generation: 1,
+            has_deletions: false,
+            size_bytes: count * 100,
+        }
+    }
 
     #[test]
     fn test_segment_manager_basic() {
         let config = SegmentManagerConfig::default();
-        let manager = SegmentManager::new(config);
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let manager = SegmentManager::new(config, storage).unwrap();
 
         let segment_id = manager.generate_segment_id();
         assert_eq!(segment_id, "segment_000000");
@@ -296,29 +457,68 @@ mod tests {
         assert_eq!(retrieved.vector_count, 1000);
     }
 
+    // Additional tests for persistence?
     #[test]
-    fn test_merge_plan_creation() {
-        let config = SegmentManagerConfig {
-            max_segments: 5,
-            merge_factor: 3,
-            ..Default::default()
-        };
-        let manager = SegmentManager::new(config);
+    fn test_persistence() {
+        let config = SegmentManagerConfig::default();
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-        // Add multiple segments
-        for i in 0..10 {
-            let segment_id = manager.generate_segment_id();
-            let info = ManagedSegmentInfo::new(segment_id, 1000 * (i + 1), i * 1000, 0);
+        {
+            let manager = SegmentManager::new(config.clone(), storage.clone()).unwrap();
+            let info = ManagedSegmentInfo::new("segment_000000".to_string(), 1000, 0, 0);
             manager.add_segment(info).unwrap();
+            // Saves automatically
         }
 
-        assert!(manager.needs_merge());
+        // Reload
+        {
+            let manager = SegmentManager::new(config, storage.clone()).unwrap();
+            let segments = manager.list_segments();
+            assert_eq!(segments.len(), 1);
+            assert_eq!(segments[0].segment_id, "segment_000000");
+        }
+    }
 
-        let plan = manager.create_merge_plan(MergeStrategy::Smallest);
-        assert!(plan.is_some());
+    #[test]
+    fn test_check_merge() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let mut config = SegmentManagerConfig::default();
+        config.max_segments = 5;
+        config.merge_factor = 3;
 
-        let plan = plan.unwrap();
-        assert_eq!(plan.candidates.len(), 1);
-        assert_eq!(plan.candidates[0].segment_ids.len(), 3);
+        // We use a temporary config for the manager
+        let manager = SegmentManager::new(config, storage).unwrap();
+
+        // 1. Add segments (not enough for merge)
+        manager.add_segment(create_info("1", 100)).unwrap();
+        manager.add_segment(create_info("2", 100)).unwrap();
+
+        assert!(manager.check_merge(&SimpleMergePolicy::new()).is_none());
+
+        // 2. Add more segments to trigger merge
+        manager.add_segment(create_info("3", 100)).unwrap();
+        manager.add_segment(create_info("4", 100)).unwrap();
+        manager.add_segment(create_info("5", 100)).unwrap();
+        manager.add_segment(create_info("6", 100)).unwrap(); // Total 6 > 5
+
+        let candidate = manager.check_merge(&SimpleMergePolicy::new());
+        assert!(candidate.is_some());
+
+        let candidate = candidate.unwrap();
+        assert_eq!(candidate.segments.len(), 3);
+        // Expect smallest: 1, 2, 3, 4, 5, 6 are all 100?
+        // Wait, simple policy sort by vector_count.
+        // If all equal, it picks stable sort order? Or arbitrary.
+        // SimpleMergePolicy uses `segments.iter().enumerate()` then sort_by_key.
+        // `sort_by_key` is stable. So it picks first 3: 1, 2, 3.
+
+        let ids: Vec<String> = candidate
+            .segments
+            .iter()
+            .map(|s| s.segment_id.clone())
+            .collect();
+        assert!(ids.contains(&"1".to_string()));
+        assert!(ids.contains(&"2".to_string()));
+        assert!(ids.contains(&"3".to_string()));
     }
 }

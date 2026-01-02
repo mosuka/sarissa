@@ -12,6 +12,8 @@
 //! ```
 
 #[cfg(feature = "embeddings-candle")]
+use std::collections::HashMap;
+#[cfg(feature = "embeddings-candle")]
 use std::sync::Arc;
 
 #[cfg(feature = "embeddings-candle")]
@@ -66,6 +68,7 @@ fn main() -> Result<()> {
         dimension: 384, // Dimension for all-MiniLM-L6-v2
         distance: DistanceMetric::Cosine,
         index: VectorIndexKind::Flat,
+        metadata: HashMap::new(),
         base_weight: 1.0,
     };
 

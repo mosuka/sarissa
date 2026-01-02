@@ -346,7 +346,7 @@ mod tests {
             dimension: 3,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-
+            metadata: HashMap::new(),
             base_weight: 1.0,
         };
         use crate::embedding::precomputed::PrecomputedEmbedder;
