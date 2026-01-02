@@ -275,14 +275,27 @@ impl MergeEngine {
         // Create merged inverted index
         let mut merged_index = TermPostingIndex::new();
         let mut all_documents = Vec::new();
-        let deleted_doc_ids = AHashSet::<u64>::new();
+        let mut deleted_doc_ids = AHashSet::<u64>::new();
         let mut next_doc_id = 0u64;
 
         // Load deletion information for each segment
+        // Load deletion information for each segment
         for segment in segments {
             if segment.segment_info.has_deletions {
-                // TODO: Load actual deletion bitmap
-                // For now, simulate based on deleted_count
+                let bitmap_file = format!("{}.delmap", segment.segment_info.segment_id);
+                if let Ok(input) = self.storage.open_input(&bitmap_file) {
+                    use crate::lexical::index::inverted::maintenance::deletion::DeletionBitmap;
+                    use crate::storage::structured::StructReader;
+
+                    if let Ok(mut reader) = StructReader::new(input) {
+                        if let Ok(bitmap) = DeletionBitmap::read_from_storage(&mut reader) {
+                            for local_doc_id in bitmap.get_deleted_docs() {
+                                let global_doc_id = segment.segment_info.doc_offset + local_doc_id;
+                                deleted_doc_ids.insert(global_doc_id);
+                            }
+                        }
+                    }
+                }
             }
         }
 

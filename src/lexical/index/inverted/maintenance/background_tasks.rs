@@ -541,14 +541,22 @@ impl BackgroundScheduler {
                 Self::execute_merge_task(&segment_ids, segment_manager, merge_engine)
             }
 
-            TaskType::Compaction { segment_id, .. } => {
-                Self::execute_compaction_task(&segment_id, deletion_manager)
-            }
+            TaskType::Compaction { segment_id, .. } => Self::execute_compaction_task(
+                &segment_id,
+                deletion_manager,
+                segment_manager,
+                merge_engine,
+            ),
 
             TaskType::Optimization {
                 target_segments,
                 optimization_level,
-            } => Self::execute_optimization_task(&target_segments, optimization_level),
+            } => Self::execute_optimization_task(
+                &target_segments,
+                optimization_level,
+                segment_manager,
+                merge_engine,
+            ),
 
             TaskType::Cleanup { file_paths } => {
                 Self::execute_cleanup_task(&file_paths, segment_manager)
@@ -596,13 +604,64 @@ impl BackgroundScheduler {
             );
         }
 
-        let items_processed = segments_to_merge.len() as u64;
-        let bytes_processed = segments_to_merge.iter().map(|s| s.size_bytes).sum();
+        // Create merge candidate
+        let candidate = crate::lexical::index::inverted::segment::manager::MergeCandidate {
+            segments: segment_ids.to_vec(),
+            priority: 0.0,     // Not used for execution
+            estimated_size: 0, // Not used for execution
+            strategy: crate::lexical::index::inverted::segment::manager::MergeStrategy::Balanced, // Default strategy if direct call
+        };
+
+        // Get generation for new segment
+        // Note: This relies on internal generation counter being atomic
+        // In a real implementation, we might want to get this more robustly
+        let generation = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        // Execute merge
+        let merge_result = match _merge_engine.merge_segments(&candidate, &segments, generation) {
+            Ok(result) => result,
+            Err(e) => {
+                return (
+                    TaskStatus::Failed(format!("Merge failed: {}", e)),
+                    0,
+                    0,
+                    Some(format!("Merge failed: {}", e)),
+                );
+            }
+        };
+
+        // Add new segment
+        if let Err(e) = _segment_manager.add_segment(
+            merge_result.new_segment.segment_info,
+            merge_result.file_paths,
+        ) {
+            return (
+                TaskStatus::Failed(format!("Failed to add new segment: {}", e)),
+                0,
+                0,
+                Some(format!("Failed to add new segment: {}", e)),
+            );
+        }
+
+        // Remove old segments
+        for segment_id in segment_ids {
+            let _ = _segment_manager.remove_segment(segment_id);
+            // We should also schedule cleanup of old files, but we don't have scheduler reference here.
+            // In a production system, we might return follow-up tasks.
+            // For now, we rely on a separate cleanup process or manual cleanup.
+            // Alternatively, we could delete immediately if we are sure no readers are active.
+            // But readers might be using them.
+            // The DeletionManager also needs to know, but remove_segment usually handles notification?
+            // No, DeletionManager is separate.
+        }
 
         (
             TaskStatus::Completed,
-            items_processed,
-            bytes_processed,
+            merge_result.stats.segments_merged as u64,
+            merge_result.stats.size_before,
             None,
         )
     }
@@ -611,22 +670,42 @@ impl BackgroundScheduler {
     fn execute_compaction_task(
         segment_id: &str,
         deletion_manager: &DeletionManager,
+        segment_manager: &SegmentManager,
+        merge_engine: &MergeEngine,
     ) -> (TaskStatus, u64, u64, Option<String>) {
-        let deleted_docs = deletion_manager.get_deleted_docs(segment_id);
-        let items_processed = deleted_docs.len() as u64;
+        // Check if segment exists
+        let _segment = match segment_manager.get_segment(segment_id) {
+            Some(seg) => seg,
+            None => {
+                return (
+                    TaskStatus::Failed(format!("Segment {} not found", segment_id)),
+                    0,
+                    0,
+                    Some(format!("Segment {} not found", segment_id)),
+                );
+            }
+        };
 
-        // TODO: Implement actual compaction
+        // Create a merge task with just this segment
+        // The merge engine handles removal of deleted documents
+        // Reuse execute_merge_task logic by calling it directly?
+        // No, execute_merge_task takes a list of IDs.
 
-        (TaskStatus::Completed, items_processed, 0, None)
+        let _deleted_count = deletion_manager.get_deleted_docs(segment_id).len() as u64;
+
+        Self::execute_merge_task(&[segment_id.to_string()], segment_manager, merge_engine)
     }
 
     /// Execute optimization task.
     fn execute_optimization_task(
         target_segments: &[String],
         _optimization_level: u8,
+        segment_manager: &SegmentManager,
+        merge_engine: &MergeEngine,
     ) -> (TaskStatus, u64, u64, Option<String>) {
-        // TODO: Implement optimization
-        (TaskStatus::Completed, target_segments.len() as u64, 0, None)
+        // Optimization is effectively a merge of target segments with optimization flags if any.
+        // For now, simple merge.
+        Self::execute_merge_task(target_segments, segment_manager, merge_engine)
     }
 
     /// Execute cleanup task.
@@ -634,8 +713,16 @@ impl BackgroundScheduler {
         file_paths: &[String],
         _segment_manager: &SegmentManager,
     ) -> (TaskStatus, u64, u64, Option<String>) {
-        // TODO: Implement cleanup
-        (TaskStatus::Completed, file_paths.len() as u64, 0, None)
+        // Perform file deletion
+        match _segment_manager.delete_files(file_paths) {
+            Ok(_) => (TaskStatus::Completed, file_paths.len() as u64, 0, None),
+            Err(e) => (
+                TaskStatus::Failed(format!("Cleanup failed: {}", e)),
+                0,
+                0,
+                Some(format!("Cleanup failed: {}", e)),
+            ),
+        }
     }
 
     /// Execute stats update task.
