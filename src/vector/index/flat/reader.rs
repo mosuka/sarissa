@@ -218,7 +218,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
     }
 
     fn stats(&self) -> VectorStats {
-        let memory_usage = match &self.vectors {
+        let _memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
             VectorStorage::OnDemand { offsets, .. } => {
                 // Estimate memory for offsets map + ID list
@@ -349,10 +349,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
                 warnings.push("OnDemand mode: Deep vector validation skipped".to_string());
             }
         }
-<<<<<<< HEAD
-=======
 
->>>>>>> 5e75bfc (refactor: Implicit vector loading mode and shared VectorStorage (#157))
         Ok(ValidationReport {
             repair_suggestions: Vec::new(),
             is_valid: errors.is_empty(),

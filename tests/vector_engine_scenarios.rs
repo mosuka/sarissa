@@ -178,11 +178,7 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-<<<<<<< HEAD
             metadata: HashMap::new(),
-=======
-
->>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
             base_weight: 1.4,
         },
     );
@@ -192,11 +188,7 @@ fn sample_engine_config() -> VectorIndexConfig {
             dimension: 4,
             distance: DistanceMetric::Cosine,
             index: VectorIndexKind::Flat,
-<<<<<<< HEAD
             metadata: HashMap::new(),
-=======
-
->>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
             base_weight: 1.0,
         },
     );
@@ -281,13 +273,6 @@ fn image_bytes_payload(bytes: &[u8]) -> Payload {
         bytes.to_vec(),
         Some("image/png".into()),
     ))
-<<<<<<< HEAD
-=======
-}
-
-fn image_uri_payload(uri: String) -> Payload {
-    Payload::new(PayloadSource::uri(uri, Some("image/png".into())))
->>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
 }
 
 fn build_payload_engine() -> Result<VectorEngine> {
@@ -305,11 +290,7 @@ fn build_payload_engine() -> Result<VectorEngine> {
                 dimension: 4,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-<<<<<<< HEAD
                 metadata: HashMap::new(),
-=======
-
->>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
                 base_weight: 1.0,
             },
         )
@@ -338,11 +319,7 @@ fn build_multimodal_payload_engine() -> Result<VectorEngine> {
                 dimension: 3,
                 distance: DistanceMetric::Cosine,
                 index: VectorIndexKind::Flat,
-<<<<<<< HEAD
                 metadata: HashMap::new(),
-=======
-
->>>>>>> cf01777 (refactor(vector): remove VectorType enum for simplified field-based API (#154))
                 base_weight: 1.0,
             },
         )
