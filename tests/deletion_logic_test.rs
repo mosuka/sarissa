@@ -7,17 +7,17 @@ mod tests {
     };
     use sarissa::storage::memory::MemoryStorageConfig;
     use sarissa::storage::{StorageConfig, StorageFactory};
-    use sarissa::vector::collection::VectorCollection;
     use sarissa::vector::core::distance::DistanceMetric;
     use sarissa::vector::core::document::{DocumentVector, StoredVector};
+    use sarissa::vector::engine::VectorEngine;
     use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
     use sarissa::vector::engine::request::{VectorScoreMode, VectorSearchRequest};
     use std::collections::HashMap;
     use std::sync::Arc;
 
     #[test]
-    fn test_vector_collection_logical_deletion() {
-        // 1. Create VectorCollection
+    fn test_vector_engine_logical_deletion() {
+        // 1. Create VectorEngine
         // Configure field
         let field_config = VectorFieldConfig {
             dimension: 128,
@@ -42,7 +42,7 @@ mod tests {
         let storage =
             StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default())).unwrap();
 
-        let collection = VectorCollection::new(config, storage, None).unwrap();
+        let engine = VectorEngine::new(storage, config).unwrap();
 
         // 2. Add a document
         let doc_id = 1;
@@ -50,7 +50,7 @@ mod tests {
         // Use set_field with StoredVector
         doc_vector.set_field("embedding", StoredVector::new(Arc::from(vec![0.1f32; 128])));
 
-        collection.upsert_document(doc_id, doc_vector).unwrap();
+        engine.upsert_vectors(doc_id, doc_vector).unwrap();
 
         // 3. Verify it exists
         // Search request
@@ -69,7 +69,7 @@ mod tests {
             query_payloads: vec![],
         };
 
-        let searcher = collection.searcher().unwrap();
+        let searcher = engine.searcher().unwrap();
         let results = searcher.search(&request).unwrap();
         assert_eq!(
             results.hits.len(),
@@ -79,10 +79,10 @@ mod tests {
         assert_eq!(results.hits[0].doc_id, doc_id);
 
         // 4. Delete the document
-        collection.delete_document(doc_id).unwrap();
+        engine.delete_vectors(doc_id).unwrap();
 
         // 5. Verify it is GONE (Logical Deletion check)
-        let searcher_after = collection.searcher().unwrap();
+        let searcher_after = engine.searcher().unwrap();
         let results_after = searcher_after.search(&request).unwrap();
         assert_eq!(
             results_after.hits.len(),

@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::error::Result;
-use crate::lexical::collection::LexicalCollection;
 use crate::lexical::core::document::Document;
 use crate::lexical::engine::config::LexicalIndexConfig;
+use crate::lexical::index::LexicalIndex;
+use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::index::inverted::query::LexicalSearchResults;
 use crate::lexical::search::searcher::LexicalSearchRequest;
@@ -62,14 +63,14 @@ use crate::storage::Storage;
 /// let results = engine.search(LexicalSearchRequest::new("title:rust")).unwrap();
 /// ```
 pub struct LexicalEngine {
-    /// The underlying lexical collection.
-    collection: LexicalCollection,
+    /// The underlying lexical index.
+    index: Box<dyn LexicalIndex>,
 }
 
 impl std::fmt::Debug for LexicalEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LexicalEngine")
-            .field("collection", &self.collection)
+            .field("index", &self.index)
             .finish()
     }
 }
@@ -118,8 +119,8 @@ impl LexicalEngine {
     /// let engine = LexicalEngine::new(storage, LexicalIndexConfig::default()).unwrap();
     /// ```
     pub fn new(storage: Arc<dyn Storage>, config: LexicalIndexConfig) -> Result<Self> {
-        let collection = LexicalCollection::new(storage, config)?;
-        Ok(Self { collection })
+        let index = LexicalIndexFactory::create(storage, config)?;
+        Ok(Self { index })
     }
 
     /// Add a document to the index.
@@ -161,27 +162,27 @@ impl LexicalEngine {
     /// engine.commit().unwrap();  // Don't forget to commit!
     /// ```
     pub fn add_document(&self, doc: Document) -> Result<u64> {
-        self.collection.add_document(doc)
+        self.index.add_document(doc)
     }
 
     /// Upsert a document with a specific document ID.
     /// Note: You must call `commit()` to persist the changes.
     pub fn upsert_document(&self, doc_id: u64, doc: Document) -> Result<()> {
-        self.collection.upsert_document(doc_id, doc)
+        self.index.upsert_document(doc_id, doc)
     }
 
     /// Add multiple documents to the index.
     /// Returns a vector of assigned document IDs.
     /// Note: You must call `commit()` to persist the changes.
     pub fn add_documents(&self, docs: Vec<Document>) -> Result<Vec<u64>> {
-        self.collection.add_documents(docs)
+        self.index.add_documents(docs)
     }
 
     /// Delete a document by ID.
     ///
     /// Note: You must call `commit()` to persist the changes.
     pub fn delete_document(&self, doc_id: u64) -> Result<()> {
-        self.collection.delete_document(doc_id)
+        self.index.delete_document(doc_id)
     }
 
     /// Commit any pending changes to the index.
@@ -227,7 +228,7 @@ impl LexicalEngine {
     /// engine.commit().unwrap();
     /// ```
     pub fn commit(&self) -> Result<()> {
-        self.collection.commit()
+        self.index.commit()
     }
 
     /// Optimize the index.
@@ -273,22 +274,22 @@ impl LexicalEngine {
     /// engine.optimize().unwrap();
     /// ```
     pub fn optimize(&self) -> Result<()> {
-        self.collection.optimize()
+        self.index.optimize()
     }
 
     /// Refresh the reader to see latest changes.
     pub fn refresh(&self) -> Result<()> {
-        self.collection.refresh()
+        self.index.refresh()
     }
 
     /// Get index statistics.
     pub fn stats(&self) -> Result<InvertedIndexStats> {
-        self.collection.stats()
+        self.index.stats()
     }
 
     /// Get the storage backend.
     pub fn storage(&self) -> &Arc<dyn Storage> {
-        self.collection.storage()
+        self.index.storage()
     }
 
     /// Search with the given request.
@@ -357,7 +358,7 @@ impl LexicalEngine {
     /// let results = engine.search(LexicalSearchRequest::new(query)).unwrap();
     /// ```
     pub fn search(&self, request: LexicalSearchRequest) -> Result<LexicalSearchResults> {
-        self.collection.search(request)
+        self.index.search(request)
     }
 
     /// Count documents matching the request.
@@ -394,17 +395,17 @@ impl LexicalEngine {
     /// println!("Found {} documents with score >= 0.5", count);
     /// ```
     pub fn count(&self, request: LexicalSearchRequest) -> Result<u64> {
-        self.collection.count(request)
+        self.index.count(request)
     }
 
     /// Close the search engine.
     pub fn close(&self) -> Result<()> {
-        self.collection.close()
+        self.index.close()
     }
 
     /// Check if the engine is closed.
     pub fn is_closed(&self) -> bool {
-        self.collection.is_closed()
+        self.index.is_closed()
     }
 
     /// Get the analyzer used by this engine.
@@ -421,7 +422,18 @@ impl LexicalEngine {
     /// Returns an error if the reader cannot be created or the index type
     /// doesn't support analyzers.
     pub fn analyzer(&self) -> Result<Arc<dyn Analyzer>> {
-        self.collection.analyzer()
+        use crate::lexical::index::inverted::reader::InvertedIndexReader;
+
+        let reader = self.index.reader()?;
+
+        // Downcast to InvertedIndexReader to access analyzer
+        if let Some(inverted_reader) = reader.as_any().downcast_ref::<InvertedIndexReader>() {
+            Ok(Arc::clone(inverted_reader.analyzer()))
+        } else {
+            // For other index types, return StandardAnalyzer as default
+            use crate::analysis::analyzer::standard::StandardAnalyzer;
+            Ok(Arc::new(StandardAnalyzer::new()?))
+        }
     }
 
     /// Create a query parser configured for this index.
@@ -437,7 +449,7 @@ impl LexicalEngine {
         let analyzer = self.analyzer()?;
         let mut parser = crate::lexical::index::inverted::query::parser::QueryParser::new(analyzer);
 
-        if let Ok(fields) = self.collection.default_fields() {
+        if let Ok(fields) = self.index.default_fields() {
             if !fields.is_empty() {
                 parser = parser.with_default_fields(fields);
             }

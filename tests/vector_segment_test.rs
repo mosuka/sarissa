@@ -3,9 +3,9 @@ use sarissa::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 use sarissa::error::{Result, SarissaError};
 use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use sarissa::vector::DistanceMetric;
-use sarissa::vector::collection::VectorCollection;
 use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource};
 use sarissa::vector::core::vector::Vector;
+use sarissa::vector::engine::VectorEngine;
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 use std::any::Any;
 use std::sync::Arc;
@@ -69,9 +69,10 @@ async fn test_vector_segment_integration() {
         metadata: std::collections::HashMap::new(),
     };
 
-    // We construct collection manually to inject storage
-    let collection =
-        VectorCollection::new(collection_config.clone(), storage.clone(), None).unwrap();
+    // We construct engine manually to inject storage
+    let engine =
+        sarissa::vector::engine::VectorEngine::new(storage.clone(), collection_config.clone())
+            .unwrap();
 
     // 2. Insert vectors
     let vectors = vec![
@@ -96,8 +97,8 @@ async fn test_vector_segment_integration() {
             .collect(),
         };
 
-        // Use upsert_document_payload.
-        collection.upsert_document_payload(doc_id, payload).unwrap();
+        // Use upsert_payloads.
+        engine.upsert_payloads(doc_id, payload).unwrap();
     }
 
     // 3. Flush/Persist explicitly if needed?
@@ -105,10 +106,13 @@ async fn test_vector_segment_integration() {
 
     // 4. Persistence check
     // We drop collection and recreates it.
-    drop(collection);
+    // 4. Persistence check
+    // We drop engine and recreates it.
+    drop(engine);
 
-    let collection_2 =
-        VectorCollection::new(collection_config.clone(), storage.clone(), None).unwrap();
+    let engine_2 =
+        sarissa::vector::engine::VectorEngine::new(storage.clone(), collection_config.clone())
+            .unwrap();
 
     // We verify stats.
     // Recovery should load segments.
@@ -116,7 +120,7 @@ async fn test_vector_segment_integration() {
     // Sealed should be 3 (one per upsert), or less if mocked?
     // Assuming upsert flushes each time.
 
-    let stats = collection_2.field_stats("vector_field").unwrap();
+    let stats = engine_2.field_stats("vector_field").unwrap();
 
     // We use assert!(stats.vector_count > 0) to be safe against flush optimizations.
     // But given implementation, it should be 3.

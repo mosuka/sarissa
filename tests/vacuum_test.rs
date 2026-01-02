@@ -4,9 +4,9 @@ use tempfile::Builder;
 
 use sarissa::storage::file::FileStorageConfig;
 use sarissa::storage::{StorageConfig, StorageFactory};
-use sarissa::vector::collection::VectorCollection;
 use sarissa::vector::core::distance::DistanceMetric;
 use sarissa::vector::core::document::{DocumentVector, StoredVector};
+use sarissa::vector::engine::VectorEngine;
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 use sarissa::vector::engine::request::{VectorScoreMode, VectorSearchRequest};
 
@@ -15,7 +15,7 @@ fn test_vacuum_reduces_file_size() {
     let dir = Builder::new().prefix("test_vacuum").tempdir().unwrap();
     let path = dir.path().to_path_buf();
 
-    // 1. Create VectorCollection using FileStorage
+    // 1. Create VectorEngine using FileStorage
     let field_config = VectorFieldConfig {
         dimension: 128,
         distance: DistanceMetric::Cosine,
@@ -44,7 +44,7 @@ fn test_vacuum_reduces_file_size() {
     let storage_config = StorageConfig::File(file_config);
     let storage = StorageFactory::create(storage_config).unwrap();
 
-    let collection = VectorCollection::new(config, storage, None).unwrap();
+    let engine = VectorEngine::new(storage, config).unwrap();
 
     let dim = 128;
     let num_vectors = 200;
@@ -54,17 +54,17 @@ fn test_vacuum_reduces_file_size() {
     for i in 0..num_vectors {
         let mut doc_vector = DocumentVector::new();
         doc_vector.set_field("vectors", StoredVector::new(Arc::from(vec![0.1f32; dim])));
-        collection.upsert_document(i, doc_vector).unwrap();
+        engine.upsert_vectors(i, doc_vector).unwrap();
     }
 
     println!("Flushing vectors to disk...");
-    collection.flush_vectors().unwrap();
-    collection.commit().unwrap();
+    engine.flush_vectors().unwrap();
+    engine.commit().unwrap();
     println!("committed.");
 
     // Check file size
     // Path: {root}/vector_fields/{field_name}/vectors.index.flat
-    // VectorCollection uses "vector_fields/{sanitized_field_name}" as storage prefix.
+    // VectorEngine uses "vector_fields/{sanitized_field_name}" as storage prefix.
     // FlatIndexWriter appends ".flat".
     let index_file_path = path
         .join("vector_fields")
@@ -83,10 +83,10 @@ fn test_vacuum_reduces_file_size() {
     println!("Deleting {} vectors...", num_vectors / 2);
     for i in 0..num_vectors {
         if i % 2 == 0 {
-            collection.delete_document(i).unwrap();
+            engine.delete_vectors(i).unwrap();
         }
     }
-    collection.commit().unwrap();
+    engine.commit().unwrap();
 
     let size_intermediate = std::fs::metadata(&index_file_path).unwrap().len();
     println!(
@@ -96,7 +96,7 @@ fn test_vacuum_reduces_file_size() {
 
     // 4. Run Vacuum
     println!("Running optimize (Vacuum)...");
-    collection.optimize().unwrap();
+    engine.optimize().unwrap();
 
     let size_after = std::fs::metadata(&index_file_path).unwrap().len();
     println!("Size after optimize: {} bytes", size_after);
@@ -129,7 +129,7 @@ fn test_vacuum_reduces_file_size() {
         query_payloads: vec![],
     };
 
-    let searcher = collection.searcher().unwrap();
+    let searcher = engine.searcher().unwrap();
     let results = searcher.search(&request).unwrap();
 
     // Expect 100 hits

@@ -13,7 +13,6 @@
 //! - `reader`: Index reader trait
 //! - `writer`: Index writer trait
 
-pub mod collection;
 pub mod core;
 pub mod index;
 pub mod search;

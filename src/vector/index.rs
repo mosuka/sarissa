@@ -35,8 +35,8 @@ use crate::vector::writer::VectorIndexWriter;
 ///
 /// This is analogous to [`crate::lexical::index::LexicalIndex`] in the lexical module.
 /// For high-level, document-centric operations, see
-/// [`crate::vector::collection::VectorCollection`] which manages multiple
-/// vector fields and is used by [`crate::vector::engine::VectorEngine`].
+/// [`crate::vector::engine::VectorEngine`] which manages multiple
+/// vector fields and handles document-level operations.
 pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     /// Get a reader for this index.
     ///
