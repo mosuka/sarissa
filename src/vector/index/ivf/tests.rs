@@ -94,4 +94,82 @@ mod tests {
         let total_vectors: usize = stats_after_split.iter().map(|s| s.count).sum();
         assert_eq!(total_vectors, 19);
     }
+
+    #[test]
+    fn test_ivf_optimizer_integration() {
+        use crate::vector::index::ivf::maintenance::optimization::{
+            OptimizationLevel, VectorIndexOptimizer,
+        };
+
+        let storage = Arc::new(MemoryStorage::default());
+        let config = IvfIndexConfig {
+            dimension: 2,
+            distance_metric: DistanceMetric::Euclidean,
+            n_clusters: 4,
+            n_probe: 2,
+            normalize_vectors: false,
+            ..IvfIndexConfig::default()
+        };
+        let writer_config = VectorIndexWriterConfig::default();
+
+        let mut writer =
+            IvfIndexWriter::with_storage(config, writer_config, "test_ivf_opt", storage).unwrap();
+
+        // Create imbalanced clusters similar to test_ivf_partition_rebalancing
+        let mut vectors = Vec::new();
+
+        // Cluster 0 area: 1 vector (should be merged, count 1 < avg 4.75/4 = 1.18)
+        vectors.push((0, "f".to_string(), Vector::new(vec![0.0, 0.0])));
+
+        // Cluster 1 area: 10 vectors (dense but not enough to split, count 10 < avg 4.75*4 = 19)
+        for i in 0..10 {
+            vectors.push((
+                i + 1,
+                "f".to_string(),
+                Vector::new(vec![10.0 + i as f32 * 0.1, 10.0 + i as f32 * 0.1]),
+            ));
+        }
+
+        // Cluster 2 area: 4 vectors
+        for i in 0..4 {
+            vectors.push((
+                i + 11,
+                "f".to_string(),
+                Vector::new(vec![0.0 + i as f32 * 0.1, 10.0 + i as f32 * 0.1]),
+            ));
+        }
+
+        // Cluster 3 area: 4 vectors
+        for i in 0..4 {
+            vectors.push((
+                i + 15,
+                "f".to_string(),
+                Vector::new(vec![10.0 + i as f32 * 0.1, 0.0 + i as f32 * 0.1]),
+            ));
+        }
+
+        writer.build(vectors).unwrap();
+        writer.finalize().unwrap();
+
+        let stats_before = writer.get_cluster_stats();
+        println!("Stats before: {:?}", stats_before);
+
+        let optimizer = VectorIndexOptimizer::new(OptimizationLevel::Aggressive);
+        let result = optimizer.optimize(&mut writer).unwrap();
+
+        result.print_summary();
+
+        let stats_after = writer.get_cluster_stats();
+        println!("Stats after: {:?}", stats_after);
+
+        // Verification:
+        // Optimization should have run effectively
+        assert!(result.is_successful());
+
+        // Check if clusters were rebalanced (merged or split)
+        // Initial setup has 10 clusters, most empty. They should be merged.
+        // The dense cluster (100 vectors) should be split.
+        // So cluster count should change.
+        assert_ne!(stats_before.len(), stats_after.len());
+    }
 }

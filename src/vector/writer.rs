@@ -141,4 +141,12 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
 
     /// Check if the writer is closed.
     fn is_closed(&self) -> bool;
+
+    /// Optimize the index.
+    ///
+    /// This method is optional and performs index-specific optimizations.
+    /// Default implementation does nothing.
+    fn optimize(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
