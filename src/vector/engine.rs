@@ -1255,24 +1255,14 @@ impl VectorEngine {
         self.closed.load(Ordering::SeqCst) == 1
     }
 
-    /// Optimize the collection by rebuilding indexes (Vacuum).
+    /// Optimize the vector index.
+    ///
+    /// This triggers optimization (e.g., segment merging, index rebuild) for all registered fields.
     pub fn optimize(&self) -> Result<()> {
         let fields = self.fields.read();
 
         for (_field_name, field_entry) in fields.iter() {
-            let writer = field_entry.runtime.writer();
-            if !writer.has_storage() {
-                continue;
-            }
-
-            let vectors = writer.vectors();
-            let valid_vectors: Vec<(u64, String, crate::vector::core::vector::Vector)> = vectors
-                .into_iter()
-                .filter(|(doc_id, _, _)| self.registry.contains(*doc_id))
-                .collect();
-
-            writer.rebuild(valid_vectors)?;
-            writer.flush()?;
+            field_entry.field.optimize()?;
         }
 
         Ok(())

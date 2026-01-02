@@ -104,6 +104,12 @@ where
         self.writer.lock().commit()?;
         Ok(())
     }
+
+    fn optimize(&self) -> Result<()> {
+        let vectors = self.vectors();
+        self.rebuild(vectors)?;
+        self.flush()
+    }
 }
 
 /// Concrete [`VectorField`] implementation backed by adapters.
