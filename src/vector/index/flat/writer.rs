@@ -353,22 +353,6 @@ impl VectorIndexWriter for FlatIndexWriter {
         vector_memory + metadata_memory
     }
 
-    fn optimize(&mut self) -> Result<()> {
-        if !self.is_finalized {
-            return Err(SarissaError::InvalidOperation(
-                "Index must be finalized before optimization".to_string(),
-            ));
-        }
-
-        // For flat index, optimization just means ensuring everything is sorted
-        // and we've removed duplicates (already done in finalize)
-
-        // Could also include memory compaction here
-        self.vectors.shrink_to_fit();
-
-        Ok(())
-    }
-
     fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }
