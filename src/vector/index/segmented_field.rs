@@ -111,24 +111,13 @@ impl SegmentedVectorField {
         let segment_id = self.segment_manager.generate_segment_id();
 
         // Get HNSW parameters from metadata if available
-        let m = self
-            .config
-            .metadata
-            .get("m")
-            .and_then(|v: &String| v.parse::<usize>().ok())
-            .unwrap_or(16);
-        let ef_construction = self
-            .config
-            .metadata
-            .get("ef_construction")
-            .and_then(|v: &String| v.parse::<usize>().ok())
-            .unwrap_or(200);
+        let hnsw_config_meta = HnswMetadataConfig::from_metadata(&self.config.metadata);
 
         let hnsw_config = HnswIndexConfig {
             dimension: self.config.dimension,
             distance_metric: self.config.distance,
-            m,
-            ef_construction,
+            m: hnsw_config_meta.m,
+            ef_construction: hnsw_config_meta.ef_construction,
             normalize_vectors: self.config.distance
                 == crate::vector::core::distance::DistanceMetric::Cosine,
             ..Default::default()
@@ -154,26 +143,15 @@ impl SegmentedVectorField {
         let policy = crate::vector::index::hnsw::segment::merge_policy::SimpleMergePolicy::new();
         if let Some(candidate) = self.segment_manager.check_merge(&policy) {
             // Get HNSW parameters from metadata if available
-            let m = self
-                .config
-                .metadata
-                .get("m")
-                .and_then(|v: &String| v.parse::<usize>().ok())
-                .unwrap_or(16);
-            let ef_construction = self
-                .config
-                .metadata
-                .get("ef_construction")
-                .and_then(|v: &String| v.parse::<usize>().ok())
-                .unwrap_or(200);
+            let hnsw_config_meta = HnswMetadataConfig::from_metadata(&self.config.metadata);
 
             let engine = MergeEngine::new(
                 MergeConfig::default(),
                 self.storage.clone(),
                 HnswIndexConfig {
                     dimension: self.config.dimension,
-                    m,
-                    ef_construction,
+                    m: hnsw_config_meta.m,
+                    ef_construction: hnsw_config_meta.ef_construction,
                     ..Default::default()
                 },
                 VectorIndexWriterConfig {
@@ -301,6 +279,25 @@ impl VectorFieldWriter for SegmentedVectorField {
 
     fn optimize(&self) -> Result<()> {
         self.perform_merge()
+    }
+}
+
+struct HnswMetadataConfig {
+    m: usize,
+    ef_construction: usize,
+}
+
+impl HnswMetadataConfig {
+    fn from_metadata(metadata: &HashMap<String, String>) -> Self {
+        let m = metadata
+            .get("m")
+            .and_then(|v: &String| v.parse::<usize>().ok())
+            .unwrap_or(16);
+        let ef_construction = metadata
+            .get("ef_construction")
+            .and_then(|v: &String| v.parse::<usize>().ok())
+            .unwrap_or(200);
+        Self { m, ef_construction }
     }
 }
 
