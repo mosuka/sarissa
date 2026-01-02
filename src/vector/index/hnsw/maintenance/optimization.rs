@@ -85,7 +85,7 @@ impl VectorIndexOptimizer {
         }
 
         // Finalize the optimization
-        // builder.optimize()?; // Method removed from trait
+        builder.optimize()?;
 
         let final_memory = builder.estimated_memory_usage();
         let elapsed = start_time.elapsed();
