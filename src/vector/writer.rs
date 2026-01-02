@@ -103,9 +103,6 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     /// Get estimated memory usage.
     fn estimated_memory_usage(&self) -> usize;
 
-    /// Optimize the built index.
-    fn optimize(&mut self) -> Result<()>;
-
     /// Get access to the stored vectors with field names.
     /// Returns a reference to the vectors with their field names stored in the writer.
     fn vectors(&self) -> &[(u64, String, Vector)];

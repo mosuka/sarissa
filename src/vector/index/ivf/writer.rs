@@ -905,41 +905,6 @@ impl VectorIndexWriter for IvfIndexWriter {
         vector_memory + centroid_memory + inverted_list_memory + metadata_memory
     }
 
-    fn optimize(&mut self) -> Result<()> {
-        if !self.is_finalized {
-            return Err(SarissaError::InvalidOperation(
-                "Index must be finalized before optimization".to_string(),
-            ));
-        }
-
-        println!("Optimizing IVF index...");
-
-        // Rebalance clusters if they're too uneven
-        let total_vectors = self.vectors.len();
-        let avg_vectors_per_cluster = total_vectors / self.index_config.n_clusters.max(1);
-        let sparse_threshold = avg_vectors_per_cluster / 4;
-        let dense_threshold = avg_vectors_per_cluster * 4;
-
-        let merged = self.merge_sparse_clusters(sparse_threshold.max(2))?;
-        if merged > 0 {
-            println!("Merged {} sparse clusters", merged);
-        }
-
-        let split = self.split_dense_clusters(dense_threshold)?;
-        if split > 0 {
-            println!("Split {} dense clusters", split);
-        }
-
-        // For now, just compact memory
-        self.vectors.shrink_to_fit();
-        self.centroids.shrink_to_fit();
-        for list in &mut self.inverted_lists {
-            list.shrink_to_fit();
-        }
-
-        Ok(())
-    }
-
     fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }

@@ -877,26 +877,6 @@ impl VectorIndexWriter for HnswIndexWriter {
         vector_memory + graph_memory + metadata_memory
     }
 
-    fn optimize(&mut self) -> Result<()> {
-        if !self.is_finalized {
-            return Err(SarissaError::InvalidOperation(
-                "Index must be finalized before optimization".to_string(),
-            ));
-        }
-
-        // HNSW optimization could include:
-        // 1. Graph pruning to remove low-quality connections
-        // 2. Memory compaction
-        // 3. Connection rebalancing
-
-        println!("Optimizing HNSW index...");
-
-        // For now, just compact memory
-        self.vectors.shrink_to_fit();
-
-        Ok(())
-    }
-
     fn vectors(&self) -> &[(u64, String, Vector)] {
         &self.vectors
     }

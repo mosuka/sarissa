@@ -198,13 +198,6 @@ impl ManagedVectorIndex {
         Ok(())
     }
 
-    /// Optimize the index.
-    pub fn optimize(&mut self) -> Result<()> {
-        let mut builder = self.builder.write().unwrap();
-        builder.optimize()?;
-        Ok(())
-    }
-
     /// Delete a document by its ID.
     pub fn delete_document(&self, doc_id: u64) -> Result<()> {
         let mut builder = self.builder.write().unwrap();
