@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::vector::core::document::DocumentVector;
-use crate::vector::engine::wal::SeqNumber;
+use crate::vector::wal::SeqNumber;
 
 pub const FIELD_INDEX_BASENAME: &str = "index";
 pub const REGISTRY_NAMESPACE: &str = "vector_registry";

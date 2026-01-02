@@ -22,7 +22,6 @@ use crate::vector::index::hnsw::writer::HnswIndexWriter;
 use crate::vector::search::searcher::{
     VectorIndexSearchParams, VectorIndexSearchRequest, VectorIndexSearcher,
 };
-use crate::vector::wal::{WalEntry, WalManager};
 use crate::vector::writer::VectorIndexWriterConfig;
 use std::cmp::Ordering;
 
@@ -46,9 +45,6 @@ pub struct SegmentedVectorField {
 
     /// Active segment for current writes.
     pub active_segment: Arc<RwLock<Option<(String, HnswIndexWriter)>>>,
-
-    /// Write-ahead log for durability.
-    pub wal: Arc<WalManager>,
 }
 
 impl SegmentedVectorField {
@@ -59,11 +55,6 @@ impl SegmentedVectorField {
         storage: Arc<dyn Storage>,
     ) -> Result<Self> {
         let name_str = name.into();
-        let wal_path = format!("wal_{}.log", name_str);
-        let wal = Arc::new(WalManager::new(storage.clone(), &wal_path)?);
-
-        // Replay WAL entries if any
-        let entries = wal.read_all()?;
 
         let field = Self {
             name: name_str,
@@ -71,27 +62,7 @@ impl SegmentedVectorField {
             segment_manager,
             storage,
             active_segment: Arc::new(RwLock::new(None)),
-            wal,
         };
-
-        if !entries.is_empty() {
-            field.ensure_active_segment()?;
-            let mut active_lock = field.active_segment.write();
-            if let Some((_, writer)) = active_lock.as_mut() {
-                for entry in entries {
-                    match entry {
-                        WalEntry::Insert { doc_id, vector } => {
-                            // Replay insert
-                            // Replay insert
-                            writer.add_vectors(vec![(doc_id, field.name.clone(), vector)])?;
-                        }
-                        WalEntry::Delete { doc_id } => {
-                            writer.delete_document(doc_id)?;
-                        }
-                    }
-                }
-            }
-        }
 
         Ok(field)
     }
@@ -204,11 +175,6 @@ impl VectorField for SegmentedVectorField {
 impl VectorFieldWriter for SegmentedVectorField {
     fn add_stored_vector(&self, doc_id: u64, vector: &StoredVector, _version: u64) -> Result<()> {
         let vec = vector.to_vector();
-        // 1. Write to WAL
-        self.wal.append(&WalEntry::Insert {
-            doc_id,
-            vector: vec.clone(),
-        })?;
 
         // 2. Update memory
         self.ensure_active_segment()?;
@@ -244,9 +210,6 @@ impl VectorFieldWriter for SegmentedVectorField {
     }
 
     fn delete_document(&self, doc_id: u64, _version: u64) -> Result<()> {
-        // 1. Write to WAL
-        self.wal.append(&WalEntry::Delete { doc_id })?;
-
         // 2. Update memory
         if let Some((_, writer)) = self.active_segment.write().as_mut() {
             let _ = writer.delete_document(doc_id);
@@ -270,9 +233,6 @@ impl VectorFieldWriter for SegmentedVectorField {
             );
 
             self.segment_manager.add_segment(info)?;
-
-            // Checkpoint: Truncate WAL after successful flush
-            self.wal.truncate()?;
         }
         Ok(())
     }
