@@ -64,7 +64,7 @@ use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 use self::embedder::{EmbedderExecutor, VectorEmbedderRegistry};
 use self::filter::RegistryFilterMatches;
 use self::memory::{FieldHandle, FieldRuntime, InMemoryVectorField};
-use self::registry::{DocumentEntry, DocumentVectorRegistry, FieldEntry};
+use self::registry::{DocumentEntry, DocumentVectorRegistry};
 use self::request::{FieldSelector, QueryVector, VectorScoreMode, VectorSearchRequest};
 use self::response::{VectorHit, VectorSearchResults, VectorStats};
 use self::snapshot::{
@@ -74,8 +74,6 @@ use self::snapshot::{
 };
 use crate::vector::wal::{WalEntry, WalManager};
 use config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
-
-const WAL_COMPACTION_THRESHOLD: usize = 1000;
 
 /// A high-level vector search engine that provides both indexing and searching.
 ///
@@ -950,25 +948,6 @@ impl VectorEngine {
         self.write_atomic(storage, COLLECTION_MANIFEST_FILE, &serialized)
     }
 
-    fn maybe_compact_wal(&self) -> Result<()> {
-        // Simple compaction strategy: if WAL file is too large?
-        // For now, if we just persisted a snapshot, we can truncate the WAL safely.
-        // But maybe_compact_wal is called after persist_state.
-        // So we can unconditionally truncate?
-        // To be safe, let's only truncate if we have many ops.
-        // But tracking op count requires atomic counter.
-        // Let's just truncate after every persist for now if easy, or use random sampling?
-        // Actually, let's leave it as a TODO or implementing a simple counter if valuable.
-        // Given the requirement to "Unify WAL", correct behavior is robust conservation logic.
-        // If snapshot is saved, WAL *can* be truncated.
-        // So just truncate.
-        self.compact_wal()
-    }
-
-    fn compact_wal(&self) -> Result<()> {
-        self.wal.truncate()
-    }
-
     /// Upsert a document (internal implementation).
     fn upsert_document_internal(&self, doc_id: u64, document: DocumentVector) -> Result<u64> {
         self.validate_document_fields(&document)?;
@@ -1087,7 +1066,6 @@ impl VectorEngine {
         // WAL is durable on append, so we don't need full persist_state here
         // But we might want to update snapshots periodically? For now, keep it simple.
         self.persist_state()?; // Still need to update registry/doc snapshots if we want them in sync
-        // self.maybe_compact_wal() // Refactor later
         Ok(())
     }
 
@@ -1520,20 +1498,6 @@ impl crate::vector::search::searcher::VectorSearcher for VectorEngineSearcher {
         let results = self.search(&count_request)?;
         Ok(results.hits.len() as u64)
     }
-}
-
-fn build_field_entries(document: &DocumentVector) -> Vec<FieldEntry> {
-    document
-        .fields
-        .iter()
-        .map(|(name, vector)| FieldEntry {
-            field_name: name.clone(),
-            version: 0,
-            vector_count: 1, // Always 1 in flattened model
-            weight: vector.weight,
-            metadata: vector.attributes.clone(),
-        })
-        .collect()
 }
 
 #[cfg(test)]

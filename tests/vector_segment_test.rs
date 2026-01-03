@@ -5,7 +5,6 @@ use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use sarissa::vector::DistanceMetric;
 use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource};
 use sarissa::vector::core::vector::Vector;
-use sarissa::vector::engine::VectorEngine;
 use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
 use std::any::Any;
 use std::sync::Arc;

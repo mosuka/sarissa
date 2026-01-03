@@ -43,6 +43,7 @@
 //! For a complete working example, see `examples/hybrid_search.rs`.
 
 // Core data structure
+pub mod core;
 pub mod index; // Core hybrid index combining lexical and vector indexes
 
 // Configuration and types

@@ -1041,4 +1041,22 @@ impl VectorIndexWriter for IvfIndexWriter {
 
         Ok(())
     }
+
+    fn build_reader(&self) -> Result<Arc<dyn crate::vector::reader::VectorIndexReader>> {
+        use crate::vector::index::ivf::reader::IvfIndexReader;
+
+        let storage = self.storage.as_ref().ok_or_else(|| {
+            SarissaError::InvalidOperation(
+                "Cannot build reader: storage not configured".to_string(),
+            )
+        })?;
+
+        let reader = IvfIndexReader::load(
+            storage.as_ref(),
+            &self.path,
+            self.index_config.distance_metric,
+        )?;
+
+        Ok(Arc::new(reader))
+    }
 }

@@ -1406,4 +1406,22 @@ impl VectorIndexWriter for HnswIndexWriter {
     fn is_closed(&self) -> bool {
         self.is_finalized && self.vectors.is_empty()
     }
+
+    fn build_reader(&self) -> Result<Arc<dyn crate::vector::reader::VectorIndexReader>> {
+        use crate::vector::index::hnsw::reader::HnswIndexReader;
+
+        let storage = self.storage.as_ref().ok_or_else(|| {
+            SarissaError::InvalidOperation(
+                "Cannot build reader: storage not configured".to_string(),
+            )
+        })?;
+
+        let reader = HnswIndexReader::load(
+            storage.as_ref(),
+            &self.path,
+            self.index_config.distance_metric,
+        )?;
+
+        Ok(Arc::new(reader))
+    }
 }

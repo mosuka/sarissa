@@ -149,4 +149,10 @@ pub trait VectorIndexWriter: Send + Sync + std::fmt::Debug {
     fn optimize(&mut self) -> Result<()> {
         Ok(())
     }
+
+    /// Build a reader from the written index.
+    ///
+    /// This method allows creating a reader directly from the writer,
+    /// enabling the "write-then-read" workflow used in hybrid search.
+    fn build_reader(&self) -> Result<std::sync::Arc<dyn crate::vector::reader::VectorIndexReader>>;
 }

@@ -1038,4 +1038,55 @@ impl LexicalIndexWriter for InvertedIndexWriter {
     fn is_closed(&self) -> bool {
         InvertedIndexWriter::is_closed(self)
     }
+
+    /// Builds an InvertedIndexReader from the current state of the writer's storage.
+    /// This method is intended to be called by the LexicalIndexWriter trait implementation.
+    fn build_reader(
+        &self,
+    ) -> Result<std::sync::Arc<dyn crate::lexical::reader::LexicalIndexReader>> {
+        use crate::lexical::index::inverted::reader::{
+            InvertedIndexReader, InvertedIndexReaderConfig,
+        };
+        use crate::lexical::index::inverted::segment::SegmentInfo;
+
+        // List all segments from storage
+        // This assumes standard segment naming: segment_XXXXXX.meta
+        let mut segments = Vec::new();
+        let mut segment_id = 0;
+
+        loop {
+            let segment_name = format!("{}_{:06}", self.config.segment_prefix, segment_id);
+            let meta_file = format!("{}.meta", segment_name);
+
+            if self.storage.file_exists(&meta_file) {
+                // Read segment metadata
+                let input = self.storage.open_input(&meta_file)?;
+                let mut json_data = String::new();
+                std::io::Read::read_to_string(&mut std::io::BufReader::new(input), &mut json_data)?;
+
+                let segment_info: SegmentInfo = serde_json::from_str(&json_data).map_err(|e| {
+                    SarissaError::index(format!("Failed to parse segment metadata: {e}"))
+                })?;
+
+                segments.push(segment_info);
+                segment_id += 1;
+            } else {
+                break;
+            }
+        }
+
+        let config = InvertedIndexReaderConfig {
+            analyzer: self.config.analyzer.clone(),
+            ..Default::default()
+        };
+
+        // Note: InvertedIndexReader::new expects Vec<SegmentInfo> and Arc<dyn Storage>
+        // We use the same storage as the writer
+        let reader = InvertedIndexReader::new(segments, self.storage.clone(), config)?;
+        Ok(Arc::new(reader))
+    }
+
+    fn next_doc_id(&self) -> u64 {
+        self.next_doc_id
+    }
 }
