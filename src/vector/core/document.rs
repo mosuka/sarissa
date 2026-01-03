@@ -15,16 +15,24 @@ use super::vector::Vector;
 pub const METADATA_WEIGHT: &str = "__sarissa_vector_weight";
 
 /// Source material used to produce a vector embedding.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PayloadSource {
     Text {
         value: String,
     },
     Bytes {
+        #[serde(
+            serialize_with = "serialize_bytes_data",
+            deserialize_with = "deserialize_bytes_data"
+        )]
         bytes: Arc<[u8]>,
         mime: Option<String>,
     },
     Vector {
+        #[serde(
+            serialize_with = "serialize_vector_data",
+            deserialize_with = "deserialize_vector_data"
+        )]
         data: Arc<[f32]>,
     },
 }
@@ -59,7 +67,7 @@ impl PayloadSource {
 ///
 /// For long texts that need chunking, create separate documents for each chunk
 /// and use metadata (e.g., `parent_doc_id`, `chunk_index`) to track relationships.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Payload {
     /// The source material to be embedded.
     pub source: PayloadSource,
@@ -198,6 +206,21 @@ where
     Ok(buffer.into())
 }
 
+fn serialize_bytes_data<S>(data: &Arc<[u8]>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    data.as_ref().serialize(serializer)
+}
+
+fn deserialize_bytes_data<'de, D>(deserializer: D) -> Result<Arc<[u8]>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let buffer = Vec::<u8>::deserialize(deserializer)?;
+    Ok(buffer.into())
+}
+
 /// Document with embedded vectors for each field.
 ///
 /// Each field maps to exactly one `StoredVector`. This is the flattened model
@@ -217,7 +240,7 @@ pub struct DocumentVector {
 /// Each field maps to exactly one `Payload`, which will produce exactly one
 /// vector after embedding. For long texts that need chunking, create separate
 /// documents for each chunk with metadata linking them (e.g., `parent_doc_id`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DocumentPayload {
     /// Fields to embed, each containing a single payload.
     pub fields: HashMap<String, Payload>,

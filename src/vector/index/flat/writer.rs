@@ -444,4 +444,22 @@ impl VectorIndexWriter for FlatIndexWriter {
         // Consider closed if finalized and no pending vectors
         self.is_finalized && self.vectors.is_empty()
     }
+
+    fn build_reader(&self) -> Result<Arc<dyn crate::vector::reader::VectorIndexReader>> {
+        use crate::vector::index::flat::reader::FlatVectorIndexReader;
+
+        let storage = self.storage.as_ref().ok_or_else(|| {
+            SarissaError::InvalidOperation(
+                "Cannot build reader: storage not configured".to_string(),
+            )
+        })?;
+
+        let reader = FlatVectorIndexReader::load(
+            storage.as_ref(),
+            &self.path,
+            self.index_config.distance_metric,
+        )?;
+
+        Ok(Arc::new(reader))
+    }
 }
