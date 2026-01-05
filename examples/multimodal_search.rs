@@ -32,7 +32,7 @@ use sarissa::storage::{StorageConfig, StorageFactory};
 #[cfg(feature = "embeddings-multimodal")]
 use sarissa::vector::DistanceMetric;
 #[cfg(feature = "embeddings-multimodal")]
-use sarissa::vector::core::document::{DocumentPayload, Payload, PayloadSource};
+use sarissa::vector::core::document::{DocumentPayload, Payload};
 #[cfg(feature = "embeddings-multimodal")]
 use sarissa::vector::engine::VectorEngine;
 #[cfg(feature = "embeddings-multimodal")]
@@ -103,8 +103,8 @@ fn main() -> Result<()> {
                     // Read image file into bytes
                     let bytes = std::fs::read(&path)?;
 
-                    // We index the image content into "content" field using PayloadSource::Bytes
-                    doc.set_field("content", Payload::new(PayloadSource::bytes(bytes, None)));
+                    // We index the image content into "content" field using PayloadSource::image_bytes
+                    doc.set_field("content", Payload::image_bytes(bytes));
 
                     // Store filename in metadata for display
                     doc.set_metadata("filename", filename.clone());
