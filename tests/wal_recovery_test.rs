@@ -1,149 +1,126 @@
+use sarissa::embedding::precomputed::PrecomputedEmbedder;
+use sarissa::error::Result;
+use sarissa::storage::Storage;
 use sarissa::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use sarissa::vector::DistanceMetric;
-use sarissa::vector::core::document::StoredVector;
-use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexKind};
-use sarissa::vector::engine::request::QueryVector;
-use sarissa::vector::field::{FieldSearchInput, VectorFieldReader, VectorFieldWriter};
-use sarissa::vector::index::hnsw::segment::manager::{SegmentManager, SegmentManagerConfig};
-use sarissa::vector::index::segmented_field::SegmentedVectorField;
+use sarissa::vector::core::document::{DocumentVector, StoredVector};
+use sarissa::vector::engine::VectorEngine;
+use sarissa::vector::engine::config::{VectorFieldConfig, VectorIndexConfig, VectorIndexKind};
+use sarissa::vector::engine::request::{FieldSelector, QueryVector, VectorSearchRequest};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 #[test]
-fn test_wal_recovery_unflushed_data() -> Result<(), Box<dyn std::error::Error>> {
+fn test_wal_recovery_unflushed_data() -> Result<()> {
     // 1. Setup Storage (shared across "restarts")
-    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-    let _wal_path = "wal_test_field.log";
+    let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
 
-    // 2. "First Run": Create field, add data, but DO NOT FLUSH
+    // 2. "First Run": Create engine, add data, but DO NOT FLUSH
     {
-        let manager_config = SegmentManagerConfig::default();
-        let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+        let engine = create_test_engine(storage.clone())?;
 
-        let field_config = VectorFieldConfig {
-            dimension: 4,
-            distance: DistanceMetric::Euclidean,
-            index: VectorIndexKind::Hnsw,
-            metadata: HashMap::new(),
-            base_weight: 1.0,
-        };
-
-        let field = SegmentedVectorField::create(
-            "test_field", // Name determines WAL filename
-            field_config,
-            manager.clone(),
-            storage.clone(),
-        )?;
-
-        // Add 3 vectors
+        // Add 3 documents
         for i in 1..=3 {
+            let mut doc = DocumentVector::new();
             let vec_data = vec![i as f32, 0.0, 0.0, 0.0];
-            field.add_stored_vector(
-                i,
-                &StoredVector::new(Arc::from(vec_data)),
-                0, // timestamp
-            )?;
+            doc.fields.insert(
+                "test_field".to_string(),
+                StoredVector::new(Arc::from(vec_data)),
+            );
+            engine.upsert_vectors(i, doc)?;
         }
 
         // Verify in-memory count
-        let stats = field.stats()?;
-        assert_eq!(stats.vector_count, 3, "Should have 3 vectors in memory");
+        let stats = engine.stats()?;
+        assert_eq!(stats.document_count, 3, "Should have 3 docs in memory");
 
-        // NO FLUSH here. We drop `field` and `manager`.
+        // NO FLUSH (commit) here, just drop engine.
         // WAL should have recorded these 3 inserts.
     }
 
-    // 3. "Restart": Re-create field using SAME storage
+    // 3. "Restart": Re-create engine using SAME storage
     {
-        let manager_config = SegmentManagerConfig::default();
-        let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
-
-        let field_config = VectorFieldConfig {
-            dimension: 4,
-            distance: DistanceMetric::Euclidean,
-            index: VectorIndexKind::Hnsw,
-            metadata: HashMap::new(),
-            base_weight: 1.0,
-        };
-
-        // This `create` call should trigger WAL replay
-        let field = SegmentedVectorField::create(
-            "test_field",
-            field_config,
-            manager.clone(),
-            storage.clone(),
-        )?;
+        // This `new` call should trigger WAL replay in VectorEngine
+        let engine = create_test_engine(storage.clone())?;
 
         // 4. Verify Recovery
-        let stats = field.stats()?;
+        let stats = engine.stats()?;
         assert_eq!(
-            stats.vector_count, 3,
-            "Should have recovered 3 vectors from WAL"
+            stats.document_count, 3,
+            "Should have recovered 3 docs from WAL"
         );
 
         // Verify search
-        let query_vec = vec![1.0, 0.0, 0.0, 0.0];
-        let qv = QueryVector {
-            vector: StoredVector::new(Arc::from(query_vec)),
+        let mut request = VectorSearchRequest::default();
+        request.limit = 3;
+        request.fields = Some(vec![FieldSelector::Exact("test_field".into())]);
+        request.query_vectors.push(QueryVector {
+            vector: StoredVector::new(Arc::from(vec![1.0, 0.0, 0.0, 0.0])),
             weight: 1.0,
             fields: None,
-        };
+        });
 
-        let results = field.search(FieldSearchInput {
-            field: "test_field".to_string(),
-            query_vectors: vec![qv],
-            limit: 3,
-        })?;
-
+        let results = engine.search(request)?;
         assert!(!results.hits.is_empty(), "Should find hits after recovery");
         assert_eq!(results.hits[0].doc_id, 1, "First doc should be ID 1");
 
-        // 5. Add more data and FLUSH
-        field.add_stored_vector(
-            4,
-            &StoredVector::new(Arc::from(vec![4.0, 0.0, 0.0, 0.0])),
-            0,
-        )?;
+        // 5. Add more data and COMMIT (flush)
+        let mut doc = DocumentVector::new();
+        doc.fields.insert(
+            "test_field".to_string(),
+            StoredVector::new(Arc::from(vec![4.0, 0.0, 0.0, 0.0])),
+        );
+        engine.upsert_vectors(4, doc)?;
 
-        // Flush (writes segment, truncates WAL)
-        field.flush()?;
+        // Commit persists snapshot and truncates WAL
+        engine.commit()?;
 
         // Verify updated count
-        let stats = field.stats()?;
-        assert_eq!(stats.vector_count, 4, "Total vectors should be 4");
-
-        // Verify WAL is truncated (empty or minimal)
-        // We can't easily check file size via `field.wal`, but we can verify subsequent restart.
+        let stats = engine.stats()?;
+        assert_eq!(stats.document_count, 4, "Total docs should be 4");
     }
 
-    // 6. "Second Restart": Verify flush persistence and clean WAL
+    // 6. "Second Restart": Verify snapshot persistence and clean WAL
     {
-        let manager_config = SegmentManagerConfig::default();
-        let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+        let engine = create_test_engine(storage.clone())?;
 
-        let field_config = VectorFieldConfig {
+        let stats = engine.stats()?;
+        assert_eq!(stats.document_count, 4, "Should load 4 persisted docs");
+
+        // Verify that we can still search
+        let mut request = VectorSearchRequest::default();
+        request.limit = 1;
+        request.fields = Some(vec![FieldSelector::Exact("test_field".into())]);
+        request.query_vectors.push(QueryVector {
+            vector: StoredVector::new(Arc::from(vec![4.0, 0.0, 0.0, 0.0])),
+            weight: 1.0,
+            fields: None,
+        });
+        let results = engine.search(request)?;
+        assert_eq!(results.hits[0].doc_id, 4);
+    }
+
+    Ok(())
+}
+
+fn create_test_engine(storage: Arc<dyn Storage>) -> Result<VectorEngine> {
+    let mut builder = VectorIndexConfig::builder()
+        .default_fields(vec!["test_field".into()])
+        .default_distance(DistanceMetric::Euclidean)
+        .default_index_kind(VectorIndexKind::Hnsw)
+        .embedder(PrecomputedEmbedder::new());
+
+    builder = builder.field(
+        "test_field",
+        VectorFieldConfig {
             dimension: 4,
             distance: DistanceMetric::Euclidean,
             index: VectorIndexKind::Hnsw,
             metadata: HashMap::new(),
             base_weight: 1.0,
-        };
+        },
+    );
 
-        // Should load persisted segment (3 vectors? no wait, flush writes ALL vectors from active segment?)
-        // `SegmentedVectorField::flush` takes active segment, finalizes it, and registers it.
-        // So after flush, active segment is None/Empty.
-        // The persisted segment contains vectors 1, 2, 3, 4.
-
-        let field = SegmentedVectorField::create(
-            "test_field",
-            field_config,
-            manager.clone(),
-            storage.clone(),
-        )?;
-
-        let stats = field.stats()?;
-        assert_eq!(stats.vector_count, 4, "Should load 4 flushed vectors");
-    }
-
-    Ok(())
+    let config = builder.build()?;
+    VectorEngine::new(storage, config)
 }

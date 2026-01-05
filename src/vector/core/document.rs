@@ -89,6 +89,33 @@ impl Payload {
         Self::new(PayloadSource::bytes(bytes, mime))
     }
 
+    /// Creates an image bytes payload.
+    ///
+    /// If the `image` feature is enabled, this will attempt to detect the MIME type
+    /// from the bytes.
+    #[cfg(feature = "image")]
+    pub fn image_bytes(bytes: impl Into<Arc<[u8]>>) -> Self {
+        use image::ImageReader;
+        use std::io::Cursor;
+
+        let bytes = bytes.into();
+        let mime = ImageReader::new(Cursor::new(bytes.as_ref()))
+            .with_guessed_format()
+            .ok()
+            .and_then(|reader| reader.format())
+            .map(|fmt| fmt.to_mime_type().to_string());
+
+        Self::new(PayloadSource::bytes(bytes, mime))
+    }
+
+    /// Creates an image bytes payload with explicit MIME type.
+    ///
+    /// Use this if the `image` feature is disabled or you know the MIME type.
+    #[cfg(not(feature = "image"))]
+    pub fn image_bytes(bytes: impl Into<Arc<[u8]>>, mime: String) -> Self {
+        Self::new(PayloadSource::bytes(bytes, Some(mime)))
+    }
+
     /// Creates a pre-embedded vector payload.
     pub fn vector(data: impl Into<Arc<[f32]>>) -> Self {
         Self::new(PayloadSource::vector(data))
