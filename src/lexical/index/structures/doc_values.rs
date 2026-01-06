@@ -124,12 +124,11 @@ impl DocValuesWriter {
             let num_values = field_dv.values.len() as u64;
             output.write_all(&num_values.to_le_bytes())?;
 
-            // Write values using bincode 2.0
+            // Write values using rkyv
             let serialized =
-                bincode::serde::encode_to_vec(&field_dv.values, bincode::config::standard())
-                    .map_err(|e| {
-                        SarissaError::Index(format!("Failed to serialize DocValues: {}", e))
-                    })?;
+                rkyv::to_bytes::<rkyv::rancor::Error>(&field_dv.values).map_err(|e| {
+                    SarissaError::Index(format!("Failed to serialize DocValues: {}", e))
+                })?;
 
             output.write_all(&(serialized.len() as u64).to_le_bytes())?;
             output.write_all(&serialized)?;
@@ -214,8 +213,8 @@ impl DocValuesReader {
             let mut data = vec![0u8; data_len];
             input.read_exact(&mut data)?;
 
-            let (values, _): (Vec<Option<FieldValue>>, _) =
-                bincode::serde::decode_from_slice(&data, bincode::config::standard()).map_err(
+            let values: Vec<Option<FieldValue>> =
+                rkyv::from_bytes::<Vec<Option<FieldValue>>, rkyv::rancor::Error>(&data).map_err(
                     |e| SarissaError::Index(format!("Failed to deserialize DocValues: {}", e)),
                 )?;
 
