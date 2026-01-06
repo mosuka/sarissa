@@ -118,22 +118,24 @@ mod tests {
         // Create imbalanced clusters similar to test_ivf_partition_rebalancing
         let mut vectors = Vec::new();
 
-        // Cluster 0 area: 1 vector (should be merged, count 1 < avg 4.75/4 = 1.18)
+        // Cluster 0 area: 1 vector (should be merged, count 1 < avg)
         vectors.push((0, "f".to_string(), Vector::new(vec![0.0, 0.0])));
 
-        // Cluster 1 area: 10 vectors (dense but not enough to split, count 10 < avg 4.75*4 = 19)
-        for i in 0..10 {
+        // Cluster 1 area: 100 vectors (dense, triggers imbalance)
+        // With 100 vectors here and ~10 elsewhere, average is ~27.
+        // Sparse threshold (avg/4) is ~6. Cluster 0 (1) and maybe others should be merged.
+        for i in 0..100 {
             vectors.push((
                 i + 1,
                 "f".to_string(),
-                Vector::new(vec![10.0 + i as f32 * 0.1, 10.0 + i as f32 * 0.1]),
+                Vector::new(vec![10.0 + i as f32 * 0.01, 10.0 + i as f32 * 0.01]),
             ));
         }
 
         // Cluster 2 area: 4 vectors
         for i in 0..4 {
             vectors.push((
-                i + 11,
+                i + 101,
                 "f".to_string(),
                 Vector::new(vec![0.0 + i as f32 * 0.1, 10.0 + i as f32 * 0.1]),
             ));
@@ -142,7 +144,7 @@ mod tests {
         // Cluster 3 area: 4 vectors
         for i in 0..4 {
             vectors.push((
-                i + 15,
+                i + 105,
                 "f".to_string(),
                 Vector::new(vec![10.0 + i as f32 * 0.1, 0.0 + i as f32 * 0.1]),
             ));

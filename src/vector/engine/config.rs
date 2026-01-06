@@ -11,14 +11,14 @@
 //! # #[cfg(feature = "embeddings-candle")]
 //! # {
 //! use sarissa::embedding::per_field::PerFieldEmbedder;
-//! use sarissa::embedding::candle_text_embedder::CandleTextEmbedder;
+//! use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 //! use sarissa::embedding::embedder::Embedder;
-//! use sarissa::vector::engine::VectorIndexConfig;
+//! use sarissa::vector::engine::config::VectorIndexConfig;
 //! use std::sync::Arc;
 //!
 //! # fn example() -> sarissa::error::Result<()> {
 //! let text_embedder: Arc<dyn Embedder> = Arc::new(
-//!     CandleTextEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
+//!     CandleBertEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")?
 //! );
 //!
 //! let embedder = PerFieldEmbedder::new(text_embedder);
@@ -54,7 +54,7 @@ use crate::vector::DistanceMetric;
 /// use sarissa::embedding::per_field::PerFieldEmbedder;
 /// use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 /// use sarissa::embedding::embedder::Embedder;
-/// use sarissa::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
+/// use sarissa::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use sarissa::vector::DistanceMetric;
 /// use std::sync::Arc;
 ///
@@ -171,7 +171,7 @@ impl VectorIndexConfig {
 /// use sarissa::embedding::per_field::PerFieldEmbedder;
 /// use sarissa::embedding::candle_bert_embedder::CandleBertEmbedder;
 /// use sarissa::embedding::embedder::Embedder;
-/// use sarissa::vector::engine::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
+/// use sarissa::vector::engine::config::{VectorIndexConfig, VectorFieldConfig, VectorIndexKind};
 /// use sarissa::vector::DistanceMetric;
 /// use std::sync::Arc;
 ///
@@ -185,11 +185,11 @@ impl VectorIndexConfig {
 /// let config = VectorIndexConfig::builder()
 ///     .embedder(embedder)
 ///     .field("content_embedding", VectorFieldConfig {
-///         loading_mode: sarissa::vector::index::config::IndexLoadingMode::default(),
 ///         dimension: 384,
 ///         distance: DistanceMetric::Cosine,
 ///         index: VectorIndexKind::Flat,
 ///         base_weight: 1.0,
+///         metadata: std::collections::HashMap::new(),
 ///     })
 ///     .default_field("content_embedding")
 ///     .build()?;

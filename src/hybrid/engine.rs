@@ -44,7 +44,7 @@ struct HybridEngineManifest {
 /// let engine = HybridEngine::new(storage, lexical_engine, vector_engine)?;
 ///
 /// // Text-only search
-/// let request = HybridSearchRequest::new("rust programming");
+/// let request = HybridSearchRequest::new().with_text("rust programming");
 /// let results = engine.search(request).await?;
 /// # Ok(())
 /// # }
@@ -237,7 +237,7 @@ impl HybridEngine {
     /// # use sarissa::hybrid::engine::HybridEngine;
     /// # use sarissa::hybrid::search::searcher::HybridSearchRequest;
     /// # async fn example(engine: HybridEngine) -> sarissa::error::Result<()> {
-    /// let request = HybridSearchRequest::new("rust programming");
+    /// let request = HybridSearchRequest::new().with_text("rust programming");
     /// let results = engine.search(request).await?;
     /// # Ok(())
     /// # }

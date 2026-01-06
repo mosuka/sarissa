@@ -19,19 +19,29 @@
 //!
 //! ```no_run
 //! use sarissa::hybrid::engine::HybridEngine;
-//! use sarissa::hybrid::search::searcher::HybridSearchRequest;
+//! use sarissa::hybrid::search::searcher::{HybridSearchRequest, HybridSearchParams};
 //! use sarissa::lexical::engine::LexicalEngine;
 //! use sarissa::vector::engine::VectorEngine;
+//! use sarissa::storage::memory::MemoryStorage;
 //! use sarissa::error::Result;
+//! use std::sync::Arc;
 //!
 //! async fn example(lexical_engine: LexicalEngine, vector_engine: VectorEngine) -> Result<()> {
+//!     // Create storage
+//!     let storage = Arc::new(MemoryStorage::default());
+//!
 //!     // Create hybrid search engine
-//!     let engine = HybridEngine::new(lexical_engine, vector_engine)?;
+//!     let engine = HybridEngine::new(storage, lexical_engine, vector_engine)?;
 //!
 //!     // Create search request
-//!     let request = HybridSearchRequest::new("rust programming")
-//!         .keyword_weight(0.6)
-//!         .vector_weight(0.4);
+//!     let params = HybridSearchParams {
+//!         keyword_weight: 0.6,
+//!         vector_weight: 0.4,
+//!         ..Default::default()
+//!     };
+//!     let request = HybridSearchRequest::new()
+//!         .with_text("rust programming")
+//!         .with_params(params);
 //!
 //!     // Execute search
 //!     let results = engine.search(request).await?;
