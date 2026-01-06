@@ -55,10 +55,58 @@
 //! assert_eq!(text2.as_boolean(), Some(true));
 //! ```
 
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
 use crate::lexical::index::inverted::query::geo::GeoPoint;
 use crate::vector::core::distance::DistanceMetric;
+
+/// Helper for archiving DateTime as micros timestamp (i64)
+pub struct MicroSeconds;
+
+impl rkyv::with::ArchiveWith<chrono::DateTime<chrono::Utc>> for MicroSeconds {
+    type Archived = rkyv::Archived<i64>;
+    type Resolver = ();
+
+    fn resolve_with(
+        field: &chrono::DateTime<chrono::Utc>,
+        _: (),
+        out: rkyv::Place<Self::Archived>,
+    ) {
+        let ts = field.timestamp_micros();
+        // unsafe block not strictly needed if we don't call unsafe fns, but resolve might be unsafe?
+        // In 0.8 traits resolve is safe? No ArchiveWith::resolve_with might not be unsafe?
+        // Actually ArchiveWith::resolve_with is NOT unsafe in 0.8? Check docs or assume consistent with signature.
+        // Wait, standard trait is: fn resolve_with(field: &F, resolver: <Self as ArchiveWith<F>>::Resolver, out: Place<<Self as ArchiveWith<F>>::Archived>)
+        // It is not unsafe.
+        ts.resolve((), out);
+    }
+}
+
+impl<S: rkyv::rancor::Fallible + ?Sized> rkyv::with::SerializeWith<chrono::DateTime<chrono::Utc>, S>
+    for MicroSeconds
+{
+    fn serialize_with(
+        field: &chrono::DateTime<chrono::Utc>,
+        serializer: &mut S,
+    ) -> Result<Self::Resolver, S::Error> {
+        RkyvSerialize::serialize(&field.timestamp_micros(), serializer)
+    }
+}
+
+impl<D: rkyv::rancor::Fallible + ?Sized>
+    rkyv::with::DeserializeWith<rkyv::Archived<i64>, chrono::DateTime<chrono::Utc>, D>
+    for MicroSeconds
+{
+    fn deserialize_with(
+        archived: &rkyv::Archived<i64>,
+        _deserializer: &mut D,
+    ) -> Result<chrono::DateTime<chrono::Utc>, D::Error> {
+        use chrono::TimeZone;
+        let ts: i64 = (*archived).into();
+        Ok(chrono::Utc.timestamp_micros(ts).single().unwrap())
+    }
+}
 
 /// A field combines a value with indexing options.
 ///
@@ -80,7 +128,9 @@ use crate::vector::core::distance::DistanceMetric;
 ///     }),
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct Field {
     /// The field value.
     pub value: FieldValue,
@@ -106,7 +156,19 @@ impl Field {
 ///
 /// This enum is used internally to distinguish between integer and
 /// floating-point numeric types when performing range queries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+
 pub enum NumericType {
     /// Integer type (i64).
     Integer,
@@ -149,7 +211,9 @@ pub enum NumericType {
 /// let text = FieldValue::Text("42".to_string());
 /// assert_eq!(text.as_text(), Some("42"));
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum FieldValue {
     /// Text value
     Text(String),
@@ -162,7 +226,7 @@ pub enum FieldValue {
     /// Binary data
     Binary(Vec<u8>),
     /// DateTime value
-    DateTime(chrono::DateTime<chrono::Utc>),
+    DateTime(#[rkyv(with = MicroSeconds)] chrono::DateTime<chrono::Utc>),
     /// Geographic point value
     Geo(GeoPoint),
     /// Vector value (text to be embedded)
@@ -246,7 +310,9 @@ impl FieldValue {
 /// Options for Text fields (used by Lexical indexing).
 ///
 /// Controls how text fields are analyzed, indexed, and stored.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct TextOption {
     /// Whether to index this field for search.
     #[serde(default = "default_true")]
@@ -272,7 +338,19 @@ impl Default for TextOption {
 }
 
 /// Vector index types for semantic search.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+
 pub enum VectorIndexType {
     /// Flat index (brute-force exact search).
     /// Best for small datasets (< 100K vectors).
@@ -288,14 +366,27 @@ pub enum VectorIndexType {
 }
 
 /// Flat-specific configuration options.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Default,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
+
 pub struct FlatOption {
     // Flat index currently has no specific options
     // This struct is here for consistency and future extensibility
 }
 
 /// HNSW-specific configuration options.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct HnswOption {
     /// Number of connections per layer (M parameter).
     /// Higher values improve recall but increase memory usage.
@@ -333,7 +424,9 @@ impl Default for HnswOption {
 }
 
 /// IVF-specific configuration options.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct IvfOption {
     /// Number of clusters for inverted file.
     #[serde(default = "default_n_clusters")]
@@ -385,7 +478,9 @@ impl Default for IvfOption {
 ///     ..Default::default()
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct VectorOption {
     /// Vector index type (Flat, HNSW, or IVF).
     pub index_type: VectorIndexType,
@@ -513,7 +608,9 @@ impl VectorOption {
 }
 
 /// Options for Integer fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct IntegerOption {
     /// Whether to index this field for range queries.
     #[serde(default = "default_true")]
@@ -534,7 +631,9 @@ impl Default for IntegerOption {
 }
 
 /// Options for Float fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct FloatOption {
     /// Whether to index this field for range queries.
     #[serde(default = "default_true")]
@@ -555,7 +654,9 @@ impl Default for FloatOption {
 }
 
 /// Options for Boolean fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct BooleanOption {
     /// Whether to index this field.
     #[serde(default = "default_true")]
@@ -576,7 +677,9 @@ impl Default for BooleanOption {
 }
 
 /// Options for Binary fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct BinaryOption {
     /// Whether to store the binary data.
     #[serde(default = "default_true")]
@@ -590,7 +693,9 @@ impl Default for BinaryOption {
 }
 
 /// Options for DateTime fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct DateTimeOption {
     /// Whether to index this field for range queries.
     #[serde(default = "default_true")]
@@ -611,7 +716,9 @@ impl Default for DateTimeOption {
 }
 
 /// Options for Geo (geographic point) fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct GeoOption {
     /// Whether to index this field for geo queries.
     #[serde(default = "default_true")]
@@ -642,7 +749,9 @@ pub struct GeoOption {
 /// // Vector field with HNSW index
 /// let vector_opt = FieldOption::Vector(VectorOption::hnsw(768));
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum FieldOption {
     /// Options for text fields (lexical search).
     Text(TextOption),

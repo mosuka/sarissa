@@ -11,7 +11,18 @@ use crate::lexical::index::inverted::query::scorer::Scorer;
 use crate::lexical::reader::LexicalIndexReader;
 
 /// A geographical point with latitude and longitude.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+
 pub struct GeoPoint {
     /// Latitude in degrees (-90 to 90)
     pub lat: f64,

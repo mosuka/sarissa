@@ -6,7 +6,20 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, SarissaError};
 
 /// Distance metrics for vector similarity calculation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Default,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+
 pub enum DistanceMetric {
     /// Cosine distance (1 - cosine similarity)
     #[default]

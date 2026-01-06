@@ -11,7 +11,7 @@ ahash = "0.8.12"
 aho-corasick = "1.1.4"
 anyhow = "1.0.100"
 async-trait = "0.1.89"
-bincode = { version = "2.0.1", features = ["serde"] }
+bytecheck = "0.8.2"
 bit-vec = "0.8.0"
 byteorder = "1.5.0"
 chrono = { version = "0.4.42", features = ["serde"] }
@@ -27,7 +27,7 @@ lindera = { version = "1.5.1", features = [
     "embedded-ko-dic",
     "embedded-cc-cedict",
 ] }
-log = "0.4.28"
+log = "0.4.29"
 memmap2 = "0.9.9"
 num_cpus = "1.17.0"
 parking_lot = "0.12.5"
@@ -36,22 +36,23 @@ pest_derive = "2.8.5"
 rand = "0.9.2"
 rayon = "1.11.0"
 regex = "1.12.2"
+rkyv = { version = "0.8.13", features = ["std"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.148"
 thiserror = "2.0.17"
 tokio = { version = "1.49.0", features = ["full"] }
 unicode-segmentation = "1.12.0"
 unicode-normalization = "0.1.25"
-uuid = { version = "1.18.1", features = ["v4"] }
+uuid = { version = "1.19.0", features = ["v4"] }
 wide = "1.1.1"
-tempfile = "3.23.0"
+tempfile = "3.24.0"
 
 # Optional embedding dependencies
 candle-core = { version = "0.9.1", optional = true }
 candle-nn = { version = "0.9.1", optional = true }
 candle-transformers = { version = "0.9.1", optional = true }
 hf-hub = { version = "0.4.3", optional = true }
-tokenizers = { version = "0.22.1", optional = true }
+tokenizers = { version = "0.22.2", optional = true }
 reqwest = { version = "0.13.1", features = ["json"], optional = true }
 image = { version = "0.25.9", optional = true }
 
