@@ -166,8 +166,12 @@ impl HybridIndexWriter {
     /// # use sarissa::hybrid::writer::HybridIndexWriter;
     /// # use sarissa::lexical::writer::LexicalIndexWriter;
     /// # use sarissa::vector::writer::VectorIndexWriter;
+    /// # use sarissa::storage::memory::MemoryStorage;
+    /// # use sarissa::storage::{Storage, StorageFactory, StorageConfig};
+    /// # use std::sync::Arc;
     /// # fn example(lexical: Box<dyn LexicalIndexWriter>, vector: Box<dyn VectorIndexWriter>) -> sarissa::error::Result<()> {
-    /// let mut writer = HybridIndexWriter::new(lexical, vector);
+    /// let storage = Arc::new(MemoryStorage::default());
+    /// let mut writer = HybridIndexWriter::new(lexical, vector, storage)?;
     /// // ... write documents ...
     /// writer.finalize()?;
     /// # Ok(())

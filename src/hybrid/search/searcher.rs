@@ -21,15 +21,20 @@ use crate::vector::field::FieldHit;
 /// # Examples
 ///
 /// ```
-/// use sarissa::hybrid::search::searcher::HybridSearchRequest;
+/// use sarissa::hybrid::search::searcher::{HybridSearchRequest, HybridSearchParams};
 /// use sarissa::vector::core::vector::Vector;
 ///
-/// // Create an empty request and add components
+/// // Create request with params
+/// let params = HybridSearchParams {
+///     keyword_weight: 0.6,
+///     vector_weight: 0.4,
+///     max_results: 20,
+///     ..Default::default()
+/// };
+///
 /// let request = HybridSearchRequest::new()
 ///     .with_text("rust programming")
-///     .keyword_weight(0.6)
-///     .vector_weight(0.4)
-///     .max_results(20);
+///     .with_params(params);
 /// ```
 #[derive(Debug, Clone)]
 pub struct HybridSearchRequest {
