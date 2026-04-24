@@ -192,7 +192,7 @@ impl SpellingDictionary {
             .map(|(word, freq)| (word.clone(), *freq))
             .collect();
 
-        word_freq.sort_by(|a, b| b.1.cmp(&a.1));
+        word_freq.sort_by_key(|(_, freq)| std::cmp::Reverse(*freq));
         word_freq.truncate(limit);
         word_freq
     }
