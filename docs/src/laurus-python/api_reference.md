@@ -62,6 +62,25 @@ class Schema:
 | `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)` | HNSW approximate nearest-neighbor vector field. |
 | `add_flat_field(name, dimension, *, distance="cosine")` | Flat (brute-force) vector field. |
 | `add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)` | IVF approximate nearest-neighbor vector field. |
+| `set_default_fields(fields)` | Set default search fields (list of strings). |
+| `set_dynamic_field_policy(policy)` | Set how undeclared fields are handled. `policy` is `"strict"`, `"dynamic"` (default), or `"ignore"`. See notes below. |
+| `dynamic_field_policy()` | Return the current policy as a lowercase string. |
+| `field_names()` | Return all field names. |
+
+#### Dynamic field policy
+
+Controls what happens when a document is ingested with field names that are
+not declared in the schema:
+
+- `"strict"` — Reject the document.
+- `"dynamic"` (default) — Infer a type for each undeclared field and add it
+  to the schema. **Warning**: integer fields silently truncate incoming
+  float values (`3.14` → `3`). Use `"strict"` if you need to reject such
+  type mismatches.
+- `"ignore"` — Silently drop the undeclared fields.
+
+See [Schema & Fields](../concepts/schema_and_fields.md#dynamic-schema) for
+the full behaviour matrix.
 
 ### Distance metrics
 

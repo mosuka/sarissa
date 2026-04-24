@@ -48,10 +48,18 @@ struct CreateIndexParams {
     /// (Text, Integer, Float, Boolean, DateTime, Geo, Hnsw, Flat, Ivf, …).
     ///
     /// FieldOption uses serde's externally-tagged representation where the
-    /// variant name is the key.  Example:
+    /// variant name is the key.  The optional `dynamic_field_policy` key
+    /// (values: `"Strict"`, `"Dynamic"`, `"Ignore"`) controls how fields
+    /// that appear in ingested documents but are absent from the schema
+    /// are handled.  It defaults to `"Dynamic"`, which silently truncates
+    /// incoming float values for integer fields (e.g. `3.14` → `3`) —
+    /// use `"Strict"` if you need to reject such type mismatches.
+    ///
+    /// Example:
     ///
     /// ```json
     /// {
+    ///   "dynamic_field_policy": "Dynamic",
     ///   "fields": {
     ///     "title": { "Text": { "indexed": true, "stored": true } },
     ///     "body":  { "Text": {} },
@@ -237,7 +245,7 @@ impl LaurusMcpServer {
     ///
     /// The schema describes the fields of the documents that will be indexed.
     #[tool(
-        description = "Create a new search index with the provided schema. The schema_json must be a JSON string defining index fields (Text, Integer, Float, Boolean, DateTime, Hnsw, Flat, Ivf, etc.). Call this before add_document or search if the index does not exist yet."
+        description = "Create a new search index with the provided schema. The schema_json must be a JSON string defining index fields (Text, Integer, Float, Boolean, DateTime, Hnsw, Flat, Ivf, etc.). An optional top-level \"dynamic_field_policy\" key controls how fields not listed in the schema are treated at ingest time: \"Strict\" rejects them, \"Dynamic\" (default) infers a type and adds the field (note: Integer fields silently truncate incoming float values), \"Ignore\" drops them silently. Call this before add_document or search if the index does not exist yet."
     )]
     async fn create_index(
         &self,

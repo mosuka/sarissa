@@ -229,7 +229,105 @@ let v: DataValue = vec![0.1f32, 0.2].into(); // Vector
 
 ## Reserved Fields
 
-The `_id` field is reserved by Laurus for internal use. It stores the external document ID and is always indexed with `KeywordAnalyzer` (exact match). You do not need to add it to your schema — it is managed automatically.
+Any field name starting with an underscore (`_`) is **reserved for the
+engine**. User code cannot declare fields with such names, and documents that
+carry user-supplied `_`-prefixed keys are rejected at ingest time.
+
+The only `_`-prefixed name that is accepted is the allow-listed `_id`
+system field described below.
+
+### `_id` — external document identifier
+
+Stores the external document ID supplied to `put_document` / `add_document`.
+It is injected automatically and indexed with `KeywordAnalyzer` (exact match).
+You do not need to add it to your schema.
+
+## Dynamic Schema
+
+Laurus can accept documents even when some of their fields have not been
+declared in the schema. The behaviour is controlled by the
+`DynamicFieldPolicy` attached to the schema:
+
+| Policy | Behaviour on an undeclared field |
+| :--- | :--- |
+| `Strict` | Reject the document with a descriptive error. |
+| `Dynamic` (default) | Infer the field's type from the value and add it to the schema. |
+| `Ignore` | Silently drop the field and continue indexing the rest. |
+
+Set the policy on the builder:
+
+```rust
+use laurus::{DynamicFieldPolicy, Schema};
+
+let schema = Schema::builder()
+    .dynamic_field_policy(DynamicFieldPolicy::Dynamic)
+    .build();
+```
+
+### Type inference rules (Dynamic policy)
+
+| Incoming value | Inferred field type |
+| :--- | :--- |
+| `string` | `Text` (BM25 via the inverted index) |
+| `integer` | `Integer` (BKD tree) |
+| `float` | `Float` (BKD tree) |
+| `bool` | `Boolean` |
+| object with a latitude key (`lat` or `latitude`) and a longitude key (`lon`, `lng`, or `longitude`), values in range | `Geo` |
+
+Vector fields (`Hnsw`, `Flat`, `Ivf`) and `Bytes` are **never** inferred:
+they must be declared in the schema explicitly. Multi-valued numeric arrays
+are also not yet inferred — they return an explicit "not yet supported"
+error so the caller can declare the field manually.
+
+### Type conflicts
+
+When a value arrives for a field that is **already declared**, Laurus attempts
+to coerce the value to the declared type. The coercion rules are:
+
+| Declared type | Incoming value | Result |
+| :--- | :--- | :--- |
+| `Integer` | `Int64` | stored as-is |
+| `Integer` | `Float64(3.14)` | **truncated to `3`** (information loss — see warning below) |
+| `Integer` | `Text("42")` | parsed as `42` |
+| `Integer` | `Text("abc")` | error |
+| `Float` | `Int64` | widened to `f64` |
+| `Float` | `Text("3.14")` | parsed |
+| `Boolean` | `Int64(0)` / `Int64(1)` | `false` / `true` |
+| `Boolean` | `Text("true"/"false")` | parsed (case-insensitive) |
+| `Text` | any scalar | stringified |
+| `Geo` / `Bytes` / vector | anything other than matching variant | error |
+
+Coercion errors interact with the policy:
+
+- `Strict`: error is returned immediately.
+- `Dynamic`: error is returned — the coercion layer already applied every
+  conversion that is considered safe.
+- `Ignore`: the offending field is dropped; the rest of the document is
+  indexed.
+
+> **⚠️ Warning: silent information loss is possible.**
+>
+> Several coercions throw away information without reporting an error:
+>
+> - An `Integer` field **truncates** incoming `Float` values (`3.14` → `3`,
+>   `-3.9` → `-3`). Ingest does not fail.
+> - A `Float` field may lose precision for very large integers that do not
+>   fit in an `f64` mantissa.
+> - A `Text` field accepts any scalar by stringifying it, losing the
+>   original type.
+> - `Ignore` drops incompatible fields quietly.
+>
+> If the correctness of your data matters more than the convenience of
+> schema-less ingestion, use `DynamicFieldPolicy::Strict` (or declare every
+> field up-front). The `Dynamic` policy prioritises keeping the document
+> ingestable over preserving every bit of incoming data.
+
+### Query DSL and undeclared fields
+
+Once the schema is settled, the query parser validates that every
+`field:value` clause references a declared field. Typos such as
+`titl:hello` (for `title:hello`) produce a clear parse error instead of
+returning silently-empty results.
 
 ## Dynamic Field Management
 

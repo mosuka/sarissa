@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use laurus::{
     AnalyzerDefinition, BooleanOption, BytesOption, CharFilterConfig, DateTimeOption,
-    DistanceMetric, EmbedderDefinition, FieldOption, FlatOption, FloatOption, GeoOption,
-    HnswOption, IntegerOption, IvfOption, QuantizationMethod, Schema, TextOption,
+    DistanceMetric, DynamicFieldPolicy, EmbedderDefinition, FieldOption, FlatOption, FloatOption,
+    GeoOption, HnswOption, IntegerOption, IvfOption, QuantizationMethod, Schema, TextOption,
     TokenFilterConfig, TokenizerConfig,
 };
 
@@ -37,6 +37,7 @@ pub fn to_proto(schema: &Schema) -> v1::Schema {
         default_fields: schema.default_fields.clone(),
         analyzers,
         embedders,
+        dynamic_field_policy: dynamic_field_policy_to_proto(&schema.dynamic_field_policy) as i32,
     }
 }
 
@@ -61,7 +62,38 @@ pub fn from_proto(proto: &v1::Schema) -> Result<Schema, String> {
         embedders,
         fields,
         default_fields: proto.default_fields.clone(),
+        dynamic_field_policy: dynamic_field_policy_from_proto(proto.dynamic_field_policy),
     })
+}
+
+/// Convert a laurus `DynamicFieldPolicy` into a proto enum value.
+///
+/// # Arguments
+///
+/// * `policy` - The laurus dynamic field policy.
+fn dynamic_field_policy_to_proto(policy: &DynamicFieldPolicy) -> v1::DynamicFieldPolicy {
+    match policy {
+        DynamicFieldPolicy::Strict => v1::DynamicFieldPolicy::Strict,
+        DynamicFieldPolicy::Dynamic => v1::DynamicFieldPolicy::Dynamic,
+        DynamicFieldPolicy::Ignore => v1::DynamicFieldPolicy::Ignore,
+    }
+}
+
+/// Convert a proto `DynamicFieldPolicy` value into a laurus `DynamicFieldPolicy`.
+///
+/// The proto value `UNSPECIFIED` (zero) and any unrecognised value are mapped to
+/// [`DynamicFieldPolicy::Dynamic`], matching the laurus default.
+///
+/// # Arguments
+///
+/// * `value` - The proto enum value (i32).
+fn dynamic_field_policy_from_proto(value: i32) -> DynamicFieldPolicy {
+    match v1::DynamicFieldPolicy::try_from(value) {
+        Ok(v1::DynamicFieldPolicy::Strict) => DynamicFieldPolicy::Strict,
+        Ok(v1::DynamicFieldPolicy::Dynamic) => DynamicFieldPolicy::Dynamic,
+        Ok(v1::DynamicFieldPolicy::Ignore) => DynamicFieldPolicy::Ignore,
+        Ok(v1::DynamicFieldPolicy::Unspecified) | Err(_) => DynamicFieldPolicy::default(),
+    }
 }
 
 /// Convert a laurus `FieldOption` into a proto `FieldOption`.
@@ -576,5 +608,106 @@ fn embedder_definition_from_proto(
                 .ok_or("openai: missing model")?,
         }),
         other => Err(format!("Unknown embedder type: {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use laurus::{BooleanOption, FlatOption, IntegerOption, TextOption};
+
+    /// Round-trip a `DynamicFieldPolicy` through proto and back for every
+    /// concrete variant, verifying the enum mapping is complete.
+    #[test]
+    fn dynamic_field_policy_round_trip_all_variants() {
+        for policy in [
+            DynamicFieldPolicy::Strict,
+            DynamicFieldPolicy::Dynamic,
+            DynamicFieldPolicy::Ignore,
+        ] {
+            let proto_value = dynamic_field_policy_to_proto(&policy) as i32;
+            let back = dynamic_field_policy_from_proto(proto_value);
+            assert_eq!(policy, back, "round-trip mismatch for {policy:?}");
+        }
+    }
+
+    /// `UNSPECIFIED` (the proto default) maps to the laurus default
+    /// (`Dynamic`).
+    #[test]
+    fn dynamic_field_policy_unspecified_maps_to_default() {
+        let unspecified = v1::DynamicFieldPolicy::Unspecified as i32;
+        assert_eq!(
+            dynamic_field_policy_from_proto(unspecified),
+            DynamicFieldPolicy::default()
+        );
+        assert_eq!(DynamicFieldPolicy::default(), DynamicFieldPolicy::Dynamic);
+    }
+
+    /// Unknown i32 values coming from a newer client fall back to the
+    /// laurus default (`Dynamic`), matching the forward-compatibility
+    /// contract for proto3 enums.
+    #[test]
+    fn dynamic_field_policy_unknown_value_maps_to_default() {
+        assert_eq!(
+            dynamic_field_policy_from_proto(9999),
+            DynamicFieldPolicy::default()
+        );
+    }
+
+    /// Round-trip a non-trivial `Schema` through proto and back, checking
+    /// that `dynamic_field_policy`, fields, and default_fields survive.
+    #[test]
+    fn schema_round_trip_preserves_policy_and_fields() {
+        let schema = Schema::builder()
+            .dynamic_field_policy(DynamicFieldPolicy::Strict)
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .add_field("year", FieldOption::Integer(IntegerOption::default()))
+            .add_field("published", FieldOption::Boolean(BooleanOption::default()))
+            .add_field(
+                "embedding",
+                FieldOption::Flat(FlatOption {
+                    dimension: 128,
+                    ..Default::default()
+                }),
+            )
+            .add_default_field("title")
+            .build();
+
+        let proto = to_proto(&schema);
+        let back = from_proto(&proto).expect("from_proto must succeed");
+
+        assert_eq!(back.dynamic_field_policy, DynamicFieldPolicy::Strict);
+        assert_eq!(back.default_fields, vec!["title".to_string()]);
+        assert_eq!(back.fields.len(), 4);
+        assert!(matches!(
+            back.fields.get("title"),
+            Some(FieldOption::Text(_))
+        ));
+        assert!(matches!(
+            back.fields.get("year"),
+            Some(FieldOption::Integer(_))
+        ));
+        assert!(matches!(
+            back.fields.get("published"),
+            Some(FieldOption::Boolean(_))
+        ));
+        assert!(matches!(
+            back.fields.get("embedding"),
+            Some(FieldOption::Flat(_))
+        ));
+    }
+
+    /// A schema constructed with the default policy round-trips to the
+    /// same default, even though the proto representation is encoded via
+    /// the `Dynamic` enum value.
+    #[test]
+    fn schema_round_trip_default_policy() {
+        let schema = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .build();
+
+        let proto = to_proto(&schema);
+        let back = from_proto(&proto).unwrap();
+        assert_eq!(back.dynamic_field_policy, DynamicFieldPolicy::Dynamic);
     }
 }

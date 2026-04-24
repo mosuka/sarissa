@@ -183,7 +183,7 @@
 <h2 id="services-overview"><a class="header" href="#services-overview">Services Overview</a></h2>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Service</th><th style="text-align: left">RPCs</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>HealthService</code></td><td style="text-align: left"><code>Check</code></td><td style="text-align: left">Health checking</td></tr>
-<tr><td style="text-align: left"><code>IndexService</code></td><td style="text-align: left"><code>CreateIndex</code>, <code>GetIndex</code>, <code>GetSchema</code></td><td style="text-align: left">Index lifecycle and schema</td></tr>
+<tr><td style="text-align: left"><code>IndexService</code></td><td style="text-align: left"><code>CreateIndex</code>, <code>GetIndex</code>, <code>GetSchema</code>, <code>AddField</code>, <code>DeleteField</code></td><td style="text-align: left">Index lifecycle and schema</td></tr>
 <tr><td style="text-align: left"><code>DocumentService</code></td><td style="text-align: left"><code>PutDocument</code>, <code>AddDocument</code>, <code>GetDocuments</code>, <code>DeleteDocuments</code>, <code>Commit</code></td><td style="text-align: left">Document CRUD and commit</td></tr>
 <tr><td style="text-align: left"><code>SearchService</code></td><td style="text-align: left"><code>Search</code>, <code>SearchStream</code></td><td style="text-align: left">Unary and streaming search</td></tr>
 </tbody></table>
@@ -214,21 +214,64 @@
 <pre><code class="language-protobuf">message Schema {
   map&lt;string, FieldOption&gt; fields = 1;
   repeated string default_fields = 2;
+  map&lt;string, AnalyzerDefinition&gt; analyzers = 3;
+  map&lt;string, EmbedderConfig&gt; embedders = 4;
+  DynamicFieldPolicy dynamic_field_policy = 5;
+}
+
+enum DynamicFieldPolicy {
+  DYNAMIC_FIELD_POLICY_UNSPECIFIED = 0;
+  DYNAMIC_FIELD_POLICY_STRICT = 1;
+  DYNAMIC_FIELD_POLICY_DYNAMIC = 2;
+  DYNAMIC_FIELD_POLICY_IGNORE = 3;
 }
 </code></pre>
+<ul>
+<li><strong><code>fields</code></strong> — Field definitions keyed by field name.</li>
+<li><strong><code>default_fields</code></strong> — Field names used as default search targets when a query does not specify a field.</li>
+<li><strong><code>analyzers</code></strong> — Custom analyzer pipelines keyed by name. Referenced by <code>TextOption.analyzer</code>.</li>
+<li><strong><code>embedders</code></strong> — Embedder configurations keyed by name. Referenced by vector field options (<code>HnswOption.embedder</code>, etc.).</li>
+<li><strong><code>dynamic_field_policy</code></strong> — How the engine treats fields that appear in an ingested document but are <strong>absent</strong> from <code>fields</code>. <code>UNSPECIFIED</code> is interpreted as <code>DYNAMIC</code> for forward compatibility. See <a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for the full behaviour matrix and the warning about silent truncation under <code>DYNAMIC</code>.</li>
+</ul>
+<p><strong>AnalyzerDefinition:</strong></p>
+<pre><code class="language-protobuf">message AnalyzerDefinition {
+  repeated ComponentConfig char_filters = 1;
+  ComponentConfig tokenizer = 2;
+  repeated ComponentConfig token_filters = 3;
+}
+</code></pre>
+<p><strong>ComponentConfig</strong> (used for char filters, tokenizer, and token filters):</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>type</code></td><td style="text-align: left"><code>string</code></td><td style="text-align: left">Component type name (e.g. <code>"whitespace"</code>, <code>"lowercase"</code>, <code>"unicode_normalization"</code>)</td></tr>
+<tr><td style="text-align: left"><code>params</code></td><td style="text-align: left"><code>map&lt;string, string&gt;</code></td><td style="text-align: left">Type-specific parameters as string key-value pairs</td></tr>
+</tbody></table>
+</div>
+<p><strong>EmbedderConfig:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>type</code></td><td style="text-align: left"><code>string</code></td><td style="text-align: left">Embedder type name (e.g. <code>"precomputed"</code>, <code>"candle_bert"</code>, <code>"openai"</code>)</td></tr>
+<tr><td style="text-align: left"><code>params</code></td><td style="text-align: left"><code>map&lt;string, string&gt;</code></td><td style="text-align: left">Type-specific parameters (e.g. <code>"model"</code> → <code>"sentence-transformers/all-MiniLM-L6-v2"</code>)</td></tr>
+</tbody></table>
+</div>
 <p>Each <code>FieldOption</code> is a <code>oneof</code> with one of the following field types:</p>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Lexical Fields</th><th style="text-align: left">Vector Fields</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>TextOption</code> (<code>indexed</code>, <code>stored</code>, <code>term_vectors</code>)</td><td style="text-align: left"><code>HnswOption</code> (<code>dimension</code>, <code>distance</code>, <code>m</code>, <code>ef_construction</code>, <code>base_weight</code>, <code>quantizer</code>)</td></tr>
-<tr><td style="text-align: left"><code>IntegerOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"><code>FlatOption</code> (<code>dimension</code>, <code>distance</code>, <code>base_weight</code>, <code>quantizer</code>)</td></tr>
-<tr><td style="text-align: left"><code>FloatOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"><code>IvfOption</code> (<code>dimension</code>, <code>distance</code>, <code>n_clusters</code>, <code>n_probe</code>, <code>base_weight</code>, <code>quantizer</code>)</td></tr>
+<tr><td style="text-align: left"><code>TextOption</code> (<code>indexed</code>, <code>stored</code>, <code>term_vectors</code>, <code>analyzer</code>)</td><td style="text-align: left"><code>HnswOption</code> (<code>dimension</code>, <code>distance</code>, <code>m</code>, <code>ef_construction</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
+<tr><td style="text-align: left"><code>IntegerOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"><code>FlatOption</code> (<code>dimension</code>, <code>distance</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
+<tr><td style="text-align: left"><code>FloatOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"><code>IvfOption</code> (<code>dimension</code>, <code>distance</code>, <code>n_clusters</code>, <code>n_probe</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
 <tr><td style="text-align: left"><code>BooleanOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>DateTimeOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>GeoOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>BytesOption</code> (<code>stored</code>)</td><td style="text-align: left"></td></tr>
 </tbody></table>
 </div>
+<p>The <code>embedder</code> field in vector options specifies the name of an embedder defined in <code>Schema.embedders</code>. When set, the server automatically generates vectors from document text fields at index time. Leave empty to supply pre-computed vectors directly.</p>
 <p><strong>Distance metrics:</strong> <code>COSINE</code>, <code>EUCLIDEAN</code>, <code>MANHATTAN</code>, <code>DOT_PRODUCT</code>, <code>ANGULAR</code></p>
 <p><strong>Quantization methods:</strong> <code>NONE</code>, <code>SCALAR_8BIT</code>, <code>PRODUCT_QUANTIZATION</code></p>
+<p><strong>QuantizationConfig structure:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>method</code></td><td style="text-align: left"><code>QuantizationMethod</code></td><td style="text-align: left">Quantization method (<code>QUANTIZATION_METHOD_NONE</code>, <code>QUANTIZATION_METHOD_SCALAR_8BIT</code>, or <code>QUANTIZATION_METHOD_PRODUCT_QUANTIZATION</code>)</td></tr>
+<tr><td style="text-align: left"><code>subvector_count</code></td><td style="text-align: left"><code>uint32</code></td><td style="text-align: left">Number of subvectors (only used when <code>method</code> is <code>PRODUCT_QUANTIZATION</code>; must evenly divide <code>dimension</code>)</td></tr>
+</tbody></table>
+</div>
 <p><strong>Example:</strong></p>
 <pre><code class="language-json">{
   "schema": {
@@ -251,6 +294,31 @@
 </tbody></table>
 </div>
 <p>Each <code>VectorFieldStats</code> contains <code>vector_count</code> and <code>dimension</code>.</p>
+<h3 id="addfield"><a class="header" href="#addfield"><code>AddField</code></a></h3>
+<p>Add a new field to the running index at runtime.</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>name</code></td><td style="text-align: left"><code>string</code></td><td style="text-align: left">The field name</td></tr>
+<tr><td style="text-align: left"><code>field_option</code></td><td style="text-align: left"><code>FieldOption</code></td><td style="text-align: left">The field configuration</td></tr>
+</tbody></table>
+</div>
+<p><strong>Response:</strong> Returns the updated <code>Schema</code>.</p>
+<h3 id="deletefield"><a class="header" href="#deletefield"><code>DeleteField</code></a></h3>
+<p>Remove a field from the running index schema.</p>
+<pre><code class="language-protobuf">rpc DeleteField(DeleteFieldRequest) returns (DeleteFieldResponse);
+</code></pre>
+<p><strong>Request fields:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>name</code></td><td style="text-align: left"><code>string</code></td><td style="text-align: left">The field name to remove</td></tr>
+</tbody></table>
+</div>
+<p><strong>Response fields:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>schema</code></td><td style="text-align: left"><code>Schema</code></td><td style="text-align: left">The updated schema after removal</td></tr>
+</tbody></table>
+</div>
+<p>Existing indexed data for the field remains in storage but becomes
+inaccessible. Per-field analyzers and embedders are unregistered.</p>
+<p><strong>HTTP gateway:</strong> <code>DELETE /v1/schema/fields/{name}</code></p>
 <h3 id="getschema"><a class="header" href="#getschema"><code>GetSchema</code></a></h3>
 <p>Retrieve the current index schema.</p>
 <pre><code class="language-protobuf">rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
@@ -323,6 +391,12 @@
 <p>Execute a search query and return results as a single response.</p>
 <pre><code class="language-protobuf">rpc Search(SearchRequest) returns (SearchResponse);
 </code></pre>
+<p><strong>Response fields:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>results</code></td><td style="text-align: left"><code>repeated SearchResult</code></td><td style="text-align: left">Search results ordered by relevance</td></tr>
+<tr><td style="text-align: left"><code>total_hits</code></td><td style="text-align: left"><code>uint64</code></td><td style="text-align: left">Total number of matching documents (before <code>limit</code>/<code>offset</code>)</td></tr>
+</tbody></table>
+</div>
 <h3 id="searchstream"><a class="header" href="#searchstream"><code>SearchStream</code></a></h3>
 <p>Execute a search query and stream results back one at a time.</p>
 <pre><code class="language-protobuf">rpc SearchStream(SearchRequest) returns (stream SearchResult);
@@ -359,6 +433,12 @@
 <tr><td style="text-align: left"><code>timeout_ms</code></td><td style="text-align: left"><code>uint64</code></td><td style="text-align: left">Search timeout in milliseconds</td></tr>
 <tr><td style="text-align: left"><code>parallel</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left">Enable parallel search</td></tr>
 <tr><td style="text-align: left"><code>sort_by</code></td><td style="text-align: left"><code>SortSpec</code></td><td style="text-align: left">Sort by a field instead of score</td></tr>
+</tbody></table>
+</div>
+<h3 id="sortspec"><a class="header" href="#sortspec">SortSpec</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>field</code></td><td style="text-align: left"><code>string</code></td><td style="text-align: left">Field name to sort by. Empty string means sort by relevance score</td></tr>
+<tr><td style="text-align: left"><code>order</code></td><td style="text-align: left"><code>SortOrder</code></td><td style="text-align: left"><code>SORT_ORDER_ASC</code> (ascending) or <code>SORT_ORDER_DESC</code> (descending)</td></tr>
 </tbody></table>
 </div>
 <h3 id="vectorparams"><a class="header" href="#vectorparams">VectorParams</a></h3>

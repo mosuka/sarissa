@@ -67,7 +67,24 @@ Laurus::Schema.new
 | :--- | :--- |
 | `add_embedder(name, config)` | Register a named embedder definition. `config` is a Hash with a `"type"` key (see below). |
 | `set_default_fields(fields)` | Set the default fields used when no field is specified in a query. `fields` is an Array of Strings. |
+| `set_dynamic_field_policy(policy)` | Set how undeclared fields are handled. `policy` is `"strict"`, `"dynamic"` (default), or `"ignore"`. See notes below. |
+| `dynamic_field_policy -> String` | Return the current policy as a lowercase string. |
 | `field_names -> Array<String>` | Return the list of field names defined in this schema. |
+
+#### Dynamic field policy
+
+Controls what happens when a document is ingested with field names that are
+not declared in the schema:
+
+- `"strict"` — Reject the document.
+- `"dynamic"` (default) — Infer a type for each undeclared field and add it
+  to the schema. **Warning**: integer fields silently truncate incoming
+  float values (`3.14` → `3`). Use `"strict"` if you need to reject such
+  type mismatches.
+- `"ignore"` — Silently drop the undeclared fields.
+
+See [Schema & Fields](../concepts/schema_and_fields.md#dynamic-schema) for
+the full behaviour matrix.
 
 ### Embedder types
 

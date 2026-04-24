@@ -185,20 +185,26 @@
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use laurus::SearchRequestBuilder;
-use laurus::vector::VectorSearchRequestBuilder;
+use laurus::vector::search::searcher::VectorSearchQuery;
+use laurus::vector::store::request::QueryPayload;
+use laurus::data::DataValue;
 
 let request = SearchRequestBuilder::new()
-    .vector_search_request(
-        VectorSearchRequestBuilder::new()
-            .add_text("embedding", "systems programming language")
-            .limit(10)
-            .build()
+    .vector_query(
+        VectorSearchQuery::Payloads(vec![
+            QueryPayload {
+                field: "embedding".to_string(),
+                payload: DataValue::Text("systems programming language".to_string()),
+                weight: 1.0,
+            },
+        ])
     )
+    .limit(10)
     .build();
 
 let results = engine.search(request).await?;
 <span class="boring">}</span></code></pre></pre>
-<p>The <code>add_text()</code> method stores the text as a query payload. At search time, the engine embeds it using the configured embedder and then searches the vector index.</p>
+<p>The <code>QueryPayload</code> stores raw data (text, bytes, etc.) that will be embedded at search time using the configured embedder.</p>
 <h3 id="query-dsl"><a class="header" href="#query-dsl">Query DSL</a></h3>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
@@ -207,51 +213,75 @@ let results = engine.search(request).await?;
 let parser = VectorQueryParser::new(embedder.clone())
     .with_default_field("embedding");
 
-let request = parser.parse(r#"embedding:~"systems programming""#).await?;
+let request = parser.parse(r#"embedding:"systems programming""#).await?;
 <span class="boring">}</span></code></pre></pre>
-<h2 id="vectorsearchrequestbuilder"><a class="header" href="#vectorsearchrequestbuilder">VectorSearchRequestBuilder</a></h2>
-<p>The builder API provides fine-grained control:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use laurus::vector::VectorSearchRequestBuilder;
-use laurus::vector::store::request::QueryVector;
-
-let request = VectorSearchRequestBuilder::new()
-    // Text query (will be embedded at search time)
-    .add_text("text_vec", "machine learning")
-
-    // Or use a pre-computed vector directly
-    .add_vector("embedding", vec![0.1, 0.2, 0.3, /* ... */])
-
-    // Search parameters
-    .limit(20)
-
-    .build();
-<span class="boring">}</span></code></pre></pre>
-<h3 id="methods"><a class="header" href="#methods">Methods</a></h3>
-<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>add_text(field, text)</code></td><td style="text-align: left">Add a text query for a specific field (embedded at search time)</td></tr>
-<tr><td style="text-align: left"><code>add_vector(field, vector)</code></td><td style="text-align: left">Add a pre-computed query vector for a specific field</td></tr>
-<tr><td style="text-align: left"><code>add_vector_with_weight(field, vector, weight)</code></td><td style="text-align: left">Add a pre-computed vector with an explicit weight</td></tr>
-<tr><td style="text-align: left"><code>add_payload(field, payload)</code></td><td style="text-align: left">Add a generic <code>DataValue</code> payload to be embedded</td></tr>
-<tr><td style="text-align: left"><code>add_bytes(field, bytes, mime)</code></td><td style="text-align: left">Add a binary payload (e.g., image bytes for multimodal)</td></tr>
-<tr><td style="text-align: left"><code>field(name)</code></td><td style="text-align: left">Restrict search to a specific field</td></tr>
-<tr><td style="text-align: left"><code>fields(names)</code></td><td style="text-align: left">Restrict search to multiple fields</td></tr>
-<tr><td style="text-align: left"><code>limit(n)</code></td><td style="text-align: left">Maximum number of results (default: 10)</td></tr>
-<tr><td style="text-align: left"><code>score_mode(VectorScoreMode)</code></td><td style="text-align: left">Score combination mode (<code>WeightedSum</code>, <code>MaxSim</code>, <code>LateInteraction</code>)</td></tr>
-<tr><td style="text-align: left"><code>min_score(f32)</code></td><td style="text-align: left">Minimum score threshold (default: 0.0)</td></tr>
-<tr><td style="text-align: left"><code>overfetch(f32)</code></td><td style="text-align: left">Overfetch factor for better result quality (default: 1.0)</td></tr>
-<tr><td style="text-align: left"><code>build()</code></td><td style="text-align: left">Build the <code>VectorSearchRequest</code></td></tr>
+<h2 id="vectorsearchquery"><a class="header" href="#vectorsearchquery">VectorSearchQuery</a></h2>
+<p>The vector search query is specified as a <code>VectorSearchQuery</code> enum:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Variant</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Payloads(Vec&lt;QueryPayload&gt;)</code></td><td style="text-align: left">Raw payloads (text, bytes, etc.) to be embedded at search time</td></tr>
+<tr><td style="text-align: left"><code>Vectors(Vec&lt;QueryVector&gt;)</code></td><td style="text-align: left">Pre-embedded query vectors ready for nearest-neighbor search</td></tr>
 </tbody></table>
 </div>
+<h3 id="querypayload"><a class="header" href="#querypayload">QueryPayload</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>field</code></td><td style="text-align: left"><code>String</code></td><td style="text-align: left">Target vector field name</td></tr>
+<tr><td style="text-align: left"><code>payload</code></td><td style="text-align: left"><code>DataValue</code></td><td style="text-align: left">The payload to embed (e.g., <code>DataValue::Text(...)</code>)</td></tr>
+<tr><td style="text-align: left"><code>weight</code></td><td style="text-align: left"><code>f32</code></td><td style="text-align: left">Score weight (default: 1.0)</td></tr>
+</tbody></table>
+</div>
+<h3 id="queryvector"><a class="header" href="#queryvector">QueryVector</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>vector</code></td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Pre-computed dense vector embedding</td></tr>
+<tr><td style="text-align: left"><code>weight</code></td><td style="text-align: left"><code>f32</code></td><td style="text-align: left">Score weight (default: 1.0)</td></tr>
+<tr><td style="text-align: left"><code>fields</code></td><td style="text-align: left"><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td style="text-align: left">Optional field restriction</td></tr>
+</tbody></table>
+</div>
+<h3 id="examples"><a class="header" href="#examples">Examples</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::vector::search::searcher::VectorSearchQuery;
+use laurus::vector::store::request::{QueryPayload, QueryVector};
+use laurus::vector::core::vector::Vector;
+use laurus::data::DataValue;
+
+// Text query (will be embedded at search time)
+let query = VectorSearchQuery::Payloads(vec![
+    QueryPayload {
+        field: "text_vec".to_string(),
+        payload: DataValue::Text("machine learning".to_string()),
+        weight: 1.0,
+    },
+]);
+
+// Pre-computed vector
+let query = VectorSearchQuery::Vectors(vec![
+    QueryVector {
+        vector: Vector::from(vec![0.1, 0.2, 0.3]),
+        weight: 1.0,
+        fields: Some(vec!["embedding".to_string()]),
+    },
+]);
+<span class="boring">}</span></code></pre></pre>
 <h2 id="multi-field-vector-search"><a class="header" href="#multi-field-vector-search">Multi-Field Vector Search</a></h2>
 <p>You can search across multiple vector fields in a single request:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>let request = VectorSearchRequestBuilder::new()
-    .add_text("text_vec", "cute kitten")
-    .add_text("image_vec", "fluffy cat")
-    .build();
+</span>use laurus::vector::search::searcher::VectorSearchQuery;
+use laurus::vector::store::request::QueryPayload;
+use laurus::data::DataValue;
+
+let query = VectorSearchQuery::Payloads(vec![
+    QueryPayload {
+        field: "text_vec".to_string(),
+        payload: DataValue::Text("cute kitten".to_string()),
+        weight: 1.0,
+    },
+    QueryPayload {
+        field: "image_vec".to_string(),
+        payload: DataValue::Text("fluffy cat".to_string()),
+        weight: 1.0,
+    },
+]);
 <span class="boring">}</span></code></pre></pre>
 <p>Each clause produces a vector that is searched against its respective field. Results are combined using the configured score mode.</p>
 <h3 id="score-modes"><a class="header" href="#score-modes">Score Modes</a></h3>
@@ -263,23 +293,29 @@ let request = VectorSearchRequestBuilder::new()
 </div>
 <h3 id="weights"><a class="header" href="#weights">Weights</a></h3>
 <p>Use the <code>^</code> boost syntax in DSL or <code>weight</code> in <code>QueryVector</code> to adjust how much each field contributes:</p>
-<pre><code class="language-text">text_vec:~"cute kitten"^1.0 image_vec:~"fluffy cat"^0.5
+<pre><code class="language-text">text_vec:"cute kitten"^1.0 image_vec:"fluffy cat"^0.5
 </code></pre>
 <p>This means text similarity counts twice as much as image similarity.</p>
 <h2 id="filtered-vector-search"><a class="header" href="#filtered-vector-search">Filtered Vector Search</a></h2>
 <p>You can apply lexical filters to narrow the vector search results:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::{SearchRequestBuilder, LexicalSearchRequest};
+</span>use laurus::SearchRequestBuilder;
 use laurus::lexical::TermQuery;
-use laurus::vector::VectorSearchRequestBuilder;
+use laurus::vector::search::searcher::VectorSearchQuery;
+use laurus::vector::store::request::QueryPayload;
+use laurus::data::DataValue;
 
 // Vector search with a category filter
 let request = SearchRequestBuilder::new()
-    .vector_search_request(
-        VectorSearchRequestBuilder::new()
-            .add_text("embedding", "machine learning")
-            .build()
+    .vector_query(
+        VectorSearchQuery::Payloads(vec![
+            QueryPayload {
+                field: "embedding".to_string(),
+                payload: DataValue::Text("machine learning".to_string()),
+                weight: 1.0,
+            },
+        ])
     )
     .filter_query(Box::new(TermQuery::new("category", "tutorial")))
     .limit(10)
@@ -295,10 +331,14 @@ let results = engine.search(request).await?;
 use laurus::lexical::core::field::NumericType;
 
 let request = SearchRequestBuilder::new()
-    .vector_search_request(
-        VectorSearchRequestBuilder::new()
-            .add_text("embedding", "type systems")
-            .build()
+    .vector_query(
+        VectorSearchQuery::Payloads(vec![
+            QueryPayload {
+                field: "embedding".to_string(),
+                payload: DataValue::Text("type systems".to_string()),
+                weight: 1.0,
+            },
+        ])
     )
     .filter_query(Box::new(NumericRangeQuery::new(
         "year", NumericType::Integer,
@@ -322,7 +362,9 @@ let request = SearchRequestBuilder::new()
 use laurus::{Document, Engine, Schema, SearchRequestBuilder, PerFieldEmbedder};
 use laurus::lexical::TextOption;
 use laurus::vector::HnswOption;
-use laurus::vector::VectorSearchRequestBuilder;
+use laurus::vector::search::searcher::VectorSearchQuery;
+use laurus::vector::store::request::QueryPayload;
+use laurus::data::DataValue;
 use laurus::storage::memory::MemoryStorage;
 
 #[tokio::main]
@@ -339,7 +381,7 @@ async fn main() -&gt; laurus::Result&lt;()&gt; {
 
     // Set up per-field embedder
     let embedder = Arc::new(my_embedder);
-    let mut pfe = PerFieldEmbedder::new(embedder.clone());
+    let pfe = PerFieldEmbedder::new(embedder.clone());
     pfe.add_embedder("text_vec", embedder.clone());
 
     let engine = Engine::builder(storage, schema)
@@ -358,10 +400,14 @@ async fn main() -&gt; laurus::Result&lt;()&gt; {
     // Search by semantic similarity
     let results = engine.search(
         SearchRequestBuilder::new()
-            .vector_search_request(
-                VectorSearchRequestBuilder::new()
-                    .add_text("text_vec", "systems language")
-                    .build()
+            .vector_query(
+                VectorSearchQuery::Payloads(vec![
+                    QueryPayload {
+                        field: "text_vec".to_string(),
+                        payload: DataValue::Text("systems language".to_string()),
+                        weight: 1.0,
+                    },
+                ])
             )
             .limit(5)
             .build()

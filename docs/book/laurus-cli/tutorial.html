@@ -211,89 +211,89 @@ EOF
 <p>This defines three text fields. The <code>default_fields</code> setting means queries without a field prefix will search <code>title</code> and <code>body</code>.</p>
 <h2 id="step-2-create-an-index"><a class="header" href="#step-2-create-an-index">Step 2: Create an Index</a></h2>
 <p>Create an index using the schema:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data create index --schema schema.toml
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data create index --schema schema.toml
 </code></pre>
 <p>Verify the index was created:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data get index
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data get stats
 </code></pre>
 <p>The output shows the document count is 0.</p>
 <h2 id="step-3-add-documents"><a class="header" href="#step-3-add-documents">Step 3: Add Documents</a></h2>
 <p>Add documents to the index. Each document needs an ID and a JSON object with field values:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data add doc \
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data add doc \
   --id doc001 \
   --data '{"title":"Introduction to Rust Programming","body":"Rust is a modern systems programming language that focuses on safety, speed, and concurrency.","category":"programming"}'
 </code></pre>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data add doc \
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data add doc \
   --id doc002 \
   --data '{"title":"Web Development with Rust","body":"Building web applications with Rust has become increasingly popular. Frameworks like Actix and Rocket make it easy to create fast and secure web services.","category":"web-development"}'
 </code></pre>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data add doc \
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data add doc \
   --id doc003 \
   --data '{"title":"Python for Data Science","body":"Python is the most popular language for data science and machine learning. Libraries like NumPy and Pandas provide powerful tools for data analysis.","category":"data-science"}'
 </code></pre>
 <h2 id="step-4-commit-changes"><a class="header" href="#step-4-commit-changes">Step 4: Commit Changes</a></h2>
 <p>Documents are not searchable until committed:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data commit
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data commit
 </code></pre>
 <h2 id="step-5-search-documents"><a class="header" href="#step-5-search-documents">Step 5: Search Documents</a></h2>
 <h3 id="basic-search"><a class="header" href="#basic-search">Basic Search</a></h3>
 <p>Search for documents containing "rust":</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data search "rust"
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data search "rust"
 </code></pre>
 <p>This searches the default fields (<code>title</code> and <code>body</code>). Results show <code>doc001</code> and <code>doc002</code>.</p>
 <h3 id="field-specific-search"><a class="header" href="#field-specific-search">Field-Specific Search</a></h3>
 <p>Search only in the <code>title</code> field:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data search "title:python"
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data search "title:python"
 </code></pre>
 <p>Only <code>doc003</code> is returned.</p>
 <h3 id="category-search"><a class="header" href="#category-search">Category Search</a></h3>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data search "category:programming"
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data search "category:programming"
 </code></pre>
 <p>Only <code>doc001</code> is returned.</p>
 <h3 id="boolean-queries"><a class="header" href="#boolean-queries">Boolean Queries</a></h3>
 <p>Combine conditions with <code>+</code> (must) and <code>-</code> (must not):</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data search "+body:rust -body:web"
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data search "+body:rust -body:web"
 </code></pre>
 <p>Only <code>doc001</code> is returned (contains "rust" but not "web").</p>
 <h3 id="phrase-search"><a class="header" href="#phrase-search">Phrase Search</a></h3>
 <p>Search for an exact phrase:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data search 'body:"data science"'
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data search 'body:"data science"'
 </code></pre>
 <p>Only <code>doc003</code> is returned.</p>
 <h3 id="fuzzy-search"><a class="header" href="#fuzzy-search">Fuzzy Search</a></h3>
 <p>Search with typo tolerance using <code>~</code>:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data search "body:programing~1"
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data search "body:programing~1"
 </code></pre>
 <p>Matches "programming" despite the typo.</p>
 <h3 id="json-output"><a class="header" href="#json-output">JSON Output</a></h3>
 <p>Get results in JSON format for programmatic use:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data --format json search "rust"
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data --format json search "rust"
 </code></pre>
 <h2 id="step-6-retrieve-a-document"><a class="header" href="#step-6-retrieve-a-document">Step 6: Retrieve a Document</a></h2>
 <p>Fetch a specific document by ID:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data get doc --id doc001
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data get docs --id doc001
 </code></pre>
 <h2 id="step-7-delete-a-document"><a class="header" href="#step-7-delete-a-document">Step 7: Delete a Document</a></h2>
 <p>Delete a document and commit the change:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data delete doc --id doc003
-laurus --data-dir ./tutorial_data commit
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data delete docs --id doc003
+laurus --index-dir ./tutorial_data commit
 </code></pre>
 <p>Verify it was deleted:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data search "python"
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data search "python"
 </code></pre>
 <p>No results are returned.</p>
 <h2 id="step-8-use-the-repl"><a class="header" href="#step-8-use-the-repl">Step 8: Use the REPL</a></h2>
 <p>The REPL provides an interactive session for exploring your index:</p>
-<pre><code class="language-bash">laurus --data-dir ./tutorial_data repl
+<pre><code class="language-bash">laurus --index-dir ./tutorial_data repl
 </code></pre>
 <p>Try these commands in the REPL:</p>
-<pre><code class="language-text">&gt; stats
+<pre><code class="language-text">&gt; get stats
 &gt; search rust
-&gt; doc add doc004 {"title":"Go Programming","body":"Go is a statically typed language designed for simplicity and efficiency.","category":"programming"}
+&gt; add doc doc004 {"title":"Go Programming","body":"Go is a statically typed language designed for simplicity and efficiency.","category":"programming"}
 &gt; commit
 &gt; search programming
-&gt; doc get doc004
-&gt; doc delete doc004
+&gt; get docs doc004
+&gt; delete docs doc004
 &gt; commit
 &gt; quit
 </code></pre>

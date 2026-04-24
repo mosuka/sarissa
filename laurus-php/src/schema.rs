@@ -1,13 +1,15 @@
 //! PHP wrapper for the Laurus [`Schema`] type.
 
 use std::cell::RefCell;
+use std::str::FromStr;
 
 use ext_php_rs::convert::FromZval;
 use ext_php_rs::prelude::*;
 use ext_php_rs::types::ZendHashTable;
 use laurus::{
-    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, EmbedderDefinition, FieldOption,
-    FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption, Schema, TextOption,
+    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
+    EmbedderDefinition, FieldOption, FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption,
+    Schema, TextOption,
 };
 
 /// Parse a distance metric string into [`DistanceMetric`].
@@ -329,6 +331,41 @@ impl PhpSchema {
     /// * `field_names` - Array of field name strings.
     pub fn set_default_fields(&self, field_names: Vec<String>) {
         self.inner.borrow_mut().default_fields = field_names;
+    }
+
+    /// Set the policy for fields that are not declared in this schema.
+    ///
+    /// Accepted values (case-insensitive): `"strict"`, `"dynamic"`,
+    /// `"ignore"`. Behaviour:
+    ///
+    /// - `"strict"`: reject documents containing undeclared fields.
+    /// - `"dynamic"` (default): infer a type for each undeclared field and
+    ///   add it to the schema during ingestion. **Warning**: integer fields
+    ///   silently truncate incoming float values (e.g. `3.14` → `3`).
+    /// - `"ignore"`: silently drop undeclared fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `policy` - One of `"strict"`, `"dynamic"`, `"ignore"`.
+    ///
+    /// # Errors
+    ///
+    /// Throws a PHP `Exception` if `policy` is not one of the accepted names.
+    pub fn set_dynamic_field_policy(&self, policy: String) -> PhpResult<()> {
+        let parsed = DynamicFieldPolicy::from_str(&policy)
+            .map_err(|e| PhpException::default(e.to_string()))?;
+        self.inner.borrow_mut().dynamic_field_policy = parsed;
+        Ok(())
+    }
+
+    /// Return the currently configured dynamic field policy as a lowercase
+    /// string (`"strict"` / `"dynamic"` / `"ignore"`).
+    pub fn dynamic_field_policy(&self) -> String {
+        match self.inner.borrow().dynamic_field_policy {
+            DynamicFieldPolicy::Strict => "strict".to_string(),
+            DynamicFieldPolicy::Dynamic => "dynamic".to_string(),
+            DynamicFieldPolicy::Ignore => "ignore".to_string(),
+        }
     }
 
     /// Return the list of field names defined in this schema.

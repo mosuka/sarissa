@@ -67,7 +67,24 @@ class Schema {
 | `addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)` | IVF vector field. |
 | `addEmbedder(name, config)` | Register a named embedder. |
 | `setDefaultFields(fields)` | Set default search fields. |
+| `setDynamicFieldPolicy(policy)` | Set how undeclared fields are handled. `policy` is `"strict"`, `"dynamic"` (default), or `"ignore"`. See notes below. |
+| `dynamicFieldPolicy()` | Return the current policy as a lowercase string. |
 | `fieldNames()` | Return all field names. |
+
+#### Dynamic field policy
+
+Controls what happens when a document is ingested with field names that are
+not declared in the schema:
+
+- `"strict"` — Reject the document.
+- `"dynamic"` (default) — Infer a type for each undeclared field and add it
+  to the schema. **Warning**: integer fields silently truncate incoming
+  float values (`3.14` → `3`). Use `"strict"` if you need to reject such
+  type mismatches.
+- `"ignore"` — Silently drop the undeclared fields.
+
+See [Schema & Fields](../concepts/schema_and_fields.md#dynamic-schema) for
+the full behaviour matrix.
 
 ### Distance metrics
 

@@ -316,7 +316,7 @@ use laurus::analysis::analyzer::keyword::KeywordAnalyzer;
 use laurus::analysis::analyzer::per_field::PerFieldAnalyzer;
 
 // Default analyzer for fields not explicitly configured
-let mut per_field = PerFieldAnalyzer::new(
+let per_field = PerFieldAnalyzer::new(
     Arc::new(StandardAnalyzer::default())
 );
 

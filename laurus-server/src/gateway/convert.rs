@@ -221,12 +221,58 @@ pub fn json_to_proto_schema(json: &Value) -> Result<v1::Schema, String> {
         .transpose()?
         .unwrap_or_default();
 
+    let dynamic_field_policy = json
+        .get("dynamic_field_policy")
+        .and_then(|v| v.as_str())
+        .map(json_to_proto_dynamic_field_policy)
+        .transpose()?
+        .unwrap_or(v1::DynamicFieldPolicy::Unspecified) as i32;
+
     Ok(v1::Schema {
         fields,
         default_fields,
         analyzers,
         embedders,
+        dynamic_field_policy,
     })
+}
+
+/// Converts a JSON string to a proto `DynamicFieldPolicy`.
+///
+/// Accepts the lowercase names `"strict"`, `"dynamic"`, and `"ignore"`.
+///
+/// # Arguments
+///
+/// * `s` - The policy name.
+///
+/// # Errors
+///
+/// Returns an error if the string does not match a known policy name.
+fn json_to_proto_dynamic_field_policy(s: &str) -> Result<v1::DynamicFieldPolicy, String> {
+    match s {
+        "strict" => Ok(v1::DynamicFieldPolicy::Strict),
+        "dynamic" => Ok(v1::DynamicFieldPolicy::Dynamic),
+        "ignore" => Ok(v1::DynamicFieldPolicy::Ignore),
+        other => Err(format!(
+            "unknown dynamic_field_policy \"{other}\" (expected \"strict\", \"dynamic\", or \"ignore\")"
+        )),
+    }
+}
+
+/// Converts a proto `DynamicFieldPolicy` enum value to its JSON string name.
+///
+/// The proto value `UNSPECIFIED` maps to `"dynamic"` (the default). Returns
+/// `None` if the value is unrecognized.
+///
+/// # Arguments
+///
+/// * `value` - The proto enum value (i32).
+fn proto_dynamic_field_policy_to_json(value: i32) -> Option<&'static str> {
+    match v1::DynamicFieldPolicy::try_from(value).ok()? {
+        v1::DynamicFieldPolicy::Strict => Some("strict"),
+        v1::DynamicFieldPolicy::Dynamic | v1::DynamicFieldPolicy::Unspecified => Some("dynamic"),
+        v1::DynamicFieldPolicy::Ignore => Some("ignore"),
+    }
 }
 
 /// Converts a proto `Schema` to a JSON value.
@@ -255,6 +301,9 @@ pub fn proto_schema_to_json(schema: &v1::Schema) -> Value {
             .map(|(k, v)| (k.clone(), proto_embedder_definition_to_json(v)))
             .collect();
         result["embedders"] = Value::Object(embedders);
+    }
+    if let Some(name) = proto_dynamic_field_policy_to_json(schema.dynamic_field_policy) {
+        result["dynamic_field_policy"] = Value::String(name.to_string());
     }
     result
 }

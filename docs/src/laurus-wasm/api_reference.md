@@ -178,6 +178,25 @@ schema.addEmbedder("my-embedder", { type: "precomputed" });
 
 Set the default search fields.
 
+#### `setDynamicFieldPolicy(policy)`
+
+Set how the engine treats fields that appear in ingested documents but are
+absent from the schema. `policy` is one of `"strict"`, `"dynamic"`
+(default), or `"ignore"` (case-insensitive). Throws on an invalid value.
+
+- `"strict"` — Reject the document.
+- `"dynamic"` — Infer a type for each undeclared field and add it to the
+  schema. **Warning**: integer fields silently truncate incoming float
+  values (`3.14` → `3`).
+- `"ignore"` — Silently drop the undeclared fields.
+
+See [Schema & Fields](../concepts/schema_and_fields.md#dynamic-schema) for
+the full behaviour matrix.
+
+#### `dynamicFieldPolicy()`
+
+Returns the current policy as a lowercase string.
+
 #### `fieldNames()`
 
 Returns an array of defined field names.

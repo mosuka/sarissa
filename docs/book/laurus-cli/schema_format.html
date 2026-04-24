@@ -181,8 +181,11 @@
                         <h1 id="schema-format-reference"><a class="header" href="#schema-format-reference">Schema Format Reference</a></h1>
 <p>The schema file defines the structure of your index — what fields exist, their types, and how they are indexed. Laurus uses TOML format for schema files.</p>
 <h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
-<p>A schema consists of two top-level elements:</p>
-<pre><code class="language-toml"># Fields to search by default when a query does not specify a field.
+<p>A schema consists of three top-level elements:</p>
+<pre><code class="language-toml"># Policy for fields not declared below. Optional — defaults to "dynamic".
+dynamic_field_policy = "dynamic"
+
+# Fields to search by default when a query does not specify a field.
 default_fields = ["title", "body"]
 
 # Field definitions. Each field has a name and a typed configuration.
@@ -190,13 +193,14 @@ default_fields = ["title", "body"]
 # ... type-specific options
 </code></pre>
 <ul>
+<li><strong><code>dynamic_field_policy</code></strong> — How the engine treats fields present in an ingested document but <strong>absent</strong> from this schema. Accepted values: <code>"strict"</code>, <code>"dynamic"</code>, <code>"ignore"</code>. Defaults to <code>"dynamic"</code>. See <a href="../concepts/schema_and_fields.html#dynamic-schema">Dynamic Schema</a> for the full semantics and the warning about silent truncation under <code>"dynamic"</code>.</li>
 <li><strong><code>default_fields</code></strong> — A list of field names used as default search targets by the <a href="../concepts/query_dsl.html">Query DSL</a>. Only lexical fields (Text, Integer, Float, etc.) can be default fields. This key is optional and defaults to an empty list.</li>
 <li><strong><code>fields</code></strong> — A map of field names to their typed configuration. Each field must specify exactly one field type.</li>
 </ul>
 <h2 id="field-naming"><a class="header" href="#field-naming">Field Naming</a></h2>
 <ul>
 <li>Field names are arbitrary strings (e.g., <code>title</code>, <code>body_vec</code>, <code>created_at</code>).</li>
-<li>The <code>_id</code> field is reserved by Laurus for internal document ID management — do not use it.</li>
+<li><strong>Field names starting with <code>_</code> are reserved</strong> for the engine. The only allow-listed name is <code>_id</code> (managed automatically). Attempting to declare any other <code>_</code>-prefixed field results in an error.</li>
 <li>Field names must be unique within a schema.</li>
 </ul>
 <h2 id="field-types"><a class="header" href="#field-types">Field Types</a></h2>

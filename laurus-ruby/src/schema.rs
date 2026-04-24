@@ -1,10 +1,12 @@
 //! Ruby wrapper for the Laurus [`Schema`] type.
 
 use std::cell::RefCell;
+use std::str::FromStr;
 
 use laurus::{
-    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, EmbedderDefinition, FieldOption,
-    FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption, Schema, TextOption,
+    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
+    EmbedderDefinition, FieldOption, FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption,
+    Schema, TextOption,
 };
 use magnus::prelude::*;
 use magnus::scan_args::{get_kwargs, scan_args};
@@ -461,6 +463,42 @@ impl RbSchema {
         Ok(())
     }
 
+    /// Set the policy for fields that are not declared in this schema.
+    ///
+    /// Accepted values (case-insensitive): `"strict"`, `"dynamic"`,
+    /// `"ignore"`. Behaviour:
+    ///
+    /// - `"strict"`: reject documents containing undeclared fields.
+    /// - `"dynamic"` (default): infer a type for each undeclared field and
+    ///   add it to the schema during ingestion. **Warning**: integer fields
+    ///   silently truncate incoming float values (e.g. `3.14` → `3`).
+    /// - `"ignore"`: silently drop undeclared fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `policy` - One of `"strict"`, `"dynamic"`, `"ignore"`.
+    ///
+    /// # Errors
+    ///
+    /// Raises a Ruby `ArgumentError` if `policy` is not one of the accepted names.
+    fn set_dynamic_field_policy(&self, policy: String) -> Result<(), Error> {
+        let ruby = Ruby::get().expect("called from Ruby thread");
+        let parsed = DynamicFieldPolicy::from_str(&policy)
+            .map_err(|e| Error::new(ruby.exception_arg_error(), e.to_string()))?;
+        self.inner.borrow_mut().dynamic_field_policy = parsed;
+        Ok(())
+    }
+
+    /// Return the currently configured dynamic field policy as a lowercase
+    /// string (`"strict"` / `"dynamic"` / `"ignore"`).
+    fn dynamic_field_policy(&self) -> String {
+        match self.inner.borrow().dynamic_field_policy {
+            DynamicFieldPolicy::Strict => "strict".to_string(),
+            DynamicFieldPolicy::Dynamic => "dynamic".to_string(),
+            DynamicFieldPolicy::Ignore => "ignore".to_string(),
+        }
+    }
+
     /// Return the list of field names defined in this schema.
     fn field_names(&self) -> Vec<String> {
         self.inner.borrow().fields.keys().cloned().collect()
@@ -528,6 +566,14 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     class.define_method(
         "set_default_fields",
         magnus::method!(RbSchema::set_default_fields, 1),
+    )?;
+    class.define_method(
+        "set_dynamic_field_policy",
+        magnus::method!(RbSchema::set_dynamic_field_policy, 1),
+    )?;
+    class.define_method(
+        "dynamic_field_policy",
+        magnus::method!(RbSchema::dynamic_field_policy, 0),
     )?;
     class.define_method("field_names", magnus::method!(RbSchema::field_names, 0))?;
     class.define_method("inspect", magnus::method!(RbSchema::inspect, 0))?;

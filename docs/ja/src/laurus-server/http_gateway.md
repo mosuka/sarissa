@@ -57,6 +57,7 @@ curl -X POST http://localhost:8080/v1/index \
   -H 'Content-Type: application/json' \
   -d '{
     "schema": {
+      "dynamic_field_policy": "dynamic",
       "fields": {
         "title": {"text": {"indexed": true, "stored": true, "term_vectors": true}},
         "body": {"text": {"indexed": true, "stored": true, "term_vectors": true}}
@@ -65,6 +66,8 @@ curl -X POST http://localhost:8080/v1/index \
     }
   }'
 ```
+
+`dynamic_field_policy` は省略可能なキーで、スキーマに宣言されていないフィールドの扱いを制御します。指定できる値は `"strict"` / `"dynamic"`（デフォルト）/ `"ignore"` の 3 種類です。詳細および `"dynamic"` での情報損失に関する警告は [スキーマとフィールド](../concepts/schema_and_fields.md#動的スキーマ) を参照してください。
 
 ### インデックス統計情報の取得
 

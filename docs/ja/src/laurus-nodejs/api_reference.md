@@ -67,7 +67,19 @@ class Schema {
 | `addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)` | IVF ベクトルフィールド。 |
 | `addEmbedder(name, config)` | 名前付き Embedder を登録。 |
 | `setDefaultFields(fields)` | デフォルト検索フィールドを設定。 |
+| `setDynamicFieldPolicy(policy)` | 未宣言フィールドの扱いを設定。`policy` は `"strict"` / `"dynamic"`（デフォルト）/ `"ignore"`。詳細は下記を参照。 |
+| `dynamicFieldPolicy()` | 現在のポリシーを小文字の文字列で返す。 |
 | `fieldNames()` | 全フィールド名を返す。 |
+
+#### Dynamic field policy（動的フィールドポリシー）
+
+ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを制御します:
+
+- `"strict"` — ドキュメントを拒否
+- `"dynamic"`（デフォルト）— 各未宣言フィールドの型を推論してスキーマに追加。**警告**: integer フィールドに入ってきた float 値は静かに切り捨てられます（`3.14` → `3`）。厳密さが必要なら `"strict"` を使用してください
+- `"ignore"` — 未宣言フィールドを静かに破棄
+
+詳細な挙動マトリクスは [スキーマとフィールド](../concepts/schema_and_fields.md#動的スキーマ) を参照してください。
 
 ### 距離指標
 

@@ -181,26 +181,37 @@
                         <h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
 <p>This page explains how Laurus is structured internally. Understanding the architecture will help you make better decisions about schema design, analyzer selection, and search strategies.</p>
 <h2 id="project-structure"><a class="header" href="#project-structure">Project Structure</a></h2>
-<p>Laurus is organized as a Cargo workspace with three crates:</p>
+<p>Laurus is organized as a Cargo workspace with five crates:</p>
 <pre><code class="language-mermaid">graph TB
     CLI["laurus-cli\n(Binary Crate)\nCLI + REPL"]
     SRV["laurus-server\n(Library + Binary)\ngRPC Server + HTTP Gateway"]
+    MCP["laurus-mcp\n(Library + Binary)\nMCP Server"]
+    PY["laurus-python\n(cdylib)\nPython Bindings"]
     LIB["laurus\n(Library Crate)\nCore Search Engine"]
 
     CLI --&gt; LIB
+    CLI --&gt; SRV
+    CLI --&gt; MCP
     SRV --&gt; LIB
+    MCP --&gt; SRV
+    MCP --&gt; LIB
+    PY --&gt; LIB
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Crate</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><strong>laurus</strong></td><td style="text-align: left">Library</td><td style="text-align: left">Core search engine -- lexical, vector, and hybrid search</td></tr>
 <tr><td style="text-align: left"><strong>laurus-cli</strong></td><td style="text-align: left">Binary</td><td style="text-align: left">Command-line interface for index management and search</td></tr>
 <tr><td style="text-align: left"><strong>laurus-server</strong></td><td style="text-align: left">Library + Binary</td><td style="text-align: left">gRPC server with optional HTTP/JSON gateway</td></tr>
+<tr><td style="text-align: left"><strong>laurus-mcp</strong></td><td style="text-align: left">Library + Binary</td><td style="text-align: left">MCP (Model Context Protocol) server</td></tr>
+<tr><td style="text-align: left"><strong>laurus-python</strong></td><td style="text-align: left">cdylib</td><td style="text-align: left">Python bindings via PyO3</td></tr>
 </tbody></table>
 </div>
 <p>For details on each crate, see:</p>
 <ul>
-<li><a href="laurus/overview.html">Library Overview</a></li>
-<li><a href="cli/overview.html">CLI Overview</a></li>
-<li><a href="server/overview.html">Server Overview</a></li>
+<li><a href="laurus.html">Library Overview</a></li>
+<li><a href="laurus-cli.html">CLI Overview</a></li>
+<li><a href="laurus-server.html">Server Overview</a></li>
+<li><a href="laurus-mcp.html">MCP Server Overview</a></li>
+<li><a href="laurus-python.html">Python Bindings Overview</a></li>
 </ul>
 <h2 id="high-level-overview"><a class="header" href="#high-level-overview">High-Level Overview</a></h2>
 <p>Laurus is organized around a single <code>Engine</code> that coordinates four internal components:</p>

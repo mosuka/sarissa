@@ -11,6 +11,18 @@ title:hello AND content:"cute kitten"^0.8
 
 The field type in the schema determines whether a clause is lexical or vector. If the field is a vector field (e.g., HNSW), the clause is treated as a vector query. Everything else is treated as a lexical query.
 
+### Field validation
+
+Every `field:value` clause is validated against the schema at parse time. A
+query that references a field **not declared** in the schema is rejected with
+an error rather than returning silently-empty results. This catches typos
+early (e.g. `titl:hello` instead of `title:hello`).
+
+If you want the engine to accept documents with previously-unknown fields,
+set the schema's [`dynamic_field_policy`](./schema_and_fields.md#dynamic-schema)
+so that the field gets added during ingestion. Once a field is part of the
+schema, queries referencing it succeed.
+
 ## Lexical Query Syntax
 
 Lexical queries search the inverted index using exact or approximate keyword matching.

@@ -1,8 +1,11 @@
 //! Node.js wrapper for the Laurus [`Schema`] type.
 
+use std::str::FromStr;
+
 use laurus::{
-    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, EmbedderDefinition, FieldOption,
-    FlatOption, FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption, Schema, TextOption,
+    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
+    EmbedderDefinition, FieldOption, FlatOption, FloatOption, GeoOption, HnswOption, IntegerOption,
+    IvfOption, Schema, TextOption,
 };
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -361,6 +364,42 @@ impl JsSchema {
     #[napi]
     pub fn set_default_fields(&mut self, fields: Vec<String>) {
         self.inner.default_fields = fields;
+    }
+
+    /// Set the policy for fields that are not declared in this schema.
+    ///
+    /// Behaviour:
+    /// - `"strict"`: reject documents containing undeclared fields.
+    /// - `"dynamic"` (default): infer a type for each undeclared field and
+    ///   add it to the schema during ingestion. **Warning**: integer fields
+    ///   silently truncate incoming float values (e.g. `3.14` → `3`).
+    /// - `"ignore"`: silently drop undeclared fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `policy` - One of `"strict"`, `"dynamic"`, `"ignore"`
+    ///   (case-insensitive).
+    ///
+    /// # Errors
+    ///
+    /// Throws a JavaScript `Error` if `policy` is not one of the accepted names.
+    #[napi]
+    pub fn set_dynamic_field_policy(&mut self, policy: String) -> Result<()> {
+        let parsed =
+            DynamicFieldPolicy::from_str(&policy).map_err(|e| Error::from_reason(e.to_string()))?;
+        self.inner.dynamic_field_policy = parsed;
+        Ok(())
+    }
+
+    /// Return the currently configured dynamic field policy as a lowercase
+    /// string (`"strict"` / `"dynamic"` / `"ignore"`).
+    #[napi]
+    pub fn dynamic_field_policy(&self) -> String {
+        match self.inner.dynamic_field_policy {
+            DynamicFieldPolicy::Strict => "strict".to_string(),
+            DynamicFieldPolicy::Dynamic => "dynamic".to_string(),
+            DynamicFieldPolicy::Ignore => "ignore".to_string(),
+        }
     }
 
     /// Return the list of field names defined in this schema.

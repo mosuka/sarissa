@@ -41,6 +41,7 @@ FieldOption uses serde's externally-tagged representation where the variant name
 
 ```json
 {
+  "dynamic_field_policy": "Dynamic",
   "fields": {
     "title":     { "Text":    { "indexed": true, "stored": true } },
     "body":      { "Text":    {} },
@@ -52,6 +53,14 @@ FieldOption uses serde's externally-tagged representation where the variant name
   }
 }
 ```
+
+The optional `dynamic_field_policy` key controls how fields that appear in
+ingested documents but are absent from the schema are handled. Accepted
+values: `"Strict"`, `"Dynamic"` (default), `"Ignore"`. **Warning**: under
+`"Dynamic"`, integer fields silently truncate incoming float values
+(`3.14` → `3`); use `"Strict"` to reject such mismatches. See
+[Schema & Fields](../concepts/schema_and_fields.md#dynamic-schema) for the
+full behaviour matrix.
 
 ### Example
 

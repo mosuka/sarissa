@@ -1,6 +1,8 @@
 pub mod query;
 pub mod schema;
 pub mod search;
+pub mod type_coercion;
+pub mod type_inference;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -219,6 +221,10 @@ impl Engine {
         doc.fields
             .insert("_id".to_string(), DataValue::Text(id.to_string()));
 
+        // 1b. Validate reserved field-name namespace, then apply the schema's
+        // DynamicFieldPolicy to add / coerce / drop user fields.
+        self.apply_dynamic_schema(&mut doc).await?;
+
         if !as_chunk {
             self.delete_documents(id).await?;
         }
@@ -259,6 +265,164 @@ impl Engine {
         self.vector.set_last_wal_seq(seq);
 
         Ok(doc_id)
+    }
+
+    /// Apply the schema's [`DynamicFieldPolicy`](schema::DynamicFieldPolicy)
+    /// to an incoming document's fields.
+    ///
+    /// For each user-supplied field:
+    ///
+    /// - **Reserved names**: any field name starting with `_` other than
+    ///   `_id` is rejected regardless of policy.
+    /// - **Declared fields**: the value is coerced to the declared type (see
+    ///   [`type_coercion::coerce_value`]).
+    /// - **Undeclared fields**: handled according to the policy:
+    ///   - `Strict`: ingest fails with an error.
+    ///   - `Dynamic`: the field type is inferred (see
+    ///     [`type_inference::infer_option_from_data_value`]) and the field
+    ///     is added to the schema.
+    ///   - `Ignore`: the field is silently dropped.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc` - The document to normalise in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::LaurusError::invalid_argument`] when:
+    ///
+    /// - A field name collides with the reserved namespace.
+    /// - Strict policy is set and an undeclared field is encountered.
+    /// - A declared field's value cannot be coerced to its type.
+    /// - Dynamic policy is set and an undeclared field has a value whose
+    ///   type cannot be inferred (e.g. raw vectors or bytes).
+    async fn apply_dynamic_schema(&self, doc: &mut Document) -> Result<()> {
+        // 1. Validate reserved field-name namespace for user-supplied keys.
+        //    `_id` was just injected by the engine and is always allowed.
+        for name in doc.fields.keys() {
+            if name == schema::RESERVED_ID_FIELD {
+                continue;
+            }
+            schema::validate_field_name(name)?;
+        }
+
+        // 2. Snapshot the current policy and declared-field set.
+        let (policy, declared): (
+            schema::DynamicFieldPolicy,
+            std::collections::HashSet<String>,
+        ) = {
+            let s = self.schema.read();
+            (s.dynamic_field_policy, s.fields.keys().cloned().collect())
+        };
+
+        // 3. Partition fields into declared vs undeclared.
+        let mut undeclared: Vec<(String, crate::data::DataValue)> = Vec::new();
+        let mut declared_updates: Vec<(String, crate::data::DataValue)> = Vec::new();
+        for (name, value) in doc.fields.drain() {
+            if name == schema::RESERVED_ID_FIELD || declared.contains(&name) {
+                declared_updates.push((name, value));
+            } else {
+                undeclared.push((name, value));
+            }
+        }
+
+        // 4. Handle undeclared fields per policy.
+        match policy {
+            schema::DynamicFieldPolicy::Strict => {
+                if !undeclared.is_empty() {
+                    let names: Vec<&str> = undeclared.iter().map(|(n, _)| n.as_str()).collect();
+                    return Err(crate::error::LaurusError::invalid_argument(format!(
+                        "undeclared fields {names:?} are not permitted \
+                         (DynamicFieldPolicy::Strict)"
+                    )));
+                }
+            }
+            schema::DynamicFieldPolicy::Ignore => {
+                // Silently drop undeclared fields.
+                for (name, _) in &undeclared {
+                    log::debug!(
+                        target: "laurus::engine::dynamic_schema",
+                        "dropping undeclared field '{name}' \
+                         (DynamicFieldPolicy::Ignore)",
+                    );
+                }
+                undeclared.clear();
+            }
+            schema::DynamicFieldPolicy::Dynamic => {
+                // Infer a FieldOption for each undeclared field and add it to
+                // the schema. Keep the original values on the document so they
+                // are indexed under the newly-added fields.
+                let mut kept: Vec<(String, crate::data::DataValue)> = Vec::new();
+                for (name, value) in undeclared.drain(..) {
+                    match type_inference::infer_option_from_data_value(&value)? {
+                        Some(option) => {
+                            match self.add_field(&name, option).await {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    // Another concurrent ingest may have added
+                                    // this field in the meantime. Accept it
+                                    // silently; any other failure propagates.
+                                    let msg = e.to_string();
+                                    if !msg.contains("already exists") {
+                                        return Err(e);
+                                    }
+                                }
+                            }
+                            kept.push((name, value));
+                        }
+                        None => {
+                            // Null value — skip this field entirely.
+                        }
+                    }
+                }
+                undeclared = kept;
+            }
+        }
+
+        // 5. Coerce declared-field values to their declared types.
+        let coerced_declared: Vec<(String, crate::data::DataValue)> = {
+            let s = self.schema.read();
+            let mut out = Vec::with_capacity(declared_updates.len());
+            for (name, value) in declared_updates {
+                if name == schema::RESERVED_ID_FIELD {
+                    out.push((name, value));
+                    continue;
+                }
+                // The field is declared (we partitioned above) so this lookup
+                // is infallible in practice, but guard just in case.
+                match s.fields.get(&name) {
+                    Some(option) => {
+                        let coerced = match type_coercion::coerce_value(&name, option, value) {
+                            Ok(v) => v,
+                            Err(e) => match policy {
+                                schema::DynamicFieldPolicy::Ignore => {
+                                    log::debug!(
+                                        target: "laurus::engine::dynamic_schema",
+                                        "dropping declared field '{name}' due to coercion \
+                                         failure ({e}) (DynamicFieldPolicy::Ignore)",
+                                    );
+                                    continue;
+                                }
+                                _ => return Err(e),
+                            },
+                        };
+                        out.push((name, coerced));
+                    }
+                    None => out.push((name, value)),
+                }
+            }
+            out
+        };
+
+        // 6. Re-populate the document with processed fields.
+        for (name, value) in coerced_declared {
+            doc.fields.insert(name, value);
+        }
+        for (name, value) in undeclared {
+            doc.fields.insert(name, value);
+        }
+
+        Ok(())
     }
 
     /// Delete all documents (including chunks) by external ID.
@@ -389,16 +553,20 @@ impl Engine {
         let vector_field_set: std::collections::HashSet<String> =
             vector_fields.iter().cloned().collect();
 
+        // All declared field names (lexical + vector), used by the parser to
+        // reject typo'd field references at parse time.
+        let known_fields: std::collections::HashSet<String> =
+            schema.fields.keys().cloned().collect();
+
         let mut vector_parser = crate::vector::query::parser::VectorQueryParser::new(embedder);
         if !vector_fields.is_empty() {
             vector_parser = vector_parser.with_default_fields(vector_fields);
         }
 
-        Ok(self::query::UnifiedQueryParser::new(
-            lexical_parser,
-            vector_parser,
-            vector_field_set,
-        ))
+        Ok(
+            self::query::UnifiedQueryParser::new(lexical_parser, vector_parser, vector_field_set)
+                .with_known_fields(known_fields),
+        )
     }
 
     /// Dynamically add a new field to the engine at runtime.
@@ -429,6 +597,9 @@ impl Engine {
     /// - The field references an unknown analyzer or embedder.
     /// - The underlying store rejects the field.
     pub async fn add_field(&self, name: &str, option: schema::FieldOption) -> Result<Schema> {
+        // 1a. Reject reserved field names (e.g. `_`-prefixed except `_id`).
+        schema::validate_field_name(name)?;
+
         // 1. Check for duplicates.
         {
             let schema = self.schema.read();

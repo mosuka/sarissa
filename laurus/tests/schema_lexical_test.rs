@@ -1,4 +1,5 @@
 use laurus::Document;
+use laurus::DynamicFieldPolicy;
 use laurus::Engine;
 use laurus::Result;
 use laurus::SearchRequestBuilder;
@@ -14,8 +15,13 @@ async fn test_schema_lexical_guardrails() -> Result<()> {
     let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
     let storage = StorageFactory::create(storage_config)?;
 
-    // 2. Configure Engine with specific schema
+    // 2. Configure Engine with specific schema.
+    //    The test predates the dynamic-schema feature and asserts that a
+    //    field absent from the schema is neither stored nor indexed, so we
+    //    pin the policy to `Ignore` to preserve those semantics. The default
+    //    is now `Dynamic`, which would instead auto-add `unknown_field`.
     let config = Schema::builder()
+        .dynamic_field_policy(DynamicFieldPolicy::Ignore)
         .add_field(
             "indexed_and_stored",
             FieldOption::Text(TextOption {

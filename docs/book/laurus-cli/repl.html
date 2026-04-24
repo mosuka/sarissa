@@ -181,26 +181,46 @@
                         <h1 id="repl-interactive-mode"><a class="header" href="#repl-interactive-mode">REPL (Interactive Mode)</a></h1>
 <p>The REPL provides an interactive session for exploring your index without typing the full <code>laurus</code> command each time.</p>
 <h2 id="starting-the-repl"><a class="header" href="#starting-the-repl">Starting the REPL</a></h2>
-<pre><code class="language-bash">laurus --data-dir ./my_index repl
+<pre><code class="language-bash">laurus --index-dir ./my_index repl
 </code></pre>
+<p>If an index already exists at the specified directory, it is opened automatically:</p>
 <pre><code class="language-text">Laurus REPL (type 'help' for commands, 'quit' to exit)
 laurus&gt;
 </code></pre>
-<p>The REPL opens the index at startup and keeps it loaded throughout the session.</p>
+<p>If no index exists yet, the REPL starts without a loaded index and guides you to create one:</p>
+<pre><code class="language-text">Laurus REPL — no index found at ./my_index.
+Use 'create index &lt;schema_path&gt;' to create one, or 'help' for commands.
+laurus&gt;
+</code></pre>
 <h2 id="available-commands"><a class="header" href="#available-commands">Available Commands</a></h2>
+<p>Commands follow the same <code>&lt;operation&gt; &lt;resource&gt;</code> ordering as the CLI.</p>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Command</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>search &lt;query&gt;</code></td><td style="text-align: left">Search the index (returns up to 10 results)</td></tr>
-<tr><td style="text-align: left"><code>doc add &lt;id&gt; &lt;json&gt;</code></td><td style="text-align: left">Add a document</td></tr>
-<tr><td style="text-align: left"><code>doc get &lt;id&gt;</code></td><td style="text-align: left">Get a document by ID</td></tr>
-<tr><td style="text-align: left"><code>doc delete &lt;id&gt;</code></td><td style="text-align: left">Delete a document by ID</td></tr>
+<tr><td style="text-align: left"><code>create index [schema_path]</code></td><td style="text-align: left">Create a new index (interactive wizard if no path given)</td></tr>
+<tr><td style="text-align: left"><code>create schema &lt;output_path&gt;</code></td><td style="text-align: left">Interactive schema generation wizard</td></tr>
+<tr><td style="text-align: left"><code>search &lt;query&gt;</code></td><td style="text-align: left">Search the index</td></tr>
+<tr><td style="text-align: left"><code>add field &lt;name&gt; &lt;json&gt;</code></td><td style="text-align: left">Add a field to the schema</td></tr>
+<tr><td style="text-align: left"><code>add doc &lt;id&gt; &lt;json&gt;</code></td><td style="text-align: left">Add a document (append, allows multiple chunks per ID)</td></tr>
+<tr><td style="text-align: left"><code>put doc &lt;id&gt; &lt;json&gt;</code></td><td style="text-align: left">Put (upsert) a document (replaces existing with same ID)</td></tr>
+<tr><td style="text-align: left"><code>get stats</code></td><td style="text-align: left">Show index statistics</td></tr>
+<tr><td style="text-align: left"><code>get schema</code></td><td style="text-align: left">Show the current schema</td></tr>
+<tr><td style="text-align: left"><code>get docs &lt;id&gt;</code></td><td style="text-align: left">Get all documents (including chunks) by ID</td></tr>
+<tr><td style="text-align: left"><code>delete field &lt;name&gt;</code></td><td style="text-align: left">Remove a field from the schema</td></tr>
+<tr><td style="text-align: left"><code>delete docs &lt;id&gt;</code></td><td style="text-align: left">Delete all documents (including chunks) by ID</td></tr>
 <tr><td style="text-align: left"><code>commit</code></td><td style="text-align: left">Commit pending changes</td></tr>
-<tr><td style="text-align: left"><code>stats</code></td><td style="text-align: left">Show index statistics</td></tr>
 <tr><td style="text-align: left"><code>help</code></td><td style="text-align: left">Show available commands</td></tr>
 <tr><td style="text-align: left"><code>quit</code> / <code>exit</code></td><td style="text-align: left">Exit the REPL</td></tr>
 </tbody></table>
 </div>
-<p>The search command always returns up to 10 results. The limit is not currently configurable in the REPL.</p>
+<blockquote>
+<p><strong>Note:</strong> Commands other than <code>create</code>, <code>help</code>, and <code>quit</code> require a loaded index. If no index is loaded, the REPL displays a message asking you to run <code>create index</code> first.</p>
+</blockquote>
 <h2 id="usage-examples"><a class="header" href="#usage-examples">Usage Examples</a></h2>
+<h3 id="creating-an-index"><a class="header" href="#creating-an-index">Creating an Index</a></h3>
+<pre><code class="language-text">laurus&gt; create index ./schema.toml
+Index created at ./my_index.
+laurus&gt; add doc doc1 {"title":"Hello","body":"World"}
+Document 'doc1' added.
+</code></pre>
 <h3 id="searching"><a class="header" href="#searching">Searching</a></h3>
 <pre><code class="language-text">laurus&gt; search body:rust
 ╭──────┬────────┬────────────────────────────────────╮
@@ -209,14 +229,29 @@ laurus&gt;
 │ doc1 │ 0.8532 │ body: Rust is a systems..., title… │
 ╰──────┴────────┴────────────────────────────────────╯
 </code></pre>
+<h3 id="managing-fields"><a class="header" href="#managing-fields">Managing Fields</a></h3>
+<pre><code class="language-text">laurus&gt; add field category {"Text": {"indexed": true, "stored": true}}
+Field 'category' added.
+laurus&gt; delete field category
+Field 'category' deleted.
+</code></pre>
 <h3 id="adding-and-committing-documents"><a class="header" href="#adding-and-committing-documents">Adding and Committing Documents</a></h3>
-<pre><code class="language-text">laurus&gt; doc add doc4 {"title":"New Document","body":"Some content here."}
+<pre><code class="language-text">laurus&gt; add doc doc4 {"title":"New Document","body":"Some content here."}
 Document 'doc4' added.
 laurus&gt; commit
 Changes committed.
 </code></pre>
-<h3 id="retrieving-documents"><a class="header" href="#retrieving-documents">Retrieving Documents</a></h3>
-<pre><code class="language-text">laurus&gt; doc get doc4
+<h3 id="retrieving-information"><a class="header" href="#retrieving-information">Retrieving Information</a></h3>
+<pre><code class="language-text">laurus&gt; get stats
+Document count: 3
+
+laurus&gt; get schema
+{
+  "fields": { ... },
+  "default_fields": ["title", "body"]
+}
+
+laurus&gt; get docs doc4
 ╭──────┬───────────────────────────────────────────────╮
 │ ID   │ Fields                                        │
 ├──────┼───────────────────────────────────────────────┤
@@ -224,14 +259,10 @@ Changes committed.
 ╰──────┴───────────────────────────────────────────────╯
 </code></pre>
 <h3 id="deleting-documents"><a class="header" href="#deleting-documents">Deleting Documents</a></h3>
-<pre><code class="language-text">laurus&gt; doc delete doc4
-Document 'doc4' deleted.
+<pre><code class="language-text">laurus&gt; delete docs doc4
+Documents 'doc4' deleted.
 laurus&gt; commit
 Changes committed.
-</code></pre>
-<h3 id="viewing-statistics"><a class="header" href="#viewing-statistics">Viewing Statistics</a></h3>
-<pre><code class="language-text">laurus&gt; stats
-Document count: 3
 </code></pre>
 <h2 id="features"><a class="header" href="#features">Features</a></h2>
 <ul>

@@ -67,7 +67,19 @@ Laurus::Schema.new
 | :--- | :--- |
 | `add_embedder(name, config)` | 名前付きエンベダー定義を登録します。`config` は `"type"` キーを持つ Hash です（下記参照）。 |
 | `set_default_fields(fields)` | クエリでフィールドが指定されていない場合に使用するデフォルトフィールドを設定します。`fields` は文字列の配列です。 |
+| `set_dynamic_field_policy(policy)` | 未宣言フィールドの扱いを設定します。`policy` は `"strict"` / `"dynamic"`（デフォルト）/ `"ignore"`。詳細は下記を参照。 |
+| `dynamic_field_policy -> String` | 現在のポリシーを小文字の文字列で返します。 |
 | `field_names -> Array<String>` | このスキーマに定義されたフィールド名のリストを返します。 |
+
+#### Dynamic field policy（動的フィールドポリシー）
+
+ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを制御します:
+
+- `"strict"` — ドキュメントを拒否
+- `"dynamic"`（デフォルト）— 各未宣言フィールドの型を推論してスキーマに追加。**警告**: integer フィールドに入ってきた float 値は静かに切り捨てられます（`3.14` → `3`）。厳密さが必要なら `"strict"` を使用してください
+- `"ignore"` — 未宣言フィールドを静かに破棄
+
+詳細な挙動マトリクスは [スキーマとフィールド](../concepts/schema_and_fields.md#動的スキーマ) を参照してください。
 
 ### エンベダータイプ
 

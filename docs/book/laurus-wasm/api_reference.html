@@ -1,0 +1,432 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>API Reference - Laurus Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Laurus Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/mosuka/laurus" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="api-reference"><a class="header" href="#api-reference">API Reference</a></h1>
+<h2 id="index"><a class="header" href="#index">Index</a></h2>
+<p>The main entry point for creating and querying search indexes.</p>
+<h3 id="static-methods"><a class="header" href="#static-methods">Static Methods</a></h3>
+<h4 id="indexcreateschema"><a class="header" href="#indexcreateschema"><code>Index.create(schema?)</code></a></h4>
+<p>Create a new in-memory (ephemeral) index.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>schema</code> (Schema, optional) -- Schema definition.</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;Index&gt;</code></li>
+</ul>
+<h4 id="indexopenname-schema"><a class="header" href="#indexopenname-schema"><code>Index.open(name, schema?)</code></a></h4>
+<p>Open or create a persistent index backed by OPFS.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>name</code> (string) -- Index name (OPFS subdirectory).</li>
+<li><code>schema</code> (Schema, optional) -- Schema definition.</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;Index&gt;</code></li>
+</ul>
+<h3 id="instance-methods"><a class="header" href="#instance-methods">Instance Methods</a></h3>
+<h4 id="putdocumentid-document"><a class="header" href="#putdocumentid-document"><code>putDocument(id, document)</code></a></h4>
+<p>Replace a document (upsert).</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>id</code> (string) -- Document identifier.</li>
+<li><code>document</code> (object) -- Key-value pairs matching schema fields.</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;void&gt;</code></li>
+</ul>
+<h4 id="adddocumentid-document"><a class="header" href="#adddocumentid-document"><code>addDocument(id, document)</code></a></h4>
+<p>Append a document version (multi-version RAG pattern).</p>
+<ul>
+<li><strong>Parameters / Returns:</strong> Same as <code>putDocument</code>.</li>
+</ul>
+<h4 id="getdocumentsid"><a class="header" href="#getdocumentsid"><code>getDocuments(id)</code></a></h4>
+<p>Retrieve all versions of a document.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>id</code> (string)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;object[]&gt;</code></li>
+</ul>
+<h4 id="deletedocumentsid"><a class="header" href="#deletedocumentsid"><code>deleteDocuments(id)</code></a></h4>
+<p>Delete all versions of a document.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>id</code> (string)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;void&gt;</code></li>
+</ul>
+<h4 id="commit"><a class="header" href="#commit"><code>commit()</code></a></h4>
+<p>Flush writes and make changes searchable. If opened with
+<code>Index.open()</code>, data is also persisted to OPFS.</p>
+<ul>
+<li><strong>Returns:</strong> <code>Promise&lt;void&gt;</code></li>
+</ul>
+<h4 id="searchquery-limit-offset"><a class="header" href="#searchquery-limit-offset"><code>search(query, limit?, offset?)</code></a></h4>
+<p>Search using a DSL string query.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>query</code> (string) -- Query DSL (e.g. <code>"title:hello"</code>).</li>
+<li><code>limit</code> (number, default 10)</li>
+<li><code>offset</code> (number, default 0)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
+<h4 id="searchtermfield-term-limit-offset"><a class="header" href="#searchtermfield-term-limit-offset"><code>searchTerm(field, term, limit?, offset?)</code></a></h4>
+<p>Search for an exact term.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>field</code> (string) -- Field name.</li>
+<li><code>term</code> (string) -- Exact term.</li>
+<li><code>limit</code>, <code>offset</code> (number, optional)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
+<h4 id="searchvectorfield-vector-limit-offset"><a class="header" href="#searchvectorfield-vector-limit-offset"><code>searchVector(field, vector, limit?, offset?)</code></a></h4>
+<p>Search by vector similarity.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>field</code> (string) -- Vector field name.</li>
+<li><code>vector</code> (number[]) -- Query embedding.</li>
+<li><code>limit</code>, <code>offset</code> (number, optional)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
+<h4 id="searchvectortextfield-text-limit-offset"><a class="header" href="#searchvectortextfield-text-limit-offset"><code>searchVectorText(field, text, limit?, offset?)</code></a></h4>
+<p>Search by text (embedded by the registered embedder).</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>field</code> (string) -- Vector field name.</li>
+<li><code>text</code> (string) -- Text to embed.</li>
+<li><code>limit</code>, <code>offset</code> (number, optional)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
+<h4 id="stats"><a class="header" href="#stats"><code>stats()</code></a></h4>
+<p>Return index statistics.</p>
+<ul>
+<li><strong>Returns:</strong> <code>{ documentCount: number, vectorFields: { [name]: { count, dimension } } }</code></li>
+</ul>
+<h2 id="schema"><a class="header" href="#schema">Schema</a></h2>
+<p>Builder for defining index fields and embedders.</p>
+<h3 id="constructor"><a class="header" href="#constructor">Constructor</a></h3>
+<h4 id="new-schema"><a class="header" href="#new-schema"><code>new Schema()</code></a></h4>
+<p>Create an empty schema.</p>
+<h3 id="methods"><a class="header" href="#methods">Methods</a></h3>
+<h4 id="addtextfieldname-stored-indexed-termvectors-analyzer"><a class="header" href="#addtextfieldname-stored-indexed-termvectors-analyzer"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></a></h4>
+<p>Add a full-text field.</p>
+<h4 id="addintegerfieldname-stored-indexed"><a class="header" href="#addintegerfieldname-stored-indexed"><code>addIntegerField(name, stored?, indexed?)</code></a></h4>
+<p>Add an integer field.</p>
+<h4 id="addfloatfieldname-stored-indexed"><a class="header" href="#addfloatfieldname-stored-indexed"><code>addFloatField(name, stored?, indexed?)</code></a></h4>
+<p>Add a float field.</p>
+<h4 id="addbooleanfieldname-stored-indexed"><a class="header" href="#addbooleanfieldname-stored-indexed"><code>addBooleanField(name, stored?, indexed?)</code></a></h4>
+<p>Add a boolean field.</p>
+<h4 id="adddatetimefieldname-stored-indexed"><a class="header" href="#adddatetimefieldname-stored-indexed"><code>addDateTimeField(name, stored?, indexed?)</code></a></h4>
+<p>Add a date/time field.</p>
+<h4 id="addgeofieldname-stored-indexed"><a class="header" href="#addgeofieldname-stored-indexed"><code>addGeoField(name, stored?, indexed?)</code></a></h4>
+<p>Add a geographic coordinate field.</p>
+<h4 id="addbytesfieldname-stored"><a class="header" href="#addbytesfieldname-stored"><code>addBytesField(name, stored?)</code></a></h4>
+<p>Add a binary data field.</p>
+<h4 id="addhnswfieldname-dimension-distance-m-efconstruction-embedder"><a class="header" href="#addhnswfieldname-dimension-distance-m-efconstruction-embedder"><code>addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)</code></a></h4>
+<p>Add an HNSW vector index field.</p>
+<ul>
+<li><code>distance</code>: <code>"cosine"</code> (default), <code>"euclidean"</code>, <code>"dot_product"</code>,
+<code>"manhattan"</code>, <code>"angular"</code></li>
+<li><code>m</code>: Branching factor (default 16)</li>
+<li><code>efConstruction</code>: Build-time expansion (default 200)</li>
+</ul>
+<h4 id="addflatfieldname-dimension-distance-embedder"><a class="header" href="#addflatfieldname-dimension-distance-embedder"><code>addFlatField(name, dimension, distance?, embedder?)</code></a></h4>
+<p>Add a brute-force vector index field.</p>
+<h4 id="addivffieldname-dimension-distance-nclusters-nprobe-embedder"><a class="header" href="#addivffieldname-dimension-distance-nclusters-nprobe-embedder"><code>addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)</code></a></h4>
+<p>Add an IVF vector index field.</p>
+<h4 id="addembeddername-config"><a class="header" href="#addembeddername-config"><code>addEmbedder(name, config)</code></a></h4>
+<p>Register a named embedder. In WASM, only <code>"precomputed"</code> type is supported.</p>
+<pre><code class="language-javascript">schema.addEmbedder("my-embedder", { type: "precomputed" });
+</code></pre>
+<h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
+<p>Set the default search fields.</p>
+<h4 id="setdynamicfieldpolicypolicy"><a class="header" href="#setdynamicfieldpolicypolicy"><code>setDynamicFieldPolicy(policy)</code></a></h4>
+<p>Set how the engine treats fields that appear in ingested documents but are
+absent from the schema. <code>policy</code> is one of <code>"strict"</code>, <code>"dynamic"</code>
+(default), or <code>"ignore"</code> (case-insensitive). Throws on an invalid value.</p>
+<ul>
+<li><code>"strict"</code> — Reject the document.</li>
+<li><code>"dynamic"</code> — Infer a type for each undeclared field and add it to the
+schema. <strong>Warning</strong>: integer fields silently truncate incoming float
+values (<code>3.14</code> → <code>3</code>).</li>
+<li><code>"ignore"</code> — Silently drop the undeclared fields.</li>
+</ul>
+<p>See <a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for
+the full behaviour matrix.</p>
+<h4 id="dynamicfieldpolicy"><a class="header" href="#dynamicfieldpolicy"><code>dynamicFieldPolicy()</code></a></h4>
+<p>Returns the current policy as a lowercase string.</p>
+<h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
+<p>Returns an array of defined field names.</p>
+<h2 id="searchresult"><a class="header" href="#searchresult">SearchResult</a></h2>
+<pre><code class="language-typescript">interface SearchResult {
+  id: string;
+  score: number;
+  document: object | null;
+}
+</code></pre>
+<h2 id="analysis"><a class="header" href="#analysis">Analysis</a></h2>
+<h3 id="whitespacetokenizer"><a class="header" href="#whitespacetokenizer">WhitespaceTokenizer</a></h3>
+<pre><code class="language-javascript">const tokenizer = new WhitespaceTokenizer();
+const tokens = tokenizer.tokenize("hello world");
+// [{ text: "hello", position: 0, ... }, { text: "world", position: 1, ... }]
+</code></pre>
+<h3 id="synonymdictionary"><a class="header" href="#synonymdictionary">SynonymDictionary</a></h3>
+<pre><code class="language-javascript">const dict = new SynonymDictionary();
+dict.addSynonymGroup(["ml", "machine learning"]);
+</code></pre>
+<h3 id="synonymgraphfilter"><a class="header" href="#synonymgraphfilter">SynonymGraphFilter</a></h3>
+<pre><code class="language-javascript">const filter = new SynonymGraphFilter(dict, true, 0.8);
+const expanded = filter.apply(tokens);
+</code></pre>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../laurus-wasm/quickstart.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../laurus-wasm/development.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../laurus-wasm/quickstart.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../laurus-wasm/development.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

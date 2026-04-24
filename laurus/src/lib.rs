@@ -89,7 +89,7 @@ pub use engine::schema::analyzer::{
     AnalyzerDefinition, CharFilterConfig, TokenFilterConfig, TokenizerConfig,
 };
 pub use engine::schema::embedder::EmbedderDefinition;
-pub use engine::schema::{FieldOption, Schema};
+pub use engine::schema::{DynamicFieldPolicy, FieldOption, Schema};
 pub use engine::search::{
     FusionAlgorithm, HybridMode, LexicalSearchOptions, SearchQuery, SearchRequest,
     SearchRequestBuilder, SearchResult, VectorSearchOptions, VectorSearchQuery,

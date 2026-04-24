@@ -174,6 +174,7 @@ pub fn build_schema_interactive() -> Result<Schema> {
         embedders: std::collections::HashMap::new(),
         fields,
         default_fields,
+        dynamic_field_policy: Default::default(),
     })
 }
 
