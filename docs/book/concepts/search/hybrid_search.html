@@ -214,22 +214,29 @@
 <h3 id="builder-api"><a class="header" href="#builder-api">Builder API</a></h3>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::{SearchRequestBuilder, LexicalSearchRequest, FusionAlgorithm};
+</span>use laurus::{SearchRequestBuilder, FusionAlgorithm};
 use laurus::lexical::TermQuery;
-use laurus::vector::VectorSearchRequestBuilder;
+use laurus::lexical::search::searcher::LexicalSearchQuery;
+use laurus::vector::search::searcher::VectorSearchQuery;
+use laurus::vector::store::request::QueryPayload;
+use laurus::data::DataValue;
 
 let request = SearchRequestBuilder::new()
     // Lexical component
-    .lexical_search_request(
-        LexicalSearchRequest::new(
+    .lexical_query(
+        LexicalSearchQuery::Obj(
             Box::new(TermQuery::new("body", "rust"))
         )
     )
     // Vector component
-    .vector_search_request(
-        VectorSearchRequestBuilder::new()
-            .add_text("text_vec", "systems programming")
-            .build()
+    .vector_query(
+        VectorSearchQuery::Payloads(vec![
+            QueryPayload {
+                field: "text_vec".to_string(),
+                payload: DataValue::Text("systems programming".to_string()),
+                weight: 1.0,
+            },
+        ])
     )
     // Fusion algorithm
     .fusion_algorithm(FusionAlgorithm::RRF { k: 60.0 })
@@ -252,10 +259,10 @@ let unified = UnifiedQueryParser::new(
 );
 
 // Lexical + vector in one query
-let request = unified.parse(r#"body:rust text_vec:~"systems programming""#).await?;
+let request = unified.parse(r#"body:rust text_vec:"systems programming""#).await?;
 let results = engine.search(request).await?;
 <span class="boring">}</span></code></pre></pre>
-<p>The <code>~"..."</code> syntax identifies vector clauses. Everything else is parsed as lexical.</p>
+<p>The parser uses the schema to identify vector clauses by field type. Fields defined as vector fields (e.g., HNSW) are parsed as vector queries; everything else is parsed as lexical.</p>
 <h2 id="fusion-algorithms"><a class="header" href="#fusion-algorithms">Fusion Algorithms</a></h2>
 <p>When both lexical and vector results exist, they must be merged into a single ranked list. Laurus supports two fusion algorithms:</p>
 <h3 id="rrf-reciprocal-rank-fusion"><a class="header" href="#rrf-reciprocal-rank-fusion">RRF (Reciprocal Rank Fusion)</a></h3>
@@ -293,14 +300,15 @@ let fusion = FusionAlgorithm::WeightedSum {
 <li>When you want explicit control over the balance between lexical and vector relevance</li>
 <li>When you know one signal is more important than the other</li>
 </ul>
-<h2 id="searchrequest-options"><a class="header" href="#searchrequest-options">SearchRequest Options</a></h2>
-<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>lexical_search_request</code></td><td style="text-align: left">None</td><td style="text-align: left">Lexical query component</td></tr>
-<tr><td style="text-align: left"><code>vector_search_request</code></td><td style="text-align: left">None</td><td style="text-align: left">Vector query component</td></tr>
-<tr><td style="text-align: left"><code>filter_query</code></td><td style="text-align: left">None</td><td style="text-align: left">Pre-filter using a lexical query (restricts both lexical and vector results)</td></tr>
-<tr><td style="text-align: left"><code>fusion_algorithm</code></td><td style="text-align: left"><code>None</code> (uses <code>RRF { k: 60.0 }</code> when both results exist)</td><td style="text-align: left">How to merge lexical and vector results</td></tr>
-<tr><td style="text-align: left"><code>limit</code></td><td style="text-align: left">10</td><td style="text-align: left">Maximum number of results to return</td></tr>
-<tr><td style="text-align: left"><code>offset</code></td><td style="text-align: left">0</td><td style="text-align: left">Number of results to skip (for pagination)</td></tr>
+<h2 id="searchrequest-fields"><a class="header" href="#searchrequest-fields">SearchRequest Fields</a></h2>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>query</code></td><td style="text-align: left"><code>SearchQuery</code></td><td style="text-align: left"><code>Dsl("")</code></td><td style="text-align: left">Search query (Dsl, Lexical, Vector, or Hybrid)</td></tr>
+<tr><td style="text-align: left"><code>limit</code></td><td style="text-align: left"><code>usize</code></td><td style="text-align: left">10</td><td style="text-align: left">Maximum number of results to return</td></tr>
+<tr><td style="text-align: left"><code>offset</code></td><td style="text-align: left"><code>usize</code></td><td style="text-align: left">0</td><td style="text-align: left">Number of results to skip (for pagination)</td></tr>
+<tr><td style="text-align: left"><code>fusion_algorithm</code></td><td style="text-align: left"><code>Option&lt;FusionAlgorithm&gt;</code></td><td style="text-align: left"><code>None</code> (uses <code>RRF { k: 60.0 }</code> when both results exist)</td><td style="text-align: left">How to merge lexical and vector results</td></tr>
+<tr><td style="text-align: left"><code>filter_query</code></td><td style="text-align: left"><code>Option&lt;Box&lt;dyn Query&gt;&gt;</code></td><td style="text-align: left">None</td><td style="text-align: left">Pre-filter using a lexical query (restricts both lexical and vector results)</td></tr>
+<tr><td style="text-align: left"><code>lexical_options</code></td><td style="text-align: left"><code>LexicalSearchOptions</code></td><td style="text-align: left">Default</td><td style="text-align: left">Parameters controlling lexical search behavior (field boosts, min score, timeout, etc.)</td></tr>
+<tr><td style="text-align: left"><code>vector_options</code></td><td style="text-align: left"><code>VectorSearchOptions</code></td><td style="text-align: left">Default</td><td style="text-align: left">Parameters controlling vector search behavior (score mode, min score)</td></tr>
 </tbody></table>
 </div>
 <h2 id="searchresult"><a class="header" href="#searchresult">SearchResult</a></h2>
@@ -316,13 +324,17 @@ let fusion = FusionAlgorithm::WeightedSum {
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>let request = SearchRequestBuilder::new()
-    .lexical_search_request(
-        LexicalSearchRequest::new(Box::new(TermQuery::new("body", "rust")))
+    .lexical_query(
+        LexicalSearchQuery::Obj(Box::new(TermQuery::new("body", "rust")))
     )
-    .vector_search_request(
-        VectorSearchRequestBuilder::new()
-            .add_text("text_vec", "systems programming")
-            .build()
+    .vector_query(
+        VectorSearchQuery::Payloads(vec![
+            QueryPayload {
+                field: "text_vec".to_string(),
+                payload: DataValue::Text("systems programming".to_string()),
+                weight: 1.0,
+            },
+        ])
     )
     // Only search within "tutorial" category
     .filter_query(Box::new(TermQuery::new("category", "tutorial")))
@@ -342,16 +354,16 @@ let fusion = FusionAlgorithm::WeightedSum {
 </span><span class="boring">fn main() {
 </span>// Page 1: results 0-9
 let page1 = SearchRequestBuilder::new()
-    .lexical_search_request(/* ... */)
-    .vector_search_request(/* ... */)
+    .lexical_query(/* ... */)
+    .vector_query(/* ... */)
     .offset(0)
     .limit(10)
     .build();
 
 // Page 2: results 10-19
 let page2 = SearchRequestBuilder::new()
-    .lexical_search_request(/* ... */)
-    .vector_search_request(/* ... */)
+    .lexical_query(/* ... */)
+    .vector_query(/* ... */)
     .offset(10)
     .limit(10)
     .build();
@@ -360,11 +372,15 @@ let page2 = SearchRequestBuilder::new()
 <pre><pre class="playground"><code class="language-rust">use std::sync::Arc;
 use laurus::{
     Document, Engine, Schema, SearchRequestBuilder,
-    LexicalSearchRequest, FusionAlgorithm, PerFieldEmbedder,
+    FusionAlgorithm, PerFieldEmbedder,
 };
 use laurus::lexical::{TextOption, TermQuery};
 use laurus::lexical::core::field::IntegerOption;
-use laurus::vector::{HnswOption, VectorSearchRequestBuilder};
+use laurus::lexical::search::searcher::LexicalSearchQuery;
+use laurus::vector::HnswOption;
+use laurus::vector::search::searcher::VectorSearchQuery;
+use laurus::vector::store::request::QueryPayload;
+use laurus::data::DataValue;
 use laurus::storage::memory::MemoryStorage;
 
 #[tokio::main]
@@ -406,13 +422,17 @@ async fn main() -&gt; laurus::Result&lt;()&gt; {
     // Hybrid search: keyword "rust" + semantic "systems language"
     let results = engine.search(
         SearchRequestBuilder::new()
-            .lexical_search_request(
-                LexicalSearchRequest::new(Box::new(TermQuery::new("body", "rust")))
+            .lexical_query(
+                LexicalSearchQuery::Obj(Box::new(TermQuery::new("body", "rust")))
             )
-            .vector_search_request(
-                VectorSearchRequestBuilder::new()
-                    .add_text("body_vec", "systems language")
-                    .build()
+            .vector_query(
+                VectorSearchQuery::Payloads(vec![
+                    QueryPayload {
+                        field: "body_vec".to_string(),
+                        payload: DataValue::Text("systems language".to_string()),
+                        weight: 1.0,
+                    },
+                ])
             )
             .fusion_algorithm(FusionAlgorithm::RRF { k: 60.0 })
             .limit(10)

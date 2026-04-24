@@ -55,6 +55,7 @@ curl -X POST http://localhost:8080/v1/index \
   -H 'Content-Type: application/json' \
   -d '{
     "schema": {
+      "dynamic_field_policy": "dynamic",
       "fields": {
         "title": {"text": {"indexed": true, "stored": true, "term_vectors": true}},
         "body": {"text": {"indexed": true, "stored": true, "term_vectors": true}}
@@ -63,6 +64,12 @@ curl -X POST http://localhost:8080/v1/index \
     }
   }'
 ```
+
+The `dynamic_field_policy` key is optional. It controls how fields absent
+from the schema are handled at ingest time. Accepted values: `"strict"`,
+`"dynamic"` (default), `"ignore"`. See
+[Schema & Fields](../concepts/schema_and_fields.md#dynamic-schema) for the
+full semantics and the warning about silent truncation under `"dynamic"`.
 
 ### Get Index Statistics
 

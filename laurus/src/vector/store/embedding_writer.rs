@@ -47,13 +47,14 @@ impl EmbeddingVectorIndexWriter {
                     self.embedder.name()
                 )));
             }
-            DataValue::Bytes(_, mime) if !self.embedder.supports_image() => {
-                if mime.as_ref().is_some_and(|m| m.starts_with("image/")) {
-                    return Err(LaurusError::invalid_argument(format!(
-                        "Embedder '{}' does not support image input",
-                        self.embedder.name()
-                    )));
-                }
+            DataValue::Bytes(_, mime)
+                if !self.embedder.supports_image()
+                    && mime.as_ref().is_some_and(|m| m.starts_with("image/")) =>
+            {
+                return Err(LaurusError::invalid_argument(format!(
+                    "Embedder '{}' does not support image input",
+                    self.embedder.name()
+                )));
             }
             _ => {
                 // Other types not supported for now unless embedder supports custom

@@ -181,7 +181,7 @@
                         <h1 id="schema--fields"><a class="header" href="#schema--fields">Schema &amp; Fields</a></h1>
 <p>The <code>Schema</code> defines the structure of your documents — what fields exist and how each field is indexed. It is the single source of truth for the Engine.</p>
 <blockquote>
-<p>For the TOML file format used by the CLI, see <a href="../cli/schema_format.html">Schema Format Reference</a>.</p>
+<p>For the TOML file format used by the CLI, see <a href="../laurus-cli/schema_format.html">Schema Format Reference</a>.</p>
 </blockquote>
 <h2 id="schema"><a class="header" href="#schema">Schema</a></h2>
 <p>A <code>Schema</code> is a collection of named fields. Each field is either a <strong>lexical field</strong> (for keyword search) or a <strong>vector field</strong> (for similarity search).</p>
@@ -378,7 +378,124 @@ let v: DataValue = true.into();          // Bool
 let v: DataValue = vec![0.1f32, 0.2].into(); // Vector
 <span class="boring">}</span></code></pre></pre>
 <h2 id="reserved-fields"><a class="header" href="#reserved-fields">Reserved Fields</a></h2>
-<p>The <code>_id</code> field is reserved by Laurus for internal use. It stores the external document ID and is always indexed with <code>KeywordAnalyzer</code> (exact match). You do not need to add it to your schema — it is managed automatically.</p>
+<p>Any field name starting with an underscore (<code>_</code>) is <strong>reserved for the
+engine</strong>. User code cannot declare fields with such names, and documents that
+carry user-supplied <code>_</code>-prefixed keys are rejected at ingest time.</p>
+<p>The only <code>_</code>-prefixed name that is accepted is the allow-listed <code>_id</code>
+system field described below.</p>
+<h3 id="_id--external-document-identifier"><a class="header" href="#_id--external-document-identifier"><code>_id</code> — external document identifier</a></h3>
+<p>Stores the external document ID supplied to <code>put_document</code> / <code>add_document</code>.
+It is injected automatically and indexed with <code>KeywordAnalyzer</code> (exact match).
+You do not need to add it to your schema.</p>
+<h2 id="dynamic-schema"><a class="header" href="#dynamic-schema">Dynamic Schema</a></h2>
+<p>Laurus can accept documents even when some of their fields have not been
+declared in the schema. The behaviour is controlled by the
+<code>DynamicFieldPolicy</code> attached to the schema:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Policy</th><th style="text-align: left">Behaviour on an undeclared field</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Strict</code></td><td style="text-align: left">Reject the document with a descriptive error.</td></tr>
+<tr><td style="text-align: left"><code>Dynamic</code> (default)</td><td style="text-align: left">Infer the field's type from the value and add it to the schema.</td></tr>
+<tr><td style="text-align: left"><code>Ignore</code></td><td style="text-align: left">Silently drop the field and continue indexing the rest.</td></tr>
+</tbody></table>
+</div>
+<p>Set the policy on the builder:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::{DynamicFieldPolicy, Schema};
+
+let schema = Schema::builder()
+    .dynamic_field_policy(DynamicFieldPolicy::Dynamic)
+    .build();
+<span class="boring">}</span></code></pre></pre>
+<h3 id="type-inference-rules-dynamic-policy"><a class="header" href="#type-inference-rules-dynamic-policy">Type inference rules (Dynamic policy)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Incoming value</th><th style="text-align: left">Inferred field type</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code> (BM25 via the inverted index)</td></tr>
+<tr><td style="text-align: left"><code>integer</code></td><td style="text-align: left"><code>Integer</code> (BKD tree)</td></tr>
+<tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float</code> (BKD tree)</td></tr>
+<tr><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>Boolean</code></td></tr>
+<tr><td style="text-align: left">object with a latitude key (<code>lat</code> or <code>latitude</code>) and a longitude key (<code>lon</code>, <code>lng</code>, or <code>longitude</code>), values in range</td><td style="text-align: left"><code>Geo</code></td></tr>
+</tbody></table>
+</div>
+<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>) and <code>Bytes</code> are <strong>never</strong> inferred:
+they must be declared in the schema explicitly. Multi-valued numeric arrays
+are also not yet inferred — they return an explicit "not yet supported"
+error so the caller can declare the field manually.</p>
+<h3 id="type-conflicts"><a class="header" href="#type-conflicts">Type conflicts</a></h3>
+<p>When a value arrives for a field that is <strong>already declared</strong>, Laurus attempts
+to coerce the value to the declared type. The coercion rules are:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Declared type</th><th style="text-align: left">Incoming value</th><th style="text-align: left">Result</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left">stored as-is</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Float64(3.14)</code></td><td style="text-align: left"><strong>truncated to <code>3</code></strong> (information loss — see warning below)</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Text("42")</code></td><td style="text-align: left">parsed as <code>42</code></td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Text("abc")</code></td><td style="text-align: left">error</td></tr>
+<tr><td style="text-align: left"><code>Float</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left">widened to <code>f64</code></td></tr>
+<tr><td style="text-align: left"><code>Float</code></td><td style="text-align: left"><code>Text("3.14")</code></td><td style="text-align: left">parsed</td></tr>
+<tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Int64(0)</code> / <code>Int64(1)</code></td><td style="text-align: left"><code>false</code> / <code>true</code></td></tr>
+<tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Text("true"/"false")</code></td><td style="text-align: left">parsed (case-insensitive)</td></tr>
+<tr><td style="text-align: left"><code>Text</code></td><td style="text-align: left">any scalar</td><td style="text-align: left">stringified</td></tr>
+<tr><td style="text-align: left"><code>Geo</code> / <code>Bytes</code> / vector</td><td style="text-align: left">anything other than matching variant</td><td style="text-align: left">error</td></tr>
+</tbody></table>
+</div>
+<p>Coercion errors interact with the policy:</p>
+<ul>
+<li><code>Strict</code>: error is returned immediately.</li>
+<li><code>Dynamic</code>: error is returned — the coercion layer already applied every
+conversion that is considered safe.</li>
+<li><code>Ignore</code>: the offending field is dropped; the rest of the document is
+indexed.</li>
+</ul>
+<blockquote>
+<p><strong>⚠️ Warning: silent information loss is possible.</strong></p>
+<p>Several coercions throw away information without reporting an error:</p>
+<ul>
+<li>An <code>Integer</code> field <strong>truncates</strong> incoming <code>Float</code> values (<code>3.14</code> → <code>3</code>,
+<code>-3.9</code> → <code>-3</code>). Ingest does not fail.</li>
+<li>A <code>Float</code> field may lose precision for very large integers that do not
+fit in an <code>f64</code> mantissa.</li>
+<li>A <code>Text</code> field accepts any scalar by stringifying it, losing the
+original type.</li>
+<li><code>Ignore</code> drops incompatible fields quietly.</li>
+</ul>
+<p>If the correctness of your data matters more than the convenience of
+schema-less ingestion, use <code>DynamicFieldPolicy::Strict</code> (or declare every
+field up-front). The <code>Dynamic</code> policy prioritises keeping the document
+ingestable over preserving every bit of incoming data.</p>
+</blockquote>
+<h3 id="query-dsl-and-undeclared-fields"><a class="header" href="#query-dsl-and-undeclared-fields">Query DSL and undeclared fields</a></h3>
+<p>Once the schema is settled, the query parser validates that every
+<code>field:value</code> clause references a declared field. Typos such as
+<code>titl:hello</code> (for <code>title:hello</code>) produce a clear parse error instead of
+returning silently-empty results.</p>
+<h2 id="dynamic-field-management"><a class="header" href="#dynamic-field-management">Dynamic Field Management</a></h2>
+<p>Fields can be added to or removed from a running engine at runtime.
+Type changes are not supported—remove the field and re-add it with the
+new type instead.</p>
+<h3 id="adding-a-field"><a class="header" href="#adding-a-field">Adding a Field</a></h3>
+<p>Use <code>Engine::add_field()</code> to add a new field to the schema.</p>
+<h4 id="adding-a-lexical-field"><a class="header" href="#adding-a-lexical-field">Adding a Lexical Field</a></h4>
+<pre><code class="language-rust ignore">let updated_schema = engine.add_field(
+    "category",
+    FieldOption::Text(TextOption::default()),
+).await?;</code></pre>
+<h4 id="adding-a-vector-field"><a class="header" href="#adding-a-vector-field">Adding a Vector Field</a></h4>
+<pre><code class="language-rust ignore">let updated_schema = engine.add_field(
+    "embedding",
+    FieldOption::Flat(FlatOption::default().dimension(384)),
+).await?;</code></pre>
+<p>Existing documents are unaffected—they simply have no value for the new
+field. The returned <code>Schema</code> should be persisted (e.g., to <code>schema.toml</code>)
+by the caller.</p>
+<h3 id="removing-a-field"><a class="header" href="#removing-a-field">Removing a Field</a></h3>
+<p>Use <code>Engine::delete_field()</code> to remove a field from the schema.</p>
+<pre><code class="language-rust ignore">let updated_schema = engine.delete_field("category").await?;</code></pre>
+<p>When a field is deleted:</p>
+<ul>
+<li>The field definition is removed from the schema.</li>
+<li>Existing indexed data for the field <strong>remains</strong> in the index but becomes
+inaccessible through queries.</li>
+<li>If the field was listed in <code>default_fields</code>, it is automatically removed.</li>
+<li>Any per-field analyzer or embedder registered for the field is
+unregistered.</li>
+</ul>
 <h2 id="schema-design-tips"><a class="header" href="#schema-design-tips">Schema Design Tips</a></h2>
 <ol>
 <li>
@@ -394,7 +511,7 @@ let v: DataValue = vec![0.1f32, 0.2].into(); // Vector
 <p><strong>Set default fields</strong> — if you use the Query DSL, set default fields so users can write <code>hello</code> instead of <code>body:hello</code>.</p>
 </li>
 <li>
-<p><strong>Use the schema generator</strong> — run <code>laurus create schema</code> to interactively build a schema TOML file instead of writing it by hand. See <a href="../cli/commands.html#create-schema">CLI Commands</a>.</p>
+<p><strong>Use the schema generator</strong> — run <code>laurus create schema</code> to interactively build a schema TOML file instead of writing it by hand. See <a href="../laurus-cli/commands.html#create-schema">CLI Commands</a>.</p>
 </li>
 </ol>
 

@@ -29,6 +29,21 @@ message Schema {
   map<string, AnalyzerDefinition> analyzers = 3;
   // Embedder definitions, keyed by name.
   map<string, EmbedderConfig> embedders = 4;
+  // Policy controlling how fields not declared in `fields` are handled
+  // during document ingestion. Defaults to DYNAMIC.
+  DynamicFieldPolicy dynamic_field_policy = 5;
+}
+
+// Policy for handling undeclared fields during document ingestion.
+enum DynamicFieldPolicy {
+  // Treated as DYNAMIC for backward compatibility.
+  DYNAMIC_FIELD_POLICY_UNSPECIFIED = 0;
+  // Unknown fields cause the ingest to fail.
+  DYNAMIC_FIELD_POLICY_STRICT = 1;
+  // Unknown fields have their type inferred and are added to the schema.
+  DYNAMIC_FIELD_POLICY_DYNAMIC = 2;
+  // Unknown fields are silently dropped.
+  DYNAMIC_FIELD_POLICY_IGNORE = 3;
 }
 
 // A custom analyzer pipeline definition.

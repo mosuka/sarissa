@@ -183,12 +183,13 @@
 <h2 id="basic-usage"><a class="header" href="#basic-usage">Basic Usage</a></h2>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::{SearchRequestBuilder, LexicalSearchRequest};
+</span>use laurus::SearchRequestBuilder;
 use laurus::lexical::TermQuery;
+use laurus::lexical::search::searcher::LexicalSearchQuery;
 
 let request = SearchRequestBuilder::new()
-    .lexical_search_request(
-        LexicalSearchRequest::new(
+    .lexical_query(
+        LexicalSearchQuery::Obj(
             Box::new(TermQuery::new("body", "rust"))
         )
     )
@@ -356,42 +357,47 @@ let query = SpanNearQuery::new(
 <li>Shorter documents are boosted relative to longer ones</li>
 </ul>
 <h3 id="field-boosts"><a class="header" href="#field-boosts">Field Boosts</a></h3>
-<p>You can boost specific fields to influence relevance:</p>
+<p>You can boost specific fields to influence relevance using the <code>SearchRequestBuilder</code>:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::LexicalSearchRequest;
+</span>use laurus::SearchRequestBuilder;
+use laurus::lexical::TermQuery;
+use laurus::lexical::search::searcher::LexicalSearchQuery;
 
-let mut request = LexicalSearchRequest::new(Box::new(query));
-request.field_boosts.insert("title".to_string(), 2.0);  // title matches count double
-request.field_boosts.insert("body".to_string(), 1.0);
+let request = SearchRequestBuilder::new()
+    .lexical_query(LexicalSearchQuery::Obj(Box::new(TermQuery::new("body", "rust"))))
+    .add_field_boost("title", 2.0)  // title matches count double
+    .add_field_boost("body", 1.0)
+    .build();
 <span class="boring">}</span></code></pre></pre>
-<h2 id="lexicalsearchrequest-options"><a class="header" href="#lexicalsearchrequest-options">LexicalSearchRequest Options</a></h2>
+<h2 id="lexical-search-options"><a class="header" href="#lexical-search-options">Lexical Search Options</a></h2>
+<p>Lexical search behavior is controlled via <code>LexicalSearchOptions</code> on the <code>SearchRequest</code>, or by using builder methods on <code>SearchRequestBuilder</code>:</p>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>query</code></td><td style="text-align: left">(required)</td><td style="text-align: left">The query to execute</td></tr>
-<tr><td style="text-align: left"><code>limit</code></td><td style="text-align: left">10</td><td style="text-align: left">Maximum number of results</td></tr>
-<tr><td style="text-align: left"><code>load_documents</code></td><td style="text-align: left">true</td><td style="text-align: left">Whether to load full document content</td></tr>
+<tr><td style="text-align: left"><code>field_boosts</code></td><td style="text-align: left">empty</td><td style="text-align: left">Per-field score multipliers</td></tr>
 <tr><td style="text-align: left"><code>min_score</code></td><td style="text-align: left">0.0</td><td style="text-align: left">Minimum score threshold</td></tr>
 <tr><td style="text-align: left"><code>timeout_ms</code></td><td style="text-align: left">None</td><td style="text-align: left">Search timeout in milliseconds</td></tr>
 <tr><td style="text-align: left"><code>parallel</code></td><td style="text-align: left">false</td><td style="text-align: left">Enable parallel search across segments</td></tr>
 <tr><td style="text-align: left"><code>sort_by</code></td><td style="text-align: left"><code>Score</code></td><td style="text-align: left">Sort by relevance score, or by a field (<code>asc</code> / <code>desc</code>)</td></tr>
-<tr><td style="text-align: left"><code>field_boosts</code></td><td style="text-align: left">empty</td><td style="text-align: left">Per-field score multipliers</td></tr>
 </tbody></table>
 </div>
 <h3 id="builder-methods"><a class="header" href="#builder-methods">Builder Methods</a></h3>
-<p><code>LexicalSearchRequest</code> supports a builder-style API for setting options:</p>
+<p><code>SearchRequestBuilder</code> provides convenience methods for lexical options:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::LexicalSearchRequest;
+</span>use laurus::SearchRequestBuilder;
 use laurus::lexical::TermQuery;
+use laurus::lexical::search::searcher::{LexicalSearchQuery, SortField, SortOrder};
 
-let request = LexicalSearchRequest::new(Box::new(TermQuery::new("body", "rust")))
+let request = SearchRequestBuilder::new()
+    .lexical_query(LexicalSearchQuery::Obj(Box::new(TermQuery::new("body", "rust"))))
+    .lexical_min_score(0.5)
+    .lexical_timeout_ms(5000)
+    .lexical_parallel(true)
+    .sort_by(SortField::Field { name: "date".to_string(), order: SortOrder::Desc })
+    .add_field_boost("title", 2.0)
+    .add_field_boost("body", 1.0)
     .limit(20)
-    .min_score(0.5)
-    .timeout_ms(5000)
-    .parallel(true)
-    .sort_by_field_desc("date")
-    .with_field_boost("title", 2.0)
-    .with_field_boost("body", 1.0);
+    .build();
 <span class="boring">}</span></code></pre></pre>
 <h2 id="using-the-query-dsl"><a class="header" href="#using-the-query-dsl">Using the Query DSL</a></h2>
 <p>Instead of building queries programmatically, you can use the text-based Query DSL:</p>

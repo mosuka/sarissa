@@ -1,10 +1,12 @@
 //! WASM wrapper for the Laurus [`Schema`] type.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use laurus::{
-    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, EmbedderDefinition, FieldOption,
-    FlatOption, FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption, Schema, TextOption,
+    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
+    EmbedderDefinition, FieldOption, FlatOption, FloatOption, GeoOption, HnswOption, IntegerOption,
+    IvfOption, Schema, TextOption,
 };
 use wasm_bindgen::prelude::*;
 
@@ -310,6 +312,40 @@ impl WasmSchema {
     #[wasm_bindgen(js_name = "setDefaultFields")]
     pub fn set_default_fields(&mut self, fields: Vec<String>) {
         self.inner.default_fields = fields;
+    }
+
+    /// Set the policy for fields that are not declared in this schema.
+    ///
+    /// Accepted values (case-insensitive): `"strict"`, `"dynamic"`,
+    /// `"ignore"`. Behaviour:
+    ///
+    /// - `"strict"`: reject documents containing undeclared fields.
+    /// - `"dynamic"` (default): infer a type for each undeclared field and
+    ///   add it to the schema during ingestion. **Warning**: integer fields
+    ///   silently truncate incoming float values (e.g. `3.14` → `3`).
+    /// - `"ignore"`: silently drop undeclared fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `JsValue` error string if `policy` is not one of the
+    /// accepted names.
+    #[wasm_bindgen(js_name = "setDynamicFieldPolicy")]
+    pub fn set_dynamic_field_policy(&mut self, policy: String) -> Result<(), JsValue> {
+        let parsed =
+            DynamicFieldPolicy::from_str(&policy).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.inner.dynamic_field_policy = parsed;
+        Ok(())
+    }
+
+    /// Return the currently configured dynamic field policy as a lowercase
+    /// string (`"strict"` / `"dynamic"` / `"ignore"`).
+    #[wasm_bindgen(js_name = "dynamicFieldPolicy")]
+    pub fn dynamic_field_policy(&self) -> String {
+        match self.inner.dynamic_field_policy {
+            DynamicFieldPolicy::Strict => "strict".into(),
+            DynamicFieldPolicy::Dynamic => "dynamic".into(),
+            DynamicFieldPolicy::Ignore => "ignore".into(),
+        }
     }
 
     /// Return the list of field names defined in this schema.

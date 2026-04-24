@@ -184,10 +184,10 @@
 <ul>
 <li><strong>Index management</strong> -- Create and inspect indexes from TOML schema files, with an interactive schema generator</li>
 <li><strong>Document CRUD</strong> -- Add, retrieve, and delete documents via JSON</li>
-<li><strong>Search</strong> -- Execute queries using the <a href="../concepts/query_dsl.html">Query DSL</a></li>
+<li><strong>Search</strong> -- Execute queries using the <a href="concepts/query_dsl.html">Query DSL</a></li>
 <li><strong>Dual output</strong> -- Human-readable tables or machine-parseable JSON</li>
 <li><strong>Interactive REPL</strong> -- Explore your index in a live session</li>
-<li><strong>gRPC server</strong> -- Start a <a href="../server/overview.html">gRPC server</a> with <code>laurus serve</code></li>
+<li><strong>gRPC server</strong> -- Start a <a href="laurus-server.html">gRPC server</a> with <code>laurus serve</code></li>
 </ul>
 <h2 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h2>
 <pre><code class="language-bash"># Install
@@ -197,23 +197,23 @@ cargo install laurus-cli
 laurus create schema
 
 # Create an index from the schema
-laurus --data-dir ./my_index create index --schema schema.toml
+laurus --index-dir ./my_index create index --schema schema.toml
 
 # Add a document
-laurus --data-dir ./my_index add doc --id doc1 --data '{"title":"Hello","body":"World"}'
+laurus --index-dir ./my_index add doc --id doc1 --data '{"title":"Hello","body":"World"}'
 
 # Commit changes
-laurus --data-dir ./my_index commit
+laurus --index-dir ./my_index commit
 
 # Search
-laurus --data-dir ./my_index search "body:world"
+laurus --index-dir ./my_index search "body:world"
 </code></pre>
 <p>See the sub-sections for detailed documentation:</p>
 <ul>
-<li><a href="installation.html">Installation</a> -- How to install the CLI</li>
-<li><a href="commands.html">Commands</a> -- Full command reference</li>
-<li><a href="schema_format.html">Schema Format</a> -- Schema TOML format reference</li>
-<li><a href="repl.html">REPL</a> -- Interactive mode</li>
+<li><a href="laurus-cli/installation.html">Installation</a> -- How to install the CLI</li>
+<li><a href="laurus-cli/commands.html">Commands</a> -- Full command reference</li>
+<li><a href="laurus-cli/schema_format.html">Schema Format</a> -- Schema TOML format reference</li>
+<li><a href="laurus-cli/repl.html">REPL</a> -- Interactive mode</li>
 </ul>
 
                     </main>

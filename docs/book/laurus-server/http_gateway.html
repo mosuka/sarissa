@@ -219,6 +219,7 @@ laurus serve --config config.toml
   -H 'Content-Type: application/json' \
   -d '{
     "schema": {
+      "dynamic_field_policy": "dynamic",
       "fields": {
         "title": {"text": {"indexed": true, "stored": true, "term_vectors": true}},
         "body": {"text": {"indexed": true, "stored": true, "term_vectors": true}}
@@ -227,6 +228,11 @@ laurus serve --config config.toml
     }
   }'
 </code></pre>
+<p>The <code>dynamic_field_policy</code> key is optional. It controls how fields absent
+from the schema are handled at ingest time. Accepted values: <code>"strict"</code>,
+<code>"dynamic"</code> (default), <code>"ignore"</code>. See
+<a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for the
+full semantics and the warning about silent truncation under <code>"dynamic"</code>.</p>
 <h3 id="get-index-statistics"><a class="header" href="#get-index-statistics">Get Index Statistics</a></h3>
 <pre><code class="language-bash">curl http://localhost:8080/v1/index
 </code></pre>
@@ -314,7 +320,7 @@ data: {"id":"doc2","score":0.4210,"document":{...}}
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../development/build_and_test.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../laurus-mcp.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -328,7 +334,7 @@ data: {"id":"doc2","score":0.4210,"document":{...}}
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../development/build_and_test.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../laurus-mcp.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

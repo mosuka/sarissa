@@ -113,7 +113,7 @@ impl FacetCount {
     /// Sort children by count (descending) or name (ascending).
     pub fn sort_children(&mut self, by_count: bool) {
         if by_count {
-            self.children.sort_by(|a, b| b.count.cmp(&a.count));
+            self.children.sort_by_key(|c| std::cmp::Reverse(c.count));
         } else {
             self.children
                 .sort_by(|a, b| a.path.path.last().cmp(&b.path.path.last()));
@@ -288,7 +288,7 @@ impl FacetCollector {
 
             // Sort top-level facets
             if self.config.sort_by_count {
-                facet_counts.sort_by(|a, b| b.count.cmp(&a.count));
+                facet_counts.sort_by_key(|c| std::cmp::Reverse(c.count));
             } else {
                 facet_counts.sort_by(|a, b| a.path.path.first().cmp(&b.path.path.first()));
             }
@@ -314,7 +314,7 @@ impl FacetCollector {
         // 3. Build the hierarchical tree structure
 
         // For now, just sort by depth
-        facet_counts.sort_by(|a, b| a.path.depth().cmp(&b.path.depth()));
+        facet_counts.sort_by_key(|c| c.path.depth());
     }
 }
 
@@ -724,7 +724,7 @@ impl GroupedSearchEngine {
 
         // Sort groups
         if self.group_config.sort_by_count {
-            group_vec.sort_by(|a, b| b.total_docs.cmp(&a.total_docs));
+            group_vec.sort_by_key(|g| std::cmp::Reverse(g.total_docs));
         } else {
             group_vec.sort_by(|a, b| a.group_key.cmp(&b.group_key));
         }

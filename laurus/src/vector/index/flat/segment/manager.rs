@@ -223,7 +223,7 @@ impl SegmentManager {
                 segment_list.sort_by_key(|s| s.vector_count);
             }
             MergeStrategy::MostDeletions => {
-                segment_list.sort_by(|a, b| b.has_deletions.cmp(&a.has_deletions));
+                segment_list.sort_by_key(|s| std::cmp::Reverse(s.has_deletions));
             }
             MergeStrategy::Adjacent => {
                 segment_list.sort_by_key(|s| s.vector_offset);

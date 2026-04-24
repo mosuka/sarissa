@@ -60,6 +60,10 @@ pub struct UnifiedQueryParser {
     lexical_parser: LexicalQueryParser,
     vector_parser: VectorQueryParser,
     vector_fields: HashSet<String>,
+    /// All field names declared in the schema (lexical + vector). When
+    /// non-empty, any `field:value` clause referencing a field outside this
+    /// set is rejected at parse time with a clear error.
+    known_fields: HashSet<String>,
     default_fusion: FusionAlgorithm,
 }
 
@@ -83,8 +87,27 @@ impl UnifiedQueryParser {
             lexical_parser,
             vector_parser,
             vector_fields,
+            known_fields: HashSet::new(),
             default_fusion: FusionAlgorithm::RRF { k: 60.0 },
         }
+    }
+
+    /// Provide the set of all field names declared in the schema.
+    ///
+    /// When set (and non-empty), parsing a query that references a field name
+    /// outside this set produces an error. This catches typos such as
+    /// `titl:hello` early instead of returning silently-empty results.
+    ///
+    /// Callers should pass the union of lexical and vector field names. If
+    /// the set is left empty (the default), no field-existence check is
+    /// performed.
+    ///
+    /// # Arguments
+    ///
+    /// * `known_fields` - All declared field names.
+    pub fn with_known_fields(mut self, known_fields: HashSet<String>) -> Self {
+        self.known_fields = known_fields;
+        self
     }
 
     /// Set the default fusion algorithm for hybrid queries.
@@ -129,6 +152,10 @@ impl UnifiedQueryParser {
                 "Query string must not be empty",
             ));
         }
+
+        // Reject field references that name a field not present in the
+        // schema. See [`check_known_fields`] for the exact heuristic.
+        self.check_known_fields(query_str)?;
 
         let (lexical_str, vector_str, hybrid_mode) = self.split_query(query_str)?;
 
@@ -255,6 +282,77 @@ impl UnifiedQueryParser {
         };
 
         Ok((lexical, vector, mode))
+    }
+
+    /// Reject field references that name a field outside the schema.
+    ///
+    /// Walks the query string looking for `identifier:` tokens outside of
+    /// double-quoted regions and verifies each identifier against
+    /// [`known_fields`](Self::known_fields). When `known_fields` is empty
+    /// (the default, used by unit tests) no validation is performed, so
+    /// callers that did not supply a field set are unaffected.
+    ///
+    /// The scan skips:
+    ///
+    /// - content inside `"..."` pairs (phrase literals may contain `:`)
+    /// - boolean keywords `AND`, `OR`, `NOT`, `TO` (reserved lexical tokens)
+    ///
+    /// The check is intentionally syntactic and best-effort. It is meant to
+    /// catch typos (`titl:hello` → did you mean `title`?), not to be a
+    /// replacement for full parse-tree validation.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_str` - The raw query DSL string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LaurusError::invalid_argument`] listing the unknown field
+    /// names found.
+    fn check_known_fields(&self, query_str: &str) -> Result<()> {
+        if self.known_fields.is_empty() {
+            return Ok(());
+        }
+
+        static FIELD_REF_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r#"(?:^|[\s+\-(])([A-Za-z_][A-Za-z0-9_]*)\s*:"#).unwrap());
+
+        // Strip quoted substrings so `"foo:bar"` is not inspected.
+        let mut stripped = String::with_capacity(query_str.len());
+        let mut in_quote = false;
+        for ch in query_str.chars() {
+            if ch == '"' {
+                in_quote = !in_quote;
+                stripped.push(' ');
+            } else if in_quote {
+                stripped.push(' ');
+            } else {
+                stripped.push(ch);
+            }
+        }
+
+        let mut unknown: Vec<String> = Vec::new();
+        for caps in FIELD_REF_RE.captures_iter(&stripped) {
+            let name = &caps[1];
+            // Skip reserved lexical keywords that may precede a colon in
+            // some synthetic inputs; none of these are field names.
+            if matches!(name, "AND" | "OR" | "NOT" | "TO") {
+                continue;
+            }
+            if !self.known_fields.contains(name) && !unknown.iter().any(|existing| existing == name)
+            {
+                unknown.push(name.to_string());
+            }
+        }
+
+        if unknown.is_empty() {
+            Ok(())
+        } else {
+            Err(LaurusError::invalid_argument(format!(
+                "query references unknown field(s) {unknown:?}; \
+                 declare them in the schema or check for typos"
+            )))
+        }
     }
 
     /// Check for lexical-only syntax used on vector fields and return a

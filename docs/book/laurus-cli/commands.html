@@ -182,22 +182,22 @@
 <h2 id="global-options"><a class="header" href="#global-options">Global Options</a></h2>
 <p>Every command accepts these options:</p>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Environment Variable</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>--data-dir &lt;PATH&gt;</code></td><td style="text-align: left"><code>LAURUS_DATA_DIR</code></td><td style="text-align: left"><code>./laurus_data</code></td><td style="text-align: left">Path to the index data directory</td></tr>
+<tr><td style="text-align: left"><code>--index-dir &lt;PATH&gt;</code></td><td style="text-align: left"><code>LAURUS_INDEX_DIR</code></td><td style="text-align: left"><code>./laurus_index</code></td><td style="text-align: left">Path to the index data directory</td></tr>
 <tr><td style="text-align: left"><code>--format &lt;FORMAT&gt;</code></td><td style="text-align: left">—</td><td style="text-align: left"><code>table</code></td><td style="text-align: left">Output format: <code>table</code> or <code>json</code></td></tr>
 </tbody></table>
 </div>
 <pre><code class="language-bash"># Example: use JSON output with a custom data directory
-laurus --data-dir /var/data/my_index --format json search "title:rust"
+laurus --index-dir /var/data/my_index --format json search "title:rust"
 </code></pre>
 <hr />
 <h2 id="create--create-a-resource"><a class="header" href="#create--create-a-resource"><code>create</code> — Create a Resource</a></h2>
 <h3 id="create-index"><a class="header" href="#create-index"><code>create index</code></a></h3>
-<p>Create a new index from a schema TOML file.</p>
-<pre><code class="language-bash">laurus create index --schema &lt;FILE&gt;
+<p>Create a new index. If <code>--schema</code> is given, uses that TOML file; otherwise launches the interactive schema wizard.</p>
+<pre><code class="language-bash">laurus create index [--schema &lt;FILE&gt;]
 </code></pre>
 <p><strong>Arguments:</strong></p>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Flag</th><th style="text-align: left">Required</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>--schema &lt;FILE&gt;</code></td><td style="text-align: left">Yes</td><td style="text-align: left">Path to a TOML file defining the index schema</td></tr>
+<tr><td style="text-align: left"><code>--schema &lt;FILE&gt;</code></td><td style="text-align: left">No</td><td style="text-align: left">Path to a TOML file defining the index schema. When omitted, the command checks if a <code>schema.toml</code> already exists in the index directory and uses it; otherwise the interactive wizard is launched.</td></tr>
 </tbody></table>
 </div>
 <p><strong>Schema file format:</strong></p>
@@ -216,12 +216,20 @@ indexed = true
 stored = true
 indexed = true
 </code></pre>
-<p><strong>Example:</strong></p>
-<pre><code class="language-bash">laurus --data-dir ./my_index create index --schema schema.toml
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># From a schema file
+laurus --index-dir ./my_index create index --schema schema.toml
+# Index created at ./my_index.
+
+# Interactive wizard (no --schema flag)
+laurus --index-dir ./my_index create index
+# === Laurus Schema Generator ===
+# Field name: title
+# ...
 # Index created at ./my_index.
 </code></pre>
 <blockquote>
-<p><strong>Note:</strong> An error is returned if the index already exists. Delete the data directory to recreate.</p>
+<p><strong>Note:</strong> If both <code>schema.toml</code> and <code>store/</code> already exist, an error is returned. Delete the index directory to recreate. If only <code>schema.toml</code> exists (e.g. after an interrupted creation), running <code>create index</code> without <code>--schema</code> recovers the index by creating the missing storage from the existing schema.</p>
 </blockquote>
 <h3 id="create-schema"><a class="header" href="#create-schema"><code>create schema</code></a></h3>
 <p>Interactively generate a schema TOML file through a guided wizard.</p>
@@ -266,9 +274,9 @@ laurus create index --schema schema.toml
 </code></pre>
 <hr />
 <h2 id="get--get-a-resource"><a class="header" href="#get--get-a-resource"><code>get</code> — Get a Resource</a></h2>
-<h3 id="get-index"><a class="header" href="#get-index"><code>get index</code></a></h3>
+<h3 id="get-stats"><a class="header" href="#get-stats"><code>get stats</code></a></h3>
 <p>Display statistics about the index.</p>
-<pre><code class="language-bash">laurus get index
+<pre><code class="language-bash">laurus get stats
 </code></pre>
 <p><strong>Table output example:</strong></p>
 <pre><code class="language-text">Document count: 42
@@ -281,7 +289,7 @@ Vector fields:
 ╰──────────┴─────────┴───────────╯
 </code></pre>
 <p><strong>JSON output example:</strong></p>
-<pre><code class="language-bash">laurus --format json get index
+<pre><code class="language-bash">laurus --format json get stats
 </code></pre>
 <pre><code class="language-json">{
   "document_count": 42,
@@ -293,9 +301,21 @@ Vector fields:
   }
 }
 </code></pre>
-<h3 id="get-doc"><a class="header" href="#get-doc"><code>get doc</code></a></h3>
-<p>Retrieve a document (and all its chunks) by external ID.</p>
-<pre><code class="language-bash">laurus get doc --id &lt;ID&gt;
+<h3 id="get-schema"><a class="header" href="#get-schema"><code>get schema</code></a></h3>
+<p>Display the current index schema as JSON.</p>
+<pre><code class="language-bash">laurus get schema
+</code></pre>
+<p><strong>Example:</strong></p>
+<pre><code class="language-bash">laurus get schema
+# {
+#   "fields": { ... },
+#   "default_fields": ["title", "body"],
+#   ...
+# }
+</code></pre>
+<h3 id="get-docs"><a class="header" href="#get-docs"><code>get docs</code></a></h3>
+<p>Retrieve all documents (including chunks) by external ID.</p>
+<pre><code class="language-bash">laurus get docs --id &lt;ID&gt;
 </code></pre>
 <p><strong>Table output example:</strong></p>
 <pre><code class="language-text">╭──────┬─────────────────────────────────────────╮
@@ -305,7 +325,7 @@ Vector fields:
 ╰──────┴─────────────────────────────────────────╯
 </code></pre>
 <p><strong>JSON output example:</strong></p>
-<pre><code class="language-bash">laurus --format json get doc --id doc1
+<pre><code class="language-bash">laurus --format json get docs --id doc1
 </code></pre>
 <pre><code class="language-json">[
   {
@@ -344,22 +364,61 @@ Vector fields:
 <p><strong>Tip:</strong> Multiple documents can share the same external ID (chunking pattern). Use <code>add doc</code> for each chunk.</p>
 </blockquote>
 <hr />
+<h2 id="put--put-upsert-a-resource"><a class="header" href="#put--put-upsert-a-resource"><code>put</code> — Put (Upsert) a Resource</a></h2>
+<h3 id="put-doc"><a class="header" href="#put-doc"><code>put doc</code></a></h3>
+<p>Put (upsert) a document into the index. If a document with the same ID already exists, all its chunks are deleted before the new document is indexed. Documents are not searchable until <code>commit</code> is called.</p>
+<pre><code class="language-bash">laurus put doc --id &lt;ID&gt; --data &lt;JSON&gt;
+</code></pre>
+<p><strong>Arguments:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Flag</th><th style="text-align: left">Required</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>--id &lt;ID&gt;</code></td><td style="text-align: left">Yes</td><td style="text-align: left">External document ID (string)</td></tr>
+<tr><td style="text-align: left"><code>--data &lt;JSON&gt;</code></td><td style="text-align: left">Yes</td><td style="text-align: left">Document fields as a JSON string</td></tr>
+</tbody></table>
+</div>
+<p><strong>Example:</strong></p>
+<pre><code class="language-bash">laurus put doc --id doc1 --data '{"title":"Updated Title","body":"This replaces the existing document."}'
+# Document 'doc1' put (upserted). Run 'commit' to persist changes.
+</code></pre>
+<blockquote>
+<p><strong>Note:</strong> Unlike <code>add doc</code>, <code>put doc</code> replaces all existing chunks for the given ID. Use <code>add doc</code> when you want to append chunks, and <code>put doc</code> when you want to replace the entire document.</p>
+</blockquote>
+<hr />
+<h3 id="add-field"><a class="header" href="#add-field"><code>add field</code></a></h3>
+<p>Dynamically add a new field to an existing index.</p>
+<pre><code class="language-bash">laurus add field --index-dir ./data \
+    --name category \
+    --field-option '{"Text": {"indexed": true, "stored": true}}'
+</code></pre>
+<p>The <code>--field-option</code> argument accepts a JSON string using the same
+externally-tagged format as the schema file. The schema is automatically
+persisted after the field is added.</p>
+<hr />
 <h2 id="delete--delete-a-resource"><a class="header" href="#delete--delete-a-resource"><code>delete</code> — Delete a Resource</a></h2>
-<h3 id="delete-doc"><a class="header" href="#delete-doc"><code>delete doc</code></a></h3>
-<p>Delete a document (and all its chunks) by external ID.</p>
-<pre><code class="language-bash">laurus delete doc --id &lt;ID&gt;
+<h3 id="delete-docs"><a class="header" href="#delete-docs"><code>delete docs</code></a></h3>
+<p>Delete all documents (including chunks) by external ID.</p>
+<pre><code class="language-bash">laurus delete docs --id &lt;ID&gt;
 </code></pre>
 <p><strong>Example:</strong></p>
-<pre><code class="language-bash">laurus delete doc --id doc1
-# Document 'doc1' deleted. Run 'commit' to persist changes.
+<pre><code class="language-bash">laurus delete docs --id doc1
+# Documents 'doc1' deleted. Run 'commit' to persist changes.
 </code></pre>
+<h3 id="delete-field"><a class="header" href="#delete-field"><code>delete field</code></a></h3>
+<p>Remove a field from the index schema.</p>
+<pre><code class="language-bash">laurus delete field --name &lt;FIELD_NAME&gt;
+</code></pre>
+<p><strong>Example:</strong></p>
+<pre><code class="language-bash">laurus delete field --name category
+# Field 'category' deleted.
+</code></pre>
+<p>Existing indexed data for the field remains in storage but becomes
+inaccessible. Per-field analyzers and embedders are unregistered.</p>
 <hr />
 <h2 id="commit"><a class="header" href="#commit"><code>commit</code></a></h2>
 <p>Commit pending changes (additions and deletions) to the index. Until committed, changes are not visible to search.</p>
 <pre><code class="language-bash">laurus commit
 </code></pre>
 <p><strong>Example:</strong></p>
-<pre><code class="language-bash">laurus --data-dir ./my_index commit
+<pre><code class="language-bash">laurus --index-dir ./my_index commit
 # Changes committed successfully.
 </code></pre>
 <hr />

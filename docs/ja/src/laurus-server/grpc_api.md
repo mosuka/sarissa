@@ -55,6 +55,14 @@ message Schema {
   repeated string default_fields = 2;
   map<string, AnalyzerDefinition> analyzers = 3;
   map<string, EmbedderConfig> embedders = 4;
+  DynamicFieldPolicy dynamic_field_policy = 5;
+}
+
+enum DynamicFieldPolicy {
+  DYNAMIC_FIELD_POLICY_UNSPECIFIED = 0;
+  DYNAMIC_FIELD_POLICY_STRICT = 1;
+  DYNAMIC_FIELD_POLICY_DYNAMIC = 2;
+  DYNAMIC_FIELD_POLICY_IGNORE = 3;
 }
 ```
 
@@ -62,6 +70,7 @@ message Schema {
 - **`default_fields`** — クエリでフィールドを指定しない場合のデフォルト検索対象フィールド名。
 - **`analyzers`** — 名前をキーとしたカスタムアナライザーパイプライン。`TextOption.analyzer` で参照。
 - **`embedders`** — 名前をキーとしたエンベッダー設定。ベクトルフィールドオプション（`HnswOption.embedder` など）で参照。
+- **`dynamic_field_policy`** — 投入されたドキュメントに含まれるが `fields` に**宣言されていない**フィールドの扱い。`UNSPECIFIED`（値 0）は後方互換のため `DYNAMIC` として解釈されます。挙動マトリクスおよび `DYNAMIC` での情報損失警告は [スキーマとフィールド](../concepts/schema_and_fields.md#動的スキーマ) を参照してください。
 
 **AnalyzerDefinition:**
 

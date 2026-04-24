@@ -287,6 +287,9 @@ let engine = Engine::builder(storage, schema)
 <tr><td style="text-align: left"><code>delete_documents(id)</code></td><td style="text-align: left">Delete all documents/chunks by external ID</td></tr>
 <tr><td style="text-align: left"><code>commit()</code></td><td style="text-align: left">Flush pending changes to storage (makes documents searchable)</td></tr>
 <tr><td style="text-align: left"><code>recover()</code></td><td style="text-align: left">Replay WAL to restore uncommitted state after crash</td></tr>
+<tr><td style="text-align: left"><code>add_field(name, field_option)</code></td><td style="text-align: left">Dynamically add a new field to the schema at runtime</td></tr>
+<tr><td style="text-align: left"><code>delete_field(name)</code></td><td style="text-align: left">Remove a field from the schema at runtime</td></tr>
+<tr><td style="text-align: left"><code>schema()</code></td><td style="text-align: left">Return the current <code>Schema</code></td></tr>
 </tbody></table>
 </div>
 <h3 id="search"><a class="header" href="#search">Search</a></h3>
@@ -297,21 +300,22 @@ let engine = Engine::builder(storage, schema)
 <p>The <code>search()</code> method accepts a <code>SearchRequest</code> which can contain a lexical query, a vector query, or both. When both are present, results are merged using the specified <code>FusionAlgorithm</code>.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::{SearchRequestBuilder, LexicalSearchRequest, FusionAlgorithm};
+</span>use laurus::{SearchRequestBuilder, FusionAlgorithm};
 use laurus::lexical::TermQuery;
+use laurus::lexical::search::searcher::LexicalSearchQuery;
 
 // Lexical-only search
 let request = SearchRequestBuilder::new()
-    .lexical_search_request(
-        LexicalSearchRequest::new(Box::new(TermQuery::new("body", "rust")))
+    .lexical_query(
+        LexicalSearchQuery::Obj(Box::new(TermQuery::new("body", "rust")))
     )
     .limit(10)
     .build();
 
 // Hybrid search with RRF fusion
 let request = SearchRequestBuilder::new()
-    .lexical_search_request(lexical_req)
-    .vector_search_request(vector_req)
+    .lexical_query(lexical_query)
+    .vector_query(vector_query)
     .fusion_algorithm(FusionAlgorithm::RRF { k: 60.0 })
     .limit(10)
     .build();
@@ -320,12 +324,13 @@ let results = engine.search(request).await?;
 <span class="boring">}</span></code></pre></pre>
 <h2 id="searchrequest"><a class="header" href="#searchrequest">SearchRequest</a></h2>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>lexical_search_request</code></td><td style="text-align: left"><code>Option&lt;LexicalSearchRequest&gt;</code></td><td style="text-align: left">None</td><td style="text-align: left">Lexical query</td></tr>
-<tr><td style="text-align: left"><code>vector_search_request</code></td><td style="text-align: left"><code>Option&lt;VectorSearchRequest&gt;</code></td><td style="text-align: left">None</td><td style="text-align: left">Vector query</td></tr>
+<tr><td style="text-align: left"><code>query</code></td><td style="text-align: left"><code>SearchQuery</code></td><td style="text-align: left"><code>Dsl("")</code></td><td style="text-align: left">Search query specification (Dsl, Lexical, Vector, or Hybrid)</td></tr>
 <tr><td style="text-align: left"><code>limit</code></td><td style="text-align: left"><code>usize</code></td><td style="text-align: left">10</td><td style="text-align: left">Maximum results to return</td></tr>
 <tr><td style="text-align: left"><code>offset</code></td><td style="text-align: left"><code>usize</code></td><td style="text-align: left">0</td><td style="text-align: left">Pagination offset</td></tr>
 <tr><td style="text-align: left"><code>fusion_algorithm</code></td><td style="text-align: left"><code>Option&lt;FusionAlgorithm&gt;</code></td><td style="text-align: left">RRF (k=60)</td><td style="text-align: left">How to merge lexical + vector results</td></tr>
 <tr><td style="text-align: left"><code>filter_query</code></td><td style="text-align: left"><code>Option&lt;Box&lt;dyn Query&gt;&gt;</code></td><td style="text-align: left">None</td><td style="text-align: left">Filter applied to both search types</td></tr>
+<tr><td style="text-align: left"><code>lexical_options</code></td><td style="text-align: left"><code>LexicalSearchOptions</code></td><td style="text-align: left">Default</td><td style="text-align: left">Parameters controlling lexical search behavior</td></tr>
+<tr><td style="text-align: left"><code>vector_options</code></td><td style="text-align: left"><code>VectorSearchOptions</code></td><td style="text-align: left">Default</td><td style="text-align: left">Parameters controlling vector search behavior</td></tr>
 </tbody></table>
 </div>
 <h2 id="fusionalgorithm"><a class="header" href="#fusionalgorithm">FusionAlgorithm</a></h2>

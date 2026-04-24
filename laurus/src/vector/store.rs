@@ -237,13 +237,14 @@ impl VectorStore {
                     embedder.name()
                 )));
             }
-            DataValue::Bytes(_, mime) if !embedder.supports_image() => {
-                if mime.as_ref().is_some_and(|m| m.starts_with("image/")) {
-                    return Err(LaurusError::invalid_argument(format!(
-                        "Embedder '{}' does not support image input",
-                        embedder.name()
-                    )));
-                }
+            DataValue::Bytes(_, mime)
+                if !embedder.supports_image()
+                    && mime.as_ref().is_some_and(|m| m.starts_with("image/")) =>
+            {
+                return Err(LaurusError::invalid_argument(format!(
+                    "Embedder '{}' does not support image input",
+                    embedder.name()
+                )));
             }
             _ => {}
         }

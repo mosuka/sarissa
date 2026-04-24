@@ -1,8 +1,11 @@
 //! Python wrapper for the Laurus [`Schema`] type.
 
+use std::str::FromStr;
+
 use laurus::{
-    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, EmbedderDefinition, FieldOption,
-    FlatOption, FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption, Schema, TextOption,
+    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
+    EmbedderDefinition, FieldOption, FlatOption, FloatOption, GeoOption, HnswOption, IntegerOption,
+    IvfOption, Schema, TextOption,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -303,6 +306,38 @@ impl PySchema {
     /// Set the default fields used when no field is specified in a query.
     pub fn set_default_fields(&mut self, fields: Vec<String>) {
         self.inner.default_fields = fields;
+    }
+
+    /// Set the policy for fields that are not declared in this schema.
+    ///
+    /// Args:
+    ///     policy: One of ``"strict"``, ``"dynamic"`` (default), or
+    ///         ``"ignore"``. Case-insensitive.
+    ///
+    /// Behaviour:
+    ///     * ``"strict"``: reject documents containing undeclared fields.
+    ///     * ``"dynamic"``: infer a type for each undeclared field and add
+    ///       it to the schema during ingestion. **Warning**: integer fields
+    ///       silently truncate incoming float values (e.g. ``3.14`` → ``3``).
+    ///     * ``"ignore"``: silently drop undeclared fields.
+    ///
+    /// Raises:
+    ///     ValueError: if ``policy`` is not one of the accepted names.
+    pub fn set_dynamic_field_policy(&mut self, policy: &str) -> PyResult<()> {
+        let parsed = DynamicFieldPolicy::from_str(policy)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        self.inner.dynamic_field_policy = parsed;
+        Ok(())
+    }
+
+    /// Return the currently configured dynamic field policy as a lowercase
+    /// string (``"strict"`` / ``"dynamic"`` / ``"ignore"``).
+    pub fn dynamic_field_policy(&self) -> &'static str {
+        match self.inner.dynamic_field_policy {
+            DynamicFieldPolicy::Strict => "strict",
+            DynamicFieldPolicy::Dynamic => "dynamic",
+            DynamicFieldPolicy::Ignore => "ignore",
+        }
     }
 
     /// Return the list of field names defined in this schema.

@@ -292,7 +292,7 @@ let bert = Arc::new(CandleBertEmbedder::new("...")?);
 let clip = Arc::new(CandleClipEmbedder::new("...")?);
 
 
-let mut per_field = PerFieldEmbedder::new(bert.clone());
+let per_field = PerFieldEmbedder::new(bert.clone());
 per_field.add_embedder("text_vec", bert.clone());
 per_field.add_embedder("image_vec", clip.clone());
 
@@ -328,7 +328,7 @@ let request = VectorSearchRequestBuilder::new()
     .build();
 
 // Query DSL
-let request = vector_parser.parse(r#"text_vec:~"systems programming""#).await?;
+let request = vector_parser.parse(r#"text_vec:"systems programming""#).await?;
 <span class="boring">}</span></code></pre></pre>
 <p>Both approaches embed the query text using the same embedder that was used at index time, ensuring consistent vector spaces.</p>
 <h2 id="feature-flags-summary"><a class="header" href="#feature-flags-summary">Feature Flags Summary</a></h2>

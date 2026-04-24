@@ -62,6 +62,20 @@ class Schema:
 | `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)` | HNSW 近似最近傍ベクトルフィールド。 |
 | `add_flat_field(name, dimension, *, distance="cosine")` | Flat（総当たり）ベクトルフィールド。 |
 | `add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)` | IVF 近似最近傍ベクトルフィールド。 |
+| `set_default_fields(fields)` | デフォルト検索フィールドを設定（文字列のリスト）。 |
+| `set_dynamic_field_policy(policy)` | 未宣言フィールドの扱いを設定。`policy` は `"strict"` / `"dynamic"`（デフォルト）/ `"ignore"`。詳細は下記を参照。 |
+| `dynamic_field_policy()` | 現在のポリシーを小文字の文字列で返す。 |
+| `field_names()` | 全フィールド名を返す。 |
+
+#### Dynamic field policy（動的フィールドポリシー）
+
+ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを制御します:
+
+- `"strict"` — ドキュメントを拒否
+- `"dynamic"`（デフォルト）— 各未宣言フィールドの型を推論してスキーマに追加。**警告**: integer フィールドに入ってきた float 値は静かに切り捨てられます（`3.14` → `3`）。厳密さが必要なら `"strict"` を使用してください
+- `"ignore"` — 未宣言フィールドを静かに破棄
+
+詳細な挙動マトリクスは [スキーマとフィールド](../concepts/schema_and_fields.md#動的スキーマ) を参照してください。
 
 ### 距離メトリクス
 

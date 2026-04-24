@@ -55,6 +55,14 @@ message Schema {
   repeated string default_fields = 2;
   map<string, AnalyzerDefinition> analyzers = 3;
   map<string, EmbedderConfig> embedders = 4;
+  DynamicFieldPolicy dynamic_field_policy = 5;
+}
+
+enum DynamicFieldPolicy {
+  DYNAMIC_FIELD_POLICY_UNSPECIFIED = 0;
+  DYNAMIC_FIELD_POLICY_STRICT = 1;
+  DYNAMIC_FIELD_POLICY_DYNAMIC = 2;
+  DYNAMIC_FIELD_POLICY_IGNORE = 3;
 }
 ```
 
@@ -62,6 +70,7 @@ message Schema {
 - **`default_fields`** — Field names used as default search targets when a query does not specify a field.
 - **`analyzers`** — Custom analyzer pipelines keyed by name. Referenced by `TextOption.analyzer`.
 - **`embedders`** — Embedder configurations keyed by name. Referenced by vector field options (`HnswOption.embedder`, etc.).
+- **`dynamic_field_policy`** — How the engine treats fields that appear in an ingested document but are **absent** from `fields`. `UNSPECIFIED` is interpreted as `DYNAMIC` for forward compatibility. See [Schema & Fields](../concepts/schema_and_fields.md#dynamic-schema) for the full behaviour matrix and the warning about silent truncation under `DYNAMIC`.
 
 **AnalyzerDefinition:**
 

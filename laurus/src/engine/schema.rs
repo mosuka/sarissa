@@ -12,11 +12,112 @@ use crate::lexical::core::field::{
 };
 use crate::vector::core::field::{FlatOption, HnswOption, IvfOption};
 
+/// Policy for fields that are not declared in the schema.
+///
+/// Applied when a document is ingested with field names that do not appear in
+/// [`Schema::fields`]. The default is [`DynamicFieldPolicy::Dynamic`], which
+/// mirrors the "schema-less onboarding" design goal: users can start indexing
+/// immediately without defining a schema upfront.
+///
+/// # Variants
+///
+/// - [`Strict`](Self::Strict): Unknown fields cause the ingest to fail. Use
+///   when you want to enforce an exact schema contract.
+/// - [`Dynamic`](Self::Dynamic) (default): Unknown fields are accepted; their
+///   type is inferred from the value and a new field definition is added to
+///   the schema automatically.
+/// - [`Ignore`](Self::Ignore): Unknown fields are silently dropped. Use when
+///   you want to ingest partially-structured data without rejecting it but
+///   also without expanding the schema.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DynamicFieldPolicy {
+    /// Fail the ingest when any field is not declared in the schema.
+    Strict,
+    /// Infer the type of unknown fields and add them to the schema.
+    #[default]
+    Dynamic,
+    /// Silently drop unknown fields.
+    Ignore,
+}
+
+impl std::str::FromStr for DynamicFieldPolicy {
+    type Err = crate::error::LaurusError;
+
+    /// Parse a policy name (case-insensitive).
+    ///
+    /// Accepted values: `"strict"`, `"dynamic"`, `"ignore"`. This is the
+    /// canonical policy parser used by all language bindings so the accepted
+    /// spelling is identical across Python, Node.js, WASM, Ruby, and PHP.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::LaurusError::invalid_argument`] for any
+    /// unrecognised value.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "strict" => Ok(DynamicFieldPolicy::Strict),
+            "dynamic" => Ok(DynamicFieldPolicy::Dynamic),
+            "ignore" => Ok(DynamicFieldPolicy::Ignore),
+            other => Err(crate::error::LaurusError::invalid_argument(format!(
+                "unknown dynamic field policy '{other}' \
+                 (expected 'strict', 'dynamic', or 'ignore')"
+            ))),
+        }
+    }
+}
+
+/// Name of the automatically-injected external document ID field.
+///
+/// This is the sole field name with a `_` prefix that the engine accepts from
+/// user code; all other `_`-prefixed names are rejected by
+/// [`validate_field_name`].
+pub const RESERVED_ID_FIELD: &str = "_id";
+
+/// Returns `true` if `name` is a reserved field name that user code is
+/// allowed to reference explicitly (currently only [`RESERVED_ID_FIELD`]).
+///
+/// # Arguments
+///
+/// * `name` - The field name to check.
+pub fn is_allowed_reserved_field(name: &str) -> bool {
+    name == RESERVED_ID_FIELD
+}
+
+/// Validates that a user-supplied field name does not collide with the
+/// engine's reserved namespace.
+///
+/// Field names whose first character is `_` are reserved for the engine
+/// (e.g. [`RESERVED_ID_FIELD`]) and cannot be declared by users. The only
+/// exception is the allow-listed names returned by
+/// [`is_allowed_reserved_field`].
+///
+/// # Arguments
+///
+/// * `name` - The field name to validate.
+///
+/// # Errors
+///
+/// Returns [`crate::error::LaurusError::invalid_argument`] if the name starts
+/// with `_` and is not in the allow-list.
+pub fn validate_field_name(name: &str) -> crate::error::Result<()> {
+    if name.starts_with('_') && !is_allowed_reserved_field(name) {
+        return Err(crate::error::LaurusError::invalid_argument(format!(
+            "Field name '{name}' is reserved: names starting with '_' are \
+             reserved for system fields (allowed: '{RESERVED_ID_FIELD}')"
+        )));
+    }
+    Ok(())
+}
+
 /// Schema for the unified engine.
 ///
 /// Declares what fields exist, their index types (lexical or vector),
 /// and optional custom analyzer definitions. Custom analyzers are
 /// referenced by name from [`TextOption::analyzer`].
+///
+/// The schema also carries a [`DynamicFieldPolicy`] that controls how
+/// undeclared fields are handled during document ingestion. The default is
+/// [`DynamicFieldPolicy::Dynamic`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schema {
     /// Custom analyzer definitions, keyed by name.
@@ -32,6 +133,10 @@ pub struct Schema {
     /// Default fields for search.
     #[serde(default)]
     pub default_fields: Vec<String>,
+    /// Policy for fields not declared in [`fields`](Self::fields).
+    /// Defaults to [`DynamicFieldPolicy::Dynamic`].
+    #[serde(default)]
+    pub dynamic_field_policy: DynamicFieldPolicy,
 }
 
 impl Schema {
@@ -41,6 +146,7 @@ impl Schema {
             embedders: HashMap::new(),
             fields: HashMap::new(),
             default_fields: Vec::new(),
+            dynamic_field_policy: DynamicFieldPolicy::default(),
         }
     }
 
@@ -152,6 +258,7 @@ pub struct SchemaBuilder {
     embedders: HashMap<String, EmbedderDefinition>,
     fields: HashMap<String, FieldOption>,
     default_fields: Vec<String>,
+    dynamic_field_policy: DynamicFieldPolicy,
 }
 
 impl SchemaBuilder {
@@ -241,12 +348,123 @@ impl SchemaBuilder {
         self
     }
 
-    pub fn build(self) -> Schema {
-        Schema {
+    /// Sets the policy for fields not declared in the schema.
+    ///
+    /// See [`DynamicFieldPolicy`] for the available options. When not set,
+    /// the default is [`DynamicFieldPolicy::Dynamic`].
+    ///
+    /// # Arguments
+    ///
+    /// * `policy` - The dynamic field policy to apply during ingestion.
+    pub fn dynamic_field_policy(mut self, policy: DynamicFieldPolicy) -> Self {
+        self.dynamic_field_policy = policy;
+        self
+    }
+
+    /// Build the schema, validating reserved field names.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any field name starts with `_` and is not in the
+    /// reserved allow-list (see [`validate_field_name`]).
+    pub fn try_build(self) -> crate::error::Result<Schema> {
+        for name in self.fields.keys() {
+            validate_field_name(name)?;
+        }
+        Ok(Schema {
             analyzers: self.analyzers,
             embedders: self.embedders,
             fields: self.fields,
             default_fields: self.default_fields,
+            dynamic_field_policy: self.dynamic_field_policy,
+        })
+    }
+
+    /// Build the schema.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any field name collides with a reserved name. Use
+    /// [`try_build`](Self::try_build) for a fallible variant.
+    pub fn build(self) -> Schema {
+        self.try_build()
+            .expect("SchemaBuilder::build: field name validation failed")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexical::core::field::TextOption;
+
+    #[test]
+    fn default_dynamic_field_policy_is_dynamic() {
+        assert_eq!(DynamicFieldPolicy::default(), DynamicFieldPolicy::Dynamic);
+    }
+
+    #[test]
+    fn schema_new_uses_default_policy() {
+        let schema = Schema::new();
+        assert_eq!(schema.dynamic_field_policy, DynamicFieldPolicy::Dynamic);
+    }
+
+    #[test]
+    fn schema_builder_sets_policy() {
+        let schema = Schema::builder()
+            .dynamic_field_policy(DynamicFieldPolicy::Strict)
+            .build();
+        assert_eq!(schema.dynamic_field_policy, DynamicFieldPolicy::Strict);
+    }
+
+    #[test]
+    fn validate_field_name_accepts_regular_name() {
+        assert!(validate_field_name("title").is_ok());
+        assert!(validate_field_name("year_2024").is_ok());
+        assert!(validate_field_name("a").is_ok());
+    }
+
+    #[test]
+    fn validate_field_name_accepts_id() {
+        assert!(validate_field_name(RESERVED_ID_FIELD).is_ok());
+    }
+
+    #[test]
+    fn validate_field_name_rejects_underscore_prefix() {
+        let err = validate_field_name("_score").unwrap_err();
+        assert!(
+            err.to_string().contains("reserved"),
+            "unexpected error: {err}"
+        );
+        assert!(validate_field_name("_custom").is_err());
+        assert!(validate_field_name("__foo").is_err());
+    }
+
+    #[test]
+    fn schema_builder_try_build_rejects_reserved_name() {
+        let result = Schema::builder()
+            .add_field("_bad", FieldOption::Text(TextOption::default()))
+            .try_build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn schema_builder_try_build_accepts_regular_names() {
+        let result = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .try_build();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn dynamic_field_policy_serde_round_trip() {
+        for policy in [
+            DynamicFieldPolicy::Strict,
+            DynamicFieldPolicy::Dynamic,
+            DynamicFieldPolicy::Ignore,
+        ] {
+            let json = serde_json::to_string(&policy).unwrap();
+            let back: DynamicFieldPolicy = serde_json::from_str(&json).unwrap();
+            assert_eq!(policy, back);
         }
     }
 }

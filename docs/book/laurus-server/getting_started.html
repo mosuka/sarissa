@@ -189,17 +189,18 @@
 <tr><td style="text-align: left"><code>--host &lt;HOST&gt;</code></td><td style="text-align: left"><code>-H</code></td><td style="text-align: left"><code>LAURUS_HOST</code></td><td style="text-align: left"><code>0.0.0.0</code></td><td style="text-align: left">Listen address</td></tr>
 <tr><td style="text-align: left"><code>--port &lt;PORT&gt;</code></td><td style="text-align: left"><code>-p</code></td><td style="text-align: left"><code>LAURUS_PORT</code></td><td style="text-align: left"><code>50051</code></td><td style="text-align: left">Listen port</td></tr>
 <tr><td style="text-align: left"><code>--http-port &lt;PORT&gt;</code></td><td style="text-align: left">--</td><td style="text-align: left"><code>LAURUS_HTTP_PORT</code></td><td style="text-align: left">--</td><td style="text-align: left">HTTP Gateway port (enables HTTP gateway when set)</td></tr>
-<tr><td style="text-align: left"><code>--log-level &lt;LEVEL&gt;</code></td><td style="text-align: left"><code>-l</code></td><td style="text-align: left"><code>LAURUS_LOG_LEVEL</code></td><td style="text-align: left"><code>info</code></td><td style="text-align: left">Log level (<code>trace</code>, <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>)</td></tr>
 </tbody></table>
 </div>
-<p>The global <code>--data-dir</code> option (env: <code>LAURUS_DATA_DIR</code>) specifies the index data directory:</p>
+<p>Log verbosity is controlled by the standard <code>RUST_LOG</code> environment variable (default: <code>info</code>).
+See <a href="https://docs.rs/env_logger/latest/env_logger/#enabling-logging">env_logger syntax</a> for filter directives such as <code>RUST_LOG=laurus=debug,tonic=warn</code>.</p>
+<p>The global <code>--index-dir</code> option (env: <code>LAURUS_INDEX_DIR</code>) specifies the index data directory:</p>
 <pre><code class="language-bash"># Using CLI arguments
-laurus --data-dir ./my_index serve --port 8080 --log-level debug
+laurus --index-dir ./my_index serve --port 8080
 
 # Using environment variables
-export LAURUS_DATA_DIR=./my_index
+export LAURUS_INDEX_DIR=./my_index
 export LAURUS_PORT=8080
-export LAURUS_LOG_LEVEL=debug
+export RUST_LOG=debug
 laurus serve
 </code></pre>
 <h3 id="startup-behavior"><a class="header" href="#startup-behavior">Startup Behavior</a></h3>

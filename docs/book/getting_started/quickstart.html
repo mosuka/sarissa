@@ -268,13 +268,14 @@ engine.commit().await?;
 <p>Use <code>SearchRequestBuilder</code> with a query to search the index:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::{SearchRequestBuilder, LexicalSearchRequest};
+</span>use laurus::SearchRequestBuilder;
 use laurus::lexical::TermQuery;
+use laurus::lexical::search::searcher::LexicalSearchQuery;
 
 // Search for "rust" in the "body" field
 let request = SearchRequestBuilder::new()
-    .lexical_search_request(
-        LexicalSearchRequest::new(
+    .lexical_query(
+        LexicalSearchQuery::Obj(
             Box::new(TermQuery::new("body", "rust"))
         )
     )
@@ -296,10 +297,11 @@ for result in &amp;results {
 <p>Here is the full program that you can copy, paste, and run:</p>
 <pre><pre class="playground"><code class="language-rust">use std::sync::Arc;
 use laurus::{
-    Document, Engine, LexicalSearchRequest,
+    Document, Engine,
     Result, Schema, SearchRequestBuilder,
 };
 use laurus::lexical::{TextOption, TermQuery};
+use laurus::lexical::search::searcher::LexicalSearchQuery;
 use laurus::storage::memory::MemoryStorage;
 
 #[tokio::main]
@@ -333,8 +335,8 @@ async fn main() -&gt; Result&lt;()&gt; {
 
     // 5. Search
     let request = SearchRequestBuilder::new()
-        .lexical_search_request(
-            LexicalSearchRequest::new(
+        .lexical_query(
+            LexicalSearchQuery::Obj(
                 Box::new(TermQuery::new("body", "rust"))
             )
         )

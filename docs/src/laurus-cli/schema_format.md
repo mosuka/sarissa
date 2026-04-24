@@ -4,9 +4,12 @@ The schema file defines the structure of your index — what fields exist, their
 
 ## Overview
 
-A schema consists of two top-level elements:
+A schema consists of three top-level elements:
 
 ```toml
+# Policy for fields not declared below. Optional — defaults to "dynamic".
+dynamic_field_policy = "dynamic"
+
 # Fields to search by default when a query does not specify a field.
 default_fields = ["title", "body"]
 
@@ -15,13 +18,14 @@ default_fields = ["title", "body"]
 # ... type-specific options
 ```
 
+- **`dynamic_field_policy`** — How the engine treats fields present in an ingested document but **absent** from this schema. Accepted values: `"strict"`, `"dynamic"`, `"ignore"`. Defaults to `"dynamic"`. See [Dynamic Schema](../concepts/schema_and_fields.md#dynamic-schema) for the full semantics and the warning about silent truncation under `"dynamic"`.
 - **`default_fields`** — A list of field names used as default search targets by the [Query DSL](../concepts/query_dsl.md). Only lexical fields (Text, Integer, Float, etc.) can be default fields. This key is optional and defaults to an empty list.
 - **`fields`** — A map of field names to their typed configuration. Each field must specify exactly one field type.
 
 ## Field Naming
 
 - Field names are arbitrary strings (e.g., `title`, `body_vec`, `created_at`).
-- The `_id` field is reserved by Laurus for internal document ID management — do not use it.
+- **Field names starting with `_` are reserved** for the engine. The only allow-listed name is `_id` (managed automatically). Attempting to declare any other `_`-prefixed field results in an error.
 - Field names must be unique within a schema.
 
 ## Field Types

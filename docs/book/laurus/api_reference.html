@@ -192,11 +192,14 @@
 <tr><td style="text-align: left"><code>engine.get_documents(id).await?</code></td><td style="text-align: left">Get all documents/chunks by external ID</td></tr>
 <tr><td style="text-align: left"><code>engine.search(request).await?</code></td><td style="text-align: left">Execute a search request</td></tr>
 <tr><td style="text-align: left"><code>engine.commit().await?</code></td><td style="text-align: left">Flush all pending changes to storage</td></tr>
+<tr><td style="text-align: left"><code>engine.add_field(name, field_option).await?</code></td><td style="text-align: left">Dynamically add a new field to the schema at runtime</td></tr>
+<tr><td style="text-align: left"><code>engine.delete_field(name).await?</code></td><td style="text-align: left">Remove a field from the schema at runtime</td></tr>
+<tr><td style="text-align: left"><code>engine.schema()</code></td><td style="text-align: left">Return the current <code>Schema</code></td></tr>
 <tr><td style="text-align: left"><code>engine.stats()?</code></td><td style="text-align: left">Get index statistics</td></tr>
 </tbody></table>
 </div>
 <blockquote>
-<p><strong><code>put_document</code> vs <code>add_document</code>:</strong> <code>put_document</code> performs an upsert — if a document with the same external ID already exists, it is deleted and replaced. <code>add_document</code> always appends, allowing multiple document chunks to share the same external ID. See <a href="concepts/schema_and_fields.html#indexing-documents">Schema &amp; Fields — Indexing Documents</a> for details.</p>
+<p><strong><code>put_document</code> vs <code>add_document</code>:</strong> <code>put_document</code> performs an upsert — if a document with the same external ID already exists, it is deleted and replaced. <code>add_document</code> always appends, allowing multiple document chunks to share the same external ID. See <a href="../concepts/schema_and_fields.html#indexing-documents">Schema &amp; Fields — Indexing Documents</a> for details.</p>
 </blockquote>
 <h3 id="enginebuilder"><a class="header" href="#enginebuilder">EngineBuilder</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
@@ -254,41 +257,33 @@
 <h3 id="searchrequestbuilder"><a class="header" href="#searchrequestbuilder">SearchRequestBuilder</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>SearchRequestBuilder::new()</code></td><td style="text-align: left">Create a new builder</td></tr>
-<tr><td style="text-align: left"><code>.lexical_search_request(req)</code></td><td style="text-align: left">Set the lexical search component</td></tr>
-<tr><td style="text-align: left"><code>.vector_search_request(req)</code></td><td style="text-align: left">Set the vector search component</td></tr>
+<tr><td style="text-align: left"><code>.query_dsl(dsl)</code></td><td style="text-align: left">Set a unified DSL string (parsed at search time)</td></tr>
+<tr><td style="text-align: left"><code>.lexical_query(query)</code></td><td style="text-align: left">Set the lexical search query (<code>LexicalSearchQuery</code>)</td></tr>
+<tr><td style="text-align: left"><code>.vector_query(query)</code></td><td style="text-align: left">Set the vector search query (<code>VectorSearchQuery</code>)</td></tr>
 <tr><td style="text-align: left"><code>.filter_query(query)</code></td><td style="text-align: left">Set a pre-filter query</td></tr>
 <tr><td style="text-align: left"><code>.fusion_algorithm(algo)</code></td><td style="text-align: left">Set the fusion algorithm (default: RRF)</td></tr>
 <tr><td style="text-align: left"><code>.limit(n)</code></td><td style="text-align: left">Maximum results (default: 10)</td></tr>
 <tr><td style="text-align: left"><code>.offset(n)</code></td><td style="text-align: left">Skip N results (default: 0)</td></tr>
+<tr><td style="text-align: left"><code>.add_field_boost(field, boost)</code></td><td style="text-align: left">Add a field-level boost for lexical search</td></tr>
+<tr><td style="text-align: left"><code>.lexical_min_score(f32)</code></td><td style="text-align: left">Set minimum score threshold for lexical search</td></tr>
+<tr><td style="text-align: left"><code>.lexical_timeout_ms(u64)</code></td><td style="text-align: left">Set lexical search timeout in milliseconds</td></tr>
+<tr><td style="text-align: left"><code>.lexical_parallel(bool)</code></td><td style="text-align: left">Enable parallel lexical search</td></tr>
+<tr><td style="text-align: left"><code>.sort_by(SortField)</code></td><td style="text-align: left">Set sort order for lexical search results</td></tr>
+<tr><td style="text-align: left"><code>.vector_score_mode(VectorScoreMode)</code></td><td style="text-align: left">Set score combination mode for vector search</td></tr>
+<tr><td style="text-align: left"><code>.vector_min_score(f32)</code></td><td style="text-align: left">Set minimum score threshold for vector search</td></tr>
 <tr><td style="text-align: left"><code>.build()</code></td><td style="text-align: left">Build the <code>SearchRequest</code></td></tr>
 </tbody></table>
 </div>
-<h3 id="lexicalsearchrequest"><a class="header" href="#lexicalsearchrequest">LexicalSearchRequest</a></h3>
-<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>LexicalSearchRequest::new(query)</code></td><td style="text-align: left">Create with a query</td></tr>
-<tr><td style="text-align: left"><code>LexicalSearchRequest::from_dsl(query_str)</code></td><td style="text-align: left">Create from a DSL query string</td></tr>
-<tr><td style="text-align: left"><code>.limit(n)</code></td><td style="text-align: left">Maximum results</td></tr>
-<tr><td style="text-align: left"><code>.load_documents(bool)</code></td><td style="text-align: left">Whether to load document content</td></tr>
-<tr><td style="text-align: left"><code>.min_score(f32)</code></td><td style="text-align: left">Minimum score threshold</td></tr>
-<tr><td style="text-align: left"><code>.timeout_ms(u64)</code></td><td style="text-align: left">Search timeout in milliseconds</td></tr>
-<tr><td style="text-align: left"><code>.parallel(bool)</code></td><td style="text-align: left">Enable parallel search</td></tr>
-<tr><td style="text-align: left"><code>.sort_by_field_asc(field)</code></td><td style="text-align: left">Sort by field ascending</td></tr>
-<tr><td style="text-align: left"><code>.sort_by_field_desc(field)</code></td><td style="text-align: left">Sort by field descending</td></tr>
-<tr><td style="text-align: left"><code>.sort_by_score()</code></td><td style="text-align: left">Sort by relevance score (default)</td></tr>
-<tr><td style="text-align: left"><code>.with_field_boost(field, boost)</code></td><td style="text-align: left">Add field-level boost</td></tr>
+<h3 id="lexicalsearchquery"><a class="header" href="#lexicalsearchquery">LexicalSearchQuery</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Variant</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>LexicalSearchQuery::Dsl(String)</code></td><td style="text-align: left">Query specified as a DSL string (parsed at search time)</td></tr>
+<tr><td style="text-align: left"><code>LexicalSearchQuery::Obj(Box&lt;dyn Query&gt;)</code></td><td style="text-align: left">Query specified as a pre-built Query object</td></tr>
 </tbody></table>
 </div>
-<h3 id="vectorsearchrequestbuilder"><a class="header" href="#vectorsearchrequestbuilder">VectorSearchRequestBuilder</a></h3>
-<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>VectorSearchRequestBuilder::new()</code></td><td style="text-align: left">Create a new builder</td></tr>
-<tr><td style="text-align: left"><code>.add_text(field, text)</code></td><td style="text-align: left">Add a text query for a field</td></tr>
-<tr><td style="text-align: left"><code>.add_vector(field, vector)</code></td><td style="text-align: left">Add a pre-computed query vector</td></tr>
-<tr><td style="text-align: left"><code>.add_bytes(field, bytes, mime)</code></td><td style="text-align: left">Add a binary payload (for multimodal)</td></tr>
-<tr><td style="text-align: left"><code>.limit(n)</code></td><td style="text-align: left">Maximum results</td></tr>
-<tr><td style="text-align: left"><code>.score_mode(VectorScoreMode)</code></td><td style="text-align: left">Score combination mode (WeightedSum, MaxSim)</td></tr>
-<tr><td style="text-align: left"><code>.min_score(f32)</code></td><td style="text-align: left">Minimum score threshold</td></tr>
-<tr><td style="text-align: left"><code>.field(name)</code></td><td style="text-align: left">Restrict search to a specific field</td></tr>
-<tr><td style="text-align: left"><code>.build()</code></td><td style="text-align: left">Build the request</td></tr>
+<h3 id="vectorsearchquery"><a class="header" href="#vectorsearchquery">VectorSearchQuery</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Variant</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>VectorSearchQuery::Payloads(Vec&lt;QueryPayload&gt;)</code></td><td style="text-align: left">Raw payloads (text, bytes, etc.) to be embedded at search time</td></tr>
+<tr><td style="text-align: left"><code>VectorSearchQuery::Vectors(Vec&lt;QueryVector&gt;)</code></td><td style="text-align: left">Pre-embedded query vectors ready for nearest-neighbor search</td></tr>
 </tbody></table>
 </div>
 <h3 id="searchresult"><a class="header" href="#searchresult">SearchResult</a></h3>
@@ -311,9 +306,9 @@
 <tr><td style="text-align: left"><code>BooleanQueryBuilder::new()</code></td><td style="text-align: left">Boolean combination</td><td style="text-align: left"><code>.must(q1).should(q2).must_not(q3).build()</code></td></tr>
 <tr><td style="text-align: left"><code>FuzzyQuery::new(field, term)</code></td><td style="text-align: left">Fuzzy match (default max_edits=2)</td><td style="text-align: left"><code>FuzzyQuery::new("body", "programing").max_edits(1)</code></td></tr>
 <tr><td style="text-align: left"><code>WildcardQuery::new(field, pattern)</code></td><td style="text-align: left">Wildcard</td><td style="text-align: left"><code>WildcardQuery::new("file", "*.pdf")</code></td></tr>
-<tr><td style="text-align: left"><code>NumericRangeQuery::new(...)</code></td><td style="text-align: left">Numeric range</td><td style="text-align: left">See <a href="search/lexical_search.html">Lexical Search</a></td></tr>
-<tr><td style="text-align: left"><code>GeoQuery::within_radius(...)</code></td><td style="text-align: left">Geo radius</td><td style="text-align: left">See <a href="search/lexical_search.html">Lexical Search</a></td></tr>
-<tr><td style="text-align: left"><code>SpanNearQuery::new(...)</code></td><td style="text-align: left">Proximity</td><td style="text-align: left">See <a href="search/lexical_search.html">Lexical Search</a></td></tr>
+<tr><td style="text-align: left"><code>NumericRangeQuery::new(...)</code></td><td style="text-align: left">Numeric range</td><td style="text-align: left">See <a href="../concepts/search.html">Lexical Search</a></td></tr>
+<tr><td style="text-align: left"><code>GeoQuery::within_radius(...)</code></td><td style="text-align: left">Geo radius</td><td style="text-align: left">See <a href="../concepts/search.html">Lexical Search</a></td></tr>
+<tr><td style="text-align: left"><code>SpanNearQuery::new(...)</code></td><td style="text-align: left">Proximity</td><td style="text-align: left">See <a href="../concepts/search.html">Lexical Search</a></td></tr>
 <tr><td style="text-align: left"><code>PrefixQuery::new(field, prefix)</code></td><td style="text-align: left">Prefix match</td><td style="text-align: left"><code>PrefixQuery::new("body", "pro")</code></td></tr>
 <tr><td style="text-align: left"><code>RegexpQuery::new(field, pattern)?</code></td><td style="text-align: left">Regex match</td><td style="text-align: left"><code>RegexpQuery::new("body", "^pro.*ing$")?</code></td></tr>
 </tbody></table>
@@ -360,7 +355,7 @@
 <tr><td style="text-align: left"><code>DataValue::Float64(f64)</code></td><td style="text-align: left"><code>f64</code></td></tr>
 <tr><td style="text-align: left"><code>DataValue::Text(String)</code></td><td style="text-align: left"><code>String</code></td></tr>
 <tr><td style="text-align: left"><code>DataValue::Bytes(Vec&lt;u8&gt;, Option&lt;String&gt;)</code></td><td style="text-align: left"><code>(data, mime_type)</code></td></tr>
-<tr><td style="text-align: left"><code>DataValue::Vector(Vec&lt;f32&gt;)</code></td><td style="text-align: left"><code>Vec&lt;f32&gt;</code></td></tr>
+<tr><td style="text-align: left"><code>DataValue::Vector(Vector)</code></td><td style="text-align: left"><code>Vector</code></td></tr>
 <tr><td style="text-align: left"><code>DataValue::DateTime(DateTime&lt;Utc&gt;)</code></td><td style="text-align: left"><code>chrono::DateTime&lt;Utc&gt;</code></td></tr>
 <tr><td style="text-align: left"><code>DataValue::Geo(f64, f64)</code></td><td style="text-align: left"><code>(latitude, longitude)</code></td></tr>
 </tbody></table>
