@@ -113,8 +113,7 @@ impl FacetCount {
     /// Sort children by count (descending) or name (ascending).
     pub fn sort_children(&mut self, by_count: bool) {
         if by_count {
-            self.children
-                .sort_by_key(|c| std::cmp::Reverse(c.count));
+            self.children.sort_by_key(|c| std::cmp::Reverse(c.count));
         } else {
             self.children
                 .sort_by(|a, b| a.path.path.last().cmp(&b.path.path.last()));
