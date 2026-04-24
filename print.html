@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a88fb1c8.js";
+            window.path_to_searchindex_js = "searchindex-de470a3c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-6cc5bf7f.js"></script>
@@ -1123,7 +1123,111 @@ let v: DataValue = true.into();          // Bool
 let v: DataValue = vec![0.1f32, 0.2].into(); // Vector
 <span class="boring">}</span></code></pre>
 <h2 id="reserved-fields"><a class="header" href="#reserved-fields">Reserved Fields</a></h2>
-<p>The <code>_id</code> field is reserved by Laurus for internal use. It stores the external document ID and is always indexed with <code>KeywordAnalyzer</code> (exact match). You do not need to add it to your schema — it is managed automatically.</p>
+<p>Any field name starting with an underscore (<code>_</code>) is <strong>reserved for the
+engine</strong>. User code cannot declare fields with such names, and documents that
+carry user-supplied <code>_</code>-prefixed keys are rejected at ingest time.</p>
+<p>The only <code>_</code>-prefixed name that is accepted is the allow-listed <code>_id</code>
+system field described below.</p>
+<h3 id="_id--external-document-identifier"><a class="header" href="#_id--external-document-identifier"><code>_id</code> — external document identifier</a></h3>
+<p>Stores the external document ID supplied to <code>put_document</code> / <code>add_document</code>.
+It is injected automatically and indexed with <code>KeywordAnalyzer</code> (exact match).
+You do not need to add it to your schema.</p>
+<h2 id="dynamic-schema"><a class="header" href="#dynamic-schema">Dynamic Schema</a></h2>
+<p>Laurus can accept documents even when some of their fields have not been
+declared in the schema. The behaviour is controlled by the
+<code>DynamicFieldPolicy</code> attached to the schema:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Policy</th><th style="text-align: left">Behaviour on an undeclared field</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Strict</code></td><td style="text-align: left">Reject the document with a descriptive error.</td></tr>
+<tr><td style="text-align: left"><code>Dynamic</code> (default)</td><td style="text-align: left">Infer the field’s type from the value and add it to the schema.</td></tr>
+<tr><td style="text-align: left"><code>Ignore</code></td><td style="text-align: left">Silently drop the field and continue indexing the rest.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Set the policy on the builder:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::{DynamicFieldPolicy, Schema};
+
+let schema = Schema::builder()
+    .dynamic_field_policy(DynamicFieldPolicy::Dynamic)
+    .build();
+<span class="boring">}</span></code></pre>
+<h3 id="type-inference-rules-dynamic-policy"><a class="header" href="#type-inference-rules-dynamic-policy">Type inference rules (Dynamic policy)</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Incoming value</th><th style="text-align: left">Inferred field type</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code> (BM25 via the inverted index)</td></tr>
+<tr><td style="text-align: left"><code>integer</code></td><td style="text-align: left"><code>Integer</code> (BKD tree)</td></tr>
+<tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float</code> (BKD tree)</td></tr>
+<tr><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>Boolean</code></td></tr>
+<tr><td style="text-align: left">object with a latitude key (<code>lat</code> or <code>latitude</code>) and a longitude key (<code>lon</code>, <code>lng</code>, or <code>longitude</code>), values in range</td><td style="text-align: left"><code>Geo</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>) and <code>Bytes</code> are <strong>never</strong> inferred:
+they must be declared in the schema explicitly. Multi-valued numeric arrays
+are also not yet inferred — they return an explicit “not yet supported”
+error so the caller can declare the field manually.</p>
+<h3 id="type-conflicts"><a class="header" href="#type-conflicts">Type conflicts</a></h3>
+<p>When a value arrives for a field that is <strong>already declared</strong>, Laurus attempts
+to coerce the value to the declared type. The coercion rules are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Declared type</th><th style="text-align: left">Incoming value</th><th style="text-align: left">Result</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left">stored as-is</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Float64(3.14)</code></td><td style="text-align: left"><strong>truncated to <code>3</code></strong> (information loss — see warning below)</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Text("42")</code></td><td style="text-align: left">parsed as <code>42</code></td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Text("abc")</code></td><td style="text-align: left">error</td></tr>
+<tr><td style="text-align: left"><code>Float</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left">widened to <code>f64</code></td></tr>
+<tr><td style="text-align: left"><code>Float</code></td><td style="text-align: left"><code>Text("3.14")</code></td><td style="text-align: left">parsed</td></tr>
+<tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Int64(0)</code> / <code>Int64(1)</code></td><td style="text-align: left"><code>false</code> / <code>true</code></td></tr>
+<tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Text("true"/"false")</code></td><td style="text-align: left">parsed (case-insensitive)</td></tr>
+<tr><td style="text-align: left"><code>Text</code></td><td style="text-align: left">any scalar</td><td style="text-align: left">stringified</td></tr>
+<tr><td style="text-align: left"><code>Geo</code> / <code>Bytes</code> / vector</td><td style="text-align: left">anything other than matching variant</td><td style="text-align: left">error</td></tr>
+</tbody>
+</table>
+</div>
+<p>Coercion errors interact with the policy:</p>
+<ul>
+<li><code>Strict</code>: error is returned immediately.</li>
+<li><code>Dynamic</code>: error is returned — the coercion layer already applied every
+conversion that is considered safe.</li>
+<li><code>Ignore</code>: the offending field is dropped; the rest of the document is
+indexed.</li>
+</ul>
+<blockquote>
+<p><strong>⚠️ Warning: silent information loss is possible.</strong></p>
+<p>Several coercions throw away information without reporting an error:</p>
+<ul>
+<li>An <code>Integer</code> field <strong>truncates</strong> incoming <code>Float</code> values (<code>3.14</code> → <code>3</code>,
+<code>-3.9</code> → <code>-3</code>). Ingest does not fail.</li>
+<li>A <code>Float</code> field may lose precision for very large integers that do not
+fit in an <code>f64</code> mantissa.</li>
+<li>A <code>Text</code> field accepts any scalar by stringifying it, losing the
+original type.</li>
+<li><code>Ignore</code> drops incompatible fields quietly.</li>
+</ul>
+<p>If the correctness of your data matters more than the convenience of
+schema-less ingestion, use <code>DynamicFieldPolicy::Strict</code> (or declare every
+field up-front). The <code>Dynamic</code> policy prioritises keeping the document
+ingestable over preserving every bit of incoming data.</p>
+</blockquote>
+<h3 id="query-dsl-and-undeclared-fields"><a class="header" href="#query-dsl-and-undeclared-fields">Query DSL and undeclared fields</a></h3>
+<p>Once the schema is settled, the query parser validates that every
+<code>field:value</code> clause references a declared field. Typos such as
+<code>titl:hello</code> (for <code>title:hello</code>) produce a clear parse error instead of
+returning silently-empty results.</p>
 <h2 id="dynamic-field-management"><a class="header" href="#dynamic-field-management">Dynamic Field Management</a></h2>
 <p>Fields can be added to or removed from a running engine at runtime.
 Type changes are not supported—remove the field and re-add it with the
@@ -3248,6 +3352,15 @@ async fn main() -&gt; laurus::Result&lt;()&gt; {
 |--- lexical --|    |--- vector --------|
 </code></pre>
 <p>The field type in the schema determines whether a clause is lexical or vector. If the field is a vector field (e.g., HNSW), the clause is treated as a vector query. Everything else is treated as a lexical query.</p>
+<h3 id="field-validation"><a class="header" href="#field-validation">Field validation</a></h3>
+<p>Every <code>field:value</code> clause is validated against the schema at parse time. A
+query that references a field <strong>not declared</strong> in the schema is rejected with
+an error rather than returning silently-empty results. This catches typos
+early (e.g. <code>titl:hello</code> instead of <code>title:hello</code>).</p>
+<p>If you want the engine to accept documents with previously-unknown fields,
+set the schema’s <a href="#dynamic-schema"><code>dynamic_field_policy</code></a>
+so that the field gets added during ingestion. Once a field is part of the
+schema, queries referencing it succeed.</p>
 <h2 id="lexical-query-syntax"><a class="header" href="#lexical-query-syntax">Lexical Query Syntax</a></h2>
 <p>Lexical queries search the inverted index using exact or approximate keyword matching.</p>
 <h3 id="term-query"><a class="header" href="#term-query">Term Query</a></h3>
@@ -5759,8 +5872,11 @@ laurus search "price:[10 TO 50]"
 <h1 id="schema-format-reference"><a class="header" href="#schema-format-reference">Schema Format Reference</a></h1>
 <p>The schema file defines the structure of your index — what fields exist, their types, and how they are indexed. Laurus uses TOML format for schema files.</p>
 <h2 id="overview-2"><a class="header" href="#overview-2">Overview</a></h2>
-<p>A schema consists of two top-level elements:</p>
-<pre><code class="language-toml"># Fields to search by default when a query does not specify a field.
+<p>A schema consists of three top-level elements:</p>
+<pre><code class="language-toml"># Policy for fields not declared below. Optional — defaults to "dynamic".
+dynamic_field_policy = "dynamic"
+
+# Fields to search by default when a query does not specify a field.
 default_fields = ["title", "body"]
 
 # Field definitions. Each field has a name and a typed configuration.
@@ -5768,13 +5884,14 @@ default_fields = ["title", "body"]
 # ... type-specific options
 </code></pre>
 <ul>
+<li><strong><code>dynamic_field_policy</code></strong> — How the engine treats fields present in an ingested document but <strong>absent</strong> from this schema. Accepted values: <code>"strict"</code>, <code>"dynamic"</code>, <code>"ignore"</code>. Defaults to <code>"dynamic"</code>. See <a href="#dynamic-schema">Dynamic Schema</a> for the full semantics and the warning about silent truncation under <code>"dynamic"</code>.</li>
 <li><strong><code>default_fields</code></strong> — A list of field names used as default search targets by the <a href="#query-dsl-2">Query DSL</a>. Only lexical fields (Text, Integer, Float, etc.) can be default fields. This key is optional and defaults to an empty list.</li>
 <li><strong><code>fields</code></strong> — A map of field names to their typed configuration. Each field must specify exactly one field type.</li>
 </ul>
 <h2 id="field-naming"><a class="header" href="#field-naming">Field Naming</a></h2>
 <ul>
 <li>Field names are arbitrary strings (e.g., <code>title</code>, <code>body_vec</code>, <code>created_at</code>).</li>
-<li>The <code>_id</code> field is reserved by Laurus for internal document ID management — do not use it.</li>
+<li><strong>Field names starting with <code>_</code> are reserved</strong> for the engine. The only allow-listed name is <code>_id</code> (managed automatically). Attempting to declare any other <code>_</code>-prefixed field results in an error.</li>
 <li>Field names must be unique within a schema.</li>
 </ul>
 <h2 id="field-types-1"><a class="header" href="#field-types-1">Field Types</a></h2>
@@ -6948,6 +7065,14 @@ laurus serve
   repeated string default_fields = 2;
   map&lt;string, AnalyzerDefinition&gt; analyzers = 3;
   map&lt;string, EmbedderConfig&gt; embedders = 4;
+  DynamicFieldPolicy dynamic_field_policy = 5;
+}
+
+enum DynamicFieldPolicy {
+  DYNAMIC_FIELD_POLICY_UNSPECIFIED = 0;
+  DYNAMIC_FIELD_POLICY_STRICT = 1;
+  DYNAMIC_FIELD_POLICY_DYNAMIC = 2;
+  DYNAMIC_FIELD_POLICY_IGNORE = 3;
 }
 </code></pre>
 <ul>
@@ -6955,6 +7080,7 @@ laurus serve
 <li><strong><code>default_fields</code></strong> — Field names used as default search targets when a query does not specify a field.</li>
 <li><strong><code>analyzers</code></strong> — Custom analyzer pipelines keyed by name. Referenced by <code>TextOption.analyzer</code>.</li>
 <li><strong><code>embedders</code></strong> — Embedder configurations keyed by name. Referenced by vector field options (<code>HnswOption.embedder</code>, etc.).</li>
+<li><strong><code>dynamic_field_policy</code></strong> — How the engine treats fields that appear in an ingested document but are <strong>absent</strong> from <code>fields</code>. <code>UNSPECIFIED</code> is interpreted as <code>DYNAMIC</code> for forward compatibility. See <a href="#dynamic-schema">Schema &amp; Fields</a> for the full behaviour matrix and the warning about silent truncation under <code>DYNAMIC</code>.</li>
 </ul>
 <p><strong>AnalyzerDefinition:</strong></p>
 <pre><code class="language-protobuf">message AnalyzerDefinition {
@@ -7379,6 +7505,7 @@ laurus serve --config config.toml
   -H 'Content-Type: application/json' \
   -d '{
     "schema": {
+      "dynamic_field_policy": "dynamic",
       "fields": {
         "title": {"text": {"indexed": true, "stored": true, "term_vectors": true}},
         "body": {"text": {"indexed": true, "stored": true, "term_vectors": true}}
@@ -7387,6 +7514,11 @@ laurus serve --config config.toml
     }
   }'
 </code></pre>
+<p>The <code>dynamic_field_policy</code> key is optional. It controls how fields absent
+from the schema are handled at ingest time. Accepted values: <code>"strict"</code>,
+<code>"dynamic"</code> (default), <code>"ignore"</code>. See
+<a href="#dynamic-schema">Schema &amp; Fields</a> for the
+full semantics and the warning about silent truncation under <code>"dynamic"</code>.</p>
 <h3 id="get-index-statistics"><a class="header" href="#get-index-statistics">Get Index Statistics</a></h3>
 <pre><code class="language-bash">curl http://localhost:8080/v1/index
 </code></pre>
@@ -7665,6 +7797,7 @@ endpoint: "http://localhost:50051"
 <h3 id="schema-json-format"><a class="header" href="#schema-json-format">Schema JSON format</a></h3>
 <p>FieldOption uses serde’s externally-tagged representation where the variant name is the key:</p>
 <pre><code class="language-json">{
+  "dynamic_field_policy": "Dynamic",
   "fields": {
     "title":     { "Text":    { "indexed": true, "stored": true } },
     "body":      { "Text":    {} },
@@ -7676,6 +7809,13 @@ endpoint: "http://localhost:50051"
   }
 }
 </code></pre>
+<p>The optional <code>dynamic_field_policy</code> key controls how fields that appear in
+ingested documents but are absent from the schema are handled. Accepted
+values: <code>"Strict"</code>, <code>"Dynamic"</code> (default), <code>"Ignore"</code>. <strong>Warning</strong>: under
+<code>"Dynamic"</code>, integer fields silently truncate incoming float values
+(<code>3.14</code> → <code>3</code>); use <code>"Strict"</code> to reject such mismatches. See
+<a href="#dynamic-schema">Schema &amp; Fields</a> for the
+full behaviour matrix.</p>
 <h3 id="example-1-1"><a class="header" href="#example-1-1">Example</a></h3>
 <pre><code class="language-text">Tool: create_index
 schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
@@ -8198,9 +8338,26 @@ print(stats["vector_fields"])
 <tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
 <tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
 <tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">Set default search fields (list of strings).</td></tr>
+<tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
+<tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
+<tr><td style="text-align: left"><code>field_names()</code></td><td style="text-align: left">Return all field names.</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy"><a class="header" href="#dynamic-field-policy">Dynamic field policy</a></h4>
+<p>Controls what happens when a document is ingested with field names that are
+not declared in the schema:</p>
+<ul>
+<li><code>"strict"</code> — Reject the document.</li>
+<li><code>"dynamic"</code> (default) — Infer a type for each undeclared field and add it
+to the schema. <strong>Warning</strong>: integer fields silently truncate incoming
+float values (<code>3.14</code> → <code>3</code>). Use <code>"strict"</code> if you need to reject such
+type mismatches.</li>
+<li><code>"ignore"</code> — Silently drop the undeclared fields.</li>
+</ul>
+<p>See <a href="#dynamic-schema">Schema &amp; Fields</a> for
+the full behaviour matrix.</p>
 <h3 id="distance-metrics-3"><a class="header" href="#distance-metrics-3">Distance metrics</a></h3>
 <div class="table-wrapper">
 <table>
@@ -8671,10 +8828,25 @@ and return Promises. <code>stats()</code> is synchronous.</p>
 <tr><td style="text-align: left"><code>addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)</code></td><td style="text-align: left">IVF vector field.</td></tr>
 <tr><td style="text-align: left"><code>addEmbedder(name, config)</code></td><td style="text-align: left">Register a named embedder.</td></tr>
 <tr><td style="text-align: left"><code>setDefaultFields(fields)</code></td><td style="text-align: left">Set default search fields.</td></tr>
+<tr><td style="text-align: left"><code>setDynamicFieldPolicy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
+<tr><td style="text-align: left"><code>dynamicFieldPolicy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
 <tr><td style="text-align: left"><code>fieldNames()</code></td><td style="text-align: left">Return all field names.</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy-1"><a class="header" href="#dynamic-field-policy-1">Dynamic field policy</a></h4>
+<p>Controls what happens when a document is ingested with field names that are
+not declared in the schema:</p>
+<ul>
+<li><code>"strict"</code> — Reject the document.</li>
+<li><code>"dynamic"</code> (default) — Infer a type for each undeclared field and add it
+to the schema. <strong>Warning</strong>: integer fields silently truncate incoming
+float values (<code>3.14</code> → <code>3</code>). Use <code>"strict"</code> if you need to reject such
+type mismatches.</li>
+<li><code>"ignore"</code> — Silently drop the undeclared fields.</li>
+</ul>
+<p>See <a href="#dynamic-schema">Schema &amp; Fields</a> for
+the full behaviour matrix.</p>
 <h3 id="distance-metrics-4"><a class="header" href="#distance-metrics-4">Distance metrics</a></h3>
 <div class="table-wrapper">
 <table>
@@ -9375,6 +9547,21 @@ module.exports = {
 </code></pre>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>Set the default search fields.</p>
+<h4 id="setdynamicfieldpolicypolicy"><a class="header" href="#setdynamicfieldpolicypolicy"><code>setDynamicFieldPolicy(policy)</code></a></h4>
+<p>Set how the engine treats fields that appear in ingested documents but are
+absent from the schema. <code>policy</code> is one of <code>"strict"</code>, <code>"dynamic"</code>
+(default), or <code>"ignore"</code> (case-insensitive). Throws on an invalid value.</p>
+<ul>
+<li><code>"strict"</code> — Reject the document.</li>
+<li><code>"dynamic"</code> — Infer a type for each undeclared field and add it to the
+schema. <strong>Warning</strong>: integer fields silently truncate incoming float
+values (<code>3.14</code> → <code>3</code>).</li>
+<li><code>"ignore"</code> — Silently drop the undeclared fields.</li>
+</ul>
+<p>See <a href="#dynamic-schema">Schema &amp; Fields</a> for
+the full behaviour matrix.</p>
+<h4 id="dynamicfieldpolicy"><a class="header" href="#dynamicfieldpolicy"><code>dynamicFieldPolicy()</code></a></h4>
+<p>Returns the current policy as a lowercase string.</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>Returns an array of defined field names.</p>
 <h2 id="searchresult-5"><a class="header" href="#searchresult-5">SearchResult</a></h2>
@@ -9743,10 +9930,25 @@ puts stats["vector_fields"]
 <tbody>
 <tr><td style="text-align: left"><code>add_embedder(name, config)</code></td><td style="text-align: left">Register a named embedder definition. <code>config</code> is a Hash with a <code>"type"</code> key (see below).</td></tr>
 <tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">Set the default fields used when no field is specified in a query. <code>fields</code> is an Array of Strings.</td></tr>
+<tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
+<tr><td style="text-align: left"><code>dynamic_field_policy -&gt; String</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
 <tr><td style="text-align: left"><code>field_names -&gt; Array&lt;String&gt;</code></td><td style="text-align: left">Return the list of field names defined in this schema.</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy-2"><a class="header" href="#dynamic-field-policy-2">Dynamic field policy</a></h4>
+<p>Controls what happens when a document is ingested with field names that are
+not declared in the schema:</p>
+<ul>
+<li><code>"strict"</code> — Reject the document.</li>
+<li><code>"dynamic"</code> (default) — Infer a type for each undeclared field and add it
+to the schema. <strong>Warning</strong>: integer fields silently truncate incoming
+float values (<code>3.14</code> → <code>3</code>). Use <code>"strict"</code> if you need to reject such
+type mismatches.</li>
+<li><code>"ignore"</code> — Silently drop the undeclared fields.</li>
+</ul>
+<p>See <a href="#dynamic-schema">Schema &amp; Fields</a> for
+the full behaviour matrix.</p>
 <h3 id="embedder-types"><a class="header" href="#embedder-types">Embedder types</a></h3>
 <div class="table-wrapper">
 <table>

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a88fb1c8.js";
+            window.path_to_searchindex_js = "../searchindex-de470a3c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-6cc5bf7f.js"></script>
@@ -216,6 +216,7 @@ endpoint: "http://localhost:50051"
 <h3 id="schema-json-format"><a class="header" href="#schema-json-format">Schema JSON format</a></h3>
 <p>FieldOption uses serde’s externally-tagged representation where the variant name is the key:</p>
 <pre><code class="language-json">{
+  "dynamic_field_policy": "Dynamic",
   "fields": {
     "title":     { "Text":    { "indexed": true, "stored": true } },
     "body":      { "Text":    {} },
@@ -227,6 +228,13 @@ endpoint: "http://localhost:50051"
   }
 }
 </code></pre>
+<p>The optional <code>dynamic_field_policy</code> key controls how fields that appear in
+ingested documents but are absent from the schema are handled. Accepted
+values: <code>"Strict"</code>, <code>"Dynamic"</code> (default), <code>"Ignore"</code>. <strong>Warning</strong>: under
+<code>"Dynamic"</code>, integer fields silently truncate incoming float values
+(<code>3.14</code> → <code>3</code>); use <code>"Strict"</code> to reject such mismatches. See
+<a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for the
+full behaviour matrix.</p>
 <h3 id="example-1"><a class="header" href="#example-1">Example</a></h3>
 <pre><code class="language-text">Tool: create_index
 schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}

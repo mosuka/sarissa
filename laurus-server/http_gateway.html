@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a88fb1c8.js";
+            window.path_to_searchindex_js = "../searchindex-de470a3c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-6cc5bf7f.js"></script>
@@ -224,6 +224,7 @@ laurus serve --config config.toml
   -H 'Content-Type: application/json' \
   -d '{
     "schema": {
+      "dynamic_field_policy": "dynamic",
       "fields": {
         "title": {"text": {"indexed": true, "stored": true, "term_vectors": true}},
         "body": {"text": {"indexed": true, "stored": true, "term_vectors": true}}
@@ -232,6 +233,11 @@ laurus serve --config config.toml
     }
   }'
 </code></pre>
+<p>The <code>dynamic_field_policy</code> key is optional. It controls how fields absent
+from the schema are handled at ingest time. Accepted values: <code>"strict"</code>,
+<code>"dynamic"</code> (default), <code>"ignore"</code>. See
+<a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for the
+full semantics and the warning about silent truncation under <code>"dynamic"</code>.</p>
 <h3 id="get-index-statistics"><a class="header" href="#get-index-statistics">Get Index Statistics</a></h3>
 <pre><code class="language-bash">curl http://localhost:8080/v1/index
 </code></pre>

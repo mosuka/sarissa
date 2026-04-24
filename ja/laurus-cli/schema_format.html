@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -183,8 +183,11 @@
                         <h1 id="スキーマフォーマットリファレンス"><a class="header" href="#スキーマフォーマットリファレンス">スキーマフォーマットリファレンス</a></h1>
 <p>スキーマファイルはインデックスの構造を定義します。どのフィールドが存在するか、その型、およびインデックスの方法を指定します。Laurus はスキーマファイルに TOML 形式を使用します。</p>
 <h2 id="概要"><a class="header" href="#概要">概要</a></h2>
-<p>スキーマは2つのトップレベル要素で構成されます:</p>
-<pre><code class="language-toml"># クエリでフィールドが指定されていない場合にデフォルトで検索するフィールド。
+<p>スキーマは 3 つのトップレベル要素で構成されます:</p>
+<pre><code class="language-toml"># スキーマに宣言されていないフィールドの扱い。省略時は "dynamic"。
+dynamic_field_policy = "dynamic"
+
+# クエリでフィールドが指定されていない場合にデフォルトで検索するフィールド。
 default_fields = ["title", "body"]
 
 # フィールド定義。各フィールドには名前と型付き設定があります。
@@ -192,13 +195,14 @@ default_fields = ["title", "body"]
 # ... 型固有のオプション
 </code></pre>
 <ul>
+<li><strong><code>dynamic_field_policy</code></strong> — スキーマに<strong>宣言されていない</strong>フィールドがドキュメントに含まれる場合の挙動を制御します。値は <code>"strict"</code> / <code>"dynamic"</code> / <code>"ignore"</code>。デフォルトは <code>"dynamic"</code>。詳細および「<code>dynamic</code> では情報損失が起きうる」という警告は <a href="../concepts/schema_and_fields.html#動的スキーマ">動的スキーマ</a> を参照してください。</li>
 <li><strong><code>default_fields</code></strong> — <a href="../concepts/query_dsl.html">Query DSL</a> でデフォルトの検索対象として使用されるフィールド名のリストです。Lexical フィールド（Text、Integer、Float など）のみデフォルトフィールドに指定できます。このキーはオプションで、デフォルトは空のリストです。</li>
 <li><strong><code>fields</code></strong> — フィールド名とその型付き設定のマップです。各フィールドにはフィールド型を1つだけ指定する必要があります。</li>
 </ul>
 <h2 id="フィールド命名規則"><a class="header" href="#フィールド命名規則">フィールド命名規則</a></h2>
 <ul>
 <li>フィールド名は任意の文字列です（例: <code>title</code>、<code>body_vec</code>、<code>created_at</code>）。</li>
-<li><code>_id</code> フィールドは Laurus が内部ドキュメント ID 管理用に予約しています。使用しないでください。</li>
+<li><strong>アンダースコア（<code>_</code>）で始まるフィールド名はエンジンの予約領域</strong>です。例外として <code>_id</code>（自動管理）のみ許可されます。それ以外の <code>_</code> プレフィックス名を宣言しようとするとエラーになります。</li>
 <li>フィールド名はスキーマ内で一意である必要があります。</li>
 </ul>
 <h2 id="フィールド型"><a class="header" href="#フィールド型">フィールド型</a></h2>

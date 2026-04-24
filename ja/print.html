@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-0f2ac19d.js"></script>
@@ -1122,7 +1122,102 @@ let v: DataValue = true.into();          // Bool
 let v: DataValue = vec![0.1f32, 0.2].into(); // Vector
 <span class="boring">}</span></code></pre>
 <h2 id="予約フィールド"><a class="header" href="#予約フィールド">予約フィールド</a></h2>
-<p><code>_id</code> フィールドは Laurus の内部使用のために予約されています。外部ドキュメント ID を格納し、常に <code>KeywordAnalyzer</code>（完全一致）でインデクシングされます。スキーマに追加する必要はありません。自動的に管理されます。</p>
+<p>アンダースコア（<code>_</code>）で始まるフィールド名は<strong>すべてエンジンの予約領域</strong>です。
+ユーザーコードからそのような名前でフィールドを定義することはできず、
+<code>_</code> で始まるキーを含むドキュメントは投入時にエラーとなります。</p>
+<p>唯一許可される <code>_</code> プレフィックス名は、次に説明する <code>_id</code> システムフィールドです。</p>
+<h3 id="_id--外部ドキュメント-id"><a class="header" href="#_id--外部ドキュメント-id"><code>_id</code> — 外部ドキュメント ID</a></h3>
+<p><code>put_document</code> / <code>add_document</code> に渡された外部ドキュメント ID を格納します。
+<code>KeywordAnalyzer</code>（完全一致）でインデクシングされ、自動的に挿入されるため
+スキーマに追加する必要はありません。</p>
+<h2 id="動的スキーマ"><a class="header" href="#動的スキーマ">動的スキーマ</a></h2>
+<p>Laurus はスキーマに宣言されていないフィールドを含むドキュメントも受け付けます。
+挙動は Schema に設定する <code>DynamicFieldPolicy</code> で制御します:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">ポリシー</th><th style="text-align: left">未宣言フィールドに対する挙動</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Strict</code></td><td style="text-align: left">わかりやすいエラーメッセージで投入を拒否する</td></tr>
+<tr><td style="text-align: left"><code>Dynamic</code>（デフォルト）</td><td style="text-align: left">値から型を推論してスキーマへ自動追加する</td></tr>
+<tr><td style="text-align: left"><code>Ignore</code></td><td style="text-align: left">未宣言フィールドを静かに破棄し、他のフィールドはインデックスする</td></tr>
+</tbody>
+</table>
+</div>
+<p>Builder でポリシーを設定します:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::{DynamicFieldPolicy, Schema};
+
+let schema = Schema::builder()
+    .dynamic_field_policy(DynamicFieldPolicy::Dynamic)
+    .build();
+<span class="boring">}</span></code></pre>
+<h3 id="型推論ルールdynamic-ポリシー"><a class="header" href="#型推論ルールdynamic-ポリシー">型推論ルール（Dynamic ポリシー）</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">投入される値</th><th style="text-align: left">推論されるフィールド型</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code>（転置インデックス、BM25）</td></tr>
+<tr><td style="text-align: left"><code>integer</code></td><td style="text-align: left"><code>Integer</code>（BKD tree）</td></tr>
+<tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float</code>（BKD tree）</td></tr>
+<tr><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>Boolean</code></td></tr>
+<tr><td style="text-align: left">緯度キー（<code>lat</code> または <code>latitude</code>）と経度キー（<code>lon</code>、<code>lng</code>、<code>longitude</code> のいずれか）を持ち、値が範囲内の object</td><td style="text-align: left"><code>Geo</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）および <code>Bytes</code> は<strong>自動推論の対象外</strong>です。
+スキーマへ明示的に宣言してください。数値配列（多値数値）も現時点では自動推論されず、
+「未サポート」エラーが返ります。手動で宣言してください。</p>
+<h3 id="型衝突"><a class="header" href="#型衝突">型衝突</a></h3>
+<p><strong>既に宣言されている</strong>フィールドに別の型の値が到着した場合、Laurus は
+宣言された型への変換を試みます。変換ルールは以下の通りです:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">宣言型</th><th style="text-align: left">受け取った値</th><th style="text-align: left">結果</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left">そのまま格納</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Float64(3.14)</code></td><td style="text-align: left"><strong><code>3</code> へ切り捨て</strong>（情報損失あり — 下の警告を参照）</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Text("42")</code></td><td style="text-align: left"><code>42</code> としてパース</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Text("abc")</code></td><td style="text-align: left">エラー</td></tr>
+<tr><td style="text-align: left"><code>Float</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left"><code>f64</code> に拡張</td></tr>
+<tr><td style="text-align: left"><code>Float</code></td><td style="text-align: left"><code>Text("3.14")</code></td><td style="text-align: left">パース</td></tr>
+<tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Int64(0)</code> / <code>Int64(1)</code></td><td style="text-align: left"><code>false</code> / <code>true</code></td></tr>
+<tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Text("true"/"false")</code></td><td style="text-align: left">大文字小文字を無視してパース</td></tr>
+<tr><td style="text-align: left"><code>Text</code></td><td style="text-align: left">任意のスカラー値</td><td style="text-align: left">文字列化</td></tr>
+<tr><td style="text-align: left"><code>Geo</code> / <code>Bytes</code> / ベクトル</td><td style="text-align: left">対応 variant 以外</td><td style="text-align: left">エラー</td></tr>
+</tbody>
+</table>
+</div>
+<p>変換エラーの扱いはポリシーに依存します:</p>
+<ul>
+<li><code>Strict</code>: ただちにエラーを返す</li>
+<li><code>Dynamic</code>: エラーを返す（安全とみなせる変換はこの層ですべて試し切っている）</li>
+<li><code>Ignore</code>: 該当フィールドのみ破棄し、他のフィールドはインデックスする</li>
+</ul>
+<blockquote>
+<p><strong>⚠️ 警告: 静かな情報損失が発生しうる</strong></p>
+<p>いくつかの変換は、エラーを返さずに情報を失います:</p>
+<ul>
+<li><code>Integer</code> フィールドは受け取った <code>Float</code> 値を<strong>切り捨てます</strong>
+（<code>3.14</code> → <code>3</code>、<code>-3.9</code> → <code>-3</code>）。投入は成功します</li>
+<li><code>Float</code> フィールドは <code>f64</code> 仮数部に収まらない巨大な整数で精度を失う可能性があります</li>
+<li><code>Text</code> フィールドはスカラーを文字列化して受け入れます（元の型情報は消えます）</li>
+<li><code>Ignore</code> は非互換なフィールドを静かに捨てます</li>
+</ul>
+<p>データの正確性を優先したい場合は、<code>DynamicFieldPolicy::Strict</code>
+を使う（あるいは必要なフィールドをすべて事前に宣言する）ことを推奨します。
+<code>Dynamic</code> ポリシーは「ドキュメントを投入できる」ことを「入力データを 1 ビットも失わない」ことより優先します。</p>
+</blockquote>
+<h3 id="query-dsl-と未宣言フィールド"><a class="header" href="#query-dsl-と未宣言フィールド">Query DSL と未宣言フィールド</a></h3>
+<p>スキーマが確定した後、クエリパーサは <code>field:value</code> 句で参照されるフィールドが
+すべてスキーマに存在することを検証します。<code>titl:hello</code>（<code>title:hello</code> の打ち間違い）
+のような typo は、結果が無言で空になるのではなく、明確なパースエラーとして返ります。</p>
 <h2 id="動的フィールド管理"><a class="header" href="#動的フィールド管理">動的フィールド管理</a></h2>
 <p>稼働中のエンジンに対して、フィールドの追加および削除を動的に行えます。
 フィールドの型変更はサポートされていません。</p>
@@ -3168,6 +3263,9 @@ async fn main() -&gt; laurus::Result&lt;()&gt; {
 |--- lexical --|    |--- vector --------|
 </code></pre>
 <p>Vector 句と Lexical 句の区別は、フィールド名に基づいて行われます。スキーマ上でベクトルフィールドとして定義されたフィールド名が指定された場合、その句は Vector クエリとして扱われます。</p>
+<h3 id="フィールド検証"><a class="header" href="#フィールド検証">フィールド検証</a></h3>
+<p>クエリ中の <code>field:value</code> 句は、パース時にスキーマと照合されます。スキーマに<strong>宣言されていない</strong>フィールドを参照したクエリは、結果が黙って空になるのではなく、エラーとして返されます。これにより typo（例: <code>title:hello</code> のつもりで <code>titl:hello</code>）を早期に検出できます。</p>
+<p>未知のフィールドを含むドキュメントを受け付けたい場合は、スキーマの <a href="#動的スキーマ"><code>dynamic_field_policy</code></a> を設定して、投入時にフィールドを追加する動作を有効にしてください。一度フィールドがスキーマに登録されれば、それを参照するクエリは正常に動作します。</p>
 <h2 id="lexical-クエリ構文"><a class="header" href="#lexical-クエリ構文">Lexical クエリ構文</a></h2>
 <p>Lexical クエリは、完全一致または近似のキーワードマッチングを使用して転置インデックスを検索します。</p>
 <h3 id="term-クエリ"><a class="header" href="#term-クエリ">Term クエリ</a></h3>
@@ -5667,8 +5765,11 @@ laurus search "price:[10 TO 50]"
 <h1 id="スキーマフォーマットリファレンス"><a class="header" href="#スキーマフォーマットリファレンス">スキーマフォーマットリファレンス</a></h1>
 <p>スキーマファイルはインデックスの構造を定義します。どのフィールドが存在するか、その型、およびインデックスの方法を指定します。Laurus はスキーマファイルに TOML 形式を使用します。</p>
 <h2 id="概要-2"><a class="header" href="#概要-2">概要</a></h2>
-<p>スキーマは2つのトップレベル要素で構成されます:</p>
-<pre><code class="language-toml"># クエリでフィールドが指定されていない場合にデフォルトで検索するフィールド。
+<p>スキーマは 3 つのトップレベル要素で構成されます:</p>
+<pre><code class="language-toml"># スキーマに宣言されていないフィールドの扱い。省略時は "dynamic"。
+dynamic_field_policy = "dynamic"
+
+# クエリでフィールドが指定されていない場合にデフォルトで検索するフィールド。
 default_fields = ["title", "body"]
 
 # フィールド定義。各フィールドには名前と型付き設定があります。
@@ -5676,13 +5777,14 @@ default_fields = ["title", "body"]
 # ... 型固有のオプション
 </code></pre>
 <ul>
+<li><strong><code>dynamic_field_policy</code></strong> — スキーマに<strong>宣言されていない</strong>フィールドがドキュメントに含まれる場合の挙動を制御します。値は <code>"strict"</code> / <code>"dynamic"</code> / <code>"ignore"</code>。デフォルトは <code>"dynamic"</code>。詳細および「<code>dynamic</code> では情報損失が起きうる」という警告は <a href="#動的スキーマ">動的スキーマ</a> を参照してください。</li>
 <li><strong><code>default_fields</code></strong> — <a href="#query-dsl-2">Query DSL</a> でデフォルトの検索対象として使用されるフィールド名のリストです。Lexical フィールド（Text、Integer、Float など）のみデフォルトフィールドに指定できます。このキーはオプションで、デフォルトは空のリストです。</li>
 <li><strong><code>fields</code></strong> — フィールド名とその型付き設定のマップです。各フィールドにはフィールド型を1つだけ指定する必要があります。</li>
 </ul>
 <h2 id="フィールド命名規則"><a class="header" href="#フィールド命名規則">フィールド命名規則</a></h2>
 <ul>
 <li>フィールド名は任意の文字列です（例: <code>title</code>、<code>body_vec</code>、<code>created_at</code>）。</li>
-<li><code>_id</code> フィールドは Laurus が内部ドキュメント ID 管理用に予約しています。使用しないでください。</li>
+<li><strong>アンダースコア（<code>_</code>）で始まるフィールド名はエンジンの予約領域</strong>です。例外として <code>_id</code>（自動管理）のみ許可されます。それ以外の <code>_</code> プレフィックス名を宣言しようとするとエラーになります。</li>
 <li>フィールド名はスキーマ内で一意である必要があります。</li>
 </ul>
 <h2 id="フィールド型"><a class="header" href="#フィールド型">フィールド型</a></h2>
@@ -6859,6 +6961,14 @@ laurus serve
   repeated string default_fields = 2;
   map&lt;string, AnalyzerDefinition&gt; analyzers = 3;
   map&lt;string, EmbedderConfig&gt; embedders = 4;
+  DynamicFieldPolicy dynamic_field_policy = 5;
+}
+
+enum DynamicFieldPolicy {
+  DYNAMIC_FIELD_POLICY_UNSPECIFIED = 0;
+  DYNAMIC_FIELD_POLICY_STRICT = 1;
+  DYNAMIC_FIELD_POLICY_DYNAMIC = 2;
+  DYNAMIC_FIELD_POLICY_IGNORE = 3;
 }
 </code></pre>
 <ul>
@@ -6866,6 +6976,7 @@ laurus serve
 <li><strong><code>default_fields</code></strong> — クエリでフィールドを指定しない場合のデフォルト検索対象フィールド名。</li>
 <li><strong><code>analyzers</code></strong> — 名前をキーとしたカスタムアナライザーパイプライン。<code>TextOption.analyzer</code> で参照。</li>
 <li><strong><code>embedders</code></strong> — 名前をキーとしたエンベッダー設定。ベクトルフィールドオプション（<code>HnswOption.embedder</code> など）で参照。</li>
+<li><strong><code>dynamic_field_policy</code></strong> — 投入されたドキュメントに含まれるが <code>fields</code> に<strong>宣言されていない</strong>フィールドの扱い。<code>UNSPECIFIED</code>（値 0）は後方互換のため <code>DYNAMIC</code> として解釈されます。挙動マトリクスおよび <code>DYNAMIC</code> での情報損失警告は <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</li>
 </ul>
 <p><strong>AnalyzerDefinition:</strong></p>
 <pre><code class="language-protobuf">message AnalyzerDefinition {
@@ -7289,6 +7400,7 @@ laurus serve --config config.toml
   -H 'Content-Type: application/json' \
   -d '{
     "schema": {
+      "dynamic_field_policy": "dynamic",
       "fields": {
         "title": {"text": {"indexed": true, "stored": true, "term_vectors": true}},
         "body": {"text": {"indexed": true, "stored": true, "term_vectors": true}}
@@ -7297,6 +7409,7 @@ laurus serve --config config.toml
     }
   }'
 </code></pre>
+<p><code>dynamic_field_policy</code> は省略可能なキーで、スキーマに宣言されていないフィールドの扱いを制御します。指定できる値は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code> の 3 種類です。詳細および <code>"dynamic"</code> での情報損失に関する警告は <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="インデックス統計情報の取得"><a class="header" href="#インデックス統計情報の取得">インデックス統計情報の取得</a></h3>
 <pre><code class="language-bash">curl http://localhost:8080/v1/index
 </code></pre>
@@ -7569,6 +7682,7 @@ endpoint: "http://localhost:50051"
 <h3 id="スキーマ-json-フォーマット"><a class="header" href="#スキーマ-json-フォーマット">スキーマ JSON フォーマット</a></h3>
 <p>FieldOption は serde の externally-tagged 表現を使用します（バリアント名がキーになります）：</p>
 <pre><code class="language-json">{
+  "dynamic_field_policy": "Dynamic",
   "fields": {
     "title":     { "Text":    { "indexed": true, "stored": true } },
     "body":      { "Text":    {} },
@@ -7580,6 +7694,7 @@ endpoint: "http://localhost:50051"
   }
 }
 </code></pre>
+<p>オプションの <code>dynamic_field_policy</code> キーは、スキーマに宣言されていないフィールドが投入ドキュメントに含まれる場合の挙動を制御します。指定可能な値は <code>"Strict"</code> / <code>"Dynamic"</code>（デフォルト）/ <code>"Ignore"</code>。<strong>警告</strong>: <code>"Dynamic"</code> では integer フィールドに入ってきた float 値が静かに切り捨てられます（<code>3.14</code> → <code>3</code>）。厳密さが必要なら <code>"Strict"</code> を使用してください。詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="例-1-1"><a class="header" href="#例-1-1">例</a></h3>
 <pre><code class="language-text">Tool: create_index
 schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
@@ -8100,9 +8215,21 @@ print(stats["vector_fields"])
 <tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW 近似最近傍ベクトルフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat（総当たり）ベクトルフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF 近似最近傍ベクトルフィールド。</td></tr>
+<tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">デフォルト検索フィールドを設定（文字列のリスト）。</td></tr>
+<tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">未宣言フィールドの扱いを設定。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code>。詳細は下記を参照。</td></tr>
+<tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">現在のポリシーを小文字の文字列で返す。</td></tr>
+<tr><td style="text-align: left"><code>field_names()</code></td><td style="text-align: left">全フィールド名を返す。</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy動的フィールドポリシー"><a class="header" href="#dynamic-field-policy動的フィールドポリシー">Dynamic field policy（動的フィールドポリシー）</a></h4>
+<p>ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを制御します:</p>
+<ul>
+<li><code>"strict"</code> — ドキュメントを拒否</li>
+<li><code>"dynamic"</code>（デフォルト）— 各未宣言フィールドの型を推論してスキーマに追加。<strong>警告</strong>: integer フィールドに入ってきた float 値は静かに切り捨てられます（<code>3.14</code> → <code>3</code>）。厳密さが必要なら <code>"strict"</code> を使用してください</li>
+<li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
+</ul>
+<p>詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="距離メトリクス-1"><a class="header" href="#距離メトリクス-1">距離メトリクス</a></h3>
 <div class="table-wrapper">
 <table>
@@ -8571,10 +8698,20 @@ console.log(stats.vectorFields);
 <tr><td style="text-align: left"><code>addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)</code></td><td style="text-align: left">IVF ベクトルフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addEmbedder(name, config)</code></td><td style="text-align: left">名前付き Embedder を登録。</td></tr>
 <tr><td style="text-align: left"><code>setDefaultFields(fields)</code></td><td style="text-align: left">デフォルト検索フィールドを設定。</td></tr>
+<tr><td style="text-align: left"><code>setDynamicFieldPolicy(policy)</code></td><td style="text-align: left">未宣言フィールドの扱いを設定。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code>。詳細は下記を参照。</td></tr>
+<tr><td style="text-align: left"><code>dynamicFieldPolicy()</code></td><td style="text-align: left">現在のポリシーを小文字の文字列で返す。</td></tr>
 <tr><td style="text-align: left"><code>fieldNames()</code></td><td style="text-align: left">全フィールド名を返す。</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy動的フィールドポリシー-1"><a class="header" href="#dynamic-field-policy動的フィールドポリシー-1">Dynamic field policy（動的フィールドポリシー）</a></h4>
+<p>ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを制御します:</p>
+<ul>
+<li><code>"strict"</code> — ドキュメントを拒否</li>
+<li><code>"dynamic"</code>（デフォルト）— 各未宣言フィールドの型を推論してスキーマに追加。<strong>警告</strong>: integer フィールドに入ってきた float 値は静かに切り捨てられます（<code>3.14</code> → <code>3</code>）。厳密さが必要なら <code>"strict"</code> を使用してください</li>
+<li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
+</ul>
+<p>詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="距離指標"><a class="header" href="#距離指標">距離指標</a></h3>
 <div class="table-wrapper">
 <table>
@@ -9251,6 +9388,16 @@ module.exports = {
 <p>名前付き埋め込み器を登録します。WASM では <code>"precomputed"</code> のみ対応しています。</p>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>デフォルト検索フィールドを設定します。</p>
+<h4 id="setdynamicfieldpolicypolicy"><a class="header" href="#setdynamicfieldpolicypolicy"><code>setDynamicFieldPolicy(policy)</code></a></h4>
+<p>ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを設定します。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code> のいずれか（大文字小文字を無視）。不正な値を渡すと例外をスローします。</p>
+<ul>
+<li><code>"strict"</code> — ドキュメントを拒否</li>
+<li><code>"dynamic"</code> — 各未宣言フィールドの型を推論してスキーマに追加。<strong>警告</strong>: integer フィールドに入ってきた float 値は静かに切り捨てられます（<code>3.14</code> → <code>3</code>）</li>
+<li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
+</ul>
+<p>詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
+<h4 id="dynamicfieldpolicy"><a class="header" href="#dynamicfieldpolicy"><code>dynamicFieldPolicy()</code></a></h4>
+<p>現在のポリシーを小文字の文字列で返します。</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>定義済みフィールド名の配列を返します。</p>
 <h2 id="searchresult-5"><a class="header" href="#searchresult-5">SearchResult</a></h2>
@@ -9605,10 +9752,20 @@ puts stats["vector_fields"]
 <tbody>
 <tr><td style="text-align: left"><code>add_embedder(name, config)</code></td><td style="text-align: left">名前付きエンベダー定義を登録します。<code>config</code> は <code>"type"</code> キーを持つ Hash です（下記参照）。</td></tr>
 <tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">クエリでフィールドが指定されていない場合に使用するデフォルトフィールドを設定します。<code>fields</code> は文字列の配列です。</td></tr>
+<tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">未宣言フィールドの扱いを設定します。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code>。詳細は下記を参照。</td></tr>
+<tr><td style="text-align: left"><code>dynamic_field_policy -&gt; String</code></td><td style="text-align: left">現在のポリシーを小文字の文字列で返します。</td></tr>
 <tr><td style="text-align: left"><code>field_names -&gt; Array&lt;String&gt;</code></td><td style="text-align: left">このスキーマに定義されたフィールド名のリストを返します。</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy動的フィールドポリシー-2"><a class="header" href="#dynamic-field-policy動的フィールドポリシー-2">Dynamic field policy（動的フィールドポリシー）</a></h4>
+<p>ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを制御します:</p>
+<ul>
+<li><code>"strict"</code> — ドキュメントを拒否</li>
+<li><code>"dynamic"</code>（デフォルト）— 各未宣言フィールドの型を推論してスキーマに追加。<strong>警告</strong>: integer フィールドに入ってきた float 値は静かに切り捨てられます（<code>3.14</code> → <code>3</code>）。厳密さが必要なら <code>"strict"</code> を使用してください</li>
+<li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
+</ul>
+<p>詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="エンベダータイプ"><a class="header" href="#エンベダータイプ">エンベダータイプ</a></h3>
 <div class="table-wrapper">
 <table>
@@ -10156,10 +10313,20 @@ echo $stats["vector_fields"];
 <tbody>
 <tr><td style="text-align: left"><code>addEmbedder(string $name, array $config): void</code></td><td style="text-align: left">名前付きエンベダー定義を登録します。<code>$config</code> は <code>"type"</code> キーを持つ連想配列です（下記参照）。</td></tr>
 <tr><td style="text-align: left"><code>setDefaultFields(array $fieldNames): void</code></td><td style="text-align: left">クエリでフィールドが指定されていない場合に使用するデフォルトフィールドを設定します。<code>$fieldNames</code> は文字列の配列です。</td></tr>
+<tr><td style="text-align: left"><code>setDynamicFieldPolicy(string $policy): void</code></td><td style="text-align: left">未宣言フィールドの扱いを設定します。<code>$policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code>。詳細は下記を参照。</td></tr>
+<tr><td style="text-align: left"><code>dynamicFieldPolicy(): string</code></td><td style="text-align: left">現在のポリシーを小文字の文字列で返します。</td></tr>
 <tr><td style="text-align: left"><code>fieldNames(): array</code></td><td style="text-align: left">このスキーマに定義されたフィールド名のリストを返します。</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy動的フィールドポリシー-3"><a class="header" href="#dynamic-field-policy動的フィールドポリシー-3">Dynamic field policy（動的フィールドポリシー）</a></h4>
+<p>ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを制御します:</p>
+<ul>
+<li><code>"strict"</code> — ドキュメントを拒否</li>
+<li><code>"dynamic"</code>（デフォルト）— 各未宣言フィールドの型を推論してスキーマに追加。<strong>警告</strong>: integer フィールドに入ってきた float 値は静かに切り捨てられます（<code>3.14</code> → <code>3</code>）。厳密さが必要なら <code>"strict"</code> を使用してください</li>
+<li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
+</ul>
+<p>詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="エンベダータイプ-1"><a class="header" href="#エンベダータイプ-1">エンベダータイプ</a></h3>
 <div class="table-wrapper">
 <table>

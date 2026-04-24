@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -410,7 +410,102 @@ let v: DataValue = true.into();          // Bool
 let v: DataValue = vec![0.1f32, 0.2].into(); // Vector
 <span class="boring">}</span></code></pre>
 <h2 id="予約フィールド"><a class="header" href="#予約フィールド">予約フィールド</a></h2>
-<p><code>_id</code> フィールドは Laurus の内部使用のために予約されています。外部ドキュメント ID を格納し、常に <code>KeywordAnalyzer</code>（完全一致）でインデクシングされます。スキーマに追加する必要はありません。自動的に管理されます。</p>
+<p>アンダースコア（<code>_</code>）で始まるフィールド名は<strong>すべてエンジンの予約領域</strong>です。
+ユーザーコードからそのような名前でフィールドを定義することはできず、
+<code>_</code> で始まるキーを含むドキュメントは投入時にエラーとなります。</p>
+<p>唯一許可される <code>_</code> プレフィックス名は、次に説明する <code>_id</code> システムフィールドです。</p>
+<h3 id="_id--外部ドキュメント-id"><a class="header" href="#_id--外部ドキュメント-id"><code>_id</code> — 外部ドキュメント ID</a></h3>
+<p><code>put_document</code> / <code>add_document</code> に渡された外部ドキュメント ID を格納します。
+<code>KeywordAnalyzer</code>（完全一致）でインデクシングされ、自動的に挿入されるため
+スキーマに追加する必要はありません。</p>
+<h2 id="動的スキーマ"><a class="header" href="#動的スキーマ">動的スキーマ</a></h2>
+<p>Laurus はスキーマに宣言されていないフィールドを含むドキュメントも受け付けます。
+挙動は Schema に設定する <code>DynamicFieldPolicy</code> で制御します:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">ポリシー</th><th style="text-align: left">未宣言フィールドに対する挙動</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Strict</code></td><td style="text-align: left">わかりやすいエラーメッセージで投入を拒否する</td></tr>
+<tr><td style="text-align: left"><code>Dynamic</code>（デフォルト）</td><td style="text-align: left">値から型を推論してスキーマへ自動追加する</td></tr>
+<tr><td style="text-align: left"><code>Ignore</code></td><td style="text-align: left">未宣言フィールドを静かに破棄し、他のフィールドはインデックスする</td></tr>
+</tbody>
+</table>
+</div>
+<p>Builder でポリシーを設定します:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::{DynamicFieldPolicy, Schema};
+
+let schema = Schema::builder()
+    .dynamic_field_policy(DynamicFieldPolicy::Dynamic)
+    .build();
+<span class="boring">}</span></code></pre>
+<h3 id="型推論ルールdynamic-ポリシー"><a class="header" href="#型推論ルールdynamic-ポリシー">型推論ルール（Dynamic ポリシー）</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">投入される値</th><th style="text-align: left">推論されるフィールド型</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code>（転置インデックス、BM25）</td></tr>
+<tr><td style="text-align: left"><code>integer</code></td><td style="text-align: left"><code>Integer</code>（BKD tree）</td></tr>
+<tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float</code>（BKD tree）</td></tr>
+<tr><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>Boolean</code></td></tr>
+<tr><td style="text-align: left">緯度キー（<code>lat</code> または <code>latitude</code>）と経度キー（<code>lon</code>、<code>lng</code>、<code>longitude</code> のいずれか）を持ち、値が範囲内の object</td><td style="text-align: left"><code>Geo</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）および <code>Bytes</code> は<strong>自動推論の対象外</strong>です。
+スキーマへ明示的に宣言してください。数値配列（多値数値）も現時点では自動推論されず、
+「未サポート」エラーが返ります。手動で宣言してください。</p>
+<h3 id="型衝突"><a class="header" href="#型衝突">型衝突</a></h3>
+<p><strong>既に宣言されている</strong>フィールドに別の型の値が到着した場合、Laurus は
+宣言された型への変換を試みます。変換ルールは以下の通りです:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">宣言型</th><th style="text-align: left">受け取った値</th><th style="text-align: left">結果</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left">そのまま格納</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Float64(3.14)</code></td><td style="text-align: left"><strong><code>3</code> へ切り捨て</strong>（情報損失あり — 下の警告を参照）</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Text("42")</code></td><td style="text-align: left"><code>42</code> としてパース</td></tr>
+<tr><td style="text-align: left"><code>Integer</code></td><td style="text-align: left"><code>Text("abc")</code></td><td style="text-align: left">エラー</td></tr>
+<tr><td style="text-align: left"><code>Float</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left"><code>f64</code> に拡張</td></tr>
+<tr><td style="text-align: left"><code>Float</code></td><td style="text-align: left"><code>Text("3.14")</code></td><td style="text-align: left">パース</td></tr>
+<tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Int64(0)</code> / <code>Int64(1)</code></td><td style="text-align: left"><code>false</code> / <code>true</code></td></tr>
+<tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Text("true"/"false")</code></td><td style="text-align: left">大文字小文字を無視してパース</td></tr>
+<tr><td style="text-align: left"><code>Text</code></td><td style="text-align: left">任意のスカラー値</td><td style="text-align: left">文字列化</td></tr>
+<tr><td style="text-align: left"><code>Geo</code> / <code>Bytes</code> / ベクトル</td><td style="text-align: left">対応 variant 以外</td><td style="text-align: left">エラー</td></tr>
+</tbody>
+</table>
+</div>
+<p>変換エラーの扱いはポリシーに依存します:</p>
+<ul>
+<li><code>Strict</code>: ただちにエラーを返す</li>
+<li><code>Dynamic</code>: エラーを返す（安全とみなせる変換はこの層ですべて試し切っている）</li>
+<li><code>Ignore</code>: 該当フィールドのみ破棄し、他のフィールドはインデックスする</li>
+</ul>
+<blockquote>
+<p><strong>⚠️ 警告: 静かな情報損失が発生しうる</strong></p>
+<p>いくつかの変換は、エラーを返さずに情報を失います:</p>
+<ul>
+<li><code>Integer</code> フィールドは受け取った <code>Float</code> 値を<strong>切り捨てます</strong>
+（<code>3.14</code> → <code>3</code>、<code>-3.9</code> → <code>-3</code>）。投入は成功します</li>
+<li><code>Float</code> フィールドは <code>f64</code> 仮数部に収まらない巨大な整数で精度を失う可能性があります</li>
+<li><code>Text</code> フィールドはスカラーを文字列化して受け入れます（元の型情報は消えます）</li>
+<li><code>Ignore</code> は非互換なフィールドを静かに捨てます</li>
+</ul>
+<p>データの正確性を優先したい場合は、<code>DynamicFieldPolicy::Strict</code>
+を使う（あるいは必要なフィールドをすべて事前に宣言する）ことを推奨します。
+<code>Dynamic</code> ポリシーは「ドキュメントを投入できる」ことを「入力データを 1 ビットも失わない」ことより優先します。</p>
+</blockquote>
+<h3 id="query-dsl-と未宣言フィールド"><a class="header" href="#query-dsl-と未宣言フィールド">Query DSL と未宣言フィールド</a></h3>
+<p>スキーマが確定した後、クエリパーサは <code>field:value</code> 句で参照されるフィールドが
+すべてスキーマに存在することを検証します。<code>titl:hello</code>（<code>title:hello</code> の打ち間違い）
+のような typo は、結果が無言で空になるのではなく、明確なパースエラーとして返ります。</p>
 <h2 id="動的フィールド管理"><a class="header" href="#動的フィールド管理">動的フィールド管理</a></h2>
 <p>稼働中のエンジンに対して、フィールドの追加および削除を動的に行えます。
 フィールドの型変更はサポートされていません。</p>

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a88fb1c8.js";
+            window.path_to_searchindex_js = "../searchindex-de470a3c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-6cc5bf7f.js"></script>
@@ -184,6 +184,15 @@
 |--- lexical --|    |--- vector --------|
 </code></pre>
 <p>The field type in the schema determines whether a clause is lexical or vector. If the field is a vector field (e.g., HNSW), the clause is treated as a vector query. Everything else is treated as a lexical query.</p>
+<h3 id="field-validation"><a class="header" href="#field-validation">Field validation</a></h3>
+<p>Every <code>field:value</code> clause is validated against the schema at parse time. A
+query that references a field <strong>not declared</strong> in the schema is rejected with
+an error rather than returning silently-empty results. This catches typos
+early (e.g. <code>titl:hello</code> instead of <code>title:hello</code>).</p>
+<p>If you want the engine to accept documents with previously-unknown fields,
+set the schema’s <a href="./schema_and_fields.html#dynamic-schema"><code>dynamic_field_policy</code></a>
+so that the field gets added during ingestion. Once a field is part of the
+schema, queries referencing it succeed.</p>
 <h2 id="lexical-query-syntax"><a class="header" href="#lexical-query-syntax">Lexical Query Syntax</a></h2>
 <p>Lexical queries search the inverted index using exact or approximate keyword matching.</p>
 <h3 id="term-query"><a class="header" href="#term-query">Term Query</a></h3>

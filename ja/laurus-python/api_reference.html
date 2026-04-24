@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -246,9 +246,21 @@
 <tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW 近似最近傍ベクトルフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat（総当たり）ベクトルフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF 近似最近傍ベクトルフィールド。</td></tr>
+<tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">デフォルト検索フィールドを設定（文字列のリスト）。</td></tr>
+<tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">未宣言フィールドの扱いを設定。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code>。詳細は下記を参照。</td></tr>
+<tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">現在のポリシーを小文字の文字列で返す。</td></tr>
+<tr><td style="text-align: left"><code>field_names()</code></td><td style="text-align: left">全フィールド名を返す。</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy動的フィールドポリシー"><a class="header" href="#dynamic-field-policy動的フィールドポリシー">Dynamic field policy（動的フィールドポリシー）</a></h4>
+<p>ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを制御します:</p>
+<ul>
+<li><code>"strict"</code> — ドキュメントを拒否</li>
+<li><code>"dynamic"</code>（デフォルト）— 各未宣言フィールドの型を推論してスキーマに追加。<strong>警告</strong>: integer フィールドに入ってきた float 値は静かに切り捨てられます（<code>3.14</code> → <code>3</code>）。厳密さが必要なら <code>"strict"</code> を使用してください</li>
+<li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
+</ul>
+<p>詳細な挙動マトリクスは <a href="../concepts/schema_and_fields.html#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="距離メトリクス"><a class="header" href="#距離メトリクス">距離メトリクス</a></h3>
 <div class="table-wrapper">
 <table>

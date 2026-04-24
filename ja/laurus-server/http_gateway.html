@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -229,6 +229,7 @@ laurus serve --config config.toml
   -H 'Content-Type: application/json' \
   -d '{
     "schema": {
+      "dynamic_field_policy": "dynamic",
       "fields": {
         "title": {"text": {"indexed": true, "stored": true, "term_vectors": true}},
         "body": {"text": {"indexed": true, "stored": true, "term_vectors": true}}
@@ -237,6 +238,7 @@ laurus serve --config config.toml
     }
   }'
 </code></pre>
+<p><code>dynamic_field_policy</code> は省略可能なキーで、スキーマに宣言されていないフィールドの扱いを制御します。指定できる値は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code> の 3 種類です。詳細および <code>"dynamic"</code> での情報損失に関する警告は <a href="../concepts/schema_and_fields.html#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="インデックス統計情報の取得"><a class="header" href="#インデックス統計情報の取得">インデックス統計情報の取得</a></h3>
 <pre><code class="language-bash">curl http://localhost:8080/v1/index
 </code></pre>

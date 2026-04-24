@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a88fb1c8.js";
+            window.path_to_searchindex_js = "../searchindex-de470a3c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-6cc5bf7f.js"></script>
@@ -233,6 +233,14 @@
   repeated string default_fields = 2;
   map&lt;string, AnalyzerDefinition&gt; analyzers = 3;
   map&lt;string, EmbedderConfig&gt; embedders = 4;
+  DynamicFieldPolicy dynamic_field_policy = 5;
+}
+
+enum DynamicFieldPolicy {
+  DYNAMIC_FIELD_POLICY_UNSPECIFIED = 0;
+  DYNAMIC_FIELD_POLICY_STRICT = 1;
+  DYNAMIC_FIELD_POLICY_DYNAMIC = 2;
+  DYNAMIC_FIELD_POLICY_IGNORE = 3;
 }
 </code></pre>
 <ul>
@@ -240,6 +248,7 @@
 <li><strong><code>default_fields</code></strong> — Field names used as default search targets when a query does not specify a field.</li>
 <li><strong><code>analyzers</code></strong> — Custom analyzer pipelines keyed by name. Referenced by <code>TextOption.analyzer</code>.</li>
 <li><strong><code>embedders</code></strong> — Embedder configurations keyed by name. Referenced by vector field options (<code>HnswOption.embedder</code>, etc.).</li>
+<li><strong><code>dynamic_field_policy</code></strong> — How the engine treats fields that appear in an ingested document but are <strong>absent</strong> from <code>fields</code>. <code>UNSPECIFIED</code> is interpreted as <code>DYNAMIC</code> for forward compatibility. See <a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for the full behaviour matrix and the warning about silent truncation under <code>DYNAMIC</code>.</li>
 </ul>
 <p><strong>AnalyzerDefinition:</strong></p>
 <pre><code class="language-protobuf">message AnalyzerDefinition {

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a88fb1c8.js";
+            window.path_to_searchindex_js = "../searchindex-de470a3c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-6cc5bf7f.js"></script>
@@ -243,9 +243,26 @@
 <tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
 <tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
 <tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">Set default search fields (list of strings).</td></tr>
+<tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
+<tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
+<tr><td style="text-align: left"><code>field_names()</code></td><td style="text-align: left">Return all field names.</td></tr>
 </tbody>
 </table>
 </div>
+<h4 id="dynamic-field-policy"><a class="header" href="#dynamic-field-policy">Dynamic field policy</a></h4>
+<p>Controls what happens when a document is ingested with field names that are
+not declared in the schema:</p>
+<ul>
+<li><code>"strict"</code> — Reject the document.</li>
+<li><code>"dynamic"</code> (default) — Infer a type for each undeclared field and add it
+to the schema. <strong>Warning</strong>: integer fields silently truncate incoming
+float values (<code>3.14</code> → <code>3</code>). Use <code>"strict"</code> if you need to reject such
+type mismatches.</li>
+<li><code>"ignore"</code> — Silently drop the undeclared fields.</li>
+</ul>
+<p>See <a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for
+the full behaviour matrix.</p>
 <h3 id="distance-metrics"><a class="header" href="#distance-metrics">Distance metrics</a></h3>
 <div class="table-wrapper">
 <table>

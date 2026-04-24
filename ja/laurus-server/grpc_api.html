@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -236,6 +236,14 @@
   repeated string default_fields = 2;
   map&lt;string, AnalyzerDefinition&gt; analyzers = 3;
   map&lt;string, EmbedderConfig&gt; embedders = 4;
+  DynamicFieldPolicy dynamic_field_policy = 5;
+}
+
+enum DynamicFieldPolicy {
+  DYNAMIC_FIELD_POLICY_UNSPECIFIED = 0;
+  DYNAMIC_FIELD_POLICY_STRICT = 1;
+  DYNAMIC_FIELD_POLICY_DYNAMIC = 2;
+  DYNAMIC_FIELD_POLICY_IGNORE = 3;
 }
 </code></pre>
 <ul>
@@ -243,6 +251,7 @@
 <li><strong><code>default_fields</code></strong> — クエリでフィールドを指定しない場合のデフォルト検索対象フィールド名。</li>
 <li><strong><code>analyzers</code></strong> — 名前をキーとしたカスタムアナライザーパイプライン。<code>TextOption.analyzer</code> で参照。</li>
 <li><strong><code>embedders</code></strong> — 名前をキーとしたエンベッダー設定。ベクトルフィールドオプション（<code>HnswOption.embedder</code> など）で参照。</li>
+<li><strong><code>dynamic_field_policy</code></strong> — 投入されたドキュメントに含まれるが <code>fields</code> に<strong>宣言されていない</strong>フィールドの扱い。<code>UNSPECIFIED</code>（値 0）は後方互換のため <code>DYNAMIC</code> として解釈されます。挙動マトリクスおよび <code>DYNAMIC</code> での情報損失警告は <a href="../concepts/schema_and_fields.html#動的スキーマ">スキーマとフィールド</a> を参照してください。</li>
 </ul>
 <p><strong>AnalyzerDefinition:</strong></p>
 <pre><code class="language-protobuf">message AnalyzerDefinition {

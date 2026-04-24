@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -187,6 +187,9 @@
 |--- lexical --|    |--- vector --------|
 </code></pre>
 <p>Vector 句と Lexical 句の区別は、フィールド名に基づいて行われます。スキーマ上でベクトルフィールドとして定義されたフィールド名が指定された場合、その句は Vector クエリとして扱われます。</p>
+<h3 id="フィールド検証"><a class="header" href="#フィールド検証">フィールド検証</a></h3>
+<p>クエリ中の <code>field:value</code> 句は、パース時にスキーマと照合されます。スキーマに<strong>宣言されていない</strong>フィールドを参照したクエリは、結果が黙って空になるのではなく、エラーとして返されます。これにより typo（例: <code>title:hello</code> のつもりで <code>titl:hello</code>）を早期に検出できます。</p>
+<p>未知のフィールドを含むドキュメントを受け付けたい場合は、スキーマの <a href="./schema_and_fields.html#動的スキーマ"><code>dynamic_field_policy</code></a> を設定して、投入時にフィールドを追加する動作を有効にしてください。一度フィールドがスキーマに登録されれば、それを参照するクエリは正常に動作します。</p>
 <h2 id="lexical-クエリ構文"><a class="header" href="#lexical-クエリ構文">Lexical クエリ構文</a></h2>
 <p>Lexical クエリは、完全一致または近似のキーワードマッチングを使用して転置インデックスを検索します。</p>
 <h3 id="term-クエリ"><a class="header" href="#term-クエリ">Term クエリ</a></h3>

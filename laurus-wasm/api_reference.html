@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a88fb1c8.js";
+            window.path_to_searchindex_js = "../searchindex-de470a3c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-6cc5bf7f.js"></script>
@@ -336,6 +336,21 @@
 </code></pre>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>Set the default search fields.</p>
+<h4 id="setdynamicfieldpolicypolicy"><a class="header" href="#setdynamicfieldpolicypolicy"><code>setDynamicFieldPolicy(policy)</code></a></h4>
+<p>Set how the engine treats fields that appear in ingested documents but are
+absent from the schema. <code>policy</code> is one of <code>"strict"</code>, <code>"dynamic"</code>
+(default), or <code>"ignore"</code> (case-insensitive). Throws on an invalid value.</p>
+<ul>
+<li><code>"strict"</code> — Reject the document.</li>
+<li><code>"dynamic"</code> — Infer a type for each undeclared field and add it to the
+schema. <strong>Warning</strong>: integer fields silently truncate incoming float
+values (<code>3.14</code> → <code>3</code>).</li>
+<li><code>"ignore"</code> — Silently drop the undeclared fields.</li>
+</ul>
+<p>See <a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for
+the full behaviour matrix.</p>
+<h4 id="dynamicfieldpolicy"><a class="header" href="#dynamicfieldpolicy"><code>dynamicFieldPolicy()</code></a></h4>
+<p>Returns the current policy as a lowercase string.</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>Returns an array of defined field names.</p>
 <h2 id="searchresult"><a class="header" href="#searchresult">SearchResult</a></h2>

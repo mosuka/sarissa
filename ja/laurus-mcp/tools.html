@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -217,6 +217,7 @@ endpoint: "http://localhost:50051"
 <h3 id="スキーマ-json-フォーマット"><a class="header" href="#スキーマ-json-フォーマット">スキーマ JSON フォーマット</a></h3>
 <p>FieldOption は serde の externally-tagged 表現を使用します（バリアント名がキーになります）：</p>
 <pre><code class="language-json">{
+  "dynamic_field_policy": "Dynamic",
   "fields": {
     "title":     { "Text":    { "indexed": true, "stored": true } },
     "body":      { "Text":    {} },
@@ -228,6 +229,7 @@ endpoint: "http://localhost:50051"
   }
 }
 </code></pre>
+<p>オプションの <code>dynamic_field_policy</code> キーは、スキーマに宣言されていないフィールドが投入ドキュメントに含まれる場合の挙動を制御します。指定可能な値は <code>"Strict"</code> / <code>"Dynamic"</code>（デフォルト）/ <code>"Ignore"</code>。<strong>警告</strong>: <code>"Dynamic"</code> では integer フィールドに入ってきた float 値が静かに切り捨てられます（<code>3.14</code> → <code>3</code>）。厳密さが必要なら <code>"Strict"</code> を使用してください。詳細な挙動マトリクスは <a href="../concepts/schema_and_fields.html#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
 <h3 id="例-1"><a class="header" href="#例-1">例</a></h3>
 <pre><code class="language-text">Tool: create_index
 schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}

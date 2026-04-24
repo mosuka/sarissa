@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4dfb22af.js";
+            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -326,6 +326,16 @@
 <p>名前付き埋め込み器を登録します。WASM では <code>"precomputed"</code> のみ対応しています。</p>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>デフォルト検索フィールドを設定します。</p>
+<h4 id="setdynamicfieldpolicypolicy"><a class="header" href="#setdynamicfieldpolicypolicy"><code>setDynamicFieldPolicy(policy)</code></a></h4>
+<p>ドキュメントに含まれるがスキーマに宣言されていないフィールドの扱いを設定します。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code> のいずれか（大文字小文字を無視）。不正な値を渡すと例外をスローします。</p>
+<ul>
+<li><code>"strict"</code> — ドキュメントを拒否</li>
+<li><code>"dynamic"</code> — 各未宣言フィールドの型を推論してスキーマに追加。<strong>警告</strong>: integer フィールドに入ってきた float 値は静かに切り捨てられます（<code>3.14</code> → <code>3</code>）</li>
+<li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
+</ul>
+<p>詳細な挙動マトリクスは <a href="../concepts/schema_and_fields.html#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
+<h4 id="dynamicfieldpolicy"><a class="header" href="#dynamicfieldpolicy"><code>dynamicFieldPolicy()</code></a></h4>
+<p>現在のポリシーを小文字の文字列で返します。</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>定義済みフィールド名の配列を返します。</p>
 <h2 id="searchresult"><a class="header" href="#searchresult">SearchResult</a></h2>
