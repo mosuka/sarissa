@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3813c31f.js";
+            window.path_to_searchindex_js = "searchindex-6df29731.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-6cc5bf7f.js"></script>
@@ -7607,6 +7607,44 @@ full semantics and the warning about silent truncation under <code>"dynamic"</co
 
 data: {"id":"doc2","score":0.4210,"document":{...}}
 </code></pre>
+<h2 id="json-field-value-inference"><a class="header" href="#json-field-value-inference">JSON Field Value Inference</a></h2>
+<p>When the gateway accepts a document body (<code>PUT /v1/documents/:id</code> or
+<code>POST /v1/documents/:id</code>), each value inside <code>document.fields</code> is converted
+to the engine’s <a href="#schema--fields"><code>DataValue</code></a> type using
+the same inference rules as schema-less ingestion. This keeps the HTTP and
+gRPC paths in sync.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">JSON value</th><th style="text-align: left">Resulting field type</th><th style="text-align: left">Notes</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>null</code></td><td style="text-align: left">(skipped)</td><td style="text-align: left">The field is emitted as a <code>NullValue</code> and dropped during ingest.</td></tr>
+<tr><td style="text-align: left"><code>true</code> / <code>false</code></td><td style="text-align: left"><code>boolean</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left">integer (fits in <code>i64</code>)</td><td style="text-align: left"><code>integer</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left">float / large integer</td><td style="text-align: left"><code>float</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>"text"</code></td><td style="text-align: left"><code>text</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>[1, 2, 3]</code> (all integers)</td><td style="text-align: left"><code>integer</code> with <code>multi_valued: true</code></td><td style="text-align: left">Multi-valued numeric field.</td></tr>
+<tr><td style="text-align: left"><code>[1.0, 2.5]</code> (any non-integer number)</td><td style="text-align: left"><code>float</code> with <code>multi_valued: true</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>[]</code> (empty array)</td><td style="text-align: left">(skipped)</td><td style="text-align: left">Element type cannot be determined, so the field is skipped.</td></tr>
+<tr><td style="text-align: left"><code>{"latitude": ..., "longitude": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>{"lat": ..., "lon": ...}</code> / <code>{"lat": ..., "lng": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left">Short aliases for latitude / longitude are accepted.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The gateway returns an HTTP 400 (<code>Bad Request</code>) when:</p>
+<ul>
+<li>An array contains mixed types or non-numeric elements
+(e.g. <code>[1, "x"]</code>).</li>
+<li>An object is not a valid geographic point (missing latitude / longitude
+keys, or non-numeric values).</li>
+<li>A geographic latitude is outside <code>[-90, 90]</code> or a longitude is outside
+<code>[-180, 180]</code>.</li>
+</ul>
+<p>Vector and bytes fields cannot be inferred from JSON alone and must be
+declared in the schema. Numeric arrays sent against a declared vector
+field are coerced to a vector of <code>f32</code> values automatically, so REST
+clients can post embeddings as plain JSON arrays.</p>
 <h2 id="requestresponse-format"><a class="header" href="#requestresponse-format">Request/Response Format</a></h2>
 <p>All request and response bodies use JSON. The JSON structure mirrors the gRPC protobuf messages. See <a href="#grpc-api-reference">gRPC API Reference</a> for the full message definitions.</p>
 <div style="break-before: page; page-break-before: always;"></div>

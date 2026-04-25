@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-8107c21b.js";
+            window.path_to_searchindex_js = "../searchindex-47a1de00.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -315,6 +315,42 @@ laurus serve --config config.toml
 
 data: {"id":"doc2","score":0.4210,"document":{...}}
 </code></pre>
+<h2 id="json-フィールド値の型推論"><a class="header" href="#json-フィールド値の型推論">JSON フィールド値の型推論</a></h2>
+<p>ドキュメント投入リクエスト（<code>PUT /v1/documents/:id</code> または
+<code>POST /v1/documents/:id</code>）のボディに含まれる <code>document.fields</code> の各値は、
+スキーマレス取り込みと同じ推論ルールでエンジンの
+<a href="../concepts/schema_and_fields.html"><code>DataValue</code></a> に変換されます。これにより
+HTTP 経路と gRPC 経路で挙動が一致します。</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">JSON 値</th><th style="text-align: left">推論されるフィールド型</th><th style="text-align: left">備考</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>null</code></td><td style="text-align: left">(スキップ)</td><td style="text-align: left"><code>NullValue</code> として送出され、取り込み時に破棄されます。</td></tr>
+<tr><td style="text-align: left"><code>true</code> / <code>false</code></td><td style="text-align: left"><code>boolean</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left">整数（<code>i64</code> に収まる）</td><td style="text-align: left"><code>integer</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left">浮動小数点 / 巨大整数</td><td style="text-align: left"><code>float</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>"text"</code></td><td style="text-align: left"><code>text</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>[1, 2, 3]</code>（全要素 integer）</td><td style="text-align: left"><code>integer</code>（<code>multi_valued: true</code>）</td><td style="text-align: left">多値数値フィールド。</td></tr>
+<tr><td style="text-align: left"><code>[1.0, 2.5]</code>（非整数を含む数値配列）</td><td style="text-align: left"><code>float</code>（<code>multi_valued: true</code>）</td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>[]</code>（空配列）</td><td style="text-align: left">(スキップ)</td><td style="text-align: left">要素型を決定できないためフィールドはスキップされます。</td></tr>
+<tr><td style="text-align: left"><code>{"latitude": ..., "longitude": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>{"lat": ..., "lon": ...}</code> / <code>{"lat": ..., "lng": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left">latitude / longitude の短縮別名を受け付けます。</td></tr>
+</tbody>
+</table>
+</div>
+<p>以下の場合、ゲートウェイは HTTP 400（<code>Bad Request</code>）を返します:</p>
+<ul>
+<li>配列が混在型もしくは非数値要素を含む（例: <code>[1, "x"]</code>）</li>
+<li>オブジェクトが有効な地理座標ではない（latitude/longitude キーがない、
+値が数値でない）</li>
+<li>緯度が <code>[-90, 90]</code> の範囲外、または経度が <code>[-180, 180]</code> の範囲外</li>
+</ul>
+<p>ベクトルおよびバイト列フィールドは JSON だけからは推論できないため、
+スキーマで明示的に宣言する必要があります。宣言済みのベクトルフィールドに
+数値配列が送られた場合は自動的に <code>f32</code> ベクトルへキャストされるので、
+REST クライアントは埋め込みベクトルを通常の JSON 配列として送信できます。</p>
 <h2 id="リクエストレスポンス形式"><a class="header" href="#リクエストレスポンス形式">リクエスト/レスポンス形式</a></h2>
 <p>すべてのリクエストおよびレスポンスボディは JSON を使用します。JSON の構造は gRPC の protobuf メッセージに対応しています。メッセージ定義の詳細は <a href="grpc_api.html">gRPC API リファレンス</a>を参照してください。</p>
 
