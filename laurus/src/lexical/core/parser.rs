@@ -270,6 +270,50 @@ impl DocumentParser {
                     // Null fields are not indexed, only stored
                     stored_fields.insert(field_name.clone(), FieldValue::Null);
                 }
+                FieldValue::Int64Array(arr) => {
+                    // Multi-valued integer: each element becomes its own
+                    // analyzed term and BKD point so range queries match
+                    // when any value satisfies the predicate.
+                    let mut terms: Vec<AnalyzedTerm> = Vec::with_capacity(arr.len());
+                    let mut points: Vec<f64> = Vec::with_capacity(arr.len());
+                    let mut offset = 0usize;
+                    for (idx, num) in arr.iter().enumerate() {
+                        let text = num.to_string();
+                        let len = text.len();
+                        terms.push(AnalyzedTerm {
+                            term: text,
+                            position: idx as u32,
+                            frequency: 1,
+                            offset: (offset, offset + len),
+                        });
+                        offset += len + 1;
+                        points.push(*num as f64);
+                    }
+                    field_terms.insert(field_name.clone(), terms);
+                    stored_fields.insert(field_name.clone(), FieldValue::Int64Array(arr.clone()));
+                    point_values.insert(field_name.clone(), points);
+                }
+                FieldValue::Float64Array(arr) => {
+                    // Multi-valued float: same shape as Int64Array.
+                    let mut terms: Vec<AnalyzedTerm> = Vec::with_capacity(arr.len());
+                    let mut points: Vec<f64> = Vec::with_capacity(arr.len());
+                    let mut offset = 0usize;
+                    for (idx, num) in arr.iter().enumerate() {
+                        let text = num.to_string();
+                        let len = text.len();
+                        terms.push(AnalyzedTerm {
+                            term: text,
+                            position: idx as u32,
+                            frequency: 1,
+                            offset: (offset, offset + len),
+                        });
+                        offset += len + 1;
+                        points.push(*num);
+                    }
+                    field_terms.insert(field_name.clone(), terms);
+                    stored_fields.insert(field_name.clone(), FieldValue::Float64Array(arr.clone()));
+                    point_values.insert(field_name.clone(), points);
+                }
             }
         }
 

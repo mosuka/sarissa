@@ -96,11 +96,18 @@ impl PhpSchema {
     /// * `name` - Field name.
     /// * `stored` - Whether the value is retrievable (default: true).
     /// * `indexed` - Whether the field is searchable (default: true).
-    #[php(defaults(stored = true, indexed = true))]
-    pub fn add_integer_field(&self, name: String, stored: bool, indexed: bool) {
+    /// * `multi_valued` - When true, the field accepts arrays of integers
+    ///   and range queries match if any value satisfies the predicate
+    ///   (Lucene-style "any match"). Default: false.
+    #[php(defaults(stored = true, indexed = true, multi_valued = false))]
+    pub fn add_integer_field(&self, name: String, stored: bool, indexed: bool, multi_valued: bool) {
         self.inner.borrow_mut().fields.insert(
             name,
-            FieldOption::Integer(IntegerOption { indexed, stored }),
+            FieldOption::Integer(IntegerOption {
+                indexed,
+                stored,
+                multi_valued,
+            }),
         );
     }
 
@@ -111,12 +118,19 @@ impl PhpSchema {
     /// * `name` - Field name.
     /// * `stored` - Whether the value is retrievable (default: true).
     /// * `indexed` - Whether the field is searchable (default: true).
-    #[php(defaults(stored = true, indexed = true))]
-    pub fn add_float_field(&self, name: String, stored: bool, indexed: bool) {
-        self.inner
-            .borrow_mut()
-            .fields
-            .insert(name, FieldOption::Float(FloatOption { indexed, stored }));
+    /// * `multi_valued` - When true, the field accepts arrays of floats
+    ///   and range queries match if any value satisfies the predicate
+    ///   (Lucene-style "any match"). Default: false.
+    #[php(defaults(stored = true, indexed = true, multi_valued = false))]
+    pub fn add_float_field(&self, name: String, stored: bool, indexed: bool, multi_valued: bool) {
+        self.inner.borrow_mut().fields.insert(
+            name,
+            FieldOption::Float(FloatOption {
+                indexed,
+                stored,
+                multi_valued,
+            }),
+        );
     }
 
     /// Add a boolean field.

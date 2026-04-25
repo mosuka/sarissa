@@ -268,9 +268,26 @@ fn prompt_indexed_stored_option(type_name: &str) -> Result<FieldOption> {
         .default(true)
         .interact()?;
 
+    let multi_valued = if matches!(type_name, "Integer" | "Float") {
+        Confirm::new()
+            .with_prompt("Multi-valued? (accepts arrays of values)")
+            .default(false)
+            .interact()?
+    } else {
+        false
+    };
+
     Ok(match type_name {
-        "Integer" => FieldOption::Integer(IntegerOption { indexed, stored }),
-        "Float" => FieldOption::Float(FloatOption { indexed, stored }),
+        "Integer" => FieldOption::Integer(IntegerOption {
+            indexed,
+            stored,
+            multi_valued,
+        }),
+        "Float" => FieldOption::Float(FloatOption {
+            indexed,
+            stored,
+            multi_valued,
+        }),
         "Boolean" => FieldOption::Boolean(BooleanOption { indexed, stored }),
         "DateTime" => FieldOption::DateTime(DateTimeOption { indexed, stored }),
         "Geo" => FieldOption::Geo(GeoOption { indexed, stored }),

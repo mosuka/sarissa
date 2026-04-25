@@ -51,8 +51,8 @@ new \Laurus\Schema()
 | メソッド | 説明 |
 | :--- | :--- |
 | `addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void` | 全文フィールド（転置インデックス、BM25）。 |
-| `addIntegerField(string $name, bool $stored = true, bool $indexed = true): void` | 64 ビット整数フィールド。 |
-| `addFloatField(string $name, bool $stored = true, bool $indexed = true): void` | 64 ビット浮動小数点フィールド。 |
+| `addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void` | 64 ビット整数フィールド。`$multi_valued = true` で整数配列を受け付け（範囲クエリは "any match"）。 |
+| `addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void` | 64 ビット浮動小数点フィールド。`$multi_valued = true` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `addBooleanField(string $name, bool $stored = true, bool $indexed = true): void` | ブールフィールド。 |
 | `addBytesField(string $name, bool $stored = true): void` | 生バイトフィールド。 |
 | `addGeoField(string $name, bool $stored = true, bool $indexed = true): void` | 地理座標フィールド（緯度/経度）。 |

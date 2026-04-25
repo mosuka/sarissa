@@ -125,13 +125,17 @@ Create an empty schema.
 
 Add a full-text field.
 
-#### `addIntegerField(name, stored?, indexed?)`
+#### `addIntegerField(name, stored?, indexed?, multiValued?)`
 
-Add an integer field.
+Add a 64-bit integer field. Pass `multiValued: true` to accept arrays of
+integers; range queries then match if any value satisfies the predicate
+(Lucene-style "any match" with constant scoring).
 
-#### `addFloatField(name, stored?, indexed?)`
+#### `addFloatField(name, stored?, indexed?, multiValued?)`
 
-Add a float field.
+Add a 64-bit float field. Pass `multiValued: true` to accept arrays of
+floats; range queries then match if any value satisfies the predicate
+(Lucene-style "any match" with constant scoring).
 
 #### `addBooleanField(name, stored?, indexed?)`
 

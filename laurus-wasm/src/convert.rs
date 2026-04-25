@@ -135,5 +135,11 @@ pub fn data_value_to_json(value: &DataValue) -> Value {
         DataValue::Geo(lat, lon) => {
             serde_json::json!({ "lat": *lat, "lon": *lon })
         }
+        DataValue::Int64Array(arr) => {
+            Value::Array(arr.iter().map(|v| serde_json::json!(*v)).collect())
+        }
+        DataValue::Float64Array(arr) => {
+            Value::Array(arr.iter().map(|v| serde_json::json!(*v)).collect())
+        }
     }
 }

@@ -56,8 +56,8 @@ class Schema {
 | メソッド | 説明 |
 | :--- | :--- |
 | `addTextField(name, stored?, indexed?, termVectors?, analyzer?)` | 全文検索フィールド（転置インデックス、BM25）。 |
-| `addIntegerField(name, stored?, indexed?)` | 64ビット整数フィールド。 |
-| `addFloatField(name, stored?, indexed?)` | 64ビット浮動小数点フィールド。 |
+| `addIntegerField(name, stored?, indexed?, multiValued?)` | 64 ビット整数フィールド。`multiValued: true` で整数配列を受け付け（範囲クエリは "any match"）。 |
+| `addFloatField(name, stored?, indexed?, multiValued?)` | 64 ビット浮動小数点フィールド。`multiValued: true` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `addBooleanField(name, stored?, indexed?)` | 真偽値フィールド。 |
 | `addBytesField(name, stored?)` | バイナリデータフィールド。 |
 | `addGeoField(name, stored?, indexed?)` | 地理座標フィールド。 |

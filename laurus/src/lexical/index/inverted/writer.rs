@@ -745,6 +745,20 @@ impl InvertedIndexWriter {
                             stored_writer.write_f32(f)?;
                         }
                     }
+                    crate::data::DataValue::Int64Array(arr) => {
+                        stored_writer.write_u8(10)?; // Type tag for Int64Array
+                        stored_writer.write_varint(arr.len() as u64)?;
+                        for &v in arr {
+                            stored_writer.write_u64(v as u64)?;
+                        }
+                    }
+                    crate::data::DataValue::Float64Array(arr) => {
+                        stored_writer.write_u8(11)?; // Type tag for Float64Array
+                        stored_writer.write_varint(arr.len() as u64)?;
+                        for &v in arr {
+                            stored_writer.write_f64(v)?;
+                        }
+                    }
                 }
             }
         }

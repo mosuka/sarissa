@@ -51,8 +51,8 @@ Laurus::Schema.new
 | Method | Description |
 | :--- | :--- |
 | `add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)` | Full-text field (inverted index, BM25). |
-| `add_integer_field(name, stored: true, indexed: true)` | 64-bit integer field. |
-| `add_float_field(name, stored: true, indexed: true)` | 64-bit float field. |
+| `add_integer_field(name, stored: true, indexed: true, multi_valued: false)` | 64-bit integer field. Pass `multi_valued: true` to accept arrays of integers (range queries match if any value satisfies the predicate). |
+| `add_float_field(name, stored: true, indexed: true, multi_valued: false)` | 64-bit float field. Pass `multi_valued: true` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `add_boolean_field(name, stored: true, indexed: true)` | Boolean field. |
 | `add_bytes_field(name, stored: true)` | Raw bytes field. |
 | `add_geo_field(name, stored: true, indexed: true)` | Geographic coordinate field (lat/lon). |

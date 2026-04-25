@@ -94,24 +94,38 @@ impl WasmSchema {
 
     /// Add an integer (i64) field.
     #[wasm_bindgen(js_name = "addIntegerField")]
-    pub fn add_integer_field(&mut self, name: String, stored: Option<bool>, indexed: Option<bool>) {
+    pub fn add_integer_field(
+        &mut self,
+        name: String,
+        stored: Option<bool>,
+        indexed: Option<bool>,
+        multi_valued: Option<bool>,
+    ) {
         self.inner.fields.insert(
             name,
             FieldOption::Integer(IntegerOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
+                multi_valued: multi_valued.unwrap_or(false),
             }),
         );
     }
 
     /// Add a float (f64) field.
     #[wasm_bindgen(js_name = "addFloatField")]
-    pub fn add_float_field(&mut self, name: String, stored: Option<bool>, indexed: Option<bool>) {
+    pub fn add_float_field(
+        &mut self,
+        name: String,
+        stored: Option<bool>,
+        indexed: Option<bool>,
+        multi_valued: Option<bool>,
+    ) {
         self.inner.fields.insert(
             name,
             FieldOption::Float(FloatOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
+                multi_valued: multi_valued.unwrap_or(false),
             }),
         );
     }

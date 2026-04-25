@@ -307,10 +307,14 @@
 <h3 id="methods"><a class="header" href="#methods">Methods</a></h3>
 <h4 id="addtextfieldname-stored-indexed-termvectors-analyzer"><a class="header" href="#addtextfieldname-stored-indexed-termvectors-analyzer"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></a></h4>
 <p>Add a full-text field.</p>
-<h4 id="addintegerfieldname-stored-indexed"><a class="header" href="#addintegerfieldname-stored-indexed"><code>addIntegerField(name, stored?, indexed?)</code></a></h4>
-<p>Add an integer field.</p>
-<h4 id="addfloatfieldname-stored-indexed"><a class="header" href="#addfloatfieldname-stored-indexed"><code>addFloatField(name, stored?, indexed?)</code></a></h4>
-<p>Add a float field.</p>
+<h4 id="addintegerfieldname-stored-indexed-multivalued"><a class="header" href="#addintegerfieldname-stored-indexed-multivalued"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></a></h4>
+<p>Add a 64-bit integer field. Pass <code>multiValued: true</code> to accept arrays of
+integers; range queries then match if any value satisfies the predicate
+(Lucene-style "any match" with constant scoring).</p>
+<h4 id="addfloatfieldname-stored-indexed-multivalued"><a class="header" href="#addfloatfieldname-stored-indexed-multivalued"><code>addFloatField(name, stored?, indexed?, multiValued?)</code></a></h4>
+<p>Add a 64-bit float field. Pass <code>multiValued: true</code> to accept arrays of
+floats; range queries then match if any value satisfies the predicate
+(Lucene-style "any match" with constant scoring).</p>
 <h4 id="addbooleanfieldname-stored-indexed"><a class="header" href="#addbooleanfieldname-stored-indexed"><code>addBooleanField(name, stored?, indexed?)</code></a></h4>
 <p>Add a boolean field.</p>
 <h4 id="adddatetimefieldname-stored-indexed"><a class="header" href="#adddatetimefieldname-stored-indexed"><code>addDateTimeField(name, stored?, indexed?)</code></a></h4>

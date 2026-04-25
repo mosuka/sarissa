@@ -123,13 +123,15 @@ DSL 文字列クエリで検索します。
 
 全文検索テキストフィールドを追加します。
 
-#### `addIntegerField(name, stored?, indexed?)`
+#### `addIntegerField(name, stored?, indexed?, multiValued?)`
 
-整数フィールドを追加します。
+64 ビット整数フィールドを追加します。`multiValued: true` を指定すると整数配列を受け付け、
+範囲クエリは**いずれかの値**が条件を満たせばマッチ（Lucene 流の "any match"、constant スコア）します。
 
-#### `addFloatField(name, stored?, indexed?)`
+#### `addFloatField(name, stored?, indexed?, multiValued?)`
 
-浮動小数点フィールドを追加します。
+64 ビット浮動小数点フィールドを追加します。`multiValued: true` を指定すると浮動小数点配列を受け付け、
+範囲クエリは**いずれかの値**が条件を満たせばマッチ（Lucene 流の "any match"、constant スコア）します。
 
 #### `addBooleanField(name, stored?, indexed?)`
 

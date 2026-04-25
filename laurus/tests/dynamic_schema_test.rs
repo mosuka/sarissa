@@ -113,6 +113,35 @@ async fn dynamic_auto_adds_geo_field() -> Result<()> {
     Ok(())
 }
 
+/// Dynamic: a numeric array on an undeclared field is auto-added as a
+/// multi-valued numeric field (not a vector field).
+#[tokio::test(flavor = "multi_thread")]
+async fn dynamic_auto_adds_int64_array_field() -> Result<()> {
+    let engine = engine_with_policy(DynamicFieldPolicy::Dynamic).await?;
+
+    let doc = Document::builder()
+        .add_int64_array("scores", vec![85, 72, 95])
+        .build();
+    engine.put_document("doc1", doc).await?;
+    engine.commit().await?;
+
+    let schema = engine.schema();
+    match schema.fields.get("scores") {
+        Some(FieldOption::Integer(opt)) => assert!(
+            opt.multi_valued,
+            "scores should be Integer with multi_valued=true"
+        ),
+        other => panic!("expected Integer field for 'scores', got {other:?}"),
+    }
+
+    let docs = engine.get_documents("doc1").await?;
+    assert_eq!(
+        docs[0].get("scores").and_then(|v| v.as_int64_array()),
+        Some(&[85, 72, 95][..])
+    );
+    Ok(())
+}
+
 /// Dynamic: a raw vector without a declared schema is rejected.
 #[tokio::test(flavor = "multi_thread")]
 async fn dynamic_rejects_undeclared_vector() -> Result<()> {

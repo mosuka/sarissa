@@ -101,8 +101,8 @@ message AnalyzerDefinition {
 | Lexical フィールド | Vector フィールド |
 | :--- | :--- |
 | `TextOption` (`indexed`, `stored`, `term_vectors`, `analyzer`) | `HnswOption` (`dimension`, `distance`, `m`, `ef_construction`, `base_weight`, `quantizer`, `embedder`) |
-| `IntegerOption` (`indexed`, `stored`) | `FlatOption` (`dimension`, `distance`, `base_weight`, `quantizer`, `embedder`) |
-| `FloatOption` (`indexed`, `stored`) | `IvfOption` (`dimension`, `distance`, `n_clusters`, `n_probe`, `base_weight`, `quantizer`, `embedder`) |
+| `IntegerOption` (`indexed`, `stored`, `multi_valued`) | `FlatOption` (`dimension`, `distance`, `base_weight`, `quantizer`, `embedder`) |
+| `FloatOption` (`indexed`, `stored`, `multi_valued`) | `IvfOption` (`dimension`, `distance`, `n_clusters`, `n_probe`, `base_weight`, `quantizer`, `embedder`) |
 | `BooleanOption` (`indexed`, `stored`) | |
 | `DateTimeOption` (`indexed`, `stored`) | |
 | `GeoOption` (`indexed`, `stored`) | |

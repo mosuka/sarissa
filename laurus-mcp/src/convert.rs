@@ -77,6 +77,8 @@ fn proto_value_to_json(val: &v1::Value) -> Value {
             }
         }
         Some(Kind::GeoValue(g)) => json!({ "lat": g.latitude, "lon": g.longitude }),
+        Some(Kind::Int64ArrayValue(arr)) => json!(arr.values),
+        Some(Kind::Float64ArrayValue(arr)) => json!(arr.values),
     }
 }
 

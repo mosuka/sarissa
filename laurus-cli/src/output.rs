@@ -239,6 +239,20 @@ fn format_data_value(value: &DataValue) -> String {
         DataValue::Vector(v) => format!("<vector dim={}>", v.len()),
         DataValue::DateTime(dt) => dt.to_rfc3339(),
         DataValue::Geo(lat, lon) => format!("({lat}, {lon})"),
+        DataValue::Int64Array(arr) => format!(
+            "[{}]",
+            arr.iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        DataValue::Float64Array(arr) => format!(
+            "[{}]",
+            arr.iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
 
@@ -254,5 +268,7 @@ fn data_value_to_json(value: &DataValue) -> serde_json::Value {
         DataValue::Vector(v) => json!(v),
         DataValue::DateTime(dt) => json!(dt.to_rfc3339()),
         DataValue::Geo(lat, lon) => json!({"lat": lat, "lon": lon}),
+        DataValue::Int64Array(arr) => json!(arr),
+        DataValue::Float64Array(arr) => json!(arr),
     }
 }

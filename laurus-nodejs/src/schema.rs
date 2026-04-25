@@ -96,13 +96,23 @@ impl JsSchema {
     /// * `name` - Field name.
     /// * `stored` - Whether the value is retrievable (default `true`).
     /// * `indexed` - Whether the field is searchable (default `true`).
+    /// * `multi_valued` - When `true`, the field accepts arrays of integers
+    ///   and range queries match if any value satisfies the predicate
+    ///   (Lucene-style "any match"). Default `false`.
     #[napi]
-    pub fn add_integer_field(&mut self, name: String, stored: Option<bool>, indexed: Option<bool>) {
+    pub fn add_integer_field(
+        &mut self,
+        name: String,
+        stored: Option<bool>,
+        indexed: Option<bool>,
+        multi_valued: Option<bool>,
+    ) {
         self.inner.fields.insert(
             name,
             FieldOption::Integer(IntegerOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
+                multi_valued: multi_valued.unwrap_or(false),
             }),
         );
     }
@@ -114,13 +124,23 @@ impl JsSchema {
     /// * `name` - Field name.
     /// * `stored` - Whether the value is retrievable (default `true`).
     /// * `indexed` - Whether the field is searchable (default `true`).
+    /// * `multi_valued` - When `true`, the field accepts arrays of floats
+    ///   and range queries match if any value satisfies the predicate
+    ///   (Lucene-style "any match"). Default `false`.
     #[napi]
-    pub fn add_float_field(&mut self, name: String, stored: Option<bool>, indexed: Option<bool>) {
+    pub fn add_float_field(
+        &mut self,
+        name: String,
+        stored: Option<bool>,
+        indexed: Option<bool>,
+        multi_valued: Option<bool>,
+    ) {
         self.inner.fields.insert(
             name,
             FieldOption::Float(FloatOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
+                multi_valued: multi_valued.unwrap_or(false),
             }),
         );
     }

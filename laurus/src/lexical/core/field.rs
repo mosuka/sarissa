@@ -322,6 +322,15 @@ pub struct IntegerOption {
     /// Whether to store the original value.
     #[serde(default = "default_true")]
     pub stored: bool,
+
+    /// Whether this field can hold multiple values per document.
+    ///
+    /// When `true`, the field accepts [`DataValue::Int64Array`](crate::data::DataValue::Int64Array)
+    /// (and auto-wraps single integers) and range queries match a document
+    /// if **any** value satisfies the predicate (Lucene-style "any match"
+    /// with constant scoring). Defaults to `false`.
+    #[serde(default)]
+    pub multi_valued: bool,
 }
 
 impl IntegerOption {
@@ -343,6 +352,7 @@ impl Default for IntegerOption {
         Self {
             indexed: true,
             stored: true,
+            multi_valued: false,
         }
     }
 }
@@ -359,6 +369,15 @@ pub struct FloatOption {
     /// Whether to store the original value.
     #[serde(default = "default_true")]
     pub stored: bool,
+
+    /// Whether this field can hold multiple values per document.
+    ///
+    /// When `true`, the field accepts [`DataValue::Float64Array`](crate::data::DataValue::Float64Array)
+    /// (and auto-wraps single floats) and range queries match a document
+    /// if **any** value satisfies the predicate (Lucene-style "any match"
+    /// with constant scoring). Defaults to `false`.
+    #[serde(default)]
+    pub multi_valued: bool,
 }
 
 impl FloatOption {
@@ -380,6 +399,7 @@ impl Default for FloatOption {
         Self {
             indexed: true,
             stored: true,
+            multi_valued: false,
         }
     }
 }
@@ -556,6 +576,14 @@ impl FieldOption {
             FieldValue::DateTime(_) => FieldOption::DateTime(DateTimeOption::default()),
             FieldValue::Geo(_, _) => FieldOption::Geo(GeoOption::default()),
             FieldValue::Null => FieldOption::Text(TextOption::default()),
+            FieldValue::Int64Array(_) => FieldOption::Integer(IntegerOption {
+                multi_valued: true,
+                ..Default::default()
+            }),
+            FieldValue::Float64Array(_) => FieldOption::Float(FloatOption {
+                multi_valued: true,
+                ..Default::default()
+            }),
         }
     }
 }

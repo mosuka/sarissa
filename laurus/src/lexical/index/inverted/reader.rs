@@ -504,6 +504,24 @@ impl SegmentReader {
                             // Null
                             FieldValue::Null
                         }
+                        10 => {
+                            // Int64Array
+                            let len = reader.read_varint()? as usize;
+                            let mut arr = Vec::with_capacity(len);
+                            for _ in 0..len {
+                                arr.push(reader.read_u64()? as i64);
+                            }
+                            FieldValue::Int64Array(arr)
+                        }
+                        11 => {
+                            // Float64Array
+                            let len = reader.read_varint()? as usize;
+                            let mut arr = Vec::with_capacity(len);
+                            for _ in 0..len {
+                                arr.push(reader.read_f64()?);
+                            }
+                            FieldValue::Float64Array(arr)
+                        }
                         _ => {
                             return Err(LaurusError::index(format!(
                                 "Unknown field type tag: {type_tag}"

@@ -51,8 +51,8 @@ Laurus::Schema.new
 | メソッド | 説明 |
 | :--- | :--- |
 | `add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)` | 全文フィールド（転置インデックス、BM25）。 |
-| `add_integer_field(name, stored: true, indexed: true)` | 64 ビット整数フィールド。 |
-| `add_float_field(name, stored: true, indexed: true)` | 64 ビット浮動小数点フィールド。 |
+| `add_integer_field(name, stored: true, indexed: true, multi_valued: false)` | 64 ビット整数フィールド。`multi_valued: true` で整数配列を受け付け（範囲クエリは "any match"）。 |
+| `add_float_field(name, stored: true, indexed: true, multi_valued: false)` | 64 ビット浮動小数点フィールド。`multi_valued: true` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `add_boolean_field(name, stored: true, indexed: true)` | ブールフィールド。 |
 | `add_bytes_field(name, stored: true)` | 生バイトフィールド。 |
 | `add_geo_field(name, stored: true, indexed: true)` | 地理座標フィールド（緯度/経度）。 |
