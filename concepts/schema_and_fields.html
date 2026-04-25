@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-de470a3c.js";
+            window.path_to_searchindex_js = "../searchindex-3813c31f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-6cc5bf7f.js"></script>
@@ -452,14 +452,22 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><code>integer</code></td><td style="text-align: left"><code>Integer</code> (BKD tree)</td></tr>
 <tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float</code> (BKD tree)</td></tr>
 <tr><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>Boolean</code></td></tr>
+<tr><td style="text-align: left">array of integers (e.g. <code>[1, 2, 3]</code>)</td><td style="text-align: left"><code>Integer</code> with <code>multi_valued = true</code></td></tr>
+<tr><td style="text-align: left">array of floats / mixed numeric (e.g. <code>[1.5, 2.0, 3]</code>)</td><td style="text-align: left"><code>Float</code> with <code>multi_valued = true</code></td></tr>
 <tr><td style="text-align: left">object with a latitude key (<code>lat</code> or <code>latitude</code>) and a longitude key (<code>lon</code>, <code>lng</code>, or <code>longitude</code>), values in range</td><td style="text-align: left"><code>Geo</code></td></tr>
 </tbody>
 </table>
 </div>
 <p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>) and <code>Bytes</code> are <strong>never</strong> inferred:
-they must be declared in the schema explicitly. Multi-valued numeric arrays
-are also not yet inferred — they return an explicit “not yet supported”
-error so the caller can declare the field manually.</p>
+they must be declared in the schema explicitly.</p>
+<h3 id="multi-valued-numeric-fields"><a class="header" href="#multi-valued-numeric-fields">Multi-valued numeric fields</a></h3>
+<p>Integer and Float fields can be declared with <code>multi_valued = true</code> to
+hold multiple values per document. A range query matches a document if
+<strong>any</strong> of its values satisfies the predicate (Lucene-style “any match”
+semantics with constant scoring — there is no per-match BM25 weighting).</p>
+<p>Single values sent to a multi-valued field are auto-wrapped into a
+one-element array; arrays sent to a single-valued field are rejected
+rather than silently truncating.</p>
 <h3 id="type-conflicts"><a class="header" href="#type-conflicts">Type conflicts</a></h3>
 <p>When a value arrives for a field that is <strong>already declared</strong>, Laurus attempts
 to coerce the value to the declared type. The coercion rules are:</p>

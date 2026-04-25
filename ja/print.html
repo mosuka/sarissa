@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b91d6b03.js";
+            window.path_to_searchindex_js = "searchindex-8107c21b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-0f2ac19d.js"></script>
@@ -1165,13 +1165,20 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><code>integer</code></td><td style="text-align: left"><code>Integer</code>（BKD tree）</td></tr>
 <tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float</code>（BKD tree）</td></tr>
 <tr><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>Boolean</code></td></tr>
+<tr><td style="text-align: left">整数の配列（例: <code>[1, 2, 3]</code>）</td><td style="text-align: left"><code>Integer</code>（<code>multi_valued = true</code>）</td></tr>
+<tr><td style="text-align: left">浮動小数点を含む数値配列（例: <code>[1.5, 2.0, 3]</code>）</td><td style="text-align: left"><code>Float</code>（<code>multi_valued = true</code>）</td></tr>
 <tr><td style="text-align: left">緯度キー（<code>lat</code> または <code>latitude</code>）と経度キー（<code>lon</code>、<code>lng</code>、<code>longitude</code> のいずれか）を持ち、値が範囲内の object</td><td style="text-align: left"><code>Geo</code></td></tr>
 </tbody>
 </table>
 </div>
 <p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）および <code>Bytes</code> は<strong>自動推論の対象外</strong>です。
-スキーマへ明示的に宣言してください。数値配列（多値数値）も現時点では自動推論されず、
-「未サポート」エラーが返ります。手動で宣言してください。</p>
+スキーマへ明示的に宣言してください。</p>
+<h3 id="多値数値フィールド"><a class="header" href="#多値数値フィールド">多値数値フィールド</a></h3>
+<p><code>Integer</code> と <code>Float</code> フィールドは <code>multi_valued = true</code> を指定することで、
+1 ドキュメントに複数の値を保持できます。範囲クエリは<strong>いずれかの値が条件を満たせばマッチ</strong>
+する Lucene 流の挙動で、スコアは constant（マッチ件数による加点なし）です。</p>
+<p>多値フィールドに単一値を送った場合は要素 1 個の配列に自動ラップされます。
+逆に単一値フィールドに配列を送ると、暗黙の切り捨てではなくエラーになります。</p>
 <h3 id="型衝突"><a class="header" href="#型衝突">型衝突</a></h3>
 <p><strong>既に宣言されている</strong>フィールドに別の型の値が到着した場合、Laurus は
 宣言された型への変換を試みます。変換ルールは以下の通りです:</p>
@@ -5814,6 +5821,7 @@ term_vectors = false # タームの位置を保存するかどうか（フレー
 <pre><code class="language-toml">[fields.year.Integer]
 indexed = true
 stored = true
+multi_valued = false
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -5823,6 +5831,7 @@ stored = true
 <tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">範囲クエリおよび完全一致クエリを有効にする</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">元の値を保存する</td></tr>
+<tr><td style="text-align: left"><code>multi_valued</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">整数の配列を受け付け、範囲クエリは<strong>いずれかの値</strong>が条件を満たせばマッチ（Lucene 流の “any match”、constant スコア）</td></tr>
 </tbody>
 </table>
 </div>
@@ -5831,6 +5840,7 @@ stored = true
 <pre><code class="language-toml">[fields.rating.Float]
 indexed = true
 stored = true
+multi_valued = false
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -5840,6 +5850,7 @@ stored = true
 <tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">範囲クエリを有効にする</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">元の値を保存する</td></tr>
+<tr><td style="text-align: left"><code>multi_valued</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">浮動小数点の配列を受け付け、範囲クエリは<strong>いずれかの値</strong>が条件を満たせばマッチ（Lucene 流の “any match”、constant スコア）</td></tr>
 </tbody>
 </table>
 </div>
@@ -7017,8 +7028,8 @@ enum DynamicFieldPolicy {
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>TextOption</code> (<code>indexed</code>, <code>stored</code>, <code>term_vectors</code>, <code>analyzer</code>)</td><td style="text-align: left"><code>HnswOption</code> (<code>dimension</code>, <code>distance</code>, <code>m</code>, <code>ef_construction</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
-<tr><td style="text-align: left"><code>IntegerOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"><code>FlatOption</code> (<code>dimension</code>, <code>distance</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
-<tr><td style="text-align: left"><code>FloatOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"><code>IvfOption</code> (<code>dimension</code>, <code>distance</code>, <code>n_clusters</code>, <code>n_probe</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
+<tr><td style="text-align: left"><code>IntegerOption</code> (<code>indexed</code>, <code>stored</code>, <code>multi_valued</code>)</td><td style="text-align: left"><code>FlatOption</code> (<code>dimension</code>, <code>distance</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
+<tr><td style="text-align: left"><code>FloatOption</code> (<code>indexed</code>, <code>stored</code>, <code>multi_valued</code>)</td><td style="text-align: left"><code>IvfOption</code> (<code>dimension</code>, <code>distance</code>, <code>n_clusters</code>, <code>n_probe</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
 <tr><td style="text-align: left"><code>BooleanOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>DateTimeOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>GeoOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
@@ -8206,8 +8217,8 @@ print(stats["vector_fields"])
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>add_text_field(name)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
-<tr><td style="text-align: left"><code>add_int_field(name)</code></td><td style="text-align: left">64 ビット整数フィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_float_field(name)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multi_valued=True</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multi_valued=True</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_bool_field(name)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_bytes_field(name)</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_geo_field(name)</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
@@ -8687,8 +8698,8 @@ console.log(stats.vectorFields);
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></td><td style="text-align: left">全文検索フィールド（転置インデックス、BM25）。</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(name, stored?, indexed?)</code></td><td style="text-align: left">64ビット整数フィールド。</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(name, stored?, indexed?)</code></td><td style="text-align: left">64ビット浮動小数点フィールド。</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multiValued: true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multiValued: true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(name, stored?, indexed?)</code></td><td style="text-align: left">真偽値フィールド。</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(name, stored?)</code></td><td style="text-align: left">バイナリデータフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(name, stored?, indexed?)</code></td><td style="text-align: left">地理座標フィールド。</td></tr>
@@ -9363,10 +9374,12 @@ module.exports = {
 <h3 id="メソッド-3"><a class="header" href="#メソッド-3">メソッド</a></h3>
 <h4 id="addtextfieldname-stored-indexed-termvectors-analyzer"><a class="header" href="#addtextfieldname-stored-indexed-termvectors-analyzer"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></a></h4>
 <p>全文検索テキストフィールドを追加します。</p>
-<h4 id="addintegerfieldname-stored-indexed"><a class="header" href="#addintegerfieldname-stored-indexed"><code>addIntegerField(name, stored?, indexed?)</code></a></h4>
-<p>整数フィールドを追加します。</p>
-<h4 id="addfloatfieldname-stored-indexed"><a class="header" href="#addfloatfieldname-stored-indexed"><code>addFloatField(name, stored?, indexed?)</code></a></h4>
-<p>浮動小数点フィールドを追加します。</p>
+<h4 id="addintegerfieldname-stored-indexed-multivalued"><a class="header" href="#addintegerfieldname-stored-indexed-multivalued"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></a></h4>
+<p>64 ビット整数フィールドを追加します。<code>multiValued: true</code> を指定すると整数配列を受け付け、
+範囲クエリは<strong>いずれかの値</strong>が条件を満たせばマッチ（Lucene 流の “any match”、constant スコア）します。</p>
+<h4 id="addfloatfieldname-stored-indexed-multivalued"><a class="header" href="#addfloatfieldname-stored-indexed-multivalued"><code>addFloatField(name, stored?, indexed?, multiValued?)</code></a></h4>
+<p>64 ビット浮動小数点フィールドを追加します。<code>multiValued: true</code> を指定すると浮動小数点配列を受け付け、
+範囲クエリは<strong>いずれかの値</strong>が条件を満たせばマッチ（Lucene 流の “any match”、constant スコア）します。</p>
 <h4 id="addbooleanfieldname-stored-indexed"><a class="header" href="#addbooleanfieldname-stored-indexed"><code>addBooleanField(name, stored?, indexed?)</code></a></h4>
 <p>真偽値フィールドを追加します。</p>
 <h4 id="adddatetimefieldname-stored-indexed"><a class="header" href="#adddatetimefieldname-stored-indexed"><code>addDateTimeField(name, stored?, indexed?)</code></a></h4>
@@ -9731,8 +9744,8 @@ puts stats["vector_fields"]
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
-<tr><td style="text-align: left"><code>add_integer_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">64 ビット整数フィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_float_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_integer_field(name, stored: true, indexed: true, multi_valued: false)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multi_valued: true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>add_float_field(name, stored: true, indexed: true, multi_valued: false)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multi_valued: true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_boolean_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_bytes_field(name, stored: true)</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_geo_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
@@ -10292,8 +10305,8 @@ echo $stats["vector_fields"];
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">64 ビット整数フィールド。</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64 ビット整数フィールド。<code>$multi_valued = true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>$multi_valued = true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">ブールフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(string $name, bool $stored = true): void</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>

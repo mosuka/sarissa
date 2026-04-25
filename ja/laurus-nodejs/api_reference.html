@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
+            window.path_to_searchindex_js = "../searchindex-8107c21b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -240,8 +240,8 @@
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></td><td style="text-align: left">全文検索フィールド（転置インデックス、BM25）。</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(name, stored?, indexed?)</code></td><td style="text-align: left">64ビット整数フィールド。</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(name, stored?, indexed?)</code></td><td style="text-align: left">64ビット浮動小数点フィールド。</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multiValued: true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multiValued: true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(name, stored?, indexed?)</code></td><td style="text-align: left">真偽値フィールド。</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(name, stored?)</code></td><td style="text-align: left">バイナリデータフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(name, stored?, indexed?)</code></td><td style="text-align: left">地理座標フィールド。</td></tr>

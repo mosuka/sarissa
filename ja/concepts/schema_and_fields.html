@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
+            window.path_to_searchindex_js = "../searchindex-8107c21b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -453,13 +453,20 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><code>integer</code></td><td style="text-align: left"><code>Integer</code>（BKD tree）</td></tr>
 <tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float</code>（BKD tree）</td></tr>
 <tr><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>Boolean</code></td></tr>
+<tr><td style="text-align: left">整数の配列（例: <code>[1, 2, 3]</code>）</td><td style="text-align: left"><code>Integer</code>（<code>multi_valued = true</code>）</td></tr>
+<tr><td style="text-align: left">浮動小数点を含む数値配列（例: <code>[1.5, 2.0, 3]</code>）</td><td style="text-align: left"><code>Float</code>（<code>multi_valued = true</code>）</td></tr>
 <tr><td style="text-align: left">緯度キー（<code>lat</code> または <code>latitude</code>）と経度キー（<code>lon</code>、<code>lng</code>、<code>longitude</code> のいずれか）を持ち、値が範囲内の object</td><td style="text-align: left"><code>Geo</code></td></tr>
 </tbody>
 </table>
 </div>
 <p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）および <code>Bytes</code> は<strong>自動推論の対象外</strong>です。
-スキーマへ明示的に宣言してください。数値配列（多値数値）も現時点では自動推論されず、
-「未サポート」エラーが返ります。手動で宣言してください。</p>
+スキーマへ明示的に宣言してください。</p>
+<h3 id="多値数値フィールド"><a class="header" href="#多値数値フィールド">多値数値フィールド</a></h3>
+<p><code>Integer</code> と <code>Float</code> フィールドは <code>multi_valued = true</code> を指定することで、
+1 ドキュメントに複数の値を保持できます。範囲クエリは<strong>いずれかの値が条件を満たせばマッチ</strong>
+する Lucene 流の挙動で、スコアは constant（マッチ件数による加点なし）です。</p>
+<p>多値フィールドに単一値を送った場合は要素 1 個の配列に自動ラップされます。
+逆に単一値フィールドに配列を送ると、暗黙の切り捨てではなくエラーになります。</p>
 <h3 id="型衝突"><a class="header" href="#型衝突">型衝突</a></h3>
 <p><strong>既に宣言されている</strong>フィールドに別の型の値が到着した場合、Laurus は
 宣言された型への変換を試みます。変換ルールは以下の通りです:</p>

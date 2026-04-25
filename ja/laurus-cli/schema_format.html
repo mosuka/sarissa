@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b91d6b03.js";
+            window.path_to_searchindex_js = "../searchindex-8107c21b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0f2ac19d.js"></script>
@@ -232,6 +232,7 @@ term_vectors = false # タームの位置を保存するかどうか（フレー
 <pre><code class="language-toml">[fields.year.Integer]
 indexed = true
 stored = true
+multi_valued = false
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -241,6 +242,7 @@ stored = true
 <tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">範囲クエリおよび完全一致クエリを有効にする</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">元の値を保存する</td></tr>
+<tr><td style="text-align: left"><code>multi_valued</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">整数の配列を受け付け、範囲クエリは<strong>いずれかの値</strong>が条件を満たせばマッチ（Lucene 流の “any match”、constant スコア）</td></tr>
 </tbody>
 </table>
 </div>
@@ -249,6 +251,7 @@ stored = true
 <pre><code class="language-toml">[fields.rating.Float]
 indexed = true
 stored = true
+multi_valued = false
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -258,6 +261,7 @@ stored = true
 <tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">範囲クエリを有効にする</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">元の値を保存する</td></tr>
+<tr><td style="text-align: left"><code>multi_valued</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">浮動小数点の配列を受け付け、範囲クエリは<strong>いずれかの値</strong>が条件を満たせばマッチ（Lucene 流の “any match”、constant スコア）</td></tr>
 </tbody>
 </table>
 </div>
