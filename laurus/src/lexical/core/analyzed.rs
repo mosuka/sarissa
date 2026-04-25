@@ -90,8 +90,17 @@ pub struct AnalyzedDocument {
     pub stored_fields: AHashMap<String, FieldValue>,
     /// Field name to field length (number of tokens) mapping.
     pub field_lengths: AHashMap<String, u32>,
-    /// Field name to numeric point values (for BKD tree).
-    pub point_values: AHashMap<String, Vec<f64>>,
+    /// Field name to numeric point values for the BKD tree.
+    ///
+    /// Each value in the map is a list of points for that field. A point is
+    /// itself a `Vec<f64>` whose length is the BKD dimensionality (1 for
+    /// integer/float/datetime, 2 for geo, etc.). A field can have multiple
+    /// points per document — single-valued numeric fields contribute one
+    /// point, multi-valued numeric fields contribute one point per element.
+    /// Each `(point, doc_id)` pair is emitted as a distinct BKD entry, and
+    /// the BKD reader deduplicates `doc_id`s during range search so a
+    /// document is reported at most once per query.
+    pub point_values: AHashMap<String, Vec<Vec<f64>>>,
 }
 
 /// An analyzed term with position and metadata.

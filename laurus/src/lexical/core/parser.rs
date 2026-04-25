@@ -192,7 +192,7 @@ impl DocumentParser {
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
                     stored_fields.insert(field_name.clone(), FieldValue::Int64(num));
-                    point_values.insert(field_name.clone(), vec![num as f64]);
+                    point_values.insert(field_name.clone(), vec![vec![num as f64]]);
                 }
                 FieldValue::Float64(num) => {
                     // Convert float to text for indexing
@@ -207,7 +207,7 @@ impl DocumentParser {
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
                     stored_fields.insert(field_name.clone(), FieldValue::Float64(num));
-                    point_values.insert(field_name.clone(), vec![num]);
+                    point_values.insert(field_name.clone(), vec![vec![num]]);
                 }
                 FieldValue::Bool(b) => {
                     // Convert boolean to text
@@ -245,7 +245,7 @@ impl DocumentParser {
                     stored_fields.insert(field_name.clone(), FieldValue::DateTime(dt));
                     let ts = dt.timestamp() as f64
                         + dt.timestamp_subsec_nanos() as f64 / 1_000_000_000.0;
-                    point_values.insert(field_name.clone(), vec![ts]);
+                    point_values.insert(field_name.clone(), vec![vec![ts]]);
                 }
                 FieldValue::Geo(lat, lon) => {
                     // Convert geo point to string representation
@@ -260,7 +260,8 @@ impl DocumentParser {
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
                     stored_fields.insert(field_name.clone(), FieldValue::Geo(lat, lon));
-                    point_values.insert(field_name.clone(), vec![lat, lon]);
+                    // Geo is a single 2D point.
+                    point_values.insert(field_name.clone(), vec![vec![lat, lon]]);
                 }
                 FieldValue::Vector(v) => {
                     // Vectors are stored but not indexed in lexical
@@ -272,10 +273,10 @@ impl DocumentParser {
                 }
                 FieldValue::Int64Array(arr) => {
                     // Multi-valued integer: each element becomes its own
-                    // analyzed term and BKD point so range queries match
-                    // when any value satisfies the predicate.
+                    // analyzed term and a separate 1D BKD point so range
+                    // queries match when any value satisfies the predicate.
                     let mut terms: Vec<AnalyzedTerm> = Vec::with_capacity(arr.len());
-                    let mut points: Vec<f64> = Vec::with_capacity(arr.len());
+                    let mut points: Vec<Vec<f64>> = Vec::with_capacity(arr.len());
                     let mut offset = 0usize;
                     for (idx, num) in arr.iter().enumerate() {
                         let text = num.to_string();
@@ -287,7 +288,7 @@ impl DocumentParser {
                             offset: (offset, offset + len),
                         });
                         offset += len + 1;
-                        points.push(*num as f64);
+                        points.push(vec![*num as f64]);
                     }
                     field_terms.insert(field_name.clone(), terms);
                     stored_fields.insert(field_name.clone(), FieldValue::Int64Array(arr.clone()));
@@ -296,7 +297,7 @@ impl DocumentParser {
                 FieldValue::Float64Array(arr) => {
                     // Multi-valued float: same shape as Int64Array.
                     let mut terms: Vec<AnalyzedTerm> = Vec::with_capacity(arr.len());
-                    let mut points: Vec<f64> = Vec::with_capacity(arr.len());
+                    let mut points: Vec<Vec<f64>> = Vec::with_capacity(arr.len());
                     let mut offset = 0usize;
                     for (idx, num) in arr.iter().enumerate() {
                         let text = num.to_string();
@@ -308,7 +309,7 @@ impl DocumentParser {
                             offset: (offset, offset + len),
                         });
                         offset += len + 1;
-                        points.push(*num);
+                        points.push(vec![*num]);
                     }
                     field_terms.insert(field_name.clone(), terms);
                     stored_fields.insert(field_name.clone(), FieldValue::Float64Array(arr.clone()));

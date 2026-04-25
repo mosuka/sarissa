@@ -464,158 +464,101 @@ impl NumericRangeQuery {
     }
 
     /// Count the number of documents that match this range query.
+    ///
+    /// For multi-valued fields, a document is counted at most once even
+    /// when several of its values fall in the range (Lucene-style "any
+    /// match" semantics).
     pub fn count_matching_documents(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
         let mut count = 0u64;
         let total_docs = reader.max_doc();
         for doc_id in 0..total_docs {
             if let Ok(Some(doc)) = reader.document(doc_id)
                 && let Some(val) = doc.get(&self.field)
+                && self.value_matches_any(val)
             {
-                let numeric_value = match val {
-                    crate::data::DataValue::Float64(f) => *f,
-                    crate::data::DataValue::Int64(i) => *i as f64,
-                    _ => continue, // Not a numeric field
-                };
-
-                if self.contains_numeric(numeric_value) {
-                    count += 1;
-                }
+                count += 1;
             }
         }
 
         Ok(count)
     }
+
+    /// Returns `true` if any numeric component of `val` is in this range.
+    ///
+    /// Single-valued fields contribute one numeric value; multi-valued
+    /// (`Int64Array` / `Float64Array`) fields are scanned for any element
+    /// that satisfies the predicate. Non-numeric variants return `false`.
+    fn value_matches_any(&self, val: &crate::data::DataValue) -> bool {
+        match val {
+            crate::data::DataValue::Int64(i) => self.contains_numeric(*i as f64),
+            crate::data::DataValue::Float64(f) => self.contains_numeric(*f),
+            crate::data::DataValue::Int64Array(arr) => {
+                arr.iter().any(|i| self.contains_numeric(*i as f64))
+            }
+            crate::data::DataValue::Float64Array(arr) => {
+                arr.iter().any(|f| self.contains_numeric(*f))
+            }
+            _ => false,
+        }
+    }
 }
 
 /// A scorer specialized for numeric range queries.
+///
+/// Range queries use Lucene-style **constant scoring**: every matching
+/// document receives the same score (`boost`), regardless of how close
+/// each value is to the range bounds or how many of a multi-valued
+/// document's values fall in range. The previous IDF + proximity scoring
+/// was removed when multi-valued numeric fields landed (#281), since per
+/// per-value weighting interacts poorly with "any match" semantics and
+/// produced surprising rankings.
 #[derive(Debug, Clone)]
 pub struct RangeScorer {
-    /// Lower bound value for proximity calculation.
-    lower_bound: Option<f64>,
-    /// Upper bound value for proximity calculation.
-    upper_bound: Option<f64>,
-    /// Range width for selectivity calculation.
-    range_width: f64,
-    /// Total number of documents.
-    total_docs: u64,
-    /// Number of documents matching the range.
+    /// Number of documents matching the range. Retained for `max_score`'s
+    /// "is anything matching?" check.
     matching_docs: u64,
-    /// Boost factor.
+    /// Boost factor; the per-document score is exactly this value.
     boost: f32,
 }
 
 impl RangeScorer {
     /// Create a new range scorer.
+    ///
+    /// Bounds and total document count were used by the legacy IDF /
+    /// proximity scorer; they are accepted (and ignored) so existing call
+    /// sites continue to compile.
     pub fn new(
-        lower_bound: Option<f64>,
-        upper_bound: Option<f64>,
+        _lower_bound: Option<f64>,
+        _upper_bound: Option<f64>,
         matching_docs: u64,
-        total_docs: u64,
+        _total_docs: u64,
         boost: f32,
     ) -> Self {
-        // Calculate range width for selectivity scoring
-        let range_width = match (lower_bound, upper_bound) {
-            (Some(lower), Some(upper)) => (upper - lower).abs(),
-            (Some(_), None) | (None, Some(_)) => 1000.0, // Large default for unbounded ranges
-            (None, None) => f64::INFINITY,               // Unbounded range
-        };
-
         RangeScorer {
-            lower_bound,
-            upper_bound,
-            range_width,
-            total_docs,
             matching_docs,
             boost,
-        }
-    }
-
-    /// Calculate selectivity-based IDF for the range.
-    fn range_idf(&self) -> f32 {
-        if self.matching_docs == 0 || self.total_docs == 0 {
-            // Return a default IDF for ranges with no matches
-            return 1.0;
-        }
-
-        let n = self.total_docs as f32;
-        let df = self.matching_docs as f32;
-
-        // Base IDF calculation using BM25 formula
-        let base_idf = ((n - df + 0.5) / (df + 0.5)).ln();
-
-        // Check for invalid values and ensure non-negative
-        let base_idf = if base_idf.is_nan() || base_idf.is_infinite() || base_idf < 0.0 {
-            // When most documents match (negative IDF), use a small positive value
-            // This maintains relative ranking while avoiding negative scores
-            0.5
-        } else {
-            base_idf
-        };
-
-        // Apply range selectivity bonus - narrower ranges get higher scores
-        let selectivity_multiplier = if self.range_width.is_finite() && self.range_width > 0.0 {
-            // Smaller range width = higher selectivity = higher score
-            1.0_f32 + (100.0_f32 / (self.range_width as f32 + 1.0_f32)).min(2.0_f32)
-        } else {
-            1.0_f32 // No bonus for unbounded ranges
-        };
-
-        // Ensure minimum meaningful score
-        let min_score = 0.5_f32;
-        (base_idf * selectivity_multiplier).max(min_score)
-    }
-
-    /// Calculate proximity-based score for a numeric value.
-    fn proximity_score(&self, value: f64) -> f32 {
-        match (self.lower_bound, self.upper_bound) {
-            (Some(lower), Some(upper)) => {
-                // For bounded ranges, calculate distance from range center
-                let center = (lower + upper) / 2.0;
-                let distance_from_center = (value - center).abs();
-                let max_distance = (upper - lower) / 2.0;
-
-                if max_distance > 0.0 {
-                    // Values closer to center get higher scores
-                    (1.0 + (1.0 - (distance_from_center / max_distance)).max(0.0)) as f32
-                } else {
-                    1.0_f32
-                }
-            }
-            (Some(bound), None) | (None, Some(bound)) => {
-                // For single-bounded ranges, closer to bound is better
-                let distance = (value - bound).abs();
-                (1.0 + (1.0 / (distance + 1.0)).min(1.0)) as f32
-            }
-            (None, None) => {
-                // Unbounded range - constant score
-                1.0_f32
-            }
         }
     }
 }
 
 impl Scorer for RangeScorer {
-    fn score(&self, _doc_id: u64, value: f32, _field_length: Option<f32>) -> f32 {
-        let idf = self.range_idf();
-
-        // If value is provided (non-zero), use it for proximity calculation
-        // Otherwise use a default score
-        let proximity = if value != 0.0 {
-            self.proximity_score(value as f64)
-        } else {
-            // Default proximity score when no value is provided
-            1.5
-        };
-
-        // Final score combines IDF with proximity bonus
-        let score = self.boost * idf * proximity;
-
-        // Ensure score is never NaN or infinite
-        if score.is_nan() || score.is_infinite() {
-            return self.boost * idf * 1.5; // Return reasonable default
-        }
-
-        score
+    /// Constant score for range matches.
+    ///
+    /// Matches Lucene's
+    /// [`PointRangeQuery`](https://lucene.apache.org/core/9_0_0/core/org/apache/lucene/search/PointRangeQuery.html)
+    /// behaviour: a range query is a binary "in range / not in range"
+    /// predicate, scored uniformly by the boost factor. This applies to
+    /// both single-valued and multi-valued numeric fields — when several
+    /// of a multi-valued document's values fall in range, the document
+    /// still contributes a single constant-scored hit (the BKD reader
+    /// deduplicates `doc_id`s during range search).
+    ///
+    /// The previous IDF + proximity heuristic confused users when the same
+    /// query produced different scores for the same document depending on
+    /// surrounding queries; constant scoring keeps range query semantics
+    /// predictable and aligns with the dynamic-schema spec.
+    fn score(&self, _doc_id: u64, _value: f32, _field_length: Option<f32>) -> f32 {
+        self.boost
     }
 
     fn boost(&self) -> f32 {
@@ -630,10 +573,7 @@ impl Scorer for RangeScorer {
         if self.matching_docs == 0 {
             return 0.0;
         }
-
-        let idf = self.range_idf();
-        let max_proximity = 2.0; // Maximum proximity bonus
-        self.boost * idf * max_proximity
+        self.boost
     }
 
     fn name(&self) -> &'static str {
@@ -656,7 +596,10 @@ impl Query for NumericRangeQuery {
             return Ok(Box::new(PreComputedMatcher::new(doc_ids)));
         }
 
-        // Fallback: scan all documents and filter by numeric range
+        // Fallback: scan all documents and filter by numeric range.
+        // Multi-valued fields match if ANY value falls in the range
+        // (Lucene-style "any match"), and the document is recorded at
+        // most once per query.
         let mut matching_docs = Vec::new();
         let max_doc = reader.max_doc();
 
@@ -664,17 +607,25 @@ impl Query for NumericRangeQuery {
             if let Ok(Some(doc)) = reader.document(doc_id)
                 && let Some(val) = doc.get(&self.field)
             {
-                let numeric_value = match val {
-                    crate::data::DataValue::Float64(f) => Some(*f),
-                    crate::data::DataValue::Int64(i) => Some(*i as f64),
-                    // WORKAROUND: Parse text values as numbers (needed because stored docs lose type info)
-                    crate::data::DataValue::Text(s) => s.parse::<f64>().ok(),
-                    _ => None,
+                let matched = match val {
+                    crate::data::DataValue::Float64(f) => self.contains_numeric(*f),
+                    crate::data::DataValue::Int64(i) => self.contains_numeric(*i as f64),
+                    crate::data::DataValue::Int64Array(arr) => {
+                        arr.iter().any(|i| self.contains_numeric(*i as f64))
+                    }
+                    crate::data::DataValue::Float64Array(arr) => {
+                        arr.iter().any(|f| self.contains_numeric(*f))
+                    }
+                    // WORKAROUND: Parse text values as numbers (needed
+                    // because stored docs lose type info in some paths).
+                    crate::data::DataValue::Text(s) => s
+                        .parse::<f64>()
+                        .ok()
+                        .is_some_and(|n| self.contains_numeric(n)),
+                    _ => false,
                 };
 
-                if let Some(numeric_value) = numeric_value
-                    && self.contains_numeric(numeric_value)
-                {
+                if matched {
                     matching_docs.push(doc_id);
                 }
             }
