@@ -153,10 +153,6 @@ impl UnifiedQueryParser {
             ));
         }
 
-        // Reject field references that name a field not present in the
-        // schema. See [`check_known_fields`] for the exact heuristic.
-        self.check_known_fields(query_str)?;
-
         let (lexical_str, vector_str, hybrid_mode) = self.split_query(query_str)?;
 
         let lexical = if let Some(ref s) = lexical_str {
@@ -164,6 +160,19 @@ impl UnifiedQueryParser {
         } else {
             None
         };
+
+        // Walk the parsed lexical tree and verify every field reference is
+        // declared in the schema. This runs after the (cheap) lexical parse
+        // but before the (expensive, embedding-driven) vector parse, so a
+        // typo'd query is rejected before any embedder cost is incurred.
+        //
+        // Vector clauses do not need a separate walk: `split_query` only
+        // routes a clause to the vector parser when its field is in the
+        // known vector-field set, so any unknown field name would have
+        // remained in the lexical portion and been caught here.
+        if let Some(ref lex) = lexical {
+            self.validate_field_refs(lex.as_ref())?;
+        }
 
         let vector = if let Some(ref s) = vector_str {
             Some(self.vector_parser.parse(s).await?)
@@ -286,68 +295,52 @@ impl UnifiedQueryParser {
 
     /// Reject field references that name a field outside the schema.
     ///
-    /// Walks the query string looking for `identifier:` tokens outside of
-    /// double-quoted regions and verifies each identifier against
-    /// [`known_fields`](Self::known_fields). When `known_fields` is empty
-    /// (the default, used by unit tests) no validation is performed, so
-    /// callers that did not supply a field set are unaffected.
+    /// Walks the parsed lexical query tree using
+    /// [`Query::collect_field_refs`](crate::lexical::query::Query::collect_field_refs),
+    /// gathers every field name reachable from the root (including those
+    /// nested inside boolean / span / advanced composite queries), and
+    /// verifies each against [`known_fields`](Self::known_fields). When
+    /// `known_fields` is empty (the default, used by unit tests) no
+    /// validation is performed, so callers that did not supply a field set
+    /// are unaffected.
     ///
-    /// The scan skips:
+    /// Unlike the previous regex-based heuristic, this approach:
     ///
-    /// - content inside `"..."` pairs (phrase literals may contain `:`)
-    /// - boolean keywords `AND`, `OR`, `NOT`, `TO` (reserved lexical tokens)
-    ///
-    /// The check is intentionally syntactic and best-effort. It is meant to
-    /// catch typos (`titl:hello` → did you mean `title`?), not to be a
-    /// replacement for full parse-tree validation.
+    /// - Sees only resolved field references — no false positives from
+    ///   `identifier:` tokens that appear inside quoted phrase literals or
+    ///   range expressions like `[A TO Z]`.
+    /// - Detects every leaf reference inside arbitrarily-nested boolean and
+    ///   span constructs.
+    /// - Allows users to declare fields named `AND`, `OR`, `NOT`, `TO` (or
+    ///   any other former reserved keyword) without the validator silently
+    ///   skipping them.
     ///
     /// # Arguments
     ///
-    /// * `query_str` - The raw query DSL string.
+    /// * `query` - The parsed lexical query whose field references should
+    ///   be validated.
     ///
     /// # Errors
     ///
     /// Returns [`LaurusError::invalid_argument`] listing the unknown field
-    /// names found.
-    fn check_known_fields(&self, query_str: &str) -> Result<()> {
+    /// names found, in deterministic (sorted) order.
+    fn validate_field_refs(&self, query: &dyn crate::lexical::query::Query) -> Result<()> {
         if self.known_fields.is_empty() {
             return Ok(());
         }
 
-        static FIELD_REF_RE: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r#"(?:^|[\s+\-(])([A-Za-z_][A-Za-z0-9_]*)\s*:"#).unwrap());
+        let mut refs: HashSet<String> = HashSet::new();
+        query.collect_field_refs(&mut refs);
 
-        // Strip quoted substrings so `"foo:bar"` is not inspected.
-        let mut stripped = String::with_capacity(query_str.len());
-        let mut in_quote = false;
-        for ch in query_str.chars() {
-            if ch == '"' {
-                in_quote = !in_quote;
-                stripped.push(' ');
-            } else if in_quote {
-                stripped.push(' ');
-            } else {
-                stripped.push(ch);
-            }
-        }
-
-        let mut unknown: Vec<String> = Vec::new();
-        for caps in FIELD_REF_RE.captures_iter(&stripped) {
-            let name = &caps[1];
-            // Skip reserved lexical keywords that may precede a colon in
-            // some synthetic inputs; none of these are field names.
-            if matches!(name, "AND" | "OR" | "NOT" | "TO") {
-                continue;
-            }
-            if !self.known_fields.contains(name) && !unknown.iter().any(|existing| existing == name)
-            {
-                unknown.push(name.to_string());
-            }
-        }
+        let mut unknown: Vec<String> = refs
+            .into_iter()
+            .filter(|f| !self.known_fields.contains(f))
+            .collect();
 
         if unknown.is_empty() {
             Ok(())
         } else {
+            unknown.sort();
             Err(LaurusError::invalid_argument(format!(
                 "query references unknown field(s) {unknown:?}; \
                  declare them in the schema or check for typos"
@@ -876,5 +869,123 @@ mod tests {
         assert_eq!(clean_lexical_string("   "), "");
         assert_eq!(clean_lexical_string("AND"), "");
         assert_eq!(clean_lexical_string("AND OR"), "");
+    }
+
+    // -- Field-reference validation (parse-tree walking) --
+
+    /// Build a parser that knows the given lexical field set, so
+    /// `validate_field_refs` is active.
+    fn make_parser_with_known_fields(fields: &[&str]) -> UnifiedQueryParser {
+        let analyzer = Arc::new(StandardAnalyzer::new().unwrap());
+        let lexical = LexicalQueryParser::new(analyzer).with_default_field(fields[0]);
+        let embedder: Arc<dyn Embedder> = Arc::new(MockEmbedder);
+        let vector = VectorQueryParser::new(embedder);
+        let known_fields: HashSet<String> = fields.iter().map(|s| s.to_string()).collect();
+        UnifiedQueryParser::new(lexical, vector, HashSet::new()).with_known_fields(known_fields)
+    }
+
+    #[tokio::test]
+    async fn validate_accepts_declared_field() {
+        let parser = make_parser_with_known_fields(&["title", "body"]);
+        parser.parse("title:hello").await.unwrap();
+        parser.parse("body:world").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_typo_with_sorted_message() {
+        let parser = make_parser_with_known_fields(&["title", "body"]);
+        let err = match parser.parse("titl:hello").await {
+            Ok(_) => panic!("expected error for typo'd field"),
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("titl"), "{msg}");
+        assert!(msg.contains("unknown field"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn validate_collects_all_unknowns_sorted() {
+        let parser = make_parser_with_known_fields(&["title"]);
+        let err = match parser.parse("foo:hello AND bar:world").await {
+            Ok(_) => panic!("expected error"),
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        // Both unknown fields appear, in sorted order (`bar` before `foo`).
+        let foo_pos = msg
+            .find("foo")
+            .unwrap_or_else(|| panic!("foo present: {msg}"));
+        let bar_pos = msg
+            .find("bar")
+            .unwrap_or_else(|| panic!("bar present: {msg}"));
+        assert!(bar_pos < foo_pos, "expected sorted order: {msg}");
+    }
+
+    #[tokio::test]
+    async fn validate_recurses_into_boolean_clauses() {
+        let parser = make_parser_with_known_fields(&["title", "body", "tag"]);
+        // Nested boolean: should walk every leaf.
+        parser
+            .parse("(title:foo AND body:bar) OR tag:baz")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_detects_unknown_inside_nested_boolean() {
+        let parser = make_parser_with_known_fields(&["title", "body"]);
+        let err = match parser.parse("(title:foo AND body:bar) OR tag:baz").await {
+            Ok(_) => panic!("expected error for nested unknown"),
+            Err(e) => e,
+        };
+        assert!(err.to_string().contains("tag"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn validate_does_not_inspect_quoted_phrases() {
+        // The phrase contains `bar:` literally, which the previous regex
+        // pre-stripped. With AST walking it never reaches the field check
+        // because the parsed query targets only the surrounding `title`.
+        let parser = make_parser_with_known_fields(&["title"]);
+        parser.parse(r#"title:"foo bar:baz qux""#).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_allows_field_named_and() {
+        // A field literally named `AND` (or `OR` / `NOT` / `TO`) was
+        // skipped by the old regex via its keyword allow-list, which made
+        // typos in those names invisible. The AST walk treats them as
+        // ordinary identifiers and validates them like any other field.
+        let parser = make_parser_with_known_fields(&["AND", "title"]);
+        parser.parse("AND:hello").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_allows_field_named_to() {
+        let parser = make_parser_with_known_fields(&["TO", "title"]);
+        parser.parse("TO:hello").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_does_not_misinterpret_range_to_keyword() {
+        // `[A TO Z]` is a range literal; `TO` inside it is a separator,
+        // not a field reference. The walker never sees `TO` as a field
+        // name because it walks the parsed RangeQuery, not the source
+        // string.
+        let parser = make_parser_with_known_fields(&["title"]);
+        parser.parse("title:[A TO Z]").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_skipped_when_known_fields_empty() {
+        // The default parser has an empty `known_fields` set, so the
+        // unknown field name `anything_goes` does not raise a validation
+        // error. (Whether the underlying lexical parser succeeds is
+        // independent — using a known-default field keeps the test
+        // focused on the validation skip behaviour.)
+        let parser = make_parser();
+        // `make_parser` uses default field "title", so this query parses
+        // successfully and the lexical AST targets only `title`.
+        parser.parse("title:anything_goes").await.unwrap();
     }
 }

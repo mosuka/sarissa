@@ -428,6 +428,12 @@ impl Query for BooleanQuery {
         self
     }
 
+    fn collect_field_refs(&self, out: &mut std::collections::HashSet<String>) {
+        for clause in &self.clauses {
+            clause.query.collect_field_refs(out);
+        }
+    }
+
     fn apply_field_boosts(&mut self, boosts: &std::collections::HashMap<String, f32>) {
         // Apply overall boost if targeted (BooleanQuery doesn't target a field usually, but we check anyway)
         if let Some(f) = self.field()

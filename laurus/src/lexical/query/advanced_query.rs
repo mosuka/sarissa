@@ -273,6 +273,19 @@ impl Query for AdvancedQuery {
         self
     }
 
+    fn collect_field_refs(&self, out: &mut std::collections::HashSet<String>) {
+        self.core_query.collect_field_refs(out);
+        for filter in &self.filters {
+            filter.collect_field_refs(out);
+        }
+        for filter in &self.negative_filters {
+            filter.collect_field_refs(out);
+        }
+        for filter in &self.post_filters {
+            filter.collect_field_refs(out);
+        }
+    }
+
     fn apply_field_boosts(&mut self, boosts: &HashMap<String, f32>) {
         // Apply field-level boosts from AdvanceQuery's own field_boosts first
         if !self.field_boosts.is_empty() {
