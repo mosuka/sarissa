@@ -720,6 +720,10 @@ impl Query for SpanQueryWrapper {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn collect_field_refs(&self, out: &mut std::collections::HashSet<String>) {
+        out.insert(self.span_query.field_name().to_string());
+    }
 }
 
 /// Builder for creating complex span queries.

@@ -33,7 +33,7 @@ pub use term::TermQuery;
 pub use wildcard::WildcardQuery;
 
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
@@ -150,6 +150,29 @@ pub trait Query: Send + Sync + Debug {
     /// Returns None for queries that don't target a specific field (e.g., BooleanQuery).
     fn field(&self) -> Option<&str> {
         None
+    }
+
+    /// Collect every field name referenced by this query and its sub-queries.
+    ///
+    /// The default implementation inserts `self.field()` into `out` if it
+    /// returns `Some`. Composite queries that hold child queries (e.g.
+    /// [`BooleanQuery`](crate::lexical::query::BooleanQuery), span queries)
+    /// override this method to recurse into each child so every leaf field
+    /// reference contributes.
+    ///
+    /// This is the authoritative way for callers (such as
+    /// [`UnifiedQueryParser`](crate::engine::query::UnifiedQueryParser)) to
+    /// validate that every field a query references is declared in the
+    /// schema, replacing earlier regex-based heuristics.
+    ///
+    /// # Arguments
+    ///
+    /// * `out` - The set to populate with field names. Existing entries are
+    ///   preserved; new names are inserted.
+    fn collect_field_refs(&self, out: &mut HashSet<String>) {
+        if let Some(f) = self.field() {
+            out.insert(f.to_string());
+        }
     }
 
     /// Apply field-level boosts to this query and its sub-queries.
