@@ -447,7 +447,7 @@ impl InvertedIndexWriter {
                         };
 
                         field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                        point_values.insert(field_name.clone(), vec![*num as f64]);
+                        point_values.insert(field_name.clone(), vec![vec![*num as f64]]);
                     }
                     DataValue::Float64(num) => {
                         // ...
@@ -460,7 +460,7 @@ impl InvertedIndexWriter {
                                 offset: (0, num.to_string().len()),
                             }],
                         );
-                        point_values.insert(field_name.clone(), vec![*num]);
+                        point_values.insert(field_name.clone(), vec![vec![*num]]);
                     }
                     DataValue::DateTime(dt) => {
                         let ts = dt.timestamp() as f64;
@@ -473,7 +473,7 @@ impl InvertedIndexWriter {
                                 offset: (0, ts.to_string().len()),
                             }],
                         );
-                        point_values.insert(field_name.clone(), vec![ts]);
+                        point_values.insert(field_name.clone(), vec![vec![ts]]);
                     }
                     DataValue::Bool(b) => {
                         // bool is indexed as "true"/"false" text for lexical queries,
@@ -500,9 +500,52 @@ impl InvertedIndexWriter {
                                 offset: (0, format!("{},{}", lat, lon).len()),
                             }],
                         );
-                        point_values.insert(field_name.clone(), vec![*lat, *lon]);
+                        point_values.insert(field_name.clone(), vec![vec![*lat, *lon]]);
                     }
-                    // Handle other variants...
+                    DataValue::Int64Array(arr) => {
+                        // Multi-valued integer field. Each element is a
+                        // distinct analyzed term and a distinct 1D BKD
+                        // point so range queries match if any value falls
+                        // in range (Lucene "any match" semantics).
+                        let mut terms: Vec<AnalyzedTerm> = Vec::with_capacity(arr.len());
+                        let mut points: Vec<Vec<f64>> = Vec::with_capacity(arr.len());
+                        let mut offset = 0usize;
+                        for (idx, num) in arr.iter().enumerate() {
+                            let text = num.to_string();
+                            let len = text.len();
+                            terms.push(AnalyzedTerm {
+                                term: text,
+                                position: idx as u32,
+                                frequency: 1,
+                                offset: (offset, offset + len),
+                            });
+                            offset += len + 1;
+                            points.push(vec![*num as f64]);
+                        }
+                        field_terms.insert(field_name.clone(), terms);
+                        point_values.insert(field_name.clone(), points);
+                    }
+                    DataValue::Float64Array(arr) => {
+                        // Multi-valued float field. Same shape as Int64Array.
+                        let mut terms: Vec<AnalyzedTerm> = Vec::with_capacity(arr.len());
+                        let mut points: Vec<Vec<f64>> = Vec::with_capacity(arr.len());
+                        let mut offset = 0usize;
+                        for (idx, num) in arr.iter().enumerate() {
+                            let text = num.to_string();
+                            let len = text.len();
+                            terms.push(AnalyzedTerm {
+                                term: text,
+                                position: idx as u32,
+                                frequency: 1,
+                                offset: (offset, offset + len),
+                            });
+                            offset += len + 1;
+                            points.push(vec![*num]);
+                        }
+                        field_terms.insert(field_name.clone(), terms);
+                        point_values.insert(field_name.clone(), points);
+                    }
+                    // Handle other variants (Bytes, Vector, Null) — not lexically indexed.
                     _ => {}
                 }
             }
@@ -890,11 +933,16 @@ impl InvertedIndexWriter {
         let mut field_points: AHashMap<String, Vec<(Vec<f64>, u64)>> = AHashMap::new();
 
         for (doc_id, doc) in &self.buffered_docs {
-            for (field, values) in &doc.point_values {
-                field_points
-                    .entry(field.clone())
-                    .or_default()
-                    .push((values.clone(), *doc_id));
+            for (field, points) in &doc.point_values {
+                // Each `point` is one BKD entry. A single-valued field
+                // contributes one entry; a multi-valued field contributes
+                // one per element. The BKD reader's `range_search` already
+                // deduplicates `doc_id`s, so a multi-valued document is
+                // reported at most once per query.
+                let bucket = field_points.entry(field.clone()).or_default();
+                for point in points {
+                    bucket.push((point.clone(), *doc_id));
+                }
             }
         }
 
