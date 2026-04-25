@@ -94,6 +94,7 @@ pub use engine::search::{
     FusionAlgorithm, HybridMode, LexicalSearchOptions, SearchQuery, SearchRequest,
     SearchRequestBuilder, SearchResult, VectorSearchOptions, VectorSearchQuery,
 };
+pub use engine::type_inference::{InferredValue, infer_from_json, infer_option_from_data_value};
 pub use error::{LaurusError, Result};
 pub use lexical::core::field::{
     BooleanOption, BytesOption, DateTimeOption, FloatOption, GeoOption, IntegerOption, TextOption,

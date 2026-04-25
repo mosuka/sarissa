@@ -2,59 +2,55 @@
 
 use std::collections::HashMap;
 
+use laurus::{InferredValue, infer_from_json};
 use serde_json::{Map, Value, json};
 
+use crate::convert::document::data_value_to_proto;
 use crate::proto::laurus::v1;
 
 // ---------------------------------------------------------------------------
 // Value conversion
 // ---------------------------------------------------------------------------
 
-/// Converts a JSON value to a proto `Value`.
-pub fn json_value_to_proto(json: &Value) -> v1::Value {
+/// Convert a JSON value to a proto `Value` using engine type inference.
+///
+/// Delegates to [`laurus::engine::type_inference::infer_from_json`] so the
+/// gateway path produces the same [`laurus::DataValue`] shapes as the
+/// engine's schema-less ingestion path. The resulting `DataValue` is then
+/// lowered to a proto `Value` via
+/// [`crate::convert::document::data_value_to_proto`].
+///
+/// Mapping summary:
+///
+/// | JSON | proto `Value` |
+/// | --- | --- |
+/// | `null` | `NullValue` |
+/// | `bool` | `BoolValue` |
+/// | integer (fits in i64) | `Int64Value` |
+/// | non-integer / large number | `Float64Value` |
+/// | `string` | `TextValue` |
+/// | numeric array (all i64) | `Int64ArrayValue` |
+/// | numeric array (any non-i64 number) | `Float64ArrayValue` |
+/// | empty array | `NullValue` (treated as skip) |
+/// | object with `lat\|latitude` + `lon\|lng\|longitude` | `GeoValue` |
+///
+/// # Arguments
+///
+/// * `json` - The JSON value to convert.
+///
+/// # Errors
+///
+/// Returns the engine error message (as a `String`) when the JSON value
+/// cannot be inferred — for example, mixed-type arrays, non-geo objects,
+/// or out-of-range geo coordinates.
+pub fn json_value_to_proto(json: &Value) -> Result<v1::Value, String> {
     use v1::value::Kind;
-    let kind = match json {
-        Value::Null => Some(Kind::NullValue(true)),
-        Value::Bool(b) => Some(Kind::BoolValue(*b)),
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Some(Kind::Int64Value(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(Kind::Float64Value(f))
-            } else {
-                Some(Kind::Float64Value(0.0))
-            }
-        }
-        Value::String(s) => Some(Kind::TextValue(s.clone())),
-        Value::Array(arr) => {
-            // Treat numeric arrays as vectors
-            let values: Vec<f32> = arr
-                .iter()
-                .filter_map(|v| v.as_f64().map(|f| f as f32))
-                .collect();
-            if values.len() == arr.len() && !arr.is_empty() {
-                Some(Kind::VectorValue(v1::VectorValue { values }))
-            } else {
-                // Treat non-numeric arrays as text
-                Some(Kind::TextValue(json.to_string()))
-            }
-        }
-        Value::Object(obj) => {
-            // Geo point ({"latitude": ..., "longitude": ...})
-            if let (Some(lat), Some(lon)) = (
-                obj.get("latitude").and_then(|v| v.as_f64()),
-                obj.get("longitude").and_then(|v| v.as_f64()),
-            ) {
-                Some(Kind::GeoValue(v1::GeoPoint {
-                    latitude: lat,
-                    longitude: lon,
-                }))
-            } else {
-                Some(Kind::TextValue(json.to_string()))
-            }
-        }
-    };
-    v1::Value { kind }
+    match infer_from_json(json).map_err(|e| e.to_string())? {
+        InferredValue::Skip => Ok(v1::Value {
+            kind: Some(Kind::NullValue(true)),
+        }),
+        InferredValue::Inferred { value, .. } => Ok(data_value_to_proto(&value)),
+    }
 }
 
 /// Converts a proto `Value` to a JSON value.
@@ -133,9 +129,22 @@ fn base64_encode(_engine: &Base64Engine, data: &[u8]) -> String {
 // Document conversion
 // ---------------------------------------------------------------------------
 
-/// Converts a JSON object to a proto `Document`.
+/// Convert a JSON object to a proto `Document`.
 ///
-/// Input format: `{"fields": {"field_name": value, ...}}`
+/// Input format: `{"fields": {"field_name": value, ...}}`. Each field value
+/// is run through [`json_value_to_proto`], so the same type-inference rules
+/// as the engine apply (geo aliases, range checks, multi-valued numerics,
+/// mixed-array rejection).
+///
+/// # Arguments
+///
+/// * `json` - The JSON document to convert.
+///
+/// # Errors
+///
+/// Returns a `String` error message when the input is structurally invalid
+/// (missing `fields` key, non-object `fields`) or when any field value
+/// cannot be inferred. The error includes the offending field name.
 pub fn json_to_proto_document(json: &Value) -> Result<v1::Document, String> {
     let fields_val = json
         .get("fields")
@@ -144,10 +153,11 @@ pub fn json_to_proto_document(json: &Value) -> Result<v1::Document, String> {
         .as_object()
         .ok_or_else(|| "\"fields\" must be an object".to_string())?;
 
-    let fields: HashMap<String, v1::Value> = fields_obj
-        .iter()
-        .map(|(k, v)| (k.clone(), json_value_to_proto(v)))
-        .collect();
+    let mut fields: HashMap<String, v1::Value> = HashMap::with_capacity(fields_obj.len());
+    for (k, v) in fields_obj {
+        let proto_val = json_value_to_proto(v).map_err(|e| format!("field \"{k}\": {e}"))?;
+        fields.insert(k.clone(), proto_val);
+    }
 
     Ok(v1::Document { fields })
 }
@@ -947,7 +957,7 @@ mod tests {
     #[test]
     fn test_json_value_roundtrip_null() {
         let json = Value::Null;
-        let proto = json_value_to_proto(&json);
+        let proto = json_value_to_proto(&json).unwrap();
         let back = proto_value_to_json(&proto);
         assert_eq!(back, Value::Null);
     }
@@ -955,7 +965,7 @@ mod tests {
     #[test]
     fn test_json_value_roundtrip_bool() {
         let json = json!(true);
-        let proto = json_value_to_proto(&json);
+        let proto = json_value_to_proto(&json).unwrap();
         let back = proto_value_to_json(&proto);
         assert_eq!(back, json!(true));
     }
@@ -963,7 +973,7 @@ mod tests {
     #[test]
     fn test_json_value_roundtrip_int() {
         let json = json!(42);
-        let proto = json_value_to_proto(&json);
+        let proto = json_value_to_proto(&json).unwrap();
         let back = proto_value_to_json(&proto);
         assert_eq!(back, json!(42));
     }
@@ -971,7 +981,7 @@ mod tests {
     #[test]
     fn test_json_value_roundtrip_float() {
         let json = json!(1.23);
-        let proto = json_value_to_proto(&json);
+        let proto = json_value_to_proto(&json).unwrap();
         let back = proto_value_to_json(&proto);
         assert_eq!(back, json!(1.23));
     }
@@ -979,26 +989,85 @@ mod tests {
     #[test]
     fn test_json_value_roundtrip_text() {
         let json = json!("hello");
-        let proto = json_value_to_proto(&json);
+        let proto = json_value_to_proto(&json).unwrap();
         let back = proto_value_to_json(&proto);
         assert_eq!(back, json!("hello"));
     }
 
     #[test]
-    fn test_json_value_roundtrip_vector() {
-        let json = json!([1.0, 2.0, 3.0]);
-        let proto = json_value_to_proto(&json);
+    fn test_json_value_integer_array_roundtrip() {
+        // Integer-only arrays now roundtrip as Int64ArrayValue (multi-valued integer field).
+        let json = json!([10, 20, 30]);
+        let proto = json_value_to_proto(&json).unwrap();
         let back = proto_value_to_json(&proto);
-        assert_eq!(back, json!([1.0, 2.0, 3.0]));
+        assert_eq!(back, json!([10, 20, 30]));
     }
 
     #[test]
-    fn test_json_value_roundtrip_geo() {
+    fn test_json_value_float_array_roundtrip() {
+        // Mixed-precision numeric arrays roundtrip as Float64ArrayValue.
+        let json = json!([1.0, 2.5, 3.0]);
+        let proto = json_value_to_proto(&json).unwrap();
+        let back = proto_value_to_json(&proto);
+        assert_eq!(back, json!([1.0, 2.5, 3.0]));
+    }
+
+    #[test]
+    fn test_json_value_empty_array_skips_to_null() {
+        // Empty arrays are inferred as Skip → emitted as NullValue.
+        let json = json!([]);
+        let proto = json_value_to_proto(&json).unwrap();
+        let back = proto_value_to_json(&proto);
+        assert_eq!(back, Value::Null);
+    }
+
+    #[test]
+    fn test_json_value_mixed_array_errors() {
+        let json = json!([1, "x"]);
+        let err = json_value_to_proto(&json).unwrap_err();
+        assert!(err.contains("array"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_json_value_geo_canonical_keys() {
         let json = json!({"latitude": 35.6762, "longitude": 139.6503});
-        let proto = json_value_to_proto(&json);
+        let proto = json_value_to_proto(&json).unwrap();
         let back = proto_value_to_json(&proto);
         assert_eq!(back["latitude"], json!(35.6762));
         assert_eq!(back["longitude"], json!(139.6503));
+    }
+
+    #[test]
+    fn test_json_value_geo_short_aliases() {
+        // The engine accepts `lat` / `lon` aliases.
+        let json = json!({"lat": 35.6762, "lon": 139.6503});
+        let proto = json_value_to_proto(&json).unwrap();
+        let back = proto_value_to_json(&proto);
+        assert_eq!(back["latitude"], json!(35.6762));
+        assert_eq!(back["longitude"], json!(139.6503));
+    }
+
+    #[test]
+    fn test_json_value_geo_lng_alias() {
+        let json = json!({"latitude": 35.6762, "lng": 139.6503});
+        let proto = json_value_to_proto(&json).unwrap();
+        let back = proto_value_to_json(&proto);
+        assert_eq!(back["latitude"], json!(35.6762));
+        assert_eq!(back["longitude"], json!(139.6503));
+    }
+
+    #[test]
+    fn test_json_value_geo_out_of_range_errors() {
+        let json = json!({"latitude": 200.0, "longitude": 0.0});
+        let err = json_value_to_proto(&json).unwrap_err();
+        assert!(err.contains("latitude"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_json_value_non_geo_object_errors() {
+        let json = json!({"foo": "bar"});
+        let err = json_value_to_proto(&json).unwrap_err();
+        assert!(err.contains("geographic"), "unexpected error: {err}");
     }
 
     #[test]
@@ -1011,6 +1080,18 @@ mod tests {
         });
         let doc = json_to_proto_document(&json).unwrap();
         assert_eq!(doc.fields.len(), 2);
+    }
+
+    #[test]
+    fn test_json_to_proto_document_field_error_includes_name() {
+        let json = json!({
+            "fields": {
+                "good": "ok",
+                "bad": [1, "x"]
+            }
+        });
+        let err = json_to_proto_document(&json).unwrap_err();
+        assert!(err.starts_with("field \"bad\":"), "unexpected error: {err}");
     }
 
     #[test]

@@ -1,7 +1,9 @@
 //! Conversion between [`laurus::Document`] and the protobuf `Document` message.
 //!
-//! The public [`to_proto`] and [`from_proto`] functions handle the top-level
-//! document, while the private helpers convert individual [`DataValue`] fields.
+//! [`to_proto`] and [`from_proto`] handle the top-level document.
+//! [`data_value_to_proto`] and [`data_value_from_proto`] convert individual
+//! [`DataValue`] fields and are also reused by the HTTP gateway when it
+//! lowers JSON-derived [`DataValue`]s into the proto wire format.
 
 use std::collections::HashMap;
 
@@ -33,7 +35,15 @@ pub fn from_proto(proto: &v1::Document) -> Document {
     Document { fields }
 }
 
-fn data_value_to_proto(val: &DataValue) -> v1::Value {
+/// Convert a [`DataValue`] into a proto `Value`.
+///
+/// Used by both the gRPC document path ([`to_proto`]) and the HTTP gateway
+/// JSON path (after [`laurus::engine::type_inference::infer_from_json`]).
+///
+/// # Arguments
+///
+/// * `val` - The [`DataValue`] to convert.
+pub fn data_value_to_proto(val: &DataValue) -> v1::Value {
     use v1::value::Kind;
     let kind = match val {
         DataValue::Null => Some(Kind::NullValue(true)),
@@ -58,7 +68,12 @@ fn data_value_to_proto(val: &DataValue) -> v1::Value {
     v1::Value { kind }
 }
 
-fn data_value_from_proto(val: &v1::Value) -> DataValue {
+/// Convert a proto `Value` into a [`DataValue`].
+///
+/// # Arguments
+///
+/// * `val` - The proto `Value` to convert.
+pub fn data_value_from_proto(val: &v1::Value) -> DataValue {
     use v1::value::Kind;
     match &val.kind {
         Some(Kind::NullValue(_)) => DataValue::Null,

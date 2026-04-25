@@ -5,29 +5,26 @@
 //! this module infers a [`FieldOption`] for each undeclared field from the
 //! value that the user provided.
 //!
+//! Two entry points cover the two ingestion paths:
+//!
+//! - [`infer_option_from_data_value`] — engine-side path; the document already
+//!   carries a [`DataValue`] (gRPC `add_document`, native bindings).
+//! - [`infer_from_json`] — transport-side path; used by the HTTP gateway so
+//!   JSON inputs follow the same inference rules as the engine.
+//!
 //! Supported inferences:
 //!
 //! - `string` → [`FieldOption::Text`]
 //! - `integer` → [`FieldOption::Integer`]
 //! - `float` → [`FieldOption::Float`]
 //! - `bool` → [`FieldOption::Boolean`]
+//! - numeric array (all `i64`) → [`FieldOption::Integer`] with `multi_valued = true`
+//! - numeric array (any non-`i64` number) → [`FieldOption::Float`] with `multi_valued = true`
 //! - `object` with `lat|latitude` and `lon|lng|longitude` keys (values in
 //!   range) → [`FieldOption::Geo`]
 //!
-//! Arrays of numbers are **not** inferred in the current version: they are
-//! intended to become multi-valued numeric fields, but the lexical store does
-//! not yet support multi-valued numerics. See the task plan for details.
-//!
-//! Vector fields are never inferred; they must always be declared explicitly
-//! in the schema.
-
-// The JSON-based inference helpers ([`infer_from_json`], [`InferredValue`])
-// are part of the public crate API so that transport layers (e.g. the gRPC
-// gateway) can convert JSON input with the same rules as the engine's
-// [`DataValue`]-based path. They are intentionally unused inside this crate
-// while the gateway integration is pending — silence the dead-code warnings
-// to keep lint output clean without hiding genuine issues.
-#![allow(dead_code)]
+//! Vector and bytes fields are never inferred; they must always be declared
+//! explicitly in the schema.
 
 use serde_json::Value as JsonValue;
 
@@ -125,7 +122,9 @@ pub fn infer_option_from_data_value(value: &DataValue) -> Result<Option<FieldOpt
 /// | `bool` | [`DataValue::Bool`] | [`FieldOption::Boolean`] |
 /// | `object` with `lat|latitude` + `lon|lng|longitude` | [`DataValue::Geo`] | [`FieldOption::Geo`] |
 /// | `null` | (none) | (none) — returns [`InferredValue::Skip`] |
-/// | `array` of numbers | — | returns an error (multi-valued numerics not yet supported) |
+/// | `array` of integers | [`DataValue::Int64Array`] | [`FieldOption::Integer`] with `multi_valued = true` |
+/// | `array` containing any non-i64 number | [`DataValue::Float64Array`] | [`FieldOption::Float`] with `multi_valued = true` |
+/// | empty `array` | (none) | (none) — returns [`InferredValue::Skip`] |
 ///
 /// # Arguments
 ///
@@ -134,7 +133,7 @@ pub fn infer_option_from_data_value(value: &DataValue) -> Result<Option<FieldOpt
 /// # Errors
 ///
 /// Returns [`LaurusError::invalid_argument`] if the value cannot be inferred
-/// (e.g. unsupported array or object shape, out-of-range geo values).
+/// (e.g. mixed-type array, non-geo object, out-of-range geo values).
 pub fn infer_from_json(value: &JsonValue) -> Result<InferredValue> {
     match value {
         JsonValue::Null => Ok(InferredValue::Skip),
@@ -170,11 +169,12 @@ pub fn infer_from_json(value: &JsonValue) -> Result<InferredValue> {
 
 /// Infer a value from a JSON array.
 ///
-/// Arrays are only supported when they represent a multi-valued numeric field.
-/// Since multi-valued numerics are not yet implemented in the lexical store,
-/// this function returns an error for non-empty arrays. Empty arrays are
-/// treated as [`InferredValue::Skip`] because their element type cannot be
-/// determined.
+/// Numeric-only arrays become multi-valued numeric fields. Arrays whose
+/// elements all fit in `i64` map to [`DataValue::Int64Array`] backed by an
+/// [`IntegerOption`] with `multi_valued = true`. Arrays containing any
+/// non-`i64` number map to [`DataValue::Float64Array`] backed by a
+/// [`FloatOption`] with `multi_valued = true`. Empty arrays return
+/// [`InferredValue::Skip`] because their element type cannot be determined.
 ///
 /// # Arguments
 ///
@@ -183,10 +183,7 @@ pub fn infer_from_json(value: &JsonValue) -> Result<InferredValue> {
 /// # Errors
 ///
 /// Returns [`LaurusError::invalid_argument`] when the array contains a
-/// non-numeric or mixed-type element. Numeric-only arrays are inferred as
-/// multi-valued numeric fields ([`DataValue::Int64Array`] or
-/// [`DataValue::Float64Array`]) backed by an [`IntegerOption`] /
-/// [`FloatOption`] with `multi_valued = true`.
+/// non-numeric or mixed-type element.
 fn infer_from_array(arr: &[JsonValue]) -> Result<InferredValue> {
     if arr.is_empty() {
         return Ok(InferredValue::Skip);

@@ -186,6 +186,41 @@ data: {"id":"doc1","score":0.8532,"document":{...}}
 data: {"id":"doc2","score":0.4210,"document":{...}}
 ```
 
+## JSON Field Value Inference
+
+When the gateway accepts a document body (`PUT /v1/documents/:id` or
+`POST /v1/documents/:id`), each value inside `document.fields` is converted
+to the engine's [`DataValue`](../concepts/schema_and_fields.md) type using
+the same inference rules as schema-less ingestion. This keeps the HTTP and
+gRPC paths in sync.
+
+| JSON value | Resulting field type | Notes |
+| :--- | :--- | :--- |
+| `null` | (skipped) | The field is emitted as a `NullValue` and dropped during ingest. |
+| `true` / `false` | `boolean` | |
+| integer (fits in `i64`) | `integer` | |
+| float / large integer | `float` | |
+| `"text"` | `text` | |
+| `[1, 2, 3]` (all integers) | `integer` with `multi_valued: true` | Multi-valued numeric field. |
+| `[1.0, 2.5]` (any non-integer number) | `float` with `multi_valued: true` | |
+| `[]` (empty array) | (skipped) | Element type cannot be determined, so the field is skipped. |
+| `{"latitude": ..., "longitude": ...}` | `geo` | |
+| `{"lat": ..., "lon": ...}` / `{"lat": ..., "lng": ...}` | `geo` | Short aliases for latitude / longitude are accepted. |
+
+The gateway returns an HTTP 400 (`Bad Request`) when:
+
+- An array contains mixed types or non-numeric elements
+  (e.g. `[1, "x"]`).
+- An object is not a valid geographic point (missing latitude / longitude
+  keys, or non-numeric values).
+- A geographic latitude is outside `[-90, 90]` or a longitude is outside
+  `[-180, 180]`.
+
+Vector and bytes fields cannot be inferred from JSON alone and must be
+declared in the schema. Numeric arrays sent against a declared vector
+field are coerced to a vector of `f32` values automatically, so REST
+clients can post embeddings as plain JSON arrays.
+
 ## Request/Response Format
 
 All request and response bodies use JSON. The JSON structure mirrors the gRPC protobuf messages. See [gRPC API Reference](grpc_api.md) for the full message definitions.
