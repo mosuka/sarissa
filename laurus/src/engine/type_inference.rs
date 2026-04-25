@@ -95,6 +95,14 @@ pub fn infer_option_from_data_value(value: &DataValue) -> Result<Option<FieldOpt
             crate::lexical::core::field::DateTimeOption::default(),
         ))),
         DataValue::Geo(_, _) => Ok(Some(FieldOption::Geo(GeoOption::default()))),
+        DataValue::Int64Array(_) => Ok(Some(FieldOption::Integer(IntegerOption {
+            multi_valued: true,
+            ..Default::default()
+        }))),
+        DataValue::Float64Array(_) => Ok(Some(FieldOption::Float(FloatOption {
+            multi_valued: true,
+            ..Default::default()
+        }))),
         DataValue::Vector(_) => Err(LaurusError::invalid_argument(
             "vector values require an explicit vector field declaration \
              (Hnsw, Flat, or Ivf) in the schema",
@@ -174,11 +182,11 @@ pub fn infer_from_json(value: &JsonValue) -> Result<InferredValue> {
 ///
 /// # Errors
 ///
-/// Returns [`LaurusError::invalid_argument`] if the array is non-empty. The
-/// error message reflects whether the elements form a well-typed numeric
-/// array (in which case the feature is "not yet supported") or the array
-/// contains a non-numeric or mixed-type element (in which case the input is
-/// rejected on shape grounds even once multi-valued numerics are supported).
+/// Returns [`LaurusError::invalid_argument`] when the array contains a
+/// non-numeric or mixed-type element. Numeric-only arrays are inferred as
+/// multi-valued numeric fields ([`DataValue::Int64Array`] or
+/// [`DataValue::Float64Array`]) backed by an [`IntegerOption`] /
+/// [`FloatOption`] with `multi_valued = true`.
 fn infer_from_array(arr: &[JsonValue]) -> Result<InferredValue> {
     if arr.is_empty() {
         return Ok(InferredValue::Skip);
@@ -207,12 +215,34 @@ fn infer_from_array(arr: &[JsonValue]) -> Result<InferredValue> {
         ));
     }
 
-    let kind = if all_i64 { "integer" } else { "float" };
-    Err(LaurusError::invalid_argument(format!(
-        "multi-valued {kind} arrays are not yet supported by the lexical store; \
-         declare the field explicitly in the schema once multi-valued numerics \
-         become available"
-    )))
+    if all_i64 {
+        let values: Vec<i64> = arr
+            .iter()
+            .map(|v| v.as_i64().expect("checked above"))
+            .collect();
+        Ok(InferredValue::Inferred {
+            value: DataValue::Int64Array(values),
+            option: FieldOption::Integer(IntegerOption {
+                multi_valued: true,
+                ..Default::default()
+            }),
+        })
+    } else {
+        let values: Vec<f64> = arr
+            .iter()
+            .map(|v| {
+                v.as_f64()
+                    .expect("numeric JSON values are always representable as f64")
+            })
+            .collect();
+        Ok(InferredValue::Inferred {
+            value: DataValue::Float64Array(values),
+            option: FieldOption::Float(FloatOption {
+                multi_valued: true,
+                ..Default::default()
+            }),
+        })
+    }
 }
 
 /// Infer a value from a JSON object.
@@ -335,11 +365,24 @@ mod tests {
     }
 
     #[test]
-    fn infer_numeric_array_not_supported() {
-        let err = infer_from_json(&json!([1, 2, 3])).unwrap_err();
-        assert!(err.to_string().contains("not yet supported"));
-        let err = infer_from_json(&json!([1.0, 2.5])).unwrap_err();
-        assert!(err.to_string().contains("not yet supported"));
+    fn infer_integer_array_to_int64_array() {
+        let (v, o) = inferred(infer_from_json(&json!([1, 2, 3])).unwrap());
+        assert_eq!(v, DataValue::Int64Array(vec![1, 2, 3]));
+        match o {
+            FieldOption::Integer(opt) => assert!(opt.multi_valued),
+            other => panic!("expected Integer with multi_valued=true, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_float_array_to_float64_array() {
+        // Mixed integer + float (any non-i64 element flips to float array)
+        let (v, o) = inferred(infer_from_json(&json!([1.0, 2.5, 3])).unwrap());
+        assert_eq!(v, DataValue::Float64Array(vec![1.0, 2.5, 3.0]));
+        match o {
+            FieldOption::Float(opt) => assert!(opt.multi_valued),
+            other => panic!("expected Float with multi_valued=true, got {other:?}"),
+        }
     }
 
     #[test]

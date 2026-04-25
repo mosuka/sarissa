@@ -493,6 +493,20 @@ impl MergeEngine {
                         }
                         FieldValue::Vector(v) => format!("[vector: {} dims]", v.len()),
                         FieldValue::Null => "null".to_string(),
+                        FieldValue::Int64Array(arr) => format!(
+                            "[{}]",
+                            arr.iter()
+                                .map(|v| v.to_string())
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        ),
+                        FieldValue::Float64Array(arr) => format!(
+                            "[{}]",
+                            arr.iter()
+                                .map(|v| v.to_string())
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        ),
                     };
                     writer.write_string(&field_str)?;
                 }

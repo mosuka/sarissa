@@ -13,12 +13,24 @@ message Value {
     VectorValue vector_value = 7;
     int64 datetime_value = 8;  // Unix microseconds (UTC)
     GeoPoint geo_value = 9;
+    Int64ArrayValue int64_array_value = 10;
+    Float64ArrayValue float64_array_value = 11;
   }
 }
 
 // A vector of floating-point values.
 message VectorValue {
   repeated float values = 1;
+}
+
+// A multi-valued 64-bit signed integer field (Lucene-style "any match" semantics).
+message Int64ArrayValue {
+  repeated int64 values = 1;
+}
+
+// A multi-valued 64-bit floating-point field (Lucene-style "any match" semantics).
+message Float64ArrayValue {
+  repeated double values = 1;
 }
 
 // A geographic point (latitude/longitude).

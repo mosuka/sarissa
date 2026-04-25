@@ -456,6 +456,16 @@ impl SimilaritySearchEngine {
                         FieldValue::Geo(lat, lon) => Ok(format!("{},{}", lat, lon)),
                         FieldValue::Null => Ok(String::new()),
                         FieldValue::Vector(v) => Ok(format!("[vector: dim={}]", v.len())),
+                        FieldValue::Int64Array(arr) => Ok(arr
+                            .iter()
+                            .map(|v| v.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")),
+                        FieldValue::Float64Array(arr) => Ok(arr
+                            .iter()
+                            .map(|v| v.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")),
                     }
                 } else {
                     Ok(String::new())

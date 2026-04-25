@@ -1067,13 +1067,21 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><code>integer</code></td><td style="text-align: left"><code>Integer</code> (BKD tree)</td></tr>
 <tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float</code> (BKD tree)</td></tr>
 <tr><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>Boolean</code></td></tr>
+<tr><td style="text-align: left">array of integers (e.g. <code>[1, 2, 3]</code>)</td><td style="text-align: left"><code>Integer</code> with <code>multi_valued = true</code></td></tr>
+<tr><td style="text-align: left">array of floats / mixed numeric (e.g. <code>[1.5, 2.0, 3]</code>)</td><td style="text-align: left"><code>Float</code> with <code>multi_valued = true</code></td></tr>
 <tr><td style="text-align: left">object with a latitude key (<code>lat</code> or <code>latitude</code>) and a longitude key (<code>lon</code>, <code>lng</code>, or <code>longitude</code>), values in range</td><td style="text-align: left"><code>Geo</code></td></tr>
 </tbody></table>
 </div>
 <p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>) and <code>Bytes</code> are <strong>never</strong> inferred:
-they must be declared in the schema explicitly. Multi-valued numeric arrays
-are also not yet inferred — they return an explicit "not yet supported"
-error so the caller can declare the field manually.</p>
+they must be declared in the schema explicitly.</p>
+<h3 id="multi-valued-numeric-fields"><a class="header" href="#multi-valued-numeric-fields">Multi-valued numeric fields</a></h3>
+<p>Integer and Float fields can be declared with <code>multi_valued = true</code> to
+hold multiple values per document. A range query matches a document if
+<strong>any</strong> of its values satisfies the predicate (Lucene-style "any match"
+semantics with constant scoring — there is no per-match BM25 weighting).</p>
+<p>Single values sent to a multi-valued field are auto-wrapped into a
+one-element array; arrays sent to a single-valued field are rejected
+rather than silently truncating.</p>
 <h3 id="type-conflicts"><a class="header" href="#type-conflicts">Type conflicts</a></h3>
 <p>When a value arrives for a field that is <strong>already declared</strong>, Laurus attempts
 to coerce the value to the declared type. The coercion rules are:</p>
@@ -5207,10 +5215,12 @@ term_vectors = false # Whether to store term positions (for phrase queries, high
 <pre><code class="language-toml">[fields.year.Integer]
 indexed = true
 stored = true
+multi_valued = false
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables range and exact-match queries</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Stores the original value</td></tr>
+<tr><td style="text-align: left"><code>multi_valued</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Accept arrays of integers; range queries match if <strong>any</strong> value satisfies the predicate (Lucene-style "any match" with constant scoring)</td></tr>
 </tbody></table>
 </div>
 <h4 id="float"><a class="header" href="#float">Float</a></h4>
@@ -5218,10 +5228,12 @@ stored = true
 <pre><code class="language-toml">[fields.rating.Float]
 indexed = true
 stored = true
+multi_valued = false
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables range queries</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Stores the original value</td></tr>
+<tr><td style="text-align: left"><code>multi_valued</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Accept arrays of floats; range queries match if <strong>any</strong> value satisfies the predicate (Lucene-style "any match" with constant scoring)</td></tr>
 </tbody></table>
 </div>
 <h4 id="boolean"><a class="header" href="#boolean">Boolean</a></h4>
@@ -6258,8 +6270,8 @@ enum DynamicFieldPolicy {
 <p>Each <code>FieldOption</code> is a <code>oneof</code> with one of the following field types:</p>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Lexical Fields</th><th style="text-align: left">Vector Fields</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>TextOption</code> (<code>indexed</code>, <code>stored</code>, <code>term_vectors</code>, <code>analyzer</code>)</td><td style="text-align: left"><code>HnswOption</code> (<code>dimension</code>, <code>distance</code>, <code>m</code>, <code>ef_construction</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
-<tr><td style="text-align: left"><code>IntegerOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"><code>FlatOption</code> (<code>dimension</code>, <code>distance</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
-<tr><td style="text-align: left"><code>FloatOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"><code>IvfOption</code> (<code>dimension</code>, <code>distance</code>, <code>n_clusters</code>, <code>n_probe</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
+<tr><td style="text-align: left"><code>IntegerOption</code> (<code>indexed</code>, <code>stored</code>, <code>multi_valued</code>)</td><td style="text-align: left"><code>FlatOption</code> (<code>dimension</code>, <code>distance</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
+<tr><td style="text-align: left"><code>FloatOption</code> (<code>indexed</code>, <code>stored</code>, <code>multi_valued</code>)</td><td style="text-align: left"><code>IvfOption</code> (<code>dimension</code>, <code>distance</code>, <code>n_clusters</code>, <code>n_probe</code>, <code>base_weight</code>, <code>quantizer</code>, <code>embedder</code>)</td></tr>
 <tr><td style="text-align: left"><code>BooleanOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>DateTimeOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>GeoOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
@@ -7253,8 +7265,8 @@ print(stats["vector_fields"])
 <h3 id="field-methods"><a class="header" href="#field-methods">Field methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>add_text_field(name)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
-<tr><td style="text-align: left"><code>add_int_field(name)</code></td><td style="text-align: left">64-bit integer field.</td></tr>
-<tr><td style="text-align: left"><code>add_float_field(name)</code></td><td style="text-align: left">64-bit float field.</td></tr>
+<tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64-bit integer field. Set <code>multi_valued=True</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64-bit float field. Set <code>multi_valued=True</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>add_bool_field(name)</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>add_bytes_field(name)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>add_geo_field(name)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
@@ -7700,8 +7712,8 @@ and return Promises. <code>stats()</code> is synchronous.</p>
 <h3 id="field-methods-1"><a class="header" href="#field-methods-1">Field methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(name, stored?, indexed?)</code></td><td style="text-align: left">64-bit integer field.</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(name, stored?, indexed?)</code></td><td style="text-align: left">64-bit float field.</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64-bit integer field. Pass <code>multiValued: true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64-bit float field. Pass <code>multiValued: true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(name, stored?, indexed?)</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(name, stored?)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(name, stored?, indexed?)</code></td><td style="text-align: left">Geographic coordinate field.</td></tr>
@@ -8355,10 +8367,14 @@ module.exports = {
 <h3 id="methods-2"><a class="header" href="#methods-2">Methods</a></h3>
 <h4 id="addtextfieldname-stored-indexed-termvectors-analyzer"><a class="header" href="#addtextfieldname-stored-indexed-termvectors-analyzer"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></a></h4>
 <p>Add a full-text field.</p>
-<h4 id="addintegerfieldname-stored-indexed"><a class="header" href="#addintegerfieldname-stored-indexed"><code>addIntegerField(name, stored?, indexed?)</code></a></h4>
-<p>Add an integer field.</p>
-<h4 id="addfloatfieldname-stored-indexed"><a class="header" href="#addfloatfieldname-stored-indexed"><code>addFloatField(name, stored?, indexed?)</code></a></h4>
-<p>Add a float field.</p>
+<h4 id="addintegerfieldname-stored-indexed-multivalued"><a class="header" href="#addintegerfieldname-stored-indexed-multivalued"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></a></h4>
+<p>Add a 64-bit integer field. Pass <code>multiValued: true</code> to accept arrays of
+integers; range queries then match if any value satisfies the predicate
+(Lucene-style "any match" with constant scoring).</p>
+<h4 id="addfloatfieldname-stored-indexed-multivalued"><a class="header" href="#addfloatfieldname-stored-indexed-multivalued"><code>addFloatField(name, stored?, indexed?, multiValued?)</code></a></h4>
+<p>Add a 64-bit float field. Pass <code>multiValued: true</code> to accept arrays of
+floats; range queries then match if any value satisfies the predicate
+(Lucene-style "any match" with constant scoring).</p>
 <h4 id="addbooleanfieldname-stored-indexed"><a class="header" href="#addbooleanfieldname-stored-indexed"><code>addBooleanField(name, stored?, indexed?)</code></a></h4>
 <p>Add a boolean field.</p>
 <h4 id="adddatetimefieldname-stored-indexed"><a class="header" href="#adddatetimefieldname-stored-indexed"><code>addDateTimeField(name, stored?, indexed?)</code></a></h4>
@@ -8725,8 +8741,8 @@ puts stats["vector_fields"]
 <h3 id="field-methods-2"><a class="header" href="#field-methods-2">Field methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
-<tr><td style="text-align: left"><code>add_integer_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">64-bit integer field.</td></tr>
-<tr><td style="text-align: left"><code>add_float_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">64-bit float field.</td></tr>
+<tr><td style="text-align: left"><code>add_integer_field(name, stored: true, indexed: true, multi_valued: false)</code></td><td style="text-align: left">64-bit integer field. Pass <code>multi_valued: true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>add_float_field(name, stored: true, indexed: true, multi_valued: false)</code></td><td style="text-align: left">64-bit float field. Pass <code>multi_valued: true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>add_boolean_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>add_bytes_field(name, stored: true)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>add_geo_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>

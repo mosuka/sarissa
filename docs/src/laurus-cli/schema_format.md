@@ -59,12 +59,14 @@ term_vectors = false # Whether to store term positions (for phrase queries, high
 [fields.year.Integer]
 indexed = true
 stored = true
+multi_valued = false
 ```
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `indexed` | `bool` | `true` | Enables range and exact-match queries |
 | `stored` | `bool` | `true` | Stores the original value |
+| `multi_valued` | `bool` | `false` | Accept arrays of integers; range queries match if **any** value satisfies the predicate (Lucene-style "any match" with constant scoring) |
 
 #### Float
 
@@ -74,12 +76,14 @@ stored = true
 [fields.rating.Float]
 indexed = true
 stored = true
+multi_valued = false
 ```
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `indexed` | `bool` | `true` | Enables range queries |
 | `stored` | `bool` | `true` | Stores the original value |
+| `multi_valued` | `bool` | `false` | Accept arrays of floats; range queries match if **any** value satisfies the predicate (Lucene-style "any match" with constant scoring) |
 
 #### Boolean
 

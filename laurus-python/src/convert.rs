@@ -116,5 +116,7 @@ pub fn data_value_to_py(py: Python, value: &DataValue) -> PyResult<Py<PyAny>> {
             let tup = pyo3::types::PyTuple::new(py, [*lat, *lon])?;
             Ok(tup.unbind().into_any())
         }
+        DataValue::Int64Array(arr) => Ok(arr.clone().into_pyobject(py)?.unbind().into_any()),
+        DataValue::Float64Array(arr) => Ok(arr.clone().into_pyobject(py)?.unbind().into_any()),
     }
 }

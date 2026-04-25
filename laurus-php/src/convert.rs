@@ -189,6 +189,24 @@ pub fn data_value_to_zval(value: &DataValue) -> PhpResult<Zval> {
                 .map_err(|_| "failed to insert lon")?;
             zv.set_hashtable(arr);
         }
+        DataValue::Int64Array(values) => {
+            let mut arr = ZendHashTable::new();
+            for v in values {
+                let mut item = Zval::new();
+                item.set_long(*v);
+                arr.push(item).map_err(|_| "failed to push integer")?;
+            }
+            zv.set_hashtable(arr);
+        }
+        DataValue::Float64Array(values) => {
+            let mut arr = ZendHashTable::new();
+            for v in values {
+                let mut item = Zval::new();
+                item.set_double(*v);
+                arr.push(item).map_err(|_| "failed to push float")?;
+            }
+            zv.set_hashtable(arr);
+        }
     }
     Ok(zv)
 }

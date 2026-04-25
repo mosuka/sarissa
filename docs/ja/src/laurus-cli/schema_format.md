@@ -59,12 +59,14 @@ term_vectors = false # タームの位置を保存するかどうか（フレー
 [fields.year.Integer]
 indexed = true
 stored = true
+multi_valued = false
 ```
 
 | オプション | 型 | デフォルト | 説明 |
 | :--- | :--- | :--- | :--- |
 | `indexed` | `bool` | `true` | 範囲クエリおよび完全一致クエリを有効にする |
 | `stored` | `bool` | `true` | 元の値を保存する |
+| `multi_valued` | `bool` | `false` | 整数の配列を受け付け、範囲クエリは**いずれかの値**が条件を満たせばマッチ（Lucene 流の "any match"、constant スコア） |
 
 #### Float
 
@@ -74,12 +76,14 @@ stored = true
 [fields.rating.Float]
 indexed = true
 stored = true
+multi_valued = false
 ```
 
 | オプション | 型 | デフォルト | 説明 |
 | :--- | :--- | :--- | :--- |
 | `indexed` | `bool` | `true` | 範囲クエリを有効にする |
 | `stored` | `bool` | `true` | 元の値を保存する |
+| `multi_valued` | `bool` | `false` | 浮動小数点の配列を受け付け、範囲クエリは**いずれかの値**が条件を満たせばマッチ（Lucene 流の "any match"、constant スコア） |
 
 #### Boolean
 

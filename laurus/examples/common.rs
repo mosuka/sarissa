@@ -149,5 +149,7 @@ fn format_data_value(value: &DataValue) -> String {
         DataValue::Vector(v) => format!("{v:?}"),
         DataValue::Bytes(b, _) => format!("[{} bytes]", b.len()),
         DataValue::Null => "null".to_string(),
+        DataValue::Int64Array(arr) => format!("{arr:?}"),
+        DataValue::Float64Array(arr) => format!("{arr:?}"),
     }
 }

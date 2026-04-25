@@ -91,11 +91,17 @@ message TextOption {
 message IntegerOption {
   bool indexed = 1;
   bool stored = 2;
+  // When true, the field accepts arrays of integers and range queries
+  // match a document if any value satisfies the predicate (Lucene-style).
+  bool multi_valued = 3;
 }
 
 message FloatOption {
   bool indexed = 1;
   bool stored = 2;
+  // When true, the field accepts arrays of floats and range queries
+  // match a document if any value satisfies the predicate (Lucene-style).
+  bool multi_valued = 3;
 }
 
 message BooleanOption {

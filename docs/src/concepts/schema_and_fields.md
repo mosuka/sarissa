@@ -272,12 +272,23 @@ let schema = Schema::builder()
 | `integer` | `Integer` (BKD tree) |
 | `float` | `Float` (BKD tree) |
 | `bool` | `Boolean` |
+| array of integers (e.g. `[1, 2, 3]`) | `Integer` with `multi_valued = true` |
+| array of floats / mixed numeric (e.g. `[1.5, 2.0, 3]`) | `Float` with `multi_valued = true` |
 | object with a latitude key (`lat` or `latitude`) and a longitude key (`lon`, `lng`, or `longitude`), values in range | `Geo` |
 
 Vector fields (`Hnsw`, `Flat`, `Ivf`) and `Bytes` are **never** inferred:
-they must be declared in the schema explicitly. Multi-valued numeric arrays
-are also not yet inferred — they return an explicit "not yet supported"
-error so the caller can declare the field manually.
+they must be declared in the schema explicitly.
+
+### Multi-valued numeric fields
+
+Integer and Float fields can be declared with `multi_valued = true` to
+hold multiple values per document. A range query matches a document if
+**any** of its values satisfies the predicate (Lucene-style "any match"
+semantics with constant scoring — there is no per-match BM25 weighting).
+
+Single values sent to a multi-valued field are auto-wrapped into a
+one-element array; arrays sent to a single-valued field are rejected
+rather than silently truncating.
 
 ### Type conflicts
 

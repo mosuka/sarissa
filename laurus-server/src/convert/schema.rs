@@ -113,10 +113,12 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
         FieldOption::Integer(o) => Some(Opt::Integer(v1::IntegerOption {
             indexed: o.indexed,
             stored: o.stored,
+            multi_valued: o.multi_valued,
         })),
         FieldOption::Float(o) => Some(Opt::Float(v1::FloatOption {
             indexed: o.indexed,
             stored: o.stored,
+            multi_valued: o.multi_valued,
         })),
         FieldOption::Boolean(o) => Some(Opt::Boolean(v1::BooleanOption {
             indexed: o.indexed,
@@ -183,10 +185,12 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
         Some(Opt::Integer(o)) => Some(FieldOption::Integer(IntegerOption {
             indexed: o.indexed,
             stored: o.stored,
+            multi_valued: o.multi_valued,
         })),
         Some(Opt::Float(o)) => Some(FieldOption::Float(FloatOption {
             indexed: o.indexed,
             stored: o.stored,
+            multi_valued: o.multi_valued,
         })),
         Some(Opt::Boolean(o)) => Some(FieldOption::Boolean(BooleanOption {
             indexed: o.indexed,

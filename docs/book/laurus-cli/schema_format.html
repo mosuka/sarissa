@@ -224,10 +224,12 @@ term_vectors = false # Whether to store term positions (for phrase queries, high
 <pre><code class="language-toml">[fields.year.Integer]
 indexed = true
 stored = true
+multi_valued = false
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables range and exact-match queries</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Stores the original value</td></tr>
+<tr><td style="text-align: left"><code>multi_valued</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Accept arrays of integers; range queries match if <strong>any</strong> value satisfies the predicate (Lucene-style "any match" with constant scoring)</td></tr>
 </tbody></table>
 </div>
 <h4 id="float"><a class="header" href="#float">Float</a></h4>
@@ -235,10 +237,12 @@ stored = true
 <pre><code class="language-toml">[fields.rating.Float]
 indexed = true
 stored = true
+multi_valued = false
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables range queries</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Stores the original value</td></tr>
+<tr><td style="text-align: left"><code>multi_valued</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>false</code></td><td style="text-align: left">Accept arrays of floats; range queries match if <strong>any</strong> value satisfies the predicate (Lucene-style "any match" with constant scoring)</td></tr>
 </tbody></table>
 </div>
 <h4 id="boolean"><a class="header" href="#boolean">Boolean</a></h4>

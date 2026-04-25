@@ -74,6 +74,24 @@ pub enum DataValue {
 
     /// Geographical point (latitude, longitude).
     Geo(f64, f64),
+
+    /// Multi-valued 64-bit signed integers.
+    ///
+    /// Used by fields declared with
+    /// [`IntegerOption::multi_valued`](crate::lexical::core::field::IntegerOption::multi_valued)
+    /// set to `true`. Range queries match a document if **any** value in
+    /// the array satisfies the predicate (Lucene-style "any match"
+    /// semantics with constant scoring).
+    Int64Array(Vec<i64>),
+
+    /// Multi-valued 64-bit floating-point numbers.
+    ///
+    /// Used by fields declared with
+    /// [`FloatOption::multi_valued`](crate::lexical::core::field::FloatOption::multi_valued)
+    /// set to `true`. Range queries match a document if **any** value in
+    /// the array satisfies the predicate (Lucene-style "any match"
+    /// semantics with constant scoring).
+    Float64Array(Vec<f64>),
 }
 
 impl DataValue {
@@ -140,6 +158,22 @@ impl DataValue {
             _ => None,
         }
     }
+
+    /// Returns the multi-valued integer slice if this is an `Int64Array` variant.
+    pub fn as_int64_array(&self) -> Option<&[i64]> {
+        match self {
+            DataValue::Int64Array(arr) => Some(arr),
+            _ => None,
+        }
+    }
+
+    /// Returns the multi-valued float slice if this is a `Float64Array` variant.
+    pub fn as_float64_array(&self) -> Option<&[f64]> {
+        match self {
+            DataValue::Float64Array(arr) => Some(arr),
+            _ => None,
+        }
+    }
 }
 
 // --- Conversions ---
@@ -195,6 +229,18 @@ impl From<chrono::DateTime<chrono::Utc>> for DataValue {
 impl From<Vec<f32>> for DataValue {
     fn from(v: Vec<f32>) -> Self {
         DataValue::Vector(v)
+    }
+}
+
+impl From<Vec<i64>> for DataValue {
+    fn from(v: Vec<i64>) -> Self {
+        DataValue::Int64Array(v)
+    }
+}
+
+impl From<Vec<f64>> for DataValue {
+    fn from(v: Vec<f64>) -> Self {
+        DataValue::Float64Array(v)
     }
 }
 
@@ -304,6 +350,26 @@ impl DocumentBuilder {
     /// Add a geo field (latitude, longitude).
     pub fn add_geo(self, name: impl Into<String>, lat: f64, lon: f64) -> Self {
         self.add_field(name.into(), DataValue::Geo(lat, lon))
+    }
+
+    /// Add a multi-valued integer field.
+    ///
+    /// The schema field must be declared with
+    /// [`IntegerOption::multi_valued`](crate::lexical::core::field::IntegerOption::multi_valued)
+    /// set to `true`. Range queries match if any value satisfies the
+    /// predicate.
+    pub fn add_int64_array(self, name: impl Into<String>, values: Vec<i64>) -> Self {
+        self.add_field(name.into(), DataValue::Int64Array(values))
+    }
+
+    /// Add a multi-valued float field.
+    ///
+    /// The schema field must be declared with
+    /// [`FloatOption::multi_valued`](crate::lexical::core::field::FloatOption::multi_valued)
+    /// set to `true`. Range queries match if any value satisfies the
+    /// predicate.
+    pub fn add_float64_array(self, name: impl Into<String>, values: Vec<f64>) -> Self {
+        self.add_field(name.into(), DataValue::Float64Array(values))
     }
 
     /// Add a binary data field with no MIME type.

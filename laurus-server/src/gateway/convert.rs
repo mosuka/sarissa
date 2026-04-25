@@ -87,6 +87,12 @@ pub fn proto_value_to_json(val: &v1::Value) -> Value {
         Some(Kind::GeoValue(g)) => {
             json!({"latitude": g.latitude, "longitude": g.longitude})
         }
+        Some(Kind::Int64ArrayValue(arr)) => {
+            Value::Array(arr.values.iter().map(|v| json!(*v)).collect())
+        }
+        Some(Kind::Float64ArrayValue(arr)) => {
+            Value::Array(arr.values.iter().map(|v| json!(*v)).collect())
+        }
         None => Value::Null,
     }
 }
@@ -350,11 +356,19 @@ pub fn json_to_proto_field_option(json: &Value) -> Result<v1::FieldOption, Strin
         Opt::Integer(v1::IntegerOption {
             indexed: v.get("indexed").and_then(|v| v.as_bool()).unwrap_or(false),
             stored: v.get("stored").and_then(|v| v.as_bool()).unwrap_or(false),
+            multi_valued: v
+                .get("multi_valued")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         })
     } else if let Some(v) = obj.get("float") {
         Opt::Float(v1::FloatOption {
             indexed: v.get("indexed").and_then(|v| v.as_bool()).unwrap_or(false),
             stored: v.get("stored").and_then(|v| v.as_bool()).unwrap_or(false),
+            multi_valued: v
+                .get("multi_valued")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         })
     } else if let Some(v) = obj.get("boolean") {
         Opt::Boolean(v1::BooleanOption {

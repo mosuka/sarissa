@@ -53,8 +53,8 @@ class Schema:
 | メソッド | 説明 |
 | :--- | :--- |
 | `add_text_field(name)` | 全文フィールド（転置インデックス、BM25）。 |
-| `add_int_field(name)` | 64 ビット整数フィールド。 |
-| `add_float_field(name)` | 64 ビット浮動小数点フィールド。 |
+| `add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64 ビット整数フィールド。`multi_valued=True` で整数配列を受け付け（範囲クエリは "any match"）。 |
+| `add_float_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64 ビット浮動小数点フィールド。`multi_valued=True` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `add_bool_field(name)` | ブールフィールド。 |
 | `add_bytes_field(name)` | 生バイトフィールド。 |
 | `add_geo_field(name)` | 地理座標フィールド（緯度/経度）。 |

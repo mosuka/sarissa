@@ -81,20 +81,52 @@ impl PySchema {
     }
 
     /// Add an integer (i64) field.
-    #[pyo3(signature = (name, *, stored=true, indexed=true))]
-    pub fn add_integer_field(&mut self, name: &str, stored: bool, indexed: bool) {
+    ///
+    /// Args:
+    ///     name: Field name.
+    ///     stored: Whether the value is retrievable (default True).
+    ///     indexed: Whether the field is searchable for range queries
+    ///         (default True).
+    ///     multi_valued: When True, the field accepts arrays of integers
+    ///         and range queries match if any value satisfies the
+    ///         predicate (Lucene-style "any match"). Default False.
+    #[pyo3(signature = (name, *, stored=true, indexed=true, multi_valued=false))]
+    pub fn add_integer_field(
+        &mut self,
+        name: &str,
+        stored: bool,
+        indexed: bool,
+        multi_valued: bool,
+    ) {
         self.inner.fields.insert(
             name.to_string(),
-            FieldOption::Integer(IntegerOption { indexed, stored }),
+            FieldOption::Integer(IntegerOption {
+                indexed,
+                stored,
+                multi_valued,
+            }),
         );
     }
 
     /// Add a float (f64) field.
-    #[pyo3(signature = (name, *, stored=true, indexed=true))]
-    pub fn add_float_field(&mut self, name: &str, stored: bool, indexed: bool) {
+    ///
+    /// Args:
+    ///     name: Field name.
+    ///     stored: Whether the value is retrievable (default True).
+    ///     indexed: Whether the field is searchable for range queries
+    ///         (default True).
+    ///     multi_valued: When True, the field accepts arrays of floats
+    ///         and range queries match if any value satisfies the
+    ///         predicate (Lucene-style "any match"). Default False.
+    #[pyo3(signature = (name, *, stored=true, indexed=true, multi_valued=false))]
+    pub fn add_float_field(&mut self, name: &str, stored: bool, indexed: bool, multi_valued: bool) {
         self.inner.fields.insert(
             name.to_string(),
-            FieldOption::Float(FloatOption { indexed, stored }),
+            FieldOption::Float(FloatOption {
+                indexed,
+                stored,
+                multi_valued,
+            }),
         );
     }
 

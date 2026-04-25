@@ -48,6 +48,12 @@ fn data_value_to_proto(val: &DataValue) -> v1::Value {
             latitude: *lat,
             longitude: *lon,
         })),
+        DataValue::Int64Array(arr) => Some(Kind::Int64ArrayValue(v1::Int64ArrayValue {
+            values: arr.clone(),
+        })),
+        DataValue::Float64Array(arr) => Some(Kind::Float64ArrayValue(v1::Float64ArrayValue {
+            values: arr.clone(),
+        })),
     };
     v1::Value { kind }
 }
@@ -69,6 +75,8 @@ fn data_value_from_proto(val: &v1::Value) -> DataValue {
             DataValue::DateTime(dt)
         }
         Some(Kind::GeoValue(g)) => DataValue::Geo(g.latitude, g.longitude),
+        Some(Kind::Int64ArrayValue(arr)) => DataValue::Int64Array(arr.values.clone()),
+        Some(Kind::Float64ArrayValue(arr)) => DataValue::Float64Array(arr.values.clone()),
         None => DataValue::Null,
     }
 }

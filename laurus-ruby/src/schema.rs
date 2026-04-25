@@ -100,20 +100,24 @@ impl RbSchema {
     ///   - `name` (String): Field name.
     ///   - `stored:` (bool, default true): Whether the value is retrievable.
     ///   - `indexed:` (bool, default true): Whether the field is searchable.
+    ///   - `multi_valued:` (bool, default false): When true, the field
+    ///     accepts arrays of integers and range queries match if any value
+    ///     satisfies the predicate (Lucene-style "any match").
     fn add_integer_field(&self, args: &[Value]) -> Result<(), Error> {
         let args = scan_args::<(String,), (), (), (), RHash, ()>(args)?;
         let (name,) = args.required;
-        let kwargs = get_kwargs::<_, (), (Option<bool>, Option<bool>), ()>(
+        let kwargs = get_kwargs::<_, (), (Option<bool>, Option<bool>, Option<bool>), ()>(
             args.keywords,
             &[],
-            &["stored", "indexed"],
+            &["stored", "indexed", "multi_valued"],
         )?;
-        let (stored, indexed) = kwargs.optional;
+        let (stored, indexed, multi_valued) = kwargs.optional;
         self.inner.borrow_mut().fields.insert(
             name,
             FieldOption::Integer(IntegerOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
+                multi_valued: multi_valued.unwrap_or(false),
             }),
         );
         Ok(())
@@ -127,20 +131,24 @@ impl RbSchema {
     ///   - `name` (String): Field name.
     ///   - `stored:` (bool, default true): Whether the value is retrievable.
     ///   - `indexed:` (bool, default true): Whether the field is searchable.
+    ///   - `multi_valued:` (bool, default false): When true, the field
+    ///     accepts arrays of floats and range queries match if any value
+    ///     satisfies the predicate (Lucene-style "any match").
     fn add_float_field(&self, args: &[Value]) -> Result<(), Error> {
         let args = scan_args::<(String,), (), (), (), RHash, ()>(args)?;
         let (name,) = args.required;
-        let kwargs = get_kwargs::<_, (), (Option<bool>, Option<bool>), ()>(
+        let kwargs = get_kwargs::<_, (), (Option<bool>, Option<bool>, Option<bool>), ()>(
             args.keywords,
             &[],
-            &["stored", "indexed"],
+            &["stored", "indexed", "multi_valued"],
         )?;
-        let (stored, indexed) = kwargs.optional;
+        let (stored, indexed, multi_valued) = kwargs.optional;
         self.inner.borrow_mut().fields.insert(
             name,
             FieldOption::Float(FloatOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
+                multi_valued: multi_valued.unwrap_or(false),
             }),
         );
         Ok(())

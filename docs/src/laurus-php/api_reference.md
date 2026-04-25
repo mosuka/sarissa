@@ -51,8 +51,8 @@ new \Laurus\Schema()
 | Method | Description |
 | :--- | :--- |
 | `addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void` | Full-text field (inverted index, BM25). |
-| `addIntegerField(string $name, bool $stored = true, bool $indexed = true): void` | 64-bit integer field. |
-| `addFloatField(string $name, bool $stored = true, bool $indexed = true): void` | 64-bit float field. |
+| `addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void` | 64-bit integer field. Pass `$multi_valued = true` to accept arrays of integers (range queries match if any value satisfies the predicate). |
+| `addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void` | 64-bit float field. Pass `$multi_valued = true` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `addBooleanField(string $name, bool $stored = true, bool $indexed = true): void` | Boolean field. |
 | `addBytesField(string $name, bool $stored = true): void` | Raw bytes field. |
 | `addGeoField(string $name, bool $stored = true, bool $indexed = true): void` | Geographic coordinate field (lat/lon). |

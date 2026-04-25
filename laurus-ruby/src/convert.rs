@@ -184,5 +184,19 @@ pub fn data_value_to_rb(ruby: &Ruby, value: &DataValue) -> Result<Value, Error> 
             hash.aset(ruby.str_new("lon"), ruby.float_from_f64(*lon))?;
             Ok(hash.as_value())
         }
+        DataValue::Int64Array(arr) => {
+            let out = ruby.ary_new_capa(arr.len());
+            for &v in arr {
+                out.push(ruby.integer_from_i64(v))?;
+            }
+            Ok(out.as_value())
+        }
+        DataValue::Float64Array(arr) => {
+            let out = ruby.ary_new_capa(arr.len());
+            for &v in arr {
+                out.push(ruby.float_from_f64(v))?;
+            }
+            Ok(out.as_value())
+        }
     }
 }

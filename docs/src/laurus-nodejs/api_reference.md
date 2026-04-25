@@ -56,8 +56,8 @@ class Schema {
 | Method | Description |
 | :--- | :--- |
 | `addTextField(name, stored?, indexed?, termVectors?, analyzer?)` | Full-text field (inverted index, BM25). |
-| `addIntegerField(name, stored?, indexed?)` | 64-bit integer field. |
-| `addFloatField(name, stored?, indexed?)` | 64-bit float field. |
+| `addIntegerField(name, stored?, indexed?, multiValued?)` | 64-bit integer field. Pass `multiValued: true` to accept arrays of integers (range queries match if any value satisfies the predicate). |
+| `addFloatField(name, stored?, indexed?, multiValued?)` | 64-bit float field. Pass `multiValued: true` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `addBooleanField(name, stored?, indexed?)` | Boolean field. |
 | `addBytesField(name, stored?)` | Raw bytes field. |
 | `addGeoField(name, stored?, indexed?)` | Geographic coordinate field. |

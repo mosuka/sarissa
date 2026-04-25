@@ -53,8 +53,8 @@ class Schema:
 | Method | Description |
 | :--- | :--- |
 | `add_text_field(name)` | Full-text field (inverted index, BM25). |
-| `add_int_field(name)` | 64-bit integer field. |
-| `add_float_field(name)` | 64-bit float field. |
+| `add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64-bit integer field. Set `multi_valued=True` to accept arrays of integers (range queries match if any value satisfies the predicate). |
+| `add_float_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64-bit float field. Set `multi_valued=True` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `add_bool_field(name)` | Boolean field. |
 | `add_bytes_field(name)` | Raw bytes field. |
 | `add_geo_field(name)` | Geographic coordinate field (lat/lon). |

@@ -420,6 +420,20 @@ impl ResultProcessor {
             FieldValue::Geo(lat, lon) => format!("{},{}", lat, lon),
             FieldValue::Null => "null".to_string(),
             FieldValue::Vector(v) => format!("[vector: dim={}]", v.len()),
+            FieldValue::Int64Array(arr) => format!(
+                "[{}]",
+                arr.iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            FieldValue::Float64Array(arr) => format!(
+                "[{}]",
+                arr.iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 

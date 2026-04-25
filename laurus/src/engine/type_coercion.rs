@@ -47,8 +47,8 @@ use super::schema::FieldOption;
 pub fn coerce_value(field_name: &str, option: &FieldOption, value: DataValue) -> Result<DataValue> {
     match option {
         FieldOption::Text(_) => coerce_to_text(field_name, value),
-        FieldOption::Integer(_) => coerce_to_integer(field_name, value),
-        FieldOption::Float(_) => coerce_to_float(field_name, value),
+        FieldOption::Integer(opt) => coerce_to_integer(field_name, opt, value),
+        FieldOption::Float(opt) => coerce_to_float(field_name, opt, value),
         FieldOption::Boolean(_) => coerce_to_boolean(field_name, value),
         FieldOption::DateTime(_) => coerce_to_datetime(field_name, value),
         FieldOption::Geo(_) => coerce_to_geo(field_name, value),
@@ -67,8 +67,8 @@ fn coerce_to_text(_field_name: &str, value: DataValue) -> Result<DataValue> {
         DataValue::Bool(b) => DataValue::Text(b.to_string()),
         DataValue::DateTime(dt) => DataValue::Text(dt.to_rfc3339()),
         DataValue::Null => DataValue::Text(String::new()),
-        // Other variants (Bytes, Vector, Geo) don't have a meaningful string
-        // representation for a text field.
+        // Other variants (Bytes, Vector, Geo, arrays) don't have a meaningful
+        // string representation for a text field.
         other => {
             return Err(LaurusError::invalid_argument(format!(
                 "cannot coerce {} to a text value",
@@ -78,42 +78,117 @@ fn coerce_to_text(_field_name: &str, value: DataValue) -> Result<DataValue> {
     })
 }
 
-fn coerce_to_integer(field_name: &str, value: DataValue) -> Result<DataValue> {
-    match value {
-        DataValue::Int64(i) => Ok(DataValue::Int64(i)),
-        // Information-losing truncation: documented as intentional.
-        DataValue::Float64(f) => Ok(DataValue::Int64(f as i64)),
-        DataValue::Bool(b) => Ok(DataValue::Int64(if b { 1 } else { 0 })),
-        DataValue::Text(s) => s.trim().parse::<i64>().map(DataValue::Int64).map_err(|_| {
-            LaurusError::invalid_argument(format!(
-                "field '{field_name}': cannot parse '{s}' as an integer"
-            ))
-        }),
-        other => Err(LaurusError::invalid_argument(format!(
-            "field '{field_name}': cannot coerce {} to an integer",
-            describe(&other)
-        ))),
+fn coerce_to_integer(
+    field_name: &str,
+    option: &crate::lexical::core::field::IntegerOption,
+    value: DataValue,
+) -> Result<DataValue> {
+    if option.multi_valued {
+        // Multi-valued integer field. Single-value inputs are auto-wrapped
+        // into a one-element array. Float inputs (single or array) are
+        // truncated element-wise (Lucene-style information-losing).
+        match value {
+            DataValue::Int64Array(arr) => Ok(DataValue::Int64Array(arr)),
+            DataValue::Float64Array(arr) => Ok(DataValue::Int64Array(
+                arr.iter().map(|f| *f as i64).collect(),
+            )),
+            DataValue::Int64(i) => Ok(DataValue::Int64Array(vec![i])),
+            DataValue::Float64(f) => Ok(DataValue::Int64Array(vec![f as i64])),
+            DataValue::Bool(b) => Ok(DataValue::Int64Array(vec![if b { 1 } else { 0 }])),
+            DataValue::Text(s) => s
+                .trim()
+                .parse::<i64>()
+                .map(|n| DataValue::Int64Array(vec![n]))
+                .map_err(|_| {
+                    LaurusError::invalid_argument(format!(
+                        "field '{field_name}': cannot parse '{s}' as an integer"
+                    ))
+                }),
+            other => Err(LaurusError::invalid_argument(format!(
+                "field '{field_name}': cannot coerce {} to a multi-valued integer",
+                describe(&other)
+            ))),
+        }
+    } else {
+        match value {
+            DataValue::Int64(i) => Ok(DataValue::Int64(i)),
+            // Information-losing truncation: documented as intentional.
+            DataValue::Float64(f) => Ok(DataValue::Int64(f as i64)),
+            DataValue::Bool(b) => Ok(DataValue::Int64(if b { 1 } else { 0 })),
+            DataValue::Text(s) => s.trim().parse::<i64>().map(DataValue::Int64).map_err(|_| {
+                LaurusError::invalid_argument(format!(
+                    "field '{field_name}': cannot parse '{s}' as an integer"
+                ))
+            }),
+            // Multi-valued input to a single-valued field is rejected
+            // rather than silently truncating to one element.
+            DataValue::Int64Array(_) | DataValue::Float64Array(_) => {
+                Err(LaurusError::invalid_argument(format!(
+                    "field '{field_name}': received an array but the field is single-valued; \
+                     declare the field with multi_valued = true to accept arrays"
+                )))
+            }
+            other => Err(LaurusError::invalid_argument(format!(
+                "field '{field_name}': cannot coerce {} to an integer",
+                describe(&other)
+            ))),
+        }
     }
 }
 
-fn coerce_to_float(field_name: &str, value: DataValue) -> Result<DataValue> {
-    match value {
-        DataValue::Float64(f) => Ok(DataValue::Float64(f)),
-        DataValue::Int64(i) => Ok(DataValue::Float64(i as f64)),
-        DataValue::Bool(b) => Ok(DataValue::Float64(if b { 1.0 } else { 0.0 })),
-        DataValue::Text(s) => s
-            .trim()
-            .parse::<f64>()
-            .map(DataValue::Float64)
-            .map_err(|_| {
-                LaurusError::invalid_argument(format!(
-                    "field '{field_name}': cannot parse '{s}' as a float"
-                ))
-            }),
-        other => Err(LaurusError::invalid_argument(format!(
-            "field '{field_name}': cannot coerce {} to a float",
-            describe(&other)
-        ))),
+fn coerce_to_float(
+    field_name: &str,
+    option: &crate::lexical::core::field::FloatOption,
+    value: DataValue,
+) -> Result<DataValue> {
+    if option.multi_valued {
+        match value {
+            DataValue::Float64Array(arr) => Ok(DataValue::Float64Array(arr)),
+            DataValue::Int64Array(arr) => Ok(DataValue::Float64Array(
+                arr.iter().map(|i| *i as f64).collect(),
+            )),
+            DataValue::Float64(f) => Ok(DataValue::Float64Array(vec![f])),
+            DataValue::Int64(i) => Ok(DataValue::Float64Array(vec![i as f64])),
+            DataValue::Bool(b) => Ok(DataValue::Float64Array(vec![if b { 1.0 } else { 0.0 }])),
+            DataValue::Text(s) => s
+                .trim()
+                .parse::<f64>()
+                .map(|n| DataValue::Float64Array(vec![n]))
+                .map_err(|_| {
+                    LaurusError::invalid_argument(format!(
+                        "field '{field_name}': cannot parse '{s}' as a float"
+                    ))
+                }),
+            other => Err(LaurusError::invalid_argument(format!(
+                "field '{field_name}': cannot coerce {} to a multi-valued float",
+                describe(&other)
+            ))),
+        }
+    } else {
+        match value {
+            DataValue::Float64(f) => Ok(DataValue::Float64(f)),
+            DataValue::Int64(i) => Ok(DataValue::Float64(i as f64)),
+            DataValue::Bool(b) => Ok(DataValue::Float64(if b { 1.0 } else { 0.0 })),
+            DataValue::Text(s) => s
+                .trim()
+                .parse::<f64>()
+                .map(DataValue::Float64)
+                .map_err(|_| {
+                    LaurusError::invalid_argument(format!(
+                        "field '{field_name}': cannot parse '{s}' as a float"
+                    ))
+                }),
+            DataValue::Int64Array(_) | DataValue::Float64Array(_) => {
+                Err(LaurusError::invalid_argument(format!(
+                    "field '{field_name}': received an array but the field is single-valued; \
+                     declare the field with multi_valued = true to accept arrays"
+                )))
+            }
+            other => Err(LaurusError::invalid_argument(format!(
+                "field '{field_name}': cannot coerce {} to a float",
+                describe(&other)
+            ))),
+        }
     }
 }
 
@@ -178,20 +253,29 @@ fn coerce_to_bytes(field_name: &str, value: DataValue) -> Result<DataValue> {
 }
 
 fn coerce_to_vector(field_name: &str, value: DataValue) -> Result<DataValue> {
-    // Vector fields accept three input shapes, resolved downstream by the
+    // Vector fields accept these input shapes, resolved downstream by the
     // vector store:
     //
     // - `Vector`: a pre-computed embedding, indexed verbatim.
     // - `Text` / `Bytes`: passed through unchanged so the vector store's
     //   configured embedder can turn them into vectors. The engine itself
     //   never auto-embeds, but an explicitly-configured embedder may.
+    // - `Int64Array` / `Float64Array`: pre-computed embeddings supplied as
+    //   numeric arrays via JSON or bindings. Cast element-wise to f32 since
+    //   the vector store stores 32-bit floats.
     match value {
         DataValue::Vector(v) => Ok(DataValue::Vector(v)),
         DataValue::Text(s) => Ok(DataValue::Text(s)),
         DataValue::Bytes(data, mime) => Ok(DataValue::Bytes(data, mime)),
+        DataValue::Float64Array(arr) => {
+            Ok(DataValue::Vector(arr.iter().map(|v| *v as f32).collect()))
+        }
+        DataValue::Int64Array(arr) => {
+            Ok(DataValue::Vector(arr.iter().map(|v| *v as f32).collect()))
+        }
         other => Err(LaurusError::invalid_argument(format!(
-            "field '{field_name}': vector fields accept Vector, Text, or Bytes \
-             values; got {}",
+            "field '{field_name}': vector fields accept Vector, Text, Bytes, \
+             or numeric arrays; got {}",
             describe(&other)
         ))),
     }
@@ -208,6 +292,8 @@ fn describe(value: &DataValue) -> &'static str {
         DataValue::Vector(_) => "vector",
         DataValue::DateTime(_) => "datetime",
         DataValue::Geo(_, _) => "geo",
+        DataValue::Int64Array(_) => "integer array",
+        DataValue::Float64Array(_) => "float array",
     }
 }
 
