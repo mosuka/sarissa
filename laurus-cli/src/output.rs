@@ -238,7 +238,8 @@ fn format_data_value(value: &DataValue) -> String {
         DataValue::Bytes(b, _) => format!("<{} bytes>", b.len()),
         DataValue::Vector(v) => format!("<vector dim={}>", v.len()),
         DataValue::DateTime(dt) => dt.to_rfc3339(),
-        DataValue::Geo(lat, lon) => format!("({lat}, {lon})"),
+        DataValue::Geo(p) => format!("({}, {})", p.lat, p.lon),
+        DataValue::GeoEcef(p) => format!("({}, {}, {})", p.x, p.y, p.z),
         DataValue::Int64Array(arr) => format!(
             "[{}]",
             arr.iter()
@@ -267,7 +268,8 @@ fn data_value_to_json(value: &DataValue) -> serde_json::Value {
         DataValue::Bytes(b, mime) => json!({"bytes_len": b.len(), "mime": mime}),
         DataValue::Vector(v) => json!(v),
         DataValue::DateTime(dt) => json!(dt.to_rfc3339()),
-        DataValue::Geo(lat, lon) => json!({"lat": lat, "lon": lon}),
+        DataValue::Geo(p) => json!({"lat": p.lat, "lon": p.lon}),
+        DataValue::GeoEcef(p) => json!({"x": p.x, "y": p.y, "z": p.z}),
         DataValue::Int64Array(arr) => json!(arr),
         DataValue::Float64Array(arr) => json!(arr),
     }

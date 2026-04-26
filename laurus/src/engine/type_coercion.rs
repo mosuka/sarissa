@@ -234,7 +234,7 @@ fn coerce_to_datetime(field_name: &str, value: DataValue) -> Result<DataValue> {
 
 fn coerce_to_geo(field_name: &str, value: DataValue) -> Result<DataValue> {
     match value {
-        DataValue::Geo(lat, lon) => Ok(DataValue::Geo(lat, lon)),
+        DataValue::Geo(p) => Ok(DataValue::Geo(p)),
         other => Err(LaurusError::invalid_argument(format!(
             "field '{field_name}': cannot coerce {} to a geographic point",
             describe(&other)
@@ -291,7 +291,8 @@ fn describe(value: &DataValue) -> &'static str {
         DataValue::Bytes(_, _) => "bytes",
         DataValue::Vector(_) => "vector",
         DataValue::DateTime(_) => "datetime",
-        DataValue::Geo(_, _) => "geo",
+        DataValue::Geo(_) => "geo",
+        DataValue::GeoEcef(_) => "geo3d",
         DataValue::Int64Array(_) => "integer array",
         DataValue::Float64Array(_) => "float array",
     }
@@ -439,8 +440,13 @@ mod tests {
     #[test]
     fn geo_passthrough_only() {
         assert_eq!(
-            coerce_value("g", &geo(), DataValue::Geo(35.1, 139.0)).unwrap(),
-            DataValue::Geo(35.1, 139.0)
+            coerce_value(
+                "g",
+                &geo(),
+                DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0))
+            )
+            .unwrap(),
+            DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0))
         );
         assert!(coerce_value("g", &geo(), DataValue::Int64(35)).is_err());
     }

@@ -54,9 +54,18 @@ pub fn data_value_to_proto(val: &DataValue) -> v1::Value {
         DataValue::Bytes(b, _mime) => Some(Kind::BytesValue(b.clone())),
         DataValue::Vector(v) => Some(Kind::VectorValue(v1::VectorValue { values: v.clone() })),
         DataValue::DateTime(dt) => Some(Kind::DatetimeValue(dt.timestamp_micros())),
-        DataValue::Geo(lat, lon) => Some(Kind::GeoValue(v1::GeoPoint {
-            latitude: *lat,
-            longitude: *lon,
+        DataValue::Geo(p) => Some(Kind::GeoValue(v1::GeoPoint {
+            latitude: p.lat,
+            longitude: p.lon,
+        })),
+        DataValue::GeoEcef(p) => Some(Kind::GeoValue(v1::GeoPoint {
+            // Reuse the existing GeoPoint proto kind for now: the dedicated
+            // GeoEcef proto message lands with #305 (gRPC/MCP API surface
+            // for 3D geo). Fall back to lat=x, lon=y so the value at least
+            // round-trips to bytes; once #305 lands this branch is replaced
+            // with `Kind::Geo3dValue`.
+            latitude: p.x,
+            longitude: p.y,
         })),
         DataValue::Int64Array(arr) => Some(Kind::Int64ArrayValue(v1::Int64ArrayValue {
             values: arr.clone(),
@@ -89,7 +98,10 @@ pub fn data_value_from_proto(val: &v1::Value) -> DataValue {
             let dt = chrono::DateTime::from_timestamp(secs, nanos).unwrap_or_default();
             DataValue::DateTime(dt)
         }
-        Some(Kind::GeoValue(g)) => DataValue::Geo(g.latitude, g.longitude),
+        Some(Kind::GeoValue(g)) => DataValue::Geo(
+            laurus::lexical::GeoPoint::try_new(g.latitude, g.longitude)
+                .unwrap_or_else(|_| laurus::lexical::GeoPoint::new(0.0, 0.0)),
+        ),
         Some(Kind::Int64ArrayValue(arr)) => DataValue::Int64Array(arr.values.clone()),
         Some(Kind::Float64ArrayValue(arr)) => DataValue::Float64Array(arr.values.clone()),
         None => DataValue::Null,

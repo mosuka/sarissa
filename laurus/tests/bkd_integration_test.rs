@@ -113,16 +113,16 @@ fn test_geo_bkd_query() {
     let mut writer = InvertedIndexWriter::new(storage.clone(), config).unwrap();
 
     // Tokyo: 35.6812, 139.7671
-    let tokyo = GeoPoint::new(35.6812, 139.7671).unwrap();
+    let tokyo = GeoPoint::new(35.6812, 139.7671);
     // Yokohama: 35.4437, 139.6380
-    let yokohama = GeoPoint::new(35.4437, 139.6380).unwrap();
+    let yokohama = GeoPoint::new(35.4437, 139.6380);
     // Osaka: 34.6937, 135.5023
-    let osaka = GeoPoint::new(34.6937, 135.5023).unwrap();
+    let osaka = GeoPoint::new(34.6937, 135.5023);
 
     writer
         .add_document(
             Document::builder()
-                .add_field("location", DataValue::Geo(tokyo.lat, tokyo.lon))
+                .add_field("location", DataValue::Geo(tokyo))
                 .add_field("city", DataValue::Text("Tokyo".into()))
                 .build(),
         )
@@ -131,7 +131,7 @@ fn test_geo_bkd_query() {
     writer
         .add_document(
             Document::builder()
-                .add_field("location", DataValue::Geo(yokohama.lat, yokohama.lon))
+                .add_field("location", DataValue::Geo(yokohama))
                 .add_field("city", DataValue::Text("Yokohama".into()))
                 .build(),
         )
@@ -140,7 +140,7 @@ fn test_geo_bkd_query() {
     writer
         .add_document(
             Document::builder()
-                .add_field("location", DataValue::Geo(osaka.lat, osaka.lon))
+                .add_field("location", DataValue::Geo(osaka))
                 .add_field("city", DataValue::Text("Osaka".into()))
                 .build(),
         )

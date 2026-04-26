@@ -91,7 +91,11 @@ pub fn infer_option_from_data_value(value: &DataValue) -> Result<Option<FieldOpt
         DataValue::DateTime(_) => Ok(Some(FieldOption::DateTime(
             crate::lexical::core::field::DateTimeOption::default(),
         ))),
-        DataValue::Geo(_, _) => Ok(Some(FieldOption::Geo(GeoOption::default()))),
+        DataValue::Geo(_) => Ok(Some(FieldOption::Geo(GeoOption::default()))),
+        DataValue::GeoEcef(_) => Err(LaurusError::invalid_argument(
+            "ECEF (3D geo) values require an explicit Geo3d field declaration \
+             in the schema",
+        )),
         DataValue::Int64Array(_) => Ok(Some(FieldOption::Integer(IntegerOption {
             multi_valued: true,
             ..Default::default()
@@ -287,7 +291,7 @@ fn infer_from_object(map: &serde_json::Map<String, JsonValue>) -> Result<Inferre
                 )));
             }
             Ok(InferredValue::Inferred {
-                value: DataValue::Geo(lat, lon),
+                value: DataValue::Geo(crate::data::GeoPoint::new(lat, lon)),
                 option: FieldOption::Geo(GeoOption::default()),
             })
         }
@@ -391,7 +395,7 @@ mod tests {
     #[test]
     fn infer_geo_lat_lon() {
         let (v, o) = inferred(infer_from_json(&json!({"lat": 35.1, "lon": 139.0})).unwrap());
-        assert_eq!(v, DataValue::Geo(35.1, 139.0));
+        assert_eq!(v, DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0)));
         assert!(matches!(o, FieldOption::Geo(_)));
     }
 
@@ -399,13 +403,13 @@ mod tests {
     fn infer_geo_latitude_longitude() {
         let (v, _) =
             inferred(infer_from_json(&json!({"latitude": 35.1, "longitude": 139.0})).unwrap());
-        assert_eq!(v, DataValue::Geo(35.1, 139.0));
+        assert_eq!(v, DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0)));
     }
 
     #[test]
     fn infer_geo_lng_alias() {
         let (v, _) = inferred(infer_from_json(&json!({"lat": 35.1, "lng": 139.0})).unwrap());
-        assert_eq!(v, DataValue::Geo(35.1, 139.0));
+        assert_eq!(v, DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0)));
     }
 
     #[test]

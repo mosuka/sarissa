@@ -202,12 +202,12 @@ impl<'a> Collector for TopFieldCollector<'a> {
                 }
                 (FieldValue::Bool(av), FieldValue::Bool(bv)) => av.cmp(bv),
                 (FieldValue::DateTime(av), FieldValue::DateTime(bv)) => av.cmp(bv),
-                (FieldValue::Geo(alat, alon), FieldValue::Geo(blat, blon)) => {
-                    let lat_cmp = alat.partial_cmp(blat).unwrap_or(Ordering::Equal);
+                (FieldValue::Geo(a), FieldValue::Geo(b)) => {
+                    let lat_cmp = a.lat.partial_cmp(&b.lat).unwrap_or(Ordering::Equal);
                     if lat_cmp != Ordering::Equal {
                         lat_cmp
                     } else {
-                        alon.partial_cmp(blon).unwrap_or(Ordering::Equal)
+                        a.lon.partial_cmp(&b.lon).unwrap_or(Ordering::Equal)
                     }
                 }
                 (FieldValue::Bytes(av, _), FieldValue::Bytes(bv, _)) => av.cmp(bv),
@@ -226,12 +226,12 @@ impl<'a> Collector for TopFieldCollector<'a> {
                 }
                 (FieldValue::Bool(av), FieldValue::Bool(bv)) => bv.cmp(av),
                 (FieldValue::DateTime(av), FieldValue::DateTime(bv)) => bv.cmp(av),
-                (FieldValue::Geo(alat, alon), FieldValue::Geo(blat, blon)) => {
-                    let lat_cmp = blat.partial_cmp(alat).unwrap_or(Ordering::Equal);
+                (FieldValue::Geo(a), FieldValue::Geo(b)) => {
+                    let lat_cmp = b.lat.partial_cmp(&a.lat).unwrap_or(Ordering::Equal);
                     if lat_cmp != Ordering::Equal {
                         lat_cmp
                     } else {
-                        blon.partial_cmp(alon).unwrap_or(Ordering::Equal)
+                        b.lon.partial_cmp(&a.lon).unwrap_or(Ordering::Equal)
                     }
                 }
                 (FieldValue::Bytes(av, _), FieldValue::Bytes(bv, _)) => bv.cmp(av),
@@ -306,12 +306,12 @@ impl Ord for FieldScoredDoc {
                 }
                 (FieldValue::Bool(a), FieldValue::Bool(b)) => b.cmp(a),
                 (FieldValue::DateTime(a), FieldValue::DateTime(b)) => b.cmp(a),
-                (FieldValue::Geo(alat, alon), FieldValue::Geo(blat, blon)) => {
-                    let lat_cmp = blat.partial_cmp(alat).unwrap_or(Ordering::Equal);
+                (FieldValue::Geo(a), FieldValue::Geo(b)) => {
+                    let lat_cmp = b.lat.partial_cmp(&a.lat).unwrap_or(Ordering::Equal);
                     if lat_cmp != Ordering::Equal {
                         lat_cmp
                     } else {
-                        blon.partial_cmp(alon).unwrap_or(Ordering::Equal)
+                        b.lon.partial_cmp(&a.lon).unwrap_or(Ordering::Equal)
                     }
                 }
                 (FieldValue::Bytes(a, _), FieldValue::Bytes(b, _)) => b.cmp(a),
@@ -330,12 +330,12 @@ impl Ord for FieldScoredDoc {
                 }
                 (FieldValue::Bool(a), FieldValue::Bool(b)) => a.cmp(b),
                 (FieldValue::DateTime(a), FieldValue::DateTime(b)) => a.cmp(b),
-                (FieldValue::Geo(alat, alon), FieldValue::Geo(blat, blon)) => {
-                    let lat_cmp = alat.partial_cmp(blat).unwrap_or(Ordering::Equal);
+                (FieldValue::Geo(a), FieldValue::Geo(b)) => {
+                    let lat_cmp = a.lat.partial_cmp(&b.lat).unwrap_or(Ordering::Equal);
                     if lat_cmp != Ordering::Equal {
                         lat_cmp
                     } else {
-                        alon.partial_cmp(blon).unwrap_or(Ordering::Equal)
+                        a.lon.partial_cmp(&b.lon).unwrap_or(Ordering::Equal)
                     }
                 }
                 (FieldValue::Bytes(a, _), FieldValue::Bytes(b, _)) => a.cmp(b),

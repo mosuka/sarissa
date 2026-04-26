@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
             .add_boolean("in_print", true)
             .add_field("price", DataValue::Float64(49.99))
             .add_integer("year", 2019)
-            .add_field("location", DataValue::Geo(37.7749, -122.4194)) // San Francisco
+            .add_field("location", DataValue::Geo(laurus::lexical::GeoPoint::new(37.7749, -122.4194))) // San Francisco
             .build()),
         ("book2", Document::builder()
             .add_text("title", "Python for Data Science")
@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
             .add_boolean("in_print", true)
             .add_field("price", DataValue::Float64(39.99))
             .add_integer("year", 2021)
-            .add_field("location", DataValue::Geo(40.7128, -74.0060)) // New York
+            .add_field("location", DataValue::Geo(laurus::lexical::GeoPoint::new(40.7128, -74.0060))) // New York
             .build()),
         ("book3", Document::builder()
             .add_text("title", "JavaScript Web Development")
@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
             .add_boolean("in_print", true)
             .add_field("price", DataValue::Float64(54.99))
             .add_integer("year", 2022)
-            .add_field("location", DataValue::Geo(51.5074, -0.1278)) // London
+            .add_field("location", DataValue::Geo(laurus::lexical::GeoPoint::new(51.5074, -0.1278))) // London
             .build()),
         ("book4", Document::builder()
             .add_text("title", "Machine Learning Algorithms")
@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
             .add_boolean("in_print", true)
             .add_field("price", DataValue::Float64(72.99))
             .add_integer("year", 2020)
-            .add_field("location", DataValue::Geo(37.4419, -122.1430)) // Palo Alto
+            .add_field("location", DataValue::Geo(laurus::lexical::GeoPoint::new(37.4419, -122.1430))) // Palo Alto
             .build()),
         ("book5", Document::builder()
             .add_text("title", "Database Design Principles")
@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
             .add_boolean("in_print", false)
             .add_field("price", DataValue::Float64(45.50))
             .add_integer("year", 2018)
-            .add_field("location", DataValue::Geo(47.6062, -122.3321)) // Seattle
+            .add_field("location", DataValue::Geo(laurus::lexical::GeoPoint::new(47.6062, -122.3321))) // Seattle
             .build()),
         ("book6", Document::builder()
             .add_text("title", "The quick brown fox")
@@ -113,7 +113,7 @@ async fn main() -> Result<()> {
             .add_boolean("in_print", false)
             .add_field("price", DataValue::Float64(12.99))
             .add_integer("year", 2023)
-            .add_field("location", DataValue::Geo(34.0522, -118.2437)) // Los Angeles
+            .add_field("location", DataValue::Geo(laurus::lexical::GeoPoint::new(34.0522, -118.2437))) // Los Angeles
             .build()),
     ];
 

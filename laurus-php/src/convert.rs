@@ -94,7 +94,9 @@ pub fn zval_to_data_value(zv: &Zval) -> PhpResult<DataValue> {
         if let (Some(lat_zv), Some(lon_zv)) = (ht.get("lat"), ht.get("lon")) {
             let lat = f64::from_zval(lat_zv).ok_or("'lat' must be a float")?;
             let lon = f64::from_zval(lon_zv).ok_or("'lon' must be a float")?;
-            return Ok(DataValue::Geo(lat, lon));
+            let point = laurus::lexical::GeoPoint::try_new(lat, lon)
+                .map_err(|e| format!("invalid geo point: {e}"))?;
+            return Ok(DataValue::Geo(point));
         }
 
         // Otherwise treat as vector (sequential array of floats)
@@ -177,16 +179,29 @@ pub fn data_value_to_zval(value: &DataValue) -> PhpResult<Zval> {
             zv.set_string(&dt.to_rfc3339(), false)
                 .map_err(|_| "failed to set datetime string")?;
         }
-        DataValue::Geo(lat, lon) => {
+        DataValue::Geo(p) => {
             let mut arr = ZendHashTable::new();
             let mut lat_zv = Zval::new();
-            lat_zv.set_double(*lat);
+            lat_zv.set_double(p.lat);
             let mut lon_zv = Zval::new();
-            lon_zv.set_double(*lon);
+            lon_zv.set_double(p.lon);
             arr.insert("lat", lat_zv)
                 .map_err(|_| "failed to insert lat")?;
             arr.insert("lon", lon_zv)
                 .map_err(|_| "failed to insert lon")?;
+            zv.set_hashtable(arr);
+        }
+        DataValue::GeoEcef(p) => {
+            let mut arr = ZendHashTable::new();
+            let mut x_zv = Zval::new();
+            x_zv.set_double(p.x);
+            let mut y_zv = Zval::new();
+            y_zv.set_double(p.y);
+            let mut z_zv = Zval::new();
+            z_zv.set_double(p.z);
+            arr.insert("x", x_zv).map_err(|_| "failed to insert x")?;
+            arr.insert("y", y_zv).map_err(|_| "failed to insert y")?;
+            arr.insert("z", z_zv).map_err(|_| "failed to insert z")?;
             zv.set_hashtable(arr);
         }
         DataValue::Int64Array(values) => {

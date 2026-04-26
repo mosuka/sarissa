@@ -574,7 +574,14 @@ impl FieldOption {
                 FieldOption::Bytes(BytesOption::default())
             }
             FieldValue::DateTime(_) => FieldOption::DateTime(DateTimeOption::default()),
-            FieldValue::Geo(_, _) => FieldOption::Geo(GeoOption::default()),
+            FieldValue::Geo(_) => FieldOption::Geo(GeoOption::default()),
+            // ECEF (3D geo) does not yet have a dedicated FieldOption — a
+            // schema with a `GeoEcef` value still needs an explicit Geo3d
+            // declaration, which is the work of #298. Until then, fall back
+            // to the closest existing option (2D geo) so the schema-less
+            // path keeps compiling. Once #298 lands, swap this for
+            // `FieldOption::Geo3d(Geo3dOption::default())`.
+            FieldValue::GeoEcef(_) => FieldOption::Geo(GeoOption::default()),
             FieldValue::Null => FieldOption::Text(TextOption::default()),
             FieldValue::Int64Array(_) => FieldOption::Integer(IntegerOption {
                 multi_valued: true,
