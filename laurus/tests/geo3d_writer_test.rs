@@ -15,6 +15,8 @@
 //! paths and confirms that all three dimensions are honoured.
 
 use laurus::lexical::LexicalIndexWriter;
+use laurus::lexical::query::Geo3dDistanceQuery;
+use laurus::lexical::query::Query;
 use laurus::lexical::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use laurus::storage::Storage;
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
@@ -160,4 +162,91 @@ fn geo3d_dimension_observable_through_bkd_header() {
     assert_eq!(header.num_dims, 3, "ECEF must produce a 3D BKD");
     assert_eq!(header.bytes_per_dim, 8);
     assert_eq!(header.total_point_count, 1);
+}
+
+#[test]
+fn geo3d_distance_query_finds_docs_within_radius() {
+    // Index three ECEF points and run a sphere query that should match
+    // exactly two of them. The third sits well outside the radius.
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let mut writer = InvertedIndexWriter::new(
+        storage.clone(),
+        InvertedIndexWriterConfig {
+            max_buffered_docs: 10,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let center = GeoEcefPoint::new(1_000_000.0, 2_000_000.0, 3_000_000.0);
+    // Inside (offset 100m on x)
+    let p_close = GeoEcefPoint::new(1_000_100.0, 2_000_000.0, 3_000_000.0);
+    // Inside (offset ~141m, sqrt(50000² + 0 + 0) wait — let me pick
+    // (50, 50, 50) → sqrt(7500) ≈ 86.6m, well inside 1km)
+    let p_mid = GeoEcefPoint::new(1_000_050.0, 2_000_050.0, 3_000_050.0);
+    // Outside (offset 5km on x)
+    let p_far = GeoEcefPoint::new(1_005_000.0, 2_000_000.0, 3_000_000.0);
+
+    writer
+        .add_document(
+            Document::builder()
+                .add_field("position", DataValue::GeoEcef(p_close))
+                .build(),
+        )
+        .unwrap();
+    writer
+        .add_document(
+            Document::builder()
+                .add_field("position", DataValue::GeoEcef(p_mid))
+                .build(),
+        )
+        .unwrap();
+    writer
+        .add_document(
+            Document::builder()
+                .add_field("position", DataValue::GeoEcef(p_far))
+                .build(),
+        )
+        .unwrap();
+    writer.commit().unwrap();
+
+    let reader = writer.build_reader().unwrap();
+
+    // 1km sphere query catches the two close docs but not the 5km-away
+    // one. Matches arrive distance-ascending — doc 1 (~87m) is closer
+    // than doc 0 (100m), so doc 1 comes first.
+    let query = Geo3dDistanceQuery::new("position", center, 1_000.0);
+    let matches = query.find_matches(&*reader).unwrap();
+    let doc_ids: Vec<u64> = matches.iter().map(|m| m.doc_id).collect();
+    assert_eq!(doc_ids, vec![1, 0]);
+
+    let d_close = ((p_close.x - center.x).powi(2)
+        + (p_close.y - center.y).powi(2)
+        + (p_close.z - center.z).powi(2))
+    .sqrt();
+    let d_mid = ((p_mid.x - center.x).powi(2)
+        + (p_mid.y - center.y).powi(2)
+        + (p_mid.z - center.z).powi(2))
+    .sqrt();
+    assert!(d_mid < d_close, "doc 1 must be closer than doc 0");
+    assert!((matches[0].distance_m - d_mid).abs() < 1e-6);
+    assert!((matches[1].distance_m - d_close).abs() < 1e-6);
+    // Scores decrease with distance.
+    assert!(matches[0].score > matches[1].score);
+
+    // Wider radius (10km) catches all three, including the far doc.
+    let wide = Geo3dDistanceQuery::new("position", center, 10_000.0);
+    let mut all_doc_ids: Vec<u64> = wide
+        .find_matches(&*reader)
+        .unwrap()
+        .iter()
+        .map(|m| m.doc_id)
+        .collect();
+    all_doc_ids.sort_unstable();
+    assert_eq!(all_doc_ids, vec![0, 1, 2]);
+
+    // Empty radius matches nothing.
+    let empty = Geo3dDistanceQuery::new("position", center, 0.0);
+    assert!(empty.find_matches(&*reader).unwrap().is_empty());
+    assert!(empty.is_empty(&*reader).unwrap());
 }
