@@ -264,11 +264,12 @@ impl DocumentParser {
                     point_values.insert(field_name.clone(), vec![vec![point.lat, point.lon]]);
                 }
                 FieldValue::GeoEcef(point) => {
-                    // 3D ECEF point: store the (x, y, z) tuple as a single
-                    // BKD point. The dedicated `Geo3d` schema option and
-                    // optimized writer paths arrive in #298 / #299; for now
-                    // we mirror the 2D geo flow (text term + point values)
-                    // so a `GeoEcef`-bearing document can still round-trip.
+                    // 3D ECEF point: index the (x, y, z) tuple as a single
+                    // BKD entry. Mirrors the 2D Geo flow (text term + point
+                    // values); `FieldOption::Geo3d` (#298) drives the
+                    // schema-side decisions and `BKDWriter` infers the
+                    // dimensionality from the point length, so emitting a
+                    // 3-element point here is enough to land on a 3D BKD.
                     let text = format!("{},{},{}", point.x, point.y, point.z);
 
                     let analyzed_term = AnalyzedTerm {

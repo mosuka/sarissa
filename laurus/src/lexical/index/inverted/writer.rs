@@ -504,11 +504,12 @@ impl InvertedIndexWriter {
                         point_values.insert(field_name.clone(), vec![vec![p.lat, p.lon]]);
                     }
                     DataValue::GeoEcef(p) => {
-                        // 3D ECEF points are indexed as 3D points in BKD.
-                        // Once #298 introduces FieldOption::Geo3d this branch
-                        // will gain dedicated handling; for now mirror the
-                        // 2D Geo flow so a GeoEcef-bearing document still
-                        // makes it onto disk.
+                        // 3D ECEF point: emitting a 3-element point here is
+                        // what tells `BKDWriter::new` to build a 3D BKD when
+                        // the per-field tree is materialized. Schema-side,
+                        // `FieldOption::Geo3d` (#298) classifies the field
+                        // as lexical and respects the (indexed, stored)
+                        // flags exactly like 2D Geo.
                         field_terms.insert(
                             field_name.clone(),
                             vec![AnalyzedTerm {
@@ -791,11 +792,11 @@ impl InvertedIndexWriter {
                         stored_writer.write_f64(p.lon)?;
                     }
                     crate::data::DataValue::GeoEcef(p) => {
-                        // Type tag 11 is reserved for 3D ECEF points; reader
-                        // support follows in #299. For now we emit the bytes
-                        // so a round-trip through the writer is at least
-                        // lossless.
-                        stored_writer.write_u8(11)?;
+                        // Type tag 12 = 3D ECEF point. Tag 11 was originally
+                        // claimed for ECEF in #297 but collided with the
+                        // pre-existing Float64Array tag (also 11); #299
+                        // moves ECEF to tag 12 and wires reader support.
+                        stored_writer.write_u8(12)?;
                         stored_writer.write_f64(p.x)?;
                         stored_writer.write_f64(p.y)?;
                         stored_writer.write_f64(p.z)?;
