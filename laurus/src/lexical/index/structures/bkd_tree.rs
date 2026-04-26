@@ -211,6 +211,29 @@ fn compute_aabb(ctx: &BuildContext<'_>, indices: &[u32]) -> (Vec<f64>, Vec<f64>)
     (min, max)
 }
 
+/// Pick the dimension whose `(max - min)` range is the widest.
+///
+/// Ties are broken by lower dimension index (stable, deterministic). The
+/// caller must pass equal-length `min` / `max` slices of at least one
+/// element — empty AABBs have no defined "widest axis".
+///
+/// Returning `u32` matches the on-disk `split_dim` encoding so the caller
+/// can drop the result straight into an `IndexNode`.
+fn widest_axis(min: &[f64], max: &[f64]) -> u32 {
+    debug_assert_eq!(min.len(), max.len());
+    debug_assert!(!min.is_empty());
+    let mut best = 0usize;
+    let mut best_range = max[0] - min[0];
+    for d in 1..min.len() {
+        let r = max[d] - min[d];
+        if r > best_range {
+            best = d;
+            best_range = r;
+        }
+    }
+    best as u32
+}
+
 impl<W: StorageOutput> BKDWriter<W> {
     pub fn new(writer: W, num_dims: u32) -> Self {
         BKDWriter {
@@ -299,7 +322,7 @@ impl<W: StorageOutput> BKDWriter<W> {
             doc_ids,
             num_dims,
         };
-        let root_info = self.build_subtree(&ctx, &mut indices, 0)?;
+        let root_info = self.build_subtree(&ctx, &mut indices)?;
 
         // Write index section after all leaves
         let index_start_offset = self.writer.stream_position()?;
@@ -359,14 +382,15 @@ impl<W: StorageOutput> BKDWriter<W> {
     /// allowed to reorder; recursion proceeds on the two halves of the
     /// permutation around the split position.
     ///
-    /// In addition to the file mutation, the call returns a `SubtreeInfo`
-    /// carrying the AABB of every point reachable through this subtree so the
-    /// parent call can store per-child AABBs on its own index node.
+    /// The AABB of the points covered by `indices` is computed up-front and
+    /// reused for two purposes: a leaf call writes it as `leaf_min`/`leaf_max`,
+    /// and an internal call uses it both to pick the widest axis as the split
+    /// dimension and to populate its own [`SubtreeInfo`] without unioning the
+    /// children afterwards.
     fn build_subtree(
         &mut self,
         ctx: &BuildContext<'_>,
         indices: &mut [u32],
-        depth: u32,
     ) -> Result<SubtreeInfo> {
         if indices.is_empty() {
             // The recursion only descends into non-empty halves (we only split
@@ -377,19 +401,24 @@ impl<W: StorageOutput> BKDWriter<W> {
             ));
         }
 
+        let (subtree_min, subtree_max) = compute_aabb(ctx, indices);
+
         if indices.len() <= self.block_size {
-            let (leaf_min, leaf_max) = compute_aabb(ctx, indices);
-            self.write_leaf_block(ctx, indices, &leaf_min, &leaf_max)?;
+            self.write_leaf_block(ctx, indices, &subtree_min, &subtree_max)?;
             self.num_blocks += 1;
             return Ok(SubtreeInfo {
                 node_idx: None,
-                min: leaf_min,
-                max: leaf_max,
+                min: subtree_min,
+                max: subtree_max,
             });
         }
 
-        // Split dimension: round robin (#293 will switch to widest-axis).
-        let split_dim = depth % self.num_dims;
+        // Split on the axis with the widest range, mirroring Lucene BKD.
+        // For uniformly distributed data this collapses to the previous
+        // round-robin (`depth % num_dims`) pattern, but for skewed data
+        // (e.g. lat/lon paired with a tiny altitude) it concentrates splits
+        // on the axis where they actually shrink the search box.
+        let split_dim = widest_axis(&subtree_min, &subtree_max);
         let split_dim_us = split_dim as usize;
 
         // Sort the permutation by the split dimension to find the median.
@@ -426,24 +455,15 @@ impl<W: StorageOutput> BKDWriter<W> {
         });
 
         let left_file_pos_before = self.writer.stream_position()?;
-        let left_info = self.build_subtree(ctx, left_indices, depth + 1)?;
+        let left_info = self.build_subtree(ctx, left_indices)?;
         let left_is_leaf = left_info.node_idx.is_none();
 
         let right_file_pos_before = self.writer.stream_position()?;
-        let right_info = self.build_subtree(ctx, right_indices, depth + 1)?;
+        let right_info = self.build_subtree(ctx, right_indices)?;
         let right_is_leaf = right_info.node_idx.is_none();
 
-        // Compute the union AABB BEFORE moving the child AABB Vecs into the
-        // node, so the borrow checker can see that we only consume the child
-        // info once.
-        let mut union_min = Vec::with_capacity(nd);
-        let mut union_max = Vec::with_capacity(nd);
-        for d in 0..nd {
-            union_min.push(left_info.min[d].min(right_info.min[d]));
-            union_max.push(left_info.max[d].max(right_info.max[d]));
-        }
-
-        // Update the previously reserved node slot.
+        // Update the previously reserved node slot. The parent's AABB was
+        // computed up-front so we no longer need to union the child AABBs.
         let node = &mut self.index_nodes[node_idx];
         node.left_child_idx = left_info.node_idx;
         node.right_child_idx = right_info.node_idx;
@@ -460,8 +480,8 @@ impl<W: StorageOutput> BKDWriter<W> {
 
         Ok(SubtreeInfo {
             node_idx: Some(node_idx),
-            min: union_min,
-            max: union_max,
+            min: subtree_min,
+            max: subtree_max,
         })
     }
 
@@ -1132,6 +1152,117 @@ mod tests {
                 self.hits.push(doc_id);
             }
         }
+    }
+
+    #[test]
+    fn widest_axis_picks_largest_range() {
+        // Free-function smoke test (doesn't go through the writer).
+        assert_eq!(widest_axis(&[0.0, 0.0], &[10.0, 100.0]), 1);
+        assert_eq!(widest_axis(&[0.0, 0.0], &[100.0, 10.0]), 0);
+        // Tie: lower-index dimension wins (deterministic).
+        assert_eq!(widest_axis(&[0.0, 0.0], &[5.0, 5.0]), 0);
+        // 3D, middle axis widest.
+        assert_eq!(widest_axis(&[0.0, 0.0, 0.0], &[1.0, 50.0, 10.0]), 1);
+    }
+
+    #[test]
+    fn build_subtree_root_split_is_widest_axis() {
+        // 2D dataset where dim 0 spans 0..n and dim 1 stays in [0, 1).
+        // The widest-axis policy must pick dim 0 for the root split,
+        // unlike the previous round-robin which would also pick dim 0
+        // at depth 0 by accident — so we confirm by also testing the
+        // mirrored dataset where dim 1 is widest.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 256;
+
+        // Wider on dim 0.
+        let mut points: Vec<f64> = Vec::with_capacity(n * 2);
+        let mut doc_ids: Vec<u64> = Vec::with_capacity(n);
+        for i in 0..n {
+            points.push(i as f64);
+            points.push(0.0); // narrow: every point shares the same dim 1
+            doc_ids.push(i as u64);
+        }
+        {
+            let output = storage.create_output("wide_dim0.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 2).with_block_size(32);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        // Mirrored: wider on dim 1.
+        points.clear();
+        doc_ids.clear();
+        for i in 0..n {
+            points.push(0.0);
+            points.push(i as f64);
+            doc_ids.push(i as u64);
+        }
+        {
+            let output = storage.create_output("wide_dim1.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 2).with_block_size(32);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        // Helper that reads the root index node's split_dim straight from
+        // disk — the root sits at `index_start_offset` because it is the
+        // first node pushed into `index_nodes`.
+        fn root_split_dim(storage: &Arc<MemoryStorage>, path: &str) -> u32 {
+            let reader = BKDReader::open(storage.clone(), path).unwrap();
+            let index_start = reader.header.index_start_offset;
+            let input = storage.open_input(path).unwrap();
+            let mut sr = StructReader::new(input).unwrap();
+            sr.seek(SeekFrom::Start(index_start)).unwrap();
+            sr.read_u32().unwrap()
+        }
+
+        assert_eq!(
+            root_split_dim(&storage, "wide_dim0.bkd"),
+            0,
+            "root should split on dim 0 when dim 0 is widest"
+        );
+        assert_eq!(
+            root_split_dim(&storage, "wide_dim1.bkd"),
+            1,
+            "root should split on dim 1 when dim 1 is widest"
+        );
+    }
+
+    #[test]
+    fn build_subtree_skewed_data_round_trip() {
+        // End-to-end correctness on a heavily skewed 3D dataset: dim 0
+        // spans [0, n), dim 1 spans [0, 1), dim 2 spans [0, 0.001).
+        // Widest-axis splitting must still produce a tree that returns
+        // exactly the expected doc ids for an axis-aligned query.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 1_000;
+        let mut points: Vec<f64> = Vec::with_capacity(n * 3);
+        let mut doc_ids: Vec<u64> = Vec::with_capacity(n);
+        for i in 0..n {
+            let v = i as f64;
+            points.push(v); // dim 0: wide
+            points.push(v / (n as f64)); // dim 1: narrow [0, 1)
+            points.push(v / (n as f64 * 1000.0)); // dim 2: very narrow
+            doc_ids.push(i as u64);
+        }
+        {
+            let output = storage.create_output("skewed.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 3).with_block_size(64);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "skewed.bkd").unwrap();
+        let results = reader
+            .range_search(
+                &[Some(100.0), None, None],
+                &[Some(200.0), None, None],
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(results, (100u64..=200u64).collect::<Vec<_>>());
     }
 
     #[test]
