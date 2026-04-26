@@ -453,7 +453,8 @@ impl SimilaritySearchEngine {
                             }
                         }
                         FieldValue::DateTime(dt) => Ok(dt.to_rfc3339()),
-                        FieldValue::Geo(lat, lon) => Ok(format!("{},{}", lat, lon)),
+                        FieldValue::Geo(p) => Ok(format!("{},{}", p.lat, p.lon)),
+                        FieldValue::GeoEcef(p) => Ok(format!("{},{},{}", p.x, p.y, p.z)),
                         FieldValue::Null => Ok(String::new()),
                         FieldValue::Vector(v) => Ok(format!("[vector: dim={}]", v.len())),
                         FieldValue::Int64Array(arr) => Ok(arr

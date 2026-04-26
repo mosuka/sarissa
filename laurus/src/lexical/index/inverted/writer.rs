@@ -489,18 +489,35 @@ impl InvertedIndexWriter {
                             }],
                         );
                     }
-                    DataValue::Geo(lat, lon) => {
+                    DataValue::Geo(p) => {
                         // Geo points are indexed as 2D points in BKD
                         field_terms.insert(
                             field_name.clone(),
                             vec![AnalyzedTerm {
-                                term: format!("{},{}", lat, lon),
+                                term: format!("{},{}", p.lat, p.lon),
                                 position: 0,
                                 frequency: 1,
-                                offset: (0, format!("{},{}", lat, lon).len()),
+                                offset: (0, format!("{},{}", p.lat, p.lon).len()),
                             }],
                         );
-                        point_values.insert(field_name.clone(), vec![vec![*lat, *lon]]);
+                        point_values.insert(field_name.clone(), vec![vec![p.lat, p.lon]]);
+                    }
+                    DataValue::GeoEcef(p) => {
+                        // 3D ECEF points are indexed as 3D points in BKD.
+                        // Once #298 introduces FieldOption::Geo3d this branch
+                        // will gain dedicated handling; for now mirror the
+                        // 2D Geo flow so a GeoEcef-bearing document still
+                        // makes it onto disk.
+                        field_terms.insert(
+                            field_name.clone(),
+                            vec![AnalyzedTerm {
+                                term: format!("{},{},{}", p.x, p.y, p.z),
+                                position: 0,
+                                frequency: 1,
+                                offset: (0, format!("{},{},{}", p.x, p.y, p.z).len()),
+                            }],
+                        );
+                        point_values.insert(field_name.clone(), vec![vec![p.x, p.y, p.z]]);
                     }
                     DataValue::Int64Array(arr) => {
                         // Multi-valued integer field. Each element is a
@@ -767,10 +784,20 @@ impl InvertedIndexWriter {
                         stored_writer.write_u8(5)?; // Type tag for DateTime
                         stored_writer.write_string(&dt.to_rfc3339())?;
                     }
-                    crate::data::DataValue::Geo(lat, lon) => {
+                    crate::data::DataValue::Geo(p) => {
                         stored_writer.write_u8(6)?; // Type tag for Geo
-                        stored_writer.write_f64(*lat)?;
-                        stored_writer.write_f64(*lon)?;
+                        stored_writer.write_f64(p.lat)?;
+                        stored_writer.write_f64(p.lon)?;
+                    }
+                    crate::data::DataValue::GeoEcef(p) => {
+                        // Type tag 11 is reserved for 3D ECEF points; reader
+                        // support follows in #299. For now we emit the bytes
+                        // so a round-trip through the writer is at least
+                        // lossless.
+                        stored_writer.write_u8(11)?;
+                        stored_writer.write_f64(p.x)?;
+                        stored_writer.write_f64(p.y)?;
+                        stored_writer.write_f64(p.z)?;
                     }
                     crate::data::DataValue::Bytes(bytes, mime) => {
                         stored_writer.write_u8(4)?; // Type tag for Bytes

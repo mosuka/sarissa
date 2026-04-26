@@ -488,8 +488,11 @@ impl MergeEngine {
                             format!("[blob: {:?} ({} bytes)]", mime, data.len())
                         }
                         FieldValue::DateTime(dt) => dt.to_rfc3339(),
-                        FieldValue::Geo(lat, lon) => {
-                            format!("{},{}", lat, lon)
+                        FieldValue::Geo(p) => {
+                            format!("{},{}", p.lat, p.lon)
+                        }
+                        FieldValue::GeoEcef(p) => {
+                            format!("{},{},{}", p.x, p.y, p.z)
                         }
                         FieldValue::Vector(v) => format!("[vector: {} dims]", v.len()),
                         FieldValue::Null => "null".to_string(),

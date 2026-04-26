@@ -498,7 +498,7 @@ impl SegmentReader {
                             // Geo
                             let lat = reader.read_f64()?;
                             let lon = reader.read_f64()?;
-                            FieldValue::Geo(lat, lon)
+                            FieldValue::Geo(crate::data::GeoPoint::new(lat, lon))
                         }
                         7 => {
                             // Null

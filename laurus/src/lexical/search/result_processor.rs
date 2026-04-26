@@ -417,7 +417,8 @@ impl ResultProcessor {
                 format!("[blob: {} ({} bytes)]", m, data.len())
             }
             FieldValue::DateTime(dt) => dt.to_rfc3339(),
-            FieldValue::Geo(lat, lon) => format!("{},{}", lat, lon),
+            FieldValue::Geo(p) => format!("{},{}", p.lat, p.lon),
+            FieldValue::GeoEcef(p) => format!("{},{},{}", p.x, p.y, p.z),
             FieldValue::Null => "null".to_string(),
             FieldValue::Vector(v) => format!("[vector: dim={}]", v.len()),
             FieldValue::Int64Array(arr) => format!(

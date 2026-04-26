@@ -106,10 +106,9 @@ async fn dynamic_auto_adds_geo_field() -> Result<()> {
     ));
 
     let docs = engine.get_documents("doc1").await?;
-    assert_eq!(
-        docs[0].get("location").and_then(|v| v.as_geo()),
-        Some((35.1, 139.0))
-    );
+    let geo = docs[0].get("location").and_then(|v| v.as_geo()).unwrap();
+    assert_eq!(geo.lat, 35.1);
+    assert_eq!(geo.lon, 139.0);
     Ok(())
 }
 

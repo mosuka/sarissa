@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
+use crate::error::LaurusError;
+
 /// Helper for archiving DateTime as micros timestamp (i64)
 pub struct MicroSeconds;
 
@@ -42,6 +44,132 @@ impl<D: rkyv::rancor::Fallible + ?Sized>
     }
 }
 
+/// A geographical point on the Earth's surface, in WGS84 latitude /
+/// longitude degrees.
+///
+/// `lat` is bounded to `[-90, 90]` and `lon` to `[-180, 180]`. Use
+/// [`GeoPoint::try_new`] to validate at construction; the infallible
+/// [`GeoPoint::new`] only debug-asserts and is intended for callers that
+/// have already validated their input (or for hot paths inside the engine
+/// where validation has happened upstream).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+pub struct GeoPoint {
+    /// Latitude in degrees, bounded to `[-90, 90]`.
+    pub lat: f64,
+    /// Longitude in degrees, bounded to `[-180, 180]`.
+    pub lon: f64,
+}
+
+impl GeoPoint {
+    /// Construct a `GeoPoint` without validation.
+    ///
+    /// Debug builds assert that `lat` and `lon` are inside their valid
+    /// ranges; release builds skip the check, on the assumption that the
+    /// caller validated the values upstream (or constructed them from a
+    /// trusted source like a previous serialized index). Prefer
+    /// [`GeoPoint::try_new`] when handling user-supplied input.
+    #[inline]
+    pub fn new(lat: f64, lon: f64) -> Self {
+        debug_assert!(
+            (-90.0..=90.0).contains(&lat),
+            "GeoPoint latitude {lat} out of range [-90, 90]"
+        );
+        debug_assert!(
+            (-180.0..=180.0).contains(&lon),
+            "GeoPoint longitude {lon} out of range [-180, 180]"
+        );
+        GeoPoint { lat, lon }
+    }
+
+    /// Construct a `GeoPoint`, validating that `lat` and `lon` lie inside
+    /// their canonical WGS84 ranges. Returns `LaurusError::other` for
+    /// out-of-range or `NaN` inputs.
+    pub fn try_new(lat: f64, lon: f64) -> crate::error::Result<Self> {
+        if !(-90.0..=90.0).contains(&lat) {
+            return Err(LaurusError::other(format!(
+                "Invalid latitude: {lat} (must be between -90 and 90)"
+            )));
+        }
+        if !(-180.0..=180.0).contains(&lon) {
+            return Err(LaurusError::other(format!(
+                "Invalid longitude: {lon} (must be between -180 and 180)"
+            )));
+        }
+        Ok(GeoPoint { lat, lon })
+    }
+
+    /// Great-circle distance to another point in kilometers, using the
+    /// Haversine formula on a sphere of mean Earth radius (6371 km).
+    pub fn distance_to(&self, other: &GeoPoint) -> f64 {
+        const EARTH_RADIUS_KM: f64 = 6371.0;
+
+        let lat1_rad = self.lat.to_radians();
+        let lat2_rad = other.lat.to_radians();
+        let delta_lat = (other.lat - self.lat).to_radians();
+        let delta_lon = (other.lon - self.lon).to_radians();
+
+        let a = (delta_lat / 2.0).sin().powi(2)
+            + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
+        let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+
+        EARTH_RADIUS_KM * c
+    }
+
+    /// Initial bearing toward `other`, in degrees in `[0, 360)` clockwise
+    /// from true north.
+    pub fn bearing_to(&self, other: &GeoPoint) -> f64 {
+        let lat1_rad = self.lat.to_radians();
+        let lat2_rad = other.lat.to_radians();
+        let delta_lon = (other.lon - self.lon).to_radians();
+
+        let y = delta_lon.sin() * lat2_rad.cos();
+        let x = lat1_rad.cos() * lat2_rad.sin() - lat1_rad.sin() * lat2_rad.cos() * delta_lon.cos();
+
+        let bearing_rad = y.atan2(x);
+        (bearing_rad.to_degrees() + 360.0) % 360.0
+    }
+
+    /// Whether this point falls inside the closed lat/lon rectangle
+    /// `[min_lat, max_lat] × [min_lon, max_lon]`.
+    pub fn within_bounds(&self, min_lat: f64, max_lat: f64, min_lon: f64, max_lon: f64) -> bool {
+        self.lat >= min_lat && self.lat <= max_lat && self.lon >= min_lon && self.lon <= max_lon
+    }
+}
+
+/// A 3D point in Earth-Centered Earth-Fixed (ECEF) Cartesian coordinates.
+///
+/// All three components are in meters, with the origin at the Earth's
+/// center of mass. Suitable for true 3D geospatial queries (drone
+/// proximity, satellite tracking, indoor 3D positioning) where a 2D
+/// `GeoPoint` would lose the altitude dimension or wrap incorrectly near
+/// the poles.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+pub struct GeoEcefPoint {
+    /// X axis: meters along the equatorial plane through 0° longitude.
+    pub x: f64,
+    /// Y axis: meters along the equatorial plane through 90°E longitude.
+    pub y: f64,
+    /// Z axis: meters along the Earth's rotation axis toward the North Pole.
+    pub z: f64,
+}
+
+impl GeoEcefPoint {
+    /// Construct a `GeoEcefPoint` from raw Cartesian components.
+    ///
+    /// No range validation is performed: ECEF coordinates have no fixed
+    /// upper bound (a satellite is a valid 3D point well outside the
+    /// surface), and the natural sentinels `±INFINITY` are accepted as
+    /// "unbounded" markers in queries.
+    #[inline]
+    pub fn new(x: f64, y: f64, z: f64) -> Self {
+        GeoEcefPoint { x, y, z }
+    }
+}
+
 /// The unified value type for fields in a document.
 ///
 /// This enum merges the concepts of `FieldValue` (from Lexical Index) and
@@ -72,8 +200,11 @@ pub enum DataValue {
     /// Date and time in UTC.
     DateTime(#[rkyv(with = MicroSeconds)] chrono::DateTime<chrono::Utc>),
 
-    /// Geographical point (latitude, longitude).
-    Geo(f64, f64),
+    /// 2D geographical point (WGS84 latitude / longitude).
+    Geo(GeoPoint),
+
+    /// 3D Earth-Centered Earth-Fixed (ECEF) Cartesian point in meters.
+    GeoEcef(GeoEcefPoint),
 
     /// Multi-valued 64-bit signed integers.
     ///
@@ -151,10 +282,18 @@ impl DataValue {
         }
     }
 
-    /// Returns the geographical point if this is a Geo variant.
-    pub fn as_geo(&self) -> Option<(f64, f64)> {
+    /// Returns the geographical point if this is a `Geo` variant.
+    pub fn as_geo(&self) -> Option<GeoPoint> {
         match self {
-            DataValue::Geo(lat, lon) => Some((*lat, *lon)),
+            DataValue::Geo(p) => Some(*p),
+            _ => None,
+        }
+    }
+
+    /// Returns the ECEF Cartesian point if this is a `GeoEcef` variant.
+    pub fn as_geo_ecef(&self) -> Option<GeoEcefPoint> {
+        match self {
+            DataValue::GeoEcef(p) => Some(*p),
             _ => None,
         }
     }
@@ -241,6 +380,18 @@ impl From<Vec<i64>> for DataValue {
 impl From<Vec<f64>> for DataValue {
     fn from(v: Vec<f64>) -> Self {
         DataValue::Float64Array(v)
+    }
+}
+
+impl From<GeoPoint> for DataValue {
+    fn from(p: GeoPoint) -> Self {
+        DataValue::Geo(p)
+    }
+}
+
+impl From<GeoEcefPoint> for DataValue {
+    fn from(p: GeoEcefPoint) -> Self {
+        DataValue::GeoEcef(p)
     }
 }
 
@@ -347,9 +498,20 @@ impl DocumentBuilder {
         self.add_field(name.into(), DataValue::Vector(vector))
     }
 
-    /// Add a geo field (latitude, longitude).
+    /// Add a 2D geographical field from `(lat, lon)` degrees.
+    ///
+    /// The values are passed through [`GeoPoint::new`], which debug-asserts
+    /// the canonical WGS84 ranges. Use [`add_field`](Self::add_field) with
+    /// `GeoPoint::try_new(...)?` if you need validation against
+    /// user-supplied input.
     pub fn add_geo(self, name: impl Into<String>, lat: f64, lon: f64) -> Self {
-        self.add_field(name.into(), DataValue::Geo(lat, lon))
+        self.add_field(name.into(), DataValue::Geo(GeoPoint::new(lat, lon)))
+    }
+
+    /// Add a 3D Earth-Centered Earth-Fixed (ECEF) Cartesian field from
+    /// raw `(x, y, z)` meters.
+    pub fn add_geo_ecef(self, name: impl Into<String>, x: f64, y: f64, z: f64) -> Self {
+        self.add_field(name.into(), DataValue::GeoEcef(GeoEcefPoint::new(x, y, z)))
     }
 
     /// Add a multi-valued integer field.

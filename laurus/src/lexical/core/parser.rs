@@ -247,9 +247,9 @@ impl DocumentParser {
                         + dt.timestamp_subsec_nanos() as f64 / 1_000_000_000.0;
                     point_values.insert(field_name.clone(), vec![vec![ts]]);
                 }
-                FieldValue::Geo(lat, lon) => {
+                FieldValue::Geo(point) => {
                     // Convert geo point to string representation
-                    let text = format!("{},{}", lat, lon);
+                    let text = format!("{},{}", point.lat, point.lon);
 
                     let analyzed_term = AnalyzedTerm {
                         term: text.clone(),
@@ -259,9 +259,28 @@ impl DocumentParser {
                     };
 
                     field_terms.insert(field_name.clone(), vec![analyzed_term]);
-                    stored_fields.insert(field_name.clone(), FieldValue::Geo(lat, lon));
+                    stored_fields.insert(field_name.clone(), FieldValue::Geo(point));
                     // Geo is a single 2D point.
-                    point_values.insert(field_name.clone(), vec![vec![lat, lon]]);
+                    point_values.insert(field_name.clone(), vec![vec![point.lat, point.lon]]);
+                }
+                FieldValue::GeoEcef(point) => {
+                    // 3D ECEF point: store the (x, y, z) tuple as a single
+                    // BKD point. The dedicated `Geo3d` schema option and
+                    // optimized writer paths arrive in #298 / #299; for now
+                    // we mirror the 2D geo flow (text term + point values)
+                    // so a `GeoEcef`-bearing document can still round-trip.
+                    let text = format!("{},{},{}", point.x, point.y, point.z);
+
+                    let analyzed_term = AnalyzedTerm {
+                        term: text.clone(),
+                        position: 0,
+                        frequency: 1,
+                        offset: (0, text.len()),
+                    };
+
+                    field_terms.insert(field_name.clone(), vec![analyzed_term]);
+                    stored_fields.insert(field_name.clone(), FieldValue::GeoEcef(point));
+                    point_values.insert(field_name.clone(), vec![vec![point.x, point.y, point.z]]);
                 }
                 FieldValue::Vector(v) => {
                     // Vectors are stored but not indexed in lexical
