@@ -126,6 +126,58 @@ impl AABB {
         }
         true
     }
+
+    /// Squared Euclidean distance from `point` to the *nearest* point inside
+    /// (or on) the AABB. Returns `0.0` when `point` itself lies inside the
+    /// box. The squared form avoids a `sqrt` in tight pruning loops; callers
+    /// that need a real distance can apply `.sqrt()` to the result.
+    ///
+    /// Returns `f64::INFINITY` if `point.len()` does not match
+    /// [`AABB::num_dims`].
+    pub fn min_distance_sq_to_point(&self, point: &[f64]) -> f64 {
+        if point.len() != self.min.len() {
+            return f64::INFINITY;
+        }
+        let mut acc = 0.0;
+        for (d, &p) in point.iter().enumerate() {
+            let lo = self.min[d];
+            let hi = self.max[d];
+            let delta = if p < lo {
+                lo - p
+            } else if p > hi {
+                p - hi
+            } else {
+                0.0
+            };
+            acc += delta * delta;
+        }
+        acc
+    }
+
+    /// Squared Euclidean distance from `point` to the *farthest* point
+    /// inside the AABB. For each axis we pick whichever corner (`min[d]`
+    /// or `max[d]`) is farther from `point[d]`. Pairs with
+    /// [`AABB::min_distance_sq_to_point`] for the BKD's sphere-vs-cell
+    /// containment test: a cell whose `max_distance_sq_to_point(center)
+    /// <= radius²` lies fully inside the sphere.
+    ///
+    /// Returns `f64::NEG_INFINITY` if `point.len()` does not match
+    /// [`AABB::num_dims`] (a sentinel that will never satisfy any
+    /// `<= radius²` check, so misuse never produces a false-positive
+    /// Inside classification).
+    pub fn max_distance_sq_to_point(&self, point: &[f64]) -> f64 {
+        if point.len() != self.min.len() {
+            return f64::NEG_INFINITY;
+        }
+        let mut acc = 0.0;
+        for (d, &p) in point.iter().enumerate() {
+            let dlo = (p - self.min[d]).abs();
+            let dhi = (p - self.max[d]).abs();
+            let far = dlo.max(dhi);
+            acc += far * far;
+        }
+        acc
+    }
 }
 
 #[cfg(test)]
@@ -196,5 +248,63 @@ mod tests {
         // Touching boxes share their corner — closed intervals intersect.
         assert!(a.intersects(&touching));
         assert!(!a.intersects(&disjoint));
+    }
+
+    #[test]
+    fn min_distance_sq_to_point_is_zero_when_inside() {
+        let aabb = AABB::new(vec![0.0, 0.0, 0.0], vec![10.0, 10.0, 10.0]).unwrap();
+        assert_eq!(aabb.min_distance_sq_to_point(&[5.0, 5.0, 5.0]), 0.0);
+        // On the boundary: still inside, distance 0.
+        assert_eq!(aabb.min_distance_sq_to_point(&[0.0, 10.0, 5.0]), 0.0);
+    }
+
+    #[test]
+    fn min_distance_sq_to_point_outside_axes() {
+        // 3D AABB at origin, point 3 units beyond each axis.
+        let aabb = AABB::new(vec![0.0, 0.0, 0.0], vec![10.0, 10.0, 10.0]).unwrap();
+        // Point 3 units below the min corner on x only: dist² = 9.
+        assert_eq!(aabb.min_distance_sq_to_point(&[-3.0, 5.0, 5.0]), 9.0);
+        // Point 3 units past max on every axis: dist² = 3² + 3² + 3² = 27.
+        assert_eq!(aabb.min_distance_sq_to_point(&[13.0, 13.0, 13.0]), 27.0);
+    }
+
+    #[test]
+    fn min_distance_sq_to_point_dim_mismatch_is_infinity() {
+        let aabb = AABB::new(vec![0.0, 0.0, 0.0], vec![10.0, 10.0, 10.0]).unwrap();
+        assert!(aabb.min_distance_sq_to_point(&[5.0]).is_infinite());
+    }
+
+    #[test]
+    fn max_distance_sq_to_point_picks_far_corner() {
+        // 1D AABB [0, 10]; point at 1 → far corner is 10, dist 9.
+        let aabb = AABB::new(vec![0.0], vec![10.0]).unwrap();
+        assert_eq!(aabb.max_distance_sq_to_point(&[1.0]), 81.0);
+        // Point at 6 → far corner is 0, dist 6.
+        assert_eq!(aabb.max_distance_sq_to_point(&[6.0]), 36.0);
+
+        // 3D AABB [0, 10]³; center query (5, 5, 5) → every corner 5√3 away
+        // → squared = 75.
+        let aabb3 = AABB::new(vec![0.0, 0.0, 0.0], vec![10.0, 10.0, 10.0]).unwrap();
+        assert_eq!(aabb3.max_distance_sq_to_point(&[5.0, 5.0, 5.0]), 75.0);
+    }
+
+    #[test]
+    fn min_le_max_distance_sq() {
+        // Sanity: min_distance_sq is always <= max_distance_sq for a
+        // matching-dim point.
+        let aabb = AABB::new(vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]).unwrap();
+        for point in [
+            [0.0, 0.0, 0.0],
+            [2.5, 3.5, 4.5],
+            [10.0, 0.0, -5.0],
+            [4.0, 5.0, 6.0],
+        ] {
+            let lo = aabb.min_distance_sq_to_point(&point);
+            let hi = aabb.max_distance_sq_to_point(&point);
+            assert!(
+                lo <= hi,
+                "min_dist_sq ({lo}) must be <= max_dist_sq ({hi}) for point {point:?}"
+            );
+        }
     }
 }
