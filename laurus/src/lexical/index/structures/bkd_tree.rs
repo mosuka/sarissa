@@ -1,14 +1,18 @@
-//! Simple BKD Tree implementation for numeric range queries.
+//! BKD tree implementation for axis-aligned numeric range and visitor-driven
+//! spatial queries.
 //!
-//! This is a simplified version of Apache Lucene's BKD Tree data structure,
-//! optimized for 1-dimensional numeric range filtering.
+//! Modeled on Apache Lucene's BKD-tree, the on-disk layout described on
+//! [`BKD_VERSION`] stores per-node and per-leaf axis-aligned bounding boxes
+//! (AABBs) so the reader can prune subtrees with Inside / Outside / Crosses
+//! logic. The trait [`BKDTree`] exposes the low-level
+//! [`intersect`](BKDTree::intersect) primitive plus a default
+//! [`range_search`](BKDTree::range_search) wrapper.
 
 use super::aabb::AABB;
 use super::visitor::{CellRelation, IntersectVisitor, RangeQueryVisitor};
 use crate::error::Result;
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{Storage, StorageInput, StorageOutput};
-use std::cmp::Ordering;
 use std::io::SeekFrom;
 use std::sync::Arc;
 
@@ -264,13 +268,23 @@ impl<W: StorageOutput> BKDWriter<W> {
     /// point/doc_id buffers themselves, so no per-point heap allocation is
     /// performed regardless of point count.
     ///
+    /// # Numeric robustness
+    ///
+    /// Coordinates must be totally orderable. `NaN` is rejected at write
+    /// time with `LaurusError::index` because it has no defined ordering and
+    /// would otherwise corrupt the BKD's split decisions and per-node AABB
+    /// containment invariants. `f64::INFINITY` and `f64::NEG_INFINITY` are
+    /// both accepted: they sort consistently against every finite value
+    /// (`NEG_INFINITY < x < INFINITY`) and act as natural sentinels for
+    /// "unbounded" semantics in queries (compare with [`AABB::unbounded`]).
+    ///
     /// # Arguments
     /// - `points`: flat row-major buffer of f64 coordinates.
     /// - `doc_ids`: parallel buffer of document ids.
     ///
     /// # Returns
     /// `Ok(())` on success, otherwise a `LaurusError::index` describing the
-    /// dimensional mismatch or an underlying I/O error.
+    /// dimensional mismatch, the NaN position, or an underlying I/O error.
     pub fn write(&mut self, points: &[f64], doc_ids: &[u64]) -> Result<()> {
         let num_dims = self.num_dims as usize;
         let expected = doc_ids.len().checked_mul(num_dims).ok_or_else(|| {
@@ -292,6 +306,20 @@ impl<W: StorageOutput> BKDWriter<W> {
             // Write basic header for empty tree
             self.write_header(0, 0, 0)?;
             return Ok(());
+        }
+
+        // Reject any NaN coordinate up-front. NaN's `partial_cmp` is `None`,
+        // so silently allowing it would corrupt sort order and AABB
+        // containment in subtle, query-dependent ways.
+        for (offset, &v) in points.iter().enumerate() {
+            if v.is_nan() {
+                let doc_idx = offset / num_dims;
+                let dim = offset % num_dims;
+                return Err(crate::error::LaurusError::index(format!(
+                    "Point at doc index {doc_idx} dim {dim} is NaN; BKD requires \
+                     totally-ordered values (NaN has no defined ordering)"
+                )));
+            }
         }
 
         // Calculate global min/max
@@ -423,11 +451,12 @@ impl<W: StorageOutput> BKDWriter<W> {
 
         // Sort the permutation by the split dimension to find the median.
         // The underlying point/doc_id buffers stay immutable; only `indices`
-        // is reordered.
+        // is reordered. `total_cmp` is safe here because `BKDWriter::write`
+        // has already rejected NaN coordinates, so every f64 in `ctx.points`
+        // is totally ordered.
         indices.sort_by(|&a, &b| {
             ctx.value(a, split_dim_us)
-                .partial_cmp(&ctx.value(b, split_dim_us))
-                .unwrap_or(Ordering::Equal)
+                .total_cmp(&ctx.value(b, split_dim_us))
         });
 
         // Internal nodes are written AFTER all leaves; we track tree structure
@@ -836,97 +865,12 @@ impl BKDTree for BKDReader {
     }
 }
 
-/// A simple BKD Tree for efficient range queries.
-///
-/// Slated for removal in #295 once the disk-backed `BKDReader` covers all
-/// remaining call sites.
-#[derive(Debug, Clone)]
-pub struct SimpleBKDTree {
-    /// Sorted array of (points, doc_id) pairs.
-    entries: Vec<(Vec<f64>, u64)>,
-    /// Retained for diagnostic accessors only; the new `intersect`-based
-    /// implementation derives the per-point dimensionality from each entry.
-    #[allow(dead_code)]
-    num_dims: u32,
-    field_name: String,
-}
-
-impl BKDTree for SimpleBKDTree {
-    /// Linear scan across `entries`. The simple tree carries no AABB and
-    /// performs no pruning, so every point is reported via `visitor.visit`
-    /// (the `Crosses` path) and the visitor is responsible for filtering.
-    fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()> {
-        for (vals, doc_id) in &self.entries {
-            visitor.visit(*doc_id, vals);
-        }
-        Ok(())
-    }
-}
-
-impl SimpleBKDTree {
-    /// Create a new BKD Tree from unsorted (points, doc_id) pairs.
-    pub fn new(field_name: String, num_dims: u32, mut entries: Vec<(Vec<f64>, u64)>) -> Self {
-        // Simple sorting by first dimension for consistent ordering
-        entries.sort_by(|a, b| {
-            if a.0.is_empty() || b.0.is_empty() {
-                std::cmp::Ordering::Equal
-            } else {
-                a.0[0]
-                    .partial_cmp(&b.0[0])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            }
-        });
-
-        SimpleBKDTree {
-            entries,
-            num_dims,
-            field_name,
-        }
-    }
-
-    /// Create an empty BKD Tree.
-    pub fn empty(field_name: String, num_dims: u32) -> Self {
-        SimpleBKDTree {
-            entries: Vec::new(),
-            num_dims,
-            field_name,
-        }
-    }
-
-    /// Get the field name this tree is built for.
-    pub fn field_name(&self) -> &str {
-        &self.field_name
-    }
-
-    /// Get the number of entries in this tree.
-    pub fn size(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Check if the tree is empty.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::Storage;
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use std::sync::Arc;
-
-    fn create_test_tree() -> SimpleBKDTree {
-        let entries = vec![
-            (vec![1.0], 10), // doc 10, value 1.0
-            (vec![3.0], 20), // doc 20, value 3.0
-            (vec![2.0], 30), // doc 30, value 2.0
-            (vec![5.0], 40), // doc 40, value 5.0
-            (vec![4.0], 50), // doc 50, value 4.0
-            (vec![1.5], 60), // doc 60, value 1.5
-        ];
-        SimpleBKDTree::new("test_field".to_string(), 1, entries)
-    }
 
     #[test]
     fn test_bkd_writer_reader_2d() {
@@ -1509,50 +1453,69 @@ mod tests {
         assert_eq!(results, vec![20]);
     }
 
+    // Note: the legacy `test_bkd_tree_creation`, `test_empty_tree`, and
+    // `test_range_search_exact_bounds` were removed in #295 along with the
+    // in-memory `SimpleBKDTree` they exercised. Equivalent coverage is
+    // provided by `test_bkd_writer_empty`, `test_bkd_writer_reader_*`,
+    // and `range_search_default_impl_matches_legacy_semantics` above.
+
     #[test]
-    fn test_bkd_tree_creation() {
-        let tree = create_test_tree();
+    fn write_rejects_nan_coordinate() {
+        // NaN has no defined ordering and would corrupt the BKD's split
+        // decisions; the writer must reject it up-front with an index
+        // error pointing at the offending dimension.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let points: Vec<f64> = vec![1.0, 2.0, f64::NAN, 4.0];
+        let doc_ids: Vec<u64> = vec![10, 20];
 
-        assert_eq!(tree.size(), 6);
-        assert_eq!(tree.field_name(), "test_field");
-        assert!(!tree.is_empty());
-
-        // Verify entries are sorted by value
-        let expected_order = vec![
-            (vec![1.0], 10),
-            (vec![1.5], 60),
-            (vec![2.0], 30),
-            (vec![3.0], 20),
-            (vec![4.0], 50),
-            (vec![5.0], 40),
-        ];
-        assert_eq!(tree.entries, expected_order);
+        let output = storage.create_output("nan.bkd").unwrap();
+        let mut writer = BKDWriter::new(output, 2);
+        let err = writer.write(&points, &doc_ids).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("NaN"), "unexpected error: {msg}");
+        // Offending position: doc 1 (second doc), dim 0.
+        assert!(msg.contains("doc index 1"), "unexpected error: {msg}");
+        assert!(msg.contains("dim 0"), "unexpected error: {msg}");
     }
 
     #[test]
-    fn test_empty_tree() {
-        let tree = SimpleBKDTree::empty("empty_field".to_string(), 1);
+    fn write_accepts_infinity_and_round_trips() {
+        // ±Infinity sort consistently against every finite f64, so the
+        // writer must accept them and the reader must surface them.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let points: Vec<f64> = vec![f64::NEG_INFINITY, -10.0, 0.0, 10.0, f64::INFINITY];
+        let doc_ids: Vec<u64> = vec![100, 200, 300, 400, 500];
+        {
+            let output = storage.create_output("inf.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
 
-        assert_eq!(tree.size(), 0);
-        assert!(tree.is_empty());
-        assert_eq!(
-            tree.range_search(&[Some(1.0)], &[Some(5.0)], true, true)
-                .unwrap(),
-            Vec::<u64>::new()
-        );
-    }
+        let reader = BKDReader::open(storage.clone(), "inf.bkd").unwrap();
 
-    #[test]
-    fn test_range_search_exact_bounds() {
-        let tree = create_test_tree();
+        // Unbounded query: every doc, including the infinities.
+        let mut all = reader.range_search(&[None], &[None], true, true).unwrap();
+        all.sort_unstable();
+        assert_eq!(all, vec![100, 200, 300, 400, 500]);
 
-        // Range [2.0, 4.0] should match docs 30, 20, 50
-        let results = tree
-            .range_search(&[Some(2.0)], &[Some(4.0)], true, true)
+        // Bounded query that excludes both infinities.
+        let finite = reader
+            .range_search(&[Some(-100.0)], &[Some(100.0)], true, true)
             .unwrap();
-        let mut expected = vec![30, 20, 50]; // docs with values 2.0, 3.0, 4.0
-        expected.sort();
+        assert_eq!(finite, vec![200, 300, 400]);
 
-        assert_eq!(results, expected);
+        // Lower bound at NEG_INFINITY (closed): includes the NEG_INFINITY
+        // doc as well as every finite doc up to (and including) 0.0.
+        let lower_inf = reader
+            .range_search(&[Some(f64::NEG_INFINITY)], &[Some(0.0)], true, true)
+            .unwrap();
+        assert_eq!(lower_inf, vec![100, 200, 300]);
+
+        // Upper bound at INFINITY (closed): includes the INFINITY doc.
+        let upper_inf = reader
+            .range_search(&[Some(0.0)], &[Some(f64::INFINITY)], true, true)
+            .unwrap();
+        assert_eq!(upper_inf, vec![300, 400, 500]);
     }
 }
