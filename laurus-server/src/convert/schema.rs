@@ -132,6 +132,11 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             indexed: o.indexed,
             stored: o.stored,
         })),
+        // Geo3d (3D ECEF) does not yet have a proto representation; the
+        // dedicated `Geo3dOption` proto message lands with #305 (gRPC/MCP
+        // API for 3D geo). Until then, skip the variant — receivers can
+        // distinguish Geo3d fields via the schema kind once #305 lands.
+        FieldOption::Geo3d(_) => None,
         FieldOption::Bytes(o) => Some(Opt::Bytes(v1::BytesOption { stored: o.stored })),
         FieldOption::Hnsw(o) => Some(Opt::Hnsw(v1::HnswOption {
             dimension: o.dimension as u32,

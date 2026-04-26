@@ -410,6 +410,7 @@ impl InvertedIndexWriter {
                 Some(FieldOption::Boolean(opt)) => (opt.indexed, opt.stored),
                 Some(FieldOption::DateTime(opt)) => (opt.indexed, opt.stored),
                 Some(FieldOption::Geo(opt)) => (opt.indexed, opt.stored),
+                Some(FieldOption::Geo3d(opt)) => (opt.indexed, opt.stored),
                 Some(FieldOption::Bytes(opt)) => (false, opt.stored), // Bytes are not lexically indexed
                 None => (true, true), // Internal or schema-less default
             };
