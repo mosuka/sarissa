@@ -522,6 +522,15 @@ impl SegmentReader {
                             }
                             FieldValue::Float64Array(arr)
                         }
+                        12 => {
+                            // 3D ECEF point. Tag 12 (not 11) — see the
+                            // matching writer comment for why ECEF was
+                            // remapped during #299.
+                            let x = reader.read_f64()?;
+                            let y = reader.read_f64()?;
+                            let z = reader.read_f64()?;
+                            FieldValue::GeoEcef(crate::data::GeoEcefPoint::new(x, y, z))
+                        }
                         _ => {
                             return Err(LaurusError::index(format!(
                                 "Unknown field type tag: {type_tag}"

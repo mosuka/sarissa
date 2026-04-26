@@ -606,6 +606,17 @@ pub struct BKDReader {
 }
 
 impl BKDReader {
+    /// Borrow the file header parsed at `open` time.
+    ///
+    /// Useful for callers that need to inspect the dimensionality, point
+    /// count, or global AABB of an existing tree without performing a
+    /// query (e.g. integration tests, schema introspection tooling).
+    pub fn header(&self) -> &BKDFileHeader {
+        &self.header
+    }
+}
+
+impl BKDReader {
     /// Open a BKD tree from storage and path.
     pub fn open(storage: Arc<dyn Storage>, path: &str) -> Result<Self> {
         let input = storage.open_input(path)?;

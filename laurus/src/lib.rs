@@ -71,7 +71,7 @@ pub mod vector;
 
 // Re-exports for the public API
 pub use analysis::analyzer::analyzer::Analyzer;
-pub use data::{DataValue, Document};
+pub use data::{DataValue, Document, GeoEcefPoint, GeoPoint};
 #[cfg(feature = "embeddings-candle")]
 pub use embedding::candle_bert_embedder::CandleBertEmbedder;
 #[cfg(feature = "embeddings-multimodal")]
