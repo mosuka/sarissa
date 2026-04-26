@@ -14,8 +14,10 @@
 //!   ECEF point lies within `radius_m` meters of the query center.
 //! - [`Geo3dBoundingBoxQuery`] — 3D axis-aligned box search: every doc
 //!   whose stored ECEF point falls inside the closed `[min, max]` box.
-//!
-//! The k-NN flavour arrives in #302.
+//! - [`Geo3dNearestQuery`] — k-nearest-neighbour search: the `k` docs
+//!   whose stored ECEF points lie closest to the query center, returned
+//!   in distance-ascending order. Built on an expanding-radius loop on
+//!   top of the same BKD `intersect` primitive.
 //!
 //! # How sphere queries reach the BKD
 //!
@@ -552,6 +554,327 @@ impl Query for Geo3dBoundingBoxQuery {
     }
 }
 
+/// k-nearest-neighbour query against an ECEF-typed field.
+///
+/// Returns the `k` documents whose stored [`GeoEcefPoint`] lies closest
+/// to `center`, sorted distance-ascending. Implemented as a sphere
+/// query whose radius doubles until at least `k` candidates have been
+/// collected (or the index is exhausted, or `max_radius_m` is reached).
+///
+/// Unlike [`Geo3dDistanceQuery`], the visitor here never lets the BKD
+/// short-circuit a subtree as Inside: k-NN ordering needs the *exact*
+/// per-point distance, and the Inside path skips reading the
+/// coordinates. The trade-off is slightly less aggressive pruning in
+/// exchange for stable ordering.
+///
+/// # Configuration
+///
+/// - `initial_radius_m`: first radius the loop probes. Default `1000.0`
+///   (1 km). Picking this close to the expected nearest-neighbour
+///   distance avoids wasted work.
+/// - `max_radius_m`: ceiling for the doubling loop. Default `1e10`
+///   meters (well beyond Earth radius), large enough that the loop
+///   terminates because either `k` candidates are found or the index
+///   has been visited in full.
+///
+/// # Termination
+///
+/// The loop exits as soon as one of these holds:
+/// 1. The number of distinct candidates collected reaches `k`.
+/// 2. Doubling the radius produced no additional hits — the index is
+///    exhausted.
+/// 3. The next radius would exceed `max_radius_m`.
+///
+/// In every case the result is truncated to the top-`k` by distance,
+/// so a smaller-than-`k` result simply means the index does not contain
+/// `k` indexed points within `max_radius_m`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Geo3dNearestQuery {
+    field: String,
+    center: GeoEcefPoint,
+    k: usize,
+    initial_radius_m: f64,
+    max_radius_m: f64,
+    boost: f32,
+}
+
+impl Geo3dNearestQuery {
+    /// Initial sphere radius used for the first probe (meters).
+    pub const DEFAULT_INITIAL_RADIUS_M: f64 = 1_000.0;
+    /// Upper bound for the expanding radius loop (meters). 10⁷ km is
+    /// well beyond any real ECEF distance.
+    pub const DEFAULT_MAX_RADIUS_M: f64 = 1.0e10;
+
+    /// Construct a new k-NN query with the default radius schedule.
+    pub fn new<F: Into<String>>(field: F, center: GeoEcefPoint, k: usize) -> Self {
+        Self {
+            field: field.into(),
+            center,
+            k,
+            initial_radius_m: Self::DEFAULT_INITIAL_RADIUS_M,
+            max_radius_m: Self::DEFAULT_MAX_RADIUS_M,
+            boost: 1.0,
+        }
+    }
+
+    /// Override the initial probe radius.
+    pub fn with_initial_radius(mut self, radius_m: f64) -> Self {
+        self.initial_radius_m = radius_m.max(0.0);
+        self
+    }
+
+    /// Override the doubling-loop ceiling.
+    pub fn with_max_radius(mut self, radius_m: f64) -> Self {
+        self.max_radius_m = radius_m.max(0.0);
+        self
+    }
+
+    /// Set the boost factor applied to every match's score.
+    pub fn with_boost(mut self, boost: f32) -> Self {
+        self.boost = boost;
+        self
+    }
+
+    /// Field name this query targets.
+    pub fn field(&self) -> &str {
+        &self.field
+    }
+
+    /// Search center.
+    pub fn center(&self) -> GeoEcefPoint {
+        self.center
+    }
+
+    /// Number of neighbours requested.
+    pub fn k(&self) -> usize {
+        self.k
+    }
+
+    /// Initial probe radius (meters).
+    pub fn initial_radius_m(&self) -> f64 {
+        self.initial_radius_m
+    }
+
+    /// Doubling-loop ceiling (meters).
+    pub fn max_radius_m(&self) -> f64 {
+        self.max_radius_m
+    }
+
+    /// Run the query and return the top-`k` matches in distance-ascending
+    /// order. Score is normalized so that the closest hit gets `1.0` and
+    /// the farthest hit in the returned set gets `0.0`.
+    pub fn find_matches(&self, reader: &dyn LexicalIndexReader) -> Result<Vec<Geo3dMatch>> {
+        if self.k == 0 {
+            return Ok(Vec::new());
+        }
+        let Some(bkd) = reader.get_bkd_tree(&self.field)? else {
+            return Ok(Vec::new());
+        };
+
+        // Expanding-radius loop. Start at `initial_radius_m`, double the
+        // radius until we collect at least k distinct hits or the radius
+        // ceiling is reached. We deliberately do NOT short-circuit on
+        // "no growth this iteration": a doubling can fail to add any
+        // hits and still reveal new ones a few doublings later (e.g.
+        // points clustered far away beyond an empty annulus). Bounding
+        // the loop only by `max_radius_m` is safe because doubling from
+        // `initial_radius_m` (default 1 km) to `max_radius_m` (default
+        // 10⁷ km) takes about 23 iterations — and once we hit k we
+        // exit immediately, which is the usual case in practice.
+        let mut radius = self.initial_radius_m.max(0.0);
+        let visitor: NearestVisitor;
+
+        loop {
+            let mut current = NearestVisitor::new(self.center, radius);
+            bkd.intersect(&mut current)?;
+
+            // Deduplicate by doc_id (multi-segment readers can produce
+            // duplicates) to get an accurate "unique candidates" count.
+            let mut deduped = current.hits.clone();
+            deduped.sort_by(|a, b| {
+                a.doc_id.cmp(&b.doc_id).then_with(|| {
+                    a.distance_sq
+                        .partial_cmp(&b.distance_sq)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+            });
+            deduped.dedup_by_key(|h| h.doc_id);
+            let unique_count = deduped.len();
+
+            // Termination #1: collected enough.
+            if unique_count >= self.k {
+                current.hits = deduped;
+                visitor = current;
+                break;
+            }
+
+            // Termination #2: hit the radius ceiling — return whatever
+            // we found (fewer than k means the index does not contain
+            // k points within `max_radius_m`).
+            if radius >= self.max_radius_m {
+                current.hits = deduped;
+                visitor = current;
+                break;
+            }
+
+            // Double the radius (capped at the ceiling). A starting
+            // radius of zero gets bumped to a small positive value so
+            // doubling can make progress.
+            let next = if radius == 0.0 {
+                self.max_radius_m.min(1.0)
+            } else {
+                (radius * 2.0).min(self.max_radius_m)
+            };
+            if next == radius {
+                current.hits = deduped;
+                visitor = current;
+                break;
+            }
+            radius = next;
+        }
+
+        // Final sort by distance ascending and truncation to top-k.
+        let mut hits = visitor.hits;
+        hits.sort_by(|a, b| {
+            a.distance_sq
+                .partial_cmp(&b.distance_sq)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        hits.truncate(self.k);
+
+        // Normalize scores against the farthest distance in the returned
+        // set: closest gets 1.0, farthest gets 0.0. Single-hit results
+        // and all-coincident results normalize to 1.0.
+        let max_distance = hits.last().map(|h| h.distance_sq.sqrt()).unwrap_or(0.0);
+
+        Ok(hits
+            .into_iter()
+            .map(|h| {
+                let distance = h.distance_sq.sqrt();
+                let score = if max_distance == 0.0 {
+                    1.0
+                } else {
+                    (1.0 - distance / max_distance).clamp(0.0, 1.0) as f32
+                };
+                Geo3dMatch {
+                    doc_id: h.doc_id,
+                    distance_m: distance,
+                    score,
+                }
+            })
+            .collect())
+    }
+}
+
+/// `IntersectVisitor` for k-NN. Always returns `Outside` or `Crosses`
+/// from `compare` — never `Inside` — so every candidate goes through
+/// `visit` with its exact coordinates and the visitor can record an
+/// exact distance for k-NN ordering.
+struct NearestVisitor {
+    center: [f64; 3],
+    radius_sq: f64,
+    hits: Vec<NearestHit>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NearestHit {
+    doc_id: u64,
+    distance_sq: f64,
+}
+
+impl NearestVisitor {
+    fn new(center: GeoEcefPoint, radius_m: f64) -> Self {
+        let r = radius_m.max(0.0);
+        Self {
+            center: [center.x, center.y, center.z],
+            radius_sq: r * r,
+            hits: Vec::new(),
+        }
+    }
+}
+
+impl IntersectVisitor for NearestVisitor {
+    fn compare(&self, cell: &AABB) -> CellRelation {
+        debug_assert_eq!(cell.num_dims(), 3, "NearestVisitor expects a 3D BKD");
+        let min_d_sq = cell.min_distance_sq_to_point(&self.center);
+        if min_d_sq > self.radius_sq {
+            CellRelation::Outside
+        } else {
+            // Always Crosses: k-NN needs the exact per-point distance,
+            // which the Inside path withholds.
+            CellRelation::Crosses
+        }
+    }
+
+    fn visit_inside(&mut self, _doc_id: u64) {
+        // Unreachable in practice — `compare` never returns Inside —
+        // but if a future BKD impl chooses to call this we ignore the
+        // hit (we have no exact distance to record for k-NN ordering).
+    }
+
+    fn visit(&mut self, doc_id: u64, point: &[f64]) {
+        debug_assert_eq!(point.len(), 3, "NearestVisitor expects a 3D BKD");
+        let dx = point[0] - self.center[0];
+        let dy = point[1] - self.center[1];
+        let dz = point[2] - self.center[2];
+        let d_sq = dx * dx + dy * dy + dz * dz;
+        if d_sq <= self.radius_sq {
+            self.hits.push(NearestHit {
+                doc_id,
+                distance_sq: d_sq,
+            });
+        }
+    }
+}
+
+impl Query for Geo3dNearestQuery {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
+        Ok(Box::new(Geo3dMatcher::new(self.find_matches(reader)?)))
+    }
+
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
+        Ok(Box::new(Geo3dScorer::new(
+            self.find_matches(reader)?,
+            self.boost,
+        )))
+    }
+
+    fn boost(&self) -> f32 {
+        self.boost
+    }
+
+    fn set_boost(&mut self, boost: f32) {
+        self.boost = boost;
+    }
+
+    fn clone_box(&self) -> Box<dyn Query> {
+        Box::new(self.clone())
+    }
+
+    fn description(&self) -> String {
+        format!(
+            "Geo3dNearestQuery(field: {}, center: {:?}, k: {}, initial_radius: {}m, max_radius: {}m)",
+            self.field, self.center, self.k, self.initial_radius_m, self.max_radius_m
+        )
+    }
+
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
+        Ok(self.k == 0)
+    }
+
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
+        // The expanding-radius loop visits the index roughly once per
+        // doubling iteration in the worst case; bound at doc_count * 4
+        // to give the planner a moderate-cost signal.
+        let doc_count = reader.doc_count();
+        Ok(doc_count.saturating_mul(4))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,6 +1000,52 @@ mod tests {
             q.is_ok(),
             "box with zero extent on one axis must be accepted"
         );
+    }
+
+    #[test]
+    fn geo3d_nearest_query_basics() {
+        let q = Geo3dNearestQuery::new("position", GeoEcefPoint::new(1.0, 2.0, 3.0), 5)
+            .with_initial_radius(100.0)
+            .with_max_radius(1_000_000.0)
+            .with_boost(2.5);
+        assert_eq!(q.field(), "position");
+        assert_eq!(q.center(), GeoEcefPoint::new(1.0, 2.0, 3.0));
+        assert_eq!(q.k(), 5);
+        assert_eq!(q.initial_radius_m(), 100.0);
+        assert_eq!(q.max_radius_m(), 1_000_000.0);
+        assert_eq!(q.boost(), 2.5);
+        let cloned = q.clone_box();
+        assert!(cloned.description().contains("Geo3dNearestQuery"));
+    }
+
+    #[test]
+    fn nearest_visitor_compare_outside_when_cell_too_far() {
+        let v = NearestVisitor::new(GeoEcefPoint::new(0.0, 0.0, 0.0), 5.0);
+        let c = cell([100.0, 100.0, 100.0], [110.0, 110.0, 110.0]);
+        assert_eq!(v.compare(&c), CellRelation::Outside);
+    }
+
+    #[test]
+    fn nearest_visitor_never_returns_inside() {
+        // Tight cell wholly inside a huge sphere — `SphereVisitor`
+        // would say Inside; `NearestVisitor` must say Crosses so the
+        // BKD streams the points and we can compute exact distances.
+        let v = NearestVisitor::new(GeoEcefPoint::new(0.0, 0.0, 0.0), 10_000.0);
+        let c = cell([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]);
+        assert_eq!(v.compare(&c), CellRelation::Crosses);
+    }
+
+    #[test]
+    fn nearest_visitor_visit_records_exact_distance() {
+        let mut v = NearestVisitor::new(GeoEcefPoint::new(0.0, 0.0, 0.0), 100.0);
+        v.visit(1, &[3.0, 4.0, 0.0]); // dist 5
+        v.visit(2, &[0.0, 0.0, 6.0]); // dist 6
+        v.visit(3, &[200.0, 0.0, 0.0]); // outside
+        assert_eq!(v.hits.len(), 2);
+        assert_eq!(v.hits[0].doc_id, 1);
+        assert_eq!(v.hits[0].distance_sq, 25.0);
+        assert_eq!(v.hits[1].doc_id, 2);
+        assert_eq!(v.hits[1].distance_sq, 36.0);
     }
 
     #[test]
