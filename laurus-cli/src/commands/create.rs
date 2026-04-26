@@ -408,6 +408,7 @@ fn is_lexical_field(option: &FieldOption) -> bool {
             | FieldOption::Boolean(_)
             | FieldOption::DateTime(_)
             | FieldOption::Geo(_)
+            | FieldOption::Geo3d(_)
             | FieldOption::Bytes(_)
     )
 }
@@ -421,6 +422,7 @@ fn field_type_label(option: &FieldOption) -> &'static str {
         FieldOption::Boolean(_) => "Boolean",
         FieldOption::DateTime(_) => "DateTime",
         FieldOption::Geo(_) => "Geo",
+        FieldOption::Geo3d(_) => "Geo3d",
         FieldOption::Bytes(_) => "Bytes",
         FieldOption::Hnsw(_) => "Hnsw",
         FieldOption::Flat(_) => "Flat",

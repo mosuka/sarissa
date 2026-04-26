@@ -8,7 +8,8 @@ use self::analyzer::AnalyzerDefinition;
 use self::embedder::EmbedderDefinition;
 
 use crate::lexical::core::field::{
-    BooleanOption, BytesOption, DateTimeOption, FloatOption, GeoOption, IntegerOption, TextOption,
+    BooleanOption, BytesOption, DateTimeOption, FloatOption, Geo3dOption, GeoOption, IntegerOption,
+    TextOption,
 };
 use crate::vector::core::field::{FlatOption, HnswOption, IvfOption};
 
@@ -183,8 +184,10 @@ pub enum FieldOption {
     Boolean(BooleanOption),
     /// DateTime field options.
     DateTime(DateTimeOption),
-    /// Geo field options.
+    /// 2D geo field options.
     Geo(GeoOption),
+    /// 3D ECEF geo field options.
+    Geo3d(Geo3dOption),
     /// Bytes field options.
     Bytes(BytesOption),
     /// HNSW vector index options.
@@ -211,6 +214,7 @@ impl FieldOption {
                 | Self::Boolean(_)
                 | Self::DateTime(_)
                 | Self::Geo(_)
+                | Self::Geo3d(_)
                 | Self::Bytes(_)
         )
     }
@@ -246,6 +250,7 @@ impl FieldOption {
                 o.clone(),
             )),
             Self::Geo(o) => Some(crate::lexical::core::field::FieldOption::Geo(o.clone())),
+            Self::Geo3d(o) => Some(crate::lexical::core::field::FieldOption::Geo3d(o.clone())),
             Self::Bytes(o) => Some(crate::lexical::core::field::FieldOption::Bytes(o.clone())),
             _ => None,
         }
@@ -302,6 +307,12 @@ impl SchemaBuilder {
 
     pub fn add_geo_field(self, name: impl Into<String>, option: impl Into<GeoOption>) -> Self {
         self.add_field(name, FieldOption::Geo(option.into()))
+    }
+
+    /// Add a 3D ECEF geo field, indexed in a 3D BKD tree for sphere /
+    /// k-NN queries (queries themselves arrive with #300–#302).
+    pub fn add_geo3d_field(self, name: impl Into<String>, option: impl Into<Geo3dOption>) -> Self {
+        self.add_field(name, FieldOption::Geo3d(option.into()))
     }
 
     pub fn add_bytes_field(self, name: impl Into<String>, option: impl Into<BytesOption>) -> Self {
@@ -453,6 +464,30 @@ mod tests {
             .add_field("title", FieldOption::Text(TextOption::default()))
             .try_build();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn schema_builder_add_geo3d_field_round_trips() {
+        let schema = Schema::builder()
+            .add_geo3d_field("position", Geo3dOption::default())
+            .build();
+        let opt = schema.fields.get("position").expect("field declared");
+        match opt {
+            FieldOption::Geo3d(g3d) => {
+                assert!(g3d.indexed);
+                assert!(g3d.stored);
+            }
+            other => panic!("expected FieldOption::Geo3d, got {other:?}"),
+        }
+
+        // The engine schema -> lexical schema bridge must preserve Geo3d.
+        let lexical = opt.to_lexical().expect("Geo3d is a lexical field");
+        assert!(matches!(
+            lexical,
+            crate::lexical::core::field::FieldOption::Geo3d(_)
+        ));
+        assert!(opt.is_lexical());
+        assert!(!opt.is_vector());
     }
 
     #[test]
