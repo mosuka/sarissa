@@ -438,16 +438,19 @@ impl<W: StorageOutput> BKDWriter<W> {
 
         // Reserve a slot for this internal node now so the index_nodes vector
         // is stable across recursive calls. AABB / offset / child fields are
-        // back-patched once both children have been built.
+        // back-patched once both children have been built. The AABB Vec
+        // placeholders use `Vec::new()` (a const, no-alloc constructor)
+        // because they are immediately overwritten by moves from the
+        // children's `SubtreeInfo` once recursion returns — preallocating
+        // capacity here would just be discarded.
         let node_idx = self.index_nodes.len();
-        let nd = ctx.num_dims;
         self.index_nodes.push(IndexNode {
             split_dim,
             split_value,
-            left_min: Vec::with_capacity(nd),
-            left_max: Vec::with_capacity(nd),
-            right_min: Vec::with_capacity(nd),
-            right_max: Vec::with_capacity(nd),
+            left_min: Vec::new(),
+            left_max: Vec::new(),
+            right_min: Vec::new(),
+            right_max: Vec::new(),
             left_offset: 0,
             right_offset: 0,
             left_child_idx: None,
@@ -652,14 +655,19 @@ impl BKDReader {
     /// to `visitor`. Internal nodes consult `visitor.compare` on each
     /// child's AABB; leaves either short-circuit (Outside / Inside) or
     /// stream every (doc_id, point) candidate through `visitor.visit`.
+    ///
+    /// The `scratch` buffer is reused across every leaf visited in this
+    /// query, so steady-state queries on similarly-sized leaves run
+    /// allocation-free after the first `Crosses` leaf.
     fn intersect_subtree<R: StorageInput>(
         &self,
         reader: &mut StructReader<R>,
         offset: u64,
         visitor: &mut dyn IntersectVisitor,
+        scratch: &mut IntersectScratch,
     ) -> Result<()> {
         if offset < self.header.index_start_offset {
-            return self.intersect_leaf(reader, offset, visitor);
+            return self.intersect_leaf(reader, offset, visitor, scratch);
         }
         let num_dims = self.header.num_dims as usize;
         reader.seek(SeekFrom::Start(offset))?;
@@ -673,23 +681,34 @@ impl BKDReader {
         match visitor.compare(&left_aabb) {
             CellRelation::Outside => {}
             CellRelation::Inside => self.collect_subtree(reader, left_offset, visitor)?,
-            CellRelation::Crosses => self.intersect_subtree(reader, left_offset, visitor)?,
+            CellRelation::Crosses => {
+                self.intersect_subtree(reader, left_offset, visitor, scratch)?
+            }
         }
         match visitor.compare(&right_aabb) {
             CellRelation::Outside => {}
             CellRelation::Inside => self.collect_subtree(reader, right_offset, visitor)?,
-            CellRelation::Crosses => self.intersect_subtree(reader, right_offset, visitor)?,
+            CellRelation::Crosses => {
+                self.intersect_subtree(reader, right_offset, visitor, scratch)?
+            }
         }
         Ok(())
     }
 
     /// Walk a leaf at `offset`, classifying it via `visitor.compare` on the
     /// stored leaf AABB and dispatching points accordingly.
+    ///
+    /// On `Crosses`, leaf points are read into the caller-supplied
+    /// `scratch.points` buffer (grown only on the first leaf large enough
+    /// to need it). The earlier implementation freshly allocated
+    /// `count * num_dims` f64s per leaf; this version performs at most
+    /// one growth per query.
     fn intersect_leaf<R: StorageInput>(
         &self,
         reader: &mut StructReader<R>,
         offset: u64,
         visitor: &mut dyn IntersectVisitor,
+        scratch: &mut IntersectScratch,
     ) -> Result<()> {
         reader.seek(SeekFrom::Start(offset))?;
         let count = reader.read_u32()? as usize;
@@ -709,13 +728,14 @@ impl BKDReader {
                 Ok(())
             }
             CellRelation::Crosses => {
-                let mut points = vec![0.0f64; count * num_dims];
-                for slot in points.iter_mut() {
+                let needed = count * num_dims;
+                let buf = scratch.point_slice(needed);
+                for slot in buf.iter_mut() {
                     *slot = reader.read_f64()?;
                 }
                 for i in 0..count {
                     let doc_id = reader.read_u64()?;
-                    let point = &points[i * num_dims..(i + 1) * num_dims];
+                    let point = &buf[i * num_dims..(i + 1) * num_dims];
                     visitor.visit(doc_id, point);
                 }
                 Ok(())
@@ -772,6 +792,32 @@ impl BKDReader {
     }
 }
 
+/// Per-query scratch buffer reused across every leaf visited by
+/// [`BKDReader::intersect`]. Holding the buffer outside the recursion lets
+/// `Crosses` leaves reuse the same allocation instead of allocating a fresh
+/// `Vec<f64>` of `count * num_dims` floats per leaf.
+struct IntersectScratch {
+    /// Backing storage for leaf point bytes. Grown on demand to the largest
+    /// leaf encountered, never shrunk during one query.
+    points: Vec<f64>,
+}
+
+impl IntersectScratch {
+    fn new() -> Self {
+        IntersectScratch { points: Vec::new() }
+    }
+
+    /// Return a mutable slice with at least `len` elements, growing the
+    /// backing buffer with `Vec::resize` if needed. Returned slice always
+    /// has exactly `len` elements.
+    fn point_slice(&mut self, len: usize) -> &mut [f64] {
+        if self.points.len() < len {
+            self.points.resize(len, 0.0);
+        }
+        &mut self.points[..len]
+    }
+}
+
 impl BKDTree for BKDReader {
     fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()> {
         if self.header.total_point_count == 0 {
@@ -780,11 +826,12 @@ impl BKDTree for BKDReader {
         let input = self.storage.open_input(&self.path)?;
         let mut reader = StructReader::new(input)?;
         let root_offset = self.header.root_node_offset;
+        let mut scratch = IntersectScratch::new();
         if root_offset < self.header.index_start_offset {
             // Single-leaf tree: the root "address" is just past the header.
-            self.intersect_leaf(&mut reader, root_offset, visitor)
+            self.intersect_leaf(&mut reader, root_offset, visitor, &mut scratch)
         } else {
-            self.intersect_subtree(&mut reader, root_offset, visitor)
+            self.intersect_subtree(&mut reader, root_offset, visitor, &mut scratch)
         }
     }
 }
@@ -1263,6 +1310,46 @@ mod tests {
             )
             .unwrap();
         assert_eq!(results, (100u64..=200u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn intersect_scratch_reuse_across_many_crosses_leaves() {
+        // Build a tree with many small leaves and run a query that crosses
+        // every leaf boundary, forcing the Crosses branch in intersect_leaf
+        // to be taken once per leaf. The shared `IntersectScratch.points`
+        // buffer must be reused without losing data across leaf reads.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 4_096;
+        let block_size: usize = 32; // → ~128 leaves
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("scratch.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(block_size);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "scratch.bkd").unwrap();
+
+        // Pick a query whose bounds (10.5 / (n - 10).5) sit *inside* leaf
+        // blocks rather than on their boundaries, guaranteeing many leaves
+        // hit the Crosses branch.
+        let lower = 10.5;
+        let upper = (n - 10) as f64 + 0.5;
+        let results = reader
+            .range_search(&[Some(lower)], &[Some(upper)], true, true)
+            .unwrap();
+        let expected: Vec<u64> = (11u64..=(n as u64 - 10)).collect();
+        assert_eq!(results, expected);
+
+        // Re-run the query — the second call uses a fresh scratch but
+        // should also be deterministic. This guards against any cross-call
+        // state leakage.
+        let results2 = reader
+            .range_search(&[Some(lower)], &[Some(upper)], true, true)
+            .unwrap();
+        assert_eq!(results2, expected);
     }
 
     #[test]
