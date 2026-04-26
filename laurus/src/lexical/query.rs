@@ -23,7 +23,10 @@ pub use advanced_query::AdvancedQuery;
 pub use boolean::{BooleanQuery, BooleanQueryBuilder};
 pub use fuzzy::FuzzyQuery;
 pub use geo::{GeoBoundingBox, GeoBoundingBoxQuery, GeoDistanceQuery, GeoPoint, GeoQuery};
-pub use geo3d::{Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dMatch, Geo3dMatcher, Geo3dScorer};
+pub use geo3d::{
+    Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dMatch, Geo3dMatcher, Geo3dNearestQuery,
+    Geo3dScorer,
+};
 pub use multi_term::MultiTermQuery;
 pub use parser::LexicalQueryParser;
 pub use phrase::PhraseQuery;

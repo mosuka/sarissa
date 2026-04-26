@@ -16,7 +16,7 @@
 
 use laurus::lexical::LexicalIndexWriter;
 use laurus::lexical::query::Query;
-use laurus::lexical::query::{Geo3dBoundingBoxQuery, Geo3dDistanceQuery};
+use laurus::lexical::query::{Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery};
 use laurus::lexical::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use laurus::storage::Storage;
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
@@ -374,4 +374,97 @@ fn geo3d_bbox_query_finds_docs_inside_box() {
         assert_eq!(m.score, 1.0);
         assert_eq!(m.distance_m, 0.0);
     }
+}
+
+#[test]
+fn geo3d_nearest_query_finds_top_k_in_distance_order() {
+    // Index five points along the x-axis at increasing distances from
+    // the origin, then exercise the k-NN query at various k values and
+    // initial-radius settings.
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let mut writer = InvertedIndexWriter::new(
+        storage.clone(),
+        InvertedIndexWriterConfig {
+            max_buffered_docs: 10,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let center = GeoEcefPoint::new(0.0, 0.0, 0.0);
+    // Doc i sits at (10^i, 0, 0): 1, 10, 100, 1000, 10000.
+    let positions = [1.0_f64, 10.0, 100.0, 1_000.0, 10_000.0];
+    for &x in &positions {
+        writer
+            .add_document(
+                Document::builder()
+                    .add_field(
+                        "position",
+                        DataValue::GeoEcef(GeoEcefPoint::new(x, 0.0, 0.0)),
+                    )
+                    .build(),
+            )
+            .unwrap();
+    }
+    writer.commit().unwrap();
+
+    let reader = writer.build_reader().unwrap();
+
+    // k=1: closest doc is doc 0 (distance 1).
+    let q1 = Geo3dNearestQuery::new("position", center, 1);
+    let m1 = q1.find_matches(&*reader).unwrap();
+    assert_eq!(m1.len(), 1);
+    assert_eq!(m1[0].doc_id, 0);
+    assert_eq!(m1[0].distance_m, 1.0);
+
+    // k=3: docs 0, 1, 2 in distance order.
+    let q3 = Geo3dNearestQuery::new("position", center, 3);
+    let m3 = q3.find_matches(&*reader).unwrap();
+    let ids3: Vec<u64> = m3.iter().map(|m| m.doc_id).collect();
+    assert_eq!(ids3, vec![0, 1, 2]);
+    // Distance-ascending: each subsequent hit is farther than the last.
+    for w in m3.windows(2) {
+        assert!(w[0].distance_m <= w[1].distance_m);
+    }
+    // Score: monotonically decreasing as distance grows, with the
+    // farthest hit normalized to 0.0 by `1 - distance/max_distance`.
+    assert!(m3[0].score > m3[1].score);
+    assert!(m3[1].score > m3[2].score);
+    assert_eq!(m3[2].score, 0.0);
+    // m3[0] is the closest of the returned top-k; with positions
+    // {1, 10, 100} it scores `1 - 1/100 = 0.99`, very close to 1.0.
+    assert!((m3[0].score - 0.99).abs() < 1e-4);
+
+    // k > #docs: returns all docs (5).
+    let q_all = Geo3dNearestQuery::new("position", center, 100);
+    let m_all = q_all.find_matches(&*reader).unwrap();
+    assert_eq!(m_all.len(), 5);
+    let ids_all: Vec<u64> = m_all.iter().map(|m| m.doc_id).collect();
+    assert_eq!(ids_all, vec![0, 1, 2, 3, 4]);
+
+    // k=0: empty result.
+    let q0 = Geo3dNearestQuery::new("position", center, 0);
+    assert!(q0.find_matches(&*reader).unwrap().is_empty());
+    assert!(q0.is_empty(&*reader).unwrap());
+
+    // Convergence with a tiny initial radius: even though the loop
+    // starts at 1m (smaller than the closest doc), it must double up
+    // until 5 hits are collected.
+    let q_small_init = Geo3dNearestQuery::new("position", center, 5).with_initial_radius(0.5);
+    let m_si = q_small_init.find_matches(&*reader).unwrap();
+    assert_eq!(m_si.len(), 5);
+    let ids_si: Vec<u64> = m_si.iter().map(|m| m.doc_id).collect();
+    assert_eq!(ids_si, vec![0, 1, 2, 3, 4]);
+
+    // Sparse: query center far from every point. With default initial
+    // radius (1km), the first probe finds nothing — the loop must keep
+    // doubling until the index is exhausted within max_radius.
+    let far_center = GeoEcefPoint::new(1_000_000.0, 0.0, 0.0);
+    let q_far = Geo3dNearestQuery::new("position", far_center, 2);
+    let m_far = q_far.find_matches(&*reader).unwrap();
+    assert_eq!(m_far.len(), 2);
+    // Closest to (1e6, 0, 0) is doc 4 at (10000, 0, 0), then doc 3 at
+    // (1000, 0, 0).
+    assert_eq!(m_far[0].doc_id, 4);
+    assert_eq!(m_far[1].doc_id, 3);
 }
