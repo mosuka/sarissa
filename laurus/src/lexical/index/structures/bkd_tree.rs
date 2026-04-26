@@ -3,6 +3,8 @@
 //! This is a simplified version of Apache Lucene's BKD Tree data structure,
 //! optimized for 1-dimensional numeric range filtering.
 
+use super::aabb::AABB;
+use super::visitor::{CellRelation, IntersectVisitor, RangeQueryVisitor};
 use crate::error::Result;
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{Storage, StorageInput, StorageOutput};
@@ -11,15 +13,54 @@ use std::io::SeekFrom;
 use std::sync::Arc;
 
 /// Trait for BKD Tree implementations (in-memory or disk-based).
+///
+/// Implementations expose two query primitives:
+///
+/// - [`BKDTree::intersect`] is the low-level Lucene-style traversal: the
+///   reader walks the tree once, calling the visitor's `compare` method on
+///   each subtree's AABB (Inside / Outside / Crosses) and either pruning,
+///   collecting, or descending accordingly. This is the building block for
+///   sphere queries, k-NN, and any custom shape that fits the visitor API.
+/// - [`BKDTree::range_search`] is the legacy axis-aligned range API. It is
+///   provided as a default method that builds a [`RangeQueryVisitor`] and
+///   delegates to `intersect`, so concrete `BKDTree` implementations only
+///   need to supply `intersect`.
 pub trait BKDTree: Send + Sync + std::fmt::Debug {
-    /// Perform a range search.
+    /// Walk the tree, dispatching subtree pruning decisions and per-point
+    /// candidates to `visitor`.
+    ///
+    /// Implementations are expected to honor the visitor's `compare` result
+    /// faithfully:
+    /// - `CellRelation::Outside` cells are skipped.
+    /// - `CellRelation::Inside` cells contribute every doc id beneath them
+    ///   via `visit_inside` (the visitor does not need the point bytes).
+    /// - `CellRelation::Crosses` leaves expose every (doc_id, point) pair
+    ///   via `visit` so the visitor can perform the final per-point check.
+    fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()>;
+
+    /// Axis-aligned range search returning the matching doc ids in sorted
+    /// and deduplicated order.
+    ///
+    /// `mins[d]` / `maxs[d]` may be `None` to leave a dimension unbounded.
+    /// `include_min` / `include_max` control whether the boundary itself
+    /// matches.
+    ///
+    /// The default implementation builds a [`RangeQueryVisitor`] and
+    /// delegates to [`BKDTree::intersect`].
     fn range_search(
         &self,
         mins: &[Option<f64>],
         maxs: &[Option<f64>],
         include_min: bool,
         include_max: bool,
-    ) -> Result<Vec<u64>>;
+    ) -> Result<Vec<u64>> {
+        let mut visitor = RangeQueryVisitor::new(mins, maxs, include_min, include_max);
+        self.intersect(&mut visitor)?;
+        let mut hits = visitor.into_hits();
+        hits.sort_unstable();
+        hits.dedup();
+        Ok(hits)
+    }
 }
 
 /// Magic number for BKD Tree files: ASCII "BKDT" in little-endian.
@@ -570,223 +611,188 @@ impl BKDReader {
         })
     }
 
-    fn visit_node<R: StorageInput>(
+    /// Read `num_dims` `f64` values for `min` followed by `num_dims` for
+    /// `max`, returning the constructed AABB.
+    fn read_child_aabb<R: StorageInput>(
+        reader: &mut StructReader<R>,
+        num_dims: usize,
+    ) -> Result<AABB> {
+        let mut min = Vec::with_capacity(num_dims);
+        for _ in 0..num_dims {
+            min.push(reader.read_f64()?);
+        }
+        let mut max = Vec::with_capacity(num_dims);
+        for _ in 0..num_dims {
+            max.push(reader.read_f64()?);
+        }
+        AABB::new(min, max)
+    }
+
+    /// Walk the subtree rooted at `offset`, dispatching pruning decisions
+    /// to `visitor`. Internal nodes consult `visitor.compare` on each
+    /// child's AABB; leaves either short-circuit (Outside / Inside) or
+    /// stream every (doc_id, point) candidate through `visitor.visit`.
+    fn intersect_subtree<R: StorageInput>(
         &self,
         reader: &mut StructReader<R>,
         offset: u64,
-        ctx: &QueryContext,
-        collector: &mut Vec<u64>,
+        visitor: &mut dyn IntersectVisitor,
     ) -> Result<()> {
         if offset < self.header.index_start_offset {
-            return self.visit_leaf_block(reader, offset, ctx, collector);
+            return self.intersect_leaf(reader, offset, visitor);
         }
-
-        reader.seek(SeekFrom::Start(offset))?;
-        let split_dim = reader.read_u32()? as usize;
-        let split_value = reader.read_f64()?;
-
-        // Per-child AABB. The current `range_search` does not yet use these
-        // for Inside/Outside/Crosses pruning — that arrives with the
-        // `IntersectVisitor` work in #292 — but we still consume the bytes so
-        // the offsets stay aligned with the on-disk layout.
         let num_dims = self.header.num_dims as usize;
-        for _ in 0..(num_dims * 4) {
-            let _ = reader.read_f64()?;
-        }
-
+        reader.seek(SeekFrom::Start(offset))?;
+        let _split_dim = reader.read_u32()?;
+        let _split_value = reader.read_f64()?;
+        let left_aabb = Self::read_child_aabb(reader, num_dims)?;
+        let right_aabb = Self::read_child_aabb(reader, num_dims)?;
         let left_offset = reader.read_u64()?;
         let right_offset = reader.read_u64()?;
 
-        // Validate split_dim against number of dimensions
-        if split_dim >= self.header.num_dims as usize {
-            return Err(crate::error::LaurusError::index(format!(
-                "Invalid split dimension {} (num_dims={})",
-                split_dim, self.header.num_dims
-            )));
+        match visitor.compare(&left_aabb) {
+            CellRelation::Outside => {}
+            CellRelation::Inside => self.collect_subtree(reader, left_offset, visitor)?,
+            CellRelation::Crosses => self.intersect_subtree(reader, left_offset, visitor)?,
         }
-
-        // Logic check for split dimension
-        let min = ctx.mins[split_dim];
-        let max = ctx.maxs[split_dim];
-
-        let go_left = min.is_none_or(|m| {
-            if ctx.include_min {
-                m <= split_value
-            } else {
-                m < split_value
-            }
-        });
-
-        if go_left {
-            self.visit_node(reader, left_offset, ctx, collector)?;
+        match visitor.compare(&right_aabb) {
+            CellRelation::Outside => {}
+            CellRelation::Inside => self.collect_subtree(reader, right_offset, visitor)?,
+            CellRelation::Crosses => self.intersect_subtree(reader, right_offset, visitor)?,
         }
-
-        let go_right = max.is_none_or(|m| {
-            if ctx.include_max {
-                m >= split_value
-            } else {
-                m > split_value
-            }
-        });
-
-        if go_right {
-            self.visit_node(reader, right_offset, ctx, collector)?;
-        }
-
         Ok(())
     }
 
-    fn visit_leaf_block<R: StorageInput>(
+    /// Walk a leaf at `offset`, classifying it via `visitor.compare` on the
+    /// stored leaf AABB and dispatching points accordingly.
+    fn intersect_leaf<R: StorageInput>(
         &self,
         reader: &mut StructReader<R>,
         offset: u64,
-        ctx: &QueryContext,
-        collector: &mut Vec<u64>,
+        visitor: &mut dyn IntersectVisitor,
     ) -> Result<()> {
         reader.seek(SeekFrom::Start(offset))?;
-        let count = reader.read_u32()?;
-
-        // Per-leaf AABB. Same rationale as `visit_node`: read but unused for
-        // pruning until #292 wires up `IntersectVisitor`.
+        let count = reader.read_u32()? as usize;
         let num_dims = self.header.num_dims as usize;
-        for _ in 0..(num_dims * 2) {
-            let _ = reader.read_f64()?;
-        }
+        let leaf_aabb = Self::read_child_aabb(reader, num_dims)?;
 
-        let mut points = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            let mut vals = Vec::with_capacity(self.header.num_dims as usize);
-            for _ in 0..self.header.num_dims {
-                vals.push(reader.read_f64()?);
-            }
-            points.push(vals);
-        }
-
-        let mut doc_ids = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            doc_ids.push(reader.read_u64()?);
-        }
-
-        for (vals, doc_id) in points.iter().zip(doc_ids.iter()) {
-            let mut matches = true;
-            for (i, &val) in vals.iter().enumerate() {
-                let gte_min =
-                    ctx.mins[i].is_none_or(|m| if ctx.include_min { val >= m } else { val > m });
-                let lte_max =
-                    ctx.maxs[i].is_none_or(|m| if ctx.include_max { val <= m } else { val < m });
-                if !gte_min || !lte_max {
-                    matches = false;
-                    break;
+        match visitor.compare(&leaf_aabb) {
+            CellRelation::Outside => Ok(()),
+            CellRelation::Inside => {
+                // Skip the point bytes; we only need the doc ids.
+                let point_bytes = (count as u64) * (num_dims as u64) * 8;
+                reader.seek(SeekFrom::Current(point_bytes as i64))?;
+                for _ in 0..count {
+                    let doc_id = reader.read_u64()?;
+                    visitor.visit_inside(doc_id);
                 }
+                Ok(())
             }
-            if matches {
-                collector.push(*doc_id);
+            CellRelation::Crosses => {
+                let mut points = vec![0.0f64; count * num_dims];
+                for slot in points.iter_mut() {
+                    *slot = reader.read_f64()?;
+                }
+                for i in 0..count {
+                    let doc_id = reader.read_u64()?;
+                    let point = &points[i * num_dims..(i + 1) * num_dims];
+                    visitor.visit(doc_id, point);
+                }
+                Ok(())
             }
+        }
+    }
+
+    /// Walk a subtree whose root the caller has already classified as
+    /// `Inside`. No `compare` calls are made — every doc is reported via
+    /// `visit_inside` and the leaf point bytes are skipped entirely.
+    fn collect_subtree<R: StorageInput>(
+        &self,
+        reader: &mut StructReader<R>,
+        offset: u64,
+        visitor: &mut dyn IntersectVisitor,
+    ) -> Result<()> {
+        if offset < self.header.index_start_offset {
+            return self.collect_leaf(reader, offset, visitor);
+        }
+        let num_dims = self.header.num_dims as usize;
+        reader.seek(SeekFrom::Start(offset))?;
+        let _split_dim = reader.read_u32()?;
+        let _split_value = reader.read_f64()?;
+        // Skip both child AABBs.
+        let aabb_bytes = (num_dims as u64) * 16 * 2;
+        reader.seek(SeekFrom::Current(aabb_bytes as i64))?;
+        let left_offset = reader.read_u64()?;
+        let right_offset = reader.read_u64()?;
+        self.collect_subtree(reader, left_offset, visitor)?;
+        self.collect_subtree(reader, right_offset, visitor)?;
+        Ok(())
+    }
+
+    /// Walk a leaf whose enclosing cell has already been classified as
+    /// `Inside`. The leaf AABB and point bytes are skipped; only doc ids
+    /// are read and reported via `visit_inside`.
+    fn collect_leaf<R: StorageInput>(
+        &self,
+        reader: &mut StructReader<R>,
+        offset: u64,
+        visitor: &mut dyn IntersectVisitor,
+    ) -> Result<()> {
+        reader.seek(SeekFrom::Start(offset))?;
+        let count = reader.read_u32()? as usize;
+        let num_dims = self.header.num_dims as usize;
+        // Skip leaf AABB (min + max) and all point bytes.
+        let skip_bytes = (num_dims as u64) * 16 + (count as u64) * (num_dims as u64) * 8;
+        reader.seek(SeekFrom::Current(skip_bytes as i64))?;
+        for _ in 0..count {
+            let doc_id = reader.read_u64()?;
+            visitor.visit_inside(doc_id);
         }
         Ok(())
     }
 }
 
-struct QueryContext<'a> {
-    mins: &'a [Option<f64>],
-    maxs: &'a [Option<f64>],
-    include_min: bool,
-    include_max: bool,
-}
-
 impl BKDTree for BKDReader {
-    /// Perform a range search.
-    fn range_search(
-        &self,
-        mins: &[Option<f64>],
-        maxs: &[Option<f64>],
-        include_min: bool,
-        include_max: bool,
-    ) -> Result<Vec<u64>> {
+    fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()> {
         if self.header.total_point_count == 0 {
-            return Ok(Vec::new());
+            return Ok(());
         }
-
-        let num_dims = self.header.num_dims as usize;
-        if mins.len() != num_dims || maxs.len() != num_dims {
-            return Err(crate::error::LaurusError::index(format!(
-                "Dimension mismatch: expected {} dims, got mins={} maxs={}",
-                num_dims,
-                mins.len(),
-                maxs.len()
-            )));
-        }
-
-        let mut doc_ids = Vec::new();
-        let root_offset = self.header.root_node_offset;
-
         let input = self.storage.open_input(&self.path)?;
         let mut reader = StructReader::new(input)?;
-
-        if root_offset < self.header.index_start_offset && self.header.total_point_count > 0 {
-            // Single leaf block case or root leaf
-            let ctx = QueryContext {
-                mins,
-                maxs,
-                include_min,
-                include_max,
-            };
-            self.visit_leaf_block(&mut reader, root_offset, &ctx, &mut doc_ids)?;
+        let root_offset = self.header.root_node_offset;
+        if root_offset < self.header.index_start_offset {
+            // Single-leaf tree: the root "address" is just past the header.
+            self.intersect_leaf(&mut reader, root_offset, visitor)
         } else {
-            let ctx = QueryContext {
-                mins,
-                maxs,
-                include_min,
-                include_max,
-            };
-            self.visit_node(&mut reader, root_offset, &ctx, &mut doc_ids)?;
+            self.intersect_subtree(&mut reader, root_offset, visitor)
         }
-
-        doc_ids.sort_unstable();
-        doc_ids.dedup();
-
-        Ok(doc_ids)
     }
 }
 
 /// A simple BKD Tree for efficient range queries.
+///
+/// Slated for removal in #295 once the disk-backed `BKDReader` covers all
+/// remaining call sites.
 #[derive(Debug, Clone)]
 pub struct SimpleBKDTree {
     /// Sorted array of (points, doc_id) pairs.
     entries: Vec<(Vec<f64>, u64)>,
+    /// Retained for diagnostic accessors only; the new `intersect`-based
+    /// implementation derives the per-point dimensionality from each entry.
+    #[allow(dead_code)]
     num_dims: u32,
     field_name: String,
 }
 
 impl BKDTree for SimpleBKDTree {
-    fn range_search(
-        &self,
-        mins: &[Option<f64>],
-        maxs: &[Option<f64>],
-        include_min: bool,
-        include_max: bool,
-    ) -> Result<Vec<u64>> {
-        let mut doc_ids = Vec::new();
-
+    /// Linear scan across `entries`. The simple tree carries no AABB and
+    /// performs no pruning, so every point is reported via `visitor.visit`
+    /// (the `Crosses` path) and the visitor is responsible for filtering.
+    fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()> {
         for (vals, doc_id) in &self.entries {
-            let mut matches = true;
-            for i in 0..self.num_dims as usize {
-                let val = vals[i];
-                let gte_min = mins[i].is_none_or(|m| if include_min { val >= m } else { val > m });
-                let lte_max = maxs[i].is_none_or(|m| if include_max { val <= m } else { val < m });
-                if !gte_min || !lte_max {
-                    matches = false;
-                    break;
-                }
-            }
-            if matches {
-                doc_ids.push(*doc_id);
-            }
+            visitor.visit(*doc_id, vals);
         }
-
-        doc_ids.sort_unstable();
-        doc_ids.dedup();
-        Ok(doc_ids)
+        Ok(())
     }
 }
 
@@ -1024,6 +1030,237 @@ mod tests {
             msg.contains("Unsupported BKD version"),
             "unexpected error: {msg}"
         );
+    }
+
+    /// Visitor that segregates hits by which BKD code path produced them
+    /// (`visit_inside` vs `visit`), used to assert that `Inside` cells avoid
+    /// per-point filtering and `Crosses` leaves go through it.
+    struct TracingVisitor {
+        query: AABB,
+        inside_hits: Vec<u64>,
+        crosses_hits: Vec<u64>,
+    }
+
+    impl TracingVisitor {
+        fn new(query: AABB) -> Self {
+            Self {
+                query,
+                inside_hits: Vec::new(),
+                crosses_hits: Vec::new(),
+            }
+        }
+    }
+
+    impl IntersectVisitor for TracingVisitor {
+        fn compare(&self, cell: &AABB) -> CellRelation {
+            // Conservative compare: cell vs query (closed intervals).
+            let qmin = self.query.min();
+            let qmax = self.query.max();
+            let cmin = cell.min();
+            let cmax = cell.max();
+            for d in 0..cell.num_dims() {
+                if cmax[d] < qmin[d] || cmin[d] > qmax[d] {
+                    return CellRelation::Outside;
+                }
+            }
+            for d in 0..cell.num_dims() {
+                if cmin[d] < qmin[d] || cmax[d] > qmax[d] {
+                    return CellRelation::Crosses;
+                }
+            }
+            CellRelation::Inside
+        }
+        fn visit_inside(&mut self, doc_id: u64) {
+            self.inside_hits.push(doc_id);
+        }
+        fn visit(&mut self, doc_id: u64, point: &[f64]) {
+            if self.query.contains_point(point) {
+                self.crosses_hits.push(doc_id);
+            }
+        }
+    }
+
+    /// A wrapper that also records every `compare` outcome (including
+    /// `Outside`) by using a `Cell` for interior mutability.
+    struct RecordingVisitor {
+        query: AABB,
+        relations: std::cell::RefCell<Vec<CellRelation>>,
+        hits: Vec<u64>,
+    }
+
+    impl RecordingVisitor {
+        fn new(query: AABB) -> Self {
+            Self {
+                query,
+                relations: std::cell::RefCell::new(Vec::new()),
+                hits: Vec::new(),
+            }
+        }
+    }
+
+    impl IntersectVisitor for RecordingVisitor {
+        fn compare(&self, cell: &AABB) -> CellRelation {
+            let qmin = self.query.min();
+            let qmax = self.query.max();
+            let cmin = cell.min();
+            let cmax = cell.max();
+            let mut relation = CellRelation::Inside;
+            for d in 0..cell.num_dims() {
+                if cmax[d] < qmin[d] || cmin[d] > qmax[d] {
+                    relation = CellRelation::Outside;
+                    break;
+                }
+            }
+            if !matches!(relation, CellRelation::Outside) {
+                for d in 0..cell.num_dims() {
+                    if cmin[d] < qmin[d] || cmax[d] > qmax[d] {
+                        relation = CellRelation::Crosses;
+                        break;
+                    }
+                }
+            }
+            self.relations.borrow_mut().push(relation);
+            relation
+        }
+        fn visit_inside(&mut self, doc_id: u64) {
+            self.hits.push(doc_id);
+        }
+        fn visit(&mut self, doc_id: u64, point: &[f64]) {
+            // For Crosses cells, accept the point only if it actually lies
+            // inside the query.
+            if self.query.contains_point(point) {
+                self.hits.push(doc_id);
+            }
+        }
+    }
+
+    #[test]
+    fn intersect_inside_avoids_per_point_filter() {
+        // Build a 1D tree with 4 leaf blocks; query the entire range so the
+        // root subtree is `Inside` and every doc is reported via
+        // `visit_inside`, never `visit`.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 256;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("inside.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(32);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "inside.bkd").unwrap();
+        let query = AABB::new(vec![-1e9], vec![1e9]).unwrap();
+        let mut v = TracingVisitor::new(query);
+        reader.intersect(&mut v).unwrap();
+
+        // Every hit came through visit_inside: the query bounds wholly
+        // enclose every cell, so no point ever needed per-coordinate
+        // filtering.
+        assert_eq!(v.inside_hits.len(), n);
+        assert!(v.crosses_hits.is_empty());
+        v.inside_hits.sort_unstable();
+        let expected: Vec<u64> = (0..n as u64).collect();
+        assert_eq!(v.inside_hits, expected);
+    }
+
+    #[test]
+    fn intersect_outside_prunes_subtree() {
+        // Query that lies entirely above every point; expect zero hits and
+        // at least one Outside compare result.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 128;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("outside.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(16);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "outside.bkd").unwrap();
+        let query = AABB::new(vec![1000.0], vec![2000.0]).unwrap();
+        let mut v = RecordingVisitor::new(query);
+        reader.intersect(&mut v).unwrap();
+
+        assert!(v.hits.is_empty());
+        assert!(
+            v.relations
+                .borrow()
+                .iter()
+                .any(|r| matches!(r, CellRelation::Outside)),
+            "expected at least one Outside compare, got {:?}",
+            v.relations.borrow()
+        );
+    }
+
+    #[test]
+    fn intersect_crosses_filters_per_point() {
+        // Query that overlaps a leaf boundary; expect Crosses leaves and
+        // hits accumulated via visit (per-point filtering).
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 200;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("crosses.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(16);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "crosses.bkd").unwrap();
+        let query = AABB::new(vec![50.5], vec![100.5]).unwrap();
+        let mut v = TracingVisitor::new(query);
+        reader.intersect(&mut v).unwrap();
+
+        let expected: Vec<u64> = (51u64..=100u64).collect();
+        let mut got = v.crosses_hits.clone();
+        got.append(&mut v.inside_hits.clone());
+        got.sort_unstable();
+        got.dedup();
+        assert_eq!(got, expected);
+        // At least some hits arrived via the `Crosses` path because the
+        // query bounds (50.5 / 100.5) cut through leaf blocks.
+        assert!(!v.crosses_hits.is_empty());
+    }
+
+    #[test]
+    fn range_search_default_impl_matches_legacy_semantics() {
+        // The trait's default `range_search` should still produce the same
+        // sorted/deduped doc-id list it always has, now via `intersect`.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 500;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("legacy.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(64);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "legacy.bkd").unwrap();
+
+        // Inclusive bounds.
+        let inclusive = reader
+            .range_search(&[Some(100.0)], &[Some(200.0)], true, true)
+            .unwrap();
+        assert_eq!(inclusive, (100u64..=200u64).collect::<Vec<_>>());
+
+        // Exclusive bounds: 100 < x < 200.
+        let exclusive = reader
+            .range_search(&[Some(100.0)], &[Some(200.0)], false, false)
+            .unwrap();
+        assert_eq!(exclusive, (101u64..=199u64).collect::<Vec<_>>());
+
+        // Unbounded upper.
+        let lower_only = reader
+            .range_search(&[Some(490.0)], &[None], true, true)
+            .unwrap();
+        assert_eq!(lower_only, (490u64..n as u64).collect::<Vec<_>>());
     }
 
     #[test]

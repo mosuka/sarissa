@@ -952,21 +952,17 @@ struct MultiSegmentBKDTree {
 }
 
 impl BKDTree for MultiSegmentBKDTree {
-    fn range_search(
+    /// Forward the visitor to every per-segment tree in order. The visitor
+    /// accumulates hits across segments; the trait's default
+    /// `range_search` then sorts and dedups the combined output.
+    fn intersect(
         &self,
-        mins: &[Option<f64>],
-        maxs: &[Option<f64>],
-        include_min: bool,
-        include_max: bool,
-    ) -> Result<Vec<u64>> {
-        let mut results = Vec::new();
+        visitor: &mut dyn crate::lexical::index::structures::visitor::IntersectVisitor,
+    ) -> Result<()> {
         for tree in &self.trees {
-            let mut tree_results = tree.range_search(mins, maxs, include_min, include_max)?;
-            results.append(&mut tree_results);
+            tree.intersect(visitor)?;
         }
-        results.sort_unstable();
-        results.dedup();
-        Ok(results)
+        Ok(())
     }
 }
 
