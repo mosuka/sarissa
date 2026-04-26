@@ -929,8 +929,14 @@ impl InvertedIndexWriter {
     }
 
     /// Write BKD trees for numeric and geo fields.
+    ///
+    /// Per-field state is accumulated into flat row-major coordinate buffers
+    /// (`points`) and parallel doc-id buffers (`doc_ids`) so the BKD writer
+    /// can be fed without re-allocating per point. The dimensionality is
+    /// captured from the first point seen for each field.
     fn write_bkd_trees(&self, segment_name: &str) -> Result<()> {
-        let mut field_points: AHashMap<String, Vec<(Vec<f64>, u64)>> = AHashMap::new();
+        // (flat points, doc_ids, num_dims)
+        let mut field_buckets: AHashMap<String, (Vec<f64>, Vec<u64>, usize)> = AHashMap::new();
 
         for (doc_id, doc) in &self.buffered_docs {
             for (field, points) in &doc.point_values {
@@ -939,24 +945,25 @@ impl InvertedIndexWriter {
                 // one per element. The BKD reader's `range_search` already
                 // deduplicates `doc_id`s, so a multi-valued document is
                 // reported at most once per query.
-                let bucket = field_points.entry(field.clone()).or_default();
                 for point in points {
-                    bucket.push((point.clone(), *doc_id));
+                    let bucket = field_buckets
+                        .entry(field.clone())
+                        .or_insert_with(|| (Vec::new(), Vec::new(), point.len()));
+                    bucket.0.extend_from_slice(point);
+                    bucket.1.push(*doc_id);
                 }
             }
         }
 
-        for (field, points) in field_points {
-            if points.is_empty() {
+        for (field, (points, doc_ids, num_dims)) in field_buckets {
+            if doc_ids.is_empty() {
                 continue;
             }
 
-            let num_dims = points[0].0.len() as u32;
-
             let file_name = format!("{segment_name}.{field}.bkd");
             let output = self.storage.create_output(&file_name)?;
-            let mut writer = BKDWriter::new(output, num_dims);
-            writer.write(&points)?;
+            let mut writer = BKDWriter::new(output, num_dims as u32);
+            writer.write(&points, &doc_ids)?;
             writer.finish()?;
         }
         Ok(())

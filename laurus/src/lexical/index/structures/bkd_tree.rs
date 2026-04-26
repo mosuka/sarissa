@@ -66,6 +66,24 @@ struct IndexNode {
     right_child_idx: Option<usize>,
 }
 
+/// Borrowed view over the caller's flat point/doc_id buffers used during
+/// recursive subtree construction. Holding only references avoids deep-copying
+/// the input data while the builder permutes its private index array.
+struct BuildContext<'a> {
+    points: &'a [f64],
+    doc_ids: &'a [u64],
+    num_dims: usize,
+}
+
+impl BuildContext<'_> {
+    /// Return the d-th coordinate of the point at slot `i` in the original
+    /// (unpermuted) buffer.
+    #[inline]
+    fn value(&self, i: u32, d: usize) -> f64 {
+        self.points[i as usize * self.num_dims + d]
+    }
+}
+
 impl<W: StorageOutput> BKDWriter<W> {
     pub fn new(writer: W, num_dims: u32) -> Self {
         BKDWriter {
@@ -85,23 +103,58 @@ impl<W: StorageOutput> BKDWriter<W> {
         self
     }
 
-    /// Write a BKD tree from entries.
-    pub fn write(&mut self, entries: &[(Vec<f64>, u64)]) -> Result<()> {
-        if entries.is_empty() {
+    /// Write a BKD tree from flat point/doc_id buffers.
+    ///
+    /// The `points` buffer is laid out as a row-major matrix of
+    /// `doc_ids.len()` rows by `num_dims` columns: the d-th coordinate of the
+    /// i-th point lives at `points[i * num_dims + d]`. `points.len()` must
+    /// therefore equal `doc_ids.len() * num_dims`.
+    ///
+    /// Internally the builder sorts an index permutation rather than the
+    /// point/doc_id buffers themselves, so no per-point heap allocation is
+    /// performed regardless of point count.
+    ///
+    /// # Arguments
+    /// - `points`: flat row-major buffer of f64 coordinates.
+    /// - `doc_ids`: parallel buffer of document ids.
+    ///
+    /// # Returns
+    /// `Ok(())` on success, otherwise a `LaurusError::index` describing the
+    /// dimensional mismatch or an underlying I/O error.
+    pub fn write(&mut self, points: &[f64], doc_ids: &[u64]) -> Result<()> {
+        let num_dims = self.num_dims as usize;
+        let expected = doc_ids.len().checked_mul(num_dims).ok_or_else(|| {
+            crate::error::LaurusError::index(
+                "Point count overflows when multiplied by num_dims".to_string(),
+            )
+        })?;
+        if points.len() != expected {
+            return Err(crate::error::LaurusError::index(format!(
+                "Point buffer size mismatch: expected {} doc_ids * {} dims = {} f64s, got {}",
+                doc_ids.len(),
+                num_dims,
+                expected,
+                points.len()
+            )));
+        }
+
+        if doc_ids.is_empty() {
             // Write basic header for empty tree
             self.write_header(0, 0, 0)?;
             return Ok(());
         }
 
         // Calculate global min/max
-        for (vals, _) in entries {
-            for (i, &val) in vals.iter().enumerate() {
-                self.min_values[i] = self.min_values[i].min(val);
-                self.max_values[i] = self.max_values[i].max(val);
+        for i in 0..doc_ids.len() {
+            let base = i * num_dims;
+            for d in 0..num_dims {
+                let v = points[base + d];
+                self.min_values[d] = self.min_values[d].min(v);
+                self.max_values[d] = self.max_values[d].max(v);
             }
         }
 
-        let total_count = entries.len() as u64;
+        let total_count = doc_ids.len() as u64;
 
         // Reserve space for header:
         // Magic(4) + Version(4) + num_dims(4) + bytes_per_dim(4) + total_count(8) + num_blocks(8)
@@ -111,9 +164,15 @@ impl<W: StorageOutput> BKDWriter<W> {
         self.writer.write_u32(0)?; // Placeholder
         self.writer.seek(SeekFrom::Start(header_size))?;
 
-        // Recursively build tree and write leaf blocks
-        let mut mutable_entries = entries.to_vec();
-        let root_node_idx = self.build_subtree(&mut mutable_entries, 0)?;
+        // Sort an index permutation instead of the data: this keeps the
+        // point/doc_id buffers immutable and avoids per-point allocations.
+        let mut indices: Vec<u32> = (0..doc_ids.len() as u32).collect();
+        let ctx = BuildContext {
+            points,
+            doc_ids,
+            num_dims,
+        };
+        let root_node_idx = self.build_subtree(&ctx, &mut indices, 0)?;
 
         // Write index section after all leaves
         let index_start_offset = self.writer.stream_position()?;
@@ -157,47 +216,52 @@ impl<W: StorageOutput> BKDWriter<W> {
         Ok(())
     }
 
-    /// Recursively build subtree, write leaves, and return index node index
+    /// Recursively build a subtree, writing leaves on the fly and recording
+    /// internal nodes in `self.index_nodes` for back-patching. The slice
+    /// `indices` is a permutation of point ids that this call owns and is
+    /// allowed to reorder; recursion proceeds on the two halves of the
+    /// permutation around the split position.
+    ///
+    /// # Returns
+    /// `Ok(Some(node_idx))` when the call materialized an internal index
+    /// node, `Ok(None)` when the call wrote a single leaf block (so the
+    /// caller should record the file offset captured before the recursion
+    /// instead of looking up an internal node).
     fn build_subtree(
         &mut self,
-        entries: &mut [(Vec<f64>, u64)],
+        ctx: &BuildContext<'_>,
+        indices: &mut [u32],
         depth: u32,
     ) -> Result<Option<usize>> {
-        if entries.is_empty() {
+        if indices.is_empty() {
             return Ok(None);
         }
 
-        if entries.len() <= self.block_size {
+        if indices.len() <= self.block_size {
             // Write leaf block
-            self.write_leaf_block(entries)?;
+            self.write_leaf_block(ctx, indices)?;
             self.num_blocks += 1;
             return Ok(None);
         }
 
         // Split dimension: round robin
         let split_dim = depth % self.num_dims;
+        let split_dim_us = split_dim as usize;
 
-        // Sort by split dimension to find median
-        entries.sort_by(|a, b| {
-            a.0[split_dim as usize]
-                .partial_cmp(&b.0[split_dim as usize])
+        // Sort the permutation by the split dimension to find the median.
+        // The underlying point/doc_id buffers stay immutable; only `indices`
+        // is reordered.
+        indices.sort_by(|&a, &b| {
+            ctx.value(a, split_dim_us)
+                .partial_cmp(&ctx.value(b, split_dim_us))
                 .unwrap_or(Ordering::Equal)
         });
 
-        // Recurse - we write leaves in post-order or similar?
-        // Actually, to know offsets, we write leaves as we go.
-        // But for the index, we need offsets of children.
-        // If child is a leaf, offset is the leaf block offset.
-        // If child is a node, offset is the node offset (which is written later).
-        // This suggests we should write all leaves first, or handle offsets carefully.
-
-        // Simpler approach for 1D:
-        // Internal nodes are written AFTER all leaves.
-        // We track the tree structure in memory (IndexNode vec) and then flatten it.
-
-        let mid = entries.len() / 2;
-        let (left_entries, right_entries) = entries.split_at_mut(mid);
-        let split_value = right_entries[0].0[split_dim as usize];
+        // Internal nodes are written AFTER all leaves; we track tree structure
+        // in `index_nodes` here and back-patch offsets in `write_index`.
+        let mid = indices.len() / 2;
+        let (left_indices, right_indices) = indices.split_at_mut(mid);
+        let split_value = ctx.value(right_indices[0], split_dim_us);
 
         // Record current node
         let node_idx = self.index_nodes.len();
@@ -211,11 +275,11 @@ impl<W: StorageOutput> BKDWriter<W> {
         });
 
         let left_file_pos_before = self.writer.stream_position()?;
-        let left_child_node_idx = self.build_subtree(left_entries, depth + 1)?;
+        let left_child_node_idx = self.build_subtree(ctx, left_indices, depth + 1)?;
         let left_is_leaf = left_child_node_idx.is_none();
 
         let right_file_pos_before = self.writer.stream_position()?;
-        let right_child_node_idx = self.build_subtree(right_entries, depth + 1)?;
+        let right_child_node_idx = self.build_subtree(ctx, right_indices, depth + 1)?;
         let right_is_leaf = right_child_node_idx.is_none();
 
         // Update current node
@@ -233,20 +297,21 @@ impl<W: StorageOutput> BKDWriter<W> {
         Ok(Some(node_idx))
     }
 
-    fn write_leaf_block(&mut self, entries: &[(Vec<f64>, u64)]) -> Result<()> {
-        let count = entries.len() as u32;
+    fn write_leaf_block(&mut self, ctx: &BuildContext<'_>, indices: &[u32]) -> Result<()> {
+        let count = indices.len() as u32;
         self.writer.write_u32(count)?;
 
-        // Write values for all dimensions
-        for (vals, _) in entries {
-            for &val in vals {
-                self.writer.write_f64(val)?;
+        // Write values for all dimensions, gathered through the permutation.
+        for &i in indices {
+            let base = i as usize * ctx.num_dims;
+            for d in 0..ctx.num_dims {
+                self.writer.write_f64(ctx.points[base + d])?;
             }
         }
 
-        // Write doc ids
-        for (_, doc_id) in entries {
-            self.writer.write_u64(*doc_id)?;
+        // Write doc ids in the same order
+        for &i in indices {
+            self.writer.write_u64(ctx.doc_ids[i as usize])?;
         }
 
         Ok(())
@@ -615,17 +680,15 @@ mod tests {
     #[test]
     fn test_bkd_writer_reader_2d() {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let entries = vec![
-            (vec![10.0, 20.0], 1),
-            (vec![15.0, 25.0], 2),
-            (vec![20.0, 30.0], 3),
-        ];
+        // Flat row-major buffer: [pt0_x, pt0_y, pt1_x, pt1_y, pt2_x, pt2_y]
+        let points: Vec<f64> = vec![10.0, 20.0, 15.0, 25.0, 20.0, 30.0];
+        let doc_ids: Vec<u64> = vec![1, 2, 3];
 
         // Write
         {
             let output = storage.create_output("test_2d.bkd").unwrap();
             let mut writer = BKDWriter::new(output, 2);
-            writer.write(&entries).unwrap();
+            writer.write(&points, &doc_ids).unwrap();
             writer.finish().unwrap();
         }
 
@@ -645,6 +708,67 @@ mod tests {
                 .unwrap();
             assert_eq!(results, vec![1, 2]);
         }
+    }
+
+    #[test]
+    fn test_bkd_writer_empty() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let points: Vec<f64> = vec![];
+        let doc_ids: Vec<u64> = vec![];
+
+        {
+            let output = storage.create_output("empty.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 2);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "empty.bkd").unwrap();
+        assert_eq!(reader.header.total_point_count, 0);
+        let results = reader
+            .range_search(&[None, None], &[None, None], true, true)
+            .unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_bkd_writer_size_mismatch_rejected() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        // 2 doc_ids in 2D would require 4 f64s, but we pass 3.
+        let points: Vec<f64> = vec![1.0, 2.0, 3.0];
+        let doc_ids: Vec<u64> = vec![10, 20];
+
+        let output = storage.create_output("bad.bkd").unwrap();
+        let mut writer = BKDWriter::new(output, 2);
+        let err = writer.write(&points, &doc_ids).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("Point buffer size mismatch"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_bkd_writer_reader_1d_multi_block() {
+        // Exercise the recursive build path with more points than the leaf
+        // block size so the index/leaf split is actually visited.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 2_000;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+
+        {
+            let output = storage.create_output("range1d.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(128);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "range1d.bkd").unwrap();
+        let results = reader
+            .range_search(&[Some(100.0)], &[Some(200.0)], true, true)
+            .unwrap();
+        let expected: Vec<u64> = (100u64..=200u64).collect();
+        assert_eq!(results, expected);
     }
 
     #[test]
