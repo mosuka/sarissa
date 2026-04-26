@@ -22,11 +22,50 @@ pub trait BKDTree: Send + Sync + std::fmt::Debug {
     ) -> Result<Vec<u64>>;
 }
 
-/// Magic number for BKD Tree files "BKDT"
+/// Magic number for BKD Tree files: ASCII "BKDT" in little-endian.
 pub const BKD_MAGIC: u32 = 0x54444B42;
 
-/// Version 1
-pub const BKD_VERSION: u32 = 1;
+/// Current on-disk format version.
+///
+/// Version 2 (this revision): every internal index node and every leaf block
+/// carries its own axis-aligned bounding box (AABB) so the reader can prune
+/// subtrees with Inside/Outside/Crosses logic. The previous version 1 layout
+/// (no per-node AABB) is no longer supported — laurus is pre-release, so the
+/// format is broken intentionally rather than dual-supported.
+///
+/// File layout (all integers little-endian):
+///
+/// ```text
+/// Header (fixed-prefix + 2 * num_dims * 8 bytes):
+///   magic               u32
+///   version             u32
+///   num_dims            u32
+///   bytes_per_dim       u32   (always 8 today: f64)
+///   total_point_count   u64
+///   num_blocks          u64
+///   global_min          [f64; num_dims]
+///   global_max          [f64; num_dims]
+///   index_start_offset  u64
+///   root_node_offset    u64
+///
+/// Leaf Block:
+///   count               u32
+///   leaf_min            [f64; num_dims]
+///   leaf_max            [f64; num_dims]
+///   point_values        [f64; count * num_dims]   (row-major)
+///   doc_ids             [u64; count]
+///
+/// Internal Index Node (size = 28 + 32 * num_dims bytes):
+///   split_dim           u32
+///   split_value         f64
+///   left_min            [f64; num_dims]
+///   left_max            [f64; num_dims]
+///   right_min           [f64; num_dims]
+///   right_max           [f64; num_dims]
+///   left_offset         u64
+///   right_offset        u64
+/// ```
+pub const BKD_VERSION: u32 = 2;
 
 /// BKD Tree File Header
 #[derive(Debug, Clone)]
@@ -54,16 +93,38 @@ pub struct BKDWriter<W: StorageOutput> {
     index_nodes: Vec<IndexNode>,
 }
 
-/// Internal index node for navigation
+/// Internal index node for navigation.
+///
+/// Each node remembers the axis-aligned bounding box (`*_min`/`*_max`) of the
+/// two child subtrees in addition to the split dimension and value, enabling
+/// readers to prune entire subtrees when their AABB lies fully inside or
+/// outside the query region.
 #[derive(Debug, Clone)]
 struct IndexNode {
     split_dim: u32,
     split_value: f64,
+    left_min: Vec<f64>,
+    left_max: Vec<f64>,
+    right_min: Vec<f64>,
+    right_max: Vec<f64>,
     left_offset: u64,
     right_offset: u64,
     // Helper to back-patch offsets during writing
     left_child_idx: Option<usize>,
     right_child_idx: Option<usize>,
+}
+
+/// Information returned by `BKDWriter::build_subtree` so the caller can fold
+/// per-child AABBs into the parent index node.
+struct SubtreeInfo {
+    /// `Some(idx)` when the subtree is rooted at the internal node at index
+    /// `idx` in `index_nodes`; `None` when the subtree is a single leaf
+    /// (whose file offset was captured by the caller before recursion).
+    node_idx: Option<usize>,
+    /// Per-dimension minimum coordinates of all points in this subtree.
+    min: Vec<f64>,
+    /// Per-dimension maximum coordinates of all points in this subtree.
+    max: Vec<f64>,
 }
 
 /// Borrowed view over the caller's flat point/doc_id buffers used during
@@ -82,6 +143,31 @@ impl BuildContext<'_> {
     fn value(&self, i: u32, d: usize) -> f64 {
         self.points[i as usize * self.num_dims + d]
     }
+}
+
+/// Compute the per-dimension axis-aligned bounding box that encloses every
+/// point referenced by `indices` in the underlying buffer.
+///
+/// The returned `(min, max)` Vecs have length `ctx.num_dims`. Callers must
+/// pass a non-empty `indices` slice; an empty slice would leave the bounds at
+/// their `INFINITY` / `NEG_INFINITY` sentinels and propagate degenerate
+/// AABBs into the index, so the caller is responsible for the precondition.
+fn compute_aabb(ctx: &BuildContext<'_>, indices: &[u32]) -> (Vec<f64>, Vec<f64>) {
+    let mut min = vec![f64::INFINITY; ctx.num_dims];
+    let mut max = vec![f64::NEG_INFINITY; ctx.num_dims];
+    for &i in indices {
+        let base = i as usize * ctx.num_dims;
+        for d in 0..ctx.num_dims {
+            let v = ctx.points[base + d];
+            if v < min[d] {
+                min[d] = v;
+            }
+            if v > max[d] {
+                max[d] = v;
+            }
+        }
+    }
+    (min, max)
 }
 
 impl<W: StorageOutput> BKDWriter<W> {
@@ -172,19 +258,18 @@ impl<W: StorageOutput> BKDWriter<W> {
             doc_ids,
             num_dims,
         };
-        let root_node_idx = self.build_subtree(&ctx, &mut indices, 0)?;
+        let root_info = self.build_subtree(&ctx, &mut indices, 0)?;
 
         // Write index section after all leaves
         let index_start_offset = self.writer.stream_position()?;
         self.write_index()?;
 
-        // Root node size calculation needs to be updated.
-        // Node: split_dim(4) + split_value(8) + left_offset(8) + right_offset(8) = 28 bytes
-        let node_size = 4 + 8 + 8 + 8;
-
-        let root_node_offset = if let Some(idx) = root_node_idx {
+        let node_size = Self::node_size(self.num_dims);
+        let root_node_offset = if let Some(idx) = root_info.node_idx {
             index_start_offset + (idx as u64) * node_size
         } else {
+            // Single-leaf tree: the leaf was written immediately after the
+            // header, so the "root" address is just past the header bytes.
             header_size
         };
 
@@ -216,35 +301,53 @@ impl<W: StorageOutput> BKDWriter<W> {
         Ok(())
     }
 
+    /// Returns the on-disk byte size of one internal index node.
+    ///
+    /// Each dimension contributes 32 bytes (left_min, left_max, right_min,
+    /// right_max — four f64 values per dimension) on top of the fixed 28-byte
+    /// split / offset header, matching the layout documented on
+    /// [`BKD_VERSION`].
+    #[inline]
+    fn node_size(num_dims: u32) -> u64 {
+        28 + 32 * num_dims as u64
+    }
+
     /// Recursively build a subtree, writing leaves on the fly and recording
     /// internal nodes in `self.index_nodes` for back-patching. The slice
     /// `indices` is a permutation of point ids that this call owns and is
     /// allowed to reorder; recursion proceeds on the two halves of the
     /// permutation around the split position.
     ///
-    /// # Returns
-    /// `Ok(Some(node_idx))` when the call materialized an internal index
-    /// node, `Ok(None)` when the call wrote a single leaf block (so the
-    /// caller should record the file offset captured before the recursion
-    /// instead of looking up an internal node).
+    /// In addition to the file mutation, the call returns a `SubtreeInfo`
+    /// carrying the AABB of every point reachable through this subtree so the
+    /// parent call can store per-child AABBs on its own index node.
     fn build_subtree(
         &mut self,
         ctx: &BuildContext<'_>,
         indices: &mut [u32],
         depth: u32,
-    ) -> Result<Option<usize>> {
+    ) -> Result<SubtreeInfo> {
         if indices.is_empty() {
-            return Ok(None);
+            // The recursion only descends into non-empty halves (we only split
+            // when len > block_size, where the smaller half has at least one
+            // element), so reaching this branch indicates a programmer error.
+            return Err(crate::error::LaurusError::index(
+                "build_subtree called with empty indices".to_string(),
+            ));
         }
 
         if indices.len() <= self.block_size {
-            // Write leaf block
-            self.write_leaf_block(ctx, indices)?;
+            let (leaf_min, leaf_max) = compute_aabb(ctx, indices);
+            self.write_leaf_block(ctx, indices, &leaf_min, &leaf_max)?;
             self.num_blocks += 1;
-            return Ok(None);
+            return Ok(SubtreeInfo {
+                node_idx: None,
+                min: leaf_min,
+                max: leaf_max,
+            });
         }
 
-        // Split dimension: round robin
+        // Split dimension: round robin (#293 will switch to widest-axis).
         let split_dim = depth % self.num_dims;
         let split_dim_us = split_dim as usize;
 
@@ -263,11 +366,18 @@ impl<W: StorageOutput> BKDWriter<W> {
         let (left_indices, right_indices) = indices.split_at_mut(mid);
         let split_value = ctx.value(right_indices[0], split_dim_us);
 
-        // Record current node
+        // Reserve a slot for this internal node now so the index_nodes vector
+        // is stable across recursive calls. AABB / offset / child fields are
+        // back-patched once both children have been built.
         let node_idx = self.index_nodes.len();
+        let nd = ctx.num_dims;
         self.index_nodes.push(IndexNode {
             split_dim,
             split_value,
+            left_min: Vec::with_capacity(nd),
+            left_max: Vec::with_capacity(nd),
+            right_min: Vec::with_capacity(nd),
+            right_max: Vec::with_capacity(nd),
             left_offset: 0,
             right_offset: 0,
             left_child_idx: None,
@@ -275,31 +385,63 @@ impl<W: StorageOutput> BKDWriter<W> {
         });
 
         let left_file_pos_before = self.writer.stream_position()?;
-        let left_child_node_idx = self.build_subtree(ctx, left_indices, depth + 1)?;
-        let left_is_leaf = left_child_node_idx.is_none();
+        let left_info = self.build_subtree(ctx, left_indices, depth + 1)?;
+        let left_is_leaf = left_info.node_idx.is_none();
 
         let right_file_pos_before = self.writer.stream_position()?;
-        let right_child_node_idx = self.build_subtree(ctx, right_indices, depth + 1)?;
-        let right_is_leaf = right_child_node_idx.is_none();
+        let right_info = self.build_subtree(ctx, right_indices, depth + 1)?;
+        let right_is_leaf = right_info.node_idx.is_none();
 
-        // Update current node
-        self.index_nodes[node_idx].left_child_idx = left_child_node_idx;
-        self.index_nodes[node_idx].right_child_idx = right_child_node_idx;
+        // Compute the union AABB BEFORE moving the child AABB Vecs into the
+        // node, so the borrow checker can see that we only consume the child
+        // info once.
+        let mut union_min = Vec::with_capacity(nd);
+        let mut union_max = Vec::with_capacity(nd);
+        for d in 0..nd {
+            union_min.push(left_info.min[d].min(right_info.min[d]));
+            union_max.push(left_info.max[d].max(right_info.max[d]));
+        }
 
-        // Store the file offsets for leaves immediately
+        // Update the previously reserved node slot.
+        let node = &mut self.index_nodes[node_idx];
+        node.left_child_idx = left_info.node_idx;
+        node.right_child_idx = right_info.node_idx;
+        node.left_min = left_info.min;
+        node.left_max = left_info.max;
+        node.right_min = right_info.min;
+        node.right_max = right_info.max;
         if left_is_leaf {
-            self.index_nodes[node_idx].left_offset = left_file_pos_before;
+            node.left_offset = left_file_pos_before;
         }
         if right_is_leaf {
-            self.index_nodes[node_idx].right_offset = right_file_pos_before;
+            node.right_offset = right_file_pos_before;
         }
 
-        Ok(Some(node_idx))
+        Ok(SubtreeInfo {
+            node_idx: Some(node_idx),
+            min: union_min,
+            max: union_max,
+        })
     }
 
-    fn write_leaf_block(&mut self, ctx: &BuildContext<'_>, indices: &[u32]) -> Result<()> {
+    fn write_leaf_block(
+        &mut self,
+        ctx: &BuildContext<'_>,
+        indices: &[u32],
+        leaf_min: &[f64],
+        leaf_max: &[f64],
+    ) -> Result<()> {
         let count = indices.len() as u32;
         self.writer.write_u32(count)?;
+
+        // Per-leaf AABB, used by the reader for subtree pruning starting
+        // from #292.
+        for &v in leaf_min {
+            self.writer.write_f64(v)?;
+        }
+        for &v in leaf_max {
+            self.writer.write_f64(v)?;
+        }
 
         // Write values for all dimensions, gathered through the permutation.
         for &i in indices {
@@ -319,7 +461,7 @@ impl<W: StorageOutput> BKDWriter<W> {
 
     fn write_index(&mut self) -> Result<()> {
         let start_pos = self.writer.stream_position()?;
-        let node_size = 4 + 8 + 8 + 8; // split_dim + split_value + left + right = 28 bytes
+        let node_size = Self::node_size(self.num_dims);
 
         for i in 0..self.index_nodes.len() {
             let left_idx = self.index_nodes[i].left_child_idx;
@@ -333,10 +475,22 @@ impl<W: StorageOutput> BKDWriter<W> {
             }
         }
 
-        // Write nodes
+        // Write nodes in the layout documented on `BKD_VERSION`.
         for node in &self.index_nodes {
             self.writer.write_u32(node.split_dim)?;
             self.writer.write_f64(node.split_value)?;
+            for &v in &node.left_min {
+                self.writer.write_f64(v)?;
+            }
+            for &v in &node.left_max {
+                self.writer.write_f64(v)?;
+            }
+            for &v in &node.right_min {
+                self.writer.write_f64(v)?;
+            }
+            for &v in &node.right_max {
+                self.writer.write_f64(v)?;
+            }
             self.writer.write_u64(node.left_offset)?;
             self.writer.write_u64(node.right_offset)?;
         }
@@ -374,6 +528,13 @@ impl BKDReader {
         }
 
         let version = reader.read_u32()?;
+        if version != BKD_VERSION {
+            return Err(crate::error::LaurusError::storage(format!(
+                "Unsupported BKD version: {} (expected {}). Pre-release format \
+                 changes do not support older revisions; rebuild the index.",
+                version, BKD_VERSION
+            )));
+        }
         let num_dims = reader.read_u32()?;
         let bytes_per_dim = reader.read_u32()?;
         let total_point_count = reader.read_u64()?;
@@ -423,6 +584,16 @@ impl BKDReader {
         reader.seek(SeekFrom::Start(offset))?;
         let split_dim = reader.read_u32()? as usize;
         let split_value = reader.read_f64()?;
+
+        // Per-child AABB. The current `range_search` does not yet use these
+        // for Inside/Outside/Crosses pruning — that arrives with the
+        // `IntersectVisitor` work in #292 — but we still consume the bytes so
+        // the offsets stay aligned with the on-disk layout.
+        let num_dims = self.header.num_dims as usize;
+        for _ in 0..(num_dims * 4) {
+            let _ = reader.read_f64()?;
+        }
+
         let left_offset = reader.read_u64()?;
         let right_offset = reader.read_u64()?;
 
@@ -474,6 +645,13 @@ impl BKDReader {
     ) -> Result<()> {
         reader.seek(SeekFrom::Start(offset))?;
         let count = reader.read_u32()?;
+
+        // Per-leaf AABB. Same rationale as `visit_node`: read but unused for
+        // pruning until #292 wires up `IntersectVisitor`.
+        let num_dims = self.header.num_dims as usize;
+        for _ in 0..(num_dims * 2) {
+            let _ = reader.read_f64()?;
+        }
 
         let mut points = Vec::with_capacity(count as usize);
         for _ in 0..count {
@@ -769,6 +947,111 @@ mod tests {
             .unwrap();
         let expected: Vec<u64> = (100u64..=200u64).collect();
         assert_eq!(results, expected);
+    }
+
+    #[test]
+    fn test_bkd_writer_reader_3d_multi_block() {
+        // 3D round-trip with multiple leaf blocks: the new per-node /
+        // per-leaf AABB layout must round-trip without misaligning offsets.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 1_000;
+        let mut points: Vec<f64> = Vec::with_capacity(n * 3);
+        let mut doc_ids: Vec<u64> = Vec::with_capacity(n);
+        for i in 0..n {
+            let v = i as f64;
+            points.push(v);
+            points.push(v + 1000.0);
+            points.push(v + 2000.0);
+            doc_ids.push(i as u64);
+        }
+
+        {
+            let output = storage.create_output("range3d.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 3).with_block_size(64);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "range3d.bkd").unwrap();
+        assert_eq!(reader.header.num_dims, 3);
+        assert_eq!(reader.header.version, BKD_VERSION);
+
+        // Half-open bound on the first axis with an upper-only bound on the
+        // second axis to make sure visit_node consumes the AABB bytes
+        // correctly even with mixed bounded/unbounded dimensions.
+        let results = reader
+            .range_search(
+                &[Some(100.0), None, None],
+                &[Some(150.0), Some(1200.0), None],
+                true,
+                true,
+            )
+            .unwrap();
+        let expected: Vec<u64> = (100u64..=150u64)
+            .filter(|&i| (i as f64) + 1000.0 <= 1200.0)
+            .collect();
+        assert_eq!(results, expected);
+    }
+
+    #[test]
+    fn test_bkd_reader_rejects_version_mismatch() {
+        // Hand-craft a header that claims version 1 (the previous on-disk
+        // format) and confirm the reader refuses to open it.
+        use crate::storage::structured::StructWriter;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        {
+            let output = storage.create_output("v1.bkd").unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(BKD_MAGIC).unwrap();
+            writer.write_u32(1).unwrap(); // legacy version
+            writer.write_u32(2).unwrap(); // num_dims
+            writer.write_u32(8).unwrap(); // bytes_per_dim
+            writer.write_u64(0).unwrap(); // total_count
+            writer.write_u64(0).unwrap(); // num_blocks
+            writer.write_f64(0.0).unwrap(); // global_min[0]
+            writer.write_f64(0.0).unwrap(); // global_min[1]
+            writer.write_f64(0.0).unwrap(); // global_max[0]
+            writer.write_f64(0.0).unwrap(); // global_max[1]
+            writer.write_u64(0).unwrap(); // index_start
+            writer.write_u64(0).unwrap(); // root_offset
+            writer.close().unwrap();
+        }
+
+        let err = BKDReader::open(storage.clone(), "v1.bkd").unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("Unsupported BKD version"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_bkd_writer_reader_2d_single_leaf_aabb() {
+        // Single-leaf tree: exercises the leaf-only write/read path that
+        // skips the index section entirely. The new leaf AABB must still be
+        // written and consumed.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let points: Vec<f64> = vec![1.0, 100.0, 2.0, 200.0, 3.0, 300.0];
+        let doc_ids: Vec<u64> = vec![10, 20, 30];
+
+        {
+            let output = storage.create_output("single.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 2);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "single.bkd").unwrap();
+        let results = reader
+            .range_search(
+                &[Some(2.0), Some(150.0)],
+                &[Some(3.0), Some(250.0)],
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(results, vec![20]);
     }
 
     #[test]
