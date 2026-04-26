@@ -15,8 +15,8 @@
 //! paths and confirms that all three dimensions are honoured.
 
 use laurus::lexical::LexicalIndexWriter;
-use laurus::lexical::query::Geo3dDistanceQuery;
 use laurus::lexical::query::Query;
+use laurus::lexical::query::{Geo3dBoundingBoxQuery, Geo3dDistanceQuery};
 use laurus::lexical::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use laurus::storage::Storage;
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
@@ -249,4 +249,129 @@ fn geo3d_distance_query_finds_docs_within_radius() {
     let empty = Geo3dDistanceQuery::new("position", center, 0.0);
     assert!(empty.find_matches(&*reader).unwrap().is_empty());
     assert!(empty.is_empty(&*reader).unwrap());
+}
+
+#[test]
+fn geo3d_bbox_query_finds_docs_inside_box() {
+    // Index three ECEF points in distinct octants and verify various
+    // bounding-box queries pick the right ones.
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+    let mut writer = InvertedIndexWriter::new(
+        storage.clone(),
+        InvertedIndexWriterConfig {
+            max_buffered_docs: 10,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let p_a = GeoEcefPoint::new(100.0, 100.0, 100.0); // doc 0 — interior
+    let p_b = GeoEcefPoint::new(200.0, 200.0, 200.0); // doc 1 — interior
+    let p_c = GeoEcefPoint::new(1_000.0, 1_000.0, 1_000.0); // doc 2 — outside
+
+    writer
+        .add_document(
+            Document::builder()
+                .add_field("position", DataValue::GeoEcef(p_a))
+                .build(),
+        )
+        .unwrap();
+    writer
+        .add_document(
+            Document::builder()
+                .add_field("position", DataValue::GeoEcef(p_b))
+                .build(),
+        )
+        .unwrap();
+    writer
+        .add_document(
+            Document::builder()
+                .add_field("position", DataValue::GeoEcef(p_c))
+                .build(),
+        )
+        .unwrap();
+    writer.commit().unwrap();
+
+    let reader = writer.build_reader().unwrap();
+
+    // Basic case: a box that contains exactly doc 0 and doc 1.
+    let q = Geo3dBoundingBoxQuery::new(
+        "position",
+        GeoEcefPoint::new(0.0, 0.0, 0.0),
+        GeoEcefPoint::new(300.0, 300.0, 300.0),
+    )
+    .unwrap();
+    let mut hits: Vec<u64> = q
+        .find_matches(&*reader)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.doc_id)
+        .collect();
+    hits.sort_unstable();
+    assert_eq!(hits, vec![0, 1]);
+
+    // Edge-aligned: a box whose maximum corner sits exactly on doc 1.
+    // Closed bounds → doc 1 is included.
+    let q_edge = Geo3dBoundingBoxQuery::new(
+        "position",
+        GeoEcefPoint::new(0.0, 0.0, 0.0),
+        GeoEcefPoint::new(200.0, 200.0, 200.0),
+    )
+    .unwrap();
+    let mut edge_hits: Vec<u64> = q_edge
+        .find_matches(&*reader)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.doc_id)
+        .collect();
+    edge_hits.sort_unstable();
+    assert_eq!(edge_hits, vec![0, 1]);
+
+    // Degenerate (zero-volume) box: matches the single point at doc 0.
+    let q_point = Geo3dBoundingBoxQuery::new("position", p_a, p_a).unwrap();
+    let pt_hits: Vec<u64> = q_point
+        .find_matches(&*reader)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.doc_id)
+        .collect();
+    assert_eq!(pt_hits, vec![0]);
+
+    // Wide-open box: catches every doc.
+    let q_wide = Geo3dBoundingBoxQuery::new(
+        "position",
+        GeoEcefPoint::new(-1e9, -1e9, -1e9),
+        GeoEcefPoint::new(1e9, 1e9, 1e9),
+    )
+    .unwrap();
+    let mut wide_hits: Vec<u64> = q_wide
+        .find_matches(&*reader)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.doc_id)
+        .collect();
+    wide_hits.sort_unstable();
+    assert_eq!(wide_hits, vec![0, 1, 2]);
+
+    // Per-axis exclusion: shrinking only the z axis enough to drop
+    // doc 1 still keeps doc 0.
+    let q_z = Geo3dBoundingBoxQuery::new(
+        "position",
+        GeoEcefPoint::new(0.0, 0.0, 0.0),
+        GeoEcefPoint::new(300.0, 300.0, 150.0),
+    )
+    .unwrap();
+    let z_hits: Vec<u64> = q_z
+        .find_matches(&*reader)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.doc_id)
+        .collect();
+    assert_eq!(z_hits, vec![0]);
+
+    // Scoring: every hit gets the constant score 1.0 from the bbox path.
+    for m in q.find_matches(&*reader).unwrap() {
+        assert_eq!(m.score, 1.0);
+        assert_eq!(m.distance_m, 0.0);
+    }
 }

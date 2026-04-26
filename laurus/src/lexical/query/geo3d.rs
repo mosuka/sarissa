@@ -12,8 +12,10 @@
 //!
 //! - [`Geo3dDistanceQuery`] — sphere-radius search: every doc whose stored
 //!   ECEF point lies within `radius_m` meters of the query center.
+//! - [`Geo3dBoundingBoxQuery`] — 3D axis-aligned box search: every doc
+//!   whose stored ECEF point falls inside the closed `[min, max]` box.
 //!
-//! Bounding-box and k-NN equivalents arrive in #301 / #302.
+//! The k-NN flavour arrives in #302.
 //!
 //! # How sphere queries reach the BKD
 //!
@@ -392,6 +394,164 @@ impl Query for Geo3dDistanceQuery {
     }
 }
 
+/// A 3D bounding-box query against an ECEF-typed field.
+///
+/// Matches every document whose stored [`GeoEcefPoint`] falls inside the
+/// closed axis-aligned box `[min, max]` (inclusive on every axis). The
+/// constructor enforces `min.x <= max.x` (and likewise for `y` / `z`); a
+/// degenerate box where `min == max` on one or more axes is allowed and
+/// matches points that lie exactly on that face / edge / corner.
+///
+/// Implemented as a thin wrapper over [`BKDTree::range_search`] with the
+/// 3D bounds — no custom visitor is needed because the BKD's existing
+/// axis-aligned range path already does the right thing for AABBs. As a
+/// result every match comes back with `distance_m = 0.0` and `score =
+/// 1.0` (the BKD only surfaces doc ids, not the points themselves, so
+/// per-doc distance scoring would require an extra read pass; users who
+/// want distance-based ranking should use [`Geo3dDistanceQuery`]).
+///
+/// [`BKDTree::range_search`]: crate::lexical::index::structures::bkd_tree::BKDTree::range_search
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Geo3dBoundingBoxQuery {
+    /// Field containing 3D ECEF coordinates.
+    field: String,
+    /// South-west-bottom corner of the box (per-axis minimum).
+    min: GeoEcefPoint,
+    /// North-east-top corner of the box (per-axis maximum).
+    max: GeoEcefPoint,
+    /// Boost factor applied to the constant per-doc score.
+    boost: f32,
+}
+
+impl Geo3dBoundingBoxQuery {
+    /// Construct a new bounding-box query.
+    ///
+    /// # Errors
+    /// Returns `LaurusError::other` when `min` exceeds `max` on any axis.
+    /// A degenerate box where they are equal on one or more axes is
+    /// accepted (it matches points lying exactly on that face / edge /
+    /// corner).
+    pub fn new<F: Into<String>>(field: F, min: GeoEcefPoint, max: GeoEcefPoint) -> Result<Self> {
+        if min.x > max.x {
+            return Err(crate::error::LaurusError::other(format!(
+                "Geo3dBoundingBoxQuery: min.x ({}) must be <= max.x ({})",
+                min.x, max.x
+            )));
+        }
+        if min.y > max.y {
+            return Err(crate::error::LaurusError::other(format!(
+                "Geo3dBoundingBoxQuery: min.y ({}) must be <= max.y ({})",
+                min.y, max.y
+            )));
+        }
+        if min.z > max.z {
+            return Err(crate::error::LaurusError::other(format!(
+                "Geo3dBoundingBoxQuery: min.z ({}) must be <= max.z ({})",
+                min.z, max.z
+            )));
+        }
+        Ok(Self {
+            field: field.into(),
+            min,
+            max,
+            boost: 1.0,
+        })
+    }
+
+    /// Set the boost factor applied to every match's score.
+    pub fn with_boost(mut self, boost: f32) -> Self {
+        self.boost = boost;
+        self
+    }
+
+    /// Field name this query targets.
+    pub fn field(&self) -> &str {
+        &self.field
+    }
+
+    /// SW-bottom corner (per-axis minimum).
+    pub fn min(&self) -> GeoEcefPoint {
+        self.min
+    }
+
+    /// NE-top corner (per-axis maximum).
+    pub fn max(&self) -> GeoEcefPoint {
+        self.max
+    }
+
+    /// Run the query against `reader` and return the matches in
+    /// doc-id-ascending order. Every match has `distance_m = 0.0` and
+    /// `score = 1.0` — see the type docs for the rationale.
+    pub fn find_matches(&self, reader: &dyn LexicalIndexReader) -> Result<Vec<Geo3dMatch>> {
+        let Some(bkd) = reader.get_bkd_tree(&self.field)? else {
+            return Ok(Vec::new());
+        };
+        let mins = [Some(self.min.x), Some(self.min.y), Some(self.min.z)];
+        let maxs = [Some(self.max.x), Some(self.max.y), Some(self.max.z)];
+        // Closed bounds on both ends: a point sitting exactly on a face
+        // of the box is a hit (consistent with the constructor's
+        // tolerance for degenerate boxes).
+        let doc_ids = bkd.range_search(&mins, &maxs, true, true)?;
+        Ok(doc_ids
+            .into_iter()
+            .map(|doc_id| Geo3dMatch {
+                doc_id,
+                distance_m: 0.0,
+                score: 1.0,
+            })
+            .collect())
+    }
+}
+
+impl Query for Geo3dBoundingBoxQuery {
+    fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
+        Ok(Box::new(Geo3dMatcher::new(self.find_matches(reader)?)))
+    }
+
+    fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
+        Ok(Box::new(Geo3dScorer::new(
+            self.find_matches(reader)?,
+            self.boost,
+        )))
+    }
+
+    fn boost(&self) -> f32 {
+        self.boost
+    }
+
+    fn set_boost(&mut self, boost: f32) {
+        self.boost = boost;
+    }
+
+    fn clone_box(&self) -> Box<dyn Query> {
+        Box::new(self.clone())
+    }
+
+    fn description(&self) -> String {
+        format!(
+            "Geo3dBoundingBoxQuery(field: {}, min: {:?}, max: {:?})",
+            self.field, self.min, self.max
+        )
+    }
+
+    fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
+        // The constructor guarantees min <= max on every axis, so the box
+        // is always non-empty in the geometric sense (it contains at
+        // least one point). Whether any document falls inside is a
+        // runtime question; we leave that to the matcher.
+        Ok(false)
+    }
+
+    fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
+        let doc_count = reader.doc_count();
+        Ok(doc_count.saturating_mul(2))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,5 +635,77 @@ mod tests {
         assert_eq!(q.boost(), 2.0);
         let cloned = q.clone_box();
         assert!(cloned.description().contains("Geo3dDistanceQuery"));
+    }
+
+    #[test]
+    fn geo3d_bbox_query_basics() {
+        let q = Geo3dBoundingBoxQuery::new(
+            "position",
+            GeoEcefPoint::new(0.0, 0.0, 0.0),
+            GeoEcefPoint::new(10.0, 20.0, 30.0),
+        )
+        .unwrap()
+        .with_boost(3.0);
+        assert_eq!(q.field(), "position");
+        assert_eq!(q.min(), GeoEcefPoint::new(0.0, 0.0, 0.0));
+        assert_eq!(q.max(), GeoEcefPoint::new(10.0, 20.0, 30.0));
+        assert_eq!(q.boost(), 3.0);
+        let cloned = q.clone_box();
+        assert!(cloned.description().contains("Geo3dBoundingBoxQuery"));
+    }
+
+    #[test]
+    fn geo3d_bbox_query_accepts_degenerate_box() {
+        // Zero-volume box (single point); valid per the type docs.
+        let q = Geo3dBoundingBoxQuery::new(
+            "position",
+            GeoEcefPoint::new(5.0, 5.0, 5.0),
+            GeoEcefPoint::new(5.0, 5.0, 5.0),
+        );
+        assert!(q.is_ok(), "degenerate (zero-volume) box must be accepted");
+    }
+
+    #[test]
+    fn geo3d_bbox_query_accepts_zero_volume_axis() {
+        // Zero on a single axis (a face) — also valid.
+        let q = Geo3dBoundingBoxQuery::new(
+            "position",
+            GeoEcefPoint::new(0.0, 0.0, 5.0),
+            GeoEcefPoint::new(10.0, 10.0, 5.0),
+        );
+        assert!(
+            q.is_ok(),
+            "box with zero extent on one axis must be accepted"
+        );
+    }
+
+    #[test]
+    fn geo3d_bbox_query_rejects_inverted_box() {
+        // min.x > max.x → reject.
+        let err = Geo3dBoundingBoxQuery::new(
+            "position",
+            GeoEcefPoint::new(10.0, 0.0, 0.0),
+            GeoEcefPoint::new(5.0, 10.0, 10.0),
+        )
+        .unwrap_err();
+        assert!(format!("{err:?}").contains("min.x"));
+
+        // min.y > max.y → reject.
+        let err_y = Geo3dBoundingBoxQuery::new(
+            "position",
+            GeoEcefPoint::new(0.0, 10.0, 0.0),
+            GeoEcefPoint::new(10.0, 5.0, 10.0),
+        )
+        .unwrap_err();
+        assert!(format!("{err_y:?}").contains("min.y"));
+
+        // min.z > max.z → reject.
+        let err_z = Geo3dBoundingBoxQuery::new(
+            "position",
+            GeoEcefPoint::new(0.0, 0.0, 10.0),
+            GeoEcefPoint::new(10.0, 10.0, 5.0),
+        )
+        .unwrap_err();
+        assert!(format!("{err_z:?}").contains("min.z"));
     }
 }
