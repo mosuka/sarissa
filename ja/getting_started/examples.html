@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-aa469a35.js";
+            window.path_to_searchindex_js = "../searchindex-fbb2f7b9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -210,6 +210,11 @@ cargo run --example &lt;name&gt; --features &lt;flag&gt;
 <pre><code class="language-bash">cargo run --example hybrid_search
 </code></pre>
 <p>デモ内容: Lexical のみ、Vector のみ、ハイブリッド検索。<code>RRF</code> と <code>WeightedSum</code> の両方の融合アルゴリズム。Builder API と DSL。</p>
+<h3 id="geo3d_search"><a class="header" href="#geo3d_search">geo3d_search</a></h3>
+<p>Earth-Centered Earth-Fixed (ECEF) 座標系を用いた 3D 地理検索のサンプルです。6 つのランドマーク（東京タワー、東京スカイツリー、富士山頂、自由の女神像、シドニー・オペラハウス、ISS サンプル点）を <code>wgs84_to_ecef</code> で変換してインデックスします。</p>
+<pre><code class="language-bash">cargo run --example geo3d_search
+</code></pre>
+<p>デモ内容: <code>Geo3dDistanceQuery</code>（球）、<code>Geo3dBoundingBoxQuery</code>（3D AABB）、<code>Geo3dNearestQuery</code>（k-NN）、および <code>wgs84_to_ecef</code> 変換ユーティリティ。バウンディングボックスクエリは ISS サンプルを意図的に除外し、高度が第三の軸として機能することを示します。</p>
 <h3 id="search_with_candle"><a class="header" href="#search_with_candle">search_with_candle</a></h3>
 <p>Hugging Face Candle を使用した実際の BERT エンベディングによる Vector 検索です。初回実行時にモデルが自動的にダウンロードされます（約 80 MB）。</p>
 <pre><code class="language-bash">cargo run --example search_with_candle --features embeddings-candle

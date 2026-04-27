@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4822c65a.js";
+            window.path_to_searchindex_js = "searchindex-55d4e1d1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a6ad8c0d.js"></script>
@@ -861,6 +861,11 @@ cargo run --example &lt;name&gt; --features &lt;flag&gt;
 <pre><code class="language-bash">cargo run --example hybrid_search
 </code></pre>
 <p>Demonstrates: Lexical-only, vector-only, and hybrid search. Both <code>RRF</code> and <code>WeightedSum</code> fusion algorithms. Builder API and DSL.</p>
+<h3 id="geo3d_search"><a class="header" href="#geo3d_search">geo3d_search</a></h3>
+<p>3D Earth-Centered Earth-Fixed (ECEF) geographic search. Indexes six landmarks (Tokyo Tower, Tokyo Skytree, Mt. Fuji summit, Statue of Liberty, Sydney Opera House, an ISS sample point) computed via <code>wgs84_to_ecef</code>.</p>
+<pre><code class="language-bash">cargo run --example geo3d_search
+</code></pre>
+<p>Demonstrates: <code>Geo3dDistanceQuery</code> (sphere), <code>Geo3dBoundingBoxQuery</code> (3D AABB), <code>Geo3dNearestQuery</code> (k-NN), and the <code>wgs84_to_ecef</code> conversion utility. The bounding-box query intentionally excludes the ISS sample to highlight that altitude is a first-class third axis.</p>
 <h3 id="search_with_candle"><a class="header" href="#search_with_candle">search_with_candle</a></h3>
 <p>Vector search using real BERT embeddings via Hugging Face Candle. The model is downloaded automatically on first run (~80 MB).</p>
 <pre><code class="language-bash">cargo run --example search_with_candle --features embeddings-candle
