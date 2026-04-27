@@ -39,6 +39,7 @@ graph TB
     FO --> B["Boolean"]
     FO --> DT["DateTime"]
     FO --> G["Geo"]
+    FO --> G3["Geo3d"]
     FO --> BY["Bytes"]
 
     FO --> FLAT["Flat"]
@@ -58,6 +59,7 @@ Lexical フィールドは転置インデックス（Inverted Index）を使用�
 | **Boolean** | `BooleanOption` | `add_boolean_field()` | `true` / `false` |
 | **DateTime** | `DateTimeOption` | `add_datetime_field()` | UTC タイムスタンプ。範囲クエリをサポート |
 | **Geo** | `GeoOption` | `add_geo_field()` | 緯度/経度のペア。半径検索とバウンディングボックスクエリをサポート |
+| **Geo3d** | `Geo3dOption` | `add_geo3d_field()` | 3D ECEF 直交座標ポイント（`x`, `y`, `z`、メートル）。3D 距離検索・バウンディングボックス・k-NN クエリをサポート。詳細は [3D 地理検索](geo3d.md) を参照 |
 | **Bytes** | `BytesOption` | `add_bytes_field()` | バイナリデータ |
 
 #### Text フィールドオプション
@@ -193,7 +195,8 @@ graph LR
 | `add_boolean(name, value)` | `bool` | ブールフィールドを追加 |
 | `add_datetime(name, value)` | `DateTime<Utc>` | 日時フィールドを追加 |
 | `add_vector(name, value)` | `Vec<f32>` | 事前計算済みベクトルフィールドを追加 |
-| `add_geo(name, lat, lon)` | `(f64, f64)` | 地理座標フィールドを追加 |
+| `add_geo(name, lat, lon)` | `(f64, f64)` | 2D 地理座標フィールドを追加（WGS84） |
+| `add_geo_ecef(name, x, y, z)` | `(f64, f64, f64)` | 3D ECEF 直交座標ポイントを追加（メートル） |
 | `add_bytes(name, data)` | `Vec<u8>` | バイナリデータを追加 |
 | `add_field(name, value)` | `DataValue` | 任意の値型を追加 |
 
@@ -211,7 +214,10 @@ pub enum DataValue {
     Bytes(Vec<u8>, Option<String>),  // (data, optional MIME type)
     Vector(Vec<f32>),
     DateTime(DateTime<Utc>),
-    Geo(f64, f64),          // (latitude, longitude)
+    Geo(GeoPoint),                   // 2D WGS84 ポイント (latitude, longitude)
+    GeoEcef(GeoEcefPoint),           // 3D ECEF 直交座標ポイント (x, y, z)、メートル
+    Int64Array(Vec<i64>),            // 多値整数フィールド
+    Float64Array(Vec<f64>),          // 多値浮動小数点フィールド
 }
 ```
 
@@ -274,8 +280,10 @@ let schema = Schema::builder()
 | 浮動小数点を含む数値配列（例: `[1.5, 2.0, 3]`） | `Float`（`multi_valued = true`） |
 | 緯度キー（`lat` または `latitude`）と経度キー（`lon`、`lng`、`longitude` のいずれか）を持ち、値が範囲内の object | `Geo` |
 
-ベクトルフィールド（`Hnsw` / `Flat` / `Ivf`）および `Bytes` は**自動推論の対象外**です。
-スキーマへ明示的に宣言してください。
+ベクトルフィールド（`Hnsw` / `Flat` / `Ivf`）、`Bytes`、`Geo3d` は
+**自動推論の対象外**です。スキーマへ明示的に宣言してください。
+（`x`, `y`, `z` キーを持つ任意のユーザーレコードと衝突するため、
+`Geo3d` は JSON オブジェクトから推論されません。）
 
 ### 多値数値フィールド
 
@@ -302,7 +310,7 @@ let schema = Schema::builder()
 | `Boolean` | `Int64(0)` / `Int64(1)` | `false` / `true` |
 | `Boolean` | `Text("true"/"false")` | 大文字小文字を無視してパース |
 | `Text` | 任意のスカラー値 | 文字列化 |
-| `Geo` / `Bytes` / ベクトル | 対応 variant 以外 | エラー |
+| `Geo` / `Geo3d` / `Bytes` / ベクトル | 対応 variant 以外 | エラー |
 
 変換エラーの扱いはポリシーに依存します:
 

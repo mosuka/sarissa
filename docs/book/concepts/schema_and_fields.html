@@ -212,6 +212,7 @@ let schema = Schema::builder()
     FO --&gt; B["Boolean"]
     FO --&gt; DT["DateTime"]
     FO --&gt; G["Geo"]
+    FO --&gt; G3["Geo3d"]
     FO --&gt; BY["Bytes"]
 
     FO --&gt; FLAT["Flat"]
@@ -227,6 +228,7 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><strong>Boolean</strong></td><td style="text-align: left"><code>BooleanOption</code></td><td style="text-align: left"><code>add_boolean_field()</code></td><td style="text-align: left"><code>true</code> / <code>false</code></td></tr>
 <tr><td style="text-align: left"><strong>DateTime</strong></td><td style="text-align: left"><code>DateTimeOption</code></td><td style="text-align: left"><code>add_datetime_field()</code></td><td style="text-align: left">UTC timestamp; supports range queries</td></tr>
 <tr><td style="text-align: left"><strong>Geo</strong></td><td style="text-align: left"><code>GeoOption</code></td><td style="text-align: left"><code>add_geo_field()</code></td><td style="text-align: left">Latitude/longitude pair; supports radius and bounding box queries</td></tr>
+<tr><td style="text-align: left"><strong>Geo3d</strong></td><td style="text-align: left"><code>Geo3dOption</code></td><td style="text-align: left"><code>add_geo3d_field()</code></td><td style="text-align: left">3D ECEF Cartesian point (<code>x</code>, <code>y</code>, <code>z</code> in metres); supports 3D distance, bounding box, and k-NN queries. See <a href="geo3d.html">3D Geographic Search</a>.</td></tr>
 <tr><td style="text-align: left"><strong>Bytes</strong></td><td style="text-align: left"><code>BytesOption</code></td><td style="text-align: left"><code>add_bytes_field()</code></td><td style="text-align: left">Raw binary data</td></tr>
 </tbody></table>
 </div>
@@ -345,7 +347,8 @@ engine.commit().await?;
 <tr><td style="text-align: left"><code>add_boolean(name, value)</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left">Add a boolean field</td></tr>
 <tr><td style="text-align: left"><code>add_datetime(name, value)</code></td><td style="text-align: left"><code>DateTime&lt;Utc&gt;</code></td><td style="text-align: left">Add a datetime field</td></tr>
 <tr><td style="text-align: left"><code>add_vector(name, value)</code></td><td style="text-align: left"><code>Vec&lt;f32&gt;</code></td><td style="text-align: left">Add a pre-computed vector field</td></tr>
-<tr><td style="text-align: left"><code>add_geo(name, lat, lon)</code></td><td style="text-align: left"><code>(f64, f64)</code></td><td style="text-align: left">Add a geographic point</td></tr>
+<tr><td style="text-align: left"><code>add_geo(name, lat, lon)</code></td><td style="text-align: left"><code>(f64, f64)</code></td><td style="text-align: left">Add a 2D geographic point (WGS84)</td></tr>
+<tr><td style="text-align: left"><code>add_geo_ecef(name, x, y, z)</code></td><td style="text-align: left"><code>(f64, f64, f64)</code></td><td style="text-align: left">Add a 3D ECEF Cartesian point (metres)</td></tr>
 <tr><td style="text-align: left"><code>add_bytes(name, data)</code></td><td style="text-align: left"><code>Vec&lt;u8&gt;</code></td><td style="text-align: left">Add binary data</td></tr>
 <tr><td style="text-align: left"><code>add_field(name, value)</code></td><td style="text-align: left"><code>DataValue</code></td><td style="text-align: left">Add any value type</td></tr>
 </tbody></table>
@@ -363,7 +366,10 @@ engine.commit().await?;
     Bytes(Vec&lt;u8&gt;, Option&lt;String&gt;),  // (data, optional MIME type)
     Vector(Vec&lt;f32&gt;),
     DateTime(DateTime&lt;Utc&gt;),
-    Geo(f64, f64),          // (latitude, longitude)
+    Geo(GeoPoint),                   // 2D WGS84 point (latitude, longitude)
+    GeoEcef(GeoEcefPoint),           // 3D ECEF Cartesian point (x, y, z) in metres
+    Int64Array(Vec&lt;i64&gt;),            // multi-valued integer field
+    Float64Array(Vec&lt;f64&gt;),          // multi-valued float field
 }
 <span class="boring">}</span></code></pre></pre>
 <p><code>DataValue</code> implements <code>From&lt;T&gt;</code> for common types, so you can use <code>.into()</code> conversions:</p>
@@ -417,8 +423,10 @@ let schema = Schema::builder()
 <tr><td style="text-align: left">object with a latitude key (<code>lat</code> or <code>latitude</code>) and a longitude key (<code>lon</code>, <code>lng</code>, or <code>longitude</code>), values in range</td><td style="text-align: left"><code>Geo</code></td></tr>
 </tbody></table>
 </div>
-<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>) and <code>Bytes</code> are <strong>never</strong> inferred:
-they must be declared in the schema explicitly.</p>
+<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>), <code>Bytes</code>, and <code>Geo3d</code> are <strong>never</strong>
+inferred: they must be declared in the schema explicitly. (Inferring
+<code>Geo3d</code> from a 3D-looking JSON object would conflict with arbitrary user
+records that happen to have <code>x</code>, <code>y</code>, <code>z</code> keys.)</p>
 <h3 id="multi-valued-numeric-fields"><a class="header" href="#multi-valued-numeric-fields">Multi-valued numeric fields</a></h3>
 <p>Integer and Float fields can be declared with <code>multi_valued = true</code> to
 hold multiple values per document. A range query matches a document if
@@ -440,7 +448,7 @@ to coerce the value to the declared type. The coercion rules are:</p>
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Int64(0)</code> / <code>Int64(1)</code></td><td style="text-align: left"><code>false</code> / <code>true</code></td></tr>
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Text("true"/"false")</code></td><td style="text-align: left">parsed (case-insensitive)</td></tr>
 <tr><td style="text-align: left"><code>Text</code></td><td style="text-align: left">any scalar</td><td style="text-align: left">stringified</td></tr>
-<tr><td style="text-align: left"><code>Geo</code> / <code>Bytes</code> / vector</td><td style="text-align: left">anything other than matching variant</td><td style="text-align: left">error</td></tr>
+<tr><td style="text-align: left"><code>Geo</code> / <code>Geo3d</code> / <code>Bytes</code> / vector</td><td style="text-align: left">anything other than matching variant</td><td style="text-align: left">error</td></tr>
 </tbody></table>
 </div>
 <p>Coercion errors interact with the policy:</p>

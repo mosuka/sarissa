@@ -867,6 +867,7 @@ let schema = Schema::builder()
     FO --&gt; B["Boolean"]
     FO --&gt; DT["DateTime"]
     FO --&gt; G["Geo"]
+    FO --&gt; G3["Geo3d"]
     FO --&gt; BY["Bytes"]
 
     FO --&gt; FLAT["Flat"]
@@ -882,6 +883,7 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><strong>Boolean</strong></td><td style="text-align: left"><code>BooleanOption</code></td><td style="text-align: left"><code>add_boolean_field()</code></td><td style="text-align: left"><code>true</code> / <code>false</code></td></tr>
 <tr><td style="text-align: left"><strong>DateTime</strong></td><td style="text-align: left"><code>DateTimeOption</code></td><td style="text-align: left"><code>add_datetime_field()</code></td><td style="text-align: left">UTC timestamp; supports range queries</td></tr>
 <tr><td style="text-align: left"><strong>Geo</strong></td><td style="text-align: left"><code>GeoOption</code></td><td style="text-align: left"><code>add_geo_field()</code></td><td style="text-align: left">Latitude/longitude pair; supports radius and bounding box queries</td></tr>
+<tr><td style="text-align: left"><strong>Geo3d</strong></td><td style="text-align: left"><code>Geo3dOption</code></td><td style="text-align: left"><code>add_geo3d_field()</code></td><td style="text-align: left">3D ECEF Cartesian point (<code>x</code>, <code>y</code>, <code>z</code> in metres); supports 3D distance, bounding box, and k-NN queries. See <a href="concepts/geo3d.html">3D Geographic Search</a>.</td></tr>
 <tr><td style="text-align: left"><strong>Bytes</strong></td><td style="text-align: left"><code>BytesOption</code></td><td style="text-align: left"><code>add_bytes_field()</code></td><td style="text-align: left">Raw binary data</td></tr>
 </tbody></table>
 </div>
@@ -1000,7 +1002,8 @@ engine.commit().await?;
 <tr><td style="text-align: left"><code>add_boolean(name, value)</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left">Add a boolean field</td></tr>
 <tr><td style="text-align: left"><code>add_datetime(name, value)</code></td><td style="text-align: left"><code>DateTime&lt;Utc&gt;</code></td><td style="text-align: left">Add a datetime field</td></tr>
 <tr><td style="text-align: left"><code>add_vector(name, value)</code></td><td style="text-align: left"><code>Vec&lt;f32&gt;</code></td><td style="text-align: left">Add a pre-computed vector field</td></tr>
-<tr><td style="text-align: left"><code>add_geo(name, lat, lon)</code></td><td style="text-align: left"><code>(f64, f64)</code></td><td style="text-align: left">Add a geographic point</td></tr>
+<tr><td style="text-align: left"><code>add_geo(name, lat, lon)</code></td><td style="text-align: left"><code>(f64, f64)</code></td><td style="text-align: left">Add a 2D geographic point (WGS84)</td></tr>
+<tr><td style="text-align: left"><code>add_geo_ecef(name, x, y, z)</code></td><td style="text-align: left"><code>(f64, f64, f64)</code></td><td style="text-align: left">Add a 3D ECEF Cartesian point (metres)</td></tr>
 <tr><td style="text-align: left"><code>add_bytes(name, data)</code></td><td style="text-align: left"><code>Vec&lt;u8&gt;</code></td><td style="text-align: left">Add binary data</td></tr>
 <tr><td style="text-align: left"><code>add_field(name, value)</code></td><td style="text-align: left"><code>DataValue</code></td><td style="text-align: left">Add any value type</td></tr>
 </tbody></table>
@@ -1018,7 +1021,10 @@ engine.commit().await?;
     Bytes(Vec&lt;u8&gt;, Option&lt;String&gt;),  // (data, optional MIME type)
     Vector(Vec&lt;f32&gt;),
     DateTime(DateTime&lt;Utc&gt;),
-    Geo(f64, f64),          // (latitude, longitude)
+    Geo(GeoPoint),                   // 2D WGS84 point (latitude, longitude)
+    GeoEcef(GeoEcefPoint),           // 3D ECEF Cartesian point (x, y, z) in metres
+    Int64Array(Vec&lt;i64&gt;),            // multi-valued integer field
+    Float64Array(Vec&lt;f64&gt;),          // multi-valued float field
 }
 <span class="boring">}</span></code></pre></pre>
 <p><code>DataValue</code> implements <code>From&lt;T&gt;</code> for common types, so you can use <code>.into()</code> conversions:</p>
@@ -1072,8 +1078,10 @@ let schema = Schema::builder()
 <tr><td style="text-align: left">object with a latitude key (<code>lat</code> or <code>latitude</code>) and a longitude key (<code>lon</code>, <code>lng</code>, or <code>longitude</code>), values in range</td><td style="text-align: left"><code>Geo</code></td></tr>
 </tbody></table>
 </div>
-<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>) and <code>Bytes</code> are <strong>never</strong> inferred:
-they must be declared in the schema explicitly.</p>
+<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>), <code>Bytes</code>, and <code>Geo3d</code> are <strong>never</strong>
+inferred: they must be declared in the schema explicitly. (Inferring
+<code>Geo3d</code> from a 3D-looking JSON object would conflict with arbitrary user
+records that happen to have <code>x</code>, <code>y</code>, <code>z</code> keys.)</p>
 <h3 id="multi-valued-numeric-fields"><a class="header" href="#multi-valued-numeric-fields">Multi-valued numeric fields</a></h3>
 <p>Integer and Float fields can be declared with <code>multi_valued = true</code> to
 hold multiple values per document. A range query matches a document if
@@ -1095,7 +1103,7 @@ to coerce the value to the declared type. The coercion rules are:</p>
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Int64(0)</code> / <code>Int64(1)</code></td><td style="text-align: left"><code>false</code> / <code>true</code></td></tr>
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Text("true"/"false")</code></td><td style="text-align: left">parsed (case-insensitive)</td></tr>
 <tr><td style="text-align: left"><code>Text</code></td><td style="text-align: left">any scalar</td><td style="text-align: left">stringified</td></tr>
-<tr><td style="text-align: left"><code>Geo</code> / <code>Bytes</code> / vector</td><td style="text-align: left">anything other than matching variant</td><td style="text-align: left">error</td></tr>
+<tr><td style="text-align: left"><code>Geo</code> / <code>Geo3d</code> / <code>Bytes</code> / vector</td><td style="text-align: left">anything other than matching variant</td><td style="text-align: left">error</td></tr>
 </tbody></table>
 </div>
 <p>Coercion errors interact with the policy:</p>
@@ -1855,7 +1863,7 @@ let storage = StorageFactory::create(
 </tbody></table>
 </div>
 <h2 id="numeric-and-date-fields"><a class="header" href="#numeric-and-date-fields">Numeric and Date Fields</a></h2>
-<p>Integer, float, and datetime fields are indexed using a <strong>BKD tree</strong> — a space-partitioning data structure optimized for range queries:</p>
+<p>Integer, float, and datetime fields are indexed using a <strong><a href="concepts/indexing/../bkd_tree.html">BKD tree</a></strong> — a space-partitioning data structure optimized for range queries:</p>
 <pre><code class="language-mermaid">graph TB
     Root["BKD Root"]
     Root --&gt; L["values &lt; 50"]
@@ -1867,11 +1875,18 @@ let storage = StorageFactory::create(
 </code></pre>
 <p>BKD trees allow efficient evaluation of range queries like <code>price:[10 TO 100]</code> or <code>date:[2024-01-01 TO 2024-12-31]</code>.</p>
 <h2 id="geo-fields"><a class="header" href="#geo-fields">Geo Fields</a></h2>
-<p>Geographic fields store latitude/longitude pairs. They are indexed using a spatial data structure that supports:</p>
-<ul>
-<li><strong>Radius queries</strong>: find all points within N kilometers of a center point</li>
-<li><strong>Bounding box queries</strong>: find all points within a rectangular area</li>
-</ul>
+<p>Geographic fields come in two flavours, both backed by the same multi-dimensional
+<a href="concepts/indexing/../bkd_tree.html">BKD-Tree</a> primitive:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field type</th><th style="text-align: center">Dimensions</th><th style="text-align: left">Coordinates</th><th style="text-align: left">Supported queries</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: center">2</td><td style="text-align: left">WGS84 latitude / longitude (degrees)</td><td style="text-align: left">radius, bounding box</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: center">3</td><td style="text-align: left">ECEF Cartesian <code>(x, y, z)</code> in metres</td><td style="text-align: left">3D distance (sphere), 3D bounding box, k-nearest neighbours</td></tr>
+</tbody></table>
+</div>
+<p><code>Geo3d</code> is the right choice when altitude is a first-class dimension —
+drones, satellites, indoor 3D positioning, or anything else that a 2D
+<code>Geo</code> field would lose or distort near the poles. See
+<a href="concepts/indexing/../geo3d.html">3D Geographic Search (ECEF)</a> for the coordinate system,
+WGS84 conversion helpers, and DSL syntax.</p>
 <h2 id="segments"><a class="header" href="#segments">Segments</a></h2>
 <p>The lexical index is organized into <strong>segments</strong>. Each segment is an immutable, self-contained mini-index:</p>
 <pre><code class="language-mermaid">graph TB
@@ -1891,7 +1906,7 @@ let storage = StorageFactory::create(
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">File Extension</th><th style="text-align: left">Contents</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>.dict</code></td><td style="text-align: left">Term dictionary (sorted terms + metadata offsets)</td></tr>
 <tr><td style="text-align: left"><code>.post</code></td><td style="text-align: left">Posting lists (document IDs, term frequencies, positions)</td></tr>
-<tr><td style="text-align: left"><code>.bkd</code></td><td style="text-align: left">BKD tree data for numeric and date fields</td></tr>
+<tr><td style="text-align: left"><code>.bkd</code></td><td style="text-align: left"><a href="concepts/indexing/../bkd_tree.html">BKD tree</a> data for numeric, date, <code>Geo</code> (2D), and <code>Geo3d</code> (3D ECEF) fields</td></tr>
 <tr><td style="text-align: left"><code>.docs</code></td><td style="text-align: left">Stored field values (the original document content)</td></tr>
 <tr><td style="text-align: left"><code>.dv</code></td><td style="text-align: left">Doc values for sorting and filtering</td></tr>
 <tr><td style="text-align: left"><code>.meta</code></td><td style="text-align: left">Segment metadata (doc count, term count, etc.)</td></tr>
@@ -2380,7 +2395,7 @@ let query = NumericRangeQuery::new(
 );
 <span class="boring">}</span></code></pre></pre>
 <h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<p>Matches documents by geographic location.</p>
+<p>Matches documents by 2D geographic location (WGS84 latitude / longitude).</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use laurus::lexical::query::geo::GeoQuery;
@@ -2395,6 +2410,39 @@ let query = GeoQuery::within_bounding_box(
     36.0, 140.0,  // max (lat, lon)
 )?;
 <span class="boring">}</span></code></pre></pre>
+<h3 id="geo3ddistancequery--geo3dboundingboxquery--geo3dnearestquery"><a class="header" href="#geo3ddistancequery--geo3dboundingboxquery--geo3dnearestquery">Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery</a></h3>
+<p>Three queries target 3D <code>Geo3d</code> fields backed by ECEF Cartesian coordinates
+(metres). Use them when altitude matters or when a 2D <code>Geo</code> field would
+introduce pole singularities. See <a href="concepts/search/../geo3d.html">3D Geographic Search</a> for
+the coordinate system, WGS84 conversion helpers, and worked examples.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::GeoEcefPoint;
+use laurus::lexical::query::geo3d::{
+    Geo3dDistanceQuery, Geo3dBoundingBoxQuery, Geo3dNearestQuery,
+};
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+
+// Sphere: docs within 5 km of `centre`
+let q = Geo3dDistanceQuery::new("position", centre, 5_000.0);
+
+// Axis-aligned 3D bounding box (constructor validates min ≤ max per axis)
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let q = Geo3dBoundingBoxQuery::new("position", min, max)?;
+
+// k-NN: 10 nearest neighbours, with a custom radius schedule
+let q = Geo3dNearestQuery::new("position", centre, 10)
+    .with_initial_radius(500.0)
+    .with_max_radius(1_000_000.0);
+<span class="boring">}</span></code></pre></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Score</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Geo3dDistanceQuery</code></td><td style="text-align: left"><code>1 - distance / radius</code>, clamped to <code>[0, 1]</code>.</td></tr>
+<tr><td style="text-align: left"><code>Geo3dBoundingBoxQuery</code></td><td style="text-align: left">Constant <code>1.0</code> for every match.</td></tr>
+<tr><td style="text-align: left"><code>Geo3dNearestQuery</code></td><td style="text-align: left">Normalised so the closest hit is <code>1.0</code>, the farthest in the returned set is <code>0.0</code>.</td></tr>
+</tbody></table>
+</div>
 <h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
 <p>Matches terms based on their proximity within a document. Use <code>SpanTermQuery</code> and <code>SpanNearQuery</code> to build proximity queries:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -3071,6 +3119,34 @@ test*
 date:{2024-01-01 TO 2024-12-31}
 price:[* TO 100]
 </code></pre>
+<h3 id="3d-geographic-queries-geo3d_"><a class="header" href="#3d-geographic-queries-geo3d_">3D Geographic Queries (<code>geo3d_*</code>)</a></h3>
+<p>Three function-style forms target <code>Geo3d</code> (3D ECEF Cartesian) fields. All
+arguments are signed floats in metres, except <code>k</code> (an unsigned integer):</p>
+<pre><code class="language-text">position:geo3d_distance(x, y, z, radius_m)
+position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+position:geo3d_nearest(x, y, z, k)
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">All docs whose stored point lies within <code>radius_m</code> metres of <code>(x, y, z)</code>.</td></tr>
+<tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">All docs whose stored point lies inside the axis-aligned 3D box.</td></tr>
+<tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">The <code>k</code> nearest docs to <code>(x, y, z)</code> by Euclidean distance.</td></tr>
+</tbody></table>
+</div>
+<p>Examples:</p>
+<pre><code class="language-text"># Within 5 km of Tokyo Tower (ECEF coordinates)
+position:geo3d_distance(-3955182, 3350553, 3700276, 5000)
+
+# Inside an axis-aligned ECEF bounding box
+position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
+
+# 10 nearest indexed points
+position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
+</code></pre>
+<blockquote>
+<p>The query field must be declared as a <code>Geo3d</code> field in the schema. See
+<a href="concepts/geo3d.html">3D Geographic Search</a> for the underlying coordinate system,
+WGS84 conversion helpers, and detailed semantics.</p>
+</blockquote>
 <h3 id="boost"><a class="header" href="#boost">Boost</a></h3>
 <p>Increase the weight of a clause with <code>^</code>:</p>
 <pre><code class="language-text">title:hello^2
@@ -3091,8 +3167,16 @@ sub_clause     = { grouped_query | field_query | term_query }
 grouped_query  = { "(" ~ boolean_query ~ ")" ~ boost? }
 boolean_op     = { ^"AND" | ^"OR" }
 field_query    = { field ~ ":" ~ field_value }
-field_value    = { range_query | phrase_query | fuzzy_term
+field_value    = { geo3d_query | range_query | phrase_query | fuzzy_term
                  | wildcard_term | simple_term }
+geo3d_query    = { geo3d_distance | geo3d_bbox | geo3d_nearest }
+geo3d_distance = { ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_bbox     = { ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ","
+                 ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_nearest  = { ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")" }
 phrase_query   = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
 proximity      = { "~" ~ number }
 fuzzy_term     = { term ~ "~" ~ fuzziness? ~ boost? }
@@ -3271,6 +3355,380 @@ let unified = UnifiedQueryParser::new(lexical_parser, vector_parser)
         vector_weight: 0.7,
     });
 <span class="boring">}</span></code></pre></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="bkd-tree"><a class="header" href="#bkd-tree">BKD-Tree</a></h1>
+<p>Laurus stores numeric, datetime, and geographic point data in a <strong>BKD-Tree</strong>
+(Block KD-Tree) — a disk-resident, multi-dimensional index that supports
+range, bounding-box, distance, and k-nearest-neighbour queries on the same
+underlying file format.</p>
+<p>The BKD primitive is shared by every "spatial-shaped" field type:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field type</th><th style="text-align: center">Dimensions</th><th style="text-align: left">Coordinate space</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Integer</code> / <code>Float</code> (single- or multi-valued)</td><td style="text-align: center">1</td><td style="text-align: left">scalar</td></tr>
+<tr><td style="text-align: left"><code>DateTime</code></td><td style="text-align: center">1</td><td style="text-align: left">Unix microseconds (UTC)</td></tr>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: center">2</td><td style="text-align: left">latitude / longitude (degrees)</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: center">3</td><td style="text-align: left">ECEF Cartesian (metres)</td></tr>
+</tbody></table>
+</div>
+<p>Adding a new spatial field type therefore boils down to picking a
+dimensionality and writing a query-side
+<a href="concepts/bkd_tree.html#query-the-intersectvisitor-protocol"><code>IntersectVisitor</code></a> — the writer,
+reader, and on-disk layout are reused unchanged.</p>
+<h2 id="file-format-version-2"><a class="header" href="#file-format-version-2">File Format (Version 2)</a></h2>
+<p>A <code>.bkd</code> segment file is a self-contained binary blob made of three regions:</p>
+<pre><code class="language-text">+----------------------------------------+
+| File Header                            |   fixed-size, version-tagged
++----------------------------------------+
+| Leaf Blocks                            |   row-major points + doc_ids
+|   leaf 0                               |
+|   leaf 1                               |
+|   ...                                  |
++----------------------------------------+
+| Index Nodes                            |   internal navigation nodes
+|   node N-1                             |
+|   ...                                  |
+|   node 0  (root, written last)         |
++----------------------------------------+
+</code></pre>
+<p>The header (<code>BKDFileHeader</code>) records <code>magic</code>, <code>version</code> (currently <code>2</code>),
+<code>num_dims</code>, <code>bytes_per_dim</code>, the total point count, the number of leaf
+blocks, the <strong>per-axis global min/max</strong> for the whole tree, and offsets to
+the index region and the root node.</p>
+<h3 id="leaf-block-layout"><a class="header" href="#leaf-block-layout">Leaf Block Layout</a></h3>
+<p>Each leaf block stores the points that fall inside its subtree:</p>
+<pre><code class="language-text">count               u32                       — number of points in the leaf
+leaf_min            [f64; num_dims]           — leaf-level AABB minimum
+leaf_max            [f64; num_dims]           — leaf-level AABB maximum
+point_values        [f64; count * num_dims]   — row-major point coordinates
+doc_ids             [u64; count]              — parallel doc-id buffer
+</code></pre>
+<p>The per-leaf AABB lets the reader prune the leaf without scanning any of its
+points when the query region is fully outside (<code>Outside</code>) or fully inside
+(<code>Inside</code>) the leaf.</p>
+<h3 id="internal-index-node-layout"><a class="header" href="#internal-index-node-layout">Internal Index Node Layout</a></h3>
+<p>Internal nodes carry both the split decision and the per-child AABB:</p>
+<pre><code class="language-text">split_dim           u32                       — axis to split on
+split_value         f64                       — split threshold on that axis
+left_min            [f64; num_dims]           — left subtree AABB min
+left_max            [f64; num_dims]           — left subtree AABB max
+right_min           [f64; num_dims]           — right subtree AABB min
+right_max           [f64; num_dims]           — right subtree AABB max
+left_offset         u64                       — file offset of left child
+right_offset        u64                       — file offset of right child
+</code></pre>
+<blockquote>
+<p>Per-node AABBs (added in v2) replace the v1 layout that only carried the
+split value. They make <code>Inside</code> / <code>Outside</code> pruning a constant-time
+rectangle test instead of a recursive descent.</p>
+</blockquote>
+<h2 id="build-algorithm"><a class="header" href="#build-algorithm">Build Algorithm</a></h2>
+<p><code>BKDWriter::write</code> builds the tree from a flat row-major point buffer plus a
+parallel <code>doc_ids</code> buffer. Construction is driven by the <strong>widest-axis split</strong>
+heuristic:</p>
+<ol>
+<li>Compute the AABB of the input subset.</li>
+<li>Pick the axis whose <code>(max - min)</code> range is the widest (ties broken by
+lower dimension index for determinism).</li>
+<li>Sort the index permutation by that axis and split at the median.</li>
+<li>Recurse on the two halves until a subtree fits in <code>block_size</code> points
+(default <code>512</code>); emit it as a leaf.</li>
+<li>Back-patch each parent's <code>left_offset</code> / <code>right_offset</code> once the children
+have been flushed.</li>
+</ol>
+<p>The builder sorts an <code>index permutation</code> rather than the point/doc-id buffers
+themselves, so it does <strong>not</strong> allocate per-point storage no matter how many
+points are written.</p>
+<h3 id="numeric-robustness"><a class="header" href="#numeric-robustness">Numeric Robustness</a></h3>
+<p>Coordinates must be totally orderable. <code>BKDWriter::write</code> rejects <code>NaN</code>
+explicitly because <code>NaN</code> has no defined ordering and would corrupt the
+split decisions and per-node AABB invariants. Both <code>±INFINITY</code> are accepted
+and act as natural sentinels for "unbounded" semantics in queries.</p>
+<h2 id="query-the-intersectvisitor-protocol"><a class="header" href="#query-the-intersectvisitor-protocol">Query: The IntersectVisitor Protocol</a></h2>
+<p>Queries against a BKD index are expressed as an
+<a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/visitor.rs"><code>IntersectVisitor</code></a>
+implementation. The reader walks the tree and asks the visitor three things:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum CellRelation {
+    Inside,   // entire subtree is a hit — collect without per-point checks
+    Outside,  // entire subtree can be skipped
+    Crosses,  // recurse, or filter the leaf per-point
+}
+
+pub trait IntersectVisitor {
+    fn compare(&amp;self, cell: &amp;AABB) -&gt; CellRelation;
+    fn visit_inside(&amp;mut self, doc_id: u64);
+    fn visit(&amp;mut self, doc_id: u64, point: &amp;[f64]);
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The reader's traversal is:</p>
+<pre><code class="language-mermaid">graph TD
+    A["compare(node.aabb)"]
+    A --&gt;|Inside| B["visit_inside(doc_id) for every doc&lt;br/&gt;under the subtree — no point read"]
+    A --&gt;|Outside| C["skip subtree"]
+    A --&gt;|Crosses, internal| D["recurse into children"]
+    A --&gt;|Crosses, leaf| E["visit(doc_id, point) per point&lt;br/&gt;visitor decides what is a hit"]
+</code></pre>
+<p>This three-valued classification is what unlocks pruning. A visitor that
+always returns <code>Crosses</code> would still produce correct results — it would just
+degrade to a full leaf scan.</p>
+<h3 id="range-queries"><a class="header" href="#range-queries">Range Queries</a></h3>
+<p>The legacy <code>BKDTree::range_search</code> API is now a thin wrapper around
+<code>intersect</code>: it constructs a <code>RangeQueryVisitor</code> from the half-open / closed
+range parameters and converts unbounded <code>None</code> slots into <code>±INFINITY</code>. The
+visitor handles inclusive-vs-exclusive boundary checks itself.</p>
+<h3 id="3d-geographic-queries"><a class="header" href="#3d-geographic-queries">3D Geographic Queries</a></h3>
+<p>Three additional visitors live in <a href="concepts/geo3d.html"><code>laurus::lexical::query::geo3d</code></a>
+and target <code>Geo3d</code> (3D ECEF) fields:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Region tested by <code>compare</code></th><th style="text-align: left">Per-point check in <code>visit</code></th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Geo3dDistanceQuery</code></td><td style="text-align: left">sphere <code>(centre, radius)</code> vs. cell AABB</td><td style="text-align: left">Euclidean distance ≤ radius</td></tr>
+<tr><td style="text-align: left"><code>Geo3dBoundingBoxQuery</code></td><td style="text-align: left">query AABB vs. cell AABB</td><td style="text-align: left">point inside query AABB</td></tr>
+<tr><td style="text-align: left"><code>Geo3dNearestQuery</code> (k-NN)</td><td style="text-align: left">expanding sphere around the query point</td><td style="text-align: left">distance ≤ current k-th best</td></tr>
+</tbody></table>
+</div>
+<p>The same primitive could host any future spatial query — for example, polygon
+queries or great-circle 2D <code>Geo</code> queries — by writing a new visitor.</p>
+<h2 id="reader-internals"><a class="header" href="#reader-internals">Reader Internals</a></h2>
+<p><code>BKDReader::intersect</code> uses a single per-query scratch buffer
+(<code>IntersectScratch</code>) that grows to the size of the largest leaf encountered
+and is then reused for every subsequent leaf, so a query touches the
+allocator at most a handful of times regardless of how many leaves it visits.</p>
+<p>Single-leaf trees (very small fields) are handled as a special case: the
+"root offset" points directly at the only leaf and the reader skips the
+internal-node descent entirely.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="concepts/geo3d.html">3D Geographic Search</a> — concrete BKD-backed visitors for ECEF
+distance, bounding-box, and k-NN queries.</li>
+<li><a href="concepts/indexing/lexical_indexing.html">Lexical Indexing</a> — where the <code>.bkd</code> segment
+file fits within the broader segment layout.</li>
+<li><a href="concepts/search/lexical_search.html">Lexical Search</a> — <code>NumericRangeQuery</code>,
+<code>GeoQuery</code>, and <code>Geo3dDistanceQuery</code> programmatic entry points.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="3d-geographic-search-ecef"><a class="header" href="#3d-geographic-search-ecef">3D Geographic Search (ECEF)</a></h1>
+<p>Laurus offers two geographic field types that target different problems:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field type</th><th style="text-align: left">Backing structure</th><th style="text-align: left">Coordinate system</th><th style="text-align: left">Use it when …</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">2D BKD-Tree</td><td style="text-align: left">WGS84 latitude / longitude (degrees)</td><td style="text-align: left">All your data lives at the surface and altitude does not matter.</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: left">3D BKD-Tree</td><td style="text-align: left">ECEF Cartesian <code>(x, y, z)</code> (metres)</td><td style="text-align: left">Altitude is a first-class dimension — drones, satellites, indoor positioning, multi-floor buildings.</td></tr>
+</tbody></table>
+</div>
+<p>Both share the same <a href="concepts/bkd_tree.html">BKD-Tree</a> primitive; <code>Geo3d</code> simply adds a
+third dimension and a different query vocabulary.</p>
+<h2 id="why-ecef"><a class="header" href="#why-ecef">Why ECEF?</a></h2>
+<p><code>(latitude, longitude, altitude)</code> triples are convenient for humans but make
+Euclidean distance unusable: a degree of longitude is ~111 km at the equator
+and 0 km at the poles, and "altitude" is curved with the Earth's surface.</p>
+<p>ECEF (Earth-Centered Earth-Fixed) flattens this into a Cartesian frame:</p>
+<ul>
+<li>The <strong>origin</strong> is the Earth's centre of mass.</li>
+<li>The <strong>+X axis</strong> points through the equator at 0° longitude.</li>
+<li>The <strong>+Y axis</strong> points through the equator at 90° E longitude.</li>
+<li>The <strong>+Z axis</strong> points through the geographic North Pole.</li>
+<li>All three axes are in <strong>metres</strong>.</li>
+</ul>
+<p>In this frame the <strong>straight-line distance between two points is just the
+Euclidean norm</strong> — no spherical trigonometry, no pole singularity, no
+longitude-wrap. That property is what makes <code>Geo3d</code> queries usable from a
+3D BKD-Tree without bespoke spatial code.</p>
+<h2 id="defining-a-geo3d-field"><a class="header" href="#defining-a-geo3d-field">Defining a Geo3d Field</a></h2>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::Schema;
+use laurus::lexical::core::field::Geo3dOption;
+
+let schema = Schema::builder()
+    .add_geo3d_field("position", Geo3dOption::default())
+    .build();
+<span class="boring">}</span></code></pre></pre>
+<p><code>Geo3dOption</code> exposes the same <code>indexed</code> / <code>stored</code> switches as the other
+lexical field options. Indexed values populate the field's 3D BKD-Tree;
+stored values are returned by <code>get_documents</code>.</p>
+<p>The TOML form (used by <code>laurus-cli</code>):</p>
+<pre><code class="language-toml">[fields.position.Geo3d]
+indexed = true
+stored = true
+</code></pre>
+<h2 id="indexing-3d-points"><a class="header" href="#indexing-3d-points">Indexing 3D Points</a></h2>
+<p>Use <code>DocumentBuilder::add_geo_ecef</code> to add a point in raw Cartesian
+metres:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::Document;
+
+// A point at lat=35.6586°, lon=139.7454°, height=250 m
+// (already converted to ECEF — see "Coordinate Conversion" below).
+let doc = Document::builder()
+    .add_geo_ecef("position", -3_955_182.0, 3_350_553.0, 3_700_276.0)
+    .build();
+
+engine.put_document("tokyo-tower", doc).await?;
+engine.commit().await?;
+<span class="boring">}</span></code></pre></pre>
+<p>If the value already exists as a <code>GeoEcefPoint</code>, build it through the
+unified <code>DataValue</code> API instead:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::{DataValue, GeoEcefPoint};
+
+let p = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let doc = Document::builder()
+    .add_field("position", DataValue::GeoEcef(p))
+    .build();
+<span class="boring">}</span></code></pre></pre>
+<h2 id="coordinate-conversion-wgs84--ecef"><a class="header" href="#coordinate-conversion-wgs84--ecef">Coordinate Conversion (WGS84 ↔ ECEF)</a></h2>
+<p>Most input arrives as <code>(latitude°, longitude°, height_m)</code>. Laurus exposes
+the canonical pair of conversions in <a href="https://github.com/mosuka/laurus/blob/main/laurus/src/util/ecef.rs"><code>laurus::util::ecef</code></a>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::util::ecef::{wgs84_to_ecef, ecef_to_wgs84};
+
+// Forward: lat/lon/height → ECEF
+let p = wgs84_to_ecef(35.6586, 139.7454, 250.0);
+
+// Reverse: ECEF → lat/lon/height
+let (lat, lon, height) = ecef_to_wgs84(&amp;p);
+<span class="boring">}</span></code></pre></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Function</th><th style="text-align: left">Direction</th><th style="text-align: left">Algorithm</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>wgs84_to_ecef(lat°, lon°, h_m)</code></td><td style="text-align: left">geographic → Cartesian</td><td style="text-align: left">Closed-form prime-vertical formula.</td></tr>
+<tr><td style="text-align: left"><code>ecef_to_wgs84(&amp;GeoEcefPoint)</code></td><td style="text-align: left">Cartesian → geographic</td><td style="text-align: left">Bowring 1985 closed-form seed + 3 Newton-Raphson iterations.</td></tr>
+</tbody></table>
+</div>
+<p>The reverse conversion round-trips with <strong>sub-µm</strong> precision on every axis
+from sub-surface up to far beyond LEO altitudes. Near the poles the
+implementation switches from the standard <code>h = p / cos(lat) - N</code> formula
+(which diverges at <code>cos(lat) → 0</code>) to the meridian form
+<code>h = z / sin(lat) - N(1 - e²)</code>.</p>
+<p>The WGS84 ellipsoid constants used internally are also exposed as <code>pub const</code>s (<code>WGS84_A</code>, <code>WGS84_F</code>, <code>WGS84_B</code>, <code>WGS84_E2</code>, <code>WGS84_E_PRIME_SQ</code>)
+so external code can reference the exact values laurus uses.</p>
+<h2 id="query-types-1"><a class="header" href="#query-types-1">Query Types</a></h2>
+<p>Three query types target <code>Geo3d</code> fields. All three are
+<a href="concepts/bkd_tree.html#query-the-intersectvisitor-protocol"><code>IntersectVisitor</code></a> implementations
+on top of the shared 3D BKD-Tree.</p>
+<h3 id="sphere-radius--geo3ddistancequery"><a class="header" href="#sphere-radius--geo3ddistancequery">Sphere (radius) — <code>Geo3dDistanceQuery</code></a></h3>
+<p>Find every document whose stored point lies within <code>radius_m</code> metres of a
+centre point. Score is <code>1 - distance / radius</code>, clamped to <code>[0, 1]</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dDistanceQuery;
+use laurus::GeoEcefPoint;
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let query = Geo3dDistanceQuery::new("position", centre, 5_000.0); // 5 km radius
+<span class="boring">}</span></code></pre></pre>
+<p>The visitor uses <a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs"><code>AABB::min_distance_sq_to_point</code></a> for the <code>Outside</code>
+test and <a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs"><code>AABB::max_distance_sq_to_point</code></a> for the <code>Inside</code> test, so
+both cell-vs-sphere checks run in squared-distance space and avoid <code>sqrt</code>.</p>
+<h3 id="bounding-box--geo3dboundingboxquery"><a class="header" href="#bounding-box--geo3dboundingboxquery">Bounding Box — <code>Geo3dBoundingBoxQuery</code></a></h3>
+<p>Find every document whose stored point lies inside an axis-aligned 3D box
+defined by <code>(min_x, min_y, min_z)</code> and <code>(max_x, max_y, max_z)</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dBoundingBoxQuery;
+use laurus::GeoEcefPoint;
+
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let query = Geo3dBoundingBoxQuery::new("position", min, max)?;
+<span class="boring">}</span></code></pre></pre>
+<p>The constructor returns <code>Result</code> because every <code>min[i]</code> must be <code>≤ max[i]</code>;
+mismatched bounds are rejected at construction time rather than producing
+silently-empty results.</p>
+<blockquote>
+<p><strong>Caveat.</strong> The query box is axis-aligned in ECEF Cartesian space. A box
+built from two <code>(lat, lon, height)</code> corners by converting each corner
+separately is <strong>not</strong> the same shape as the spherical-shell region a user
+might intuitively expect. For region queries on the Earth's surface,
+<code>Geo3dDistanceQuery</code> (a true 3D sphere) usually matches user intuition
+better.</p>
+</blockquote>
+<h3 id="k-nearest-neighbours--geo3dnearestquery"><a class="header" href="#k-nearest-neighbours--geo3dnearestquery">k-Nearest Neighbours — <code>Geo3dNearestQuery</code></a></h3>
+<p>Find the <code>k</code> nearest documents to a query point. The query starts from a
+small probe sphere (default 1 km) and <strong>doubles the radius</strong> until either:</p>
+<ol>
+<li>it has collected at least <code>k</code> distinct candidates,</li>
+<li>doubling makes no progress,</li>
+<li>the radius reaches <code>max_radius_m</code> (default <code>1.0e10</code> m, i.e. 10⁷ km).</li>
+</ol>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dNearestQuery;
+use laurus::GeoEcefPoint;
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let query = Geo3dNearestQuery::new("position", centre, 10) // 10 nearest
+    .with_initial_radius(500.0)         // start at 500 m
+    .with_max_radius(1_000_000.0);      // cap at 1 000 km
+<span class="boring">}</span></code></pre></pre>
+<p>A smaller-than-<code>k</code> result simply means the index does not contain <code>k</code>
+points within <code>max_radius_m</code>. Score is normalised so that the closest hit
+gets <code>1.0</code> and the farthest hit in the returned set gets <code>0.0</code>.</p>
+<p>The k-NN visitor never returns <code>CellRelation::Inside</code> from <code>compare</code> —
+only <code>Outside</code> or <code>Crosses</code> — so every candidate is delivered to <code>visit</code>
+with its exact coordinates, ensuring k-NN ordering uses the true distance.</p>
+<h2 id="query-dsl-3"><a class="header" href="#query-dsl-3">Query DSL</a></h2>
+<p><code>Geo3d</code> queries are also exposed in the unified Query DSL (see
+<a href="concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → Geo3d Functions</a>):</p>
+<pre><code class="language-text">position:geo3d_distance(-3955182, 3350553, 3700276, 5000)
+position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
+position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Form</th><th style="text-align: left">Arguments</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and search radius in metres</td></tr>
+<tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">two opposite corners of the AABB</td></tr>
+<tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and the integer <code>k</code></td></tr>
+</tbody></table>
+</div>
+<p>All numeric arguments are signed floats; the <code>k</code> of <code>geo3d_nearest</code> is an
+unsigned integer.</p>
+<h2 id="wire-formats"><a class="header" href="#wire-formats">Wire Formats</a></h2>
+<h3 id="grpc"><a class="header" href="#grpc">gRPC</a></h3>
+<p>Protocol Buffers expose 3D geo as a dedicated <code>Value</code> variant alongside a
+<code>Geo3dPoint</code> message and a <code>Geo3dOption</code> schema option:</p>
+<pre><code class="language-proto">message Geo3dPoint {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+
+message Value {
+  oneof kind {
+    // ...
+    Geo3dPoint geo3d_value = 12;
+  }
+}
+
+message Geo3dOption {
+  bool indexed = 1;
+  bool stored = 2;
+}
+</code></pre>
+<p>See <a href="https://github.com/mosuka/laurus/blob/main/laurus-server/proto/laurus/v1/common.proto"><code>common.proto</code></a> and
+<a href="https://github.com/mosuka/laurus/blob/main/laurus-server/proto/laurus/v1/index.proto"><code>index.proto</code></a> for the full definitions.</p>
+<h3 id="http-gateway--mcp"><a class="header" href="#http-gateway--mcp">HTTP gateway / MCP</a></h3>
+<p>JSON documents accept <code>Geo3d</code> values as a <code>{ "x": …, "y": …, "z": … }</code>
+object:</p>
+<pre><code class="language-json">{
+  "position": { "x": -3955182.0, "y": 3350553.0, "z": 3700276.0 }
+}
+</code></pre>
+<p>The HTTP gateway converts this to <code>DataValue::GeoEcef</code> before forwarding
+to the engine; the MCP server uses the same convention.</p>
+<h2 id="when-not-to-use-geo3d"><a class="header" href="#when-not-to-use-geo3d">When <em>not</em> to Use Geo3d</a></h2>
+<ul>
+<li><strong>Pure 2D map queries</strong> (radius from a coordinate on the surface, simple
+bounding boxes on a tile map) — keep using <code>Geo</code>. The 2D BKD is one
+dimension lighter and the WGS84 input matches user intuition.</li>
+<li><strong>Approximate semantic similarity</strong> of a learned location embedding —
+that is a vector field (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>), not a <code>Geo3d</code> field.</li>
+</ul>
+<h2 id="see-also-1"><a class="header" href="#see-also-1">See Also</a></h2>
+<ul>
+<li><a href="concepts/bkd_tree.html">BKD-Tree</a> — the underlying multi-dimensional index that
+also backs <code>Integer</code>, <code>Float</code>, <code>DateTime</code>, and 2D <code>Geo</code> fields.</li>
+<li><a href="concepts/schema_and_fields.html">Schema &amp; Fields</a> — <code>Geo3d</code> alongside the rest of
+the field type table.</li>
+<li><a href="concepts/query_dsl.html">Query DSL</a> — full geo3d DSL grammar.</li>
+<li><a href="concepts/search/lexical_search.html">Lexical Search</a> — programmatic entry points
+for every lexical query type.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="library-overview"><a class="header" href="#library-overview">Library Overview</a></h1>
 <p>The <code>laurus</code> crate is the core search engine library. It provides lexical search (keyword matching via inverted index), vector search (semantic similarity via embeddings), and hybrid search (combining both) through a unified API.</p>
 <h2 id="module-structure"><a class="header" href="#module-structure">Module Structure</a></h2>

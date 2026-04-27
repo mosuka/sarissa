@@ -69,7 +69,7 @@ Each entry in a posting list contains:
 
 ## Numeric and Date Fields
 
-Integer, float, and datetime fields are indexed using a **BKD tree** — a space-partitioning data structure optimized for range queries:
+Integer, float, and datetime fields are indexed using a **[BKD tree](../bkd_tree.md)** — a space-partitioning data structure optimized for range queries:
 
 ```mermaid
 graph TB
@@ -86,10 +86,19 @@ BKD trees allow efficient evaluation of range queries like `price:[10 TO 100]` o
 
 ## Geo Fields
 
-Geographic fields store latitude/longitude pairs. They are indexed using a spatial data structure that supports:
+Geographic fields come in two flavours, both backed by the same multi-dimensional
+[BKD-Tree](../bkd_tree.md) primitive:
 
-- **Radius queries**: find all points within N kilometers of a center point
-- **Bounding box queries**: find all points within a rectangular area
+| Field type | Dimensions | Coordinates | Supported queries |
+| :--- | :---: | :--- | :--- |
+| `Geo` | 2 | WGS84 latitude / longitude (degrees) | radius, bounding box |
+| `Geo3d` | 3 | ECEF Cartesian `(x, y, z)` in metres | 3D distance (sphere), 3D bounding box, k-nearest neighbours |
+
+`Geo3d` is the right choice when altitude is a first-class dimension —
+drones, satellites, indoor 3D positioning, or anything else that a 2D
+`Geo` field would lose or distort near the poles. See
+[3D Geographic Search (ECEF)](../geo3d.md) for the coordinate system,
+WGS84 conversion helpers, and DSL syntax.
 
 ## Segments
 
@@ -115,7 +124,7 @@ graph TB
 | :--- | :--- |
 | `.dict` | Term dictionary (sorted terms + metadata offsets) |
 | `.post` | Posting lists (document IDs, term frequencies, positions) |
-| `.bkd` | BKD tree data for numeric and date fields |
+| `.bkd` | [BKD tree](../bkd_tree.md) data for numeric, date, `Geo` (2D), and `Geo3d` (3D ECEF) fields |
 | `.docs` | Stored field values (the original document content) |
 | `.dv` | Doc values for sorting and filtering |
 | `.meta` | Segment metadata (doc count, term count, etc.) |

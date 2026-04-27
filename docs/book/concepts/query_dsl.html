@@ -232,6 +232,34 @@ test*
 date:{2024-01-01 TO 2024-12-31}
 price:[* TO 100]
 </code></pre>
+<h3 id="3d-geographic-queries-geo3d_"><a class="header" href="#3d-geographic-queries-geo3d_">3D Geographic Queries (<code>geo3d_*</code>)</a></h3>
+<p>Three function-style forms target <code>Geo3d</code> (3D ECEF Cartesian) fields. All
+arguments are signed floats in metres, except <code>k</code> (an unsigned integer):</p>
+<pre><code class="language-text">position:geo3d_distance(x, y, z, radius_m)
+position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+position:geo3d_nearest(x, y, z, k)
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">All docs whose stored point lies within <code>radius_m</code> metres of <code>(x, y, z)</code>.</td></tr>
+<tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">All docs whose stored point lies inside the axis-aligned 3D box.</td></tr>
+<tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">The <code>k</code> nearest docs to <code>(x, y, z)</code> by Euclidean distance.</td></tr>
+</tbody></table>
+</div>
+<p>Examples:</p>
+<pre><code class="language-text"># Within 5 km of Tokyo Tower (ECEF coordinates)
+position:geo3d_distance(-3955182, 3350553, 3700276, 5000)
+
+# Inside an axis-aligned ECEF bounding box
+position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
+
+# 10 nearest indexed points
+position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
+</code></pre>
+<blockquote>
+<p>The query field must be declared as a <code>Geo3d</code> field in the schema. See
+<a href="geo3d.html">3D Geographic Search</a> for the underlying coordinate system,
+WGS84 conversion helpers, and detailed semantics.</p>
+</blockquote>
 <h3 id="boost"><a class="header" href="#boost">Boost</a></h3>
 <p>Increase the weight of a clause with <code>^</code>:</p>
 <pre><code class="language-text">title:hello^2
@@ -252,8 +280,16 @@ sub_clause     = { grouped_query | field_query | term_query }
 grouped_query  = { "(" ~ boolean_query ~ ")" ~ boost? }
 boolean_op     = { ^"AND" | ^"OR" }
 field_query    = { field ~ ":" ~ field_value }
-field_value    = { range_query | phrase_query | fuzzy_term
+field_value    = { geo3d_query | range_query | phrase_query | fuzzy_term
                  | wildcard_term | simple_term }
+geo3d_query    = { geo3d_distance | geo3d_bbox | geo3d_nearest }
+geo3d_distance = { ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_bbox     = { ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ","
+                 ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_nearest  = { ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")" }
 phrase_query   = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
 proximity      = { "~" ~ number }
 fuzzy_term     = { term ~ "~" ~ fuzziness? ~ boost? }
@@ -441,7 +477,7 @@ let unified = UnifiedQueryParser::new(lexical_parser, vector_parser)
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../laurus.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../concepts/bkd_tree.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -455,7 +491,7 @@ let unified = UnifiedQueryParser::new(lexical_parser, vector_parser)
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../laurus.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../concepts/bkd_tree.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
