@@ -106,6 +106,7 @@ Each `FieldOption` is a `oneof` with one of the following field types:
 | `BooleanOption` (`indexed`, `stored`) | |
 | `DateTimeOption` (`indexed`, `stored`) | |
 | `GeoOption` (`indexed`, `stored`) | |
+| `Geo3dOption` (`indexed`, `stored`) | |
 | `BytesOption` (`stored`) | |
 
 The `embedder` field in vector options specifies the name of an embedder defined in `Schema.embedders`. When set, the server automatically generates vectors from document text fields at index time. Leave empty to supply pre-computed vectors directly.
@@ -242,6 +243,17 @@ Each `Value` is a `oneof` with these types:
 | Vector | `vector_value` | `VectorValue` (list of floats) |
 | DateTime | `datetime_value` | Unix microseconds (UTC) |
 | Geo | `geo_value` | `GeoPoint` (latitude, longitude) |
+| Geo3d | `geo3d_value` | `Geo3dPoint` (x, y, z meters; ECEF Cartesian) |
+
+**Geo3dPoint:**
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `x` | `double` | X coordinate in meters (ECEF: equatorial plane, +X toward 0° longitude) |
+| `y` | `double` | Y coordinate in meters (ECEF: equatorial plane, +Y toward 90°E) |
+| `z` | `double` | Z coordinate in meters (ECEF: +Z toward the North Pole) |
+
+See [3D Geographic Search (ECEF)](../concepts/geo3d.md) for the full coordinate system description and the `wgs84_to_ecef` / `ecef_to_wgs84` conversion utilities.
 
 ### `AddDocument`
 
@@ -330,6 +342,16 @@ rpc SearchStream(SearchRequest) returns (stream SearchResult);
 | `field_boosts` | `map<string, float>` | No | Per-field score boosting |
 
 At least one of `query` or `query_vectors` must be provided.
+
+### 3D Geographic Queries
+
+3D ECEF geographic queries are expressed in the lexical DSL string passed via `SearchRequest.query`. There is no dedicated message type — the same DSL forms used by the core library work over gRPC. Three forms are available (see [Query DSL → 3D Geographic Queries](../concepts/query_dsl.md#3d-geographic-queries-geo3d_) for full syntax):
+
+- `position:geo3d_distance(x, y, z, radius_m)` — sphere centered at `(x, y, z)` with radius in meters
+- `position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` — 3D axis-aligned bounding box
+- `position:geo3d_nearest(x, y, z, k)` — k nearest neighbours to `(x, y, z)`
+
+`position` is the field name; substitute the actual `Geo3d`-typed field declared in your schema. All numeric arguments are signed `double` values; `k` is an unsigned integer.
 
 ### QueryVector
 

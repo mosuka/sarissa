@@ -106,6 +106,7 @@ message AnalyzerDefinition {
 | `BooleanOption` (`indexed`, `stored`) | |
 | `DateTimeOption` (`indexed`, `stored`) | |
 | `GeoOption` (`indexed`, `stored`) | |
+| `Geo3dOption` (`indexed`, `stored`) | |
 | `BytesOption` (`stored`) | |
 
 ベクトルフィールドオプションの `embedder` フィールドには、`Schema.embedders` で定義したエンベッダー名を指定します。設定すると、インデックス時にドキュメントのテキストフィールドからベクトルを自動生成します。事前計算済みのベクトルを直接供給する場合は空のままにします。
@@ -245,6 +246,17 @@ message Document {
 | Vector | `vector_value` | `VectorValue`（浮動小数点数のリスト） |
 | DateTime | `datetime_value` | Unix マイクロ秒（UTC） |
 | Geo | `geo_value` | `GeoPoint`（緯度、経度） |
+| Geo3d | `geo3d_value` | `Geo3dPoint`（x, y, z メートル単位、ECEF 直交座標系） |
+
+**Geo3dPoint:**
+
+| フィールド | 型 | 説明 |
+| :--- | :--- | :--- |
+| `x` | `double` | X 座標（メートル単位、ECEF: 赤道面、+X 方向は経度 0°） |
+| `y` | `double` | Y 座標（メートル単位、ECEF: 赤道面、+Y 方向は東経 90°） |
+| `z` | `double` | Z 座標（メートル単位、ECEF: +Z 方向は北極） |
+
+座標系の詳細および `wgs84_to_ecef` / `ecef_to_wgs84` の変換ユーティリティについては [3D 地理検索 (ECEF)](../concepts/geo3d.md) を参照してください。
 
 ### `AddDocument`
 
@@ -333,6 +345,16 @@ rpc SearchStream(SearchRequest) returns (stream SearchResult);
 | `field_boosts` | `map<string, float>` | いいえ | フィールドごとのスコアブースト |
 
 `query` または `query_vectors` のいずれか 1 つ以上を指定する必要があります。
+
+### 3D 地理クエリ
+
+3D ECEF の地理クエリは `SearchRequest.query` に渡す Lexical DSL 文字列で表現します。専用のメッセージ型はなく、コアライブラリで使用される DSL 形式がそのまま gRPC 経由でも動作します。3 種類の形式があります（構文の詳細は [Query DSL → 3D 地理クエリ](../concepts/query_dsl.md#3d-geographic-queries-geo3d_) を参照）:
+
+- `position:geo3d_distance(x, y, z, radius_m)` — `(x, y, z)` を中心とした半径（メートル単位）の球
+- `position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` — 3D 軸並行バウンディングボックス
+- `position:geo3d_nearest(x, y, z, k)` — `(x, y, z)` に最も近い k 個の近傍点
+
+`position` はフィールド名で、スキーマで宣言した実際の `Geo3d` 型フィールドに置き換えてください。すべての数値引数は符号付きの `double` 値で、`k` は符号なし整数です。
 
 ### QueryVector
 

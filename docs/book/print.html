@@ -6733,6 +6733,7 @@ enum DynamicFieldPolicy {
 <tr><td style="text-align: left"><code>BooleanOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>DateTimeOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>GeoOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>Geo3dOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>BytesOption</code> (<code>stored</code>)</td><td style="text-align: left"></td></tr>
 </tbody></table>
 </div>
@@ -6829,8 +6830,17 @@ inaccessible. Per-field analyzers and embedders are unregistered.</p>
 <tr><td style="text-align: left">Vector</td><td style="text-align: left"><code>vector_value</code></td><td style="text-align: left"><code>VectorValue</code> (list of floats)</td></tr>
 <tr><td style="text-align: left">DateTime</td><td style="text-align: left"><code>datetime_value</code></td><td style="text-align: left">Unix microseconds (UTC)</td></tr>
 <tr><td style="text-align: left">Geo</td><td style="text-align: left"><code>geo_value</code></td><td style="text-align: left"><code>GeoPoint</code> (latitude, longitude)</td></tr>
+<tr><td style="text-align: left">Geo3d</td><td style="text-align: left"><code>geo3d_value</code></td><td style="text-align: left"><code>Geo3dPoint</code> (x, y, z meters; ECEF Cartesian)</td></tr>
 </tbody></table>
 </div>
+<p><strong>Geo3dPoint:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>x</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">X coordinate in meters (ECEF: equatorial plane, +X toward 0° longitude)</td></tr>
+<tr><td style="text-align: left"><code>y</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">Y coordinate in meters (ECEF: equatorial plane, +Y toward 90°E)</td></tr>
+<tr><td style="text-align: left"><code>z</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">Z coordinate in meters (ECEF: +Z toward the North Pole)</td></tr>
+</tbody></table>
+</div>
+<p>See <a href="laurus-server/../concepts/geo3d.html">3D Geographic Search (ECEF)</a> for the full coordinate system description and the <code>wgs84_to_ecef</code> / <code>ecef_to_wgs84</code> conversion utilities.</p>
 <h3 id="adddocument"><a class="header" href="#adddocument"><code>AddDocument</code></a></h3>
 <p>Add a document. Unlike <code>PutDocument</code>, this does not replace existing documents with the same ID — multiple documents can share an ID (chunking pattern).</p>
 <pre><code class="language-protobuf">rpc AddDocument(AddDocumentRequest) returns (AddDocumentResponse);
@@ -6887,6 +6897,14 @@ inaccessible. Per-field analyzers and embedders are unregistered.</p>
 </tbody></table>
 </div>
 <p>At least one of <code>query</code> or <code>query_vectors</code> must be provided.</p>
+<h3 id="3d-geographic-queries-1"><a class="header" href="#3d-geographic-queries-1">3D Geographic Queries</a></h3>
+<p>3D ECEF geographic queries are expressed in the lexical DSL string passed via <code>SearchRequest.query</code>. There is no dedicated message type — the same DSL forms used by the core library work over gRPC. Three forms are available (see <a href="laurus-server/../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for full syntax):</p>
+<ul>
+<li><code>position:geo3d_distance(x, y, z, radius_m)</code> — sphere centered at <code>(x, y, z)</code> with radius in meters</li>
+<li><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code> — 3D axis-aligned bounding box</li>
+<li><code>position:geo3d_nearest(x, y, z, k)</code> — k nearest neighbours to <code>(x, y, z)</code></li>
+</ul>
+<p><code>position</code> is the field name; substitute the actual <code>Geo3d</code>-typed field declared in your schema. All numeric arguments are signed <code>double</code> values; <code>k</code> is an unsigned integer.</p>
 <h3 id="queryvector-1"><a class="header" href="#queryvector-1">QueryVector</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>vector</code></td><td style="text-align: left"><code>repeated float</code></td><td style="text-align: left">Query vector</td></tr>
@@ -7102,6 +7120,7 @@ gRPC paths in sync.</p>
 <tr><td style="text-align: left"><code>[]</code> (empty array)</td><td style="text-align: left">(skipped)</td><td style="text-align: left">Element type cannot be determined, so the field is skipped.</td></tr>
 <tr><td style="text-align: left"><code>{"latitude": ..., "longitude": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>{"lat": ..., "lon": ...}</code> / <code>{"lat": ..., "lng": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left">Short aliases for latitude / longitude are accepted.</td></tr>
+<tr><td style="text-align: left"><code>{"x": ..., "y": ..., "z": ...}</code></td><td style="text-align: left">(not inferred)</td><td style="text-align: left">Geo3d values are not inferred from JSON. See the <strong>Geo3d via HTTP</strong> note below.</td></tr>
 </tbody></table>
 </div>
 <p>The gateway returns an HTTP 400 (<code>Bad Request</code>) when:</p>
@@ -7117,6 +7136,27 @@ keys, or non-numeric values).</li>
 declared in the schema. Numeric arrays sent against a declared vector
 field are coerced to a vector of <code>f32</code> values automatically, so REST
 clients can post embeddings as plain JSON arrays.</p>
+<blockquote>
+<p><strong>Note: Geo3d via HTTP is read-only</strong></p>
+<p>The HTTP gateway can return Geo3d values (as <code>{"x": ..., "y": ..., "z": ...}</code>)
+and accepts <code>Geo3d</code> schema declarations
+(as <code>{"geo3d": {"indexed": ..., "stored": ...}}</code> in the schema definition).
+However, <strong>writing</strong> Geo3d document values via HTTP is not yet supported:
+the JSON-to-<code>DataValue</code> inference rule does not recognise an <code>{x, y, z}</code>
+object as a 3D ECEF point. To insert Geo3d values, call the gRPC
+<code>PutDocument</code> / <code>AddDocument</code> RPC directly with <code>Value.geo3d_value</code> set.</p>
+<p>Tracking issue for write support: <a href="https://github.com/mosuka/laurus/issues/335">#335</a>.</p>
+</blockquote>
+<h3 id="3d-geographic-queries-2"><a class="header" href="#3d-geographic-queries-2">3D Geographic Queries</a></h3>
+<p>3D ECEF queries reuse the lexical DSL string passed via <code>query</code>. The gateway forwards it unchanged to the engine, so the same forms work over HTTP as over gRPC:</p>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)",
+    "limit": 10
+  }'
+</code></pre>
+<p>See <a href="laurus-server/../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for <code>geo3d_bbox</code> and <code>geo3d_nearest</code> syntax.</p>
 <h2 id="requestresponse-format"><a class="header" href="#requestresponse-format">Request/Response Format</a></h2>
 <p>All request and response bodies use JSON. The JSON structure mirrors the gRPC protobuf messages. See <a href="laurus-server/grpc_api.html">gRPC API Reference</a> for the full message definitions.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="mcp-server-overview"><a class="header" href="#mcp-server-overview">MCP Server Overview</a></h1>
