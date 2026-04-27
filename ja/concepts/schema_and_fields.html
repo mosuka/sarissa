@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-47a1de00.js";
+            window.path_to_searchindex_js = "../searchindex-812ca712.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-0f2ac19d.js"></script>
+        <script src="../toc-c423c571.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -214,6 +214,7 @@ let schema = Schema::builder()
     FO --&gt; B["Boolean"]
     FO --&gt; DT["DateTime"]
     FO --&gt; G["Geo"]
+    FO --&gt; G3["Geo3d"]
     FO --&gt; BY["Bytes"]
 
     FO --&gt; FLAT["Flat"]
@@ -234,6 +235,7 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><strong>Boolean</strong></td><td style="text-align: left"><code>BooleanOption</code></td><td style="text-align: left"><code>add_boolean_field()</code></td><td style="text-align: left"><code>true</code> / <code>false</code></td></tr>
 <tr><td style="text-align: left"><strong>DateTime</strong></td><td style="text-align: left"><code>DateTimeOption</code></td><td style="text-align: left"><code>add_datetime_field()</code></td><td style="text-align: left">UTC タイムスタンプ。範囲クエリをサポート</td></tr>
 <tr><td style="text-align: left"><strong>Geo</strong></td><td style="text-align: left"><code>GeoOption</code></td><td style="text-align: left"><code>add_geo_field()</code></td><td style="text-align: left">緯度/経度のペア。半径検索とバウンディングボックスクエリをサポート</td></tr>
+<tr><td style="text-align: left"><strong>Geo3d</strong></td><td style="text-align: left"><code>Geo3dOption</code></td><td style="text-align: left"><code>add_geo3d_field()</code></td><td style="text-align: left">3D ECEF 直交座標ポイント（<code>x</code>, <code>y</code>, <code>z</code>、メートル）。3D 距離検索・バウンディングボックス・k-NN クエリをサポート。詳細は <a href="geo3d.html">3D 地理検索</a> を参照</td></tr>
 <tr><td style="text-align: left"><strong>Bytes</strong></td><td style="text-align: left"><code>BytesOption</code></td><td style="text-align: left"><code>add_bytes_field()</code></td><td style="text-align: left">バイナリデータ</td></tr>
 </tbody>
 </table>
@@ -376,7 +378,8 @@ engine.commit().await?;
 <tr><td style="text-align: left"><code>add_boolean(name, value)</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left">ブールフィールドを追加</td></tr>
 <tr><td style="text-align: left"><code>add_datetime(name, value)</code></td><td style="text-align: left"><code>DateTime&lt;Utc&gt;</code></td><td style="text-align: left">日時フィールドを追加</td></tr>
 <tr><td style="text-align: left"><code>add_vector(name, value)</code></td><td style="text-align: left"><code>Vec&lt;f32&gt;</code></td><td style="text-align: left">事前計算済みベクトルフィールドを追加</td></tr>
-<tr><td style="text-align: left"><code>add_geo(name, lat, lon)</code></td><td style="text-align: left"><code>(f64, f64)</code></td><td style="text-align: left">地理座標フィールドを追加</td></tr>
+<tr><td style="text-align: left"><code>add_geo(name, lat, lon)</code></td><td style="text-align: left"><code>(f64, f64)</code></td><td style="text-align: left">2D 地理座標フィールドを追加（WGS84）</td></tr>
+<tr><td style="text-align: left"><code>add_geo_ecef(name, x, y, z)</code></td><td style="text-align: left"><code>(f64, f64, f64)</code></td><td style="text-align: left">3D ECEF 直交座標ポイントを追加（メートル）</td></tr>
 <tr><td style="text-align: left"><code>add_bytes(name, data)</code></td><td style="text-align: left"><code>Vec&lt;u8&gt;</code></td><td style="text-align: left">バイナリデータを追加</td></tr>
 <tr><td style="text-align: left"><code>add_field(name, value)</code></td><td style="text-align: left"><code>DataValue</code></td><td style="text-align: left">任意の値型を追加</td></tr>
 </tbody>
@@ -395,7 +398,10 @@ engine.commit().await?;
     Bytes(Vec&lt;u8&gt;, Option&lt;String&gt;),  // (data, optional MIME type)
     Vector(Vec&lt;f32&gt;),
     DateTime(DateTime&lt;Utc&gt;),
-    Geo(f64, f64),          // (latitude, longitude)
+    Geo(GeoPoint),                   // 2D WGS84 ポイント (latitude, longitude)
+    GeoEcef(GeoEcefPoint),           // 3D ECEF 直交座標ポイント (x, y, z)、メートル
+    Int64Array(Vec&lt;i64&gt;),            // 多値整数フィールド
+    Float64Array(Vec&lt;f64&gt;),          // 多値浮動小数点フィールド
 }
 <span class="boring">}</span></code></pre>
 <p><code>DataValue</code> は一般的な型に対して <code>From&lt;T&gt;</code> を実装しているため、<code>.into()</code> 変換が使用できます。</p>
@@ -459,8 +465,10 @@ let schema = Schema::builder()
 </tbody>
 </table>
 </div>
-<p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）および <code>Bytes</code> は<strong>自動推論の対象外</strong>です。
-スキーマへ明示的に宣言してください。</p>
+<p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）、<code>Bytes</code>、<code>Geo3d</code> は
+<strong>自動推論の対象外</strong>です。スキーマへ明示的に宣言してください。
+（<code>x</code>, <code>y</code>, <code>z</code> キーを持つ任意のユーザーレコードと衝突するため、
+<code>Geo3d</code> は JSON オブジェクトから推論されません。）</p>
 <h3 id="多値数値フィールド"><a class="header" href="#多値数値フィールド">多値数値フィールド</a></h3>
 <p><code>Integer</code> と <code>Float</code> フィールドは <code>multi_valued = true</code> を指定することで、
 1 ドキュメントに複数の値を保持できます。範囲クエリは<strong>いずれかの値が条件を満たせばマッチ</strong>
@@ -485,7 +493,7 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Int64(0)</code> / <code>Int64(1)</code></td><td style="text-align: left"><code>false</code> / <code>true</code></td></tr>
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Text("true"/"false")</code></td><td style="text-align: left">大文字小文字を無視してパース</td></tr>
 <tr><td style="text-align: left"><code>Text</code></td><td style="text-align: left">任意のスカラー値</td><td style="text-align: left">文字列化</td></tr>
-<tr><td style="text-align: left"><code>Geo</code> / <code>Bytes</code> / ベクトル</td><td style="text-align: left">対応 variant 以外</td><td style="text-align: left">エラー</td></tr>
+<tr><td style="text-align: left"><code>Geo</code> / <code>Geo3d</code> / <code>Bytes</code> / ベクトル</td><td style="text-align: left">対応 variant 以外</td><td style="text-align: left">エラー</td></tr>
 </tbody>
 </table>
 </div>

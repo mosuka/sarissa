@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-47a1de00.js";
+            window.path_to_searchindex_js = "../../searchindex-812ca712.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-0f2ac19d.js"></script>
+        <script src="../../toc-c423c571.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -251,7 +251,7 @@
 </table>
 </div>
 <h2 id="数値フィールドと日付フィールド"><a class="header" href="#数値フィールドと日付フィールド">数値フィールドと日付フィールド</a></h2>
-<p>整数、浮動小数点数、日時フィールドは、<strong>BKD ツリー</strong> を使用してインデキシングされます。BKD ツリーは範囲クエリに最適化された空間分割データ構造です。</p>
+<p>整数、浮動小数点数、日時フィールドは、<strong><a href="../bkd_tree.html">BKD ツリー</a></strong> を使用してインデキシングされます。BKD ツリーは範囲クエリに最適化された空間分割データ構造です。</p>
 <pre><code class="language-mermaid">graph TB
     Root["BKD Root"]
     Root --&gt; L["values &lt; 50"]
@@ -263,11 +263,23 @@
 </code></pre>
 <p>BKD ツリーにより、<code>price:[10 TO 100]</code> や <code>date:[2024-01-01 TO 2024-12-31]</code> のような範囲クエリを効率的に評価できます。</p>
 <h2 id="地理フィールドgeo-fields"><a class="header" href="#地理フィールドgeo-fields">地理フィールド（Geo Fields）</a></h2>
-<p>地理フィールドは緯度/経度のペアを格納します。以下のクエリをサポートする空間データ構造を使用してインデキシングされます。</p>
-<ul>
-<li><strong>半径クエリ（Radius queries）</strong>: 中心点から N キロメートル以内のすべてのポイントを検索</li>
-<li><strong>バウンディングボックスクエリ（Bounding box queries）</strong>: 矩形領域内のすべてのポイントを検索</li>
-</ul>
+<p>地理フィールドには 2 種類あり、いずれも同じ多次元
+<a href="../bkd_tree.html">BKD-Tree</a> プリミティブにバックアップされています：</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">フィールド型</th><th style="text-align: center">次元数</th><th style="text-align: left">座標</th><th style="text-align: left">サポートされるクエリ</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: center">2</td><td style="text-align: left">WGS84 緯度・経度（度）</td><td style="text-align: left">半径検索、バウンディングボックス</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: center">3</td><td style="text-align: left">ECEF 直交座標 <code>(x, y, z)</code>（メートル）</td><td style="text-align: left">3D 距離検索（球）、3D バウンディングボックス、k-NN</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>Geo3d</code> は高度が一級の次元になる用途（ドローン・衛星・屋内 3D 測位など、
+2D の <code>Geo</code> フィールドでは情報が失われたり極で歪んだりするケース）で
+適しています。座標系・WGS84 変換ヘルパー・DSL 構文については
+<a href="../geo3d.html">3D 地理検索 (ECEF)</a> を参照してください。</p>
 <h2 id="セグメントsegments"><a class="header" href="#セグメントsegments">セグメント（Segments）</a></h2>
 <p>Lexical インデックスは<strong>セグメント</strong>に分割されて構成されます。各セグメントはイミュータブルで自己完結型のミニインデックスです。</p>
 <pre><code class="language-mermaid">graph TB
@@ -292,7 +304,7 @@
 <tbody>
 <tr><td style="text-align: left"><code>.dict</code></td><td style="text-align: left">Term Dictionary（ソート済みターム + メタデータオフセット）</td></tr>
 <tr><td style="text-align: left"><code>.post</code></td><td style="text-align: left">Posting Lists（ドキュメント ID、ターム頻度、位置情報）</td></tr>
-<tr><td style="text-align: left"><code>.bkd</code></td><td style="text-align: left">数値フィールドおよび日付フィールドの BKD ツリーデータ</td></tr>
+<tr><td style="text-align: left"><code>.bkd</code></td><td style="text-align: left">数値・日付・<code>Geo</code>（2D）・<code>Geo3d</code>（3D ECEF）フィールドの <a href="../bkd_tree.html">BKD ツリー</a> データ</td></tr>
 <tr><td style="text-align: left"><code>.docs</code></td><td style="text-align: left">格納されたフィールド値（元のドキュメント内容）</td></tr>
 <tr><td style="text-align: left"><code>.dv</code></td><td style="text-align: left">ソートおよびフィルタリング用の Doc Values</td></tr>
 <tr><td style="text-align: left"><code>.meta</code></td><td style="text-align: left">セグメントメタデータ（ドキュメント数、ターム数など）</td></tr>

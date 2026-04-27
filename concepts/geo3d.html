@@ -1,44 +1,44 @@
 <!DOCTYPE HTML>
-<html lang="ja" class="light sidebar-visible" dir="ltr">
+<html lang="en" class="light sidebar-visible" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>サーバー概要 - Laurus ドキュメント</title>
+        <title>3D Geographic Search (ECEF) - Laurus Documentation</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="Laurus - Rust製高速ハイブリッド検索ライブラリのドキュメント">
+        <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="favicon-8114d1fc.png">
-        <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-2459343d.css">
-        <link rel="stylesheet" href="css/chrome-ae938929.css">
-        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "";
+            const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-812ca712.js";
+            window.path_to_searchindex_js = "../searchindex-4a49ae9b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-c423c571.js"></script>
+        <script src="../toc-293d66d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -105,7 +105,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -137,17 +137,14 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Laurus ドキュメント</h1>
+                    <h1 class="menu-title">Laurus Documentation</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
                         <a href="https://github.com/mosuka/laurus" title="Git repository" aria-label="Git repository">
                             <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
-                        </a>
-                        <a href="https://github.com/mosuka/laurus/edit/main/docs/ja/src/laurus-server.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
-                            <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
                         </a>
 
                     </div>
@@ -180,58 +177,260 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="サーバー概要"><a class="header" href="#サーバー概要">サーバー概要</a></h1>
-<p><code>laurus-server</code> クレートは、Laurus 検索エンジン用の gRPC サーバーとオプションの HTTP/JSON ゲートウェイを提供します。エンジンをメモリに常駐させることで、コマンド実行ごとの起動オーバーヘッドを排除します。</p>
-<h2 id="機能"><a class="header" href="#機能">機能</a></h2>
+                        <h1 id="3d-geographic-search-ecef"><a class="header" href="#3d-geographic-search-ecef">3D Geographic Search (ECEF)</a></h1>
+<p>Laurus offers two geographic field types that target different problems:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Field type</th><th style="text-align: left">Backing structure</th><th style="text-align: left">Coordinate system</th><th style="text-align: left">Use it when …</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">2D BKD-Tree</td><td style="text-align: left">WGS84 latitude / longitude (degrees)</td><td style="text-align: left">All your data lives at the surface and altitude does not matter.</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: left">3D BKD-Tree</td><td style="text-align: left">ECEF Cartesian <code>(x, y, z)</code> (metres)</td><td style="text-align: left">Altitude is a first-class dimension — drones, satellites, indoor positioning, multi-floor buildings.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Both share the same <a href="bkd_tree.html">BKD-Tree</a> primitive; <code>Geo3d</code> simply adds a
+third dimension and a different query vocabulary.</p>
+<h2 id="why-ecef"><a class="header" href="#why-ecef">Why ECEF?</a></h2>
+<p><code>(latitude, longitude, altitude)</code> triples are convenient for humans but make
+Euclidean distance unusable: a degree of longitude is ~111 km at the equator
+and 0 km at the poles, and “altitude” is curved with the Earth’s surface.</p>
+<p>ECEF (Earth-Centered Earth-Fixed) flattens this into a Cartesian frame:</p>
 <ul>
-<li><strong>永続エンジン</strong> – インデックスはリクエスト間で開いたまま維持され、呼び出しごとの WAL リプレイが不要</li>
-<li><strong>フル gRPC API</strong> – インデックス管理、ドキュメント CRUD、コミット、検索（単発 + ストリーミング）</li>
-<li><strong>HTTP ゲートウェイ</strong> – gRPC と併用可能なオプションの HTTP/JSON ゲートウェイで REST スタイルのアクセスを提供</li>
-<li><strong>ヘルスチェック</strong> – ロードバランサーやオーケストレーター向けの標準ヘルスチェックエンドポイント</li>
-<li><strong>グレースフルシャットダウン</strong> – Ctrl+C / SIGINT で保留中の変更を自動的にコミット</li>
-<li><strong>TOML 設定</strong> – オプションの設定ファイルと CLI・環境変数によるオーバーライド</li>
+<li>The <strong>origin</strong> is the Earth’s centre of mass.</li>
+<li>The <strong>+X axis</strong> points through the equator at 0° longitude.</li>
+<li>The <strong>+Y axis</strong> points through the equator at 90° E longitude.</li>
+<li>The <strong>+Z axis</strong> points through the geographic North Pole.</li>
+<li>All three axes are in <strong>metres</strong>.</li>
 </ul>
-<h2 id="アーキテクチャ"><a class="header" href="#アーキテクチャ">アーキテクチャ</a></h2>
-<pre><code class="language-mermaid">graph LR
-    subgraph "laurus-server"
-        GW["HTTP Gateway\n(axum)"]
-        GRPC["gRPC Server\n(tonic)"]
-        ENG["Engine\n(Arc&amp;lt;RwLock&amp;gt;)"]
-    end
+<p>In this frame the <strong>straight-line distance between two points is just the
+Euclidean norm</strong> — no spherical trigonometry, no pole singularity, no
+longitude-wrap. That property is what makes <code>Geo3d</code> queries usable from a
+3D BKD-Tree without bespoke spatial code.</p>
+<h2 id="defining-a-geo3d-field"><a class="header" href="#defining-a-geo3d-field">Defining a Geo3d Field</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::Schema;
+use laurus::lexical::core::field::Geo3dOption;
 
-    Client1["HTTP Client"] --&gt; GW
-    Client2["gRPC Client"] --&gt; GRPC
-    GW --&gt; GRPC
-    GRPC --&gt; ENG
+let schema = Schema::builder()
+    .add_geo3d_field("position", Geo3dOption::default())
+    .build();
+<span class="boring">}</span></code></pre>
+<p><code>Geo3dOption</code> exposes the same <code>indexed</code> / <code>stored</code> switches as the other
+lexical field options. Indexed values populate the field’s 3D BKD-Tree;
+stored values are returned by <code>get_documents</code>.</p>
+<p>The TOML form (used by <code>laurus-cli</code>):</p>
+<pre><code class="language-toml">[fields.position.Geo3d]
+indexed = true
+stored = true
 </code></pre>
-<p>gRPC サーバーは常に起動します。HTTP ゲートウェイはオプションで、HTTP/JSON リクエストを内部的に gRPC サーバーへプロキシします。</p>
-<h2 id="クイックスタート"><a class="header" href="#クイックスタート">クイックスタート</a></h2>
-<pre><code class="language-bash"># デフォルト設定で起動（gRPC ポート 50051）
-laurus serve
+<h2 id="indexing-3d-points"><a class="header" href="#indexing-3d-points">Indexing 3D Points</a></h2>
+<p>Use <code>DocumentBuilder::add_geo_ecef</code> to add a point in raw Cartesian
+metres:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::Document;
 
-# HTTP ゲートウェイ付きで起動
-laurus serve --http-port 8080
+// A point at lat=35.6586°, lon=139.7454°, height=250 m
+// (already converted to ECEF — see "Coordinate Conversion" below).
+let doc = Document::builder()
+    .add_geo_ecef("position", -3_955_182.0, 3_350_553.0, 3_700_276.0)
+    .build();
 
-# 設定ファイルを指定して起動
-laurus serve --config config.toml
+engine.put_document("tokyo-tower", doc).await?;
+engine.commit().await?;
+<span class="boring">}</span></code></pre>
+<p>If the value already exists as a <code>GeoEcefPoint</code>, build it through the
+unified <code>DataValue</code> API instead:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::{DataValue, GeoEcefPoint};
+
+let p = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let doc = Document::builder()
+    .add_field("position", DataValue::GeoEcef(p))
+    .build();
+<span class="boring">}</span></code></pre>
+<h2 id="coordinate-conversion-wgs84--ecef"><a class="header" href="#coordinate-conversion-wgs84--ecef">Coordinate Conversion (WGS84 ↔ ECEF)</a></h2>
+<p>Most input arrives as <code>(latitude°, longitude°, height_m)</code>. Laurus exposes
+the canonical pair of conversions in <a href="https://github.com/mosuka/laurus/blob/main/laurus/src/util/ecef.rs"><code>laurus::util::ecef</code></a>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::util::ecef::{wgs84_to_ecef, ecef_to_wgs84};
+
+// Forward: lat/lon/height → ECEF
+let p = wgs84_to_ecef(35.6586, 139.7454, 250.0);
+
+// Reverse: ECEF → lat/lon/height
+let (lat, lon, height) = ecef_to_wgs84(&amp;p);
+<span class="boring">}</span></code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Function</th><th style="text-align: left">Direction</th><th style="text-align: left">Algorithm</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>wgs84_to_ecef(lat°, lon°, h_m)</code></td><td style="text-align: left">geographic → Cartesian</td><td style="text-align: left">Closed-form prime-vertical formula.</td></tr>
+<tr><td style="text-align: left"><code>ecef_to_wgs84(&amp;GeoEcefPoint)</code></td><td style="text-align: left">Cartesian → geographic</td><td style="text-align: left">Bowring 1985 closed-form seed + 3 Newton-Raphson iterations.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The reverse conversion round-trips with <strong>sub-µm</strong> precision on every axis
+from sub-surface up to far beyond LEO altitudes. Near the poles the
+implementation switches from the standard <code>h = p / cos(lat) - N</code> formula
+(which diverges at <code>cos(lat) → 0</code>) to the meridian form
+<code>h = z / sin(lat) - N(1 - e²)</code>.</p>
+<p>The WGS84 ellipsoid constants used internally are also exposed as <code>pub const</code>s (<code>WGS84_A</code>, <code>WGS84_F</code>, <code>WGS84_B</code>, <code>WGS84_E2</code>, <code>WGS84_E_PRIME_SQ</code>)
+so external code can reference the exact values laurus uses.</p>
+<h2 id="query-types"><a class="header" href="#query-types">Query Types</a></h2>
+<p>Three query types target <code>Geo3d</code> fields. All three are
+<a href="bkd_tree.html#query-the-intersectvisitor-protocol"><code>IntersectVisitor</code></a> implementations
+on top of the shared 3D BKD-Tree.</p>
+<h3 id="sphere-radius--geo3ddistancequery"><a class="header" href="#sphere-radius--geo3ddistancequery">Sphere (radius) — <code>Geo3dDistanceQuery</code></a></h3>
+<p>Find every document whose stored point lies within <code>radius_m</code> metres of a
+centre point. Score is <code>1 - distance / radius</code>, clamped to <code>[0, 1]</code>.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dDistanceQuery;
+use laurus::GeoEcefPoint;
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let query = Geo3dDistanceQuery::new("position", centre, 5_000.0); // 5 km radius
+<span class="boring">}</span></code></pre>
+<p>The visitor uses <a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs"><code>AABB::min_distance_sq_to_point</code></a> for the <code>Outside</code>
+test and <a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs"><code>AABB::max_distance_sq_to_point</code></a> for the <code>Inside</code> test, so
+both cell-vs-sphere checks run in squared-distance space and avoid <code>sqrt</code>.</p>
+<h3 id="bounding-box--geo3dboundingboxquery"><a class="header" href="#bounding-box--geo3dboundingboxquery">Bounding Box — <code>Geo3dBoundingBoxQuery</code></a></h3>
+<p>Find every document whose stored point lies inside an axis-aligned 3D box
+defined by <code>(min_x, min_y, min_z)</code> and <code>(max_x, max_y, max_z)</code>.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dBoundingBoxQuery;
+use laurus::GeoEcefPoint;
+
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let query = Geo3dBoundingBoxQuery::new("position", min, max)?;
+<span class="boring">}</span></code></pre>
+<p>The constructor returns <code>Result</code> because every <code>min[i]</code> must be <code>≤ max[i]</code>;
+mismatched bounds are rejected at construction time rather than producing
+silently-empty results.</p>
+<blockquote>
+<p><strong>Caveat.</strong> The query box is axis-aligned in ECEF Cartesian space. A box
+built from two <code>(lat, lon, height)</code> corners by converting each corner
+separately is <strong>not</strong> the same shape as the spherical-shell region a user
+might intuitively expect. For region queries on the Earth’s surface,
+<code>Geo3dDistanceQuery</code> (a true 3D sphere) usually matches user intuition
+better.</p>
+</blockquote>
+<h3 id="k-nearest-neighbours--geo3dnearestquery"><a class="header" href="#k-nearest-neighbours--geo3dnearestquery">k-Nearest Neighbours — <code>Geo3dNearestQuery</code></a></h3>
+<p>Find the <code>k</code> nearest documents to a query point. The query starts from a
+small probe sphere (default 1 km) and <strong>doubles the radius</strong> until either:</p>
+<ol>
+<li>it has collected at least <code>k</code> distinct candidates,</li>
+<li>doubling makes no progress,</li>
+<li>the radius reaches <code>max_radius_m</code> (default <code>1.0e10</code> m, i.e. 10⁷ km).</li>
+</ol>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dNearestQuery;
+use laurus::GeoEcefPoint;
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let query = Geo3dNearestQuery::new("position", centre, 10) // 10 nearest
+    .with_initial_radius(500.0)         // start at 500 m
+    .with_max_radius(1_000_000.0);      // cap at 1 000 km
+<span class="boring">}</span></code></pre>
+<p>A smaller-than-<code>k</code> result simply means the index does not contain <code>k</code>
+points within <code>max_radius_m</code>. Score is normalised so that the closest hit
+gets <code>1.0</code> and the farthest hit in the returned set gets <code>0.0</code>.</p>
+<p>The k-NN visitor never returns <code>CellRelation::Inside</code> from <code>compare</code> —
+only <code>Outside</code> or <code>Crosses</code> — so every candidate is delivered to <code>visit</code>
+with its exact coordinates, ensuring k-NN ordering uses the true distance.</p>
+<h2 id="query-dsl"><a class="header" href="#query-dsl">Query DSL</a></h2>
+<p><code>Geo3d</code> queries are also exposed in the unified Query DSL (see
+<a href="query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → Geo3d Functions</a>):</p>
+<pre><code class="language-text">position:geo3d_distance(-3955182, 3350553, 3700276, 5000)
+position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
+position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
 </code></pre>
-<h2 id="セクション"><a class="header" href="#セクション">セクション</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Form</th><th style="text-align: left">Arguments</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and search radius in metres</td></tr>
+<tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">two opposite corners of the AABB</td></tr>
+<tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and the integer <code>k</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>All numeric arguments are signed floats; the <code>k</code> of <code>geo3d_nearest</code> is an
+unsigned integer.</p>
+<h2 id="wire-formats"><a class="header" href="#wire-formats">Wire Formats</a></h2>
+<h3 id="grpc"><a class="header" href="#grpc">gRPC</a></h3>
+<p>Protocol Buffers expose 3D geo as a dedicated <code>Value</code> variant alongside a
+<code>Geo3dPoint</code> message and a <code>Geo3dOption</code> schema option:</p>
+<pre><code class="language-proto">message Geo3dPoint {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+
+message Value {
+  oneof kind {
+    // ...
+    Geo3dPoint geo3d_value = 12;
+  }
+}
+
+message Geo3dOption {
+  bool indexed = 1;
+  bool stored = 2;
+}
+</code></pre>
+<p>See <a href="https://github.com/mosuka/laurus/blob/main/laurus-server/proto/laurus/v1/common.proto"><code>common.proto</code></a> and
+<a href="https://github.com/mosuka/laurus/blob/main/laurus-server/proto/laurus/v1/index.proto"><code>index.proto</code></a> for the full definitions.</p>
+<h3 id="http-gateway--mcp"><a class="header" href="#http-gateway--mcp">HTTP gateway / MCP</a></h3>
+<p>JSON documents accept <code>Geo3d</code> values as a <code>{ "x": …, "y": …, "z": … }</code>
+object:</p>
+<pre><code class="language-json">{
+  "position": { "x": -3955182.0, "y": 3350553.0, "z": 3700276.0 }
+}
+</code></pre>
+<p>The HTTP gateway converts this to <code>DataValue::GeoEcef</code> before forwarding
+to the engine; the MCP server uses the same convention.</p>
+<h2 id="when-not-to-use-geo3d"><a class="header" href="#when-not-to-use-geo3d">When <em>not</em> to Use Geo3d</a></h2>
 <ul>
-<li><a href="laurus-server/getting_started.html">はじめに</a> – 起動オプションと最初のステップ</li>
-<li><a href="laurus-server/configuration.html">設定</a> – TOML 設定、環境変数、優先順位</li>
-<li><a href="laurus-server/grpc_api.html">gRPC API リファレンス</a> – 全サービスと RPC の完全な API ドキュメント</li>
-<li><a href="laurus-server/http_gateway.html">HTTP ゲートウェイ</a> – HTTP/JSON エンドポイントリファレンス</li>
+<li><strong>Pure 2D map queries</strong> (radius from a coordinate on the surface, simple
+bounding boxes on a tile map) — keep using <code>Geo</code>. The 2D BKD is one
+dimension lighter and the WGS84 input matches user intuition.</li>
+<li><strong>Approximate semantic similarity</strong> of a learned location embedding —
+that is a vector field (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>), not a <code>Geo3d</code> field.</li>
+</ul>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="bkd_tree.html">BKD-Tree</a> — the underlying multi-dimensional index that
+also backs <code>Integer</code>, <code>Float</code>, <code>DateTime</code>, and 2D <code>Geo</code> fields.</li>
+<li><a href="schema_and_fields.html">Schema &amp; Fields</a> — <code>Geo3d</code> alongside the rest of
+the field type table.</li>
+<li><a href="query_dsl.html">Query DSL</a> — full geo3d DSL grammar.</li>
+<li><a href="search/lexical_search.html">Lexical Search</a> — programmatic entry points
+for every lexical query type.</li>
 </ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="laurus-cli/repl.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../concepts/bkd_tree.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="laurus-server/getting_started.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../laurus.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -241,11 +440,11 @@ laurus serve --config config.toml
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="laurus-cli/repl.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../concepts/bkd_tree.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="laurus-server/getting_started.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../laurus.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -265,17 +464,17 @@ laurus serve --config config.toml
         </script>
 
 
-        <script src="elasticlunr-ef4e11c1.min.js"></script>
-        <script src="mark-09e88c2c.min.js"></script>
-        <script src="searcher-c2a407aa.js"></script>
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
 
-        <script src="clipboard-1626706a.min.js"></script>
-        <script src="highlight-abc7f01d.js"></script>
-        <script src="book-a0b12cfe.js"></script>
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="mermaid-9a6dd17b.min.js"></script>
-        <script src="mermaid-init-ddddd38b.js"></script>
+        <script src="../mermaid-9a6dd17b.min.js"></script>
+        <script src="../mermaid-init-ddddd38b.js"></script>
 
 
 

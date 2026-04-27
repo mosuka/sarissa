@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-6df29731.js";
+            window.path_to_searchindex_js = "../../searchindex-4a49ae9b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-6cc5bf7f.js"></script>
+        <script src="../../toc-293d66d6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -248,7 +248,7 @@
 </table>
 </div>
 <h2 id="numeric-and-date-fields"><a class="header" href="#numeric-and-date-fields">Numeric and Date Fields</a></h2>
-<p>Integer, float, and datetime fields are indexed using a <strong>BKD tree</strong> — a space-partitioning data structure optimized for range queries:</p>
+<p>Integer, float, and datetime fields are indexed using a <strong><a href="../bkd_tree.html">BKD tree</a></strong> — a space-partitioning data structure optimized for range queries:</p>
 <pre><code class="language-mermaid">graph TB
     Root["BKD Root"]
     Root --&gt; L["values &lt; 50"]
@@ -260,11 +260,24 @@
 </code></pre>
 <p>BKD trees allow efficient evaluation of range queries like <code>price:[10 TO 100]</code> or <code>date:[2024-01-01 TO 2024-12-31]</code>.</p>
 <h2 id="geo-fields"><a class="header" href="#geo-fields">Geo Fields</a></h2>
-<p>Geographic fields store latitude/longitude pairs. They are indexed using a spatial data structure that supports:</p>
-<ul>
-<li><strong>Radius queries</strong>: find all points within N kilometers of a center point</li>
-<li><strong>Bounding box queries</strong>: find all points within a rectangular area</li>
-</ul>
+<p>Geographic fields come in two flavours, both backed by the same multi-dimensional
+<a href="../bkd_tree.html">BKD-Tree</a> primitive:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Field type</th><th style="text-align: center">Dimensions</th><th style="text-align: left">Coordinates</th><th style="text-align: left">Supported queries</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: center">2</td><td style="text-align: left">WGS84 latitude / longitude (degrees)</td><td style="text-align: left">radius, bounding box</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: center">3</td><td style="text-align: left">ECEF Cartesian <code>(x, y, z)</code> in metres</td><td style="text-align: left">3D distance (sphere), 3D bounding box, k-nearest neighbours</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>Geo3d</code> is the right choice when altitude is a first-class dimension —
+drones, satellites, indoor 3D positioning, or anything else that a 2D
+<code>Geo</code> field would lose or distort near the poles. See
+<a href="../geo3d.html">3D Geographic Search (ECEF)</a> for the coordinate system,
+WGS84 conversion helpers, and DSL syntax.</p>
 <h2 id="segments"><a class="header" href="#segments">Segments</a></h2>
 <p>The lexical index is organized into <strong>segments</strong>. Each segment is an immutable, self-contained mini-index:</p>
 <pre><code class="language-mermaid">graph TB
@@ -289,7 +302,7 @@
 <tbody>
 <tr><td style="text-align: left"><code>.dict</code></td><td style="text-align: left">Term dictionary (sorted terms + metadata offsets)</td></tr>
 <tr><td style="text-align: left"><code>.post</code></td><td style="text-align: left">Posting lists (document IDs, term frequencies, positions)</td></tr>
-<tr><td style="text-align: left"><code>.bkd</code></td><td style="text-align: left">BKD tree data for numeric and date fields</td></tr>
+<tr><td style="text-align: left"><code>.bkd</code></td><td style="text-align: left"><a href="../bkd_tree.html">BKD tree</a> data for numeric, date, <code>Geo</code> (2D), and <code>Geo3d</code> (3D ECEF) fields</td></tr>
 <tr><td style="text-align: left"><code>.docs</code></td><td style="text-align: left">Stored field values (the original document content)</td></tr>
 <tr><td style="text-align: left"><code>.dv</code></td><td style="text-align: left">Doc values for sorting and filtering</td></tr>
 <tr><td style="text-align: left"><code>.meta</code></td><td style="text-align: left">Segment metadata (doc count, term count, etc.)</td></tr>

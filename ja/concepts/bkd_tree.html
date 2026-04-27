@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>サーバー概要 - Laurus ドキュメント</title>
+        <title>BKD-Tree - Laurus ドキュメント</title>
 
 
         <!-- Custom HTML head -->
@@ -12,33 +12,33 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="favicon-8114d1fc.png">
-        <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-2459343d.css">
-        <link rel="stylesheet" href="css/chrome-ae938929.css">
-        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "";
+            const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-812ca712.js";
+            window.path_to_searchindex_js = "../searchindex-812ca712.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-c423c571.js"></script>
+        <script src="../toc-c423c571.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -105,7 +105,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -140,13 +140,13 @@
                     <h1 class="menu-title">Laurus ドキュメント</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
                         <a href="https://github.com/mosuka/laurus" title="Git repository" aria-label="Git repository">
                             <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
                         </a>
-                        <a href="https://github.com/mosuka/laurus/edit/main/docs/ja/src/laurus-server.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                        <a href="https://github.com/mosuka/laurus/edit/main/docs/ja/src/concepts/bkd_tree.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
                             <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
                         </a>
 
@@ -180,58 +180,172 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="サーバー概要"><a class="header" href="#サーバー概要">サーバー概要</a></h1>
-<p><code>laurus-server</code> クレートは、Laurus 検索エンジン用の gRPC サーバーとオプションの HTTP/JSON ゲートウェイを提供します。エンジンをメモリに常駐させることで、コマンド実行ごとの起動オーバーヘッドを排除します。</p>
-<h2 id="機能"><a class="header" href="#機能">機能</a></h2>
-<ul>
-<li><strong>永続エンジン</strong> – インデックスはリクエスト間で開いたまま維持され、呼び出しごとの WAL リプレイが不要</li>
-<li><strong>フル gRPC API</strong> – インデックス管理、ドキュメント CRUD、コミット、検索（単発 + ストリーミング）</li>
-<li><strong>HTTP ゲートウェイ</strong> – gRPC と併用可能なオプションの HTTP/JSON ゲートウェイで REST スタイルのアクセスを提供</li>
-<li><strong>ヘルスチェック</strong> – ロードバランサーやオーケストレーター向けの標準ヘルスチェックエンドポイント</li>
-<li><strong>グレースフルシャットダウン</strong> – Ctrl+C / SIGINT で保留中の変更を自動的にコミット</li>
-<li><strong>TOML 設定</strong> – オプションの設定ファイルと CLI・環境変数によるオーバーライド</li>
-</ul>
-<h2 id="アーキテクチャ"><a class="header" href="#アーキテクチャ">アーキテクチャ</a></h2>
-<pre><code class="language-mermaid">graph LR
-    subgraph "laurus-server"
-        GW["HTTP Gateway\n(axum)"]
-        GRPC["gRPC Server\n(tonic)"]
-        ENG["Engine\n(Arc&amp;lt;RwLock&amp;gt;)"]
-    end
-
-    Client1["HTTP Client"] --&gt; GW
-    Client2["gRPC Client"] --&gt; GRPC
-    GW --&gt; GRPC
-    GRPC --&gt; ENG
+                        <h1 id="bkd-tree"><a class="header" href="#bkd-tree">BKD-Tree</a></h1>
+<p>Laurus は数値・日時・地理ポイントなどのデータを <strong>BKD-Tree</strong> (Block KD-Tree)
+に格納する。BKD-Tree はディスク常駐の多次元インデックスで、レンジ・バウンディング
+ボックス・距離・k 近傍 (k-NN) の各クエリを単一のファイル形式で扱える。</p>
+<p>「空間的な形」を持つあらゆるフィールド型はこの BKD プリミティブを共有する：</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">フィールド型</th><th style="text-align: center">次元数</th><th style="text-align: left">座標空間</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Integer</code> / <code>Float</code>（単一値・多値）</td><td style="text-align: center">1</td><td style="text-align: left">スカラー</td></tr>
+<tr><td style="text-align: left"><code>DateTime</code></td><td style="text-align: center">1</td><td style="text-align: left">Unix マイクロ秒（UTC）</td></tr>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: center">2</td><td style="text-align: left">緯度・経度（度）</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: center">3</td><td style="text-align: left">ECEF 直交座標（メートル）</td></tr>
+</tbody>
+</table>
+</div>
+<p>新しい空間フィールド型を追加する作業は、次元数を選んでクエリ側の
+<a href="#intersectvisitor-プロトコル"><code>IntersectVisitor</code></a> を書くだけに帰着する。
+ライタ・リーダ・オンディスクレイアウトはそのまま再利用される。</p>
+<h2 id="ファイルフォーマット-version-2"><a class="header" href="#ファイルフォーマット-version-2">ファイルフォーマット (Version 2)</a></h2>
+<p><code>.bkd</code> セグメントファイルは自己完結型のバイナリで、3 つの領域から成る：</p>
+<pre><code class="language-text">+----------------------------------------+
+| File Header                            |   固定長・バージョンタグ付き
++----------------------------------------+
+| Leaf Blocks                            |   row-major points + doc_ids
+|   leaf 0                               |
+|   leaf 1                               |
+|   ...                                  |
++----------------------------------------+
+| Index Nodes                            |   内部ナビゲーションノード
+|   node N-1                             |
+|   ...                                  |
+|   node 0  (root, written last)         |
++----------------------------------------+
 </code></pre>
-<p>gRPC サーバーは常に起動します。HTTP ゲートウェイはオプションで、HTTP/JSON リクエストを内部的に gRPC サーバーへプロキシします。</p>
-<h2 id="クイックスタート"><a class="header" href="#クイックスタート">クイックスタート</a></h2>
-<pre><code class="language-bash"># デフォルト設定で起動（gRPC ポート 50051）
-laurus serve
-
-# HTTP ゲートウェイ付きで起動
-laurus serve --http-port 8080
-
-# 設定ファイルを指定して起動
-laurus serve --config config.toml
+<p>ヘッダ (<code>BKDFileHeader</code>) は <code>magic</code>、<code>version</code>（現在は <code>2</code>）、<code>num_dims</code>、
+<code>bytes_per_dim</code>、総ポイント数、リーフブロック数、<strong>全体の軸ごと min/max</strong>、
+インデックス領域とルートノードへのオフセットを保持する。</p>
+<h3 id="leaf-block-レイアウト"><a class="header" href="#leaf-block-レイアウト">Leaf Block レイアウト</a></h3>
+<p>各リーフブロックは、その部分木に属するポイントを格納する：</p>
+<pre><code class="language-text">count               u32                       — リーフ内のポイント数
+leaf_min            [f64; num_dims]           — リーフレベルの AABB 下端
+leaf_max            [f64; num_dims]           — リーフレベルの AABB 上端
+point_values        [f64; count * num_dims]   — row-major のポイント座標
+doc_ids             [u64; count]              — ドキュメント ID の並列配列
 </code></pre>
-<h2 id="セクション"><a class="header" href="#セクション">セクション</a></h2>
+<p>リーフごとに AABB を持たせることで、クエリ領域がリーフの外側にある場合
+(<code>Outside</code>) や全内包される場合 (<code>Inside</code>) には、ポイントを 1 つも読まずに
+リーフ全体を判定できる。</p>
+<h3 id="内部-index-node-レイアウト"><a class="header" href="#内部-index-node-レイアウト">内部 Index Node レイアウト</a></h3>
+<p>内部ノードは分割情報に加え、子ごとの AABB も保持する：</p>
+<pre><code class="language-text">split_dim           u32                       — 分割する軸
+split_value         f64                       — 分割しきい値
+left_min            [f64; num_dims]           — 左部分木の AABB 下端
+left_max            [f64; num_dims]           — 左部分木の AABB 上端
+right_min           [f64; num_dims]           — 右部分木の AABB 下端
+right_max           [f64; num_dims]           — 右部分木の AABB 上端
+left_offset         u64                       — 左子ノードのファイルオフセット
+right_offset        u64                       — 右子ノードのファイルオフセット
+</code></pre>
+<blockquote>
+<p>ノードごとの AABB（v2 で追加）は、分割値だけを持っていた v1 レイアウトを
+置き換える。これにより <code>Inside</code> / <code>Outside</code> の枝刈りが、再帰的な
+探索ではなく定数時間の矩形判定で済むようになった。</p>
+</blockquote>
+<h2 id="ビルドアルゴリズム"><a class="header" href="#ビルドアルゴリズム">ビルドアルゴリズム</a></h2>
+<p><code>BKDWriter::write</code> は、平坦な row-major のポイントバッファと並列の <code>doc_ids</code>
+バッファからツリーを構築する。構築は <strong>最も広い軸で分割する (widest-axis
+split)</strong> ヒューリスティクスで進む：</p>
+<ol>
+<li>入力部分集合の AABB を計算する。</li>
+<li><code>(max - min)</code> レンジが最も広い軸を選ぶ（同点時は次元番号の小さい方を
+採用して決定的にする）。</li>
+<li>インデックスの並びをその軸でソートし、中央値で分割する。</li>
+<li>部分木が <code>block_size</code>（既定 <code>512</code>）以下のポイント数になるまで再帰し、
+そうなったらリーフとして書き出す。</li>
+<li>子が flush された後、各親の <code>left_offset</code> / <code>right_offset</code> を後埋めする。</li>
+</ol>
+<p>ビルダはポイント／doc_id バッファ自体ではなく<strong>インデックスの並び</strong>
+（permutation）をソートするため、ポイント数に関わらずポイント単位の
+ヒープ確保を一切おこなわない。</p>
+<h3 id="数値ロバスト性"><a class="header" href="#数値ロバスト性">数値ロバスト性</a></h3>
+<p>座標は全順序で比較できる必要がある。<code>BKDWriter::write</code> は <code>NaN</code> を明示的に
+拒否する。<code>NaN</code> には順序が定義されておらず、分割判定とノードごとの AABB
+不変条件を破壊するためである。<code>±INFINITY</code> は両方とも受理され、クエリでは
+「無限大」を表す自然なセンチネルとして機能する。</p>
+<h2 id="intersectvisitor-プロトコル"><a class="header" href="#intersectvisitor-プロトコル">IntersectVisitor プロトコル</a></h2>
+<p>BKD インデックスへのクエリは
+<a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/visitor.rs"><code>IntersectVisitor</code></a>
+の実装として表現する。リーダはツリーを辿りながら、ビジタに 3 種類の
+情報を尋ねる：</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum CellRelation {
+    Inside,   // 部分木全体がヒット — ポイント単位の照合不要
+    Outside,  // 部分木全体をスキップできる
+    Crosses,  // 再帰、もしくはリーフをポイント単位で照合
+}
+
+pub trait IntersectVisitor {
+    fn compare(&amp;self, cell: &amp;AABB) -&gt; CellRelation;
+    fn visit_inside(&amp;mut self, doc_id: u64);
+    fn visit(&amp;mut self, doc_id: u64, point: &amp;[f64]);
+}
+<span class="boring">}</span></code></pre>
+<p>リーダのトラバーサルは次のように進む：</p>
+<pre><code class="language-mermaid">graph TD
+    A["compare(node.aabb)"]
+    A --&gt;|Inside| B["部分木の各 doc_id を visit_inside(doc_id) で報告&lt;br/&gt;（座標は読まない）"]
+    A --&gt;|Outside| C["部分木をスキップ"]
+    A --&gt;|Crosses, 内部ノード| D["子ノードへ再帰"]
+    A --&gt;|Crosses, リーフ| E["各ポイントについて visit(doc_id, point)&lt;br/&gt;ヒット判定はビジタに委ねる"]
+</code></pre>
+<p>この 3 値分類こそが枝刈りを実現する鍵である。常に <code>Crosses</code> を返すビジタを
+書いても結果は正しい — 単にリーフ全件走査に退化するだけだ。</p>
+<h3 id="レンジクエリ"><a class="header" href="#レンジクエリ">レンジクエリ</a></h3>
+<p>レガシーの <code>BKDTree::range_search</code> API は <code>intersect</code> の薄いラッパに
+なっている。<code>RangeQueryVisitor</code> を半開区間／閉区間のパラメータから組み立て、
+無限大の <code>None</code> スロットを <code>±INFINITY</code> に変換する。境界の包含・排他は
+ビジタ自身が処理する。</p>
+<h3 id="3d-地理クエリ"><a class="header" href="#3d-地理クエリ">3D 地理クエリ</a></h3>
+<p>3 つのビジタが <a href="geo3d.html"><code>laurus::lexical::query::geo3d</code></a> に存在し、
+<code>Geo3d</code> (3D ECEF) フィールドをターゲットにする：</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">クエリ</th><th style="text-align: left"><code>compare</code> の判定領域</th><th style="text-align: left"><code>visit</code> の点ごとの判定</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo3dDistanceQuery</code></td><td style="text-align: left">球 <code>(centre, radius)</code> と AABB</td><td style="text-align: left">ユークリッド距離 ≤ radius</td></tr>
+<tr><td style="text-align: left"><code>Geo3dBoundingBoxQuery</code></td><td style="text-align: left">クエリ AABB と セル AABB</td><td style="text-align: left">点がクエリ AABB に内包</td></tr>
+<tr><td style="text-align: left"><code>Geo3dNearestQuery</code> (k-NN)</td><td style="text-align: left">クエリ点を中心に拡大していく球</td><td style="text-align: left">距離 ≤ 現在の k 番目最良値</td></tr>
+</tbody>
+</table>
+</div>
+<p>同じプリミティブで将来のあらゆる空間クエリ（ポリゴンクエリや 2D <code>Geo</code>
+の大円距離クエリなど）を新しいビジタとして実装できる。</p>
+<h2 id="リーダの内部実装"><a class="header" href="#リーダの内部実装">リーダの内部実装</a></h2>
+<p><code>BKDReader::intersect</code> は 1 クエリにつき 1 つのスクラッチバッファ
+(<code>IntersectScratch</code>) を使う。バッファは出会った最大のリーフサイズまで
+拡大されたあと、後続のリーフでも再利用される。結果として、何枚のリーフを
+辿っても、1 クエリの間にアロケータに触れる回数はごく少数で済む。</p>
+<p>単一リーフだけのツリー（非常に小さなフィールド）は特別扱いされる：
+「ルートオフセット」がそのまま唯一のリーフを指すため、内部ノードの
+降下処理は完全にスキップされる。</p>
+<h2 id="関連項目"><a class="header" href="#関連項目">関連項目</a></h2>
 <ul>
-<li><a href="laurus-server/getting_started.html">はじめに</a> – 起動オプションと最初のステップ</li>
-<li><a href="laurus-server/configuration.html">設定</a> – TOML 設定、環境変数、優先順位</li>
-<li><a href="laurus-server/grpc_api.html">gRPC API リファレンス</a> – 全サービスと RPC の完全な API ドキュメント</li>
-<li><a href="laurus-server/http_gateway.html">HTTP ゲートウェイ</a> – HTTP/JSON エンドポイントリファレンス</li>
+<li><a href="geo3d.html">3D 地理検索 (ECEF)</a> — ECEF 距離・バウンディング
+ボックス・k-NN を実装した具体的な BKD ベースのビジタ。</li>
+<li><a href="indexing/lexical_indexing.html">Lexical インデクシング</a> — <code>.bkd</code>
+セグメントファイルがセグメント全体のレイアウト内のどこに位置するか。</li>
+<li><a href="search/lexical_search.html">Lexical 検索</a> — <code>NumericRangeQuery</code>、
+<code>GeoQuery</code>、<code>Geo3dDistanceQuery</code> の Rust API エントリポイント。</li>
 </ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="laurus-cli/repl.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../concepts/query_dsl.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="laurus-server/getting_started.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../concepts/geo3d.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -241,11 +355,11 @@ laurus serve --config config.toml
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="laurus-cli/repl.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../concepts/query_dsl.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="laurus-server/getting_started.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../concepts/geo3d.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -265,17 +379,17 @@ laurus serve --config config.toml
         </script>
 
 
-        <script src="elasticlunr-ef4e11c1.min.js"></script>
-        <script src="mark-09e88c2c.min.js"></script>
-        <script src="searcher-c2a407aa.js"></script>
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
 
-        <script src="clipboard-1626706a.min.js"></script>
-        <script src="highlight-abc7f01d.js"></script>
-        <script src="book-a0b12cfe.js"></script>
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="mermaid-9a6dd17b.min.js"></script>
-        <script src="mermaid-init-ddddd38b.js"></script>
+        <script src="../mermaid-9a6dd17b.min.js"></script>
+        <script src="../mermaid-init-ddddd38b.js"></script>
 
 
 

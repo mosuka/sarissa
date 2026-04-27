@@ -35,10 +35,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-47a1de00.js";
+            window.path_to_searchindex_js = "../../searchindex-812ca712.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-0f2ac19d.js"></script>
+        <script src="../../toc-c423c571.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -325,7 +325,7 @@ let query = NumericRangeQuery::new(
 );
 <span class="boring">}</span></code></pre>
 <h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<p>地理的な位置に基づいてドキュメントをマッチングします。</p>
+<p>2D 地理座標（WGS84 緯度・経度）に基づいてドキュメントをマッチングします。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use laurus::lexical::query::geo::GeoQuery;
@@ -340,6 +340,45 @@ let query = GeoQuery::within_bounding_box(
     36.0, 140.0,  // max (lat, lon)
 )?;
 <span class="boring">}</span></code></pre>
+<h3 id="geo3ddistancequery--geo3dboundingboxquery--geo3dnearestquery"><a class="header" href="#geo3ddistancequery--geo3dboundingboxquery--geo3dnearestquery">Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery</a></h3>
+<p>3 種類のクエリが、ECEF 直交座標（メートル）にバックアップされた 3D の
+<code>Geo3d</code> フィールドを対象とします。高度が意味を持つ用途や、2D の <code>Geo</code>
+フィールドでは極特異点が問題になるケースで使ってください。座標系・WGS84
+変換ヘルパー・実例については <a href="../geo3d.html">3D 地理検索</a> を参照してください。</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::GeoEcefPoint;
+use laurus::lexical::query::geo3d::{
+    Geo3dDistanceQuery, Geo3dBoundingBoxQuery, Geo3dNearestQuery,
+};
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+
+// 球: `centre` から 5 km 以内のドキュメント
+let q = Geo3dDistanceQuery::new("position", centre, 5_000.0);
+
+// 軸並行 3D バウンディングボックス（コンストラクタが軸ごとに min ≤ max を検証）
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let q = Geo3dBoundingBoxQuery::new("position", min, max)?;
+
+// k-NN: 最も近い 10 件、半径スケジュールをカスタマイズ
+let q = Geo3dNearestQuery::new("position", centre, 10)
+    .with_initial_radius(500.0)
+    .with_max_radius(1_000_000.0);
+<span class="boring">}</span></code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">クエリ</th><th style="text-align: left">スコア</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo3dDistanceQuery</code></td><td style="text-align: left"><code>1 - distance / radius</code> を <code>[0, 1]</code> にクランプ</td></tr>
+<tr><td style="text-align: left"><code>Geo3dBoundingBoxQuery</code></td><td style="text-align: left">マッチした全ドキュメントで定数 <code>1.0</code></td></tr>
+<tr><td style="text-align: left"><code>Geo3dNearestQuery</code></td><td style="text-align: left">最も近いヒットが <code>1.0</code>、返却された集合内で最も遠いヒットが <code>0.0</code> となるよう正規化</td></tr>
+</tbody>
+</table>
+</div>
 <h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
 <p>ドキュメント内のタームの近接度に基づいてマッチングします。<code>SpanTermQuery</code> と <code>SpanNearQuery</code> を使用して近接クエリを構築します。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]

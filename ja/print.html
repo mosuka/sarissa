@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-47a1de00.js";
+            window.path_to_searchindex_js = "searchindex-812ca712.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-0f2ac19d.js"></script>
+        <script src="toc-c423c571.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -926,6 +926,7 @@ let schema = Schema::builder()
     FO --&gt; B["Boolean"]
     FO --&gt; DT["DateTime"]
     FO --&gt; G["Geo"]
+    FO --&gt; G3["Geo3d"]
     FO --&gt; BY["Bytes"]
 
     FO --&gt; FLAT["Flat"]
@@ -946,6 +947,7 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><strong>Boolean</strong></td><td style="text-align: left"><code>BooleanOption</code></td><td style="text-align: left"><code>add_boolean_field()</code></td><td style="text-align: left"><code>true</code> / <code>false</code></td></tr>
 <tr><td style="text-align: left"><strong>DateTime</strong></td><td style="text-align: left"><code>DateTimeOption</code></td><td style="text-align: left"><code>add_datetime_field()</code></td><td style="text-align: left">UTC タイムスタンプ。範囲クエリをサポート</td></tr>
 <tr><td style="text-align: left"><strong>Geo</strong></td><td style="text-align: left"><code>GeoOption</code></td><td style="text-align: left"><code>add_geo_field()</code></td><td style="text-align: left">緯度/経度のペア。半径検索とバウンディングボックスクエリをサポート</td></tr>
+<tr><td style="text-align: left"><strong>Geo3d</strong></td><td style="text-align: left"><code>Geo3dOption</code></td><td style="text-align: left"><code>add_geo3d_field()</code></td><td style="text-align: left">3D ECEF 直交座標ポイント（<code>x</code>, <code>y</code>, <code>z</code>、メートル）。3D 距離検索・バウンディングボックス・k-NN クエリをサポート。詳細は <a href="#3d-地理検索-ecef">3D 地理検索</a> を参照</td></tr>
 <tr><td style="text-align: left"><strong>Bytes</strong></td><td style="text-align: left"><code>BytesOption</code></td><td style="text-align: left"><code>add_bytes_field()</code></td><td style="text-align: left">バイナリデータ</td></tr>
 </tbody>
 </table>
@@ -1088,7 +1090,8 @@ engine.commit().await?;
 <tr><td style="text-align: left"><code>add_boolean(name, value)</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left">ブールフィールドを追加</td></tr>
 <tr><td style="text-align: left"><code>add_datetime(name, value)</code></td><td style="text-align: left"><code>DateTime&lt;Utc&gt;</code></td><td style="text-align: left">日時フィールドを追加</td></tr>
 <tr><td style="text-align: left"><code>add_vector(name, value)</code></td><td style="text-align: left"><code>Vec&lt;f32&gt;</code></td><td style="text-align: left">事前計算済みベクトルフィールドを追加</td></tr>
-<tr><td style="text-align: left"><code>add_geo(name, lat, lon)</code></td><td style="text-align: left"><code>(f64, f64)</code></td><td style="text-align: left">地理座標フィールドを追加</td></tr>
+<tr><td style="text-align: left"><code>add_geo(name, lat, lon)</code></td><td style="text-align: left"><code>(f64, f64)</code></td><td style="text-align: left">2D 地理座標フィールドを追加（WGS84）</td></tr>
+<tr><td style="text-align: left"><code>add_geo_ecef(name, x, y, z)</code></td><td style="text-align: left"><code>(f64, f64, f64)</code></td><td style="text-align: left">3D ECEF 直交座標ポイントを追加（メートル）</td></tr>
 <tr><td style="text-align: left"><code>add_bytes(name, data)</code></td><td style="text-align: left"><code>Vec&lt;u8&gt;</code></td><td style="text-align: left">バイナリデータを追加</td></tr>
 <tr><td style="text-align: left"><code>add_field(name, value)</code></td><td style="text-align: left"><code>DataValue</code></td><td style="text-align: left">任意の値型を追加</td></tr>
 </tbody>
@@ -1107,7 +1110,10 @@ engine.commit().await?;
     Bytes(Vec&lt;u8&gt;, Option&lt;String&gt;),  // (data, optional MIME type)
     Vector(Vec&lt;f32&gt;),
     DateTime(DateTime&lt;Utc&gt;),
-    Geo(f64, f64),          // (latitude, longitude)
+    Geo(GeoPoint),                   // 2D WGS84 ポイント (latitude, longitude)
+    GeoEcef(GeoEcefPoint),           // 3D ECEF 直交座標ポイント (x, y, z)、メートル
+    Int64Array(Vec&lt;i64&gt;),            // 多値整数フィールド
+    Float64Array(Vec&lt;f64&gt;),          // 多値浮動小数点フィールド
 }
 <span class="boring">}</span></code></pre>
 <p><code>DataValue</code> は一般的な型に対して <code>From&lt;T&gt;</code> を実装しているため、<code>.into()</code> 変換が使用できます。</p>
@@ -1171,8 +1177,10 @@ let schema = Schema::builder()
 </tbody>
 </table>
 </div>
-<p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）および <code>Bytes</code> は<strong>自動推論の対象外</strong>です。
-スキーマへ明示的に宣言してください。</p>
+<p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）、<code>Bytes</code>、<code>Geo3d</code> は
+<strong>自動推論の対象外</strong>です。スキーマへ明示的に宣言してください。
+（<code>x</code>, <code>y</code>, <code>z</code> キーを持つ任意のユーザーレコードと衝突するため、
+<code>Geo3d</code> は JSON オブジェクトから推論されません。）</p>
 <h3 id="多値数値フィールド"><a class="header" href="#多値数値フィールド">多値数値フィールド</a></h3>
 <p><code>Integer</code> と <code>Float</code> フィールドは <code>multi_valued = true</code> を指定することで、
 1 ドキュメントに複数の値を保持できます。範囲クエリは<strong>いずれかの値が条件を満たせばマッチ</strong>
@@ -1197,7 +1205,7 @@ let schema = Schema::builder()
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Int64(0)</code> / <code>Int64(1)</code></td><td style="text-align: left"><code>false</code> / <code>true</code></td></tr>
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left"><code>Text("true"/"false")</code></td><td style="text-align: left">大文字小文字を無視してパース</td></tr>
 <tr><td style="text-align: left"><code>Text</code></td><td style="text-align: left">任意のスカラー値</td><td style="text-align: left">文字列化</td></tr>
-<tr><td style="text-align: left"><code>Geo</code> / <code>Bytes</code> / ベクトル</td><td style="text-align: left">対応 variant 以外</td><td style="text-align: left">エラー</td></tr>
+<tr><td style="text-align: left"><code>Geo</code> / <code>Geo3d</code> / <code>Bytes</code> / ベクトル</td><td style="text-align: left">対応 variant 以外</td><td style="text-align: left">エラー</td></tr>
 </tbody>
 </table>
 </div>
@@ -2063,7 +2071,7 @@ let storage = StorageFactory::create(
 </table>
 </div>
 <h2 id="数値フィールドと日付フィールド"><a class="header" href="#数値フィールドと日付フィールド">数値フィールドと日付フィールド</a></h2>
-<p>整数、浮動小数点数、日時フィールドは、<strong>BKD ツリー</strong> を使用してインデキシングされます。BKD ツリーは範囲クエリに最適化された空間分割データ構造です。</p>
+<p>整数、浮動小数点数、日時フィールドは、<strong><a href="#bkd-tree">BKD ツリー</a></strong> を使用してインデキシングされます。BKD ツリーは範囲クエリに最適化された空間分割データ構造です。</p>
 <pre><code class="language-mermaid">graph TB
     Root["BKD Root"]
     Root --&gt; L["values &lt; 50"]
@@ -2075,11 +2083,23 @@ let storage = StorageFactory::create(
 </code></pre>
 <p>BKD ツリーにより、<code>price:[10 TO 100]</code> や <code>date:[2024-01-01 TO 2024-12-31]</code> のような範囲クエリを効率的に評価できます。</p>
 <h2 id="地理フィールドgeo-fields"><a class="header" href="#地理フィールドgeo-fields">地理フィールド（Geo Fields）</a></h2>
-<p>地理フィールドは緯度/経度のペアを格納します。以下のクエリをサポートする空間データ構造を使用してインデキシングされます。</p>
-<ul>
-<li><strong>半径クエリ（Radius queries）</strong>: 中心点から N キロメートル以内のすべてのポイントを検索</li>
-<li><strong>バウンディングボックスクエリ（Bounding box queries）</strong>: 矩形領域内のすべてのポイントを検索</li>
-</ul>
+<p>地理フィールドには 2 種類あり、いずれも同じ多次元
+<a href="#bkd-tree">BKD-Tree</a> プリミティブにバックアップされています：</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">フィールド型</th><th style="text-align: center">次元数</th><th style="text-align: left">座標</th><th style="text-align: left">サポートされるクエリ</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: center">2</td><td style="text-align: left">WGS84 緯度・経度（度）</td><td style="text-align: left">半径検索、バウンディングボックス</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: center">3</td><td style="text-align: left">ECEF 直交座標 <code>(x, y, z)</code>（メートル）</td><td style="text-align: left">3D 距離検索（球）、3D バウンディングボックス、k-NN</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>Geo3d</code> は高度が一級の次元になる用途（ドローン・衛星・屋内 3D 測位など、
+2D の <code>Geo</code> フィールドでは情報が失われたり極で歪んだりするケース）で
+適しています。座標系・WGS84 変換ヘルパー・DSL 構文については
+<a href="#3d-地理検索-ecef">3D 地理検索 (ECEF)</a> を参照してください。</p>
 <h2 id="セグメントsegments"><a class="header" href="#セグメントsegments">セグメント（Segments）</a></h2>
 <p>Lexical インデックスは<strong>セグメント</strong>に分割されて構成されます。各セグメントはイミュータブルで自己完結型のミニインデックスです。</p>
 <pre><code class="language-mermaid">graph TB
@@ -2104,7 +2124,7 @@ let storage = StorageFactory::create(
 <tbody>
 <tr><td style="text-align: left"><code>.dict</code></td><td style="text-align: left">Term Dictionary（ソート済みターム + メタデータオフセット）</td></tr>
 <tr><td style="text-align: left"><code>.post</code></td><td style="text-align: left">Posting Lists（ドキュメント ID、ターム頻度、位置情報）</td></tr>
-<tr><td style="text-align: left"><code>.bkd</code></td><td style="text-align: left">数値フィールドおよび日付フィールドの BKD ツリーデータ</td></tr>
+<tr><td style="text-align: left"><code>.bkd</code></td><td style="text-align: left">数値・日付・<code>Geo</code>（2D）・<code>Geo3d</code>（3D ECEF）フィールドの <a href="#bkd-tree">BKD ツリー</a> データ</td></tr>
 <tr><td style="text-align: left"><code>.docs</code></td><td style="text-align: left">格納されたフィールド値（元のドキュメント内容）</td></tr>
 <tr><td style="text-align: left"><code>.dv</code></td><td style="text-align: left">ソートおよびフィルタリング用の Doc Values</td></tr>
 <tr><td style="text-align: left"><code>.meta</code></td><td style="text-align: left">セグメントメタデータ（ドキュメント数、ターム数など）</td></tr>
@@ -2645,7 +2665,7 @@ let query = NumericRangeQuery::new(
 );
 <span class="boring">}</span></code></pre>
 <h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<p>地理的な位置に基づいてドキュメントをマッチングします。</p>
+<p>2D 地理座標（WGS84 緯度・経度）に基づいてドキュメントをマッチングします。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use laurus::lexical::query::geo::GeoQuery;
@@ -2660,6 +2680,45 @@ let query = GeoQuery::within_bounding_box(
     36.0, 140.0,  // max (lat, lon)
 )?;
 <span class="boring">}</span></code></pre>
+<h3 id="geo3ddistancequery--geo3dboundingboxquery--geo3dnearestquery"><a class="header" href="#geo3ddistancequery--geo3dboundingboxquery--geo3dnearestquery">Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery</a></h3>
+<p>3 種類のクエリが、ECEF 直交座標（メートル）にバックアップされた 3D の
+<code>Geo3d</code> フィールドを対象とします。高度が意味を持つ用途や、2D の <code>Geo</code>
+フィールドでは極特異点が問題になるケースで使ってください。座標系・WGS84
+変換ヘルパー・実例については <a href="#3d-地理検索-ecef">3D 地理検索</a> を参照してください。</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::GeoEcefPoint;
+use laurus::lexical::query::geo3d::{
+    Geo3dDistanceQuery, Geo3dBoundingBoxQuery, Geo3dNearestQuery,
+};
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+
+// 球: `centre` から 5 km 以内のドキュメント
+let q = Geo3dDistanceQuery::new("position", centre, 5_000.0);
+
+// 軸並行 3D バウンディングボックス（コンストラクタが軸ごとに min ≤ max を検証）
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let q = Geo3dBoundingBoxQuery::new("position", min, max)?;
+
+// k-NN: 最も近い 10 件、半径スケジュールをカスタマイズ
+let q = Geo3dNearestQuery::new("position", centre, 10)
+    .with_initial_radius(500.0)
+    .with_max_radius(1_000_000.0);
+<span class="boring">}</span></code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">クエリ</th><th style="text-align: left">スコア</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo3dDistanceQuery</code></td><td style="text-align: left"><code>1 - distance / radius</code> を <code>[0, 1]</code> にクランプ</td></tr>
+<tr><td style="text-align: left"><code>Geo3dBoundingBoxQuery</code></td><td style="text-align: left">マッチした全ドキュメントで定数 <code>1.0</code></td></tr>
+<tr><td style="text-align: left"><code>Geo3dNearestQuery</code></td><td style="text-align: left">最も近いヒットが <code>1.0</code>、返却された集合内で最も遠いヒットが <code>0.0</code> となるよう正規化</td></tr>
+</tbody>
+</table>
+</div>
 <h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
 <p>ドキュメント内のタームの近接度に基づいてマッチングします。<code>SpanTermQuery</code> と <code>SpanNearQuery</code> を使用して近接クエリを構築します。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -3311,6 +3370,40 @@ test*
 date:{2024-01-01 TO 2024-12-31}
 price:[* TO 100]
 </code></pre>
+<h3 id="3d-地理クエリgeo3d_"><a class="header" href="#3d-地理クエリgeo3d_">3D 地理クエリ（<code>geo3d_*</code>）</a></h3>
+<p>3 種類の関数形式を <code>Geo3d</code>（3D ECEF 直交座標）フィールドに対して使えます。
+<code>k</code> 以外の引数はすべてメートル単位の符号付き浮動小数点数、<code>k</code> のみ符号なし整数：</p>
+<pre><code class="language-text">position:geo3d_distance(x, y, z, radius_m)
+position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+position:geo3d_nearest(x, y, z, k)
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">形式</th><th style="text-align: left">動作</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left"><code>(x, y, z)</code> から <code>radius_m</code> メートル以内の格納済みポイントを返す</td></tr>
+<tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">軸並行 3D ボックスに含まれる格納済みポイントを返す</td></tr>
+<tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left"><code>(x, y, z)</code> に最も近い <code>k</code> 件をユークリッド距離順で返す</td></tr>
+</tbody>
+</table>
+</div>
+<p>例：</p>
+<pre><code class="language-text"># 東京タワーから 5 km 以内（ECEF 座標）
+position:geo3d_distance(-3955182, 3350553, 3700276, 5000)
+
+# 軸並行 ECEF バウンディングボックス内
+position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
+
+# 最も近い 10 件
+position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
+</code></pre>
+<blockquote>
+<p>クエリ対象フィールドはスキーマで <code>Geo3d</code> として宣言されている必要があります。
+座標系・WGS84 変換ヘルパー・詳細な意味論については
+<a href="#3d-地理検索-ecef">3D 地理検索</a> を参照してください。</p>
+</blockquote>
 <h3 id="ブースト"><a class="header" href="#ブースト">ブースト</a></h3>
 <p><code>^</code> で句のウェイトを増加させます。</p>
 <pre><code class="language-text">title:hello^2
@@ -3331,8 +3424,16 @@ sub_clause     = { grouped_query | field_query | term_query }
 grouped_query  = { "(" ~ boolean_query ~ ")" ~ boost? }
 boolean_op     = { ^"AND" | ^"OR" }
 field_query    = { field ~ ":" ~ field_value }
-field_value    = { range_query | phrase_query | fuzzy_term
+field_value    = { geo3d_query | range_query | phrase_query | fuzzy_term
                  | wildcard_term | simple_term }
+geo3d_query    = { geo3d_distance | geo3d_bbox | geo3d_nearest }
+geo3d_distance = { ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_bbox     = { ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ","
+                 ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_nearest  = { ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")" }
 phrase_query   = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
 proximity      = { "~" ~ number }
 fuzzy_term     = { term ~ "~" ~ fuzziness? ~ boost? }
@@ -3534,6 +3635,409 @@ let unified = UnifiedQueryParser::new(lexical_parser, vector_parser)
         vector_weight: 0.7,
     });
 <span class="boring">}</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="bkd-tree"><a class="header" href="#bkd-tree">BKD-Tree</a></h1>
+<p>Laurus は数値・日時・地理ポイントなどのデータを <strong>BKD-Tree</strong> (Block KD-Tree)
+に格納する。BKD-Tree はディスク常駐の多次元インデックスで、レンジ・バウンディング
+ボックス・距離・k 近傍 (k-NN) の各クエリを単一のファイル形式で扱える。</p>
+<p>「空間的な形」を持つあらゆるフィールド型はこの BKD プリミティブを共有する：</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">フィールド型</th><th style="text-align: center">次元数</th><th style="text-align: left">座標空間</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Integer</code> / <code>Float</code>（単一値・多値）</td><td style="text-align: center">1</td><td style="text-align: left">スカラー</td></tr>
+<tr><td style="text-align: left"><code>DateTime</code></td><td style="text-align: center">1</td><td style="text-align: left">Unix マイクロ秒（UTC）</td></tr>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: center">2</td><td style="text-align: left">緯度・経度（度）</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: center">3</td><td style="text-align: left">ECEF 直交座標（メートル）</td></tr>
+</tbody>
+</table>
+</div>
+<p>新しい空間フィールド型を追加する作業は、次元数を選んでクエリ側の
+<a href="#intersectvisitor-プロトコル"><code>IntersectVisitor</code></a> を書くだけに帰着する。
+ライタ・リーダ・オンディスクレイアウトはそのまま再利用される。</p>
+<h2 id="ファイルフォーマット-version-2"><a class="header" href="#ファイルフォーマット-version-2">ファイルフォーマット (Version 2)</a></h2>
+<p><code>.bkd</code> セグメントファイルは自己完結型のバイナリで、3 つの領域から成る：</p>
+<pre><code class="language-text">+----------------------------------------+
+| File Header                            |   固定長・バージョンタグ付き
++----------------------------------------+
+| Leaf Blocks                            |   row-major points + doc_ids
+|   leaf 0                               |
+|   leaf 1                               |
+|   ...                                  |
++----------------------------------------+
+| Index Nodes                            |   内部ナビゲーションノード
+|   node N-1                             |
+|   ...                                  |
+|   node 0  (root, written last)         |
++----------------------------------------+
+</code></pre>
+<p>ヘッダ (<code>BKDFileHeader</code>) は <code>magic</code>、<code>version</code>（現在は <code>2</code>）、<code>num_dims</code>、
+<code>bytes_per_dim</code>、総ポイント数、リーフブロック数、<strong>全体の軸ごと min/max</strong>、
+インデックス領域とルートノードへのオフセットを保持する。</p>
+<h3 id="leaf-block-レイアウト"><a class="header" href="#leaf-block-レイアウト">Leaf Block レイアウト</a></h3>
+<p>各リーフブロックは、その部分木に属するポイントを格納する：</p>
+<pre><code class="language-text">count               u32                       — リーフ内のポイント数
+leaf_min            [f64; num_dims]           — リーフレベルの AABB 下端
+leaf_max            [f64; num_dims]           — リーフレベルの AABB 上端
+point_values        [f64; count * num_dims]   — row-major のポイント座標
+doc_ids             [u64; count]              — ドキュメント ID の並列配列
+</code></pre>
+<p>リーフごとに AABB を持たせることで、クエリ領域がリーフの外側にある場合
+(<code>Outside</code>) や全内包される場合 (<code>Inside</code>) には、ポイントを 1 つも読まずに
+リーフ全体を判定できる。</p>
+<h3 id="内部-index-node-レイアウト"><a class="header" href="#内部-index-node-レイアウト">内部 Index Node レイアウト</a></h3>
+<p>内部ノードは分割情報に加え、子ごとの AABB も保持する：</p>
+<pre><code class="language-text">split_dim           u32                       — 分割する軸
+split_value         f64                       — 分割しきい値
+left_min            [f64; num_dims]           — 左部分木の AABB 下端
+left_max            [f64; num_dims]           — 左部分木の AABB 上端
+right_min           [f64; num_dims]           — 右部分木の AABB 下端
+right_max           [f64; num_dims]           — 右部分木の AABB 上端
+left_offset         u64                       — 左子ノードのファイルオフセット
+right_offset        u64                       — 右子ノードのファイルオフセット
+</code></pre>
+<blockquote>
+<p>ノードごとの AABB（v2 で追加）は、分割値だけを持っていた v1 レイアウトを
+置き換える。これにより <code>Inside</code> / <code>Outside</code> の枝刈りが、再帰的な
+探索ではなく定数時間の矩形判定で済むようになった。</p>
+</blockquote>
+<h2 id="ビルドアルゴリズム"><a class="header" href="#ビルドアルゴリズム">ビルドアルゴリズム</a></h2>
+<p><code>BKDWriter::write</code> は、平坦な row-major のポイントバッファと並列の <code>doc_ids</code>
+バッファからツリーを構築する。構築は <strong>最も広い軸で分割する (widest-axis
+split)</strong> ヒューリスティクスで進む：</p>
+<ol>
+<li>入力部分集合の AABB を計算する。</li>
+<li><code>(max - min)</code> レンジが最も広い軸を選ぶ（同点時は次元番号の小さい方を
+採用して決定的にする）。</li>
+<li>インデックスの並びをその軸でソートし、中央値で分割する。</li>
+<li>部分木が <code>block_size</code>（既定 <code>512</code>）以下のポイント数になるまで再帰し、
+そうなったらリーフとして書き出す。</li>
+<li>子が flush された後、各親の <code>left_offset</code> / <code>right_offset</code> を後埋めする。</li>
+</ol>
+<p>ビルダはポイント／doc_id バッファ自体ではなく<strong>インデックスの並び</strong>
+（permutation）をソートするため、ポイント数に関わらずポイント単位の
+ヒープ確保を一切おこなわない。</p>
+<h3 id="数値ロバスト性"><a class="header" href="#数値ロバスト性">数値ロバスト性</a></h3>
+<p>座標は全順序で比較できる必要がある。<code>BKDWriter::write</code> は <code>NaN</code> を明示的に
+拒否する。<code>NaN</code> には順序が定義されておらず、分割判定とノードごとの AABB
+不変条件を破壊するためである。<code>±INFINITY</code> は両方とも受理され、クエリでは
+「無限大」を表す自然なセンチネルとして機能する。</p>
+<h2 id="intersectvisitor-プロトコル"><a class="header" href="#intersectvisitor-プロトコル">IntersectVisitor プロトコル</a></h2>
+<p>BKD インデックスへのクエリは
+<a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/visitor.rs"><code>IntersectVisitor</code></a>
+の実装として表現する。リーダはツリーを辿りながら、ビジタに 3 種類の
+情報を尋ねる：</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum CellRelation {
+    Inside,   // 部分木全体がヒット — ポイント単位の照合不要
+    Outside,  // 部分木全体をスキップできる
+    Crosses,  // 再帰、もしくはリーフをポイント単位で照合
+}
+
+pub trait IntersectVisitor {
+    fn compare(&amp;self, cell: &amp;AABB) -&gt; CellRelation;
+    fn visit_inside(&amp;mut self, doc_id: u64);
+    fn visit(&amp;mut self, doc_id: u64, point: &amp;[f64]);
+}
+<span class="boring">}</span></code></pre>
+<p>リーダのトラバーサルは次のように進む：</p>
+<pre><code class="language-mermaid">graph TD
+    A["compare(node.aabb)"]
+    A --&gt;|Inside| B["部分木の各 doc_id を visit_inside(doc_id) で報告&lt;br/&gt;（座標は読まない）"]
+    A --&gt;|Outside| C["部分木をスキップ"]
+    A --&gt;|Crosses, 内部ノード| D["子ノードへ再帰"]
+    A --&gt;|Crosses, リーフ| E["各ポイントについて visit(doc_id, point)&lt;br/&gt;ヒット判定はビジタに委ねる"]
+</code></pre>
+<p>この 3 値分類こそが枝刈りを実現する鍵である。常に <code>Crosses</code> を返すビジタを
+書いても結果は正しい — 単にリーフ全件走査に退化するだけだ。</p>
+<h3 id="レンジクエリ"><a class="header" href="#レンジクエリ">レンジクエリ</a></h3>
+<p>レガシーの <code>BKDTree::range_search</code> API は <code>intersect</code> の薄いラッパに
+なっている。<code>RangeQueryVisitor</code> を半開区間／閉区間のパラメータから組み立て、
+無限大の <code>None</code> スロットを <code>±INFINITY</code> に変換する。境界の包含・排他は
+ビジタ自身が処理する。</p>
+<h3 id="3d-地理クエリ"><a class="header" href="#3d-地理クエリ">3D 地理クエリ</a></h3>
+<p>3 つのビジタが <a href="#3d-地理検索-ecef"><code>laurus::lexical::query::geo3d</code></a> に存在し、
+<code>Geo3d</code> (3D ECEF) フィールドをターゲットにする：</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">クエリ</th><th style="text-align: left"><code>compare</code> の判定領域</th><th style="text-align: left"><code>visit</code> の点ごとの判定</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo3dDistanceQuery</code></td><td style="text-align: left">球 <code>(centre, radius)</code> と AABB</td><td style="text-align: left">ユークリッド距離 ≤ radius</td></tr>
+<tr><td style="text-align: left"><code>Geo3dBoundingBoxQuery</code></td><td style="text-align: left">クエリ AABB と セル AABB</td><td style="text-align: left">点がクエリ AABB に内包</td></tr>
+<tr><td style="text-align: left"><code>Geo3dNearestQuery</code> (k-NN)</td><td style="text-align: left">クエリ点を中心に拡大していく球</td><td style="text-align: left">距離 ≤ 現在の k 番目最良値</td></tr>
+</tbody>
+</table>
+</div>
+<p>同じプリミティブで将来のあらゆる空間クエリ（ポリゴンクエリや 2D <code>Geo</code>
+の大円距離クエリなど）を新しいビジタとして実装できる。</p>
+<h2 id="リーダの内部実装"><a class="header" href="#リーダの内部実装">リーダの内部実装</a></h2>
+<p><code>BKDReader::intersect</code> は 1 クエリにつき 1 つのスクラッチバッファ
+(<code>IntersectScratch</code>) を使う。バッファは出会った最大のリーフサイズまで
+拡大されたあと、後続のリーフでも再利用される。結果として、何枚のリーフを
+辿っても、1 クエリの間にアロケータに触れる回数はごく少数で済む。</p>
+<p>単一リーフだけのツリー（非常に小さなフィールド）は特別扱いされる：
+「ルートオフセット」がそのまま唯一のリーフを指すため、内部ノードの
+降下処理は完全にスキップされる。</p>
+<h2 id="関連項目"><a class="header" href="#関連項目">関連項目</a></h2>
+<ul>
+<li><a href="#3d-地理検索-ecef">3D 地理検索 (ECEF)</a> — ECEF 距離・バウンディング
+ボックス・k-NN を実装した具体的な BKD ベースのビジタ。</li>
+<li><a href="#lexical-インデキシング-1">Lexical インデクシング</a> — <code>.bkd</code>
+セグメントファイルがセグメント全体のレイアウト内のどこに位置するか。</li>
+<li><a href="#lexical-検索-1">Lexical 検索</a> — <code>NumericRangeQuery</code>、
+<code>GeoQuery</code>、<code>Geo3dDistanceQuery</code> の Rust API エントリポイント。</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="3d-地理検索-ecef"><a class="header" href="#3d-地理検索-ecef">3D 地理検索 (ECEF)</a></h1>
+<p>Laurus は用途の異なる 2 種類の地理フィールド型を提供する：</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">フィールド型</th><th style="text-align: left">バックエンド構造</th><th style="text-align: left">座標系</th><th style="text-align: left">こんなときに</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">2D BKD-Tree</td><td style="text-align: left">WGS84 緯度・経度（度）</td><td style="text-align: left">データが地表のみで、高度を考慮しなくてよい場合</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: left">3D BKD-Tree</td><td style="text-align: left">ECEF 直交座標 <code>(x, y, z)</code>（メートル）</td><td style="text-align: left">高度が一級の次元になる用途（ドローン・衛星・屋内測位・複数フロア建物）</td></tr>
+</tbody>
+</table>
+</div>
+<p>両者は同じ <a href="#bkd-tree">BKD-Tree</a> プリミティブを共有しており、<code>Geo3d</code>
+は単に第 3 の次元と異なるクエリ語彙を加えただけである。</p>
+<h2 id="なぜ-ecef-なのか"><a class="header" href="#なぜ-ecef-なのか">なぜ ECEF なのか</a></h2>
+<p><code>(緯度, 経度, 高度)</code> の組は人間にとっては便利だが、ユークリッド距離が
+そのままでは使えない：経度 1 度は赤道で約 111 km だが極では 0 km、
+そして「高度」は地球表面に沿って曲がっている。</p>
+<p>ECEF (Earth-Centered Earth-Fixed) はこれを直交座標系にフラット化する：</p>
+<ul>
+<li><strong>原点</strong>は地球の質量中心。</li>
+<li><strong>+X 軸</strong>は赤道上の経度 0° を貫く。</li>
+<li><strong>+Y 軸</strong>は赤道上の経度 90° E を貫く。</li>
+<li><strong>+Z 軸</strong>は地理北極を貫く。</li>
+<li>3 軸とも単位は<strong>メートル</strong>。</li>
+</ul>
+<p>この座標系では <strong>2 点間の直線距離が単なるユークリッドノルム</strong>になる —
+球面三角法も極特異点も経度のラップアラウンドも要らない。これこそが、
+<code>Geo3d</code> クエリを 3D BKD-Tree 上で（特殊な空間コードなしで）使える
+理由である。</p>
+<h2 id="geo3d-フィールドの定義"><a class="header" href="#geo3d-フィールドの定義">Geo3d フィールドの定義</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::Schema;
+use laurus::lexical::core::field::Geo3dOption;
+
+let schema = Schema::builder()
+    .add_geo3d_field("position", Geo3dOption::default())
+    .build();
+<span class="boring">}</span></code></pre>
+<p><code>Geo3dOption</code> は他の lexical フィールドオプションと同じく
+<code>indexed</code> / <code>stored</code> を提供する。インデックス済みの値はフィールドの
+3D BKD-Tree に格納され、stored な値は <code>get_documents</code> で返ってくる。</p>
+<p>TOML 形式（<code>laurus-cli</code> で使用）：</p>
+<pre><code class="language-toml">[fields.position.Geo3d]
+indexed = true
+stored = true
+</code></pre>
+<h2 id="3d-ポイントのインデクシング"><a class="header" href="#3d-ポイントのインデクシング">3D ポイントのインデクシング</a></h2>
+<p><code>DocumentBuilder::add_geo_ecef</code> を使って、メートル単位の生の直交座標で
+ポイントを追加する：</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::Document;
+
+// (lat=35.6586°, lon=139.7454°, height=250m) のポイント
+// 既に ECEF へ変換済み（後述「座標変換」参照）。
+let doc = Document::builder()
+    .add_geo_ecef("position", -3_955_182.0, 3_350_553.0, 3_700_276.0)
+    .build();
+
+engine.put_document("tokyo-tower", doc).await?;
+engine.commit().await?;
+<span class="boring">}</span></code></pre>
+<p>値が既に <code>GeoEcefPoint</code> として手元にある場合は、統一 <code>DataValue</code> API を
+使う：</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::{DataValue, GeoEcefPoint};
+
+let p = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let doc = Document::builder()
+    .add_field("position", DataValue::GeoEcef(p))
+    .build();
+<span class="boring">}</span></code></pre>
+<h2 id="座標変換-wgs84--ecef"><a class="header" href="#座標変換-wgs84--ecef">座標変換 (WGS84 ↔ ECEF)</a></h2>
+<p>入力は通常 <code>(緯度°, 経度°, 高度 m)</code> でやって来る。Laurus は
+<a href="https://github.com/mosuka/laurus/blob/main/laurus/src/util/ecef.rs"><code>laurus::util::ecef</code></a>
+で標準的な相互変換を提供する：</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::util::ecef::{wgs84_to_ecef, ecef_to_wgs84};
+
+// 順変換: lat/lon/height → ECEF
+let p = wgs84_to_ecef(35.6586, 139.7454, 250.0);
+
+// 逆変換: ECEF → lat/lon/height
+let (lat, lon, height) = ecef_to_wgs84(&amp;p);
+<span class="boring">}</span></code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">関数</th><th style="text-align: left">方向</th><th style="text-align: left">アルゴリズム</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>wgs84_to_ecef(lat°, lon°, h_m)</code></td><td style="text-align: left">地理 → 直交</td><td style="text-align: left">卯酉線（prime vertical）の閉形式公式</td></tr>
+<tr><td style="text-align: left"><code>ecef_to_wgs84(&amp;GeoEcefPoint)</code></td><td style="text-align: left">直交 → 地理</td><td style="text-align: left">Bowring 1985 の閉形式を初期値にした Newton-Raphson 3 反復</td></tr>
+</tbody>
+</table>
+</div>
+<p>逆変換は地表下から LEO 軌道高度をはるかに超える領域まで、各軸で
+<strong>サブ µm</strong> の精度で往復する。極付近では、<code>cos(lat) → 0</code> で発散する
+標準形 <code>h = p / cos(lat) - N</code> の代わりに、子午線形
+<code>h = z / sin(lat) - N(1 - e²)</code> に切り替える。</p>
+<p>内部で使う WGS84 楕円体定数は <code>pub const</code> として公開されている
+（<code>WGS84_A</code>, <code>WGS84_F</code>, <code>WGS84_B</code>, <code>WGS84_E2</code>, <code>WGS84_E_PRIME_SQ</code>）ので、
+外部コードからも laurus が使っているのと同じ値を参照できる。</p>
+<h2 id="クエリ種別"><a class="header" href="#クエリ種別">クエリ種別</a></h2>
+<p><code>Geo3d</code> フィールドを対象とするクエリは 3 種類ある。いずれも 3D BKD-Tree
+を共有する <a href="#intersectvisitor-プロトコル"><code>IntersectVisitor</code></a>
+の実装である。</p>
+<h3 id="球半径--geo3ddistancequery"><a class="header" href="#球半径--geo3ddistancequery">球（半径） — <code>Geo3dDistanceQuery</code></a></h3>
+<p>中心点から <code>radius_m</code> メートル以内に格納済みポイントが入っているドキュメントを
+すべて返す。スコアは <code>1 - distance / radius</code> を <code>[0, 1]</code> にクランプした
+値。</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dDistanceQuery;
+use laurus::GeoEcefPoint;
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let query = Geo3dDistanceQuery::new("position", centre, 5_000.0); // 5 km 半径
+<span class="boring">}</span></code></pre>
+<p>ビジタは <code>Outside</code> 判定に <a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs"><code>AABB::min_distance_sq_to_point</code></a>、
+<code>Inside</code> 判定に <a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs"><code>AABB::max_distance_sq_to_point</code></a> を使う。どちらも
+2 乗距離空間で比較するため、<code>sqrt</code> を回避できる。</p>
+<h3 id="バウンディングボックス--geo3dboundingboxquery"><a class="header" href="#バウンディングボックス--geo3dboundingboxquery">バウンディングボックス — <code>Geo3dBoundingBoxQuery</code></a></h3>
+<p><code>(min_x, min_y, min_z)</code> と <code>(max_x, max_y, max_z)</code> で定義された軸並行 3D
+ボックスにポイントが入っているドキュメントを返す。</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dBoundingBoxQuery;
+use laurus::GeoEcefPoint;
+
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let query = Geo3dBoundingBoxQuery::new("position", min, max)?;
+<span class="boring">}</span></code></pre>
+<p>コンストラクタが <code>Result</code> を返すのは、すべての軸で <code>min[i] ≤ max[i]</code> を
+満たす必要があるため。境界がおかしい場合は構築時点で拒否され、
+「黙って空結果」を防げる。</p>
+<blockquote>
+<p><strong>注意点。</strong> クエリボックスは ECEF 直交座標で軸並行になっている。
+<code>(lat, lon, height)</code> の 2 つの隅をそれぞれ ECEF に変換して作った
+ボックスは、ユーザーが直感的に思い描く球殻領域とは<strong>違う</strong>形をしている。
+地表上の領域クエリを書くなら、<code>Geo3dDistanceQuery</code>（真の 3D 球）の方が
+多くの場合ユーザー直感に近い。</p>
+</blockquote>
+<h3 id="k-近傍--geo3dnearestquery"><a class="header" href="#k-近傍--geo3dnearestquery">k 近傍 — <code>Geo3dNearestQuery</code></a></h3>
+<p>クエリ点に最も近い <code>k</code> 件のドキュメントを返す。クエリは小さなプローブ球
+（既定 1 km）から始め、以下のいずれかを満たすまで<strong>半径を倍加</strong>していく：</p>
+<ol>
+<li>重複なしで <code>k</code> 件以上の候補を集めた、</li>
+<li>倍加しても何も新しいヒットが見つからなくなった、</li>
+<li>半径が <code>max_radius_m</code>（既定 <code>1.0e10</code> m＝10⁷ km）に達した。</li>
+</ol>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::lexical::query::geo3d::Geo3dNearestQuery;
+use laurus::GeoEcefPoint;
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+let query = Geo3dNearestQuery::new("position", centre, 10) // 上位 10 件
+    .with_initial_radius(500.0)         // 500 m から開始
+    .with_max_radius(1_000_000.0);      // 1 000 km で打ち切り
+<span class="boring">}</span></code></pre>
+<p>結果が <code>k</code> 件未満になるのは、単に <code>max_radius_m</code> 以内に <code>k</code> 件のポイントが
+存在しないことを意味する。スコアは「最も近いヒットが <code>1.0</code>、返却された
+集合内で最も遠いヒットが <code>0.0</code>」となるよう正規化される。</p>
+<p>k-NN ビジタは <code>compare</code> から <code>CellRelation::Inside</code> を返さない —
+<code>Outside</code> か <code>Crosses</code> のみ — ので、すべての候補がその座標と一緒に <code>visit</code>
+へ届けられ、k-NN の順序付けに真の距離を使える。</p>
+<h2 id="query-dsl-3"><a class="header" href="#query-dsl-3">Query DSL</a></h2>
+<p><code>Geo3d</code> クエリは統一 Query DSL からも使える（<a href="#3d-地理クエリgeo3d_">Query DSL → Geo3d 関数</a>
+を参照）：</p>
+<pre><code class="language-text">position:geo3d_distance(-3955182, 3350553, 3700276, 5000)
+position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
+position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">形式</th><th style="text-align: left">引数</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">中心 <code>(x, y, z)</code> と検索半径（m）</td></tr>
+<tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">AABB の対角の 2 隅</td></tr>
+<tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">中心 <code>(x, y, z)</code> と整数 <code>k</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>数値引数はすべて符号付き浮動小数。<code>geo3d_nearest</code> の <code>k</code> のみ符号なし整数。</p>
+<h2 id="ワイヤーフォーマット"><a class="header" href="#ワイヤーフォーマット">ワイヤーフォーマット</a></h2>
+<h3 id="grpc"><a class="header" href="#grpc">gRPC</a></h3>
+<p>Protocol Buffers では、3D 地理を専用の <code>Value</code> バリアント、<code>Geo3dPoint</code>
+メッセージ、<code>Geo3dOption</code> スキーマオプションとして公開している：</p>
+<pre><code class="language-proto">message Geo3dPoint {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+
+message Value {
+  oneof kind {
+    // ...
+    Geo3dPoint geo3d_value = 12;
+  }
+}
+
+message Geo3dOption {
+  bool indexed = 1;
+  bool stored = 2;
+}
+</code></pre>
+<p>完全な定義は <a href="https://github.com/mosuka/laurus/blob/main/laurus-server/proto/laurus/v1/common.proto"><code>common.proto</code></a>
+と <a href="https://github.com/mosuka/laurus/blob/main/laurus-server/proto/laurus/v1/index.proto"><code>index.proto</code></a>
+を参照。</p>
+<h3 id="http-gateway--mcp"><a class="header" href="#http-gateway--mcp">HTTP gateway / MCP</a></h3>
+<p>JSON ドキュメントでは <code>Geo3d</code> 値を <code>{ "x": …, "y": …, "z": … }</code> の
+オブジェクトとして受け付ける：</p>
+<pre><code class="language-json">{
+  "position": { "x": -3955182.0, "y": 3350553.0, "z": 3700276.0 }
+}
+</code></pre>
+<p>HTTP gateway はこれをエンジンへ転送する前に <code>DataValue::GeoEcef</code> に変換する。
+MCP サーバーも同じ規約に従う。</p>
+<h2 id="geo3d-を使うべきでないケース"><a class="header" href="#geo3d-を使うべきでないケース">Geo3d を使うべき<strong>でない</strong>ケース</a></h2>
+<ul>
+<li><strong>純粋な 2D 地図クエリ</strong>（地表上の座標からの半径検索、タイル地図上の
+単純なバウンディングボックスなど） — 引き続き <code>Geo</code> を使うこと。
+2D BKD はひとつ次元が軽く、WGS84 入力もユーザー直感に近い。</li>
+<li><strong>学習済みロケーション埋め込みの近似的な意味類似度</strong> — それはベクトル
+フィールド（<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>）の領分であって、<code>Geo3d</code> ではない。</li>
+</ul>
+<h2 id="関連項目-1"><a class="header" href="#関連項目-1">関連項目</a></h2>
+<ul>
+<li><a href="#bkd-tree">BKD-Tree</a> — <code>Integer</code>, <code>Float</code>, <code>DateTime</code>, 2D <code>Geo</code>
+も含めて支える、共通の多次元インデックス。</li>
+<li><a href="#スキーマとフィールド">スキーマとフィールド</a> — <code>Geo3d</code> を含む
+フィールド型の一覧。</li>
+<li><a href="#query-dsl-2">Query DSL</a> — geo3d DSL 文法の詳細。</li>
+<li><a href="#lexical-検索-1">Lexical 検索</a> — Lexical クエリ全般の Rust
+API エントリポイント。</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ライブラリ概要"><a class="header" href="#ライブラリ概要">ライブラリ概要</a></h1>
 <p><code>laurus</code> クレートは検索エンジンのコアライブラリです。Lexical検索（転置インデックス（Inverted Index）によるキーワードマッチング）、Vector検索（Embeddingによるセマンティック類似度検索）、およびハイブリッド検索（両者の組み合わせ）を統一的なAPIで提供します。</p>
