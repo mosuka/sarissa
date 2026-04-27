@@ -77,6 +77,7 @@ fn proto_value_to_json(val: &v1::Value) -> Value {
             }
         }
         Some(Kind::GeoValue(g)) => json!({ "lat": g.latitude, "lon": g.longitude }),
+        Some(Kind::Geo3dValue(p)) => json!({ "x": p.x, "y": p.y, "z": p.z }),
         Some(Kind::Int64ArrayValue(arr)) => json!(arr.values),
         Some(Kind::Float64ArrayValue(arr)) => json!(arr.values),
     }
@@ -102,7 +103,34 @@ fn json_to_proto_value(val: &Value) -> v1::Value {
                 arr.iter().map(|v| v.as_f64().map(|f| f as f32)).collect();
             floats.map(|values| Kind::VectorValue(v1::VectorValue { values }))
         }
-        Value::Object(_) => Some(Kind::NullValue(true)),
+        Value::Object(obj) => {
+            // 3D ECEF point: { x, y, z } — must be checked before 2D geo
+            // since both are objects.
+            if let (Some(x), Some(y), Some(z)) = (
+                obj.get("x").and_then(|v| v.as_f64()),
+                obj.get("y").and_then(|v| v.as_f64()),
+                obj.get("z").and_then(|v| v.as_f64()),
+            ) {
+                Some(Kind::Geo3dValue(v1::Geo3dPoint { x, y, z }))
+            } else if let (Some(lat), Some(lon)) = (
+                // 2D geo point: { lat, lon } (also accepts the full names
+                // "latitude" / "longitude" for symmetry with the gateway
+                // converter that infers `DataValue::Geo` from JSON).
+                obj.get("lat")
+                    .or_else(|| obj.get("latitude"))
+                    .and_then(|v| v.as_f64()),
+                obj.get("lon")
+                    .or_else(|| obj.get("longitude"))
+                    .and_then(|v| v.as_f64()),
+            ) {
+                Some(Kind::GeoValue(v1::GeoPoint {
+                    latitude: lat,
+                    longitude: lon,
+                }))
+            } else {
+                Some(Kind::NullValue(true))
+            }
+        }
     };
     v1::Value { kind }
 }
@@ -311,5 +339,61 @@ mod tests {
             doc.fields["vec_field"].kind,
             Some(v1::value::Kind::VectorValue(_))
         ));
+    }
+
+    #[test]
+    fn json_to_proto_geo_3d_object() {
+        // `{ x, y, z }` JSON input must be encoded as a Geo3dValue proto
+        // kind so MCP `put_document` can pass ECEF coordinates through
+        // to laurus-server.
+        let json_val =
+            json!({ "position": { "x": 1_000_000.0, "y": 2_000_000.0, "z": 3_000_000.0 } });
+        let doc = json_to_document(json_val).unwrap();
+        match &doc.fields["position"].kind {
+            Some(v1::value::Kind::Geo3dValue(p)) => {
+                assert_eq!(p.x, 1_000_000.0);
+                assert_eq!(p.y, 2_000_000.0);
+                assert_eq!(p.z, 3_000_000.0);
+            }
+            other => panic!("expected Geo3dValue, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_to_proto_geo_2d_object() {
+        // `{ lat, lon }` (and the long-form `latitude` / `longitude`)
+        // produces a 2D GeoValue. Confirms #305 wiring did not break
+        // the historical 2D shape.
+        let json_val = json!({
+            "spot_a": { "lat": 35.6, "lon": 139.7 },
+            "spot_b": { "latitude": -33.86, "longitude": 151.21 },
+        });
+        let doc = json_to_document(json_val).unwrap();
+        for field in ["spot_a", "spot_b"] {
+            assert!(
+                matches!(doc.fields[field].kind, Some(v1::value::Kind::GeoValue(_))),
+                "{field} must be GeoValue"
+            );
+        }
+    }
+
+    #[test]
+    fn proto_to_json_geo_3d_round_trip() {
+        // Reverse direction: a Geo3dValue from the server is surfaced
+        // to MCP clients as `{ x, y, z }`.
+        let mut fields = HashMap::new();
+        fields.insert(
+            "position".to_string(),
+            v1::Value {
+                kind: Some(v1::value::Kind::Geo3dValue(v1::Geo3dPoint {
+                    x: 4.0,
+                    y: 5.0,
+                    z: 6.0,
+                })),
+            },
+        );
+        let doc = v1::Document { fields };
+        let json = document_to_json(&doc);
+        assert_eq!(json["position"], json!({"x": 4.0, "y": 5.0, "z": 6.0}));
     }
 }
