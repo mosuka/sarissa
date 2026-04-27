@@ -229,6 +229,15 @@ full behaviour matrix.</p>
 schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
 </code></pre>
 <p>Result: <code>Index created successfully at /path/to/index.</code></p>
+<p>A schema with a <code>Geo3d</code> field for 3D ECEF positions:</p>
+<pre><code class="language-json">{
+  "fields": {
+    "title":    { "Text":  { "indexed": true, "stored": true } },
+    "position": { "Geo3d": { "indexed": true, "stored": true } }
+  }
+}
+</code></pre>
+<p>See <a href="../concepts/geo3d.html">3D Geographic Search (ECEF)</a> for the coordinate system; <code>Geo3d</code> is queryable via the <code>geo3d_distance</code> / <code>geo3d_bbox</code> / <code>geo3d_nearest</code> DSL forms (see the <strong>search</strong> tool below).</p>
 <hr />
 <h2 id="add_field"><a class="header" href="#add_field">add_field</a></h2>
 <p>Add a new field to the index.</p>
@@ -302,6 +311,12 @@ id: "doc-1"
 document: {"title": "Hello World", "body": "This is a test document."}
 </code></pre>
 <p>Result: <code>Document 'doc-1' put (upserted). Call commit to persist changes.</code></p>
+<p><strong>Example with a Geo3d value:</strong></p>
+<pre><code class="language-text">Tool: put_document
+id: "drone-1"
+document: {"title": "Drone over Tokyo", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
+</code></pre>
+<p>The MCP server accepts a 3D ECEF point as a JSON object with <code>x</code>, <code>y</code>, <code>z</code> keys (meters). This is distinct from the HTTP gateway, which currently does not infer Geo3d from JSON — the MCP path is fully supported for both writes and reads.</p>
 <hr />
 <h2 id="add_document"><a class="header" href="#add_document">add_document</a></h2>
 <p>Add a document as a new chunk to the index. Unlike <code>put_document</code>, this appends without deleting existing documents with the same ID. Useful for splitting large documents into chunks. Call <code>commit</code> after adding documents.</p>
@@ -372,6 +387,14 @@ document: {"title": "Hello World - Part 2", "body": "This is a continuation."}
 <tr><td style="text-align: left"><code>title:helo~1</code></td><td style="text-align: left">Fuzzy field search</td></tr>
 </tbody></table>
 </div>
+<h4 id="3d-geographic-search"><a class="header" href="#3d-geographic-search">3D geographic search</a></h4>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">Sphere with center <code>(x, y, z)</code> and radius in meters</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">3D axis-aligned bounding box</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">k nearest neighbors to <code>(x, y, z)</code></td></tr>
+</tbody></table>
+</div>
+<p><code>position</code> is the field name; substitute the actual <code>Geo3d</code>-typed field declared in your schema. See <a href="../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for the full DSL syntax.</p>
 <h4 id="vector-search"><a class="header" href="#vector-search">Vector search</a></h4>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>content:"cute kitten"</code></td><td style="text-align: left">Vector search on a field (field must be a vector field in schema)</td></tr>

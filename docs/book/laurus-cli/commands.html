@@ -256,12 +256,20 @@ laurus --index-dir ./my_index create index
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Bytes</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Hnsw</code></td><td style="text-align: left">Vector</td><td style="text-align: left"><code>dimension</code>, <code>distance</code>, <code>m</code>, <code>ef_construction</code></td></tr>
 <tr><td style="text-align: left"><code>Flat</code></td><td style="text-align: left">Vector</td><td style="text-align: left"><code>dimension</code>, <code>distance</code></td></tr>
 <tr><td style="text-align: left"><code>Ivf</code></td><td style="text-align: left">Vector</td><td style="text-align: left"><code>dimension</code>, <code>distance</code>, <code>n_clusters</code>, <code>n_probe</code></td></tr>
 </tbody></table>
 </div>
+<blockquote>
+<p><strong>Note</strong>: The interactive <code>create schema</code> wizard does not yet list <code>Geo3d</code>
+in the field-type prompt. To declare a <code>Geo3d</code> field, hand-edit the
+generated TOML to add <code>[fields.&lt;name&gt;.Geo3d]</code> (see
+<a href="schema_format.html#geo3d">Schema Format → Geo3d</a>). Tracking issue:
+<a href="https://github.com/mosuka/laurus/issues/337">#337</a>.</p>
+</blockquote>
 <p><strong>Example:</strong></p>
 <pre><code class="language-bash"># Generate schema.toml interactively
 laurus create schema
@@ -451,6 +459,11 @@ laurus search "title:intro*"
 
 # Range query
 laurus search "price:[10 TO 50]"
+
+# 3D geographic queries (sphere / bounding box / k-NN)
+laurus search "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)"
+laurus search "position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)"
+laurus search "position:geo3d_nearest(-3955182, 3350553, 3700276, 10)"
 </code></pre>
 <p><strong>Table output example:</strong></p>
 <pre><code class="language-text">╭──────┬────────┬─────────────────────────────────────────╮

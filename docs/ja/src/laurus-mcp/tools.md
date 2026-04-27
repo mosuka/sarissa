@@ -63,6 +63,19 @@ schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
 
 結果: `Index created successfully at /path/to/index.`
 
+3D ECEF 座標を扱う `Geo3d` フィールドを含むスキーマ:
+
+```json
+{
+  "fields": {
+    "title":    { "Text":  { "indexed": true, "stored": true } },
+    "position": { "Geo3d": { "indexed": true, "stored": true } }
+  }
+}
+```
+
+座標系については [3D 地理検索 (ECEF)](../concepts/geo3d.md) を参照してください。`Geo3d` フィールドは `geo3d_distance` / `geo3d_bbox` / `geo3d_nearest` の DSL 形式で検索できます（後述の **search** ツールを参照）。
+
 ---
 
 ## get_stats
@@ -127,6 +140,16 @@ document: {"title": "Hello World", "body": "これはテストドキュメント
 ```
 
 結果: `Document 'doc-1' put (upserted). Call commit to persist changes.`
+
+**Geo3d 値を含む例:**
+
+```text
+Tool: put_document
+id: "drone-1"
+document: {"title": "東京上空のドローン", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
+```
+
+MCP サーバーは 3D ECEF 点を `x`、`y`、`z` キーを持つ JSON オブジェクト（メートル単位）として受け付けます。これは HTTP ゲートウェイの挙動とは異なり、HTTP ゲートウェイでは現在 JSON から Geo3d を推論しません。MCP では書き込み・読み出しともに完全対応しています。
 
 ---
 
@@ -272,6 +295,16 @@ laurus 統一クエリ DSL を使用してドキュメントを検索します�
 | `roam~2` | ファジー検索（編集距離 2） |
 | `count:[1 TO 10]` | 範囲検索 |
 | `title:helo~1` | フィールド指定のファジー検索 |
+
+#### 3D 地理検索
+
+| クエリ | 説明 |
+| :--- | :--- |
+| `position:geo3d_distance(x, y, z, radius_m)` | `(x, y, z)` を中心とした半径（メートル単位）の球 |
+| `position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | 3D 軸並行バウンディングボックス |
+| `position:geo3d_nearest(x, y, z, k)` | `(x, y, z)` に最も近い k 個の近傍点 |
+
+`position` はフィールド名で、スキーマで宣言した実際の `Geo3d` 型フィールドに置き換えてください。完全な DSL 構文は [Query DSL → 3D 地理クエリ](../concepts/query_dsl.md#3d-geographic-queries-geo3d_) を参照してください。
 
 #### Vector 検索
 
