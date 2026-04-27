@@ -281,11 +281,12 @@ let schema = Schema::builder()
 | array of integers (e.g. `[1, 2, 3]`) | `Integer` with `multi_valued = true` |
 | array of floats / mixed numeric (e.g. `[1.5, 2.0, 3]`) | `Float` with `multi_valued = true` |
 | object with a latitude key (`lat` or `latitude`) and a longitude key (`lon`, `lng`, or `longitude`), values in range | `Geo` |
+| object with all three numeric keys `x`, `y`, `z` (finite values, ECEF meters) | `Geo3d` |
 
-Vector fields (`Hnsw`, `Flat`, `Ivf`), `Bytes`, and `Geo3d` are **never**
-inferred: they must be declared in the schema explicitly. (Inferring
-`Geo3d` from a 3D-looking JSON object would conflict with arbitrary user
-records that happen to have `x`, `y`, `z` keys.)
+Vector fields (`Hnsw`, `Flat`, `Ivf`) and `Bytes` are **never** inferred:
+they must be declared in the schema explicitly. Mixing 2D (`lat`/`lon`)
+and 3D (`x`/`y`/`z`) markers in a single object is rejected as ambiguous;
+use either shape, not both.
 
 ### Multi-valued numeric fields
 

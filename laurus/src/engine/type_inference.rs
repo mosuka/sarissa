@@ -22,9 +22,11 @@
 //! - numeric array (any non-`i64` number) → [`FieldOption::Float`] with `multi_valued = true`
 //! - `object` with `lat|latitude` and `lon|lng|longitude` keys (values in
 //!   range) → [`FieldOption::Geo`]
+//! - `object` with all three numeric keys `x`, `y`, `z` → [`FieldOption::Geo3d`]
 //!
 //! Vector and bytes fields are never inferred; they must always be declared
-//! explicitly in the schema.
+//! explicitly in the schema. Mixing 2D (`lat`/`lon`) and 3D (`x`/`y`/`z`)
+//! markers in the same object is rejected as ambiguous.
 
 use serde_json::Value as JsonValue;
 
@@ -124,6 +126,7 @@ pub fn infer_option_from_data_value(value: &DataValue) -> Result<Option<FieldOpt
 /// | `float` / large number | [`DataValue::Float64`] | [`FieldOption::Float`] |
 /// | `bool` | [`DataValue::Bool`] | [`FieldOption::Boolean`] |
 /// | `object` with `lat|latitude` + `lon|lng|longitude` | [`DataValue::Geo`] | [`FieldOption::Geo`] |
+/// | `object` with `x` + `y` + `z` (all numeric) | [`DataValue::GeoEcef`] | [`FieldOption::Geo3d`] |
 /// | `null` | (none) | (none) — returns [`InferredValue::Skip`] |
 /// | `array` of integers | [`DataValue::Int64Array`] | [`FieldOption::Integer`] with `multi_valued = true` |
 /// | `array` containing any non-i64 number | [`DataValue::Float64Array`] | [`FieldOption::Float`] with `multi_valued = true` |
@@ -247,14 +250,21 @@ fn infer_from_array(arr: &[JsonValue]) -> Result<InferredValue> {
 
 /// Infer a value from a JSON object.
 ///
-/// Only objects that form a geographic point pair are accepted. A geographic
-/// point must have:
+/// Two object shapes are accepted:
 ///
-/// - A latitude key: `lat` or `latitude`
-/// - A longitude key: `lon`, `lng`, or `longitude`
-/// - Both values numeric, with latitude in [-90, 90] and longitude in [-180, 180]
+/// - **2D geographic point** ([`DataValue::Geo`]): an object with a latitude
+///   key (`lat` or `latitude`) and a longitude key (`lon`, `lng`, or
+///   `longitude`). Both values must be numeric, with latitude in `[-90, 90]`
+///   and longitude in `[-180, 180]`.
+/// - **3D ECEF point** ([`DataValue::GeoEcef`]): an object with all three
+///   numeric keys `x`, `y`, `z` (meters from the Earth's centre, in the
+///   ECEF Cartesian frame). Coordinates must be finite (no `NaN` / `inf`);
+///   no range check is applied because ECEF values are unbounded.
 ///
-/// All other object shapes are rejected.
+/// Mixing 2D and 3D markers in the same object (e.g. supplying both `lat`
+/// and `x`) is rejected as ambiguous. Other object shapes — including
+/// partial key sets like `{lat}` alone or `{x, y}` without `z` — are
+/// rejected with the generic "geographic points" error.
 ///
 /// # Arguments
 ///
@@ -262,43 +272,82 @@ fn infer_from_array(arr: &[JsonValue]) -> Result<InferredValue> {
 ///
 /// # Errors
 ///
-/// Returns [`LaurusError::invalid_argument`] if the object is not a valid
-/// geographic point pair.
+/// Returns [`LaurusError::invalid_argument`] when the object is not a
+/// valid 2D or 3D geographic point, when 2D and 3D markers are mixed,
+/// when a coordinate is non-numeric or out of range, or when an ECEF
+/// coordinate is not finite.
 fn infer_from_object(map: &serde_json::Map<String, JsonValue>) -> Result<InferredValue> {
     const LAT_KEYS: &[&str] = &["lat", "latitude"];
     const LON_KEYS: &[&str] = &["lon", "lng", "longitude"];
 
-    let lat = LAT_KEYS.iter().find_map(|k| map.get(*k));
-    let lon = LON_KEYS.iter().find_map(|k| map.get(*k));
+    let lat_val = LAT_KEYS.iter().find_map(|k| map.get(*k));
+    let lon_val = LON_KEYS.iter().find_map(|k| map.get(*k));
+    let x_val = map.get("x");
+    let y_val = map.get("y");
+    let z_val = map.get("z");
 
-    match (lat, lon) {
-        (Some(lat), Some(lon)) => {
-            let lat = lat
-                .as_f64()
-                .ok_or_else(|| LaurusError::invalid_argument("geo latitude must be a number"))?;
-            let lon = lon
-                .as_f64()
-                .ok_or_else(|| LaurusError::invalid_argument("geo longitude must be a number"))?;
-            if !(-90.0..=90.0).contains(&lat) {
-                return Err(LaurusError::invalid_argument(format!(
-                    "geo latitude {lat} is out of range [-90, 90]"
-                )));
-            }
-            if !(-180.0..=180.0).contains(&lon) {
-                return Err(LaurusError::invalid_argument(format!(
-                    "geo longitude {lon} is out of range [-180, 180]"
-                )));
-            }
-            Ok(InferredValue::Inferred {
-                value: DataValue::Geo(crate::data::GeoPoint::new(lat, lon)),
-                option: FieldOption::Geo(GeoOption::default()),
-            })
-        }
-        _ => Err(LaurusError::invalid_argument(
-            "object values are only supported as geographic points \
-             (expected keys: lat|latitude, lon|lng|longitude)",
-        )),
+    let has_2d_keys = lat_val.is_some() || lon_val.is_some();
+    let has_3d_keys = x_val.is_some() || y_val.is_some() || z_val.is_some();
+
+    // Reject ambiguous mixing of 2D and 3D markers.
+    if has_2d_keys && has_3d_keys {
+        return Err(LaurusError::invalid_argument(
+            "object cannot mix 2D geographic keys (lat/lon) with 3D ECEF keys (x/y/z); \
+             use either {lat, lon} or {x, y, z}",
+        ));
     }
+
+    // 2D Geo path.
+    if let (Some(lat_val), Some(lon_val)) = (lat_val, lon_val) {
+        let lat = lat_val
+            .as_f64()
+            .ok_or_else(|| LaurusError::invalid_argument("geo latitude must be a number"))?;
+        let lon = lon_val
+            .as_f64()
+            .ok_or_else(|| LaurusError::invalid_argument("geo longitude must be a number"))?;
+        if !(-90.0..=90.0).contains(&lat) {
+            return Err(LaurusError::invalid_argument(format!(
+                "geo latitude {lat} is out of range [-90, 90]"
+            )));
+        }
+        if !(-180.0..=180.0).contains(&lon) {
+            return Err(LaurusError::invalid_argument(format!(
+                "geo longitude {lon} is out of range [-180, 180]"
+            )));
+        }
+        return Ok(InferredValue::Inferred {
+            value: DataValue::Geo(crate::data::GeoPoint::new(lat, lon)),
+            option: FieldOption::Geo(GeoOption::default()),
+        });
+    }
+
+    // 3D Geo3d path: require all three of x, y, z.
+    if let (Some(x_val), Some(y_val), Some(z_val)) = (x_val, y_val, z_val) {
+        let x = x_val
+            .as_f64()
+            .ok_or_else(|| LaurusError::invalid_argument("Geo3d x must be a number"))?;
+        let y = y_val
+            .as_f64()
+            .ok_or_else(|| LaurusError::invalid_argument("Geo3d y must be a number"))?;
+        let z = z_val
+            .as_f64()
+            .ok_or_else(|| LaurusError::invalid_argument("Geo3d z must be a number"))?;
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return Err(LaurusError::invalid_argument(
+                "Geo3d coordinates (x, y, z) must be finite numbers",
+            ));
+        }
+        return Ok(InferredValue::Inferred {
+            value: DataValue::GeoEcef(crate::data::GeoEcefPoint::new(x, y, z)),
+            option: FieldOption::Geo3d(crate::lexical::core::field::Geo3dOption::default()),
+        });
+    }
+
+    // Partial keys (e.g. only `lat`, or `x`+`y` without `z`) or unrelated object.
+    Err(LaurusError::invalid_argument(
+        "object values are only supported as geographic points \
+         (expected keys: lat|latitude, lon|lng|longitude for 2D, or x+y+z for 3D ECEF)",
+    ))
 }
 
 #[cfg(test)]
@@ -461,5 +510,75 @@ mod tests {
     fn infer_geo_missing_lon_rejected() {
         let err = infer_from_json(&json!({"lat": 35.1})).unwrap_err();
         assert!(err.to_string().contains("geographic"));
+    }
+
+    #[test]
+    fn infer_geo3d_xyz() {
+        let (v, o) = inferred(infer_from_json(&json!({"x": 1.0, "y": 2.0, "z": 3.0})).unwrap());
+        assert_eq!(
+            v,
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(1.0, 2.0, 3.0))
+        );
+        assert!(matches!(o, FieldOption::Geo3d(_)));
+    }
+
+    #[test]
+    fn infer_geo3d_integer_xyz() {
+        // JSON integers must also coerce to f64 for ECEF coordinates.
+        let (v, _) = inferred(infer_from_json(&json!({"x": 1, "y": 2, "z": 3})).unwrap());
+        assert_eq!(
+            v,
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(1.0, 2.0, 3.0))
+        );
+    }
+
+    #[test]
+    fn infer_geo3d_real_ecef_values() {
+        // Tokyo Tower-ish coordinates (negative x, positive y/z) — make sure
+        // the inference does not mishandle large or negative ECEF values.
+        let (v, _) = inferred(
+            infer_from_json(&json!({
+                "x": -3_955_182.0,
+                "y": 3_350_553.0,
+                "z": 3_700_276.0
+            }))
+            .unwrap(),
+        );
+        assert_eq!(
+            v,
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(
+                -3_955_182.0,
+                3_350_553.0,
+                3_700_276.0
+            ))
+        );
+    }
+
+    #[test]
+    fn infer_geo3d_partial_keys_rejected() {
+        let err = infer_from_json(&json!({"x": 1.0, "y": 2.0})).unwrap_err();
+        // Falls through to the generic "geographic points" error because
+        // a Geo3d object requires all three of x, y, z.
+        assert!(err.to_string().contains("geographic"));
+    }
+
+    #[test]
+    fn infer_geo3d_non_numeric_rejected() {
+        let err = infer_from_json(&json!({"x": "not a number", "y": 2.0, "z": 3.0})).unwrap_err();
+        assert!(err.to_string().contains("Geo3d"));
+    }
+
+    #[test]
+    fn infer_geo3d_2d_3d_mix_rejected() {
+        let err = infer_from_json(&json!({"lat": 35.0, "x": 1.0, "y": 2.0, "z": 3.0})).unwrap_err();
+        assert!(err.to_string().contains("mix"));
+    }
+
+    #[test]
+    fn infer_geo3d_partial_2d_3d_mix_rejected() {
+        // Even a single 2D key plus a single 3D key should be rejected,
+        // because the user's intent is ambiguous.
+        let err = infer_from_json(&json!({"lat": 35.0, "x": 1.0})).unwrap_err();
+        assert!(err.to_string().contains("mix"));
     }
 }

@@ -1082,6 +1082,27 @@ mod tests {
     }
 
     #[test]
+    fn test_json_value_geo3d_roundtrip() {
+        // {x, y, z} JSON inputs are inferred as a Geo3d (ECEF) point and
+        // round-trip back through proto without loss.
+        let json = json!({"x": -3_955_182.0, "y": 3_350_553.0, "z": 3_700_276.0});
+        let proto = json_value_to_proto(&json).unwrap();
+        let back = proto_value_to_json(&proto);
+        assert_eq!(back["x"], json!(-3_955_182.0));
+        assert_eq!(back["y"], json!(3_350_553.0));
+        assert_eq!(back["z"], json!(3_700_276.0));
+    }
+
+    #[test]
+    fn test_json_value_geo_geo3d_mix_errors() {
+        // Mixing 2D (lat/lon) and 3D (x/y/z) markers in the same object is
+        // ambiguous and must be rejected.
+        let json = json!({"lat": 35.0, "x": 1.0, "y": 2.0, "z": 3.0});
+        let err = json_value_to_proto(&json).unwrap_err();
+        assert!(err.contains("mix"), "unexpected error: {err}");
+    }
+
+    #[test]
     fn test_json_to_proto_document() {
         let json = json!({
             "fields": {
