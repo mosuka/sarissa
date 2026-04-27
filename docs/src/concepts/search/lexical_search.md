@@ -157,7 +157,7 @@ let query = NumericRangeQuery::new(
 
 ### GeoQuery
 
-Matches documents by geographic location.
+Matches documents by 2D geographic location (WGS84 latitude / longitude).
 
 ```rust
 use laurus::lexical::query::geo::GeoQuery;
@@ -172,6 +172,41 @@ let query = GeoQuery::within_bounding_box(
     36.0, 140.0,  // max (lat, lon)
 )?;
 ```
+
+### Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery
+
+Three queries target 3D `Geo3d` fields backed by ECEF Cartesian coordinates
+(metres). Use them when altitude matters or when a 2D `Geo` field would
+introduce pole singularities. See [3D Geographic Search](../geo3d.md) for
+the coordinate system, WGS84 conversion helpers, and worked examples.
+
+```rust
+use laurus::GeoEcefPoint;
+use laurus::lexical::query::geo3d::{
+    Geo3dDistanceQuery, Geo3dBoundingBoxQuery, Geo3dNearestQuery,
+};
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+
+// Sphere: docs within 5 km of `centre`
+let q = Geo3dDistanceQuery::new("position", centre, 5_000.0);
+
+// Axis-aligned 3D bounding box (constructor validates min ≤ max per axis)
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let q = Geo3dBoundingBoxQuery::new("position", min, max)?;
+
+// k-NN: 10 nearest neighbours, with a custom radius schedule
+let q = Geo3dNearestQuery::new("position", centre, 10)
+    .with_initial_radius(500.0)
+    .with_max_radius(1_000_000.0);
+```
+
+| Query | Score |
+| :--- | :--- |
+| `Geo3dDistanceQuery` | `1 - distance / radius`, clamped to `[0, 1]`. |
+| `Geo3dBoundingBoxQuery` | Constant `1.0` for every match. |
+| `Geo3dNearestQuery` | Normalised so the closest hit is `1.0`, the farthest in the returned set is `0.0`. |
 
 ### SpanQuery
 

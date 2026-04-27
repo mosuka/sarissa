@@ -24,6 +24,8 @@
   - [Vector 検索](concepts/search/vector_search.md)
   - [ハイブリッド検索](concepts/search/hybrid_search.md)
 - [Query DSL](concepts/query_dsl.md)
+- [BKD-Tree](concepts/bkd_tree.md)
+- [3D 地理検索 (ECEF)](concepts/geo3d.md)
 
 # laurus
 

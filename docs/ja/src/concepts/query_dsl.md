@@ -86,6 +86,40 @@ date:{2024-01-01 TO 2024-12-31}
 price:[* TO 100]
 ```
 
+### 3D 地理クエリ（`geo3d_*`）
+
+3 種類の関数形式を `Geo3d`（3D ECEF 直交座標）フィールドに対して使えます。
+`k` 以外の引数はすべてメートル単位の符号付き浮動小数点数、`k` のみ符号なし整数：
+
+```text
+position:geo3d_distance(x, y, z, radius_m)
+position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+position:geo3d_nearest(x, y, z, k)
+```
+
+| 形式 | 動作 |
+| :--- | :--- |
+| `geo3d_distance(x, y, z, radius_m)` | `(x, y, z)` から `radius_m` メートル以内の格納済みポイントを返す |
+| `geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | 軸並行 3D ボックスに含まれる格納済みポイントを返す |
+| `geo3d_nearest(x, y, z, k)` | `(x, y, z)` に最も近い `k` 件をユークリッド距離順で返す |
+
+例：
+
+```text
+# 東京タワーから 5 km 以内（ECEF 座標）
+position:geo3d_distance(-3955182, 3350553, 3700276, 5000)
+
+# 軸並行 ECEF バウンディングボックス内
+position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
+
+# 最も近い 10 件
+position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
+```
+
+> クエリ対象フィールドはスキーマで `Geo3d` として宣言されている必要があります。
+> 座標系・WGS84 変換ヘルパー・詳細な意味論については
+> [3D 地理検索](geo3d.md) を参照してください。
+
 ### ブースト
 
 `^` で句のウェイトを増加させます。
@@ -117,8 +151,16 @@ sub_clause     = { grouped_query | field_query | term_query }
 grouped_query  = { "(" ~ boolean_query ~ ")" ~ boost? }
 boolean_op     = { ^"AND" | ^"OR" }
 field_query    = { field ~ ":" ~ field_value }
-field_value    = { range_query | phrase_query | fuzzy_term
+field_value    = { geo3d_query | range_query | phrase_query | fuzzy_term
                  | wildcard_term | simple_term }
+geo3d_query    = { geo3d_distance | geo3d_bbox | geo3d_nearest }
+geo3d_distance = { ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_bbox     = { ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ","
+                 ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_nearest  = { ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")" }
 phrase_query   = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
 proximity      = { "~" ~ number }
 fuzzy_term     = { term ~ "~" ~ fuzziness? ~ boost? }
