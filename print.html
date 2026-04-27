@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4a49ae9b.js";
+            window.path_to_searchindex_js = "searchindex-c489a0ff.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-293d66d6.js"></script>
+        <script src="toc-a6ad8c0d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -10780,8 +10780,650 @@ rm -rf vendor/bundle
 └── examples/           # Runnable Ruby examples
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="build--test"><a class="header" href="#build--test">Build &amp; Test</a></h1>
+<h1 id="php-binding-overview"><a class="header" href="#php-binding-overview">PHP Binding Overview</a></h1>
+<p>The <code>laurus</code> PHP extension provides PHP bindings for the Laurus search engine. It is built as a native Rust extension using <a href="https://github.com/davidcole1340/ext-php-rs">ext-php-rs</a>, giving PHP programs direct access to Laurus’s lexical, vector, and hybrid search capabilities with near-native performance.</p>
+<h2 id="features-8"><a class="header" href="#features-8">Features</a></h2>
+<ul>
+<li><strong>Lexical Search</strong> – Full-text search powered by an inverted index with BM25 scoring</li>
+<li><strong>Vector Search</strong> – Approximate nearest neighbor (ANN) search using Flat, HNSW, or IVF indexes</li>
+<li><strong>Hybrid Search</strong> – Combine lexical and vector results with fusion algorithms (RRF, WeightedSum)</li>
+<li><strong>Rich Query DSL</strong> – Term, Phrase, Fuzzy, Wildcard, NumericRange, Geo, Boolean, Span queries</li>
+<li><strong>Text Analysis</strong> – Tokenizers, filters, stemmers, and synonym expansion</li>
+<li><strong>Flexible Storage</strong> – In-memory (ephemeral) or file-based (persistent) indexes</li>
+<li><strong>Idiomatic PHP API</strong> – Clean, intuitive PHP classes under the <code>Laurus\</code> namespace</li>
+</ul>
+<h2 id="architecture-7"><a class="header" href="#architecture-7">Architecture</a></h2>
+<pre><code class="language-mermaid">graph LR
+    subgraph "laurus-php (extension)"
+        PhpIndex["Index\n(PHP class)"]
+        PhpQuery["Query classes"]
+        PhpSearch["SearchRequest\n/ SearchResult"]
+    end
+
+    PHP["PHP application"] --&gt;|"method calls"| PhpIndex
+    PHP --&gt;|"query objects"| PhpQuery
+    PhpIndex --&gt;|"ext-php-rs FFI"| Engine["laurus::Engine\n(Rust)"]
+    PhpQuery --&gt;|"ext-php-rs FFI"| Engine
+    Engine --&gt; Storage["Storage\n(Memory / File)"]
+</code></pre>
+<p>The PHP classes are thin wrappers around the Rust engine.
+Each call crosses the ext-php-rs FFI boundary once; the Rust engine
+then executes the operation entirely in native code.</p>
+<p>Although the Rust engine uses async I/O internally, all PHP
+methods are exposed as <strong>synchronous</strong> functions. Each method
+calls <code>tokio::Runtime::block_on()</code> under the hood to bridge
+async Rust to synchronous PHP.</p>
+<h2 id="quick-start-10"><a class="header" href="#quick-start-10">Quick Start</a></h2>
+<pre><code class="language-php">&lt;?php
+
+use Laurus\Index;
+
+// Create an in-memory index
+$index = new Index();
+
+// Index documents
+$index-&gt;putDocument("doc1", ["title" =&gt; "Introduction to Rust", "body" =&gt; "Systems programming language."]);
+$index-&gt;putDocument("doc2", ["title" =&gt; "PHP for Web Development", "body" =&gt; "Web applications with PHP."]);
+$index-&gt;commit();
+
+// Search
+$results = $index-&gt;search("title:rust", 5);
+foreach ($results as $r) {
+    printf("[%s] score=%.4f  %s\n", $r-&gt;getId(), $r-&gt;getScore(), $r-&gt;getDocument()["title"]);
+}
+</code></pre>
+<h2 id="sections-6"><a class="header" href="#sections-6">Sections</a></h2>
+<ul>
+<li><a href="#installation-6">Installation</a> – How to install the extension</li>
+<li><a href="#quick-start-11">Quick Start</a> – Hands-on introduction with examples</li>
+<li><a href="#api-reference-5">API Reference</a> – Complete class and method reference</li>
+<li><a href="#development-setup-2">Development</a> – Building from source and running tests</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="installation-6"><a class="header" href="#installation-6">Installation</a></h1>
+<h2 id="from-source-4"><a class="header" href="#from-source-4">From source</a></h2>
+<p>Building from source requires a Rust toolchain (1.85 or later) and PHP 8.1 or later with development headers.</p>
+<pre><code class="language-bash"># Clone the repository
+git clone https://github.com/mosuka/laurus.git
+cd laurus/laurus-php
+
+# Build the native extension
+cargo build --release
+
+# Copy the shared library to the PHP extensions directory
+# (the exact path depends on your OS and PHP version)
+cp ../target/release/liblaurus_php.so $(php -r "echo ini_get('extension_dir');")
+</code></pre>
+<p>Then add the extension to your <code>php.ini</code>:</p>
+<pre><code class="language-ini">extension=laurus_php.so
+</code></pre>
+<p>Alternatively, you can load the extension on the command line:</p>
+<pre><code class="language-bash">php -d extension=liblaurus_php.so your_script.php
+</code></pre>
+<h2 id="verify-4"><a class="header" href="#verify-4">Verify</a></h2>
+<pre><code class="language-php">&lt;?php
+
+use Laurus\Index;
+
+$index = new Index();
+echo $index;  // Index()
+</code></pre>
+<h2 id="requirements-3"><a class="header" href="#requirements-3">Requirements</a></h2>
+<ul>
+<li>PHP 8.1 or later with development headers (<code>php-dev</code> / <code>php-devel</code>)</li>
+<li>Rust toolchain 1.85 or later with Cargo</li>
+<li>No runtime dependencies beyond the compiled native extension</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quick-start-11"><a class="header" href="#quick-start-11">Quick Start</a></h1>
+<h2 id="1-create-an-index-3"><a class="header" href="#1-create-an-index-3">1. Create an index</a></h2>
+<pre><code class="language-php">&lt;?php
+
+use Laurus\Index;
+use Laurus\Schema;
+
+// In-memory index (ephemeral, useful for prototyping)
+$index = new Index();
+
+// File-based index (persistent)
+$schema = new Schema();
+$schema-&gt;addTextField("title");
+$schema-&gt;addTextField("body");
+$index = new Index("./myindex", $schema);
+</code></pre>
+<h2 id="2-index-documents-3"><a class="header" href="#2-index-documents-3">2. Index documents</a></h2>
+<pre><code class="language-php">$index-&gt;putDocument("doc1", [
+    "title" =&gt; "Introduction to Rust",
+    "body" =&gt; "Rust is a systems programming language focused on safety and performance.",
+]);
+$index-&gt;putDocument("doc2", [
+    "title" =&gt; "PHP for Web Development",
+    "body" =&gt; "PHP is widely used for web applications and rapid prototyping.",
+]);
+$index-&gt;commit();
+</code></pre>
+<h2 id="3-lexical-search-3"><a class="header" href="#3-lexical-search-3">3. Lexical search</a></h2>
+<pre><code class="language-php">// DSL string
+$results = $index-&gt;search("title:rust", 5);
+
+// Query object
+$results = $index-&gt;search(new \Laurus\TermQuery("body", "php"), 5);
+
+// Print results
+foreach ($results as $r) {
+    printf("[%s] score=%.4f  %s\n", $r-&gt;getId(), $r-&gt;getScore(), $r-&gt;getDocument()["title"]);
+}
+</code></pre>
+<h2 id="4-vector-search-3"><a class="header" href="#4-vector-search-3">4. Vector search</a></h2>
+<p>Vector search requires a schema with a vector field and pre-computed embeddings.</p>
+<pre><code class="language-php">&lt;?php
+
+use Laurus\Index;
+use Laurus\Schema;
+use Laurus\VectorQuery;
+
+$schema = new Schema();
+$schema-&gt;addTextField("title");
+$schema-&gt;addHnswField("embedding", 4);
+
+$index = new Index(null, $schema);
+$index-&gt;putDocument("doc1", ["title" =&gt; "Rust", "embedding" =&gt; [0.1, 0.2, 0.3, 0.4]]);
+$index-&gt;putDocument("doc2", ["title" =&gt; "PHP", "embedding" =&gt; [0.9, 0.8, 0.7, 0.6]]);
+$index-&gt;commit();
+
+$queryVec = [0.1, 0.2, 0.3, 0.4];
+$results = $index-&gt;search(new VectorQuery("embedding", $queryVec), 3);
+</code></pre>
+<h2 id="5-hybrid-search-3"><a class="header" href="#5-hybrid-search-3">5. Hybrid search</a></h2>
+<pre><code class="language-php">use Laurus\SearchRequest;
+use Laurus\TermQuery;
+use Laurus\VectorQuery;
+use Laurus\RRF;
+
+$request = new SearchRequest(
+    query: null,
+    lexicalQuery: new TermQuery("title", "rust"),
+    vectorQuery: new VectorQuery("embedding", $queryVec),
+    filterQuery: null,
+    fusion: new RRF(60.0),
+    limit: 5,
+);
+$results = $index-&gt;search($request);
+</code></pre>
+<h2 id="6-update-and-delete-3"><a class="header" href="#6-update-and-delete-3">6. Update and delete</a></h2>
+<pre><code class="language-php">// Update: putDocument replaces all existing versions
+$index-&gt;putDocument("doc1", ["title" =&gt; "Updated Title", "body" =&gt; "New content."]);
+$index-&gt;commit();
+
+// Append a new version without removing existing ones (RAG chunking pattern)
+$index-&gt;addDocument("doc1", ["title" =&gt; "Chunk 2", "body" =&gt; "Additional chunk."]);
+$index-&gt;commit();
+
+// Retrieve all versions
+$docs = $index-&gt;getDocuments("doc1");
+
+// Delete
+$index-&gt;deleteDocuments("doc1");
+$index-&gt;commit();
+</code></pre>
+<h2 id="7-schema-management-3"><a class="header" href="#7-schema-management-3">7. Schema management</a></h2>
+<pre><code class="language-php">$schema = new \Laurus\Schema();
+$schema-&gt;addTextField("title");
+$schema-&gt;addTextField("body");
+$schema-&gt;addIntegerField("year");
+$schema-&gt;addFloatField("score");
+$schema-&gt;addBooleanField("published");
+$schema-&gt;addBytesField("thumbnail");
+$schema-&gt;addGeoField("location");
+$schema-&gt;addDatetimeField("created_at");
+$schema-&gt;addHnswField("embedding", 384);
+$schema-&gt;addFlatField("small_vec", 64);
+$schema-&gt;addIvfField("ivf_vec", 128, null, 100, 1);
+</code></pre>
+<h2 id="8-index-statistics-3"><a class="header" href="#8-index-statistics-3">8. Index statistics</a></h2>
+<pre><code class="language-php">$stats = $index-&gt;stats();
+echo $stats["document_count"];
+echo $stats["vector_fields"];
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="api-reference-5"><a class="header" href="#api-reference-5">API Reference</a></h1>
+<h2 id="index-4"><a class="header" href="#index-4">Index</a></h2>
+<p>The primary entry point. Wraps the Laurus search engine.</p>
+<pre><code class="language-php">new \Laurus\Index(?string $path = null, ?Schema $schema = null)
+</code></pre>
+<h3 id="constructor-3"><a class="header" href="#constructor-3">Constructor</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Parameter</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>$path</code></td><td style="text-align: left"><code>string|null</code></td><td style="text-align: left"><code>null</code></td><td style="text-align: left">Directory path for persistent storage. <code>null</code> creates an in-memory index.</td></tr>
+<tr><td style="text-align: left"><code>$schema</code></td><td style="text-align: left"><code>Schema|null</code></td><td style="text-align: left"><code>null</code></td><td style="text-align: left">Schema definition. An empty schema is used when omitted.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="methods-4"><a class="header" href="#methods-4">Methods</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>putDocument(string $id, array $doc): void</code></td><td style="text-align: left">Upsert a document. Replaces all existing versions with the same ID.</td></tr>
+<tr><td style="text-align: left"><code>addDocument(string $id, array $doc): void</code></td><td style="text-align: left">Append a document chunk without removing existing versions.</td></tr>
+<tr><td style="text-align: left"><code>getDocuments(string $id): array</code></td><td style="text-align: left">Return all stored versions for the given ID.</td></tr>
+<tr><td style="text-align: left"><code>deleteDocuments(string $id): void</code></td><td style="text-align: left">Delete all versions for the given ID.</td></tr>
+<tr><td style="text-align: left"><code>commit(): void</code></td><td style="text-align: left">Flush buffered writes and make all pending changes searchable.</td></tr>
+<tr><td style="text-align: left"><code>search(mixed $query, int $limit = 10, int $offset = 0): array</code></td><td style="text-align: left">Execute a search query. Returns an array of <code>SearchResult</code>.</td></tr>
+<tr><td style="text-align: left"><code>stats(): array</code></td><td style="text-align: left">Return index statistics (<code>"document_count"</code>, <code>"vector_fields"</code>).</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="search-query-argument-2"><a class="header" href="#search-query-argument-2"><code>search</code> query argument</a></h3>
+<p>The <code>$query</code> parameter accepts any of the following:</p>
+<ul>
+<li>A <strong>DSL string</strong> (e.g. <code>"title:hello"</code>, <code>"embedding:\"memory safety\""</code>)</li>
+<li>A <strong>lexical query object</strong> (<code>TermQuery</code>, <code>PhraseQuery</code>, <code>BooleanQuery</code>, …)</li>
+<li>A <strong>vector query object</strong> (<code>VectorQuery</code>, <code>VectorTextQuery</code>)</li>
+<li>A <strong><code>SearchRequest</code></strong> for full control</li>
+</ul>
+<hr>
+<h2 id="schema-6"><a class="header" href="#schema-6">Schema</a></h2>
+<p>Defines the fields and index types for an <code>Index</code>.</p>
+<pre><code class="language-php">new \Laurus\Schema()
+</code></pre>
+<h3 id="field-methods-3"><a class="header" href="#field-methods-3">Field methods</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64-bit integer field. Pass <code>$multi_valued = true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64-bit float field. Pass <code>$multi_valued = true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Boolean field.</td></tr>
+<tr><td style="text-align: left"><code>addBytesField(string $name, bool $stored = true): void</code></td><td style="text-align: left">Raw bytes field.</td></tr>
+<tr><td style="text-align: left"><code>addGeoField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
+<tr><td style="text-align: left"><code>addDatetimeField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">UTC datetime field.</td></tr>
+<tr><td style="text-align: left"><code>addHnswField(string $name, int $dimension, ?string $distance = "cosine", int $m = 16, int $efConstruction = 200, ?string $embedder = null): void</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>addFlatField(string $name, int $dimension, ?string $distance = "cosine", ?string $embedder = null): void</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
+<tr><td style="text-align: left"><code>addIvfField(string $name, int $dimension, ?string $distance = "cosine", int $nClusters = 100, int $nProbe = 1, ?string $embedder = null): void</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="other-methods-1"><a class="header" href="#other-methods-1">Other methods</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>addEmbedder(string $name, array $config): void</code></td><td style="text-align: left">Register a named embedder definition. <code>$config</code> is an associative array with a <code>"type"</code> key (see below).</td></tr>
+<tr><td style="text-align: left"><code>setDefaultFields(array $fieldNames): void</code></td><td style="text-align: left">Set the default fields used when no field is specified in a query. <code>$fieldNames</code> is an array of strings.</td></tr>
+<tr><td style="text-align: left"><code>setDynamicFieldPolicy(string $policy): void</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>$policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
+<tr><td style="text-align: left"><code>dynamicFieldPolicy(): string</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
+<tr><td style="text-align: left"><code>fieldNames(): array</code></td><td style="text-align: left">Return the list of field names defined in this schema.</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="dynamic-field-policy-3"><a class="header" href="#dynamic-field-policy-3">Dynamic field policy</a></h4>
+<p>Controls what happens when a document is ingested with field names that are
+not declared in the schema:</p>
+<ul>
+<li><code>"strict"</code> — Reject the document.</li>
+<li><code>"dynamic"</code> (default) — Infer a type for each undeclared field and add it
+to the schema. <strong>Warning</strong>: integer fields silently truncate incoming
+float values (<code>3.14</code> → <code>3</code>). Use <code>"strict"</code> if you need to reject such
+type mismatches.</li>
+<li><code>"ignore"</code> — Silently drop the undeclared fields.</li>
+</ul>
+<p>See <a href="#dynamic-schema">Schema &amp; Fields</a> for
+the full behaviour matrix.</p>
+<h3 id="embedder-types-1"><a class="header" href="#embedder-types-1">Embedder types</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left"><code>"type"</code></th><th style="text-align: left">Required keys</th><th style="text-align: left">Feature flag</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>"precomputed"</code></td><td style="text-align: left">–</td><td style="text-align: left">(always available)</td></tr>
+<tr><td style="text-align: left"><code>"candle_bert"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-candle</code></td></tr>
+<tr><td style="text-align: left"><code>"candle_clip"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-multimodal</code></td></tr>
+<tr><td style="text-align: left"><code>"openai"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-openai</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="distance-metrics-6"><a class="header" href="#distance-metrics-6">Distance metrics</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Value</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>"cosine"</code></td><td style="text-align: left">Cosine similarity (default)</td></tr>
+<tr><td style="text-align: left"><code>"euclidean"</code></td><td style="text-align: left">Euclidean distance</td></tr>
+<tr><td style="text-align: left"><code>"dot_product"</code></td><td style="text-align: left">Dot product</td></tr>
+<tr><td style="text-align: left"><code>"manhattan"</code></td><td style="text-align: left">Manhattan distance</td></tr>
+<tr><td style="text-align: left"><code>"angular"</code></td><td style="text-align: left">Angular distance</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="query-classes-3"><a class="header" href="#query-classes-3">Query classes</a></h2>
+<h3 id="termquery-4"><a class="header" href="#termquery-4">TermQuery</a></h3>
+<pre><code class="language-php">new \Laurus\TermQuery(string $field, string $term)
+</code></pre>
+<p>Matches documents containing the exact term in the given field.</p>
+<h3 id="phrasequery-4"><a class="header" href="#phrasequery-4">PhraseQuery</a></h3>
+<pre><code class="language-php">new \Laurus\PhraseQuery(string $field, array $terms)
+</code></pre>
+<p>Matches documents containing the terms in order. <code>$terms</code> is an array of strings.</p>
+<h3 id="fuzzyquery-4"><a class="header" href="#fuzzyquery-4">FuzzyQuery</a></h3>
+<pre><code class="language-php">new \Laurus\FuzzyQuery(string $field, string $term, int $maxEdits = 2)
+</code></pre>
+<p>Approximate match allowing up to <code>$maxEdits</code> edit-distance errors.</p>
+<h3 id="wildcardquery-4"><a class="header" href="#wildcardquery-4">WildcardQuery</a></h3>
+<pre><code class="language-php">new \Laurus\WildcardQuery(string $field, string $pattern)
+</code></pre>
+<p>Pattern match. <code>*</code> matches any sequence of characters, <code>?</code> matches any single character.</p>
+<h3 id="numericrangequery-4"><a class="header" href="#numericrangequery-4">NumericRangeQuery</a></h3>
+<pre><code class="language-php">new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $numericType = "integer")
+</code></pre>
+<p>Matches numeric values in the range <code>[$min, $max]</code>. Pass <code>null</code> for an open bound. Set <code>$numericType</code> to <code>"integer"</code> or <code>"float"</code>.</p>
+<h3 id="geoquery-4"><a class="header" href="#geoquery-4">GeoQuery</a></h3>
+<pre><code class="language-php">// Radius search
+\Laurus\GeoQuery::withinRadius(string $field, float $lat, float $lon, float $distanceKm): GeoQuery
+
+// Bounding box search
+\Laurus\GeoQuery::withinBoundingBox(string $field, float $minLat, float $minLon, float $maxLat, float $maxLon): GeoQuery
+</code></pre>
+<p><code>withinRadius</code> returns documents whose coordinate is within <code>$distanceKm</code> of the given point. <code>withinBoundingBox</code> returns documents within the specified bounding box.</p>
+<h3 id="booleanquery-4"><a class="header" href="#booleanquery-4">BooleanQuery</a></h3>
+<pre><code class="language-php">$bq = new \Laurus\BooleanQuery();
+$bq-&gt;must($query);
+$bq-&gt;should($query);
+$bq-&gt;mustNot($query);
+</code></pre>
+<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>mustNot</code> clauses must not match.</p>
+<h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
+<pre><code class="language-php">// Single term
+\Laurus\SpanQuery::term(string $field, string $term): SpanQuery
+
+// Near: terms within slop positions
+\Laurus\SpanQuery::near(string $field, array $terms, int $slop = 0, bool $ordered = true): SpanQuery
+
+// Containing: big span contains little span
+\Laurus\SpanQuery::containing(string $field, SpanQuery $big, SpanQuery $little): SpanQuery
+
+// Within: include span within exclude span at max distance
+\Laurus\SpanQuery::within(string $field, SpanQuery $include, SpanQuery $exclude, int $distance): SpanQuery
+</code></pre>
+<p>Positional / proximity span queries. <code>near</code> takes an array of term strings.</p>
+<h3 id="vectorquery-3"><a class="header" href="#vectorquery-3">VectorQuery</a></h3>
+<pre><code class="language-php">new \Laurus\VectorQuery(string $field, array $vector)
+</code></pre>
+<p>Approximate nearest-neighbor search using a pre-computed embedding vector. <code>$vector</code> is an array of floats.</p>
+<h3 id="vectortextquery-3"><a class="header" href="#vectortextquery-3">VectorTextQuery</a></h3>
+<pre><code class="language-php">new \Laurus\VectorTextQuery(string $field, string $text)
+</code></pre>
+<p>Converts <code>$text</code> to an embedding at query time and runs vector search. Requires an embedder configured on the index.</p>
+<hr>
+<h2 id="searchrequest-4"><a class="header" href="#searchrequest-4">SearchRequest</a></h2>
+<p>Full-featured search request for advanced control.</p>
+<pre><code class="language-php">new \Laurus\SearchRequest(
+    mixed $query = null,
+    mixed $lexicalQuery = null,
+    mixed $vectorQuery = null,
+    mixed $filterQuery = null,
+    mixed $fusion = null,
+    int $limit = 10,
+    int $offset = 0,
+)
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Parameter</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>$query</code></td><td style="text-align: left">A DSL string or single query object. Mutually exclusive with <code>$lexicalQuery</code> / <code>$vectorQuery</code>.</td></tr>
+<tr><td style="text-align: left"><code>$lexicalQuery</code></td><td style="text-align: left">Lexical component for explicit hybrid search.</td></tr>
+<tr><td style="text-align: left"><code>$vectorQuery</code></td><td style="text-align: left">Vector component for explicit hybrid search.</td></tr>
+<tr><td style="text-align: left"><code>$filterQuery</code></td><td style="text-align: left">Lexical filter applied after scoring.</td></tr>
+<tr><td style="text-align: left"><code>$fusion</code></td><td style="text-align: left">Fusion algorithm (<code>RRF</code> or <code>WeightedSum</code>). Defaults to <code>RRF(k: 60)</code> when both components are set.</td></tr>
+<tr><td style="text-align: left"><code>$limit</code></td><td style="text-align: left">Maximum number of results (default 10).</td></tr>
+<tr><td style="text-align: left"><code>$offset</code></td><td style="text-align: left">Pagination offset (default 0).</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="searchresult-7"><a class="header" href="#searchresult-7">SearchResult</a></h2>
+<p>Returned by <code>Index-&gt;search()</code>.</p>
+<pre><code class="language-php">$result-&gt;getId()        // string   -- External document identifier
+$result-&gt;getScore()     // float    -- Relevance score
+$result-&gt;getDocument()  // array|null -- Retrieved field values, or null if deleted
+</code></pre>
+<hr>
+<h2 id="fusion-algorithms-5"><a class="header" href="#fusion-algorithms-5">Fusion algorithms</a></h2>
+<h3 id="rrf-3"><a class="header" href="#rrf-3">RRF</a></h3>
+<pre><code class="language-php">new \Laurus\RRF(float $k = 60.0)
+</code></pre>
+<p>Reciprocal Rank Fusion. Merges lexical and vector result lists by rank position. <code>$k</code> is a smoothing constant; higher values reduce the influence of top-ranked results.</p>
+<h3 id="weightedsum-5"><a class="header" href="#weightedsum-5">WeightedSum</a></h3>
+<pre><code class="language-php">new \Laurus\WeightedSum(float $lexicalWeight = 0.5, float $vectorWeight = 0.5)
+</code></pre>
+<p>Normalises both score lists independently, then combines them as <code>$lexicalWeight * lexical_score + $vectorWeight * vector_score</code>.</p>
+<hr>
+<h2 id="text-analysis-4"><a class="header" href="#text-analysis-4">Text analysis</a></h2>
+<h3 id="synonymdictionary-4"><a class="header" href="#synonymdictionary-4">SynonymDictionary</a></h3>
+<pre><code class="language-php">$dict = new \Laurus\SynonymDictionary();
+$dict-&gt;addSynonymGroup(["fast", "quick", "rapid"]);
+</code></pre>
+<p>A dictionary of synonym groups. All terms in a group are treated as synonyms of each other.</p>
+<h3 id="whitespacetokenizer-4"><a class="header" href="#whitespacetokenizer-4">WhitespaceTokenizer</a></h3>
+<pre><code class="language-php">$tokenizer = new \Laurus\WhitespaceTokenizer();
+$tokens = $tokenizer-&gt;tokenize("hello world");
+</code></pre>
+<p>Splits text on whitespace boundaries and returns an array of <code>Token</code> objects.</p>
+<h3 id="synonymgraphfilter-4"><a class="header" href="#synonymgraphfilter-4">SynonymGraphFilter</a></h3>
+<pre><code class="language-php">$filter = new \Laurus\SynonymGraphFilter($dictionary, true, 1.0);
+$expanded = $filter-&gt;apply($tokens);
+</code></pre>
+<p>Token filter that expands tokens with their synonyms from a <code>SynonymDictionary</code>.</p>
+<h3 id="token-3"><a class="header" href="#token-3">Token</a></h3>
+<pre><code class="language-php">$token-&gt;getText()               // string  -- The token text
+$token-&gt;getPosition()           // int     -- Position in the token stream
+$token-&gt;getStartOffset()        // int     -- Character start offset in the original text
+$token-&gt;getEndOffset()          // int     -- Character end offset in the original text
+$token-&gt;getBoost()              // float   -- Score boost factor (1.0 = no adjustment)
+$token-&gt;isStopped()             // bool    -- Whether removed by a stop filter
+$token-&gt;getPositionIncrement()  // int     -- Difference from the previous token's position
+$token-&gt;getPositionLength()     // int     -- Number of positions spanned
+</code></pre>
+<hr>
+<h2 id="field-value-types-3"><a class="header" href="#field-value-types-3">Field value types</a></h2>
+<p>PHP values are automatically converted to Laurus <code>DataValue</code> types:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">PHP type</th><th style="text-align: left">Laurus type</th><th style="text-align: left">Notes</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>null</code></td><td style="text-align: left"><code>Null</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>true</code> / <code>false</code></td><td style="text-align: left"><code>Bool</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>int</code></td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>float</code></td><td style="text-align: left"><code>Float64</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>array</code> of numerics</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Elements coerced to <code>f32</code></td></tr>
+<tr><td style="text-align: left"><code>array</code> with <code>"lat"</code>, <code>"lon"</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>float</code> values</td></tr>
+<tr><td style="text-align: left"><code>string</code> (ISO 8601)</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Parsed from ISO 8601 format</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="development-setup-2"><a class="header" href="#development-setup-2">Development Setup</a></h1>
+<p>This page covers how to set up a local development environment
+for the <code>laurus-php</code> binding, build it, and run the test
+suite.</p>
 <h2 id="prerequisites-7"><a class="header" href="#prerequisites-7">Prerequisites</a></h2>
+<ul>
+<li><strong>Rust</strong> 1.85 or later with Cargo</li>
+<li><strong>PHP</strong> 8.1 or later with development headers (<code>php-dev</code> / <code>php-devel</code>)</li>
+<li><strong>Composer</strong> for dependency management</li>
+<li>Repository cloned locally</li>
+</ul>
+<pre><code class="language-bash">git clone https://github.com/mosuka/laurus.git
+cd laurus
+</code></pre>
+<h2 id="build-3"><a class="header" href="#build-3">Build</a></h2>
+<h3 id="development-build-2"><a class="header" href="#development-build-2">Development build</a></h3>
+<p>Compiles the Rust native extension in debug mode. Re-run after
+any Rust source change.</p>
+<pre><code class="language-bash">cd laurus-php
+cargo build
+</code></pre>
+<p>The resulting shared library is located at <code>../target/debug/liblaurus_php.so</code>.</p>
+<h3 id="release-build-2"><a class="header" href="#release-build-2">Release build</a></h3>
+<pre><code class="language-bash">cd laurus-php
+cargo build --release
+</code></pre>
+<p>The resulting shared library is located at <code>../target/release/liblaurus_php.so</code>.</p>
+<h3 id="verify-the-build-2"><a class="header" href="#verify-the-build-2">Verify the build</a></h3>
+<pre><code class="language-bash">php -d extension=../target/release/liblaurus_php.so -r "
+use Laurus\Index;
+\$index = new Index();
+print_r(\$index-&gt;stats());
+"
+# Array ( [document_count] =&gt; 0 [vector_fields] =&gt; Array ( ) )
+</code></pre>
+<h2 id="testing-3"><a class="header" href="#testing-3">Testing</a></h2>
+<p>Tests use <a href="https://phpunit.de/">PHPUnit</a> and are located in
+<code>tests/</code>.</p>
+<pre><code class="language-bash"># Install test dependencies
+composer install
+
+# Run all tests
+php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/
+</code></pre>
+<p>To run a specific test file:</p>
+<pre><code class="language-bash">php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
+</code></pre>
+<h2 id="linting-and-formatting-2"><a class="header" href="#linting-and-formatting-2">Linting and formatting</a></h2>
+<pre><code class="language-bash"># Rust lint (Clippy)
+cargo clippy -p laurus-php -- -D warnings
+
+# Rust formatting
+cargo fmt -p laurus-php --check
+
+# Apply formatting
+cargo fmt -p laurus-php
+</code></pre>
+<h2 id="cleaning-up-2"><a class="header" href="#cleaning-up-2">Cleaning up</a></h2>
+<pre><code class="language-bash"># Remove build artifacts
+cargo clean
+
+# Remove Composer dependencies
+rm -rf vendor/
+</code></pre>
+<h2 id="workspace-integration-and-the-clang-sys-patch"><a class="header" href="#workspace-integration-and-the-clang-sys-patch">Workspace integration and the clang-sys patch</a></h2>
+<p><code>laurus-php</code> uses <a href="https://github.com/extphprs/ext-php-rs">ext-php-rs</a>, which
+depends on <code>ext-php-rs-clang-sys</code> (a fork of <code>clang-sys</code>). The <code>laurus-ruby</code>
+crate depends on <code>magnus</code>, which in turn depends on the original <code>clang-sys</code>.
+Both crates declare <code>links = "clang"</code>, and Cargo forbids two packages with the
+same <code>links</code> value in a single workspace.</p>
+<p>To allow <code>laurus-php</code> and <code>laurus-ruby</code> to coexist as workspace members, the
+root <code>Cargo.toml</code> patches <code>ext-php-rs-clang-sys</code> with a local copy that has the
+<code>links</code> declaration removed:</p>
+<pre><code class="language-toml"># Cargo.toml (workspace root)
+[patch.crates-io]
+ext-php-rs-clang-sys = { path = "patches/ext-php-rs-clang-sys" }
+</code></pre>
+<p>The patch lives in <code>patches/ext-php-rs-clang-sys/</code>. The only change from the
+upstream crate is the removal of <code>links = "clang"</code> in its <code>Cargo.toml</code>. This is
+safe because both <code>clang-sys</code> and <code>ext-php-rs-clang-sys</code> use <code>libclang</code> only at
+build time (for <code>bindgen</code> header parsing) and do not link it into the final
+binary.</p>
+<h3 id="when-is-the-patch-needed"><a class="header" href="#when-is-the-patch-needed">When is the patch needed?</a></h3>
+<p>This patch is only required because <code>laurus-php</code> and <code>laurus-ruby</code> are both
+members of the same Cargo workspace. If <code>laurus-ruby</code> were removed from the
+workspace (or if <code>laurus-php</code> were excluded via <code>[workspace] exclude</code>), the
+<code>links = "clang"</code> conflict would not occur and the patch could be removed along
+with the <code>[patch.crates-io]</code> section in the root <code>Cargo.toml</code>.</p>
+<h3 id="updating-the-patch"><a class="header" href="#updating-the-patch">Updating the patch</a></h3>
+<p>When <code>ext-php-rs</code> is upgraded and pulls in a new version of
+<code>ext-php-rs-clang-sys</code>, update the patch:</p>
+<pre><code class="language-bash"># 1. Update ext-php-rs in laurus-php/Cargo.toml, then:
+cargo update -p ext-php-rs
+
+# 2. Copy the new ext-php-rs-clang-sys source
+cp -r ~/.cargo/registry/src/index.crates.io-*/ext-php-rs-clang-sys-&lt;NEW_VERSION&gt;/* \
+      patches/ext-php-rs-clang-sys/
+
+# 3. Remove the links declaration
+sed -i 's/^links = "clang"/# links = "clang"/' patches/ext-php-rs-clang-sys/Cargo.toml
+
+# 4. Verify the build
+cargo build -p laurus-php -p laurus-ruby
+</code></pre>
+<h2 id="macos-linker-flag--undefined-dynamic_lookup"><a class="header" href="#macos-linker-flag--undefined-dynamic_lookup">macOS linker flag (<code>-undefined dynamic_lookup</code>)</a></h2>
+<p>PHP extensions are shared libraries (<code>.so</code> / <code>.dylib</code>) that are loaded by the
+PHP interpreter at runtime. They reference PHP API symbols (<code>zend_*</code>,
+<code>php_*</code>, etc.) that are defined in the PHP binary itself, not in any library
+the extension links against. On Linux the linker allows undefined symbols in
+shared libraries by default, so this works without extra flags. On macOS the
+linker treats undefined symbols as errors, which causes the build to fail:</p>
+<pre><code class="language-text">ld: symbol(s) not found for architecture arm64
+</code></pre>
+<p>The fix is to pass <code>-Wl,-undefined,dynamic_lookup</code> to the linker, which
+tells it to defer symbol resolution to load time (when PHP <code>dlopen</code>s the
+extension).</p>
+<p>This flag is <strong>not</strong> set in <code>.cargo/config.toml</code> because it would apply to
+every crate in the workspace, including non-PHP crates where undefined
+symbols should remain errors. Instead it is applied only when building
+<code>laurus-php</code>:</p>
+<p><strong>Makefile</strong> (local development):</p>
+<pre><code class="language-makefile">build-laurus-php:
+ifeq ($(shell uname -s),Darwin)
+    RUSTFLAGS="-C link-args=-Wl,-undefined,dynamic_lookup" cargo build -p laurus-php --release
+else
+    cargo build -p laurus-php --release
+endif
+</code></pre>
+<p><strong>CI</strong> (GitHub Actions):</p>
+<pre><code class="language-yaml">- name: Build PHP extension
+  shell: bash
+  run: |
+    if [ "$RUNNER_OS" == "macOS" ]; then
+      export RUSTFLAGS="-C link-args=-Wl,-undefined,dynamic_lookup"
+    fi
+    cargo build --release -p laurus-php
+</code></pre>
+<p>When building on macOS, always use <code>make build-laurus-php</code> or
+<code>make test-laurus-php</code> instead of running <code>cargo build -p laurus-php</code>
+directly.</p>
+<h2 id="project-layout-2"><a class="header" href="#project-layout-2">Project layout</a></h2>
+<pre><code class="language-text">laurus-php/
+├── Cargo.toml          # Rust crate manifest
+├── composer.json       # Composer package definition
+├── composer.lock       # Locked dependency versions
+├── src/                # Rust source (ext-php-rs binding)
+│   ├── lib.rs          # Module registration
+│   ├── index.rs        # Index class
+│   ├── schema.rs       # Schema class
+│   ├── query.rs        # Query classes
+│   ├── search.rs       # SearchRequest / SearchResult / Fusion
+│   ├── analysis.rs     # Tokenizer / Filter / Token
+│   ├── convert.rs      # PHP &lt;-&gt; DataValue conversion
+│   └── errors.rs       # Error mapping
+├── tests/              # PHPUnit tests
+│   └── LaurusTest.php
+└── examples/           # Runnable PHP examples
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="build--test"><a class="header" href="#build--test">Build &amp; Test</a></h1>
+<h2 id="prerequisites-8"><a class="header" href="#prerequisites-8">Prerequisites</a></h2>
 <ul>
 <li><strong>Rust</strong> 1.85 or later (edition 2024)</li>
 <li><strong>Cargo</strong> (included with Rust)</li>
@@ -10797,7 +11439,7 @@ cargo build --features embeddings-candle
 # Build in release mode
 cargo build --release
 </code></pre>
-<h2 id="testing-3"><a class="header" href="#testing-3">Testing</a></h2>
+<h2 id="testing-4"><a class="header" href="#testing-4">Testing</a></h2>
 <pre><code class="language-bash"># Run all tests
 cargo test
 

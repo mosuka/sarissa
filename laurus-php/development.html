@@ -3,8 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Page not found - Laurus Documentation</title>
-        <base href="/laurus/">
+        <title>Development - Laurus Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -13,33 +12,33 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="favicon-8114d1fc.png">
-        <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-2459343d.css">
-        <link rel="stylesheet" href="css/chrome-ae938929.css">
-        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "";
+            const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c489a0ff.js";
+            window.path_to_searchindex_js = "../searchindex-c489a0ff.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-a6ad8c0d.js"></script>
+        <script src="../toc-a6ad8c0d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -106,7 +105,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -141,7 +140,7 @@
                     <h1 class="menu-title">Laurus Documentation</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
                         <a href="https://github.com/mosuka/laurus" title="Git repository" aria-label="Git repository">
@@ -178,14 +177,176 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="document-not-found-404"><a class="header" href="#document-not-found-404">Document not found (404)</a></h1>
-<p>This URL is invalid, sorry. Please use the navigation bar or search to continue.</p>
+                        <h1 id="development-setup"><a class="header" href="#development-setup">Development Setup</a></h1>
+<p>This page covers how to set up a local development environment
+for the <code>laurus-php</code> binding, build it, and run the test
+suite.</p>
+<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<ul>
+<li><strong>Rust</strong> 1.85 or later with Cargo</li>
+<li><strong>PHP</strong> 8.1 or later with development headers (<code>php-dev</code> / <code>php-devel</code>)</li>
+<li><strong>Composer</strong> for dependency management</li>
+<li>Repository cloned locally</li>
+</ul>
+<pre><code class="language-bash">git clone https://github.com/mosuka/laurus.git
+cd laurus
+</code></pre>
+<h2 id="build"><a class="header" href="#build">Build</a></h2>
+<h3 id="development-build"><a class="header" href="#development-build">Development build</a></h3>
+<p>Compiles the Rust native extension in debug mode. Re-run after
+any Rust source change.</p>
+<pre><code class="language-bash">cd laurus-php
+cargo build
+</code></pre>
+<p>The resulting shared library is located at <code>../target/debug/liblaurus_php.so</code>.</p>
+<h3 id="release-build"><a class="header" href="#release-build">Release build</a></h3>
+<pre><code class="language-bash">cd laurus-php
+cargo build --release
+</code></pre>
+<p>The resulting shared library is located at <code>../target/release/liblaurus_php.so</code>.</p>
+<h3 id="verify-the-build"><a class="header" href="#verify-the-build">Verify the build</a></h3>
+<pre><code class="language-bash">php -d extension=../target/release/liblaurus_php.so -r "
+use Laurus\Index;
+\$index = new Index();
+print_r(\$index-&gt;stats());
+"
+# Array ( [document_count] =&gt; 0 [vector_fields] =&gt; Array ( ) )
+</code></pre>
+<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<p>Tests use <a href="https://phpunit.de/">PHPUnit</a> and are located in
+<code>tests/</code>.</p>
+<pre><code class="language-bash"># Install test dependencies
+composer install
+
+# Run all tests
+php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/
+</code></pre>
+<p>To run a specific test file:</p>
+<pre><code class="language-bash">php -d extension=../target/release/liblaurus_php.so vendor/bin/phpunit tests/LaurusTest.php
+</code></pre>
+<h2 id="linting-and-formatting"><a class="header" href="#linting-and-formatting">Linting and formatting</a></h2>
+<pre><code class="language-bash"># Rust lint (Clippy)
+cargo clippy -p laurus-php -- -D warnings
+
+# Rust formatting
+cargo fmt -p laurus-php --check
+
+# Apply formatting
+cargo fmt -p laurus-php
+</code></pre>
+<h2 id="cleaning-up"><a class="header" href="#cleaning-up">Cleaning up</a></h2>
+<pre><code class="language-bash"># Remove build artifacts
+cargo clean
+
+# Remove Composer dependencies
+rm -rf vendor/
+</code></pre>
+<h2 id="workspace-integration-and-the-clang-sys-patch"><a class="header" href="#workspace-integration-and-the-clang-sys-patch">Workspace integration and the clang-sys patch</a></h2>
+<p><code>laurus-php</code> uses <a href="https://github.com/extphprs/ext-php-rs">ext-php-rs</a>, which
+depends on <code>ext-php-rs-clang-sys</code> (a fork of <code>clang-sys</code>). The <code>laurus-ruby</code>
+crate depends on <code>magnus</code>, which in turn depends on the original <code>clang-sys</code>.
+Both crates declare <code>links = "clang"</code>, and Cargo forbids two packages with the
+same <code>links</code> value in a single workspace.</p>
+<p>To allow <code>laurus-php</code> and <code>laurus-ruby</code> to coexist as workspace members, the
+root <code>Cargo.toml</code> patches <code>ext-php-rs-clang-sys</code> with a local copy that has the
+<code>links</code> declaration removed:</p>
+<pre><code class="language-toml"># Cargo.toml (workspace root)
+[patch.crates-io]
+ext-php-rs-clang-sys = { path = "patches/ext-php-rs-clang-sys" }
+</code></pre>
+<p>The patch lives in <code>patches/ext-php-rs-clang-sys/</code>. The only change from the
+upstream crate is the removal of <code>links = "clang"</code> in its <code>Cargo.toml</code>. This is
+safe because both <code>clang-sys</code> and <code>ext-php-rs-clang-sys</code> use <code>libclang</code> only at
+build time (for <code>bindgen</code> header parsing) and do not link it into the final
+binary.</p>
+<h3 id="when-is-the-patch-needed"><a class="header" href="#when-is-the-patch-needed">When is the patch needed?</a></h3>
+<p>This patch is only required because <code>laurus-php</code> and <code>laurus-ruby</code> are both
+members of the same Cargo workspace. If <code>laurus-ruby</code> were removed from the
+workspace (or if <code>laurus-php</code> were excluded via <code>[workspace] exclude</code>), the
+<code>links = "clang"</code> conflict would not occur and the patch could be removed along
+with the <code>[patch.crates-io]</code> section in the root <code>Cargo.toml</code>.</p>
+<h3 id="updating-the-patch"><a class="header" href="#updating-the-patch">Updating the patch</a></h3>
+<p>When <code>ext-php-rs</code> is upgraded and pulls in a new version of
+<code>ext-php-rs-clang-sys</code>, update the patch:</p>
+<pre><code class="language-bash"># 1. Update ext-php-rs in laurus-php/Cargo.toml, then:
+cargo update -p ext-php-rs
+
+# 2. Copy the new ext-php-rs-clang-sys source
+cp -r ~/.cargo/registry/src/index.crates.io-*/ext-php-rs-clang-sys-&lt;NEW_VERSION&gt;/* \
+      patches/ext-php-rs-clang-sys/
+
+# 3. Remove the links declaration
+sed -i 's/^links = "clang"/# links = "clang"/' patches/ext-php-rs-clang-sys/Cargo.toml
+
+# 4. Verify the build
+cargo build -p laurus-php -p laurus-ruby
+</code></pre>
+<h2 id="macos-linker-flag--undefined-dynamic_lookup"><a class="header" href="#macos-linker-flag--undefined-dynamic_lookup">macOS linker flag (<code>-undefined dynamic_lookup</code>)</a></h2>
+<p>PHP extensions are shared libraries (<code>.so</code> / <code>.dylib</code>) that are loaded by the
+PHP interpreter at runtime. They reference PHP API symbols (<code>zend_*</code>,
+<code>php_*</code>, etc.) that are defined in the PHP binary itself, not in any library
+the extension links against. On Linux the linker allows undefined symbols in
+shared libraries by default, so this works without extra flags. On macOS the
+linker treats undefined symbols as errors, which causes the build to fail:</p>
+<pre><code class="language-text">ld: symbol(s) not found for architecture arm64
+</code></pre>
+<p>The fix is to pass <code>-Wl,-undefined,dynamic_lookup</code> to the linker, which
+tells it to defer symbol resolution to load time (when PHP <code>dlopen</code>s the
+extension).</p>
+<p>This flag is <strong>not</strong> set in <code>.cargo/config.toml</code> because it would apply to
+every crate in the workspace, including non-PHP crates where undefined
+symbols should remain errors. Instead it is applied only when building
+<code>laurus-php</code>:</p>
+<p><strong>Makefile</strong> (local development):</p>
+<pre><code class="language-makefile">build-laurus-php:
+ifeq ($(shell uname -s),Darwin)
+    RUSTFLAGS="-C link-args=-Wl,-undefined,dynamic_lookup" cargo build -p laurus-php --release
+else
+    cargo build -p laurus-php --release
+endif
+</code></pre>
+<p><strong>CI</strong> (GitHub Actions):</p>
+<pre><code class="language-yaml">- name: Build PHP extension
+  shell: bash
+  run: |
+    if [ "$RUNNER_OS" == "macOS" ]; then
+      export RUSTFLAGS="-C link-args=-Wl,-undefined,dynamic_lookup"
+    fi
+    cargo build --release -p laurus-php
+</code></pre>
+<p>When building on macOS, always use <code>make build-laurus-php</code> or
+<code>make test-laurus-php</code> instead of running <code>cargo build -p laurus-php</code>
+directly.</p>
+<h2 id="project-layout"><a class="header" href="#project-layout">Project layout</a></h2>
+<pre><code class="language-text">laurus-php/
+├── Cargo.toml          # Rust crate manifest
+├── composer.json       # Composer package definition
+├── composer.lock       # Locked dependency versions
+├── src/                # Rust source (ext-php-rs binding)
+│   ├── lib.rs          # Module registration
+│   ├── index.rs        # Index class
+│   ├── schema.rs       # Schema class
+│   ├── query.rs        # Query classes
+│   ├── search.rs       # SearchRequest / SearchResult / Fusion
+│   ├── analysis.rs     # Tokenizer / Filter / Token
+│   ├── convert.rs      # PHP &lt;-&gt; DataValue conversion
+│   └── errors.rs       # Error mapping
+├── tests/              # PHPUnit tests
+│   └── LaurusTest.php
+└── examples/           # Runnable PHP examples
+</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../laurus-php/api_reference.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
 
+                            <a rel="next prefetch" href="../development/build_and_test.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
 
                         <div style="clear: both"></div>
                     </nav>
@@ -193,7 +354,13 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../laurus-php/api_reference.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
 
+                    <a rel="next prefetch" href="../development/build_and_test.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
             </nav>
 
         </div>
@@ -211,17 +378,17 @@
         </script>
 
 
-        <script src="elasticlunr-ef4e11c1.min.js"></script>
-        <script src="mark-09e88c2c.min.js"></script>
-        <script src="searcher-c2a407aa.js"></script>
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
 
-        <script src="clipboard-1626706a.min.js"></script>
-        <script src="highlight-abc7f01d.js"></script>
-        <script src="book-a0b12cfe.js"></script>
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="mermaid-9a6dd17b.min.js"></script>
-        <script src="mermaid-init-ddddd38b.js"></script>
+        <script src="../mermaid-9a6dd17b.min.js"></script>
+        <script src="../mermaid-init-ddddd38b.js"></script>
 
 
 

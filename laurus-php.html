@@ -3,8 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Page not found - Laurus Documentation</title>
-        <base href="/laurus/">
+        <title>PHP Binding Overview - Laurus Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -178,14 +177,77 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="document-not-found-404"><a class="header" href="#document-not-found-404">Document not found (404)</a></h1>
-<p>This URL is invalid, sorry. Please use the navigation bar or search to continue.</p>
+                        <h1 id="php-binding-overview"><a class="header" href="#php-binding-overview">PHP Binding Overview</a></h1>
+<p>The <code>laurus</code> PHP extension provides PHP bindings for the Laurus search engine. It is built as a native Rust extension using <a href="https://github.com/davidcole1340/ext-php-rs">ext-php-rs</a>, giving PHP programs direct access to Laurus’s lexical, vector, and hybrid search capabilities with near-native performance.</p>
+<h2 id="features"><a class="header" href="#features">Features</a></h2>
+<ul>
+<li><strong>Lexical Search</strong> – Full-text search powered by an inverted index with BM25 scoring</li>
+<li><strong>Vector Search</strong> – Approximate nearest neighbor (ANN) search using Flat, HNSW, or IVF indexes</li>
+<li><strong>Hybrid Search</strong> – Combine lexical and vector results with fusion algorithms (RRF, WeightedSum)</li>
+<li><strong>Rich Query DSL</strong> – Term, Phrase, Fuzzy, Wildcard, NumericRange, Geo, Boolean, Span queries</li>
+<li><strong>Text Analysis</strong> – Tokenizers, filters, stemmers, and synonym expansion</li>
+<li><strong>Flexible Storage</strong> – In-memory (ephemeral) or file-based (persistent) indexes</li>
+<li><strong>Idiomatic PHP API</strong> – Clean, intuitive PHP classes under the <code>Laurus\</code> namespace</li>
+</ul>
+<h2 id="architecture"><a class="header" href="#architecture">Architecture</a></h2>
+<pre><code class="language-mermaid">graph LR
+    subgraph "laurus-php (extension)"
+        PhpIndex["Index\n(PHP class)"]
+        PhpQuery["Query classes"]
+        PhpSearch["SearchRequest\n/ SearchResult"]
+    end
+
+    PHP["PHP application"] --&gt;|"method calls"| PhpIndex
+    PHP --&gt;|"query objects"| PhpQuery
+    PhpIndex --&gt;|"ext-php-rs FFI"| Engine["laurus::Engine\n(Rust)"]
+    PhpQuery --&gt;|"ext-php-rs FFI"| Engine
+    Engine --&gt; Storage["Storage\n(Memory / File)"]
+</code></pre>
+<p>The PHP classes are thin wrappers around the Rust engine.
+Each call crosses the ext-php-rs FFI boundary once; the Rust engine
+then executes the operation entirely in native code.</p>
+<p>Although the Rust engine uses async I/O internally, all PHP
+methods are exposed as <strong>synchronous</strong> functions. Each method
+calls <code>tokio::Runtime::block_on()</code> under the hood to bridge
+async Rust to synchronous PHP.</p>
+<h2 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h2>
+<pre><code class="language-php">&lt;?php
+
+use Laurus\Index;
+
+// Create an in-memory index
+$index = new Index();
+
+// Index documents
+$index-&gt;putDocument("doc1", ["title" =&gt; "Introduction to Rust", "body" =&gt; "Systems programming language."]);
+$index-&gt;putDocument("doc2", ["title" =&gt; "PHP for Web Development", "body" =&gt; "Web applications with PHP."]);
+$index-&gt;commit();
+
+// Search
+$results = $index-&gt;search("title:rust", 5);
+foreach ($results as $r) {
+    printf("[%s] score=%.4f  %s\n", $r-&gt;getId(), $r-&gt;getScore(), $r-&gt;getDocument()["title"]);
+}
+</code></pre>
+<h2 id="sections"><a class="header" href="#sections">Sections</a></h2>
+<ul>
+<li><a href="laurus-php/installation.html">Installation</a> – How to install the extension</li>
+<li><a href="laurus-php/quickstart.html">Quick Start</a> – Hands-on introduction with examples</li>
+<li><a href="laurus-php/api_reference.html">API Reference</a> – Complete class and method reference</li>
+<li><a href="laurus-php/development.html">Development</a> – Building from source and running tests</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="laurus-ruby/development.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
 
+                            <a rel="next prefetch" href="laurus-php/installation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
 
                         <div style="clear: both"></div>
                     </nav>
@@ -193,7 +255,13 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="laurus-ruby/development.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
 
+                    <a rel="next prefetch" href="laurus-php/installation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
             </nav>
 
         </div>
