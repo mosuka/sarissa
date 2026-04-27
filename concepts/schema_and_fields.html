@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-55d4e1d1.js";
+            window.path_to_searchindex_js = "../searchindex-61a49d59.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -461,13 +461,14 @@ let schema = Schema::builder()
 <tr><td style="text-align: left">array of integers (e.g. <code>[1, 2, 3]</code>)</td><td style="text-align: left"><code>Integer</code> with <code>multi_valued = true</code></td></tr>
 <tr><td style="text-align: left">array of floats / mixed numeric (e.g. <code>[1.5, 2.0, 3]</code>)</td><td style="text-align: left"><code>Float</code> with <code>multi_valued = true</code></td></tr>
 <tr><td style="text-align: left">object with a latitude key (<code>lat</code> or <code>latitude</code>) and a longitude key (<code>lon</code>, <code>lng</code>, or <code>longitude</code>), values in range</td><td style="text-align: left"><code>Geo</code></td></tr>
+<tr><td style="text-align: left">object with all three numeric keys <code>x</code>, <code>y</code>, <code>z</code> (finite values, ECEF meters)</td><td style="text-align: left"><code>Geo3d</code></td></tr>
 </tbody>
 </table>
 </div>
-<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>), <code>Bytes</code>, and <code>Geo3d</code> are <strong>never</strong>
-inferred: they must be declared in the schema explicitly. (Inferring
-<code>Geo3d</code> from a 3D-looking JSON object would conflict with arbitrary user
-records that happen to have <code>x</code>, <code>y</code>, <code>z</code> keys.)</p>
+<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>) and <code>Bytes</code> are <strong>never</strong> inferred:
+they must be declared in the schema explicitly. Mixing 2D (<code>lat</code>/<code>lon</code>)
+and 3D (<code>x</code>/<code>y</code>/<code>z</code>) markers in a single object is rejected as ambiguous;
+use either shape, not both.</p>
 <h3 id="multi-valued-numeric-fields"><a class="header" href="#multi-valued-numeric-fields">Multi-valued numeric fields</a></h3>
 <p>Integer and Float fields can be declared with <code>multi_valued = true</code> to
 hold multiple values per document. A range query matches a document if

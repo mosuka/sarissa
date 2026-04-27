@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-fbb2f7b9.js";
+            window.path_to_searchindex_js = "../searchindex-7458acda.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -462,13 +462,15 @@ let schema = Schema::builder()
 <tr><td style="text-align: left">整数の配列（例: <code>[1, 2, 3]</code>）</td><td style="text-align: left"><code>Integer</code>（<code>multi_valued = true</code>）</td></tr>
 <tr><td style="text-align: left">浮動小数点を含む数値配列（例: <code>[1.5, 2.0, 3]</code>）</td><td style="text-align: left"><code>Float</code>（<code>multi_valued = true</code>）</td></tr>
 <tr><td style="text-align: left">緯度キー（<code>lat</code> または <code>latitude</code>）と経度キー（<code>lon</code>、<code>lng</code>、<code>longitude</code> のいずれか）を持ち、値が範囲内の object</td><td style="text-align: left"><code>Geo</code></td></tr>
+<tr><td style="text-align: left">数値の <code>x</code>、<code>y</code>、<code>z</code> の 3 キーをすべて持つ object（有限値、ECEF メートル単位）</td><td style="text-align: left"><code>Geo3d</code></td></tr>
 </tbody>
 </table>
 </div>
-<p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）、<code>Bytes</code>、<code>Geo3d</code> は
-<strong>自動推論の対象外</strong>です。スキーマへ明示的に宣言してください。
-（<code>x</code>, <code>y</code>, <code>z</code> キーを持つ任意のユーザーレコードと衝突するため、
-<code>Geo3d</code> は JSON オブジェクトから推論されません。）</p>
+<p>ベクトルフィールド（<code>Hnsw</code> / <code>Flat</code> / <code>Ivf</code>）と <code>Bytes</code> は <strong>自動推論の
+対象外</strong>です。スキーマへ明示的に宣言してください。なお、同一 object 内で
+2D 用キー（<code>lat</code> / <code>lon</code>）と 3D 用キー（<code>x</code> / <code>y</code> / <code>z</code>）を混在させた
+場合は曖昧と判定してエラーとなります。いずれか一方の形式のみ使用して
+ください。</p>
 <h3 id="多値数値フィールド"><a class="header" href="#多値数値フィールド">多値数値フィールド</a></h3>
 <p><code>Integer</code> と <code>Float</code> フィールドは <code>multi_valued = true</code> を指定することで、
 1 ドキュメントに複数の値を保持できます。範囲クエリは<strong>いずれかの値が条件を満たせばマッチ</strong>

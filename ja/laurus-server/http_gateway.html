@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-fbb2f7b9.js";
+            window.path_to_searchindex_js = "../searchindex-7458acda.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -337,32 +337,23 @@ HTTP 経路と gRPC 経路で挙動が一致します。</p>
 <tr><td style="text-align: left"><code>[]</code>（空配列）</td><td style="text-align: left">(スキップ)</td><td style="text-align: left">要素型を決定できないためフィールドはスキップされます。</td></tr>
 <tr><td style="text-align: left"><code>{"latitude": ..., "longitude": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>{"lat": ..., "lon": ...}</code> / <code>{"lat": ..., "lng": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left">latitude / longitude の短縮別名を受け付けます。</td></tr>
-<tr><td style="text-align: left"><code>{"x": ..., "y": ..., "z": ...}</code></td><td style="text-align: left">(推論されない)</td><td style="text-align: left">Geo3d 値は JSON から推論されません。下記の <strong>HTTP 経由の Geo3d</strong> 注記を参照してください。</td></tr>
+<tr><td style="text-align: left"><code>{"x": ..., "y": ..., "z": ...}</code></td><td style="text-align: left"><code>geo3d</code></td><td style="text-align: left">3 キーすべて必須、有限な数値、ECEF メートル単位。<code>lat</code>/<code>lon</code> キーとの混在は拒否されます。</td></tr>
 </tbody>
 </table>
 </div>
 <p>以下の場合、ゲートウェイは HTTP 400（<code>Bad Request</code>）を返します:</p>
 <ul>
 <li>配列が混在型もしくは非数値要素を含む（例: <code>[1, "x"]</code>）</li>
-<li>オブジェクトが有効な地理座標ではない（latitude/longitude キーがない、
-値が数値でない）</li>
+<li>オブジェクトが有効な地理座標ではない（2D は latitude/longitude キーが、
+3D は <code>x</code>/<code>y</code>/<code>z</code> のいずれかが欠けている）</li>
 <li>緯度が <code>[-90, 90]</code> の範囲外、または経度が <code>[-180, 180]</code> の範囲外</li>
+<li>3D ECEF の座標が有限値でない（<code>NaN</code> / <code>Inf</code>）</li>
+<li>同一オブジェクトに 2D（<code>lat</code>/<code>lon</code>）と 3D（<code>x</code>/<code>y</code>/<code>z</code>）のキーが混在</li>
 </ul>
 <p>ベクトルおよびバイト列フィールドは JSON だけからは推論できないため、
 スキーマで明示的に宣言する必要があります。宣言済みのベクトルフィールドに
 数値配列が送られた場合は自動的に <code>f32</code> ベクトルへキャストされるので、
 REST クライアントは埋め込みベクトルを通常の JSON 配列として送信できます。</p>
-<blockquote>
-<p><strong>注記: HTTP 経由の Geo3d は読み取り専用</strong></p>
-<p>HTTP ゲートウェイは Geo3d 値を返却（<code>{"x": ..., "y": ..., "z": ...}</code> 形式）
-でき、スキーマ定義での <code>Geo3d</code> 宣言（<code>{"geo3d": {"indexed": ..., "stored": ...}}</code>）
-も受け付けます。ただし、HTTP 経由での Geo3d ドキュメント値の <strong>書き込み</strong> は
-現在未対応です: JSON から <code>DataValue</code> への推論ルールが <code>{x, y, z}</code> オブジェクトを
-3D ECEF 点として認識しません。Geo3d 値を挿入するには、gRPC の
-<code>PutDocument</code> / <code>AddDocument</code> RPC を直接呼び出し、<code>Value.geo3d_value</code> を
-設定してください。</p>
-<p>書き込み対応の追跡 Issue: <a href="https://github.com/mosuka/laurus/issues/335">#335</a>。</p>
-</blockquote>
 <h3 id="3d-地理クエリ"><a class="header" href="#3d-地理クエリ">3D 地理クエリ</a></h3>
 <p>3D ECEF クエリは <code>query</code> に渡す Lexical DSL 文字列をそのまま再利用します。ゲートウェイは文字列を変更せずエンジンへ転送するため、gRPC 経由と同じ DSL 形式が HTTP 経由でも動作します:</p>
 <pre><code class="language-bash">curl -X POST http://localhost:8080/v1/search \

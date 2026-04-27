@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-55d4e1d1.js";
+            window.path_to_searchindex_js = "searchindex-61a49d59.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a6ad8c0d.js"></script>
@@ -1182,13 +1182,14 @@ let schema = Schema::builder()
 <tr><td style="text-align: left">array of integers (e.g. <code>[1, 2, 3]</code>)</td><td style="text-align: left"><code>Integer</code> with <code>multi_valued = true</code></td></tr>
 <tr><td style="text-align: left">array of floats / mixed numeric (e.g. <code>[1.5, 2.0, 3]</code>)</td><td style="text-align: left"><code>Float</code> with <code>multi_valued = true</code></td></tr>
 <tr><td style="text-align: left">object with a latitude key (<code>lat</code> or <code>latitude</code>) and a longitude key (<code>lon</code>, <code>lng</code>, or <code>longitude</code>), values in range</td><td style="text-align: left"><code>Geo</code></td></tr>
+<tr><td style="text-align: left">object with all three numeric keys <code>x</code>, <code>y</code>, <code>z</code> (finite values, ECEF meters)</td><td style="text-align: left"><code>Geo3d</code></td></tr>
 </tbody>
 </table>
 </div>
-<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>), <code>Bytes</code>, and <code>Geo3d</code> are <strong>never</strong>
-inferred: they must be declared in the schema explicitly. (Inferring
-<code>Geo3d</code> from a 3D-looking JSON object would conflict with arbitrary user
-records that happen to have <code>x</code>, <code>y</code>, <code>z</code> keys.)</p>
+<p>Vector fields (<code>Hnsw</code>, <code>Flat</code>, <code>Ivf</code>) and <code>Bytes</code> are <strong>never</strong> inferred:
+they must be declared in the schema explicitly. Mixing 2D (<code>lat</code>/<code>lon</code>)
+and 3D (<code>x</code>/<code>y</code>/<code>z</code>) markers in a single object is rejected as ambiguous;
+use either shape, not both.</p>
 <h3 id="multi-valued-numeric-fields"><a class="header" href="#multi-valued-numeric-fields">Multi-valued numeric fields</a></h3>
 <p>Integer and Float fields can be declared with <code>multi_valued = true</code> to
 hold multiple values per document. A range query matches a document if
@@ -8196,7 +8197,7 @@ gRPC paths in sync.</p>
 <tr><td style="text-align: left"><code>[]</code> (empty array)</td><td style="text-align: left">(skipped)</td><td style="text-align: left">Element type cannot be determined, so the field is skipped.</td></tr>
 <tr><td style="text-align: left"><code>{"latitude": ..., "longitude": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>{"lat": ..., "lon": ...}</code> / <code>{"lat": ..., "lng": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left">Short aliases for latitude / longitude are accepted.</td></tr>
-<tr><td style="text-align: left"><code>{"x": ..., "y": ..., "z": ...}</code></td><td style="text-align: left">(not inferred)</td><td style="text-align: left">Geo3d values are not inferred from JSON. See the <strong>Geo3d via HTTP</strong> note below.</td></tr>
+<tr><td style="text-align: left"><code>{"x": ..., "y": ..., "z": ...}</code></td><td style="text-align: left"><code>geo3d</code></td><td style="text-align: left">All three keys required, finite numbers, ECEF meters. Mixing with <code>lat</code>/<code>lon</code> keys is rejected.</td></tr>
 </tbody>
 </table>
 </div>
@@ -8205,25 +8206,16 @@ gRPC paths in sync.</p>
 <li>An array contains mixed types or non-numeric elements
 (e.g. <code>[1, "x"]</code>).</li>
 <li>An object is not a valid geographic point (missing latitude / longitude
-keys, or non-numeric values).</li>
+keys for 2D, or missing any of <code>x</code> / <code>y</code> / <code>z</code> for 3D).</li>
 <li>A geographic latitude is outside <code>[-90, 90]</code> or a longitude is outside
 <code>[-180, 180]</code>.</li>
+<li>A 3D ECEF coordinate is non-finite (<code>NaN</code> / <code>Inf</code>).</li>
+<li>An object mixes 2D (<code>lat</code> / <code>lon</code>) and 3D (<code>x</code> / <code>y</code> / <code>z</code>) keys.</li>
 </ul>
 <p>Vector and bytes fields cannot be inferred from JSON alone and must be
 declared in the schema. Numeric arrays sent against a declared vector
 field are coerced to a vector of <code>f32</code> values automatically, so REST
 clients can post embeddings as plain JSON arrays.</p>
-<blockquote>
-<p><strong>Note: Geo3d via HTTP is read-only</strong></p>
-<p>The HTTP gateway can return Geo3d values (as <code>{"x": ..., "y": ..., "z": ...}</code>)
-and accepts <code>Geo3d</code> schema declarations
-(as <code>{"geo3d": {"indexed": ..., "stored": ...}}</code> in the schema definition).
-However, <strong>writing</strong> Geo3d document values via HTTP is not yet supported:
-the JSON-to-<code>DataValue</code> inference rule does not recognise an <code>{x, y, z}</code>
-object as a 3D ECEF point. To insert Geo3d values, call the gRPC
-<code>PutDocument</code> / <code>AddDocument</code> RPC directly with <code>Value.geo3d_value</code> set.</p>
-<p>Tracking issue for write support: <a href="https://github.com/mosuka/laurus/issues/335">#335</a>.</p>
-</blockquote>
 <h3 id="3d-geographic-queries-2"><a class="header" href="#3d-geographic-queries-2">3D Geographic Queries</a></h3>
 <p>3D ECEF queries reuse the lexical DSL string passed via <code>query</code>. The gateway forwards it unchanged to the engine, so the same forms work over HTTP as over gRPC:</p>
 <pre><code class="language-bash">curl -X POST http://localhost:8080/v1/search \
