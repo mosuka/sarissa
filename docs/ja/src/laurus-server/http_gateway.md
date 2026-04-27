@@ -204,6 +204,7 @@ HTTP 経路と gRPC 経路で挙動が一致します。
 | `[]`（空配列） | (スキップ) | 要素型を決定できないためフィールドはスキップされます。 |
 | `{"latitude": ..., "longitude": ...}` | `geo` | |
 | `{"lat": ..., "lon": ...}` / `{"lat": ..., "lng": ...}` | `geo` | latitude / longitude の短縮別名を受け付けます。 |
+| `{"x": ..., "y": ..., "z": ...}` | (推論されない) | Geo3d 値は JSON から推論されません。下記の **HTTP 経由の Geo3d** 注記を参照してください。 |
 
 以下の場合、ゲートウェイは HTTP 400（`Bad Request`）を返します:
 
@@ -216,6 +217,33 @@ HTTP 経路と gRPC 経路で挙動が一致します。
 スキーマで明示的に宣言する必要があります。宣言済みのベクトルフィールドに
 数値配列が送られた場合は自動的に `f32` ベクトルへキャストされるので、
 REST クライアントは埋め込みベクトルを通常の JSON 配列として送信できます。
+
+> **注記: HTTP 経由の Geo3d は読み取り専用**
+>
+> HTTP ゲートウェイは Geo3d 値を返却（`{"x": ..., "y": ..., "z": ...}` 形式）
+> でき、スキーマ定義での `Geo3d` 宣言（`{"geo3d": {"indexed": ..., "stored": ...}}`）
+> も受け付けます。ただし、HTTP 経由での Geo3d ドキュメント値の **書き込み** は
+> 現在未対応です: JSON から `DataValue` への推論ルールが `{x, y, z}` オブジェクトを
+> 3D ECEF 点として認識しません。Geo3d 値を挿入するには、gRPC の
+> `PutDocument` / `AddDocument` RPC を直接呼び出し、`Value.geo3d_value` を
+> 設定してください。
+>
+> 書き込み対応の追跡 Issue: [#335](https://github.com/mosuka/laurus/issues/335)。
+
+### 3D 地理クエリ
+
+3D ECEF クエリは `query` に渡す Lexical DSL 文字列をそのまま再利用します。ゲートウェイは文字列を変更せずエンジンへ転送するため、gRPC 経由と同じ DSL 形式が HTTP 経由でも動作します:
+
+```bash
+curl -X POST http://localhost:8080/v1/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)",
+    "limit": 10
+  }'
+```
+
+`geo3d_bbox` および `geo3d_nearest` の構文は [Query DSL → 3D 地理クエリ](../concepts/query_dsl.md#3d-geographic-queries-geo3d_) を参照してください。
 
 ## リクエスト/レスポンス形式
 
