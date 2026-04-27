@@ -54,6 +54,16 @@ cargo run --example hybrid_search
 
 Demonstrates: Lexical-only, vector-only, and hybrid search. Both `RRF` and `WeightedSum` fusion algorithms. Builder API and DSL.
 
+### geo3d_search
+
+3D Earth-Centered Earth-Fixed (ECEF) geographic search. Indexes six landmarks (Tokyo Tower, Tokyo Skytree, Mt. Fuji summit, Statue of Liberty, Sydney Opera House, an ISS sample point) computed via `wgs84_to_ecef`.
+
+```bash
+cargo run --example geo3d_search
+```
+
+Demonstrates: `Geo3dDistanceQuery` (sphere), `Geo3dBoundingBoxQuery` (3D AABB), `Geo3dNearestQuery` (k-NN), and the `wgs84_to_ecef` conversion utility. The bounding-box query intentionally excludes the ISS sample to highlight that altitude is a first-class third axis.
+
 ### search_with_candle
 
 Vector search using real BERT embeddings via Hugging Face Candle. The model is downloaded automatically on first run (~80 MB).

@@ -54,6 +54,16 @@ cargo run --example hybrid_search
 
 デモ内容: Lexical のみ、Vector のみ、ハイブリッド検索。`RRF` と `WeightedSum` の両方の融合アルゴリズム。Builder API と DSL。
 
+### geo3d_search
+
+Earth-Centered Earth-Fixed (ECEF) 座標系を用いた 3D 地理検索のサンプルです。6 つのランドマーク（東京タワー、東京スカイツリー、富士山頂、自由の女神像、シドニー・オペラハウス、ISS サンプル点）を `wgs84_to_ecef` で変換してインデックスします。
+
+```bash
+cargo run --example geo3d_search
+```
+
+デモ内容: `Geo3dDistanceQuery`（球）、`Geo3dBoundingBoxQuery`（3D AABB）、`Geo3dNearestQuery`（k-NN）、および `wgs84_to_ecef` 変換ユーティリティ。バウンディングボックスクエリは ISS サンプルを意図的に除外し、高度が第三の軸として機能することを示します。
+
 ### search_with_candle
 
 Hugging Face Candle を使用した実際の BERT エンベディングによる Vector 検索です。初回実行時にモデルが自動的にダウンロードされます（約 80 MB）。
