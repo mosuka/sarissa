@@ -23,7 +23,24 @@ boolean_op = { ^"AND" | ^"OR" }
 // Field-specific queries
 field_query = { field ~ ":" ~ field_value }
 
-field_value = { range_query | phrase_query | fuzzy_term | wildcard_term | simple_term }
+field_value = { geo3d_query | range_query | phrase_query | fuzzy_term | wildcard_term | simple_term }
+
+// 3D geo queries (ECEF Cartesian coordinates, meters):
+//   field:geo3d_distance(x, y, z, radius_m)
+//   field:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+//   field:geo3d_nearest(x, y, z, k)
+geo3d_query = { geo3d_distance | geo3d_bbox | geo3d_nearest }
+geo3d_distance = {
+    ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float ~ "," ~ signed_float ~ "," ~ signed_float ~ ")"
+}
+geo3d_bbox = {
+    ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float ~ "," ~ signed_float ~ "," ~ signed_float ~ "," ~ signed_float ~ "," ~ signed_float ~ ")"
+}
+geo3d_nearest = {
+    ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")"
+}
+signed_float = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
+unsigned_int = @{ ASCII_DIGIT+ }
 
 // Range queries: [100 TO 500] or {A TO Z}
 range_query = { range_inclusive | range_exclusive }
