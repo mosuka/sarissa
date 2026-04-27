@@ -115,6 +115,9 @@ name = "vector_search"
 name = "hybrid_search"
 
 [[example]]
+name = "geo3d_search"
+
+[[example]]
 name = "synonym_graph_filter"
 
 [[example]]

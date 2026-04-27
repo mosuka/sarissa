@@ -176,6 +176,7 @@ You can find usage examples in the [`laurus/examples/`](laurus/examples/) direct
 | [lexical_search](laurus/examples/lexical_search.rs) | All query types (Term, Phrase, Boolean, Fuzzy, Wildcard, Range, Geo, Span) | — |
 | [vector_search](laurus/examples/vector_search.rs) | Semantic similarity search with embeddings | — |
 | [hybrid_search](laurus/examples/hybrid_search.rs) | Combining lexical and vector search with fusion | — |
+| [geo3d_search](laurus/examples/geo3d_search.rs) | 3D ECEF geographic search (sphere, bounding box, k-NN) | — |
 | [synonym_graph_filter](laurus/examples/synonym_graph_filter.rs) | Synonym expansion in analysis pipeline | — |
 | [search_with_candle](laurus/examples/search_with_candle.rs) | Local BERT embeddings via Candle | `embeddings-candle` |
 | [search_with_openai](laurus/examples/search_with_openai.rs) | Cloud-based embeddings via OpenAI | `embeddings-openai` |
