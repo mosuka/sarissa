@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-812ca712.js";
+            window.path_to_searchindex_js = "searchindex-65e9e580.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c423c571.js"></script>
@@ -7537,6 +7537,7 @@ enum DynamicFieldPolicy {
 <tr><td style="text-align: left"><code>BooleanOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>DateTimeOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>GeoOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>Geo3dOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>BytesOption</code> (<code>stored</code>)</td><td style="text-align: left"></td></tr>
 </tbody>
 </table>
@@ -7678,9 +7679,24 @@ message DeleteFieldResponse {
 <tr><td style="text-align: left">Vector</td><td style="text-align: left"><code>vector_value</code></td><td style="text-align: left"><code>VectorValue</code>（浮動小数点数のリスト）</td></tr>
 <tr><td style="text-align: left">DateTime</td><td style="text-align: left"><code>datetime_value</code></td><td style="text-align: left">Unix マイクロ秒（UTC）</td></tr>
 <tr><td style="text-align: left">Geo</td><td style="text-align: left"><code>geo_value</code></td><td style="text-align: left"><code>GeoPoint</code>（緯度、経度）</td></tr>
+<tr><td style="text-align: left">Geo3d</td><td style="text-align: left"><code>geo3d_value</code></td><td style="text-align: left"><code>Geo3dPoint</code>（x, y, z メートル単位、ECEF 直交座標系）</td></tr>
 </tbody>
 </table>
 </div>
+<p><strong>Geo3dPoint:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">フィールド</th><th style="text-align: left">型</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>x</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">X 座標（メートル単位、ECEF: 赤道面、+X 方向は経度 0°）</td></tr>
+<tr><td style="text-align: left"><code>y</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">Y 座標（メートル単位、ECEF: 赤道面、+Y 方向は東経 90°）</td></tr>
+<tr><td style="text-align: left"><code>z</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">Z 座標（メートル単位、ECEF: +Z 方向は北極）</td></tr>
+</tbody>
+</table>
+</div>
+<p>座標系の詳細および <code>wgs84_to_ecef</code> / <code>ecef_to_wgs84</code> の変換ユーティリティについては <a href="#3d-地理検索-ecef">3D 地理検索 (ECEF)</a> を参照してください。</p>
 <h3 id="adddocument"><a class="header" href="#adddocument"><code>AddDocument</code></a></h3>
 <p>ドキュメントを追加します。<code>PutDocument</code> と異なり、同じ ID の既存ドキュメントを置換しません。複数のドキュメントが同じ ID を共有できます（チャンキングパターン）。</p>
 <pre><code class="language-protobuf">rpc AddDocument(AddDocumentRequest) returns (AddDocumentResponse);
@@ -7761,6 +7777,14 @@ message DeleteFieldResponse {
 </table>
 </div>
 <p><code>query</code> または <code>query_vectors</code> のいずれか 1 つ以上を指定する必要があります。</p>
+<h3 id="3d-地理クエリ-1"><a class="header" href="#3d-地理クエリ-1">3D 地理クエリ</a></h3>
+<p>3D ECEF の地理クエリは <code>SearchRequest.query</code> に渡す Lexical DSL 文字列で表現します。専用のメッセージ型はなく、コアライブラリで使用される DSL 形式がそのまま gRPC 経由でも動作します。3 種類の形式があります（構文の詳細は <a href="#3d-geographic-queries-geo3d_">Query DSL → 3D 地理クエリ</a> を参照）:</p>
+<ul>
+<li><code>position:geo3d_distance(x, y, z, radius_m)</code> — <code>(x, y, z)</code> を中心とした半径（メートル単位）の球</li>
+<li><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code> — 3D 軸並行バウンディングボックス</li>
+<li><code>position:geo3d_nearest(x, y, z, k)</code> — <code>(x, y, z)</code> に最も近い k 個の近傍点</li>
+</ul>
+<p><code>position</code> はフィールド名で、スキーマで宣言した実際の <code>Geo3d</code> 型フィールドに置き換えてください。すべての数値引数は符号付きの <code>double</code> 値で、<code>k</code> は符号なし整数です。</p>
 <h3 id="queryvector"><a class="header" href="#queryvector">QueryVector</a></h3>
 <div class="table-wrapper">
 <table>
@@ -8023,6 +8047,7 @@ HTTP 経路と gRPC 経路で挙動が一致します。</p>
 <tr><td style="text-align: left"><code>[]</code>（空配列）</td><td style="text-align: left">(スキップ)</td><td style="text-align: left">要素型を決定できないためフィールドはスキップされます。</td></tr>
 <tr><td style="text-align: left"><code>{"latitude": ..., "longitude": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>{"lat": ..., "lon": ...}</code> / <code>{"lat": ..., "lng": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left">latitude / longitude の短縮別名を受け付けます。</td></tr>
+<tr><td style="text-align: left"><code>{"x": ..., "y": ..., "z": ...}</code></td><td style="text-align: left">(推論されない)</td><td style="text-align: left">Geo3d 値は JSON から推論されません。下記の <strong>HTTP 経由の Geo3d</strong> 注記を参照してください。</td></tr>
 </tbody>
 </table>
 </div>
@@ -8037,6 +8062,27 @@ HTTP 経路と gRPC 経路で挙動が一致します。</p>
 スキーマで明示的に宣言する必要があります。宣言済みのベクトルフィールドに
 数値配列が送られた場合は自動的に <code>f32</code> ベクトルへキャストされるので、
 REST クライアントは埋め込みベクトルを通常の JSON 配列として送信できます。</p>
+<blockquote>
+<p><strong>注記: HTTP 経由の Geo3d は読み取り専用</strong></p>
+<p>HTTP ゲートウェイは Geo3d 値を返却（<code>{"x": ..., "y": ..., "z": ...}</code> 形式）
+でき、スキーマ定義での <code>Geo3d</code> 宣言（<code>{"geo3d": {"indexed": ..., "stored": ...}}</code>）
+も受け付けます。ただし、HTTP 経由での Geo3d ドキュメント値の <strong>書き込み</strong> は
+現在未対応です: JSON から <code>DataValue</code> への推論ルールが <code>{x, y, z}</code> オブジェクトを
+3D ECEF 点として認識しません。Geo3d 値を挿入するには、gRPC の
+<code>PutDocument</code> / <code>AddDocument</code> RPC を直接呼び出し、<code>Value.geo3d_value</code> を
+設定してください。</p>
+<p>書き込み対応の追跡 Issue: <a href="https://github.com/mosuka/laurus/issues/335">#335</a>。</p>
+</blockquote>
+<h3 id="3d-地理クエリ-2"><a class="header" href="#3d-地理クエリ-2">3D 地理クエリ</a></h3>
+<p>3D ECEF クエリは <code>query</code> に渡す Lexical DSL 文字列をそのまま再利用します。ゲートウェイは文字列を変更せずエンジンへ転送するため、gRPC 経由と同じ DSL 形式が HTTP 経由でも動作します:</p>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)",
+    "limit": 10
+  }'
+</code></pre>
+<p><code>geo3d_bbox</code> および <code>geo3d_nearest</code> の構文は <a href="#3d-geographic-queries-geo3d_">Query DSL → 3D 地理クエリ</a> を参照してください。</p>
 <h2 id="リクエストレスポンス形式"><a class="header" href="#リクエストレスポンス形式">リクエスト/レスポンス形式</a></h2>
 <p>すべてのリクエストおよびレスポンスボディは JSON を使用します。JSON の構造は gRPC の protobuf メッセージに対応しています。メッセージ定義の詳細は <a href="#grpc-api-リファレンス">gRPC API リファレンス</a>を参照してください。</p>
 <div style="break-before: page; page-break-before: always;"></div>

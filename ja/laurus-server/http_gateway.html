@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-812ca712.js";
+            window.path_to_searchindex_js = "../searchindex-65e9e580.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -337,6 +337,7 @@ HTTP 経路と gRPC 経路で挙動が一致します。</p>
 <tr><td style="text-align: left"><code>[]</code>（空配列）</td><td style="text-align: left">(スキップ)</td><td style="text-align: left">要素型を決定できないためフィールドはスキップされます。</td></tr>
 <tr><td style="text-align: left"><code>{"latitude": ..., "longitude": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>{"lat": ..., "lon": ...}</code> / <code>{"lat": ..., "lng": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left">latitude / longitude の短縮別名を受け付けます。</td></tr>
+<tr><td style="text-align: left"><code>{"x": ..., "y": ..., "z": ...}</code></td><td style="text-align: left">(推論されない)</td><td style="text-align: left">Geo3d 値は JSON から推論されません。下記の <strong>HTTP 経由の Geo3d</strong> 注記を参照してください。</td></tr>
 </tbody>
 </table>
 </div>
@@ -351,6 +352,27 @@ HTTP 経路と gRPC 経路で挙動が一致します。</p>
 スキーマで明示的に宣言する必要があります。宣言済みのベクトルフィールドに
 数値配列が送られた場合は自動的に <code>f32</code> ベクトルへキャストされるので、
 REST クライアントは埋め込みベクトルを通常の JSON 配列として送信できます。</p>
+<blockquote>
+<p><strong>注記: HTTP 経由の Geo3d は読み取り専用</strong></p>
+<p>HTTP ゲートウェイは Geo3d 値を返却（<code>{"x": ..., "y": ..., "z": ...}</code> 形式）
+でき、スキーマ定義での <code>Geo3d</code> 宣言（<code>{"geo3d": {"indexed": ..., "stored": ...}}</code>）
+も受け付けます。ただし、HTTP 経由での Geo3d ドキュメント値の <strong>書き込み</strong> は
+現在未対応です: JSON から <code>DataValue</code> への推論ルールが <code>{x, y, z}</code> オブジェクトを
+3D ECEF 点として認識しません。Geo3d 値を挿入するには、gRPC の
+<code>PutDocument</code> / <code>AddDocument</code> RPC を直接呼び出し、<code>Value.geo3d_value</code> を
+設定してください。</p>
+<p>書き込み対応の追跡 Issue: <a href="https://github.com/mosuka/laurus/issues/335">#335</a>。</p>
+</blockquote>
+<h3 id="3d-地理クエリ"><a class="header" href="#3d-地理クエリ">3D 地理クエリ</a></h3>
+<p>3D ECEF クエリは <code>query</code> に渡す Lexical DSL 文字列をそのまま再利用します。ゲートウェイは文字列を変更せずエンジンへ転送するため、gRPC 経由と同じ DSL 形式が HTTP 経由でも動作します:</p>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)",
+    "limit": 10
+  }'
+</code></pre>
+<p><code>geo3d_bbox</code> および <code>geo3d_nearest</code> の構文は <a href="../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D 地理クエリ</a> を参照してください。</p>
 <h2 id="リクエストレスポンス形式"><a class="header" href="#リクエストレスポンス形式">リクエスト/レスポンス形式</a></h2>
 <p>すべてのリクエストおよびレスポンスボディは JSON を使用します。JSON の構造は gRPC の protobuf メッセージに対応しています。メッセージ定義の詳細は <a href="grpc_api.html">gRPC API リファレンス</a>を参照してください。</p>
 

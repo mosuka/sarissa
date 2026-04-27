@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-812ca712.js";
+            window.path_to_searchindex_js = "../searchindex-65e9e580.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -297,6 +297,7 @@ enum DynamicFieldPolicy {
 <tr><td style="text-align: left"><code>BooleanOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>DateTimeOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>GeoOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>Geo3dOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>BytesOption</code> (<code>stored</code>)</td><td style="text-align: left"></td></tr>
 </tbody>
 </table>
@@ -438,9 +439,24 @@ message DeleteFieldResponse {
 <tr><td style="text-align: left">Vector</td><td style="text-align: left"><code>vector_value</code></td><td style="text-align: left"><code>VectorValue</code>（浮動小数点数のリスト）</td></tr>
 <tr><td style="text-align: left">DateTime</td><td style="text-align: left"><code>datetime_value</code></td><td style="text-align: left">Unix マイクロ秒（UTC）</td></tr>
 <tr><td style="text-align: left">Geo</td><td style="text-align: left"><code>geo_value</code></td><td style="text-align: left"><code>GeoPoint</code>（緯度、経度）</td></tr>
+<tr><td style="text-align: left">Geo3d</td><td style="text-align: left"><code>geo3d_value</code></td><td style="text-align: left"><code>Geo3dPoint</code>（x, y, z メートル単位、ECEF 直交座標系）</td></tr>
 </tbody>
 </table>
 </div>
+<p><strong>Geo3dPoint:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">フィールド</th><th style="text-align: left">型</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>x</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">X 座標（メートル単位、ECEF: 赤道面、+X 方向は経度 0°）</td></tr>
+<tr><td style="text-align: left"><code>y</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">Y 座標（メートル単位、ECEF: 赤道面、+Y 方向は東経 90°）</td></tr>
+<tr><td style="text-align: left"><code>z</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">Z 座標（メートル単位、ECEF: +Z 方向は北極）</td></tr>
+</tbody>
+</table>
+</div>
+<p>座標系の詳細および <code>wgs84_to_ecef</code> / <code>ecef_to_wgs84</code> の変換ユーティリティについては <a href="../concepts/geo3d.html">3D 地理検索 (ECEF)</a> を参照してください。</p>
 <h3 id="adddocument"><a class="header" href="#adddocument"><code>AddDocument</code></a></h3>
 <p>ドキュメントを追加します。<code>PutDocument</code> と異なり、同じ ID の既存ドキュメントを置換しません。複数のドキュメントが同じ ID を共有できます（チャンキングパターン）。</p>
 <pre><code class="language-protobuf">rpc AddDocument(AddDocumentRequest) returns (AddDocumentResponse);
@@ -521,6 +537,14 @@ message DeleteFieldResponse {
 </table>
 </div>
 <p><code>query</code> または <code>query_vectors</code> のいずれか 1 つ以上を指定する必要があります。</p>
+<h3 id="3d-地理クエリ"><a class="header" href="#3d-地理クエリ">3D 地理クエリ</a></h3>
+<p>3D ECEF の地理クエリは <code>SearchRequest.query</code> に渡す Lexical DSL 文字列で表現します。専用のメッセージ型はなく、コアライブラリで使用される DSL 形式がそのまま gRPC 経由でも動作します。3 種類の形式があります（構文の詳細は <a href="../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D 地理クエリ</a> を参照）:</p>
+<ul>
+<li><code>position:geo3d_distance(x, y, z, radius_m)</code> — <code>(x, y, z)</code> を中心とした半径（メートル単位）の球</li>
+<li><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code> — 3D 軸並行バウンディングボックス</li>
+<li><code>position:geo3d_nearest(x, y, z, k)</code> — <code>(x, y, z)</code> に最も近い k 個の近傍点</li>
+</ul>
+<p><code>position</code> はフィールド名で、スキーマで宣言した実際の <code>Geo3d</code> 型フィールドに置き換えてください。すべての数値引数は符号付きの <code>double</code> 値で、<code>k</code> は符号なし整数です。</p>
 <h3 id="queryvector"><a class="header" href="#queryvector">QueryVector</a></h3>
 <div class="table-wrapper">
 <table>

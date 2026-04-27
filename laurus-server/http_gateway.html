@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-c489a0ff.js";
+            window.path_to_searchindex_js = "../searchindex-c4cae615.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -336,6 +336,7 @@ gRPC paths in sync.</p>
 <tr><td style="text-align: left"><code>[]</code> (empty array)</td><td style="text-align: left">(skipped)</td><td style="text-align: left">Element type cannot be determined, so the field is skipped.</td></tr>
 <tr><td style="text-align: left"><code>{"latitude": ..., "longitude": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>{"lat": ..., "lon": ...}</code> / <code>{"lat": ..., "lng": ...}</code></td><td style="text-align: left"><code>geo</code></td><td style="text-align: left">Short aliases for latitude / longitude are accepted.</td></tr>
+<tr><td style="text-align: left"><code>{"x": ..., "y": ..., "z": ...}</code></td><td style="text-align: left">(not inferred)</td><td style="text-align: left">Geo3d values are not inferred from JSON. See the <strong>Geo3d via HTTP</strong> note below.</td></tr>
 </tbody>
 </table>
 </div>
@@ -352,6 +353,27 @@ keys, or non-numeric values).</li>
 declared in the schema. Numeric arrays sent against a declared vector
 field are coerced to a vector of <code>f32</code> values automatically, so REST
 clients can post embeddings as plain JSON arrays.</p>
+<blockquote>
+<p><strong>Note: Geo3d via HTTP is read-only</strong></p>
+<p>The HTTP gateway can return Geo3d values (as <code>{"x": ..., "y": ..., "z": ...}</code>)
+and accepts <code>Geo3d</code> schema declarations
+(as <code>{"geo3d": {"indexed": ..., "stored": ...}}</code> in the schema definition).
+However, <strong>writing</strong> Geo3d document values via HTTP is not yet supported:
+the JSON-to-<code>DataValue</code> inference rule does not recognise an <code>{x, y, z}</code>
+object as a 3D ECEF point. To insert Geo3d values, call the gRPC
+<code>PutDocument</code> / <code>AddDocument</code> RPC directly with <code>Value.geo3d_value</code> set.</p>
+<p>Tracking issue for write support: <a href="https://github.com/mosuka/laurus/issues/335">#335</a>.</p>
+</blockquote>
+<h3 id="3d-geographic-queries"><a class="header" href="#3d-geographic-queries">3D Geographic Queries</a></h3>
+<p>3D ECEF queries reuse the lexical DSL string passed via <code>query</code>. The gateway forwards it unchanged to the engine, so the same forms work over HTTP as over gRPC:</p>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/search \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)",
+    "limit": 10
+  }'
+</code></pre>
+<p>See <a href="../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for <code>geo3d_bbox</code> and <code>geo3d_nearest</code> syntax.</p>
 <h2 id="requestresponse-format"><a class="header" href="#requestresponse-format">Request/Response Format</a></h2>
 <p>All request and response bodies use JSON. The JSON structure mirrors the gRPC protobuf messages. See <a href="grpc_api.html">gRPC API Reference</a> for the full message definitions.</p>
 

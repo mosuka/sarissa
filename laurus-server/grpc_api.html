@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-c489a0ff.js";
+            window.path_to_searchindex_js = "../searchindex-c4cae615.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -294,6 +294,7 @@ enum DynamicFieldPolicy {
 <tr><td style="text-align: left"><code>BooleanOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>DateTimeOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>GeoOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>Geo3dOption</code> (<code>indexed</code>, <code>stored</code>)</td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>BytesOption</code> (<code>stored</code>)</td><td style="text-align: left"></td></tr>
 </tbody>
 </table>
@@ -438,9 +439,24 @@ inaccessible. Per-field analyzers and embedders are unregistered.</p>
 <tr><td style="text-align: left">Vector</td><td style="text-align: left"><code>vector_value</code></td><td style="text-align: left"><code>VectorValue</code> (list of floats)</td></tr>
 <tr><td style="text-align: left">DateTime</td><td style="text-align: left"><code>datetime_value</code></td><td style="text-align: left">Unix microseconds (UTC)</td></tr>
 <tr><td style="text-align: left">Geo</td><td style="text-align: left"><code>geo_value</code></td><td style="text-align: left"><code>GeoPoint</code> (latitude, longitude)</td></tr>
+<tr><td style="text-align: left">Geo3d</td><td style="text-align: left"><code>geo3d_value</code></td><td style="text-align: left"><code>Geo3dPoint</code> (x, y, z meters; ECEF Cartesian)</td></tr>
 </tbody>
 </table>
 </div>
+<p><strong>Geo3dPoint:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Field</th><th style="text-align: left">Type</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>x</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">X coordinate in meters (ECEF: equatorial plane, +X toward 0° longitude)</td></tr>
+<tr><td style="text-align: left"><code>y</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">Y coordinate in meters (ECEF: equatorial plane, +Y toward 90°E)</td></tr>
+<tr><td style="text-align: left"><code>z</code></td><td style="text-align: left"><code>double</code></td><td style="text-align: left">Z coordinate in meters (ECEF: +Z toward the North Pole)</td></tr>
+</tbody>
+</table>
+</div>
+<p>See <a href="../concepts/geo3d.html">3D Geographic Search (ECEF)</a> for the full coordinate system description and the <code>wgs84_to_ecef</code> / <code>ecef_to_wgs84</code> conversion utilities.</p>
 <h3 id="adddocument"><a class="header" href="#adddocument"><code>AddDocument</code></a></h3>
 <p>Add a document. Unlike <code>PutDocument</code>, this does not replace existing documents with the same ID — multiple documents can share an ID (chunking pattern).</p>
 <pre><code class="language-protobuf">rpc AddDocument(AddDocumentRequest) returns (AddDocumentResponse);
@@ -521,6 +537,14 @@ inaccessible. Per-field analyzers and embedders are unregistered.</p>
 </table>
 </div>
 <p>At least one of <code>query</code> or <code>query_vectors</code> must be provided.</p>
+<h3 id="3d-geographic-queries"><a class="header" href="#3d-geographic-queries">3D Geographic Queries</a></h3>
+<p>3D ECEF geographic queries are expressed in the lexical DSL string passed via <code>SearchRequest.query</code>. There is no dedicated message type — the same DSL forms used by the core library work over gRPC. Three forms are available (see <a href="../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for full syntax):</p>
+<ul>
+<li><code>position:geo3d_distance(x, y, z, radius_m)</code> — sphere centered at <code>(x, y, z)</code> with radius in meters</li>
+<li><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code> — 3D axis-aligned bounding box</li>
+<li><code>position:geo3d_nearest(x, y, z, k)</code> — k nearest neighbours to <code>(x, y, z)</code></li>
+</ul>
+<p><code>position</code> is the field name; substitute the actual <code>Geo3d</code>-typed field declared in your schema. All numeric arguments are signed <code>double</code> values; <code>k</code> is an unsigned integer.</p>
 <h3 id="queryvector"><a class="header" href="#queryvector">QueryVector</a></h3>
 <div class="table-wrapper">
 <table>
