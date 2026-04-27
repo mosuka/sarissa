@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Build &amp; Test - Laurus Documentation</title>
+        <title>PHP Binding Overview - Laurus Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -12,34 +12,34 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="../favicon.svg">
-        <link rel="shortcut icon" href="../favicon.png">
-        <link rel="stylesheet" href="../css/variables.css">
-        <link rel="stylesheet" href="../css/general.css">
-        <link rel="stylesheet" href="../css/chrome.css">
-        <link rel="stylesheet" href="../css/print.css" media="print">
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="../fonts/fonts.css">
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
-        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
-        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "../";
+            const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex.js";
+            window.path_to_searchindex_js = "searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc.js"></script>
+        <script src="toc.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -106,7 +106,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -141,7 +141,7 @@
                     <h1 class="menu-title">Laurus Documentation</h1>
 
                     <div class="right-buttons">
-                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
                         <a href="https://github.com/mosuka/laurus" title="Git repository" aria-label="Git repository">
@@ -178,71 +178,75 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="build--test"><a class="header" href="#build--test">Build &amp; Test</a></h1>
-<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+                        <h1 id="php-binding-overview"><a class="header" href="#php-binding-overview">PHP Binding Overview</a></h1>
+<p>The <code>laurus</code> PHP extension provides PHP bindings for the Laurus search engine. It is built as a native Rust extension using <a href="https://github.com/davidcole1340/ext-php-rs">ext-php-rs</a>, giving PHP programs direct access to Laurus's lexical, vector, and hybrid search capabilities with near-native performance.</p>
+<h2 id="features"><a class="header" href="#features">Features</a></h2>
 <ul>
-<li><strong>Rust</strong> 1.85 or later (edition 2024)</li>
-<li><strong>Cargo</strong> (included with Rust)</li>
-<li><strong>protobuf compiler</strong> (<code>protoc</code>) -- required for building <code>laurus-server</code></li>
+<li><strong>Lexical Search</strong> -- Full-text search powered by an inverted index with BM25 scoring</li>
+<li><strong>Vector Search</strong> -- Approximate nearest neighbor (ANN) search using Flat, HNSW, or IVF indexes</li>
+<li><strong>Hybrid Search</strong> -- Combine lexical and vector results with fusion algorithms (RRF, WeightedSum)</li>
+<li><strong>Rich Query DSL</strong> -- Term, Phrase, Fuzzy, Wildcard, NumericRange, Geo, Boolean, Span queries</li>
+<li><strong>Text Analysis</strong> -- Tokenizers, filters, stemmers, and synonym expansion</li>
+<li><strong>Flexible Storage</strong> -- In-memory (ephemeral) or file-based (persistent) indexes</li>
+<li><strong>Idiomatic PHP API</strong> -- Clean, intuitive PHP classes under the <code>Laurus\</code> namespace</li>
 </ul>
-<h2 id="building"><a class="header" href="#building">Building</a></h2>
-<pre><code class="language-bash"># Build all crates
-cargo build
+<h2 id="architecture"><a class="header" href="#architecture">Architecture</a></h2>
+<pre><code class="language-mermaid">graph LR
+    subgraph "laurus-php (extension)"
+        PhpIndex["Index\n(PHP class)"]
+        PhpQuery["Query classes"]
+        PhpSearch["SearchRequest\n/ SearchResult"]
+    end
 
-# Build with specific features
-cargo build --features embeddings-candle
-
-# Build in release mode
-cargo build --release
+    PHP["PHP application"] --&gt;|"method calls"| PhpIndex
+    PHP --&gt;|"query objects"| PhpQuery
+    PhpIndex --&gt;|"ext-php-rs FFI"| Engine["laurus::Engine\n(Rust)"]
+    PhpQuery --&gt;|"ext-php-rs FFI"| Engine
+    Engine --&gt; Storage["Storage\n(Memory / File)"]
 </code></pre>
-<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
-<pre><code class="language-bash"># Run all tests
-cargo test
+<p>The PHP classes are thin wrappers around the Rust engine.
+Each call crosses the ext-php-rs FFI boundary once; the Rust engine
+then executes the operation entirely in native code.</p>
+<p>Although the Rust engine uses async I/O internally, all PHP
+methods are exposed as <strong>synchronous</strong> functions. Each method
+calls <code>tokio::Runtime::block_on()</code> under the hood to bridge
+async Rust to synchronous PHP.</p>
+<h2 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h2>
+<pre><code class="language-php">&lt;?php
 
-# Run a specific test by name
-cargo test &lt;test_name&gt;
+use Laurus\Index;
 
-# Run tests for a specific crate
-cargo test -p laurus
-cargo test -p laurus-cli
-cargo test -p laurus-server
-</code></pre>
-<h2 id="linting"><a class="header" href="#linting">Linting</a></h2>
-<pre><code class="language-bash"># Run clippy with warnings as errors
-cargo clippy -- -D warnings
-</code></pre>
-<h2 id="formatting"><a class="header" href="#formatting">Formatting</a></h2>
-<pre><code class="language-bash"># Check formatting
-cargo fmt --check
+// Create an in-memory index
+$index = new Index();
 
-# Apply formatting
-cargo fmt
-</code></pre>
-<h2 id="documentation"><a class="header" href="#documentation">Documentation</a></h2>
-<h3 id="api-documentation"><a class="header" href="#api-documentation">API Documentation</a></h3>
-<pre><code class="language-bash"># Generate and open Rust API docs
-cargo doc --no-deps --open
-</code></pre>
-<h3 id="mdbook-documentation"><a class="header" href="#mdbook-documentation">mdBook Documentation</a></h3>
-<pre><code class="language-bash"># Build the documentation site
-mdbook build docs
+// Index documents
+$index-&gt;putDocument("doc1", ["title" =&gt; "Introduction to Rust", "body" =&gt; "Systems programming language."]);
+$index-&gt;putDocument("doc2", ["title" =&gt; "PHP for Web Development", "body" =&gt; "Web applications with PHP."]);
+$index-&gt;commit();
 
-# Start a local preview server (http://localhost:3000)
-mdbook serve docs
-
-# Lint markdown files
-markdownlint-cli2 "docs/src/**/*.md"
+// Search
+$results = $index-&gt;search("title:rust", 5);
+foreach ($results as $r) {
+    printf("[%s] score=%.4f  %s\n", $r-&gt;getId(), $r-&gt;getScore(), $r-&gt;getDocument()["title"]);
+}
 </code></pre>
+<h2 id="sections"><a class="header" href="#sections">Sections</a></h2>
+<ul>
+<li><a href="laurus-php/installation.html">Installation</a> -- How to install the extension</li>
+<li><a href="laurus-php/quickstart.html">Quick Start</a> -- Hands-on introduction with examples</li>
+<li><a href="laurus-php/api_reference.html">API Reference</a> -- Complete class and method reference</li>
+<li><a href="laurus-php/development.html">Development</a> -- Building from source and running tests</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../laurus-php/development.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="laurus-ruby/development.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../development/feature_flags.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="laurus-php/installation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -252,11 +256,11 @@ markdownlint-cli2 "docs/src/**/*.md"
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../laurus-php/development.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="laurus-ruby/development.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../development/feature_flags.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="laurus-php/installation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -271,17 +275,17 @@ markdownlint-cli2 "docs/src/**/*.md"
         </script>
 
 
-        <script src="../elasticlunr.min.js"></script>
-        <script src="../mark.min.js"></script>
-        <script src="../searcher.js"></script>
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
 
-        <script src="../clipboard.min.js"></script>
-        <script src="../highlight.js"></script>
-        <script src="../book.js"></script>
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../mermaid.min.js"></script>
-        <script src="../mermaid-init.js"></script>
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
 
 
 

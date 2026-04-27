@@ -97,6 +97,14 @@
   - [API Reference](laurus-ruby/api_reference.md)
   - [Development](laurus-ruby/development.md)
 
+# laurus-php
+
+- [PHP Binding Overview](laurus-php.md)
+  - [Installation](laurus-php/installation.md)
+  - [Quick Start](laurus-php/quickstart.md)
+  - [API Reference](laurus-php/api_reference.md)
+  - [Development](laurus-php/development.md)
+
 # Development Guide
 
 - [Build & Test](development/build_and_test.md)

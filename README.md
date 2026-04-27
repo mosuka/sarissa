@@ -15,8 +15,9 @@ Built on a core library covering lexical search, vector search, and hybrid searc
 - **Node.js Bindings** — Native Node.js addon for server-side JavaScript applications
 - **WebAssembly** — Browser and edge runtime support via wasm-bindgen
 - **Ruby Bindings** — Native Ruby gem for Rails and Ruby applications
+- **PHP Bindings** — Native PHP extension for web applications and CLI tools
 
-Whether embedded as a library, deployed as a standalone server, called from Python / Node.js / Ruby, run in the browser via WASM, or woven into AI workflows, Laurus is a composable search foundation.
+Whether embedded as a library, deployed as a standalone server, called from Python / Node.js / Ruby / PHP, run in the browser via WASM, or woven into AI workflows, Laurus is a composable search foundation.
 
 ## Documentation
 
@@ -48,6 +49,7 @@ Comprehensive documentation is available online:
   - [laurus-nodejs](https://mosuka.github.io/laurus/laurus-nodejs.html) — Node.js bindings (npm package)
   - [laurus-wasm](https://mosuka.github.io/laurus/laurus-wasm.html) — WebAssembly bindings (npm package)
   - [laurus-ruby](https://mosuka.github.io/laurus/laurus-ruby.html) — Ruby bindings (RubyGems package)
+  - [laurus-php](https://mosuka.github.io/laurus/laurus-php.html) — PHP bindings (PHP extension)
 - **Development**
   - [Build & Test](https://mosuka.github.io/laurus/development/build_and_test.html)
   - [Feature Flags](https://mosuka.github.io/laurus/development/feature_flags.html)
@@ -68,7 +70,7 @@ Comprehensive documentation is available online:
 
 ## Workspace Structure
 
-Laurus is organized as a Cargo workspace with 8 crates:
+Laurus is organized as a Cargo workspace with 9 crates:
 
 | Crate | Description |
 | --- | --- |
@@ -80,6 +82,7 @@ Laurus is organized as a Cargo workspace with 8 crates:
 | [`laurus-nodejs`](laurus-nodejs/) | Node.js bindings (npm package) built with NAPI-RS |
 | [`laurus-wasm`](laurus-wasm/) | WebAssembly bindings (npm package) built with wasm-bindgen |
 | [`laurus-ruby`](laurus-ruby/) | Ruby bindings (RubyGems package) built with magnus and rb-sys |
+| [`laurus-php`](laurus-php/) | PHP bindings (PHP extension) built with ext-php-rs |
 
 ## Feature Flags
 
