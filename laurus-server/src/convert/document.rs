@@ -58,14 +58,10 @@ pub fn data_value_to_proto(val: &DataValue) -> v1::Value {
             latitude: p.lat,
             longitude: p.lon,
         })),
-        DataValue::GeoEcef(p) => Some(Kind::GeoValue(v1::GeoPoint {
-            // Reuse the existing GeoPoint proto kind for now: the dedicated
-            // GeoEcef proto message lands with #305 (gRPC/MCP API surface
-            // for 3D geo). Fall back to lat=x, lon=y so the value at least
-            // round-trips to bytes; once #305 lands this branch is replaced
-            // with `Kind::Geo3dValue`.
-            latitude: p.x,
-            longitude: p.y,
+        DataValue::GeoEcef(p) => Some(Kind::Geo3dValue(v1::Geo3dPoint {
+            x: p.x,
+            y: p.y,
+            z: p.z,
         })),
         DataValue::Int64Array(arr) => Some(Kind::Int64ArrayValue(v1::Int64ArrayValue {
             values: arr.clone(),
@@ -102,8 +98,47 @@ pub fn data_value_from_proto(val: &v1::Value) -> DataValue {
             laurus::lexical::GeoPoint::try_new(g.latitude, g.longitude)
                 .unwrap_or_else(|_| laurus::lexical::GeoPoint::new(0.0, 0.0)),
         ),
+        Some(Kind::Geo3dValue(p)) => DataValue::GeoEcef(laurus::GeoEcefPoint::new(p.x, p.y, p.z)),
         Some(Kind::Int64ArrayValue(arr)) => DataValue::Int64Array(arr.values.clone()),
         Some(Kind::Float64ArrayValue(arr)) => DataValue::Float64Array(arr.values.clone()),
         None => DataValue::Null,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use laurus::GeoEcefPoint;
+
+    /// `DataValue::GeoEcef` round-trips through the new `Geo3dValue`
+    /// proto kind added in #305 (it used to be encoded as a `GeoValue`
+    /// fallback that quietly lost the `z` component).
+    #[test]
+    fn data_value_geo_ecef_round_trip() {
+        let original =
+            DataValue::GeoEcef(GeoEcefPoint::new(1_234_567.0, -2_345_678.0, 3_456_789.5));
+        let proto = data_value_to_proto(&original);
+        match &proto.kind {
+            Some(v1::value::Kind::Geo3dValue(p)) => {
+                assert_eq!(p.x, 1_234_567.0);
+                assert_eq!(p.y, -2_345_678.0);
+                assert_eq!(p.z, 3_456_789.5);
+            }
+            other => panic!("expected Geo3dValue, got {other:?}"),
+        }
+        let back = data_value_from_proto(&proto);
+        assert_eq!(back, original);
+    }
+
+    /// `DataValue::Geo` continues to use the 2D `GeoValue` proto kind,
+    /// so adding the `Geo3dValue` variant in #305 cannot disturb the
+    /// existing 2D wire format.
+    #[test]
+    fn data_value_geo_still_uses_2d_kind() {
+        let original = DataValue::Geo(laurus::lexical::GeoPoint::new(35.1, 139.0));
+        let proto = data_value_to_proto(&original);
+        assert!(matches!(proto.kind, Some(v1::value::Kind::GeoValue(_))));
+        let back = data_value_from_proto(&proto);
+        assert_eq!(back, original);
     }
 }

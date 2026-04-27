@@ -74,6 +74,7 @@ message FieldOption {
     HnswOption hnsw = 8;
     FlatOption flat = 9;
     IvfOption ivf = 10;
+    Geo3dOption geo3d = 11;
   }
 }
 
@@ -115,6 +116,14 @@ message DateTimeOption {
 }
 
 message GeoOption {
+  bool indexed = 1;
+  bool stored = 2;
+}
+
+// Options for 3D ECEF (Earth-Centered Earth-Fixed) geographic point fields.
+// Indexed values are stored in a 3D BKD tree and queryable via the
+// `geo3d_distance` / `geo3d_bbox` / `geo3d_nearest` DSL forms.
+message Geo3dOption {
   bool indexed = 1;
   bool stored = 2;
 }
