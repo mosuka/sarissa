@@ -206,33 +206,23 @@ gRPC paths in sync.
 | `[]` (empty array) | (skipped) | Element type cannot be determined, so the field is skipped. |
 | `{"latitude": ..., "longitude": ...}` | `geo` | |
 | `{"lat": ..., "lon": ...}` / `{"lat": ..., "lng": ...}` | `geo` | Short aliases for latitude / longitude are accepted. |
-| `{"x": ..., "y": ..., "z": ...}` | (not inferred) | Geo3d values are not inferred from JSON. See the **Geo3d via HTTP** note below. |
+| `{"x": ..., "y": ..., "z": ...}` | `geo3d` | All three keys required, finite numbers, ECEF meters. Mixing with `lat`/`lon` keys is rejected. |
 
 The gateway returns an HTTP 400 (`Bad Request`) when:
 
 - An array contains mixed types or non-numeric elements
   (e.g. `[1, "x"]`).
 - An object is not a valid geographic point (missing latitude / longitude
-  keys, or non-numeric values).
+  keys for 2D, or missing any of `x` / `y` / `z` for 3D).
 - A geographic latitude is outside `[-90, 90]` or a longitude is outside
   `[-180, 180]`.
+- A 3D ECEF coordinate is non-finite (`NaN` / `Inf`).
+- An object mixes 2D (`lat` / `lon`) and 3D (`x` / `y` / `z`) keys.
 
 Vector and bytes fields cannot be inferred from JSON alone and must be
 declared in the schema. Numeric arrays sent against a declared vector
 field are coerced to a vector of `f32` values automatically, so REST
 clients can post embeddings as plain JSON arrays.
-
-> **Note: Geo3d via HTTP is read-only**
->
-> The HTTP gateway can return Geo3d values (as `{"x": ..., "y": ..., "z": ...}`)
-> and accepts `Geo3d` schema declarations
-> (as `{"geo3d": {"indexed": ..., "stored": ...}}` in the schema definition).
-> However, **writing** Geo3d document values via HTTP is not yet supported:
-> the JSON-to-`DataValue` inference rule does not recognise an `{x, y, z}`
-> object as a 3D ECEF point. To insert Geo3d values, call the gRPC
-> `PutDocument` / `AddDocument` RPC directly with `Value.geo3d_value` set.
->
-> Tracking issue for write support: [#335](https://github.com/mosuka/laurus/issues/335).
 
 ### 3D Geographic Queries
 
