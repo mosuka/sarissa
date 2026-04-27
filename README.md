@@ -61,9 +61,11 @@ Comprehensive documentation is available online:
 - **Pure Rust Implementation**: Memory-safe and fast performance with zero-cost abstractions.
 - **Hybrid Search**: Seamlessly combine BM25 lexical search with HNSW vector search using configurable fusion strategies.
 - **Multimodal Capabilities**: Native support for text-to-image and image-to-image search via CLIP embeddings.
-- **Rich Query DSL**: Term, phrase, boolean, fuzzy, wildcard, range, geographic, and span queries.
+- **Rich Query DSL**: Term, phrase, boolean, fuzzy, wildcard, range, 2D / 3D geographic (sphere, bounding box, k-NN), and span queries.
 - **Flexible Analysis**: Configurable pipelines for tokenization, normalization, and stemming (including CJK support via [Lindera](https://github.com/lindera/lindera)).
 - **Pluggable Storage**: Interfaces for in-memory, file-system, and memory-mapped storage backends.
+- **Dynamic Schema**: Optional schema-on-write — undeclared fields are inferred from the value, with `Strict` / `Dynamic` / `Ignore` policies for fine-grained control.
+- **Multi-valued Numeric Fields**: Integer and Float fields can hold multiple values per document; range queries match if any value satisfies the predicate (Lucene-style "any match" semantics).
 - **Scoring & Ranking**: BM25 scoring with customizable fusion strategies for hybrid results.
 - **Faceting & Highlighting**: Built-in support for faceted navigation and search result highlighting.
 - **Spelling Correction**: Suggest corrections for misspelled query terms.
