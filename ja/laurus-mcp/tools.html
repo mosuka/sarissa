@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-65e9e580.js";
+            window.path_to_searchindex_js = "../searchindex-aa469a35.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -235,6 +235,15 @@ endpoint: "http://localhost:50051"
 schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
 </code></pre>
 <p>結果: <code>Index created successfully at /path/to/index.</code></p>
+<p>3D ECEF 座標を扱う <code>Geo3d</code> フィールドを含むスキーマ:</p>
+<pre><code class="language-json">{
+  "fields": {
+    "title":    { "Text":  { "indexed": true, "stored": true } },
+    "position": { "Geo3d": { "indexed": true, "stored": true } }
+  }
+}
+</code></pre>
+<p>座標系については <a href="../concepts/geo3d.html">3D 地理検索 (ECEF)</a> を参照してください。<code>Geo3d</code> フィールドは <code>geo3d_distance</code> / <code>geo3d_bbox</code> / <code>geo3d_nearest</code> の DSL 形式で検索できます（後述の <strong>search</strong> ツールを参照）。</p>
 <hr>
 <h2 id="get_stats"><a class="header" href="#get_stats">get_stats</a></h2>
 <p>現在の検索インデックスの統計情報（ドキュメント数、ベクトルフィールド情報など）を取得します。</p>
@@ -282,6 +291,12 @@ id: "doc-1"
 document: {"title": "Hello World", "body": "これはテストドキュメントです。"}
 </code></pre>
 <p>結果: <code>Document 'doc-1' put (upserted). Call commit to persist changes.</code></p>
+<p><strong>Geo3d 値を含む例:</strong></p>
+<pre><code class="language-text">Tool: put_document
+id: "drone-1"
+document: {"title": "東京上空のドローン", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
+</code></pre>
+<p>MCP サーバーは 3D ECEF 点を <code>x</code>、<code>y</code>、<code>z</code> キーを持つ JSON オブジェクト（メートル単位）として受け付けます。これは HTTP ゲートウェイの挙動とは異なり、HTTP ゲートウェイでは現在 JSON から Geo3d を推論しません。MCP では書き込み・読み出しともに完全対応しています。</p>
 <hr>
 <h2 id="add_document"><a class="header" href="#add_document">add_document</a></h2>
 <p>インデックスにドキュメントを新しいチャンクとして追加します。<code>put_document</code> とは異なり、同じ ID の既存ドキュメントを削除せずに追記します。大きなドキュメントをチャンクに分割する際に便利です。ドキュメント追加後は <code>commit</code> を呼び出してください。</p>
@@ -422,6 +437,20 @@ name: "category"
 </tbody>
 </table>
 </div>
+<h4 id="3d-地理検索"><a class="header" href="#3d-地理検索">3D 地理検索</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">クエリ</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left"><code>(x, y, z)</code> を中心とした半径（メートル単位）の球</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">3D 軸並行バウンディングボックス</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left"><code>(x, y, z)</code> に最も近い k 個の近傍点</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>position</code> はフィールド名で、スキーマで宣言した実際の <code>Geo3d</code> 型フィールドに置き換えてください。完全な DSL 構文は <a href="../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D 地理クエリ</a> を参照してください。</p>
 <h4 id="vector-検索"><a class="header" href="#vector-検索">Vector 検索</a></h4>
 <div class="table-wrapper">
 <table>

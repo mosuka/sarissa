@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-65e9e580.js";
+            window.path_to_searchindex_js = "../searchindex-aa469a35.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -281,6 +281,7 @@ laurus --index-dir ./my_index create index
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Bytes</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Hnsw</code></td><td style="text-align: left">Vector</td><td style="text-align: left"><code>dimension</code>, <code>distance</code>, <code>m</code>, <code>ef_construction</code></td></tr>
 <tr><td style="text-align: left"><code>Flat</code></td><td style="text-align: left">Vector</td><td style="text-align: left"><code>dimension</code>, <code>distance</code></td></tr>
@@ -288,6 +289,13 @@ laurus --index-dir ./my_index create index
 </tbody>
 </table>
 </div>
+<blockquote>
+<p><strong>注記</strong>: 対話的な <code>create schema</code> ウィザードは、フィールド型の選択肢に
+<code>Geo3d</code> をまだ載せていません。<code>Geo3d</code> フィールドを宣言するには、生成された
+TOML を手で編集して <code>[fields.&lt;name&gt;.Geo3d]</code> を追加してください
+（<a href="schema_format.html#geo3d">スキーマフォーマット → Geo3d</a> を参照）。
+追跡 Issue: <a href="https://github.com/mosuka/laurus/issues/337">#337</a>。</p>
+</blockquote>
 <p><strong>例:</strong></p>
 <pre><code class="language-bash"># schema.toml を対話的に生成
 laurus create schema
@@ -492,6 +500,11 @@ laurus search "title:intro*"
 
 # Range クエリ
 laurus search "price:[10 TO 50]"
+
+# 3D 地理クエリ（球 / バウンディングボックス / k-NN）
+laurus search "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)"
+laurus search "position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)"
+laurus search "position:geo3d_nearest(-3955182, 3350553, 3700276, 10)"
 </code></pre>
 <p><strong>テーブル出力の例:</strong></p>
 <pre><code class="language-text">╭──────┬────────┬─────────────────────────────────────────╮

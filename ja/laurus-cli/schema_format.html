@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-65e9e580.js";
+            window.path_to_searchindex_js = "../searchindex-aa469a35.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -313,6 +313,23 @@ stored = true
 <tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Geo クエリ（半径、バウンディングボックス）を有効にする</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">元の値を保存する</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="geo3d"><a class="header" href="#geo3d">Geo3d</a></h4>
+<p>3D Earth-Centered Earth-Fixed (ECEF) 直交座標系の点フィールド（x / y / z はメートル単位）。<code>geo3d_distance</code>（球）、<code>geo3d_bbox</code>（3D AABB）、<code>geo3d_nearest</code>（k-NN）クエリをサポートします。座標系および <code>wgs84_to_ecef</code> / <code>ecef_to_wgs84</code> の変換ユーティリティについては <a href="../concepts/geo3d.html">3D 地理検索 (ECEF)</a> を参照してください。</p>
+<pre><code class="language-toml">[fields.position.Geo3d]
+indexed = true
+stored = true
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">オプション</th><th style="text-align: left">型</th><th style="text-align: left">デフォルト</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">3D 地理クエリ（<code>geo3d_distance</code>、<code>geo3d_bbox</code>、<code>geo3d_nearest</code>）を有効にする</td></tr>
+<tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">元の <code>(x, y, z)</code> 値を保存する</td></tr>
 </tbody>
 </table>
 </div>
