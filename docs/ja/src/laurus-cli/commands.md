@@ -101,10 +101,17 @@ laurus create schema [--output <FILE>]
 | `Boolean` | Lexical | `indexed`, `stored` |
 | `DateTime` | Lexical | `indexed`, `stored` |
 | `Geo` | Lexical | `indexed`, `stored` |
+| `Geo3d` | Lexical | `indexed`, `stored` |
 | `Bytes` | Lexical | `stored` |
 | `Hnsw` | Vector | `dimension`, `distance`, `m`, `ef_construction` |
 | `Flat` | Vector | `dimension`, `distance` |
 | `Ivf` | Vector | `dimension`, `distance`, `n_clusters`, `n_probe` |
+
+> **注記**: 対話的な `create schema` ウィザードは、フィールド型の選択肢に
+> `Geo3d` をまだ載せていません。`Geo3d` フィールドを宣言するには、生成された
+> TOML を手で編集して `[fields.<name>.Geo3d]` を追加してください
+> （[スキーマフォーマット → Geo3d](schema_format.md#geo3d) を参照）。
+> 追跡 Issue: [#337](https://github.com/mosuka/laurus/issues/337)。
 
 **例:**
 
@@ -387,6 +394,11 @@ laurus search "title:intro*"
 
 # Range クエリ
 laurus search "price:[10 TO 50]"
+
+# 3D 地理クエリ（球 / バウンディングボックス / k-NN）
+laurus search "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)"
+laurus search "position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)"
+laurus search "position:geo3d_nearest(-3955182, 3350553, 3700276, 10)"
 ```
 
 **テーブル出力の例:**

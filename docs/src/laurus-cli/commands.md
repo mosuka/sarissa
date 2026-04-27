@@ -101,10 +101,17 @@ The wizard guides you through:
 | `Boolean` | Lexical | `indexed`, `stored` |
 | `DateTime` | Lexical | `indexed`, `stored` |
 | `Geo` | Lexical | `indexed`, `stored` |
+| `Geo3d` | Lexical | `indexed`, `stored` |
 | `Bytes` | Lexical | `stored` |
 | `Hnsw` | Vector | `dimension`, `distance`, `m`, `ef_construction` |
 | `Flat` | Vector | `dimension`, `distance` |
 | `Ivf` | Vector | `dimension`, `distance`, `n_clusters`, `n_probe` |
+
+> **Note**: The interactive `create schema` wizard does not yet list `Geo3d`
+> in the field-type prompt. To declare a `Geo3d` field, hand-edit the
+> generated TOML to add `[fields.<name>.Geo3d]` (see
+> [Schema Format → Geo3d](schema_format.md#geo3d)). Tracking issue:
+> [#337](https://github.com/mosuka/laurus/issues/337).
 
 **Example:**
 
@@ -391,6 +398,11 @@ laurus search "title:intro*"
 
 # Range query
 laurus search "price:[10 TO 50]"
+
+# 3D geographic queries (sphere / bounding box / k-NN)
+laurus search "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)"
+laurus search "position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)"
+laurus search "position:geo3d_nearest(-3955182, 3350553, 3700276, 10)"
 ```
 
 **Table output example:**

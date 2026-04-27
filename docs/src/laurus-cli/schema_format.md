@@ -130,6 +130,21 @@ stored = true
 | `indexed` | `bool` | `true` | Enables geo queries (radius, bounding box) |
 | `stored` | `bool` | `true` | Stores the original value |
 
+#### Geo3d
+
+3D Earth-Centered Earth-Fixed (ECEF) Cartesian point field (x / y / z in meters). Supports the `geo3d_distance` (sphere), `geo3d_bbox` (3D AABB), and `geo3d_nearest` (k-NN) queries. See [3D Geographic Search (ECEF)](../concepts/geo3d.md) for the coordinate system and the `wgs84_to_ecef` / `ecef_to_wgs84` conversion utilities.
+
+```toml
+[fields.position.Geo3d]
+indexed = true
+stored = true
+```
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `indexed` | `bool` | `true` | Enables 3D geo queries (`geo3d_distance`, `geo3d_bbox`, `geo3d_nearest`) |
+| `stored` | `bool` | `true` | Stores the original `(x, y, z)` value |
+
 #### Bytes
 
 Raw binary data field. Not indexed — stored only.

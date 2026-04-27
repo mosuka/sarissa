@@ -278,6 +278,17 @@ stored = true
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Stores the original value</td></tr>
 </tbody></table>
 </div>
+<h4 id="geo3d"><a class="header" href="#geo3d">Geo3d</a></h4>
+<p>3D Earth-Centered Earth-Fixed (ECEF) Cartesian point field (x / y / z in meters). Supports the <code>geo3d_distance</code> (sphere), <code>geo3d_bbox</code> (3D AABB), and <code>geo3d_nearest</code> (k-NN) queries. See <a href="../concepts/geo3d.html">3D Geographic Search (ECEF)</a> for the coordinate system and the <code>wgs84_to_ecef</code> / <code>ecef_to_wgs84</code> conversion utilities.</p>
+<pre><code class="language-toml">[fields.position.Geo3d]
+indexed = true
+stored = true
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables 3D geo queries (<code>geo3d_distance</code>, <code>geo3d_bbox</code>, <code>geo3d_nearest</code>)</td></tr>
+<tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Stores the original <code>(x, y, z)</code> value</td></tr>
+</tbody></table>
+</div>
 <h4 id="bytes"><a class="header" href="#bytes">Bytes</a></h4>
 <p>Raw binary data field. Not indexed — stored only.</p>
 <pre><code class="language-toml">[fields.thumbnail.Bytes]

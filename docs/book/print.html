@@ -5393,12 +5393,20 @@ laurus --index-dir ./my_index create index
 <tr><td style="text-align: left"><code>Boolean</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>indexed</code>, <code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Bytes</code></td><td style="text-align: left">Lexical</td><td style="text-align: left"><code>stored</code></td></tr>
 <tr><td style="text-align: left"><code>Hnsw</code></td><td style="text-align: left">Vector</td><td style="text-align: left"><code>dimension</code>, <code>distance</code>, <code>m</code>, <code>ef_construction</code></td></tr>
 <tr><td style="text-align: left"><code>Flat</code></td><td style="text-align: left">Vector</td><td style="text-align: left"><code>dimension</code>, <code>distance</code></td></tr>
 <tr><td style="text-align: left"><code>Ivf</code></td><td style="text-align: left">Vector</td><td style="text-align: left"><code>dimension</code>, <code>distance</code>, <code>n_clusters</code>, <code>n_probe</code></td></tr>
 </tbody></table>
 </div>
+<blockquote>
+<p><strong>Note</strong>: The interactive <code>create schema</code> wizard does not yet list <code>Geo3d</code>
+in the field-type prompt. To declare a <code>Geo3d</code> field, hand-edit the
+generated TOML to add <code>[fields.&lt;name&gt;.Geo3d]</code> (see
+<a href="laurus-cli/schema_format.html#geo3d">Schema Format → Geo3d</a>). Tracking issue:
+<a href="https://github.com/mosuka/laurus/issues/337">#337</a>.</p>
+</blockquote>
 <p><strong>Example:</strong></p>
 <pre><code class="language-bash"># Generate schema.toml interactively
 laurus create schema
@@ -5588,6 +5596,11 @@ laurus search "title:intro*"
 
 # Range query
 laurus search "price:[10 TO 50]"
+
+# 3D geographic queries (sphere / bounding box / k-NN)
+laurus search "position:geo3d_distance(-3955182, 3350553, 3700276, 5000)"
+laurus search "position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)"
+laurus search "position:geo3d_nearest(-3955182, 3350553, 3700276, 10)"
 </code></pre>
 <p><strong>Table output example:</strong></p>
 <pre><code class="language-text">╭──────┬────────┬─────────────────────────────────────────╮
@@ -5725,6 +5738,17 @@ stored = true
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables geo queries (radius, bounding box)</td></tr>
 <tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Stores the original value</td></tr>
+</tbody></table>
+</div>
+<h4 id="geo3d"><a class="header" href="#geo3d">Geo3d</a></h4>
+<p>3D Earth-Centered Earth-Fixed (ECEF) Cartesian point field (x / y / z in meters). Supports the <code>geo3d_distance</code> (sphere), <code>geo3d_bbox</code> (3D AABB), and <code>geo3d_nearest</code> (k-NN) queries. See <a href="laurus-cli/../concepts/geo3d.html">3D Geographic Search (ECEF)</a> for the coordinate system and the <code>wgs84_to_ecef</code> / <code>ecef_to_wgs84</code> conversion utilities.</p>
+<pre><code class="language-toml">[fields.position.Geo3d]
+indexed = true
+stored = true
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Option</th><th style="text-align: left">Type</th><th style="text-align: left">Default</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>indexed</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Enables 3D geo queries (<code>geo3d_distance</code>, <code>geo3d_bbox</code>, <code>geo3d_nearest</code>)</td></tr>
+<tr><td style="text-align: left"><code>stored</code></td><td style="text-align: left"><code>bool</code></td><td style="text-align: left"><code>true</code></td><td style="text-align: left">Stores the original <code>(x, y, z)</code> value</td></tr>
 </tbody></table>
 </div>
 <h4 id="bytes"><a class="header" href="#bytes">Bytes</a></h4>
@@ -7368,6 +7392,15 @@ full behaviour matrix.</p>
 schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
 </code></pre>
 <p>Result: <code>Index created successfully at /path/to/index.</code></p>
+<p>A schema with a <code>Geo3d</code> field for 3D ECEF positions:</p>
+<pre><code class="language-json">{
+  "fields": {
+    "title":    { "Text":  { "indexed": true, "stored": true } },
+    "position": { "Geo3d": { "indexed": true, "stored": true } }
+  }
+}
+</code></pre>
+<p>See <a href="laurus-mcp/../concepts/geo3d.html">3D Geographic Search (ECEF)</a> for the coordinate system; <code>Geo3d</code> is queryable via the <code>geo3d_distance</code> / <code>geo3d_bbox</code> / <code>geo3d_nearest</code> DSL forms (see the <strong>search</strong> tool below).</p>
 <hr />
 <h2 id="add_field"><a class="header" href="#add_field">add_field</a></h2>
 <p>Add a new field to the index.</p>
@@ -7441,6 +7474,12 @@ id: "doc-1"
 document: {"title": "Hello World", "body": "This is a test document."}
 </code></pre>
 <p>Result: <code>Document 'doc-1' put (upserted). Call commit to persist changes.</code></p>
+<p><strong>Example with a Geo3d value:</strong></p>
+<pre><code class="language-text">Tool: put_document
+id: "drone-1"
+document: {"title": "Drone over Tokyo", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
+</code></pre>
+<p>The MCP server accepts a 3D ECEF point as a JSON object with <code>x</code>, <code>y</code>, <code>z</code> keys (meters). This is distinct from the HTTP gateway, which currently does not infer Geo3d from JSON — the MCP path is fully supported for both writes and reads.</p>
 <hr />
 <h2 id="add_document"><a class="header" href="#add_document">add_document</a></h2>
 <p>Add a document as a new chunk to the index. Unlike <code>put_document</code>, this appends without deleting existing documents with the same ID. Useful for splitting large documents into chunks. Call <code>commit</code> after adding documents.</p>
@@ -7511,6 +7550,14 @@ document: {"title": "Hello World - Part 2", "body": "This is a continuation."}
 <tr><td style="text-align: left"><code>title:helo~1</code></td><td style="text-align: left">Fuzzy field search</td></tr>
 </tbody></table>
 </div>
+<h4 id="3d-geographic-search"><a class="header" href="#3d-geographic-search">3D geographic search</a></h4>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">Sphere with center <code>(x, y, z)</code> and radius in meters</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">3D axis-aligned bounding box</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">k nearest neighbors to <code>(x, y, z)</code></td></tr>
+</tbody></table>
+</div>
+<p><code>position</code> is the field name; substitute the actual <code>Geo3d</code>-typed field declared in your schema. See <a href="laurus-mcp/../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for the full DSL syntax.</p>
 <h4 id="vector-search-3"><a class="header" href="#vector-search-3">Vector search</a></h4>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>content:"cute kitten"</code></td><td style="text-align: left">Vector search on a field (field must be a vector field in schema)</td></tr>

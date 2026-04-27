@@ -130,6 +130,21 @@ stored = true
 | `indexed` | `bool` | `true` | Geo クエリ（半径、バウンディングボックス）を有効にする |
 | `stored` | `bool` | `true` | 元の値を保存する |
 
+#### Geo3d
+
+3D Earth-Centered Earth-Fixed (ECEF) 直交座標系の点フィールド（x / y / z はメートル単位）。`geo3d_distance`（球）、`geo3d_bbox`（3D AABB）、`geo3d_nearest`（k-NN）クエリをサポートします。座標系および `wgs84_to_ecef` / `ecef_to_wgs84` の変換ユーティリティについては [3D 地理検索 (ECEF)](../concepts/geo3d.md) を参照してください。
+
+```toml
+[fields.position.Geo3d]
+indexed = true
+stored = true
+```
+
+| オプション | 型 | デフォルト | 説明 |
+| :--- | :--- | :--- | :--- |
+| `indexed` | `bool` | `true` | 3D 地理クエリ（`geo3d_distance`、`geo3d_bbox`、`geo3d_nearest`）を有効にする |
+| `stored` | `bool` | `true` | 元の `(x, y, z)` 値を保存する |
+
 #### Bytes
 
 生バイナリデータフィールド。インデックスされず、保存のみです。

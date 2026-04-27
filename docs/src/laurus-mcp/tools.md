@@ -71,6 +71,19 @@ schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
 
 Result: `Index created successfully at /path/to/index.`
 
+A schema with a `Geo3d` field for 3D ECEF positions:
+
+```json
+{
+  "fields": {
+    "title":    { "Text":  { "indexed": true, "stored": true } },
+    "position": { "Geo3d": { "indexed": true, "stored": true } }
+  }
+}
+```
+
+See [3D Geographic Search (ECEF)](../concepts/geo3d.md) for the coordinate system; `Geo3d` is queryable via the `geo3d_distance` / `geo3d_bbox` / `geo3d_nearest` DSL forms (see the **search** tool below).
+
 ---
 
 ## add_field
@@ -184,6 +197,16 @@ document: {"title": "Hello World", "body": "This is a test document."}
 
 Result: `Document 'doc-1' put (upserted). Call commit to persist changes.`
 
+**Example with a Geo3d value:**
+
+```text
+Tool: put_document
+id: "drone-1"
+document: {"title": "Drone over Tokyo", "position": {"x": -3955182.0, "y": 3350553.0, "z": 3700276.0}}
+```
+
+The MCP server accepts a 3D ECEF point as a JSON object with `x`, `y`, `z` keys (meters). This is distinct from the HTTP gateway, which currently does not infer Geo3d from JSON — the MCP path is fully supported for both writes and reads.
+
 ---
 
 ## add_document
@@ -285,6 +308,16 @@ Search documents using the laurus unified query DSL. Supports lexical search, ve
 | `roam~2` | Fuzzy search (edit distance 2) |
 | `count:[1 TO 10]` | Range search |
 | `title:helo~1` | Fuzzy field search |
+
+#### 3D geographic search
+
+| Query | Description |
+| :--- | :--- |
+| `position:geo3d_distance(x, y, z, radius_m)` | Sphere with center `(x, y, z)` and radius in meters |
+| `position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | 3D axis-aligned bounding box |
+| `position:geo3d_nearest(x, y, z, k)` | k nearest neighbors to `(x, y, z)` |
+
+`position` is the field name; substitute the actual `Geo3d`-typed field declared in your schema. See [Query DSL → 3D Geographic Queries](../concepts/query_dsl.md#3d-geographic-queries-geo3d_) for the full DSL syntax.
 
 #### Vector search
 
