@@ -153,6 +153,10 @@ harness = false
 name = "vector_search_bench"
 harness = false
 
+[[bench]]
+name = "bkd_bench"
+harness = false
+
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 tokio-test = "0.4.5"

@@ -69,7 +69,9 @@ pub fn py_to_data_value(_py: Python, obj: &Bound<PyAny>) -> PyResult<DataValue> 
             tup.get_item(1)?.extract::<f64>(),
         )
     {
-        return Ok(DataValue::Geo(lat, lon));
+        let point = laurus::lexical::GeoPoint::try_new(lat, lon)
+            .map_err(|e| PyValueError::new_err(format!("invalid geo point: {e}")))?;
+        return Ok(DataValue::Geo(point));
     }
     // Try Python datetime.datetime
     if let Ok(dt_str) = obj.call_method0("isoformat")
@@ -112,8 +114,12 @@ pub fn data_value_to_py(py: Python, value: &DataValue) -> PyResult<Py<PyAny>> {
         DataValue::Bytes(b, _mime) => Ok(PyBytes::new(py, b).unbind().into_any()),
         DataValue::Vector(v) => Ok(v.clone().into_pyobject(py)?.unbind().into_any()),
         DataValue::DateTime(dt) => Ok(dt.to_rfc3339().into_pyobject(py)?.unbind().into_any()),
-        DataValue::Geo(lat, lon) => {
-            let tup = pyo3::types::PyTuple::new(py, [*lat, *lon])?;
+        DataValue::Geo(p) => {
+            let tup = pyo3::types::PyTuple::new(py, [p.lat, p.lon])?;
+            Ok(tup.unbind().into_any())
+        }
+        DataValue::GeoEcef(p) => {
+            let tup = pyo3::types::PyTuple::new(py, [p.x, p.y, p.z])?;
             Ok(tup.unbind().into_any())
         }
         DataValue::Int64Array(arr) => Ok(arr.clone().into_pyobject(py)?.unbind().into_any()),

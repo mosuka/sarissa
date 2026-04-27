@@ -106,7 +106,13 @@ pub fn rb_to_data_value(ruby: &Ruby, value: Value) -> Result<DataValue, Error> {
         if let (Some(lat_v), Some(lon_v)) = (lat_val, lon_val) {
             let lat: f64 = magnus::TryConvert::try_convert(lat_v)?;
             let lon: f64 = magnus::TryConvert::try_convert(lon_v)?;
-            return Ok(DataValue::Geo(lat, lon));
+            let point = laurus::lexical::GeoPoint::try_new(lat, lon).map_err(|e| {
+                Error::new(
+                    ruby.exception_arg_error(),
+                    format!("invalid geo point: {e}"),
+                )
+            })?;
+            return Ok(DataValue::Geo(point));
         }
         return Err(Error::new(
             ruby.exception_arg_error(),
@@ -178,10 +184,17 @@ pub fn data_value_to_rb(ruby: &Ruby, value: &DataValue) -> Result<Value, Error> 
             Ok(arr.as_value())
         }
         DataValue::DateTime(dt) => Ok(ruby.str_new(&dt.to_rfc3339()).as_value()),
-        DataValue::Geo(lat, lon) => {
+        DataValue::Geo(p) => {
             let hash = ruby.hash_new();
-            hash.aset(ruby.str_new("lat"), ruby.float_from_f64(*lat))?;
-            hash.aset(ruby.str_new("lon"), ruby.float_from_f64(*lon))?;
+            hash.aset(ruby.str_new("lat"), ruby.float_from_f64(p.lat))?;
+            hash.aset(ruby.str_new("lon"), ruby.float_from_f64(p.lon))?;
+            Ok(hash.as_value())
+        }
+        DataValue::GeoEcef(p) => {
+            let hash = ruby.hash_new();
+            hash.aset(ruby.str_new("x"), ruby.float_from_f64(p.x))?;
+            hash.aset(ruby.str_new("y"), ruby.float_from_f64(p.y))?;
+            hash.aset(ruby.str_new("z"), ruby.float_from_f64(p.z))?;
             Ok(hash.as_value())
         }
         DataValue::Int64Array(arr) => {

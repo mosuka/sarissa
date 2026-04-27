@@ -317,7 +317,7 @@ let query = NumericRangeQuery::new(
 );
 <span class="boring">}</span></code></pre></pre>
 <h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<p>Matches documents by geographic location.</p>
+<p>Matches documents by 2D geographic location (WGS84 latitude / longitude).</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use laurus::lexical::query::geo::GeoQuery;
@@ -332,6 +332,39 @@ let query = GeoQuery::within_bounding_box(
     36.0, 140.0,  // max (lat, lon)
 )?;
 <span class="boring">}</span></code></pre></pre>
+<h3 id="geo3ddistancequery--geo3dboundingboxquery--geo3dnearestquery"><a class="header" href="#geo3ddistancequery--geo3dboundingboxquery--geo3dnearestquery">Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery</a></h3>
+<p>Three queries target 3D <code>Geo3d</code> fields backed by ECEF Cartesian coordinates
+(metres). Use them when altitude matters or when a 2D <code>Geo</code> field would
+introduce pole singularities. See <a href="../geo3d.html">3D Geographic Search</a> for
+the coordinate system, WGS84 conversion helpers, and worked examples.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use laurus::GeoEcefPoint;
+use laurus::lexical::query::geo3d::{
+    Geo3dDistanceQuery, Geo3dBoundingBoxQuery, Geo3dNearestQuery,
+};
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+
+// Sphere: docs within 5 km of `centre`
+let q = Geo3dDistanceQuery::new("position", centre, 5_000.0);
+
+// Axis-aligned 3D bounding box (constructor validates min ≤ max per axis)
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let q = Geo3dBoundingBoxQuery::new("position", min, max)?;
+
+// k-NN: 10 nearest neighbours, with a custom radius schedule
+let q = Geo3dNearestQuery::new("position", centre, 10)
+    .with_initial_radius(500.0)
+    .with_max_radius(1_000_000.0);
+<span class="boring">}</span></code></pre></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Score</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Geo3dDistanceQuery</code></td><td style="text-align: left"><code>1 - distance / radius</code>, clamped to <code>[0, 1]</code>.</td></tr>
+<tr><td style="text-align: left"><code>Geo3dBoundingBoxQuery</code></td><td style="text-align: left">Constant <code>1.0</code> for every match.</td></tr>
+<tr><td style="text-align: left"><code>Geo3dNearestQuery</code></td><td style="text-align: left">Normalised so the closest hit is <code>1.0</code>, the farthest in the returned set is <code>0.0</code>.</td></tr>
+</tbody></table>
+</div>
 <h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
 <p>Matches terms based on their proximity within a document. Use <code>SpanTermQuery</code> and <code>SpanNearQuery</code> to build proximity queries:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]

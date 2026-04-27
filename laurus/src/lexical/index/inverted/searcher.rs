@@ -565,10 +565,11 @@ impl InvertedIndexSearcher {
             }
             (Boolean(a_bool), Boolean(b_bool)) => a_bool.cmp(b_bool),
             (DateTime(a_dt), DateTime(b_dt)) => a_dt.cmp(b_dt),
-            (Geo(a_lat, a_lon), Geo(b_lat, b_lon)) => a_lat
-                .partial_cmp(b_lat)
+            (Geo(a), Geo(b)) => a
+                .lat
+                .partial_cmp(&b.lat)
                 .unwrap_or(Ordering::Equal)
-                .then_with(|| a_lon.partial_cmp(b_lon).unwrap_or(Ordering::Equal)),
+                .then_with(|| a.lon.partial_cmp(&b.lon).unwrap_or(Ordering::Equal)),
             (Bytes(_, a_bytes), Bytes(_, b_bytes)) => a_bytes.cmp(b_bytes),
             (Null, Null) => Ordering::Equal,
 

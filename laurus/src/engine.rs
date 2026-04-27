@@ -923,6 +923,7 @@ impl Engine {
                 FieldOption::Boolean(o) => o.stored,
                 FieldOption::DateTime(o) => o.stored,
                 FieldOption::Geo(o) => o.stored,
+                FieldOption::Geo3d(o) => o.stored,
                 FieldOption::Bytes(o) => o.stored,
                 // Vector fields are always stored
                 FieldOption::Hnsw(_) | FieldOption::Flat(_) | FieldOption::Ivf(_) => true,

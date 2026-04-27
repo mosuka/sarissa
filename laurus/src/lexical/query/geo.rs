@@ -4,148 +4,87 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+// Canonical GeoPoint definition lives in `crate::data` alongside DataValue.
+// We re-export it here so that `use laurus::lexical::query::GeoPoint` keeps
+// working for downstream callers.
+pub use crate::data::GeoPoint;
+
 use crate::error::Result;
 use crate::lexical::query::Query;
 use crate::lexical::query::matcher::Matcher;
 use crate::lexical::query::scorer::Scorer;
 use crate::lexical::reader::LexicalIndexReader;
 
-/// A geographical point with latitude and longitude.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-
-pub struct GeoPoint {
-    /// Latitude in degrees (-90 to 90)
-    pub lat: f64,
-    /// Longitude in degrees (-180 to 180)
-    pub lon: f64,
-}
-
-impl GeoPoint {
-    /// Create a new geographical point.
-    pub fn new(lat: f64, lon: f64) -> Result<Self> {
-        if !(-90.0..=90.0).contains(&lat) {
-            return Err(crate::error::LaurusError::other(format!(
-                "Invalid latitude: {lat} (must be between -90 and 90)"
-            )));
-        }
-        if !(-180.0..=180.0).contains(&lon) {
-            return Err(crate::error::LaurusError::other(format!(
-                "Invalid longitude: {lon} (must be between -180 and 180)"
-            )));
-        }
-
-        Ok(GeoPoint { lat, lon })
-    }
-
-    /// Calculate the Haversine distance to another point in kilometers.
-    pub fn distance_to(&self, other: &GeoPoint) -> f64 {
-        const EARTH_RADIUS_KM: f64 = 6371.0;
-
-        let lat1_rad = self.lat.to_radians();
-        let lat2_rad = other.lat.to_radians();
-        let delta_lat = (other.lat - self.lat).to_radians();
-        let delta_lon = (other.lon - self.lon).to_radians();
-
-        let a = (delta_lat / 2.0).sin().powi(2)
-            + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-        let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-        EARTH_RADIUS_KM * c
-    }
-
-    /// Calculate the bearing (direction) to another point in degrees.
-    pub fn bearing_to(&self, other: &GeoPoint) -> f64 {
-        let lat1_rad = self.lat.to_radians();
-        let lat2_rad = other.lat.to_radians();
-        let delta_lon = (other.lon - self.lon).to_radians();
-
-        let y = delta_lon.sin() * lat2_rad.cos();
-        let x = lat1_rad.cos() * lat2_rad.sin() - lat1_rad.sin() * lat2_rad.cos() * delta_lon.cos();
-
-        let bearing_rad = y.atan2(x);
-        (bearing_rad.to_degrees() + 360.0) % 360.0
-    }
-
-    /// Check if this point is within a rectangular bounding box.
-    pub fn within_bounds(&self, min_lat: f64, max_lat: f64, min_lon: f64, max_lon: f64) -> bool {
-        self.lat >= min_lat && self.lat <= max_lat && self.lon >= min_lon && self.lon <= max_lon
-    }
-}
-
-/// A geographical bounding box defined by minimum and maximum coordinates.
+/// A 2D geographical bounding box, expressed as the south-west `min` corner
+/// and the north-east `max` corner of an axis-aligned lat/lon rectangle.
+///
+/// Invariant: `min.lat <= max.lat` and `min.lon <= max.lon`. The constructor
+/// validates this and returns `LaurusError::other` for inverted boxes. The
+/// previous `top_left` / `bottom_right` representation was removed in #297;
+/// `min` / `max` matches the convention used by the redesigned BKD AABB,
+/// which makes `GeoBoundingBox` ↔ AABB conversion a direct copy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeoBoundingBox {
-    /// Top-left corner
-    pub top_left: GeoPoint,
-    /// Bottom-right corner  
-    pub bottom_right: GeoPoint,
+    /// South-west corner: minimum latitude and minimum longitude.
+    pub min: GeoPoint,
+    /// North-east corner: maximum latitude and maximum longitude.
+    pub max: GeoPoint,
 }
 
 impl GeoBoundingBox {
-    /// Create a new bounding box.
-    pub fn new(top_left: GeoPoint, bottom_right: GeoPoint) -> Result<Self> {
-        if top_left.lat < bottom_right.lat {
-            return Err(crate::error::LaurusError::other(
-                "Top-left latitude must be greater than bottom-right latitude",
-            ));
+    /// Create a new bounding box from its south-west and north-east corners.
+    ///
+    /// Errors if `min.lat > max.lat` or `min.lon > max.lon`.
+    pub fn new(min: GeoPoint, max: GeoPoint) -> Result<Self> {
+        if min.lat > max.lat {
+            return Err(crate::error::LaurusError::other(format!(
+                "min latitude {} must be <= max latitude {}",
+                min.lat, max.lat
+            )));
         }
-        if top_left.lon > bottom_right.lon {
-            return Err(crate::error::LaurusError::other(
-                "Top-left longitude must be less than bottom-right longitude",
-            ));
+        if min.lon > max.lon {
+            return Err(crate::error::LaurusError::other(format!(
+                "min longitude {} must be <= max longitude {}",
+                min.lon, max.lon
+            )));
         }
-
-        Ok(GeoBoundingBox {
-            top_left,
-            bottom_right,
-        })
+        Ok(GeoBoundingBox { min, max })
     }
 
-    /// Check if a point is within this bounding box.
+    /// Whether `point` lies inside the closed rectangle `[min, max]`.
     pub fn contains(&self, point: &GeoPoint) -> bool {
-        point.within_bounds(
-            self.bottom_right.lat, // min_lat
-            self.top_left.lat,     // max_lat
-            self.top_left.lon,     // min_lon
-            self.bottom_right.lon, // max_lon
-        )
+        point.within_bounds(self.min.lat, self.max.lat, self.min.lon, self.max.lon)
     }
 
-    /// Get the center point of this bounding box.
+    /// Center of the bounding box, clamped to the valid lat/lon ranges as
+    /// a defensive measure (a malformed box could in theory carry
+    /// out-of-range corners).
     pub fn center(&self) -> GeoPoint {
-        let center_lat = ((self.top_left.lat + self.bottom_right.lat) / 2.0).clamp(-90.0, 90.0);
-        let center_lon = ((self.top_left.lon + self.bottom_right.lon) / 2.0).clamp(-180.0, 180.0);
-        // Clamped values are always valid
-        GeoPoint::new(center_lat, center_lon).expect("clamped center must be valid")
+        let center_lat = ((self.min.lat + self.max.lat) / 2.0).clamp(-90.0, 90.0);
+        let center_lon = ((self.min.lon + self.max.lon) / 2.0).clamp(-180.0, 180.0);
+        // Clamped to valid ranges, so the infallible constructor is fine.
+        GeoPoint::new(center_lat, center_lon)
     }
 
-    /// Get the width and height of the bounding box in degrees.
+    /// Width (lon span) and height (lat span) in degrees.
     pub fn dimensions(&self) -> (f64, f64) {
-        let width = self.bottom_right.lon - self.top_left.lon;
-        let height = self.top_left.lat - self.bottom_right.lat;
+        let width = self.max.lon - self.min.lon;
+        let height = self.max.lat - self.min.lat;
         (width, height)
     }
 
-    /// Get the maximum distance from the center to any corner of the bounding box.
+    /// Greatest great-circle distance from the box's center to any of its
+    /// four corners, in kilometers.
     pub fn max_distance_from_center(&self) -> f64 {
         let center = self.center();
-        let corner_tr =
-            GeoPoint::new(self.top_left.lat, self.bottom_right.lon).unwrap_or(self.top_left);
-        let corner_bl =
-            GeoPoint::new(self.bottom_right.lat, self.top_left.lon).unwrap_or(self.bottom_right);
-        let corners = [&self.top_left, &self.bottom_right, &corner_tr, &corner_bl];
-
-        corners
+        let sw = self.min;
+        let ne = self.max;
+        // The bounding box invariant guarantees that swapping corners
+        // produces in-range GeoPoints, so the infallible constructor is
+        // appropriate here.
+        let nw = GeoPoint::new(self.max.lat, self.min.lon);
+        let se = GeoPoint::new(self.min.lat, self.max.lon);
+        [&sw, &se, &nw, &ne]
             .iter()
             .map(|corner| center.distance_to(corner))
             .fold(0.0, f64::max)
@@ -258,36 +197,32 @@ impl GeoDistanceQuery {
         let lat_delta = self.distance_km / lat_deg_km;
         let lon_delta = self.distance_km / lon_deg_km;
 
-        let top_left = GeoPoint::new(
-            (self.center.lat + lat_delta).min(90.0),
-            (self.center.lon - lon_delta).max(-180.0),
-        )
-        .unwrap_or(self.center);
+        // Clamp to the valid lat/lon ranges so the resulting GeoPoints are
+        // always in-range (the infallible `GeoPoint::new` debug-asserts).
+        let min = GeoPoint::new(
+            (self.center.lat - lat_delta).clamp(-90.0, 90.0),
+            (self.center.lon - lon_delta).clamp(-180.0, 180.0),
+        );
+        let max = GeoPoint::new(
+            (self.center.lat + lat_delta).clamp(-90.0, 90.0),
+            (self.center.lon + lon_delta).clamp(-180.0, 180.0),
+        );
 
-        let bottom_right = GeoPoint::new(
-            (self.center.lat - lat_delta).max(-90.0),
-            (self.center.lon + lon_delta).min(180.0),
-        )
-        .unwrap_or(self.center);
-
-        GeoBoundingBox::new(top_left, bottom_right).unwrap_or_else(|_| {
-            // Fallback to a small box around center (clamp to valid ranges)
-            let fallback_top_left = GeoPoint::new(
-                (self.center.lat + 0.01).min(90.0),
-                (self.center.lon - 0.01).max(-180.0),
-            )
-            .unwrap_or(self.center);
-            let fallback_bottom_right = GeoPoint::new(
-                (self.center.lat - 0.01).max(-90.0),
-                (self.center.lon + 0.01).min(180.0),
-            )
-            .unwrap_or(self.center);
-            GeoBoundingBox::new(fallback_top_left, fallback_bottom_right).unwrap_or(
-                GeoBoundingBox {
-                    top_left: self.center,
-                    bottom_right: self.center,
-                },
-            )
+        GeoBoundingBox::new(min, max).unwrap_or_else(|_| {
+            // Fallback to a tiny box around the center if validation fails
+            // (extreme deltas at the poles can produce inverted boxes).
+            let fmin = GeoPoint::new(
+                (self.center.lat - 0.01).clamp(-90.0, 90.0),
+                (self.center.lon - 0.01).clamp(-180.0, 180.0),
+            );
+            let fmax = GeoPoint::new(
+                (self.center.lat + 0.01).clamp(-90.0, 90.0),
+                (self.center.lon + 0.01).clamp(-180.0, 180.0),
+            );
+            GeoBoundingBox::new(fmin, fmax).unwrap_or(GeoBoundingBox {
+                min: self.center,
+                max: self.center,
+            })
         })
     }
 
@@ -303,12 +238,12 @@ impl GeoDistanceQuery {
         if let Some(bkd_tree) = reader.get_bkd_tree(&self.field)? {
             // Lat range is [min_lat, max_lat], Lon range is [min_lon, max_lon]
             let mins = [
-                Some(bounding_box.bottom_right.lat), // min_lat
-                Some(bounding_box.top_left.lon),     // min_lon
+                Some(bounding_box.min.lat), // min_lat
+                Some(bounding_box.min.lon), // min_lon
             ];
             let maxs = [
-                Some(bounding_box.top_left.lat),     // max_lat
-                Some(bounding_box.bottom_right.lon), // max_lon
+                Some(bounding_box.max.lat), // max_lat
+                Some(bounding_box.max.lon), // max_lon
             ];
 
             let doc_ids = bkd_tree.range_search(&mins, &maxs, true, true)?;
@@ -316,9 +251,8 @@ impl GeoDistanceQuery {
                 // Retrieve GeoPoint for exact distance calculation
                 if let Some(doc) = reader.document(doc_id)?
                     && let Some(field_value) = doc.get_field(&self.field)
-                    && let Some((lat, lon)) = field_value.as_geo()
+                    && let Some(geo_point) = field_value.as_geo()
                 {
-                    let geo_point = GeoPoint::new(lat, lon)?;
                     candidates.push((doc_id, geo_point));
                 }
             }
@@ -335,8 +269,7 @@ impl GeoDistanceQuery {
                 // Get the geo field value
                 if let Some(field_value) = doc.get_field(&self.field) {
                     // Extract the GeoPoint from the field value
-                    if let Some((lat, lon)) = field_value.as_geo() {
-                        let geo_point = GeoPoint::new(lat, lon)?;
+                    if let Some(geo_point) = field_value.as_geo() {
                         // First check bounding box for efficiency, then exact distance
                         if bounding_box.contains(&geo_point) {
                             let distance = self.center.distance_to(&geo_point);
@@ -583,12 +516,12 @@ impl GeoBoundingBoxQuery {
         // Try to use BKD tree for efficient candidate retrieval
         if let Some(bkd_tree) = reader.get_bkd_tree(&self.field)? {
             let mins = [
-                Some(self.bounding_box.bottom_right.lat), // min_lat
-                Some(self.bounding_box.top_left.lon),     // min_lon
+                Some(self.bounding_box.min.lat), // min_lat
+                Some(self.bounding_box.min.lon), // min_lon
             ];
             let maxs = [
-                Some(self.bounding_box.top_left.lat),     // max_lat
-                Some(self.bounding_box.bottom_right.lon), // max_lon
+                Some(self.bounding_box.max.lat), // max_lat
+                Some(self.bounding_box.max.lon), // max_lon
             ];
 
             let doc_ids = bkd_tree.range_search(&mins, &maxs, true, true)?;
@@ -596,9 +529,8 @@ impl GeoBoundingBoxQuery {
                 // Retrieve GeoPoint for exact check
                 if let Some(doc) = reader.document(doc_id)?
                     && let Some(field_value) = doc.get_field(&self.field)
-                    && let Some((lat, lon)) = field_value.as_geo()
+                    && let Some(geo_point) = field_value.as_geo()
                 {
-                    let geo_point = GeoPoint::new(lat, lon)?;
                     candidates.push((doc_id, geo_point));
                 }
             }
@@ -615,8 +547,7 @@ impl GeoBoundingBoxQuery {
                 // Get the geo field value
                 if let Some(field_value) = doc.get_field(&self.field) {
                     // Extract the GeoPoint from the field value
-                    if let Some((lat, lon)) = field_value.as_geo() {
-                        let geo_point = GeoPoint::new(lat, lon)?;
+                    if let Some(geo_point) = field_value.as_geo() {
                         // Check if the point is within the bounding box
                         if self.bounding_box.contains(&geo_point) {
                             candidates.push((doc_id, geo_point));
@@ -644,10 +575,10 @@ impl GeoBoundingBoxQuery {
                 let lat_ratio = i as f64 / (grid_size - 1) as f64;
                 let lon_ratio = j as f64 / (grid_size - 1) as f64;
 
-                let lat = self.bounding_box.bottom_right.lat + lat_ratio * height;
-                let lon = self.bounding_box.top_left.lon + lon_ratio * width;
+                let lat = self.bounding_box.min.lat + lat_ratio * height;
+                let lon = self.bounding_box.min.lon + lon_ratio * width;
 
-                if let Ok(point) = GeoPoint::new(lat, lon) {
+                if let Ok(point) = GeoPoint::try_new(lat, lon) {
                     let doc_id = (i * grid_size + j + 2000) as u64;
                     candidates.push((doc_id, point));
                 }
@@ -665,7 +596,7 @@ impl GeoBoundingBoxQuery {
             let lon_offset = angle.cos() * expanded_width / 2.0;
 
             let center = self.bounding_box.center();
-            if let Ok(point) = GeoPoint::new(center.lat + lat_offset, center.lon + lon_offset) {
+            if let Ok(point) = GeoPoint::try_new(center.lat + lat_offset, center.lon + lon_offset) {
                 let doc_id = (i + 3000) as u64;
                 candidates.push((doc_id, point));
             }
@@ -701,10 +632,10 @@ impl GeoBoundingBoxQuery {
         let (width, height) = self.bounding_box.dimensions();
         let edge_threshold = 0.1; // 10% of dimension
 
-        let lat_distance_from_edge = (point.lat - self.bounding_box.bottom_right.lat)
-            .min(self.bounding_box.top_left.lat - point.lat);
-        let lon_distance_from_edge = (point.lon - self.bounding_box.top_left.lon)
-            .min(self.bounding_box.bottom_right.lon - point.lon);
+        let lat_distance_from_edge =
+            (point.lat - self.bounding_box.min.lat).min(self.bounding_box.max.lat - point.lat);
+        let lon_distance_from_edge =
+            (point.lon - self.bounding_box.min.lon).min(self.bounding_box.max.lon - point.lon);
 
         let lat_edge_proximity = if lat_distance_from_edge < height * edge_threshold {
             0.05
@@ -722,19 +653,12 @@ impl GeoBoundingBoxQuery {
 
     /// Calculate bonus for points near corners of the bounding box.
     fn calculate_corner_bonus(&self, point: &GeoPoint) -> f32 {
+        let bbox = &self.bounding_box;
         let corners = [
-            self.bounding_box.top_left,
-            GeoPoint::new(
-                self.bounding_box.top_left.lat,
-                self.bounding_box.bottom_right.lon,
-            )
-            .unwrap(),
-            self.bounding_box.bottom_right,
-            GeoPoint::new(
-                self.bounding_box.bottom_right.lat,
-                self.bounding_box.top_left.lon,
-            )
-            .unwrap(),
+            bbox.min,                                  // SW
+            GeoPoint::new(bbox.max.lat, bbox.min.lon), // NW
+            bbox.max,                                  // NE
+            GeoPoint::new(bbox.min.lat, bbox.max.lon), // SE
         ];
 
         let corner_threshold_km = 1.0; // Within 1km of corner
@@ -954,7 +878,7 @@ impl GeoQuery {
         lon: f64,
         radius_km: f64,
     ) -> Result<Self> {
-        let center = GeoPoint::new(lat, lon)?;
+        let center = GeoPoint::try_new(lat, lon)?;
         Ok(GeoQuery::Distance(GeoDistanceQuery::new(
             field, center, radius_km,
         )))
@@ -982,9 +906,9 @@ impl GeoQuery {
         max_lat: f64,
         max_lon: f64,
     ) -> Result<Self> {
-        let top_left = GeoPoint::new(max_lat, min_lon)?;
-        let bottom_right = GeoPoint::new(min_lat, max_lon)?;
-        let bbox = GeoBoundingBox::new(top_left, bottom_right)?;
+        let min = GeoPoint::try_new(min_lat, min_lon)?;
+        let max = GeoPoint::try_new(max_lat, max_lon)?;
+        let bbox = GeoBoundingBox::new(min, max)?;
         Ok(GeoQuery::BoundingBox(GeoBoundingBoxQuery::new(field, bbox)))
     }
 
@@ -1097,19 +1021,19 @@ mod tests {
 
     #[test]
     fn test_geo_point_creation() {
-        let point = GeoPoint::new(40.7128, -74.0060).unwrap(); // New York City
+        let point = GeoPoint::try_new(40.7128, -74.0060).unwrap(); // New York City
         assert_eq!(point.lat, 40.7128);
         assert_eq!(point.lon, -74.0060);
 
         // Test invalid coordinates
-        assert!(GeoPoint::new(91.0, 0.0).is_err()); // Invalid latitude
-        assert!(GeoPoint::new(0.0, 181.0).is_err()); // Invalid longitude
+        assert!(GeoPoint::try_new(91.0, 0.0).is_err()); // Invalid latitude
+        assert!(GeoPoint::try_new(0.0, 181.0).is_err()); // Invalid longitude
     }
 
     #[test]
     fn test_geo_distance_calculation() {
-        let nyc = GeoPoint::new(40.7128, -74.0060).unwrap();
-        let la = GeoPoint::new(34.0522, -118.2437).unwrap();
+        let nyc = GeoPoint::try_new(40.7128, -74.0060).unwrap();
+        let la = GeoPoint::try_new(34.0522, -118.2437).unwrap();
 
         let distance = nyc.distance_to(&la);
         // Distance between NYC and LA is approximately 3,944 km
@@ -1118,8 +1042,8 @@ mod tests {
 
     #[test]
     fn test_geo_bearing() {
-        let nyc = GeoPoint::new(40.7128, -74.0060).unwrap();
-        let la = GeoPoint::new(34.0522, -118.2437).unwrap();
+        let nyc = GeoPoint::try_new(40.7128, -74.0060).unwrap();
+        let la = GeoPoint::try_new(34.0522, -118.2437).unwrap();
 
         let bearing = nyc.bearing_to(&la);
         // Bearing from NYC to LA should be roughly west (around 270 degrees)
@@ -1128,12 +1052,12 @@ mod tests {
 
     #[test]
     fn test_geo_bounding_box() {
-        let top_left = GeoPoint::new(41.0, -75.0).unwrap();
-        let bottom_right = GeoPoint::new(40.0, -74.0).unwrap();
-        let bbox = GeoBoundingBox::new(top_left, bottom_right).unwrap();
+        let min = GeoPoint::try_new(40.0, -75.0).unwrap();
+        let max = GeoPoint::try_new(41.0, -74.0).unwrap();
+        let bbox = GeoBoundingBox::new(min, max).unwrap();
 
-        let inside_point = GeoPoint::new(40.5, -74.5).unwrap();
-        let outside_point = GeoPoint::new(42.0, -73.0).unwrap();
+        let inside_point = GeoPoint::try_new(40.5, -74.5).unwrap();
+        let outside_point = GeoPoint::try_new(42.0, -73.0).unwrap();
 
         assert!(bbox.contains(&inside_point));
         assert!(!bbox.contains(&outside_point));
@@ -1145,7 +1069,7 @@ mod tests {
 
     #[test]
     fn test_geo_distance_query() {
-        let center = GeoPoint::new(40.7128, -74.0060).unwrap();
+        let center = GeoPoint::try_new(40.7128, -74.0060).unwrap();
         let query = GeoDistanceQuery::new("location", center, 10.0).with_boost(1.5);
 
         assert_eq!(query.field(), "location");
@@ -1156,7 +1080,7 @@ mod tests {
 
     #[test]
     fn test_geo_distance_scoring() {
-        let center = GeoPoint::new(0.0, 0.0).unwrap();
+        let center = GeoPoint::try_new(0.0, 0.0).unwrap();
         let query = GeoDistanceQuery::new("location", center, 10.0);
 
         // Test scoring at different distances
@@ -1168,14 +1092,14 @@ mod tests {
 
     #[test]
     fn test_geo_bounding_box_query() {
-        let top_left = GeoPoint::new(41.0, -75.0).unwrap();
-        let bottom_right = GeoPoint::new(40.0, -74.0).unwrap();
-        let bbox = GeoBoundingBox::new(top_left, bottom_right).unwrap();
+        let min = GeoPoint::try_new(40.0, -75.0).unwrap();
+        let max = GeoPoint::try_new(41.0, -74.0).unwrap();
+        let bbox = GeoBoundingBox::new(min, max).unwrap();
         let query = GeoBoundingBoxQuery::new("location", bbox);
 
         assert_eq!(query.field(), "location");
-        assert_eq!(query.bounding_box().top_left, top_left);
-        assert_eq!(query.bounding_box().bottom_right, bottom_right);
+        assert_eq!(query.bounding_box().min, min);
+        assert_eq!(query.bounding_box().max, max);
     }
 
     #[test]
@@ -1183,13 +1107,13 @@ mod tests {
         let matches = vec![
             GeoMatch {
                 doc_id: 3,
-                point: GeoPoint::new(0.0, 0.0).unwrap(),
+                point: GeoPoint::try_new(0.0, 0.0).unwrap(),
                 distance_km: 1.0,
                 relevance_score: 0.9,
             },
             GeoMatch {
                 doc_id: 1,
-                point: GeoPoint::new(0.0, 0.0).unwrap(),
+                point: GeoPoint::try_new(0.0, 0.0).unwrap(),
                 distance_km: 2.0,
                 relevance_score: 0.8,
             },
@@ -1211,7 +1135,7 @@ mod tests {
     fn test_geo_scorer() {
         let matches = vec![GeoMatch {
             doc_id: 1,
-            point: GeoPoint::new(0.0, 0.0).unwrap(),
+            point: GeoPoint::try_new(0.0, 0.0).unwrap(),
             distance_km: 1.0,
             relevance_score: 0.9,
         }];
@@ -1226,19 +1150,19 @@ mod tests {
 
     #[test]
     fn test_enhanced_distance_scoring() {
-        let center = GeoPoint::new(40.7128, -74.0060).unwrap(); // NYC
+        let center = GeoPoint::try_new(40.7128, -74.0060).unwrap(); // NYC
         let query = GeoDistanceQuery::new("location", center, 10.0);
 
         // Test point very close to center
-        let close_point = GeoPoint::new(40.7130, -74.0062).unwrap();
+        let close_point = GeoPoint::try_new(40.7130, -74.0062).unwrap();
         let close_score = query.calculate_distance_score_enhanced(0.05, &close_point);
 
         // Test point at moderate distance
-        let mid_point = GeoPoint::new(40.7200, -74.0100).unwrap();
+        let mid_point = GeoPoint::try_new(40.7200, -74.0100).unwrap();
         let mid_score = query.calculate_distance_score_enhanced(1.0, &mid_point);
 
         // Test point at max distance
-        let far_point = GeoPoint::new(40.8000, -74.1000).unwrap();
+        let far_point = GeoPoint::try_new(40.8000, -74.1000).unwrap();
         let far_score = query.calculate_distance_score_enhanced(9.0, &far_point);
 
         // Scores should decrease with distance, and close points should get precision bonus
@@ -1249,9 +1173,9 @@ mod tests {
 
     #[test]
     fn test_bounding_box_enhanced_functionality() {
-        let top_left = GeoPoint::new(41.0, -75.0).unwrap();
-        let bottom_right = GeoPoint::new(40.0, -74.0).unwrap();
-        let bbox = GeoBoundingBox::new(top_left, bottom_right).unwrap();
+        let min = GeoPoint::try_new(40.0, -75.0).unwrap();
+        let max = GeoPoint::try_new(41.0, -74.0).unwrap();
+        let bbox = GeoBoundingBox::new(min, max).unwrap();
         let query = GeoBoundingBoxQuery::new("location", bbox);
 
         // Test that generated candidates include points within bounds
@@ -1269,7 +1193,7 @@ mod tests {
         let center_point = query.bounding_box().center();
         let center_score = query.calculate_bounding_box_score(&center_point);
 
-        let corner_point = query.bounding_box().top_left;
+        let corner_point = query.bounding_box().min;
         let corner_score = query.calculate_bounding_box_score(&corner_point);
 
         // Center should generally score higher than corners
@@ -1278,7 +1202,7 @@ mod tests {
 
     #[test]
     fn test_spatial_bounding_box_creation() {
-        let center = GeoPoint::new(40.7128, -74.0060).unwrap(); // NYC
+        let center = GeoPoint::try_new(40.7128, -74.0060).unwrap(); // NYC
         let query = GeoDistanceQuery::new("location", center, 5.0); // 5km radius
 
         let bbox = query.create_bounding_box();
@@ -1299,12 +1223,12 @@ mod tests {
 
     #[test]
     fn test_geographic_relevance_calculation() {
-        let center = GeoPoint::new(40.7128, -74.0060).unwrap();
+        let center = GeoPoint::try_new(40.7128, -74.0060).unwrap();
         let query = GeoDistanceQuery::new("location", center, 10.0);
 
         // Test temperate zone bonus
-        let temperate_point = GeoPoint::new(45.0, 0.0).unwrap(); // Temperate zone
-        let tropical_point = GeoPoint::new(10.0, 0.0).unwrap(); // Tropical zone
+        let temperate_point = GeoPoint::try_new(45.0, 0.0).unwrap(); // Temperate zone
+        let tropical_point = GeoPoint::try_new(10.0, 0.0).unwrap(); // Tropical zone
 
         let temperate_bonus = query.calculate_geographic_relevance(&temperate_point);
         let tropical_bonus = query.calculate_geographic_relevance(&tropical_point);
@@ -1312,8 +1236,8 @@ mod tests {
         assert!(temperate_bonus > tropical_bonus);
 
         // Test equator bonus
-        let equator_point = GeoPoint::new(2.0, 0.0).unwrap(); // Near equator
-        let non_equator_point = GeoPoint::new(45.0, 0.0).unwrap();
+        let equator_point = GeoPoint::try_new(2.0, 0.0).unwrap(); // Near equator
+        let non_equator_point = GeoPoint::try_new(45.0, 0.0).unwrap();
 
         let equator_geo_bonus = query.calculate_geographic_relevance(&equator_point);
         let non_equator_geo_bonus = query.calculate_geographic_relevance(&non_equator_point);

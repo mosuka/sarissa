@@ -52,6 +52,7 @@ pub fn coerce_value(field_name: &str, option: &FieldOption, value: DataValue) ->
         FieldOption::Boolean(_) => coerce_to_boolean(field_name, value),
         FieldOption::DateTime(_) => coerce_to_datetime(field_name, value),
         FieldOption::Geo(_) => coerce_to_geo(field_name, value),
+        FieldOption::Geo3d(_) => coerce_to_geo3d(field_name, value),
         FieldOption::Bytes(_) => coerce_to_bytes(field_name, value),
         FieldOption::Hnsw(_) | FieldOption::Flat(_) | FieldOption::Ivf(_) => {
             coerce_to_vector(field_name, value)
@@ -234,9 +235,19 @@ fn coerce_to_datetime(field_name: &str, value: DataValue) -> Result<DataValue> {
 
 fn coerce_to_geo(field_name: &str, value: DataValue) -> Result<DataValue> {
     match value {
-        DataValue::Geo(lat, lon) => Ok(DataValue::Geo(lat, lon)),
+        DataValue::Geo(p) => Ok(DataValue::Geo(p)),
         other => Err(LaurusError::invalid_argument(format!(
             "field '{field_name}': cannot coerce {} to a geographic point",
+            describe(&other)
+        ))),
+    }
+}
+
+fn coerce_to_geo3d(field_name: &str, value: DataValue) -> Result<DataValue> {
+    match value {
+        DataValue::GeoEcef(p) => Ok(DataValue::GeoEcef(p)),
+        other => Err(LaurusError::invalid_argument(format!(
+            "field '{field_name}': cannot coerce {} to a 3D ECEF geo point",
             describe(&other)
         ))),
     }
@@ -291,7 +302,8 @@ fn describe(value: &DataValue) -> &'static str {
         DataValue::Bytes(_, _) => "bytes",
         DataValue::Vector(_) => "vector",
         DataValue::DateTime(_) => "datetime",
-        DataValue::Geo(_, _) => "geo",
+        DataValue::Geo(_) => "geo",
+        DataValue::GeoEcef(_) => "geo3d",
         DataValue::Int64Array(_) => "integer array",
         DataValue::Float64Array(_) => "float array",
     }
@@ -301,7 +313,7 @@ fn describe(value: &DataValue) -> &'static str {
 mod tests {
     use super::*;
     use crate::lexical::core::field::{
-        BooleanOption, FloatOption, GeoOption, IntegerOption, TextOption,
+        BooleanOption, FloatOption, Geo3dOption, GeoOption, IntegerOption, TextOption,
     };
 
     fn integer() -> FieldOption {
@@ -322,6 +334,10 @@ mod tests {
 
     fn geo() -> FieldOption {
         FieldOption::Geo(GeoOption::default())
+    }
+
+    fn geo3d() -> FieldOption {
+        FieldOption::Geo3d(Geo3dOption::default())
     }
 
     #[test]
@@ -439,9 +455,29 @@ mod tests {
     #[test]
     fn geo_passthrough_only() {
         assert_eq!(
-            coerce_value("g", &geo(), DataValue::Geo(35.1, 139.0)).unwrap(),
-            DataValue::Geo(35.1, 139.0)
+            coerce_value(
+                "g",
+                &geo(),
+                DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0))
+            )
+            .unwrap(),
+            DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0))
         );
         assert!(coerce_value("g", &geo(), DataValue::Int64(35)).is_err());
+    }
+
+    #[test]
+    fn geo3d_passthrough_only() {
+        let p = crate::data::GeoEcefPoint::new(1_234_567.0, 2_345_678.0, 3_456_789.0);
+        assert_eq!(
+            coerce_value("g3", &geo3d(), DataValue::GeoEcef(p)).unwrap(),
+            DataValue::GeoEcef(p)
+        );
+        // 2D geo cannot coerce to 3D ECEF: the schema declared the field
+        // as Geo3d, so the writer must reject a 2D value rather than
+        // silently lose the altitude dimension.
+        let p2d = crate::data::GeoPoint::new(35.1, 139.0);
+        assert!(coerce_value("g3", &geo3d(), DataValue::Geo(p2d)).is_err());
+        assert!(coerce_value("g3", &geo3d(), DataValue::Int64(35)).is_err());
     }
 }

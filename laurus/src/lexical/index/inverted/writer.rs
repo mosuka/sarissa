@@ -410,6 +410,7 @@ impl InvertedIndexWriter {
                 Some(FieldOption::Boolean(opt)) => (opt.indexed, opt.stored),
                 Some(FieldOption::DateTime(opt)) => (opt.indexed, opt.stored),
                 Some(FieldOption::Geo(opt)) => (opt.indexed, opt.stored),
+                Some(FieldOption::Geo3d(opt)) => (opt.indexed, opt.stored),
                 Some(FieldOption::Bytes(opt)) => (false, opt.stored), // Bytes are not lexically indexed
                 None => (true, true), // Internal or schema-less default
             };
@@ -489,18 +490,36 @@ impl InvertedIndexWriter {
                             }],
                         );
                     }
-                    DataValue::Geo(lat, lon) => {
+                    DataValue::Geo(p) => {
                         // Geo points are indexed as 2D points in BKD
                         field_terms.insert(
                             field_name.clone(),
                             vec![AnalyzedTerm {
-                                term: format!("{},{}", lat, lon),
+                                term: format!("{},{}", p.lat, p.lon),
                                 position: 0,
                                 frequency: 1,
-                                offset: (0, format!("{},{}", lat, lon).len()),
+                                offset: (0, format!("{},{}", p.lat, p.lon).len()),
                             }],
                         );
-                        point_values.insert(field_name.clone(), vec![vec![*lat, *lon]]);
+                        point_values.insert(field_name.clone(), vec![vec![p.lat, p.lon]]);
+                    }
+                    DataValue::GeoEcef(p) => {
+                        // 3D ECEF point: emitting a 3-element point here is
+                        // what tells `BKDWriter::new` to build a 3D BKD when
+                        // the per-field tree is materialized. Schema-side,
+                        // `FieldOption::Geo3d` (#298) classifies the field
+                        // as lexical and respects the (indexed, stored)
+                        // flags exactly like 2D Geo.
+                        field_terms.insert(
+                            field_name.clone(),
+                            vec![AnalyzedTerm {
+                                term: format!("{},{},{}", p.x, p.y, p.z),
+                                position: 0,
+                                frequency: 1,
+                                offset: (0, format!("{},{},{}", p.x, p.y, p.z).len()),
+                            }],
+                        );
+                        point_values.insert(field_name.clone(), vec![vec![p.x, p.y, p.z]]);
                     }
                     DataValue::Int64Array(arr) => {
                         // Multi-valued integer field. Each element is a
@@ -767,10 +786,20 @@ impl InvertedIndexWriter {
                         stored_writer.write_u8(5)?; // Type tag for DateTime
                         stored_writer.write_string(&dt.to_rfc3339())?;
                     }
-                    crate::data::DataValue::Geo(lat, lon) => {
+                    crate::data::DataValue::Geo(p) => {
                         stored_writer.write_u8(6)?; // Type tag for Geo
-                        stored_writer.write_f64(*lat)?;
-                        stored_writer.write_f64(*lon)?;
+                        stored_writer.write_f64(p.lat)?;
+                        stored_writer.write_f64(p.lon)?;
+                    }
+                    crate::data::DataValue::GeoEcef(p) => {
+                        // Type tag 12 = 3D ECEF point. Tag 11 was originally
+                        // claimed for ECEF in #297 but collided with the
+                        // pre-existing Float64Array tag (also 11); #299
+                        // moves ECEF to tag 12 and wires reader support.
+                        stored_writer.write_u8(12)?;
+                        stored_writer.write_f64(p.x)?;
+                        stored_writer.write_f64(p.y)?;
+                        stored_writer.write_f64(p.z)?;
                     }
                     crate::data::DataValue::Bytes(bytes, mime) => {
                         stored_writer.write_u8(4)?; // Type tag for Bytes
@@ -929,8 +958,14 @@ impl InvertedIndexWriter {
     }
 
     /// Write BKD trees for numeric and geo fields.
+    ///
+    /// Per-field state is accumulated into flat row-major coordinate buffers
+    /// (`points`) and parallel doc-id buffers (`doc_ids`) so the BKD writer
+    /// can be fed without re-allocating per point. The dimensionality is
+    /// captured from the first point seen for each field.
     fn write_bkd_trees(&self, segment_name: &str) -> Result<()> {
-        let mut field_points: AHashMap<String, Vec<(Vec<f64>, u64)>> = AHashMap::new();
+        // (flat points, doc_ids, num_dims)
+        let mut field_buckets: AHashMap<String, (Vec<f64>, Vec<u64>, usize)> = AHashMap::new();
 
         for (doc_id, doc) in &self.buffered_docs {
             for (field, points) in &doc.point_values {
@@ -939,24 +974,25 @@ impl InvertedIndexWriter {
                 // one per element. The BKD reader's `range_search` already
                 // deduplicates `doc_id`s, so a multi-valued document is
                 // reported at most once per query.
-                let bucket = field_points.entry(field.clone()).or_default();
                 for point in points {
-                    bucket.push((point.clone(), *doc_id));
+                    let bucket = field_buckets
+                        .entry(field.clone())
+                        .or_insert_with(|| (Vec::new(), Vec::new(), point.len()));
+                    bucket.0.extend_from_slice(point);
+                    bucket.1.push(*doc_id);
                 }
             }
         }
 
-        for (field, points) in field_points {
-            if points.is_empty() {
+        for (field, (points, doc_ids, num_dims)) in field_buckets {
+            if doc_ids.is_empty() {
                 continue;
             }
 
-            let num_dims = points[0].0.len() as u32;
-
             let file_name = format!("{segment_name}.{field}.bkd");
             let output = self.storage.create_output(&file_name)?;
-            let mut writer = BKDWriter::new(output, num_dims);
-            writer.write(&points)?;
+            let mut writer = BKDWriter::new(output, num_dims as u32);
+            writer.write(&points, &doc_ids)?;
             writer.finish()?;
         }
         Ok(())

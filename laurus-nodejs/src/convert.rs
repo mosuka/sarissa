@@ -87,7 +87,9 @@ pub fn json_to_data_value(value: &Value) -> napi::Result<DataValue> {
                 obj.get("lat").and_then(|v| v.as_f64()),
                 obj.get("lon").and_then(|v| v.as_f64()),
             ) {
-                return Ok(DataValue::Geo(lat, lon));
+                let point = laurus::lexical::GeoPoint::try_new(lat, lon)
+                    .map_err(|e| napi::Error::from_reason(format!("invalid geo point: {e}")))?;
+                return Ok(DataValue::Geo(point));
             }
             Err(napi::Error::from_reason(
                 "Cannot convert JSON object to DataValue: expected { lat, lon }",
@@ -134,8 +136,11 @@ pub fn data_value_to_json(value: &DataValue) -> Value {
         }
         DataValue::Vector(v) => Value::Array(v.iter().map(|f| serde_json::json!(*f)).collect()),
         DataValue::DateTime(dt) => Value::String(dt.to_rfc3339()),
-        DataValue::Geo(lat, lon) => {
-            serde_json::json!({ "lat": *lat, "lon": *lon })
+        DataValue::Geo(p) => {
+            serde_json::json!({ "lat": p.lat, "lon": p.lon })
+        }
+        DataValue::GeoEcef(p) => {
+            serde_json::json!({ "x": p.x, "y": p.y, "z": p.z })
         }
         DataValue::Int64Array(arr) => {
             Value::Array(arr.iter().map(|v| serde_json::json!(*v)).collect())

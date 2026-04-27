@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use laurus::{
     AnalyzerDefinition, BooleanOption, BytesOption, CharFilterConfig, DateTimeOption,
     DistanceMetric, DynamicFieldPolicy, EmbedderDefinition, FieldOption, FlatOption, FloatOption,
-    GeoOption, HnswOption, IntegerOption, IvfOption, QuantizationMethod, Schema, TextOption,
-    TokenFilterConfig, TokenizerConfig,
+    Geo3dOption, GeoOption, HnswOption, IntegerOption, IvfOption, QuantizationMethod, Schema,
+    TextOption, TokenFilterConfig, TokenizerConfig,
 };
 
 use crate::proto::laurus::v1;
@@ -132,6 +132,10 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             indexed: o.indexed,
             stored: o.stored,
         })),
+        FieldOption::Geo3d(o) => Some(Opt::Geo3d(v1::Geo3dOption {
+            indexed: o.indexed,
+            stored: o.stored,
+        })),
         FieldOption::Bytes(o) => Some(Opt::Bytes(v1::BytesOption { stored: o.stored })),
         FieldOption::Hnsw(o) => Some(Opt::Hnsw(v1::HnswOption {
             dimension: o.dimension as u32,
@@ -201,6 +205,10 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
             stored: o.stored,
         })),
         Some(Opt::Geo(o)) => Some(FieldOption::Geo(GeoOption {
+            indexed: o.indexed,
+            stored: o.stored,
+        })),
+        Some(Opt::Geo3d(o)) => Some(FieldOption::Geo3d(Geo3dOption {
             indexed: o.indexed,
             stored: o.stored,
         })),
@@ -713,5 +721,32 @@ mod tests {
         let proto = to_proto(&schema);
         let back = from_proto(&proto).unwrap();
         assert_eq!(back.dynamic_field_policy, DynamicFieldPolicy::Dynamic);
+    }
+
+    /// `FieldOption::Geo3d` round-trips through the proto `Geo3dOption`
+    /// variant added in #305 (it used to be silently dropped to `None`
+    /// before the proto representation existed).
+    #[test]
+    fn schema_field_option_geo3d_round_trip() {
+        let schema = Schema::builder()
+            .add_geo3d_field(
+                "position",
+                Geo3dOption {
+                    indexed: true,
+                    stored: false,
+                },
+            )
+            .build();
+
+        let proto = to_proto(&schema);
+        let back = from_proto(&proto).expect("from_proto must succeed");
+
+        match back.fields.get("position") {
+            Some(FieldOption::Geo3d(o)) => {
+                assert!(o.indexed);
+                assert!(!o.stored);
+            }
+            other => panic!("expected FieldOption::Geo3d, got {other:?}"),
+        }
     }
 }

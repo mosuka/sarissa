@@ -1,0 +1,383 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>BKD-Tree - Laurus Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Laurus Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/mosuka/laurus" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="bkd-tree"><a class="header" href="#bkd-tree">BKD-Tree</a></h1>
+<p>Laurus stores numeric, datetime, and geographic point data in a <strong>BKD-Tree</strong>
+(Block KD-Tree) — a disk-resident, multi-dimensional index that supports
+range, bounding-box, distance, and k-nearest-neighbour queries on the same
+underlying file format.</p>
+<p>The BKD primitive is shared by every "spatial-shaped" field type:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Field type</th><th style="text-align: center">Dimensions</th><th style="text-align: left">Coordinate space</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Integer</code> / <code>Float</code> (single- or multi-valued)</td><td style="text-align: center">1</td><td style="text-align: left">scalar</td></tr>
+<tr><td style="text-align: left"><code>DateTime</code></td><td style="text-align: center">1</td><td style="text-align: left">Unix microseconds (UTC)</td></tr>
+<tr><td style="text-align: left"><code>Geo</code></td><td style="text-align: center">2</td><td style="text-align: left">latitude / longitude (degrees)</td></tr>
+<tr><td style="text-align: left"><code>Geo3d</code></td><td style="text-align: center">3</td><td style="text-align: left">ECEF Cartesian (metres)</td></tr>
+</tbody></table>
+</div>
+<p>Adding a new spatial field type therefore boils down to picking a
+dimensionality and writing a query-side
+<a href="#query-the-intersectvisitor-protocol"><code>IntersectVisitor</code></a> — the writer,
+reader, and on-disk layout are reused unchanged.</p>
+<h2 id="file-format-version-2"><a class="header" href="#file-format-version-2">File Format (Version 2)</a></h2>
+<p>A <code>.bkd</code> segment file is a self-contained binary blob made of three regions:</p>
+<pre><code class="language-text">+----------------------------------------+
+| File Header                            |   fixed-size, version-tagged
++----------------------------------------+
+| Leaf Blocks                            |   row-major points + doc_ids
+|   leaf 0                               |
+|   leaf 1                               |
+|   ...                                  |
++----------------------------------------+
+| Index Nodes                            |   internal navigation nodes
+|   node N-1                             |
+|   ...                                  |
+|   node 0  (root, written last)         |
++----------------------------------------+
+</code></pre>
+<p>The header (<code>BKDFileHeader</code>) records <code>magic</code>, <code>version</code> (currently <code>2</code>),
+<code>num_dims</code>, <code>bytes_per_dim</code>, the total point count, the number of leaf
+blocks, the <strong>per-axis global min/max</strong> for the whole tree, and offsets to
+the index region and the root node.</p>
+<h3 id="leaf-block-layout"><a class="header" href="#leaf-block-layout">Leaf Block Layout</a></h3>
+<p>Each leaf block stores the points that fall inside its subtree:</p>
+<pre><code class="language-text">count               u32                       — number of points in the leaf
+leaf_min            [f64; num_dims]           — leaf-level AABB minimum
+leaf_max            [f64; num_dims]           — leaf-level AABB maximum
+point_values        [f64; count * num_dims]   — row-major point coordinates
+doc_ids             [u64; count]              — parallel doc-id buffer
+</code></pre>
+<p>The per-leaf AABB lets the reader prune the leaf without scanning any of its
+points when the query region is fully outside (<code>Outside</code>) or fully inside
+(<code>Inside</code>) the leaf.</p>
+<h3 id="internal-index-node-layout"><a class="header" href="#internal-index-node-layout">Internal Index Node Layout</a></h3>
+<p>Internal nodes carry both the split decision and the per-child AABB:</p>
+<pre><code class="language-text">split_dim           u32                       — axis to split on
+split_value         f64                       — split threshold on that axis
+left_min            [f64; num_dims]           — left subtree AABB min
+left_max            [f64; num_dims]           — left subtree AABB max
+right_min           [f64; num_dims]           — right subtree AABB min
+right_max           [f64; num_dims]           — right subtree AABB max
+left_offset         u64                       — file offset of left child
+right_offset        u64                       — file offset of right child
+</code></pre>
+<blockquote>
+<p>Per-node AABBs (added in v2) replace the v1 layout that only carried the
+split value. They make <code>Inside</code> / <code>Outside</code> pruning a constant-time
+rectangle test instead of a recursive descent.</p>
+</blockquote>
+<h2 id="build-algorithm"><a class="header" href="#build-algorithm">Build Algorithm</a></h2>
+<p><code>BKDWriter::write</code> builds the tree from a flat row-major point buffer plus a
+parallel <code>doc_ids</code> buffer. Construction is driven by the <strong>widest-axis split</strong>
+heuristic:</p>
+<ol>
+<li>Compute the AABB of the input subset.</li>
+<li>Pick the axis whose <code>(max - min)</code> range is the widest (ties broken by
+lower dimension index for determinism).</li>
+<li>Sort the index permutation by that axis and split at the median.</li>
+<li>Recurse on the two halves until a subtree fits in <code>block_size</code> points
+(default <code>512</code>); emit it as a leaf.</li>
+<li>Back-patch each parent's <code>left_offset</code> / <code>right_offset</code> once the children
+have been flushed.</li>
+</ol>
+<p>The builder sorts an <code>index permutation</code> rather than the point/doc-id buffers
+themselves, so it does <strong>not</strong> allocate per-point storage no matter how many
+points are written.</p>
+<h3 id="numeric-robustness"><a class="header" href="#numeric-robustness">Numeric Robustness</a></h3>
+<p>Coordinates must be totally orderable. <code>BKDWriter::write</code> rejects <code>NaN</code>
+explicitly because <code>NaN</code> has no defined ordering and would corrupt the
+split decisions and per-node AABB invariants. Both <code>±INFINITY</code> are accepted
+and act as natural sentinels for "unbounded" semantics in queries.</p>
+<h2 id="query-the-intersectvisitor-protocol"><a class="header" href="#query-the-intersectvisitor-protocol">Query: The IntersectVisitor Protocol</a></h2>
+<p>Queries against a BKD index are expressed as an
+<a href="https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/visitor.rs"><code>IntersectVisitor</code></a>
+implementation. The reader walks the tree and asks the visitor three things:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum CellRelation {
+    Inside,   // entire subtree is a hit — collect without per-point checks
+    Outside,  // entire subtree can be skipped
+    Crosses,  // recurse, or filter the leaf per-point
+}
+
+pub trait IntersectVisitor {
+    fn compare(&amp;self, cell: &amp;AABB) -&gt; CellRelation;
+    fn visit_inside(&amp;mut self, doc_id: u64);
+    fn visit(&amp;mut self, doc_id: u64, point: &amp;[f64]);
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The reader's traversal is:</p>
+<pre><code class="language-mermaid">graph TD
+    A["compare(node.aabb)"]
+    A --&gt;|Inside| B["visit_inside(doc_id) for every doc&lt;br/&gt;under the subtree — no point read"]
+    A --&gt;|Outside| C["skip subtree"]
+    A --&gt;|Crosses, internal| D["recurse into children"]
+    A --&gt;|Crosses, leaf| E["visit(doc_id, point) per point&lt;br/&gt;visitor decides what is a hit"]
+</code></pre>
+<p>This three-valued classification is what unlocks pruning. A visitor that
+always returns <code>Crosses</code> would still produce correct results — it would just
+degrade to a full leaf scan.</p>
+<h3 id="range-queries"><a class="header" href="#range-queries">Range Queries</a></h3>
+<p>The legacy <code>BKDTree::range_search</code> API is now a thin wrapper around
+<code>intersect</code>: it constructs a <code>RangeQueryVisitor</code> from the half-open / closed
+range parameters and converts unbounded <code>None</code> slots into <code>±INFINITY</code>. The
+visitor handles inclusive-vs-exclusive boundary checks itself.</p>
+<h3 id="3d-geographic-queries"><a class="header" href="#3d-geographic-queries">3D Geographic Queries</a></h3>
+<p>Three additional visitors live in <a href="geo3d.html"><code>laurus::lexical::query::geo3d</code></a>
+and target <code>Geo3d</code> (3D ECEF) fields:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Region tested by <code>compare</code></th><th style="text-align: left">Per-point check in <code>visit</code></th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>Geo3dDistanceQuery</code></td><td style="text-align: left">sphere <code>(centre, radius)</code> vs. cell AABB</td><td style="text-align: left">Euclidean distance ≤ radius</td></tr>
+<tr><td style="text-align: left"><code>Geo3dBoundingBoxQuery</code></td><td style="text-align: left">query AABB vs. cell AABB</td><td style="text-align: left">point inside query AABB</td></tr>
+<tr><td style="text-align: left"><code>Geo3dNearestQuery</code> (k-NN)</td><td style="text-align: left">expanding sphere around the query point</td><td style="text-align: left">distance ≤ current k-th best</td></tr>
+</tbody></table>
+</div>
+<p>The same primitive could host any future spatial query — for example, polygon
+queries or great-circle 2D <code>Geo</code> queries — by writing a new visitor.</p>
+<h2 id="reader-internals"><a class="header" href="#reader-internals">Reader Internals</a></h2>
+<p><code>BKDReader::intersect</code> uses a single per-query scratch buffer
+(<code>IntersectScratch</code>) that grows to the size of the largest leaf encountered
+and is then reused for every subsequent leaf, so a query touches the
+allocator at most a handful of times regardless of how many leaves it visits.</p>
+<p>Single-leaf trees (very small fields) are handled as a special case: the
+"root offset" points directly at the only leaf and the reader skips the
+internal-node descent entirely.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="geo3d.html">3D Geographic Search</a> — concrete BKD-backed visitors for ECEF
+distance, bounding-box, and k-NN queries.</li>
+<li><a href="indexing/lexical_indexing.html">Lexical Indexing</a> — where the <code>.bkd</code> segment
+file fits within the broader segment layout.</li>
+<li><a href="search/lexical_search.html">Lexical Search</a> — <code>NumericRangeQuery</code>,
+<code>GeoQuery</code>, and <code>Geo3dDistanceQuery</code> programmatic entry points.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../concepts/query_dsl.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../concepts/geo3d.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../concepts/query_dsl.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../concepts/geo3d.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

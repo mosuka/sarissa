@@ -83,6 +83,9 @@ pub fn proto_value_to_json(val: &v1::Value) -> Value {
         Some(Kind::GeoValue(g)) => {
             json!({"latitude": g.latitude, "longitude": g.longitude})
         }
+        Some(Kind::Geo3dValue(p)) => {
+            json!({"x": p.x, "y": p.y, "z": p.z})
+        }
         Some(Kind::Int64ArrayValue(arr)) => {
             Value::Array(arr.values.iter().map(|v| json!(*v)).collect())
         }
@@ -395,6 +398,11 @@ pub fn json_to_proto_field_option(json: &Value) -> Result<v1::FieldOption, Strin
             indexed: v.get("indexed").and_then(|v| v.as_bool()).unwrap_or(false),
             stored: v.get("stored").and_then(|v| v.as_bool()).unwrap_or(false),
         })
+    } else if let Some(v) = obj.get("geo3d") {
+        Opt::Geo3d(v1::Geo3dOption {
+            indexed: v.get("indexed").and_then(|v| v.as_bool()).unwrap_or(false),
+            stored: v.get("stored").and_then(|v| v.as_bool()).unwrap_or(false),
+        })
     } else if let Some(v) = obj.get("bytes") {
         Opt::Bytes(v1::BytesOption {
             stored: v.get("stored").and_then(|v| v.as_bool()).unwrap_or(false),
@@ -442,6 +450,9 @@ fn proto_field_option_to_json(opt: &v1::FieldOption) -> Value {
         }),
         Some(Opt::Geo(v)) => json!({
             "geo": { "indexed": v.indexed, "stored": v.stored }
+        }),
+        Some(Opt::Geo3d(v)) => json!({
+            "geo3d": { "indexed": v.indexed, "stored": v.stored }
         }),
         Some(Opt::Bytes(v)) => json!({
             "bytes": { "stored": v.stored }

@@ -506,6 +506,49 @@ impl GeoOption {
     }
 }
 
+/// Options for 3D Earth-Centered Earth-Fixed (ECEF) geographic point fields.
+///
+/// ECEF stores points as `(x, y, z)` Cartesian meters (origin at Earth's
+/// center of mass), enabling true 3D queries — sphere distance, k-NN, and
+/// 3D bounding boxes — that 2D `GeoOption` cannot express. Schema fields
+/// declared with `Geo3dOption` accept `DataValue::GeoEcef` values and are
+/// indexed in a 3D BKD tree.
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+pub struct Geo3dOption {
+    /// Whether to index this field for 3D geo queries.
+    #[serde(default = "default_true")]
+    pub indexed: bool,
+
+    /// Whether to store the original value.
+    #[serde(default = "default_true")]
+    pub stored: bool,
+}
+
+impl Geo3dOption {
+    /// Set whether the field is indexed.
+    pub fn indexed(mut self, indexed: bool) -> Self {
+        self.indexed = indexed;
+        self
+    }
+
+    /// Set whether the field is stored.
+    pub fn stored(mut self, stored: bool) -> Self {
+        self.stored = stored;
+        self
+    }
+}
+
+impl Default for Geo3dOption {
+    fn default() -> Self {
+        Self {
+            indexed: true,
+            stored: true,
+        }
+    }
+}
+
 /// Unified field option type that wraps all field-specific options.
 ///
 /// This enum provides a type-safe way to store configuration options
@@ -549,8 +592,12 @@ pub enum FieldOption {
     /// Options for datetime fields.
     DateTime(DateTimeOption),
 
-    /// Options for geographic point fields.
+    /// Options for 2D geographic point fields (WGS84 lat/lon).
     Geo(GeoOption),
+
+    /// Options for 3D Earth-Centered Earth-Fixed (ECEF) geographic point
+    /// fields. See [`Geo3dOption`] for details.
+    Geo3d(Geo3dOption),
 }
 
 impl Default for FieldOption {
@@ -574,7 +621,8 @@ impl FieldOption {
                 FieldOption::Bytes(BytesOption::default())
             }
             FieldValue::DateTime(_) => FieldOption::DateTime(DateTimeOption::default()),
-            FieldValue::Geo(_, _) => FieldOption::Geo(GeoOption::default()),
+            FieldValue::Geo(_) => FieldOption::Geo(GeoOption::default()),
+            FieldValue::GeoEcef(_) => FieldOption::Geo3d(Geo3dOption::default()),
             FieldValue::Null => FieldOption::Text(TextOption::default()),
             FieldValue::Int64Array(_) => FieldOption::Integer(IntegerOption {
                 multi_valued: true,

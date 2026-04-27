@@ -92,6 +92,40 @@ date:{2024-01-01 TO 2024-12-31}
 price:[* TO 100]
 ```
 
+### 3D Geographic Queries (`geo3d_*`)
+
+Three function-style forms target `Geo3d` (3D ECEF Cartesian) fields. All
+arguments are signed floats in metres, except `k` (an unsigned integer):
+
+```text
+position:geo3d_distance(x, y, z, radius_m)
+position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+position:geo3d_nearest(x, y, z, k)
+```
+
+| Form | Behaviour |
+| :--- | :--- |
+| `geo3d_distance(x, y, z, radius_m)` | All docs whose stored point lies within `radius_m` metres of `(x, y, z)`. |
+| `geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | All docs whose stored point lies inside the axis-aligned 3D box. |
+| `geo3d_nearest(x, y, z, k)` | The `k` nearest docs to `(x, y, z)` by Euclidean distance. |
+
+Examples:
+
+```text
+# Within 5 km of Tokyo Tower (ECEF coordinates)
+position:geo3d_distance(-3955182, 3350553, 3700276, 5000)
+
+# Inside an axis-aligned ECEF bounding box
+position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
+
+# 10 nearest indexed points
+position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
+```
+
+> The query field must be declared as a `Geo3d` field in the schema. See
+> [3D Geographic Search](geo3d.md) for the underlying coordinate system,
+> WGS84 conversion helpers, and detailed semantics.
+
 ### Boost
 
 Increase the weight of a clause with `^`:
@@ -123,8 +157,16 @@ sub_clause     = { grouped_query | field_query | term_query }
 grouped_query  = { "(" ~ boolean_query ~ ")" ~ boost? }
 boolean_op     = { ^"AND" | ^"OR" }
 field_query    = { field ~ ":" ~ field_value }
-field_value    = { range_query | phrase_query | fuzzy_term
+field_value    = { geo3d_query | range_query | phrase_query | fuzzy_term
                  | wildcard_term | simple_term }
+geo3d_query    = { geo3d_distance | geo3d_bbox | geo3d_nearest }
+geo3d_distance = { ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_bbox     = { ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ","
+                 ~ signed_float ~ "," ~ signed_float ~ ")" }
+geo3d_nearest  = { ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")" }
 phrase_query   = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
 proximity      = { "~" ~ number }
 fuzzy_term     = { term ~ "~" ~ fuzziness? ~ boost? }

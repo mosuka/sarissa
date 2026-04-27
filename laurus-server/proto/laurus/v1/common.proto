@@ -15,6 +15,7 @@ message Value {
     GeoPoint geo_value = 9;
     Int64ArrayValue int64_array_value = 10;
     Float64ArrayValue float64_array_value = 11;
+    Geo3dPoint geo3d_value = 12;
   }
 }
 
@@ -37,6 +38,17 @@ message Float64ArrayValue {
 message GeoPoint {
   double latitude = 1;
   double longitude = 2;
+}
+
+// A 3D Earth-Centered Earth-Fixed (ECEF) Cartesian point in meters.
+// Origin is the Earth's center of mass; units are meters on every axis.
+// Suitable for true 3D geospatial queries (drone proximity, satellite
+// tracking, indoor 3D positioning) where altitude is a first-class
+// dimension that 2D `GeoPoint` cannot represent.
+message Geo3dPoint {
+  double x = 1;
+  double y = 2;
+  double z = 3;
 }
 
 // A document consisting of named fields.

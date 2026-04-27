@@ -71,7 +71,7 @@ pub mod vector;
 
 // Re-exports for the public API
 pub use analysis::analyzer::analyzer::Analyzer;
-pub use data::{DataValue, Document};
+pub use data::{DataValue, Document, GeoEcefPoint, GeoPoint};
 #[cfg(feature = "embeddings-candle")]
 pub use embedding::candle_bert_embedder::CandleBertEmbedder;
 #[cfg(feature = "embeddings-multimodal")]
@@ -97,7 +97,8 @@ pub use engine::search::{
 pub use engine::type_inference::{InferredValue, infer_from_json, infer_option_from_data_value};
 pub use error::{LaurusError, Result};
 pub use lexical::core::field::{
-    BooleanOption, BytesOption, DateTimeOption, FloatOption, GeoOption, IntegerOption, TextOption,
+    BooleanOption, BytesOption, DateTimeOption, FloatOption, Geo3dOption, GeoOption, IntegerOption,
+    TextOption,
 };
 pub use lexical::search::searcher::{
     LexicalSearchParams, LexicalSearchQuery, LexicalSearchRequest, SortField, SortOrder,

@@ -39,6 +39,7 @@ graph TB
     FO --> B["Boolean"]
     FO --> DT["DateTime"]
     FO --> G["Geo"]
+    FO --> G3["Geo3d"]
     FO --> BY["Bytes"]
 
     FO --> FLAT["Flat"]
@@ -58,6 +59,7 @@ Lexical fields are indexed using an inverted index and support keyword-based que
 | **Boolean** | `BooleanOption` | `add_boolean_field()` | `true` / `false` |
 | **DateTime** | `DateTimeOption` | `add_datetime_field()` | UTC timestamp; supports range queries |
 | **Geo** | `GeoOption` | `add_geo_field()` | Latitude/longitude pair; supports radius and bounding box queries |
+| **Geo3d** | `Geo3dOption` | `add_geo3d_field()` | 3D ECEF Cartesian point (`x`, `y`, `z` in metres); supports 3D distance, bounding box, and k-NN queries. See [3D Geographic Search](geo3d.md). |
 | **Bytes** | `BytesOption` | `add_bytes_field()` | Raw binary data |
 
 #### Text Field Options
@@ -193,7 +195,8 @@ graph LR
 | `add_boolean(name, value)` | `bool` | Add a boolean field |
 | `add_datetime(name, value)` | `DateTime<Utc>` | Add a datetime field |
 | `add_vector(name, value)` | `Vec<f32>` | Add a pre-computed vector field |
-| `add_geo(name, lat, lon)` | `(f64, f64)` | Add a geographic point |
+| `add_geo(name, lat, lon)` | `(f64, f64)` | Add a 2D geographic point (WGS84) |
+| `add_geo_ecef(name, x, y, z)` | `(f64, f64, f64)` | Add a 3D ECEF Cartesian point (metres) |
 | `add_bytes(name, data)` | `Vec<u8>` | Add binary data |
 | `add_field(name, value)` | `DataValue` | Add any value type |
 
@@ -211,7 +214,10 @@ pub enum DataValue {
     Bytes(Vec<u8>, Option<String>),  // (data, optional MIME type)
     Vector(Vec<f32>),
     DateTime(DateTime<Utc>),
-    Geo(f64, f64),          // (latitude, longitude)
+    Geo(GeoPoint),                   // 2D WGS84 point (latitude, longitude)
+    GeoEcef(GeoEcefPoint),           // 3D ECEF Cartesian point (x, y, z) in metres
+    Int64Array(Vec<i64>),            // multi-valued integer field
+    Float64Array(Vec<f64>),          // multi-valued float field
 }
 ```
 
@@ -276,8 +282,10 @@ let schema = Schema::builder()
 | array of floats / mixed numeric (e.g. `[1.5, 2.0, 3]`) | `Float` with `multi_valued = true` |
 | object with a latitude key (`lat` or `latitude`) and a longitude key (`lon`, `lng`, or `longitude`), values in range | `Geo` |
 
-Vector fields (`Hnsw`, `Flat`, `Ivf`) and `Bytes` are **never** inferred:
-they must be declared in the schema explicitly.
+Vector fields (`Hnsw`, `Flat`, `Ivf`), `Bytes`, and `Geo3d` are **never**
+inferred: they must be declared in the schema explicitly. (Inferring
+`Geo3d` from a 3D-looking JSON object would conflict with arbitrary user
+records that happen to have `x`, `y`, `z` keys.)
 
 ### Multi-valued numeric fields
 
@@ -306,7 +314,7 @@ to coerce the value to the declared type. The coercion rules are:
 | `Boolean` | `Int64(0)` / `Int64(1)` | `false` / `true` |
 | `Boolean` | `Text("true"/"false")` | parsed (case-insensitive) |
 | `Text` | any scalar | stringified |
-| `Geo` / `Bytes` / vector | anything other than matching variant | error |
+| `Geo` / `Geo3d` / `Bytes` / vector | anything other than matching variant | error |
 
 Coercion errors interact with the policy:
 

@@ -1,32 +1,116 @@
-//! Simple BKD Tree implementation for numeric range queries.
+//! BKD tree implementation for axis-aligned numeric range and visitor-driven
+//! spatial queries.
 //!
-//! This is a simplified version of Apache Lucene's BKD Tree data structure,
-//! optimized for 1-dimensional numeric range filtering.
+//! Modeled on Apache Lucene's BKD-tree, the on-disk layout described on
+//! [`BKD_VERSION`] stores per-node and per-leaf axis-aligned bounding boxes
+//! (AABBs) so the reader can prune subtrees with Inside / Outside / Crosses
+//! logic. The trait [`BKDTree`] exposes the low-level
+//! [`intersect`](BKDTree::intersect) primitive plus a default
+//! [`range_search`](BKDTree::range_search) wrapper.
 
+use super::aabb::AABB;
+use super::visitor::{CellRelation, IntersectVisitor, RangeQueryVisitor};
 use crate::error::Result;
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{Storage, StorageInput, StorageOutput};
-use std::cmp::Ordering;
 use std::io::SeekFrom;
 use std::sync::Arc;
 
 /// Trait for BKD Tree implementations (in-memory or disk-based).
+///
+/// Implementations expose two query primitives:
+///
+/// - [`BKDTree::intersect`] is the low-level Lucene-style traversal: the
+///   reader walks the tree once, calling the visitor's `compare` method on
+///   each subtree's AABB (Inside / Outside / Crosses) and either pruning,
+///   collecting, or descending accordingly. This is the building block for
+///   sphere queries, k-NN, and any custom shape that fits the visitor API.
+/// - [`BKDTree::range_search`] is the legacy axis-aligned range API. It is
+///   provided as a default method that builds a [`RangeQueryVisitor`] and
+///   delegates to `intersect`, so concrete `BKDTree` implementations only
+///   need to supply `intersect`.
 pub trait BKDTree: Send + Sync + std::fmt::Debug {
-    /// Perform a range search.
+    /// Walk the tree, dispatching subtree pruning decisions and per-point
+    /// candidates to `visitor`.
+    ///
+    /// Implementations are expected to honor the visitor's `compare` result
+    /// faithfully:
+    /// - `CellRelation::Outside` cells are skipped.
+    /// - `CellRelation::Inside` cells contribute every doc id beneath them
+    ///   via `visit_inside` (the visitor does not need the point bytes).
+    /// - `CellRelation::Crosses` leaves expose every (doc_id, point) pair
+    ///   via `visit` so the visitor can perform the final per-point check.
+    fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()>;
+
+    /// Axis-aligned range search returning the matching doc ids in sorted
+    /// and deduplicated order.
+    ///
+    /// `mins[d]` / `maxs[d]` may be `None` to leave a dimension unbounded.
+    /// `include_min` / `include_max` control whether the boundary itself
+    /// matches.
+    ///
+    /// The default implementation builds a [`RangeQueryVisitor`] and
+    /// delegates to [`BKDTree::intersect`].
     fn range_search(
         &self,
         mins: &[Option<f64>],
         maxs: &[Option<f64>],
         include_min: bool,
         include_max: bool,
-    ) -> Result<Vec<u64>>;
+    ) -> Result<Vec<u64>> {
+        let mut visitor = RangeQueryVisitor::new(mins, maxs, include_min, include_max);
+        self.intersect(&mut visitor)?;
+        let mut hits = visitor.into_hits();
+        hits.sort_unstable();
+        hits.dedup();
+        Ok(hits)
+    }
 }
 
-/// Magic number for BKD Tree files "BKDT"
+/// Magic number for BKD Tree files: ASCII "BKDT" in little-endian.
 pub const BKD_MAGIC: u32 = 0x54444B42;
 
-/// Version 1
-pub const BKD_VERSION: u32 = 1;
+/// Current on-disk format version.
+///
+/// Version 2 (this revision): every internal index node and every leaf block
+/// carries its own axis-aligned bounding box (AABB) so the reader can prune
+/// subtrees with Inside/Outside/Crosses logic. The previous version 1 layout
+/// (no per-node AABB) is no longer supported — laurus is pre-release, so the
+/// format is broken intentionally rather than dual-supported.
+///
+/// File layout (all integers little-endian):
+///
+/// ```text
+/// Header (fixed-prefix + 2 * num_dims * 8 bytes):
+///   magic               u32
+///   version             u32
+///   num_dims            u32
+///   bytes_per_dim       u32   (always 8 today: f64)
+///   total_point_count   u64
+///   num_blocks          u64
+///   global_min          [f64; num_dims]
+///   global_max          [f64; num_dims]
+///   index_start_offset  u64
+///   root_node_offset    u64
+///
+/// Leaf Block:
+///   count               u32
+///   leaf_min            [f64; num_dims]
+///   leaf_max            [f64; num_dims]
+///   point_values        [f64; count * num_dims]   (row-major)
+///   doc_ids             [u64; count]
+///
+/// Internal Index Node (size = 28 + 32 * num_dims bytes):
+///   split_dim           u32
+///   split_value         f64
+///   left_min            [f64; num_dims]
+///   left_max            [f64; num_dims]
+///   right_min           [f64; num_dims]
+///   right_max           [f64; num_dims]
+///   left_offset         u64
+///   right_offset        u64
+/// ```
+pub const BKD_VERSION: u32 = 2;
 
 /// BKD Tree File Header
 #[derive(Debug, Clone)]
@@ -54,16 +138,104 @@ pub struct BKDWriter<W: StorageOutput> {
     index_nodes: Vec<IndexNode>,
 }
 
-/// Internal index node for navigation
+/// Internal index node for navigation.
+///
+/// Each node remembers the axis-aligned bounding box (`*_min`/`*_max`) of the
+/// two child subtrees in addition to the split dimension and value, enabling
+/// readers to prune entire subtrees when their AABB lies fully inside or
+/// outside the query region.
 #[derive(Debug, Clone)]
 struct IndexNode {
     split_dim: u32,
     split_value: f64,
+    left_min: Vec<f64>,
+    left_max: Vec<f64>,
+    right_min: Vec<f64>,
+    right_max: Vec<f64>,
     left_offset: u64,
     right_offset: u64,
     // Helper to back-patch offsets during writing
     left_child_idx: Option<usize>,
     right_child_idx: Option<usize>,
+}
+
+/// Information returned by `BKDWriter::build_subtree` so the caller can fold
+/// per-child AABBs into the parent index node.
+struct SubtreeInfo {
+    /// `Some(idx)` when the subtree is rooted at the internal node at index
+    /// `idx` in `index_nodes`; `None` when the subtree is a single leaf
+    /// (whose file offset was captured by the caller before recursion).
+    node_idx: Option<usize>,
+    /// Per-dimension minimum coordinates of all points in this subtree.
+    min: Vec<f64>,
+    /// Per-dimension maximum coordinates of all points in this subtree.
+    max: Vec<f64>,
+}
+
+/// Borrowed view over the caller's flat point/doc_id buffers used during
+/// recursive subtree construction. Holding only references avoids deep-copying
+/// the input data while the builder permutes its private index array.
+struct BuildContext<'a> {
+    points: &'a [f64],
+    doc_ids: &'a [u64],
+    num_dims: usize,
+}
+
+impl BuildContext<'_> {
+    /// Return the d-th coordinate of the point at slot `i` in the original
+    /// (unpermuted) buffer.
+    #[inline]
+    fn value(&self, i: u32, d: usize) -> f64 {
+        self.points[i as usize * self.num_dims + d]
+    }
+}
+
+/// Compute the per-dimension axis-aligned bounding box that encloses every
+/// point referenced by `indices` in the underlying buffer.
+///
+/// The returned `(min, max)` Vecs have length `ctx.num_dims`. Callers must
+/// pass a non-empty `indices` slice; an empty slice would leave the bounds at
+/// their `INFINITY` / `NEG_INFINITY` sentinels and propagate degenerate
+/// AABBs into the index, so the caller is responsible for the precondition.
+fn compute_aabb(ctx: &BuildContext<'_>, indices: &[u32]) -> (Vec<f64>, Vec<f64>) {
+    let mut min = vec![f64::INFINITY; ctx.num_dims];
+    let mut max = vec![f64::NEG_INFINITY; ctx.num_dims];
+    for &i in indices {
+        let base = i as usize * ctx.num_dims;
+        for d in 0..ctx.num_dims {
+            let v = ctx.points[base + d];
+            if v < min[d] {
+                min[d] = v;
+            }
+            if v > max[d] {
+                max[d] = v;
+            }
+        }
+    }
+    (min, max)
+}
+
+/// Pick the dimension whose `(max - min)` range is the widest.
+///
+/// Ties are broken by lower dimension index (stable, deterministic). The
+/// caller must pass equal-length `min` / `max` slices of at least one
+/// element — empty AABBs have no defined "widest axis".
+///
+/// Returning `u32` matches the on-disk `split_dim` encoding so the caller
+/// can drop the result straight into an `IndexNode`.
+fn widest_axis(min: &[f64], max: &[f64]) -> u32 {
+    debug_assert_eq!(min.len(), max.len());
+    debug_assert!(!min.is_empty());
+    let mut best = 0usize;
+    let mut best_range = max[0] - min[0];
+    for d in 1..min.len() {
+        let r = max[d] - min[d];
+        if r > best_range {
+            best = d;
+            best_range = r;
+        }
+    }
+    best as u32
 }
 
 impl<W: StorageOutput> BKDWriter<W> {
@@ -85,23 +257,82 @@ impl<W: StorageOutput> BKDWriter<W> {
         self
     }
 
-    /// Write a BKD tree from entries.
-    pub fn write(&mut self, entries: &[(Vec<f64>, u64)]) -> Result<()> {
-        if entries.is_empty() {
+    /// Write a BKD tree from flat point/doc_id buffers.
+    ///
+    /// The `points` buffer is laid out as a row-major matrix of
+    /// `doc_ids.len()` rows by `num_dims` columns: the d-th coordinate of the
+    /// i-th point lives at `points[i * num_dims + d]`. `points.len()` must
+    /// therefore equal `doc_ids.len() * num_dims`.
+    ///
+    /// Internally the builder sorts an index permutation rather than the
+    /// point/doc_id buffers themselves, so no per-point heap allocation is
+    /// performed regardless of point count.
+    ///
+    /// # Numeric robustness
+    ///
+    /// Coordinates must be totally orderable. `NaN` is rejected at write
+    /// time with `LaurusError::index` because it has no defined ordering and
+    /// would otherwise corrupt the BKD's split decisions and per-node AABB
+    /// containment invariants. `f64::INFINITY` and `f64::NEG_INFINITY` are
+    /// both accepted: they sort consistently against every finite value
+    /// (`NEG_INFINITY < x < INFINITY`) and act as natural sentinels for
+    /// "unbounded" semantics in queries (compare with [`AABB::unbounded`]).
+    ///
+    /// # Arguments
+    /// - `points`: flat row-major buffer of f64 coordinates.
+    /// - `doc_ids`: parallel buffer of document ids.
+    ///
+    /// # Returns
+    /// `Ok(())` on success, otherwise a `LaurusError::index` describing the
+    /// dimensional mismatch, the NaN position, or an underlying I/O error.
+    pub fn write(&mut self, points: &[f64], doc_ids: &[u64]) -> Result<()> {
+        let num_dims = self.num_dims as usize;
+        let expected = doc_ids.len().checked_mul(num_dims).ok_or_else(|| {
+            crate::error::LaurusError::index(
+                "Point count overflows when multiplied by num_dims".to_string(),
+            )
+        })?;
+        if points.len() != expected {
+            return Err(crate::error::LaurusError::index(format!(
+                "Point buffer size mismatch: expected {} doc_ids * {} dims = {} f64s, got {}",
+                doc_ids.len(),
+                num_dims,
+                expected,
+                points.len()
+            )));
+        }
+
+        if doc_ids.is_empty() {
             // Write basic header for empty tree
             self.write_header(0, 0, 0)?;
             return Ok(());
         }
 
-        // Calculate global min/max
-        for (vals, _) in entries {
-            for (i, &val) in vals.iter().enumerate() {
-                self.min_values[i] = self.min_values[i].min(val);
-                self.max_values[i] = self.max_values[i].max(val);
+        // Reject any NaN coordinate up-front. NaN's `partial_cmp` is `None`,
+        // so silently allowing it would corrupt sort order and AABB
+        // containment in subtle, query-dependent ways.
+        for (offset, &v) in points.iter().enumerate() {
+            if v.is_nan() {
+                let doc_idx = offset / num_dims;
+                let dim = offset % num_dims;
+                return Err(crate::error::LaurusError::index(format!(
+                    "Point at doc index {doc_idx} dim {dim} is NaN; BKD requires \
+                     totally-ordered values (NaN has no defined ordering)"
+                )));
             }
         }
 
-        let total_count = entries.len() as u64;
+        // Calculate global min/max
+        for i in 0..doc_ids.len() {
+            let base = i * num_dims;
+            for d in 0..num_dims {
+                let v = points[base + d];
+                self.min_values[d] = self.min_values[d].min(v);
+                self.max_values[d] = self.max_values[d].max(v);
+            }
+        }
+
+        let total_count = doc_ids.len() as u64;
 
         // Reserve space for header:
         // Magic(4) + Version(4) + num_dims(4) + bytes_per_dim(4) + total_count(8) + num_blocks(8)
@@ -111,21 +342,26 @@ impl<W: StorageOutput> BKDWriter<W> {
         self.writer.write_u32(0)?; // Placeholder
         self.writer.seek(SeekFrom::Start(header_size))?;
 
-        // Recursively build tree and write leaf blocks
-        let mut mutable_entries = entries.to_vec();
-        let root_node_idx = self.build_subtree(&mut mutable_entries, 0)?;
+        // Sort an index permutation instead of the data: this keeps the
+        // point/doc_id buffers immutable and avoids per-point allocations.
+        let mut indices: Vec<u32> = (0..doc_ids.len() as u32).collect();
+        let ctx = BuildContext {
+            points,
+            doc_ids,
+            num_dims,
+        };
+        let root_info = self.build_subtree(&ctx, &mut indices)?;
 
         // Write index section after all leaves
         let index_start_offset = self.writer.stream_position()?;
         self.write_index()?;
 
-        // Root node size calculation needs to be updated.
-        // Node: split_dim(4) + split_value(8) + left_offset(8) + right_offset(8) = 28 bytes
-        let node_size = 4 + 8 + 8 + 8;
-
-        let root_node_offset = if let Some(idx) = root_node_idx {
+        let node_size = Self::node_size(self.num_dims);
+        let root_node_offset = if let Some(idx) = root_info.node_idx {
             index_start_offset + (idx as u64) * node_size
         } else {
+            // Single-leaf tree: the leaf was written immediately after the
+            // header, so the "root" address is just past the header bytes.
             header_size
         };
 
@@ -157,53 +393,93 @@ impl<W: StorageOutput> BKDWriter<W> {
         Ok(())
     }
 
-    /// Recursively build subtree, write leaves, and return index node index
+    /// Returns the on-disk byte size of one internal index node.
+    ///
+    /// Each dimension contributes 32 bytes (left_min, left_max, right_min,
+    /// right_max — four f64 values per dimension) on top of the fixed 28-byte
+    /// split / offset header, matching the layout documented on
+    /// [`BKD_VERSION`].
+    #[inline]
+    fn node_size(num_dims: u32) -> u64 {
+        28 + 32 * num_dims as u64
+    }
+
+    /// Recursively build a subtree, writing leaves on the fly and recording
+    /// internal nodes in `self.index_nodes` for back-patching. The slice
+    /// `indices` is a permutation of point ids that this call owns and is
+    /// allowed to reorder; recursion proceeds on the two halves of the
+    /// permutation around the split position.
+    ///
+    /// The AABB of the points covered by `indices` is computed up-front and
+    /// reused for two purposes: a leaf call writes it as `leaf_min`/`leaf_max`,
+    /// and an internal call uses it both to pick the widest axis as the split
+    /// dimension and to populate its own [`SubtreeInfo`] without unioning the
+    /// children afterwards.
     fn build_subtree(
         &mut self,
-        entries: &mut [(Vec<f64>, u64)],
-        depth: u32,
-    ) -> Result<Option<usize>> {
-        if entries.is_empty() {
-            return Ok(None);
+        ctx: &BuildContext<'_>,
+        indices: &mut [u32],
+    ) -> Result<SubtreeInfo> {
+        if indices.is_empty() {
+            // The recursion only descends into non-empty halves (we only split
+            // when len > block_size, where the smaller half has at least one
+            // element), so reaching this branch indicates a programmer error.
+            return Err(crate::error::LaurusError::index(
+                "build_subtree called with empty indices".to_string(),
+            ));
         }
 
-        if entries.len() <= self.block_size {
-            // Write leaf block
-            self.write_leaf_block(entries)?;
+        let (subtree_min, subtree_max) = compute_aabb(ctx, indices);
+
+        if indices.len() <= self.block_size {
+            self.write_leaf_block(ctx, indices, &subtree_min, &subtree_max)?;
             self.num_blocks += 1;
-            return Ok(None);
+            return Ok(SubtreeInfo {
+                node_idx: None,
+                min: subtree_min,
+                max: subtree_max,
+            });
         }
 
-        // Split dimension: round robin
-        let split_dim = depth % self.num_dims;
+        // Split on the axis with the widest range, mirroring Lucene BKD.
+        // For uniformly distributed data this collapses to the previous
+        // round-robin (`depth % num_dims`) pattern, but for skewed data
+        // (e.g. lat/lon paired with a tiny altitude) it concentrates splits
+        // on the axis where they actually shrink the search box.
+        let split_dim = widest_axis(&subtree_min, &subtree_max);
+        let split_dim_us = split_dim as usize;
 
-        // Sort by split dimension to find median
-        entries.sort_by(|a, b| {
-            a.0[split_dim as usize]
-                .partial_cmp(&b.0[split_dim as usize])
-                .unwrap_or(Ordering::Equal)
+        // Sort the permutation by the split dimension to find the median.
+        // The underlying point/doc_id buffers stay immutable; only `indices`
+        // is reordered. `total_cmp` is safe here because `BKDWriter::write`
+        // has already rejected NaN coordinates, so every f64 in `ctx.points`
+        // is totally ordered.
+        indices.sort_by(|&a, &b| {
+            ctx.value(a, split_dim_us)
+                .total_cmp(&ctx.value(b, split_dim_us))
         });
 
-        // Recurse - we write leaves in post-order or similar?
-        // Actually, to know offsets, we write leaves as we go.
-        // But for the index, we need offsets of children.
-        // If child is a leaf, offset is the leaf block offset.
-        // If child is a node, offset is the node offset (which is written later).
-        // This suggests we should write all leaves first, or handle offsets carefully.
+        // Internal nodes are written AFTER all leaves; we track tree structure
+        // in `index_nodes` here and back-patch offsets in `write_index`.
+        let mid = indices.len() / 2;
+        let (left_indices, right_indices) = indices.split_at_mut(mid);
+        let split_value = ctx.value(right_indices[0], split_dim_us);
 
-        // Simpler approach for 1D:
-        // Internal nodes are written AFTER all leaves.
-        // We track the tree structure in memory (IndexNode vec) and then flatten it.
-
-        let mid = entries.len() / 2;
-        let (left_entries, right_entries) = entries.split_at_mut(mid);
-        let split_value = right_entries[0].0[split_dim as usize];
-
-        // Record current node
+        // Reserve a slot for this internal node now so the index_nodes vector
+        // is stable across recursive calls. AABB / offset / child fields are
+        // back-patched once both children have been built. The AABB Vec
+        // placeholders use `Vec::new()` (a const, no-alloc constructor)
+        // because they are immediately overwritten by moves from the
+        // children's `SubtreeInfo` once recursion returns — preallocating
+        // capacity here would just be discarded.
         let node_idx = self.index_nodes.len();
         self.index_nodes.push(IndexNode {
             split_dim,
             split_value,
+            left_min: Vec::new(),
+            left_max: Vec::new(),
+            right_min: Vec::new(),
+            right_max: Vec::new(),
             left_offset: 0,
             right_offset: 0,
             left_child_idx: None,
@@ -211,42 +487,66 @@ impl<W: StorageOutput> BKDWriter<W> {
         });
 
         let left_file_pos_before = self.writer.stream_position()?;
-        let left_child_node_idx = self.build_subtree(left_entries, depth + 1)?;
-        let left_is_leaf = left_child_node_idx.is_none();
+        let left_info = self.build_subtree(ctx, left_indices)?;
+        let left_is_leaf = left_info.node_idx.is_none();
 
         let right_file_pos_before = self.writer.stream_position()?;
-        let right_child_node_idx = self.build_subtree(right_entries, depth + 1)?;
-        let right_is_leaf = right_child_node_idx.is_none();
+        let right_info = self.build_subtree(ctx, right_indices)?;
+        let right_is_leaf = right_info.node_idx.is_none();
 
-        // Update current node
-        self.index_nodes[node_idx].left_child_idx = left_child_node_idx;
-        self.index_nodes[node_idx].right_child_idx = right_child_node_idx;
-
-        // Store the file offsets for leaves immediately
+        // Update the previously reserved node slot. The parent's AABB was
+        // computed up-front so we no longer need to union the child AABBs.
+        let node = &mut self.index_nodes[node_idx];
+        node.left_child_idx = left_info.node_idx;
+        node.right_child_idx = right_info.node_idx;
+        node.left_min = left_info.min;
+        node.left_max = left_info.max;
+        node.right_min = right_info.min;
+        node.right_max = right_info.max;
         if left_is_leaf {
-            self.index_nodes[node_idx].left_offset = left_file_pos_before;
+            node.left_offset = left_file_pos_before;
         }
         if right_is_leaf {
-            self.index_nodes[node_idx].right_offset = right_file_pos_before;
+            node.right_offset = right_file_pos_before;
         }
 
-        Ok(Some(node_idx))
+        Ok(SubtreeInfo {
+            node_idx: Some(node_idx),
+            min: subtree_min,
+            max: subtree_max,
+        })
     }
 
-    fn write_leaf_block(&mut self, entries: &[(Vec<f64>, u64)]) -> Result<()> {
-        let count = entries.len() as u32;
+    fn write_leaf_block(
+        &mut self,
+        ctx: &BuildContext<'_>,
+        indices: &[u32],
+        leaf_min: &[f64],
+        leaf_max: &[f64],
+    ) -> Result<()> {
+        let count = indices.len() as u32;
         self.writer.write_u32(count)?;
 
-        // Write values for all dimensions
-        for (vals, _) in entries {
-            for &val in vals {
-                self.writer.write_f64(val)?;
+        // Per-leaf AABB, used by the reader for subtree pruning starting
+        // from #292.
+        for &v in leaf_min {
+            self.writer.write_f64(v)?;
+        }
+        for &v in leaf_max {
+            self.writer.write_f64(v)?;
+        }
+
+        // Write values for all dimensions, gathered through the permutation.
+        for &i in indices {
+            let base = i as usize * ctx.num_dims;
+            for d in 0..ctx.num_dims {
+                self.writer.write_f64(ctx.points[base + d])?;
             }
         }
 
-        // Write doc ids
-        for (_, doc_id) in entries {
-            self.writer.write_u64(*doc_id)?;
+        // Write doc ids in the same order
+        for &i in indices {
+            self.writer.write_u64(ctx.doc_ids[i as usize])?;
         }
 
         Ok(())
@@ -254,7 +554,7 @@ impl<W: StorageOutput> BKDWriter<W> {
 
     fn write_index(&mut self) -> Result<()> {
         let start_pos = self.writer.stream_position()?;
-        let node_size = 4 + 8 + 8 + 8; // split_dim + split_value + left + right = 28 bytes
+        let node_size = Self::node_size(self.num_dims);
 
         for i in 0..self.index_nodes.len() {
             let left_idx = self.index_nodes[i].left_child_idx;
@@ -268,10 +568,22 @@ impl<W: StorageOutput> BKDWriter<W> {
             }
         }
 
-        // Write nodes
+        // Write nodes in the layout documented on `BKD_VERSION`.
         for node in &self.index_nodes {
             self.writer.write_u32(node.split_dim)?;
             self.writer.write_f64(node.split_value)?;
+            for &v in &node.left_min {
+                self.writer.write_f64(v)?;
+            }
+            for &v in &node.left_max {
+                self.writer.write_f64(v)?;
+            }
+            for &v in &node.right_min {
+                self.writer.write_f64(v)?;
+            }
+            for &v in &node.right_max {
+                self.writer.write_f64(v)?;
+            }
             self.writer.write_u64(node.left_offset)?;
             self.writer.write_u64(node.right_offset)?;
         }
@@ -294,6 +606,17 @@ pub struct BKDReader {
 }
 
 impl BKDReader {
+    /// Borrow the file header parsed at `open` time.
+    ///
+    /// Useful for callers that need to inspect the dimensionality, point
+    /// count, or global AABB of an existing tree without performing a
+    /// query (e.g. integration tests, schema introspection tooling).
+    pub fn header(&self) -> &BKDFileHeader {
+        &self.header
+    }
+}
+
+impl BKDReader {
     /// Open a BKD tree from storage and path.
     pub fn open(storage: Arc<dyn Storage>, path: &str) -> Result<Self> {
         let input = storage.open_input(path)?;
@@ -309,6 +632,13 @@ impl BKDReader {
         }
 
         let version = reader.read_u32()?;
+        if version != BKD_VERSION {
+            return Err(crate::error::LaurusError::storage(format!(
+                "Unsupported BKD version: {} (expected {}). Pre-release format \
+                 changes do not support older revisions; rebuild the index.",
+                version, BKD_VERSION
+            )));
+        }
         let num_dims = reader.read_u32()?;
         let bytes_per_dim = reader.read_u32()?;
         let total_point_count = reader.read_u64()?;
@@ -344,252 +674,205 @@ impl BKDReader {
         })
     }
 
-    fn visit_node<R: StorageInput>(
+    /// Read `num_dims` `f64` values for `min` followed by `num_dims` for
+    /// `max`, returning the constructed AABB.
+    fn read_child_aabb<R: StorageInput>(
+        reader: &mut StructReader<R>,
+        num_dims: usize,
+    ) -> Result<AABB> {
+        let mut min = Vec::with_capacity(num_dims);
+        for _ in 0..num_dims {
+            min.push(reader.read_f64()?);
+        }
+        let mut max = Vec::with_capacity(num_dims);
+        for _ in 0..num_dims {
+            max.push(reader.read_f64()?);
+        }
+        AABB::new(min, max)
+    }
+
+    /// Walk the subtree rooted at `offset`, dispatching pruning decisions
+    /// to `visitor`. Internal nodes consult `visitor.compare` on each
+    /// child's AABB; leaves either short-circuit (Outside / Inside) or
+    /// stream every (doc_id, point) candidate through `visitor.visit`.
+    ///
+    /// The `scratch` buffer is reused across every leaf visited in this
+    /// query, so steady-state queries on similarly-sized leaves run
+    /// allocation-free after the first `Crosses` leaf.
+    fn intersect_subtree<R: StorageInput>(
         &self,
         reader: &mut StructReader<R>,
         offset: u64,
-        ctx: &QueryContext,
-        collector: &mut Vec<u64>,
+        visitor: &mut dyn IntersectVisitor,
+        scratch: &mut IntersectScratch,
     ) -> Result<()> {
         if offset < self.header.index_start_offset {
-            return self.visit_leaf_block(reader, offset, ctx, collector);
+            return self.intersect_leaf(reader, offset, visitor, scratch);
         }
-
+        let num_dims = self.header.num_dims as usize;
         reader.seek(SeekFrom::Start(offset))?;
-        let split_dim = reader.read_u32()? as usize;
-        let split_value = reader.read_f64()?;
+        let _split_dim = reader.read_u32()?;
+        let _split_value = reader.read_f64()?;
+        let left_aabb = Self::read_child_aabb(reader, num_dims)?;
+        let right_aabb = Self::read_child_aabb(reader, num_dims)?;
         let left_offset = reader.read_u64()?;
         let right_offset = reader.read_u64()?;
 
-        // Validate split_dim against number of dimensions
-        if split_dim >= self.header.num_dims as usize {
-            return Err(crate::error::LaurusError::index(format!(
-                "Invalid split dimension {} (num_dims={})",
-                split_dim, self.header.num_dims
-            )));
-        }
-
-        // Logic check for split dimension
-        let min = ctx.mins[split_dim];
-        let max = ctx.maxs[split_dim];
-
-        let go_left = min.is_none_or(|m| {
-            if ctx.include_min {
-                m <= split_value
-            } else {
-                m < split_value
+        match visitor.compare(&left_aabb) {
+            CellRelation::Outside => {}
+            CellRelation::Inside => self.collect_subtree(reader, left_offset, visitor)?,
+            CellRelation::Crosses => {
+                self.intersect_subtree(reader, left_offset, visitor, scratch)?
             }
-        });
-
-        if go_left {
-            self.visit_node(reader, left_offset, ctx, collector)?;
         }
-
-        let go_right = max.is_none_or(|m| {
-            if ctx.include_max {
-                m >= split_value
-            } else {
-                m > split_value
+        match visitor.compare(&right_aabb) {
+            CellRelation::Outside => {}
+            CellRelation::Inside => self.collect_subtree(reader, right_offset, visitor)?,
+            CellRelation::Crosses => {
+                self.intersect_subtree(reader, right_offset, visitor, scratch)?
             }
-        });
-
-        if go_right {
-            self.visit_node(reader, right_offset, ctx, collector)?;
         }
-
         Ok(())
     }
 
-    fn visit_leaf_block<R: StorageInput>(
+    /// Walk a leaf at `offset`, classifying it via `visitor.compare` on the
+    /// stored leaf AABB and dispatching points accordingly.
+    ///
+    /// On `Crosses`, leaf points are read into the caller-supplied
+    /// `scratch.points` buffer (grown only on the first leaf large enough
+    /// to need it). The earlier implementation freshly allocated
+    /// `count * num_dims` f64s per leaf; this version performs at most
+    /// one growth per query.
+    fn intersect_leaf<R: StorageInput>(
         &self,
         reader: &mut StructReader<R>,
         offset: u64,
-        ctx: &QueryContext,
-        collector: &mut Vec<u64>,
+        visitor: &mut dyn IntersectVisitor,
+        scratch: &mut IntersectScratch,
     ) -> Result<()> {
         reader.seek(SeekFrom::Start(offset))?;
-        let count = reader.read_u32()?;
+        let count = reader.read_u32()? as usize;
+        let num_dims = self.header.num_dims as usize;
+        let leaf_aabb = Self::read_child_aabb(reader, num_dims)?;
 
-        let mut points = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            let mut vals = Vec::with_capacity(self.header.num_dims as usize);
-            for _ in 0..self.header.num_dims {
-                vals.push(reader.read_f64()?);
-            }
-            points.push(vals);
-        }
-
-        let mut doc_ids = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            doc_ids.push(reader.read_u64()?);
-        }
-
-        for (vals, doc_id) in points.iter().zip(doc_ids.iter()) {
-            let mut matches = true;
-            for (i, &val) in vals.iter().enumerate() {
-                let gte_min =
-                    ctx.mins[i].is_none_or(|m| if ctx.include_min { val >= m } else { val > m });
-                let lte_max =
-                    ctx.maxs[i].is_none_or(|m| if ctx.include_max { val <= m } else { val < m });
-                if !gte_min || !lte_max {
-                    matches = false;
-                    break;
+        match visitor.compare(&leaf_aabb) {
+            CellRelation::Outside => Ok(()),
+            CellRelation::Inside => {
+                // Skip the point bytes; we only need the doc ids.
+                let point_bytes = (count as u64) * (num_dims as u64) * 8;
+                reader.seek(SeekFrom::Current(point_bytes as i64))?;
+                for _ in 0..count {
+                    let doc_id = reader.read_u64()?;
+                    visitor.visit_inside(doc_id);
                 }
+                Ok(())
             }
-            if matches {
-                collector.push(*doc_id);
+            CellRelation::Crosses => {
+                let needed = count * num_dims;
+                let buf = scratch.point_slice(needed);
+                for slot in buf.iter_mut() {
+                    *slot = reader.read_f64()?;
+                }
+                for i in 0..count {
+                    let doc_id = reader.read_u64()?;
+                    let point = &buf[i * num_dims..(i + 1) * num_dims];
+                    visitor.visit(doc_id, point);
+                }
+                Ok(())
             }
+        }
+    }
+
+    /// Walk a subtree whose root the caller has already classified as
+    /// `Inside`. No `compare` calls are made — every doc is reported via
+    /// `visit_inside` and the leaf point bytes are skipped entirely.
+    fn collect_subtree<R: StorageInput>(
+        &self,
+        reader: &mut StructReader<R>,
+        offset: u64,
+        visitor: &mut dyn IntersectVisitor,
+    ) -> Result<()> {
+        if offset < self.header.index_start_offset {
+            return self.collect_leaf(reader, offset, visitor);
+        }
+        let num_dims = self.header.num_dims as usize;
+        reader.seek(SeekFrom::Start(offset))?;
+        let _split_dim = reader.read_u32()?;
+        let _split_value = reader.read_f64()?;
+        // Skip both child AABBs.
+        let aabb_bytes = (num_dims as u64) * 16 * 2;
+        reader.seek(SeekFrom::Current(aabb_bytes as i64))?;
+        let left_offset = reader.read_u64()?;
+        let right_offset = reader.read_u64()?;
+        self.collect_subtree(reader, left_offset, visitor)?;
+        self.collect_subtree(reader, right_offset, visitor)?;
+        Ok(())
+    }
+
+    /// Walk a leaf whose enclosing cell has already been classified as
+    /// `Inside`. The leaf AABB and point bytes are skipped; only doc ids
+    /// are read and reported via `visit_inside`.
+    fn collect_leaf<R: StorageInput>(
+        &self,
+        reader: &mut StructReader<R>,
+        offset: u64,
+        visitor: &mut dyn IntersectVisitor,
+    ) -> Result<()> {
+        reader.seek(SeekFrom::Start(offset))?;
+        let count = reader.read_u32()? as usize;
+        let num_dims = self.header.num_dims as usize;
+        // Skip leaf AABB (min + max) and all point bytes.
+        let skip_bytes = (num_dims as u64) * 16 + (count as u64) * (num_dims as u64) * 8;
+        reader.seek(SeekFrom::Current(skip_bytes as i64))?;
+        for _ in 0..count {
+            let doc_id = reader.read_u64()?;
+            visitor.visit_inside(doc_id);
         }
         Ok(())
     }
 }
 
-struct QueryContext<'a> {
-    mins: &'a [Option<f64>],
-    maxs: &'a [Option<f64>],
-    include_min: bool,
-    include_max: bool,
+/// Per-query scratch buffer reused across every leaf visited by
+/// [`BKDReader::intersect`]. Holding the buffer outside the recursion lets
+/// `Crosses` leaves reuse the same allocation instead of allocating a fresh
+/// `Vec<f64>` of `count * num_dims` floats per leaf.
+struct IntersectScratch {
+    /// Backing storage for leaf point bytes. Grown on demand to the largest
+    /// leaf encountered, never shrunk during one query.
+    points: Vec<f64>,
+}
+
+impl IntersectScratch {
+    fn new() -> Self {
+        IntersectScratch { points: Vec::new() }
+    }
+
+    /// Return a mutable slice with at least `len` elements, growing the
+    /// backing buffer with `Vec::resize` if needed. Returned slice always
+    /// has exactly `len` elements.
+    fn point_slice(&mut self, len: usize) -> &mut [f64] {
+        if self.points.len() < len {
+            self.points.resize(len, 0.0);
+        }
+        &mut self.points[..len]
+    }
 }
 
 impl BKDTree for BKDReader {
-    /// Perform a range search.
-    fn range_search(
-        &self,
-        mins: &[Option<f64>],
-        maxs: &[Option<f64>],
-        include_min: bool,
-        include_max: bool,
-    ) -> Result<Vec<u64>> {
+    fn intersect(&self, visitor: &mut dyn IntersectVisitor) -> Result<()> {
         if self.header.total_point_count == 0 {
-            return Ok(Vec::new());
+            return Ok(());
         }
-
-        let num_dims = self.header.num_dims as usize;
-        if mins.len() != num_dims || maxs.len() != num_dims {
-            return Err(crate::error::LaurusError::index(format!(
-                "Dimension mismatch: expected {} dims, got mins={} maxs={}",
-                num_dims,
-                mins.len(),
-                maxs.len()
-            )));
-        }
-
-        let mut doc_ids = Vec::new();
-        let root_offset = self.header.root_node_offset;
-
         let input = self.storage.open_input(&self.path)?;
         let mut reader = StructReader::new(input)?;
-
-        if root_offset < self.header.index_start_offset && self.header.total_point_count > 0 {
-            // Single leaf block case or root leaf
-            let ctx = QueryContext {
-                mins,
-                maxs,
-                include_min,
-                include_max,
-            };
-            self.visit_leaf_block(&mut reader, root_offset, &ctx, &mut doc_ids)?;
+        let root_offset = self.header.root_node_offset;
+        let mut scratch = IntersectScratch::new();
+        if root_offset < self.header.index_start_offset {
+            // Single-leaf tree: the root "address" is just past the header.
+            self.intersect_leaf(&mut reader, root_offset, visitor, &mut scratch)
         } else {
-            let ctx = QueryContext {
-                mins,
-                maxs,
-                include_min,
-                include_max,
-            };
-            self.visit_node(&mut reader, root_offset, &ctx, &mut doc_ids)?;
+            self.intersect_subtree(&mut reader, root_offset, visitor, &mut scratch)
         }
-
-        doc_ids.sort_unstable();
-        doc_ids.dedup();
-
-        Ok(doc_ids)
-    }
-}
-
-/// A simple BKD Tree for efficient range queries.
-#[derive(Debug, Clone)]
-pub struct SimpleBKDTree {
-    /// Sorted array of (points, doc_id) pairs.
-    entries: Vec<(Vec<f64>, u64)>,
-    num_dims: u32,
-    field_name: String,
-}
-
-impl BKDTree for SimpleBKDTree {
-    fn range_search(
-        &self,
-        mins: &[Option<f64>],
-        maxs: &[Option<f64>],
-        include_min: bool,
-        include_max: bool,
-    ) -> Result<Vec<u64>> {
-        let mut doc_ids = Vec::new();
-
-        for (vals, doc_id) in &self.entries {
-            let mut matches = true;
-            for i in 0..self.num_dims as usize {
-                let val = vals[i];
-                let gte_min = mins[i].is_none_or(|m| if include_min { val >= m } else { val > m });
-                let lte_max = maxs[i].is_none_or(|m| if include_max { val <= m } else { val < m });
-                if !gte_min || !lte_max {
-                    matches = false;
-                    break;
-                }
-            }
-            if matches {
-                doc_ids.push(*doc_id);
-            }
-        }
-
-        doc_ids.sort_unstable();
-        doc_ids.dedup();
-        Ok(doc_ids)
-    }
-}
-
-impl SimpleBKDTree {
-    /// Create a new BKD Tree from unsorted (points, doc_id) pairs.
-    pub fn new(field_name: String, num_dims: u32, mut entries: Vec<(Vec<f64>, u64)>) -> Self {
-        // Simple sorting by first dimension for consistent ordering
-        entries.sort_by(|a, b| {
-            if a.0.is_empty() || b.0.is_empty() {
-                std::cmp::Ordering::Equal
-            } else {
-                a.0[0]
-                    .partial_cmp(&b.0[0])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            }
-        });
-
-        SimpleBKDTree {
-            entries,
-            num_dims,
-            field_name,
-        }
-    }
-
-    /// Create an empty BKD Tree.
-    pub fn empty(field_name: String, num_dims: u32) -> Self {
-        SimpleBKDTree {
-            entries: Vec::new(),
-            num_dims,
-            field_name,
-        }
-    }
-
-    /// Get the field name this tree is built for.
-    pub fn field_name(&self) -> &str {
-        &self.field_name
-    }
-
-    /// Get the number of entries in this tree.
-    pub fn size(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Check if the tree is empty.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 
@@ -600,32 +883,18 @@ mod tests {
     use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
     use std::sync::Arc;
 
-    fn create_test_tree() -> SimpleBKDTree {
-        let entries = vec![
-            (vec![1.0], 10), // doc 10, value 1.0
-            (vec![3.0], 20), // doc 20, value 3.0
-            (vec![2.0], 30), // doc 30, value 2.0
-            (vec![5.0], 40), // doc 40, value 5.0
-            (vec![4.0], 50), // doc 50, value 4.0
-            (vec![1.5], 60), // doc 60, value 1.5
-        ];
-        SimpleBKDTree::new("test_field".to_string(), 1, entries)
-    }
-
     #[test]
     fn test_bkd_writer_reader_2d() {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-        let entries = vec![
-            (vec![10.0, 20.0], 1),
-            (vec![15.0, 25.0], 2),
-            (vec![20.0, 30.0], 3),
-        ];
+        // Flat row-major buffer: [pt0_x, pt0_y, pt1_x, pt1_y, pt2_x, pt2_y]
+        let points: Vec<f64> = vec![10.0, 20.0, 15.0, 25.0, 20.0, 30.0];
+        let doc_ids: Vec<u64> = vec![1, 2, 3];
 
         // Write
         {
             let output = storage.create_output("test_2d.bkd").unwrap();
             let mut writer = BKDWriter::new(output, 2);
-            writer.write(&entries).unwrap();
+            writer.write(&points, &doc_ids).unwrap();
             writer.finish().unwrap();
         }
 
@@ -648,49 +917,616 @@ mod tests {
     }
 
     #[test]
-    fn test_bkd_tree_creation() {
-        let tree = create_test_tree();
+    fn test_bkd_writer_empty() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let points: Vec<f64> = vec![];
+        let doc_ids: Vec<u64> = vec![];
 
-        assert_eq!(tree.size(), 6);
-        assert_eq!(tree.field_name(), "test_field");
-        assert!(!tree.is_empty());
+        {
+            let output = storage.create_output("empty.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 2);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
 
-        // Verify entries are sorted by value
-        let expected_order = vec![
-            (vec![1.0], 10),
-            (vec![1.5], 60),
-            (vec![2.0], 30),
-            (vec![3.0], 20),
-            (vec![4.0], 50),
-            (vec![5.0], 40),
-        ];
-        assert_eq!(tree.entries, expected_order);
+        let reader = BKDReader::open(storage.clone(), "empty.bkd").unwrap();
+        assert_eq!(reader.header.total_point_count, 0);
+        let results = reader
+            .range_search(&[None, None], &[None, None], true, true)
+            .unwrap();
+        assert!(results.is_empty());
     }
 
     #[test]
-    fn test_empty_tree() {
-        let tree = SimpleBKDTree::empty("empty_field".to_string(), 1);
+    fn test_bkd_writer_size_mismatch_rejected() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        // 2 doc_ids in 2D would require 4 f64s, but we pass 3.
+        let points: Vec<f64> = vec![1.0, 2.0, 3.0];
+        let doc_ids: Vec<u64> = vec![10, 20];
 
-        assert_eq!(tree.size(), 0);
-        assert!(tree.is_empty());
-        assert_eq!(
-            tree.range_search(&[Some(1.0)], &[Some(5.0)], true, true)
-                .unwrap(),
-            Vec::<u64>::new()
+        let output = storage.create_output("bad.bkd").unwrap();
+        let mut writer = BKDWriter::new(output, 2);
+        let err = writer.write(&points, &doc_ids).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("Point buffer size mismatch"),
+            "unexpected error: {err:?}"
         );
     }
 
     #[test]
-    fn test_range_search_exact_bounds() {
-        let tree = create_test_tree();
+    fn test_bkd_writer_reader_1d_multi_block() {
+        // Exercise the recursive build path with more points than the leaf
+        // block size so the index/leaf split is actually visited.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 2_000;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
 
-        // Range [2.0, 4.0] should match docs 30, 20, 50
-        let results = tree
-            .range_search(&[Some(2.0)], &[Some(4.0)], true, true)
+        {
+            let output = storage.create_output("range1d.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(128);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "range1d.bkd").unwrap();
+        let results = reader
+            .range_search(&[Some(100.0)], &[Some(200.0)], true, true)
             .unwrap();
-        let mut expected = vec![30, 20, 50]; // docs with values 2.0, 3.0, 4.0
-        expected.sort();
-
+        let expected: Vec<u64> = (100u64..=200u64).collect();
         assert_eq!(results, expected);
+    }
+
+    #[test]
+    fn test_bkd_writer_reader_3d_multi_block() {
+        // 3D round-trip with multiple leaf blocks: the new per-node /
+        // per-leaf AABB layout must round-trip without misaligning offsets.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 1_000;
+        let mut points: Vec<f64> = Vec::with_capacity(n * 3);
+        let mut doc_ids: Vec<u64> = Vec::with_capacity(n);
+        for i in 0..n {
+            let v = i as f64;
+            points.push(v);
+            points.push(v + 1000.0);
+            points.push(v + 2000.0);
+            doc_ids.push(i as u64);
+        }
+
+        {
+            let output = storage.create_output("range3d.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 3).with_block_size(64);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "range3d.bkd").unwrap();
+        assert_eq!(reader.header.num_dims, 3);
+        assert_eq!(reader.header.version, BKD_VERSION);
+
+        // Half-open bound on the first axis with an upper-only bound on the
+        // second axis to make sure visit_node consumes the AABB bytes
+        // correctly even with mixed bounded/unbounded dimensions.
+        let results = reader
+            .range_search(
+                &[Some(100.0), None, None],
+                &[Some(150.0), Some(1200.0), None],
+                true,
+                true,
+            )
+            .unwrap();
+        let expected: Vec<u64> = (100u64..=150u64)
+            .filter(|&i| (i as f64) + 1000.0 <= 1200.0)
+            .collect();
+        assert_eq!(results, expected);
+    }
+
+    #[test]
+    fn test_bkd_reader_rejects_version_mismatch() {
+        // Hand-craft a header that claims version 1 (the previous on-disk
+        // format) and confirm the reader refuses to open it.
+        use crate::storage::structured::StructWriter;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        {
+            let output = storage.create_output("v1.bkd").unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(BKD_MAGIC).unwrap();
+            writer.write_u32(1).unwrap(); // legacy version
+            writer.write_u32(2).unwrap(); // num_dims
+            writer.write_u32(8).unwrap(); // bytes_per_dim
+            writer.write_u64(0).unwrap(); // total_count
+            writer.write_u64(0).unwrap(); // num_blocks
+            writer.write_f64(0.0).unwrap(); // global_min[0]
+            writer.write_f64(0.0).unwrap(); // global_min[1]
+            writer.write_f64(0.0).unwrap(); // global_max[0]
+            writer.write_f64(0.0).unwrap(); // global_max[1]
+            writer.write_u64(0).unwrap(); // index_start
+            writer.write_u64(0).unwrap(); // root_offset
+            writer.close().unwrap();
+        }
+
+        let err = BKDReader::open(storage.clone(), "v1.bkd").unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("Unsupported BKD version"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    /// Visitor that segregates hits by which BKD code path produced them
+    /// (`visit_inside` vs `visit`), used to assert that `Inside` cells avoid
+    /// per-point filtering and `Crosses` leaves go through it.
+    struct TracingVisitor {
+        query: AABB,
+        inside_hits: Vec<u64>,
+        crosses_hits: Vec<u64>,
+    }
+
+    impl TracingVisitor {
+        fn new(query: AABB) -> Self {
+            Self {
+                query,
+                inside_hits: Vec::new(),
+                crosses_hits: Vec::new(),
+            }
+        }
+    }
+
+    impl IntersectVisitor for TracingVisitor {
+        fn compare(&self, cell: &AABB) -> CellRelation {
+            // Conservative compare: cell vs query (closed intervals).
+            let qmin = self.query.min();
+            let qmax = self.query.max();
+            let cmin = cell.min();
+            let cmax = cell.max();
+            for d in 0..cell.num_dims() {
+                if cmax[d] < qmin[d] || cmin[d] > qmax[d] {
+                    return CellRelation::Outside;
+                }
+            }
+            for d in 0..cell.num_dims() {
+                if cmin[d] < qmin[d] || cmax[d] > qmax[d] {
+                    return CellRelation::Crosses;
+                }
+            }
+            CellRelation::Inside
+        }
+        fn visit_inside(&mut self, doc_id: u64) {
+            self.inside_hits.push(doc_id);
+        }
+        fn visit(&mut self, doc_id: u64, point: &[f64]) {
+            if self.query.contains_point(point) {
+                self.crosses_hits.push(doc_id);
+            }
+        }
+    }
+
+    /// A wrapper that also records every `compare` outcome (including
+    /// `Outside`) by using a `Cell` for interior mutability.
+    struct RecordingVisitor {
+        query: AABB,
+        relations: std::cell::RefCell<Vec<CellRelation>>,
+        hits: Vec<u64>,
+    }
+
+    impl RecordingVisitor {
+        fn new(query: AABB) -> Self {
+            Self {
+                query,
+                relations: std::cell::RefCell::new(Vec::new()),
+                hits: Vec::new(),
+            }
+        }
+    }
+
+    impl IntersectVisitor for RecordingVisitor {
+        fn compare(&self, cell: &AABB) -> CellRelation {
+            let qmin = self.query.min();
+            let qmax = self.query.max();
+            let cmin = cell.min();
+            let cmax = cell.max();
+            let mut relation = CellRelation::Inside;
+            for d in 0..cell.num_dims() {
+                if cmax[d] < qmin[d] || cmin[d] > qmax[d] {
+                    relation = CellRelation::Outside;
+                    break;
+                }
+            }
+            if !matches!(relation, CellRelation::Outside) {
+                for d in 0..cell.num_dims() {
+                    if cmin[d] < qmin[d] || cmax[d] > qmax[d] {
+                        relation = CellRelation::Crosses;
+                        break;
+                    }
+                }
+            }
+            self.relations.borrow_mut().push(relation);
+            relation
+        }
+        fn visit_inside(&mut self, doc_id: u64) {
+            self.hits.push(doc_id);
+        }
+        fn visit(&mut self, doc_id: u64, point: &[f64]) {
+            // For Crosses cells, accept the point only if it actually lies
+            // inside the query.
+            if self.query.contains_point(point) {
+                self.hits.push(doc_id);
+            }
+        }
+    }
+
+    #[test]
+    fn widest_axis_picks_largest_range() {
+        // Free-function smoke test (doesn't go through the writer).
+        assert_eq!(widest_axis(&[0.0, 0.0], &[10.0, 100.0]), 1);
+        assert_eq!(widest_axis(&[0.0, 0.0], &[100.0, 10.0]), 0);
+        // Tie: lower-index dimension wins (deterministic).
+        assert_eq!(widest_axis(&[0.0, 0.0], &[5.0, 5.0]), 0);
+        // 3D, middle axis widest.
+        assert_eq!(widest_axis(&[0.0, 0.0, 0.0], &[1.0, 50.0, 10.0]), 1);
+    }
+
+    #[test]
+    fn build_subtree_root_split_is_widest_axis() {
+        // 2D dataset where dim 0 spans 0..n and dim 1 stays in [0, 1).
+        // The widest-axis policy must pick dim 0 for the root split,
+        // unlike the previous round-robin which would also pick dim 0
+        // at depth 0 by accident — so we confirm by also testing the
+        // mirrored dataset where dim 1 is widest.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 256;
+
+        // Wider on dim 0.
+        let mut points: Vec<f64> = Vec::with_capacity(n * 2);
+        let mut doc_ids: Vec<u64> = Vec::with_capacity(n);
+        for i in 0..n {
+            points.push(i as f64);
+            points.push(0.0); // narrow: every point shares the same dim 1
+            doc_ids.push(i as u64);
+        }
+        {
+            let output = storage.create_output("wide_dim0.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 2).with_block_size(32);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        // Mirrored: wider on dim 1.
+        points.clear();
+        doc_ids.clear();
+        for i in 0..n {
+            points.push(0.0);
+            points.push(i as f64);
+            doc_ids.push(i as u64);
+        }
+        {
+            let output = storage.create_output("wide_dim1.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 2).with_block_size(32);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        // Helper that reads the root index node's split_dim straight from
+        // disk — the root sits at `index_start_offset` because it is the
+        // first node pushed into `index_nodes`.
+        fn root_split_dim(storage: &Arc<MemoryStorage>, path: &str) -> u32 {
+            let reader = BKDReader::open(storage.clone(), path).unwrap();
+            let index_start = reader.header.index_start_offset;
+            let input = storage.open_input(path).unwrap();
+            let mut sr = StructReader::new(input).unwrap();
+            sr.seek(SeekFrom::Start(index_start)).unwrap();
+            sr.read_u32().unwrap()
+        }
+
+        assert_eq!(
+            root_split_dim(&storage, "wide_dim0.bkd"),
+            0,
+            "root should split on dim 0 when dim 0 is widest"
+        );
+        assert_eq!(
+            root_split_dim(&storage, "wide_dim1.bkd"),
+            1,
+            "root should split on dim 1 when dim 1 is widest"
+        );
+    }
+
+    #[test]
+    fn build_subtree_skewed_data_round_trip() {
+        // End-to-end correctness on a heavily skewed 3D dataset: dim 0
+        // spans [0, n), dim 1 spans [0, 1), dim 2 spans [0, 0.001).
+        // Widest-axis splitting must still produce a tree that returns
+        // exactly the expected doc ids for an axis-aligned query.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 1_000;
+        let mut points: Vec<f64> = Vec::with_capacity(n * 3);
+        let mut doc_ids: Vec<u64> = Vec::with_capacity(n);
+        for i in 0..n {
+            let v = i as f64;
+            points.push(v); // dim 0: wide
+            points.push(v / (n as f64)); // dim 1: narrow [0, 1)
+            points.push(v / (n as f64 * 1000.0)); // dim 2: very narrow
+            doc_ids.push(i as u64);
+        }
+        {
+            let output = storage.create_output("skewed.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 3).with_block_size(64);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "skewed.bkd").unwrap();
+        let results = reader
+            .range_search(
+                &[Some(100.0), None, None],
+                &[Some(200.0), None, None],
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(results, (100u64..=200u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn intersect_scratch_reuse_across_many_crosses_leaves() {
+        // Build a tree with many small leaves and run a query that crosses
+        // every leaf boundary, forcing the Crosses branch in intersect_leaf
+        // to be taken once per leaf. The shared `IntersectScratch.points`
+        // buffer must be reused without losing data across leaf reads.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 4_096;
+        let block_size: usize = 32; // → ~128 leaves
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("scratch.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(block_size);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "scratch.bkd").unwrap();
+
+        // Pick a query whose bounds (10.5 / (n - 10).5) sit *inside* leaf
+        // blocks rather than on their boundaries, guaranteeing many leaves
+        // hit the Crosses branch.
+        let lower = 10.5;
+        let upper = (n - 10) as f64 + 0.5;
+        let results = reader
+            .range_search(&[Some(lower)], &[Some(upper)], true, true)
+            .unwrap();
+        let expected: Vec<u64> = (11u64..=(n as u64 - 10)).collect();
+        assert_eq!(results, expected);
+
+        // Re-run the query — the second call uses a fresh scratch but
+        // should also be deterministic. This guards against any cross-call
+        // state leakage.
+        let results2 = reader
+            .range_search(&[Some(lower)], &[Some(upper)], true, true)
+            .unwrap();
+        assert_eq!(results2, expected);
+    }
+
+    #[test]
+    fn intersect_inside_avoids_per_point_filter() {
+        // Build a 1D tree with 4 leaf blocks; query the entire range so the
+        // root subtree is `Inside` and every doc is reported via
+        // `visit_inside`, never `visit`.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 256;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("inside.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(32);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "inside.bkd").unwrap();
+        let query = AABB::new(vec![-1e9], vec![1e9]).unwrap();
+        let mut v = TracingVisitor::new(query);
+        reader.intersect(&mut v).unwrap();
+
+        // Every hit came through visit_inside: the query bounds wholly
+        // enclose every cell, so no point ever needed per-coordinate
+        // filtering.
+        assert_eq!(v.inside_hits.len(), n);
+        assert!(v.crosses_hits.is_empty());
+        v.inside_hits.sort_unstable();
+        let expected: Vec<u64> = (0..n as u64).collect();
+        assert_eq!(v.inside_hits, expected);
+    }
+
+    #[test]
+    fn intersect_outside_prunes_subtree() {
+        // Query that lies entirely above every point; expect zero hits and
+        // at least one Outside compare result.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 128;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("outside.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(16);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "outside.bkd").unwrap();
+        let query = AABB::new(vec![1000.0], vec![2000.0]).unwrap();
+        let mut v = RecordingVisitor::new(query);
+        reader.intersect(&mut v).unwrap();
+
+        assert!(v.hits.is_empty());
+        assert!(
+            v.relations
+                .borrow()
+                .iter()
+                .any(|r| matches!(r, CellRelation::Outside)),
+            "expected at least one Outside compare, got {:?}",
+            v.relations.borrow()
+        );
+    }
+
+    #[test]
+    fn intersect_crosses_filters_per_point() {
+        // Query that overlaps a leaf boundary; expect Crosses leaves and
+        // hits accumulated via visit (per-point filtering).
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 200;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("crosses.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(16);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "crosses.bkd").unwrap();
+        let query = AABB::new(vec![50.5], vec![100.5]).unwrap();
+        let mut v = TracingVisitor::new(query);
+        reader.intersect(&mut v).unwrap();
+
+        let expected: Vec<u64> = (51u64..=100u64).collect();
+        let mut got = v.crosses_hits.clone();
+        got.append(&mut v.inside_hits.clone());
+        got.sort_unstable();
+        got.dedup();
+        assert_eq!(got, expected);
+        // At least some hits arrived via the `Crosses` path because the
+        // query bounds (50.5 / 100.5) cut through leaf blocks.
+        assert!(!v.crosses_hits.is_empty());
+    }
+
+    #[test]
+    fn range_search_default_impl_matches_legacy_semantics() {
+        // The trait's default `range_search` should still produce the same
+        // sorted/deduped doc-id list it always has, now via `intersect`.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 500;
+        let points: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let doc_ids: Vec<u64> = (0..n as u64).collect();
+        {
+            let output = storage.create_output("legacy.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1).with_block_size(64);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "legacy.bkd").unwrap();
+
+        // Inclusive bounds.
+        let inclusive = reader
+            .range_search(&[Some(100.0)], &[Some(200.0)], true, true)
+            .unwrap();
+        assert_eq!(inclusive, (100u64..=200u64).collect::<Vec<_>>());
+
+        // Exclusive bounds: 100 < x < 200.
+        let exclusive = reader
+            .range_search(&[Some(100.0)], &[Some(200.0)], false, false)
+            .unwrap();
+        assert_eq!(exclusive, (101u64..=199u64).collect::<Vec<_>>());
+
+        // Unbounded upper.
+        let lower_only = reader
+            .range_search(&[Some(490.0)], &[None], true, true)
+            .unwrap();
+        assert_eq!(lower_only, (490u64..n as u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_bkd_writer_reader_2d_single_leaf_aabb() {
+        // Single-leaf tree: exercises the leaf-only write/read path that
+        // skips the index section entirely. The new leaf AABB must still be
+        // written and consumed.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let points: Vec<f64> = vec![1.0, 100.0, 2.0, 200.0, 3.0, 300.0];
+        let doc_ids: Vec<u64> = vec![10, 20, 30];
+
+        {
+            let output = storage.create_output("single.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 2);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "single.bkd").unwrap();
+        let results = reader
+            .range_search(
+                &[Some(2.0), Some(150.0)],
+                &[Some(3.0), Some(250.0)],
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(results, vec![20]);
+    }
+
+    // Note: the legacy `test_bkd_tree_creation`, `test_empty_tree`, and
+    // `test_range_search_exact_bounds` were removed in #295 along with the
+    // in-memory `SimpleBKDTree` they exercised. Equivalent coverage is
+    // provided by `test_bkd_writer_empty`, `test_bkd_writer_reader_*`,
+    // and `range_search_default_impl_matches_legacy_semantics` above.
+
+    #[test]
+    fn write_rejects_nan_coordinate() {
+        // NaN has no defined ordering and would corrupt the BKD's split
+        // decisions; the writer must reject it up-front with an index
+        // error pointing at the offending dimension.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let points: Vec<f64> = vec![1.0, 2.0, f64::NAN, 4.0];
+        let doc_ids: Vec<u64> = vec![10, 20];
+
+        let output = storage.create_output("nan.bkd").unwrap();
+        let mut writer = BKDWriter::new(output, 2);
+        let err = writer.write(&points, &doc_ids).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("NaN"), "unexpected error: {msg}");
+        // Offending position: doc 1 (second doc), dim 0.
+        assert!(msg.contains("doc index 1"), "unexpected error: {msg}");
+        assert!(msg.contains("dim 0"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn write_accepts_infinity_and_round_trips() {
+        // ±Infinity sort consistently against every finite f64, so the
+        // writer must accept them and the reader must surface them.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let points: Vec<f64> = vec![f64::NEG_INFINITY, -10.0, 0.0, 10.0, f64::INFINITY];
+        let doc_ids: Vec<u64> = vec![100, 200, 300, 400, 500];
+        {
+            let output = storage.create_output("inf.bkd").unwrap();
+            let mut writer = BKDWriter::new(output, 1);
+            writer.write(&points, &doc_ids).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let reader = BKDReader::open(storage.clone(), "inf.bkd").unwrap();
+
+        // Unbounded query: every doc, including the infinities.
+        let mut all = reader.range_search(&[None], &[None], true, true).unwrap();
+        all.sort_unstable();
+        assert_eq!(all, vec![100, 200, 300, 400, 500]);
+
+        // Bounded query that excludes both infinities.
+        let finite = reader
+            .range_search(&[Some(-100.0)], &[Some(100.0)], true, true)
+            .unwrap();
+        assert_eq!(finite, vec![200, 300, 400]);
+
+        // Lower bound at NEG_INFINITY (closed): includes the NEG_INFINITY
+        // doc as well as every finite doc up to (and including) 0.0.
+        let lower_inf = reader
+            .range_search(&[Some(f64::NEG_INFINITY)], &[Some(0.0)], true, true)
+            .unwrap();
+        assert_eq!(lower_inf, vec![100, 200, 300]);
+
+        // Upper bound at INFINITY (closed): includes the INFINITY doc.
+        let upper_inf = reader
+            .range_search(&[Some(0.0)], &[Some(f64::INFINITY)], true, true)
+            .unwrap();
+        assert_eq!(upper_inf, vec![300, 400, 500]);
     }
 }

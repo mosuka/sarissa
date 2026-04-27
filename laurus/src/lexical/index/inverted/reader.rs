@@ -498,7 +498,7 @@ impl SegmentReader {
                             // Geo
                             let lat = reader.read_f64()?;
                             let lon = reader.read_f64()?;
-                            FieldValue::Geo(lat, lon)
+                            FieldValue::Geo(crate::data::GeoPoint::new(lat, lon))
                         }
                         7 => {
                             // Null
@@ -521,6 +521,15 @@ impl SegmentReader {
                                 arr.push(reader.read_f64()?);
                             }
                             FieldValue::Float64Array(arr)
+                        }
+                        12 => {
+                            // 3D ECEF point. Tag 12 (not 11) — see the
+                            // matching writer comment for why ECEF was
+                            // remapped during #299.
+                            let x = reader.read_f64()?;
+                            let y = reader.read_f64()?;
+                            let z = reader.read_f64()?;
+                            FieldValue::GeoEcef(crate::data::GeoEcefPoint::new(x, y, z))
                         }
                         _ => {
                             return Err(LaurusError::index(format!(
@@ -952,21 +961,17 @@ struct MultiSegmentBKDTree {
 }
 
 impl BKDTree for MultiSegmentBKDTree {
-    fn range_search(
+    /// Forward the visitor to every per-segment tree in order. The visitor
+    /// accumulates hits across segments; the trait's default
+    /// `range_search` then sorts and dedups the combined output.
+    fn intersect(
         &self,
-        mins: &[Option<f64>],
-        maxs: &[Option<f64>],
-        include_min: bool,
-        include_max: bool,
-    ) -> Result<Vec<u64>> {
-        let mut results = Vec::new();
+        visitor: &mut dyn crate::lexical::index::structures::visitor::IntersectVisitor,
+    ) -> Result<()> {
         for tree in &self.trees {
-            let mut tree_results = tree.range_search(mins, maxs, include_min, include_max)?;
-            results.append(&mut tree_results);
+            tree.intersect(visitor)?;
         }
-        results.sort_unstable();
-        results.dedup();
-        Ok(results)
+        Ok(())
     }
 }
 

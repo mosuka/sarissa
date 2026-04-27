@@ -91,7 +91,10 @@ pub fn infer_option_from_data_value(value: &DataValue) -> Result<Option<FieldOpt
         DataValue::DateTime(_) => Ok(Some(FieldOption::DateTime(
             crate::lexical::core::field::DateTimeOption::default(),
         ))),
-        DataValue::Geo(_, _) => Ok(Some(FieldOption::Geo(GeoOption::default()))),
+        DataValue::Geo(_) => Ok(Some(FieldOption::Geo(GeoOption::default()))),
+        DataValue::GeoEcef(_) => Ok(Some(FieldOption::Geo3d(
+            crate::lexical::core::field::Geo3dOption::default(),
+        ))),
         DataValue::Int64Array(_) => Ok(Some(FieldOption::Integer(IntegerOption {
             multi_valued: true,
             ..Default::default()
@@ -287,7 +290,7 @@ fn infer_from_object(map: &serde_json::Map<String, JsonValue>) -> Result<Inferre
                 )));
             }
             Ok(InferredValue::Inferred {
-                value: DataValue::Geo(lat, lon),
+                value: DataValue::Geo(crate::data::GeoPoint::new(lat, lon)),
                 option: FieldOption::Geo(GeoOption::default()),
             })
         }
@@ -391,7 +394,7 @@ mod tests {
     #[test]
     fn infer_geo_lat_lon() {
         let (v, o) = inferred(infer_from_json(&json!({"lat": 35.1, "lon": 139.0})).unwrap());
-        assert_eq!(v, DataValue::Geo(35.1, 139.0));
+        assert_eq!(v, DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0)));
         assert!(matches!(o, FieldOption::Geo(_)));
     }
 
@@ -399,13 +402,13 @@ mod tests {
     fn infer_geo_latitude_longitude() {
         let (v, _) =
             inferred(infer_from_json(&json!({"latitude": 35.1, "longitude": 139.0})).unwrap());
-        assert_eq!(v, DataValue::Geo(35.1, 139.0));
+        assert_eq!(v, DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0)));
     }
 
     #[test]
     fn infer_geo_lng_alias() {
         let (v, _) = inferred(infer_from_json(&json!({"lat": 35.1, "lng": 139.0})).unwrap());
-        assert_eq!(v, DataValue::Geo(35.1, 139.0));
+        assert_eq!(v, DataValue::Geo(crate::data::GeoPoint::new(35.1, 139.0)));
     }
 
     #[test]
@@ -418,6 +421,34 @@ mod tests {
     fn infer_geo_out_of_range_lon() {
         let err = infer_from_json(&json!({"lat": 35.1, "lon": 200.0})).unwrap_err();
         assert!(err.to_string().contains("longitude"));
+    }
+
+    #[test]
+    fn infer_option_from_data_value_geo_ecef_to_geo3d() {
+        // The dynamic-schema path: a `GeoEcef` value with no declared
+        // option must auto-infer `FieldOption::Geo3d`. Without this, a
+        // ECEF document with a missing schema entry would either fail or
+        // (worse) be silently classified as 2D Geo.
+        let p = crate::data::GeoEcefPoint::new(1.0, 2.0, 3.0);
+        let inferred = infer_option_from_data_value(&DataValue::GeoEcef(p))
+            .unwrap()
+            .expect("GeoEcef must infer some FieldOption");
+        assert!(
+            matches!(inferred, FieldOption::Geo3d(_)),
+            "expected FieldOption::Geo3d, got {inferred:?}"
+        );
+    }
+
+    #[test]
+    fn infer_option_from_data_value_geo_to_geo() {
+        let p = crate::data::GeoPoint::new(35.1, 139.0);
+        let inferred = infer_option_from_data_value(&DataValue::Geo(p))
+            .unwrap()
+            .expect("Geo must infer some FieldOption");
+        assert!(
+            matches!(inferred, FieldOption::Geo(_)),
+            "expected FieldOption::Geo, got {inferred:?}"
+        );
     }
 
     #[test]

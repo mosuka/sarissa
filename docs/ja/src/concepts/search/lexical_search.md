@@ -157,7 +157,7 @@ let query = NumericRangeQuery::new(
 
 ### GeoQuery
 
-地理的な位置に基づいてドキュメントをマッチングします。
+2D 地理座標（WGS84 緯度・経度）に基づいてドキュメントをマッチングします。
 
 ```rust
 use laurus::lexical::query::geo::GeoQuery;
@@ -172,6 +172,41 @@ let query = GeoQuery::within_bounding_box(
     36.0, 140.0,  // max (lat, lon)
 )?;
 ```
+
+### Geo3dDistanceQuery / Geo3dBoundingBoxQuery / Geo3dNearestQuery
+
+3 種類のクエリが、ECEF 直交座標（メートル）にバックアップされた 3D の
+`Geo3d` フィールドを対象とします。高度が意味を持つ用途や、2D の `Geo`
+フィールドでは極特異点が問題になるケースで使ってください。座標系・WGS84
+変換ヘルパー・実例については [3D 地理検索](../geo3d.md) を参照してください。
+
+```rust
+use laurus::GeoEcefPoint;
+use laurus::lexical::query::geo3d::{
+    Geo3dDistanceQuery, Geo3dBoundingBoxQuery, Geo3dNearestQuery,
+};
+
+let centre = GeoEcefPoint::new(-3_955_182.0, 3_350_553.0, 3_700_276.0);
+
+// 球: `centre` から 5 km 以内のドキュメント
+let q = Geo3dDistanceQuery::new("position", centre, 5_000.0);
+
+// 軸並行 3D バウンディングボックス（コンストラクタが軸ごとに min ≤ max を検証）
+let min = GeoEcefPoint::new(-4_000_000.0, 3_300_000.0, 3_650_000.0);
+let max = GeoEcefPoint::new(-3_900_000.0, 3_400_000.0, 3_750_000.0);
+let q = Geo3dBoundingBoxQuery::new("position", min, max)?;
+
+// k-NN: 最も近い 10 件、半径スケジュールをカスタマイズ
+let q = Geo3dNearestQuery::new("position", centre, 10)
+    .with_initial_radius(500.0)
+    .with_max_radius(1_000_000.0);
+```
+
+| クエリ | スコア |
+| :--- | :--- |
+| `Geo3dDistanceQuery` | `1 - distance / radius` を `[0, 1]` にクランプ |
+| `Geo3dBoundingBoxQuery` | マッチした全ドキュメントで定数 `1.0` |
+| `Geo3dNearestQuery` | 最も近いヒットが `1.0`、返却された集合内で最も遠いヒットが `0.0` となるよう正規化 |
 
 ### SpanQuery
 

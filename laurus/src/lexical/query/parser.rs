@@ -20,11 +20,13 @@ use pest_derive::Parser;
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
+use crate::data::GeoEcefPoint;
 use crate::error::{LaurusError, Result};
 use crate::lexical::core::field::NumericType;
 use crate::lexical::query::Query;
 use crate::lexical::query::boolean::{BooleanClause, BooleanQuery, Occur};
 use crate::lexical::query::fuzzy::FuzzyQuery;
+use crate::lexical::query::geo3d::{Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery};
 use crate::lexical::query::phrase::PhraseQuery;
 use crate::lexical::query::range::NumericRangeQuery;
 use crate::lexical::query::term::TermQuery;
@@ -357,6 +359,7 @@ impl LexicalQueryParser {
     ) -> Result<Box<dyn Query>> {
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
+                Rule::geo3d_query => return self.parse_geo3d_query(inner_pair, field),
                 Rule::range_query => return self.parse_range_query(inner_pair, field),
                 Rule::phrase_query => return self.parse_phrase_query(inner_pair, field),
                 Rule::fuzzy_term => return self.parse_fuzzy_term(inner_pair, field),
@@ -367,6 +370,117 @@ impl LexicalQueryParser {
         }
 
         Err(LaurusError::parse("Invalid field value".to_string()))
+    }
+
+    /// Parse a 3D geo query (`geo3d_distance`, `geo3d_bbox`, or
+    /// `geo3d_nearest`). All three require a target field; the DSL
+    /// rejects bare invocations like `geo3d_distance(...)` without a
+    /// `field:` prefix.
+    fn parse_geo3d_query(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+        field: Option<&str>,
+    ) -> Result<Box<dyn Query>> {
+        let field = field.ok_or_else(|| {
+            LaurusError::parse(
+                "3D geo queries require an explicit field prefix \
+                 (e.g. `position:geo3d_distance(...)`)"
+                    .to_string(),
+            )
+        })?;
+
+        for inner in pair.into_inner() {
+            match inner.as_rule() {
+                Rule::geo3d_distance => return self.parse_geo3d_distance(inner, field),
+                Rule::geo3d_bbox => return self.parse_geo3d_bbox(inner, field),
+                Rule::geo3d_nearest => return self.parse_geo3d_nearest(inner, field),
+                _ => {}
+            }
+        }
+        Err(LaurusError::parse(
+            "Invalid 3D geo query (expected geo3d_distance / geo3d_bbox / geo3d_nearest)"
+                .to_string(),
+        ))
+    }
+
+    fn parse_geo3d_distance(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+        field: &str,
+    ) -> Result<Box<dyn Query>> {
+        // Grammar guarantees four signed_float arguments: x, y, z, radius_m.
+        let args = collect_signed_floats(pair)?;
+        if args.len() != 4 {
+            return Err(LaurusError::parse(format!(
+                "geo3d_distance expects 4 numeric arguments (x, y, z, radius_m), got {}",
+                args.len()
+            )));
+        }
+        let center = GeoEcefPoint::new(args[0], args[1], args[2]);
+        let radius_m = args[3];
+        Ok(Box::new(Geo3dDistanceQuery::new(field, center, radius_m)))
+    }
+
+    fn parse_geo3d_bbox(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+        field: &str,
+    ) -> Result<Box<dyn Query>> {
+        // Grammar: min_x, min_y, min_z, max_x, max_y, max_z.
+        let args = collect_signed_floats(pair)?;
+        if args.len() != 6 {
+            return Err(LaurusError::parse(format!(
+                "geo3d_bbox expects 6 numeric arguments \
+                 (min_x, min_y, min_z, max_x, max_y, max_z), got {}",
+                args.len()
+            )));
+        }
+        let min = GeoEcefPoint::new(args[0], args[1], args[2]);
+        let max = GeoEcefPoint::new(args[3], args[4], args[5]);
+        Ok(Box::new(
+            Geo3dBoundingBoxQuery::new(field, min, max)
+                .map_err(|e| LaurusError::parse(format!("invalid geo3d_bbox arguments: {e}")))?,
+        ))
+    }
+
+    fn parse_geo3d_nearest(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+        field: &str,
+    ) -> Result<Box<dyn Query>> {
+        // Grammar: x (signed_float), y, z, k (unsigned_int).
+        let mut floats: Vec<f64> = Vec::with_capacity(3);
+        let mut k: Option<usize> = None;
+        for inner in pair.into_inner() {
+            match inner.as_rule() {
+                Rule::signed_float => {
+                    let s = inner.as_str();
+                    let v = s.parse::<f64>().map_err(|e| {
+                        LaurusError::parse(format!("geo3d_nearest: invalid float '{s}': {e}"))
+                    })?;
+                    floats.push(v);
+                }
+                Rule::unsigned_int => {
+                    let s = inner.as_str();
+                    let parsed = s.parse::<usize>().map_err(|e| {
+                        LaurusError::parse(format!("geo3d_nearest: invalid integer '{s}': {e}"))
+                    })?;
+                    k = Some(parsed);
+                }
+                _ => {}
+            }
+        }
+        if floats.len() != 3 {
+            return Err(LaurusError::parse(format!(
+                "geo3d_nearest expects 3 coordinate arguments before k, got {}",
+                floats.len()
+            )));
+        }
+        let k = k.ok_or_else(|| {
+            LaurusError::parse("geo3d_nearest expects k as the 4th argument".to_string())
+        })?;
+        let center = GeoEcefPoint::new(floats[0], floats[1], floats[2]);
+        Ok(Box::new(Geo3dNearestQuery::new(field, center, k)))
     }
 
     fn parse_range_query(
@@ -625,6 +739,25 @@ impl LexicalQueryParser {
     }
 }
 
+/// Walk a `geo3d_*` pair and collect every nested `signed_float` token
+/// as an `f64`. Used by [`LexicalQueryParser::parse_geo3d_distance`]
+/// and [`LexicalQueryParser::parse_geo3d_bbox`] which both take only
+/// floats; `geo3d_nearest` mixes floats with an `unsigned_int` and
+/// inlines its own walk.
+fn collect_signed_floats(pair: pest::iterators::Pair<Rule>) -> Result<Vec<f64>> {
+    let mut out = Vec::new();
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::signed_float {
+            let s = inner.as_str();
+            let v = s
+                .parse::<f64>()
+                .map_err(|e| LaurusError::parse(format!("invalid float '{s}': {e}")))?;
+            out.push(v);
+        }
+    }
+    Ok(out)
+}
+
 /// Builder for constructing a [`QueryParser`] with a fluent API.
 ///
 /// Allows configuring the analyzer, default search fields, and default boolean
@@ -765,5 +898,89 @@ mod tests {
 
         // Unfortunately standard debug format might be opaque, but we can assume BooleanQuery is created if multiple fields.
         // If it was single field, it would be TermQuery.
+    }
+
+    #[test]
+    fn test_geo3d_distance_basic() {
+        let parser = create_test_parser().with_default_field("content");
+        let q = parser
+            .parse("position:geo3d_distance(1000, 2000, 3000, 500)")
+            .unwrap();
+        let dbg = format!("{q:?}");
+        assert!(dbg.contains("Geo3dDistanceQuery"), "got: {dbg}");
+        assert!(dbg.contains("position"), "got: {dbg}");
+    }
+
+    #[test]
+    fn test_geo3d_distance_signed_and_scientific() {
+        // Negative coordinates and scientific notation must round-trip
+        // through the grammar.
+        let parser = create_test_parser().with_default_field("content");
+        let q = parser
+            .parse("p:geo3d_distance(-1.5e6, 2.5e6, -3.0e6, 1e3)")
+            .unwrap();
+        assert!(format!("{q:?}").contains("Geo3dDistanceQuery"));
+    }
+
+    #[test]
+    fn test_geo3d_bbox_basic() {
+        let parser = create_test_parser().with_default_field("content");
+        let q = parser
+            .parse("position:geo3d_bbox(0, 0, 0, 100, 200, 300)")
+            .unwrap();
+        let dbg = format!("{q:?}");
+        assert!(dbg.contains("Geo3dBoundingBoxQuery"), "got: {dbg}");
+    }
+
+    #[test]
+    fn test_geo3d_bbox_inverted_rejected() {
+        // The pest grammar accepts the syntactic form but the
+        // GeoBoundingBoxQuery constructor rejects min > max with a
+        // clear error.
+        let parser = create_test_parser().with_default_field("content");
+        let err = parser
+            .parse("position:geo3d_bbox(100, 0, 0, 0, 200, 300)")
+            .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("invalid geo3d_bbox arguments"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_geo3d_nearest_basic() {
+        let parser = create_test_parser().with_default_field("content");
+        let q = parser
+            .parse("position:geo3d_nearest(1000.5, 2000.5, 3000.5, 5)")
+            .unwrap();
+        let dbg = format!("{q:?}");
+        assert!(dbg.contains("Geo3dNearestQuery"), "got: {dbg}");
+    }
+
+    #[test]
+    fn test_geo3d_query_combined_with_boolean() {
+        // 3D geo queries can mix with the rest of the DSL: this
+        // confirms the boolean composition still parses.
+        let parser = create_test_parser().with_default_field("content");
+        let q = parser
+            .parse("city:Tokyo AND position:geo3d_distance(0, 0, 0, 1000)")
+            .unwrap();
+        let dbg = format!("{q:?}");
+        assert!(dbg.contains("BooleanQuery"), "got: {dbg}");
+        assert!(dbg.contains("Geo3dDistanceQuery"), "got: {dbg}");
+    }
+
+    #[test]
+    fn test_geo3d_without_field_rejected() {
+        // Parsing geo3d_* without a field prefix produces a parse
+        // error — the spatial query needs to know which field to hit.
+        let parser = create_test_parser().with_default_field("content");
+        // The grammar still tries to match `geo3d_distance(...)` as a
+        // bare term_query → field_value → geo3d_query path with no
+        // field, which our parse_geo3d_query rejects.
+        let err = parser.parse("geo3d_distance(0, 0, 0, 1000)").unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("3D geo queries require an explicit field prefix"),
+            "got: {msg}"
+        );
     }
 }
