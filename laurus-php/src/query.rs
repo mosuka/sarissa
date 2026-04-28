@@ -8,9 +8,11 @@ use std::cell::RefCell;
 use ext_php_rs::convert::FromZval;
 use ext_php_rs::prelude::*;
 use ext_php_rs::types::{ZendClassObject, Zval};
+use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
-    BooleanQuery, FuzzyQuery, GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
+    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -23,7 +25,8 @@ use laurus::{DataValue, LexicalSearchQuery, QueryPayload, VectorSearchQuery};
 /// Extract a Laurus lexical query from an arbitrary PHP Zval.
 ///
 /// Supports: `TermQuery`, `PhraseQuery`, `FuzzyQuery`, `WildcardQuery`,
-/// `NumericRangeQuery`, `GeoQuery`, `BooleanQuery`, `SpanQuery`.
+/// `NumericRangeQuery`, `GeoQuery`, `Geo3dDistanceQuery`,
+/// `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`, `BooleanQuery`, `SpanQuery`.
 ///
 /// # Arguments
 ///
@@ -62,6 +65,20 @@ pub fn extract_lexical_query(zv: &Zval) -> PhpResult<Box<dyn laurus::lexical::Qu
         return q
             .build()
             .map_err(|e| ext_php_rs::exception::PhpException::default(e.to_string()));
+    }
+    if let Some(obj) = <&ZendClassObject<PhpGeo3dDistanceQuery>>::from_zval(zv) {
+        let q: &PhpGeo3dDistanceQuery = obj;
+        return Ok(q.build());
+    }
+    if let Some(obj) = <&ZendClassObject<PhpGeo3dBoundingBoxQuery>>::from_zval(zv) {
+        let q: &PhpGeo3dBoundingBoxQuery = obj;
+        return q
+            .build()
+            .map_err(|e| ext_php_rs::exception::PhpException::default(e.to_string()));
+    }
+    if let Some(obj) = <&ZendClassObject<PhpGeo3dNearestQuery>>::from_zval(zv) {
+        let q: &PhpGeo3dNearestQuery = obj;
+        return Ok(q.build());
     }
     if let Some(obj) = <&ZendClassObject<PhpBooleanQuery>>::from_zval(zv) {
         let q: &PhpBooleanQuery = obj;
@@ -546,6 +563,199 @@ impl PhpGeoQuery {
                 *max_lon,
             )?)),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dDistanceQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF sphere query (`Laurus\Geo3dDistanceQuery`).
+///
+/// Returns documents whose 3D ECEF point lies within `radius_m` meters of the
+/// query centre. Construct via the `withinSphere` static factory.
+#[php_class]
+#[php(name = "Laurus\\Geo3dDistanceQuery")]
+pub struct PhpGeo3dDistanceQuery {
+    pub field: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub radius_m: f64,
+}
+
+#[php_impl]
+impl PhpGeo3dDistanceQuery {
+    /// Create a sphere-based 3D geo query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `x` - Centre ECEF X coordinate (meters).
+    /// * `y` - Centre ECEF Y coordinate (meters).
+    /// * `z` - Centre ECEF Z coordinate (meters).
+    /// * `radius_m` - Sphere radius in meters.
+    pub fn within_sphere(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
+        Self {
+            field,
+            x,
+            y,
+            z,
+            radius_m,
+        }
+    }
+
+    /// Return a string representation.
+    pub fn __to_string(&self) -> String {
+        format!(
+            "Geo3dDistanceQuery(field='{}', x={}, y={}, z={}, radius_m={})",
+            self.field, self.x, self.y, self.z, self.radius_m
+        )
+    }
+}
+
+impl PhpGeo3dDistanceQuery {
+    /// Build the underlying Rust [`Geo3dDistanceQuery`].
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        Box::new(Geo3dDistanceQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.x, self.y, self.z),
+            self.radius_m,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dBoundingBoxQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF axis-aligned bounding box query (`Laurus\Geo3dBoundingBoxQuery`).
+///
+/// Returns documents whose 3D ECEF point lies inside the AABB defined by
+/// `[min_x, max_x] x [min_y, max_y] x [min_z, max_z]`. Construct via the
+/// `withinBox` static factory.
+#[php_class]
+#[php(name = "Laurus\\Geo3dBoundingBoxQuery")]
+pub struct PhpGeo3dBoundingBoxQuery {
+    pub field: String,
+    pub min_x: f64,
+    pub min_y: f64,
+    pub min_z: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+    pub max_z: f64,
+}
+
+#[php_impl]
+impl PhpGeo3dBoundingBoxQuery {
+    /// Create a 3D AABB geo query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `min_x` - Minimum ECEF X (meters).
+    /// * `min_y` - Minimum ECEF Y (meters).
+    /// * `min_z` - Minimum ECEF Z (meters).
+    /// * `max_x` - Maximum ECEF X (meters).
+    /// * `max_y` - Maximum ECEF Y (meters).
+    /// * `max_z` - Maximum ECEF Z (meters).
+    #[allow(clippy::too_many_arguments)]
+    pub fn within_box(
+        field: String,
+        min_x: f64,
+        min_y: f64,
+        min_z: f64,
+        max_x: f64,
+        max_y: f64,
+        max_z: f64,
+    ) -> Self {
+        Self {
+            field,
+            min_x,
+            min_y,
+            min_z,
+            max_x,
+            max_y,
+            max_z,
+        }
+    }
+
+    /// Return a string representation.
+    pub fn __to_string(&self) -> String {
+        format!(
+            "Geo3dBoundingBoxQuery(field='{}', min=({}, {}, {}), max=({}, {}, {}))",
+            self.field, self.min_x, self.min_y, self.min_z, self.max_x, self.max_y, self.max_z
+        )
+    }
+}
+
+impl PhpGeo3dBoundingBoxQuery {
+    /// Build the underlying Rust [`Geo3dBoundingBoxQuery`].
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(Geo3dBoundingBoxQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.min_x, self.min_y, self.min_z),
+            GeoEcefPoint::new(self.max_x, self.max_y, self.max_z),
+        )?))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dNearestQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF k-nearest-neighbours query (`Laurus\Geo3dNearestQuery`).
+///
+/// Returns the `k` documents whose 3D ECEF points are closest to the query
+/// centre. Construct via the `kNearest` static factory.
+#[php_class]
+#[php(name = "Laurus\\Geo3dNearestQuery")]
+pub struct PhpGeo3dNearestQuery {
+    pub field: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub k: u32,
+}
+
+#[php_impl]
+impl PhpGeo3dNearestQuery {
+    /// Create a k-NN 3D geo query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `x` - Centre ECEF X coordinate (meters).
+    /// * `y` - Centre ECEF Y coordinate (meters).
+    /// * `z` - Centre ECEF Z coordinate (meters).
+    /// * `k` - Number of nearest neighbours to return.
+    pub fn k_nearest(field: String, x: f64, y: f64, z: f64, k: i64) -> Self {
+        Self {
+            field,
+            x,
+            y,
+            z,
+            k: k as u32,
+        }
+    }
+
+    /// Return a string representation.
+    pub fn __to_string(&self) -> String {
+        format!(
+            "Geo3dNearestQuery(field='{}', x={}, y={}, z={}, k={})",
+            self.field, self.x, self.y, self.z, self.k
+        )
+    }
+}
+
+impl PhpGeo3dNearestQuery {
+    /// Build the underlying Rust [`Geo3dNearestQuery`].
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        Box::new(Geo3dNearestQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.x, self.y, self.z),
+            self.k as usize,
+        ))
     }
 }
 

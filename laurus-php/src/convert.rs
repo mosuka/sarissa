@@ -39,16 +39,17 @@ pub fn hashtable_to_document(ht: &ZendHashTable) -> PhpResult<Document> {
 ///
 /// # Type mapping
 ///
-/// | PHP type                           | DataValue variant    |
-/// |------------------------------------|----------------------|
-/// | `null`                             | `Null`               |
-/// | `bool`                             | `Bool`               |
-/// | `int`                              | `Int64`              |
-/// | `float`                            | `Float64`            |
-/// | `string`                           | `Text`               |
-/// | `array` of floats (sequential)     | `Vector`             |
-/// | `array` with `"lat"`, `"lon"` keys | `Geo`                |
-/// | ISO 8601 string (fallback)         | `DateTime`           |
+/// | PHP type                                  | DataValue variant    |
+/// |-------------------------------------------|----------------------|
+/// | `null`                                    | `Null`               |
+/// | `bool`                                    | `Bool`               |
+/// | `int`                                     | `Int64`              |
+/// | `float`                                   | `Float64`            |
+/// | `string`                                  | `Text`               |
+/// | `array` of floats (sequential)            | `Vector`             |
+/// | `array` with `"lat"`, `"lon"` keys        | `Geo`                |
+/// | `array` with `"x"`, `"y"`, `"z"` keys     | `GeoEcef`            |
+/// | ISO 8601 string (fallback)                | `DateTime`           |
 ///
 /// # Arguments
 ///
@@ -97,6 +98,16 @@ pub fn zval_to_data_value(zv: &Zval) -> PhpResult<DataValue> {
             let point = laurus::lexical::GeoPoint::try_new(lat, lon)
                 .map_err(|e| format!("invalid geo point: {e}"))?;
             return Ok(DataValue::Geo(point));
+        }
+
+        // Check for geo3d: associative array with "x", "y", "z" keys (must
+        // come after the {lat, lon} check so existing 2D Geo semantics are
+        // preserved).
+        if let (Some(x_zv), Some(y_zv), Some(z_zv)) = (ht.get("x"), ht.get("y"), ht.get("z")) {
+            let x = f64::from_zval(x_zv).ok_or("'x' must be a float")?;
+            let y = f64::from_zval(y_zv).ok_or("'y' must be a float")?;
+            let z = f64::from_zval(z_zv).ok_or("'z' must be a float")?;
+            return Ok(DataValue::GeoEcef(laurus::GeoEcefPoint::new(x, y, z)));
         }
 
         // Otherwise treat as vector (sequential array of floats)
