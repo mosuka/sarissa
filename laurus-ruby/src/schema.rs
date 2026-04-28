@@ -5,8 +5,8 @@ use std::str::FromStr;
 
 use laurus::{
     BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
-    EmbedderDefinition, FieldOption, FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption,
-    Schema, TextOption,
+    EmbedderDefinition, FieldOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
+    IntegerOption, IvfOption, Schema, TextOption,
 };
 use magnus::prelude::*;
 use magnus::scan_args::{get_kwargs, scan_args};
@@ -228,6 +228,38 @@ impl RbSchema {
         self.inner.borrow_mut().fields.insert(
             name,
             FieldOption::Geo(GeoOption {
+                indexed: indexed.unwrap_or(true),
+                stored: stored.unwrap_or(true),
+            }),
+        );
+        Ok(())
+    }
+
+    /// Add a 3D ECEF Cartesian point field (x, y, z in meters).
+    ///
+    /// Values are submitted as a Hash `{ "x" => ..., "y" => ..., "z" => ... }`
+    /// and are queryable via `Geo3dDistanceQuery`, `Geo3dBoundingBoxQuery`,
+    /// and `Geo3dNearestQuery`. See the conceptual docs at
+    /// `docs/src/concepts/geo3d.md`.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - Positional and keyword arguments:
+    ///   - `name` (String): Field name.
+    ///   - `stored:` (bool, default true): Whether the value is retrievable.
+    ///   - `indexed:` (bool, default true): Whether the field is searchable.
+    fn add_geo3d_field(&self, args: &[Value]) -> Result<(), Error> {
+        let args = scan_args::<(String,), (), (), (), RHash, ()>(args)?;
+        let (name,) = args.required;
+        let kwargs = get_kwargs::<_, (), (Option<bool>, Option<bool>), ()>(
+            args.keywords,
+            &[],
+            &["stored", "indexed"],
+        )?;
+        let (stored, indexed) = kwargs.optional;
+        self.inner.borrow_mut().fields.insert(
+            name,
+            FieldOption::Geo3d(Geo3dOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
             }),
@@ -553,6 +585,10 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     class.define_method(
         "add_geo_field",
         magnus::method!(RbSchema::add_geo_field, -1),
+    )?;
+    class.define_method(
+        "add_geo3d_field",
+        magnus::method!(RbSchema::add_geo3d_field, -1),
     )?;
     class.define_method(
         "add_bytes_field",
