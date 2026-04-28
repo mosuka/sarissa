@@ -107,12 +107,6 @@ laurus create schema [--output <FILE>]
 | `Flat` | Vector | `dimension`, `distance` |
 | `Ivf` | Vector | `dimension`, `distance`, `n_clusters`, `n_probe` |
 
-> **注記**: 対話的な `create schema` ウィザードは、フィールド型の選択肢に
-> `Geo3d` をまだ載せていません。`Geo3d` フィールドを宣言するには、生成された
-> TOML を手で編集して `[fields.<name>.Geo3d]` を追加してください
-> （[スキーマフォーマット → Geo3d](schema_format.md#geo3d) を参照）。
-> 追跡 Issue: [#337](https://github.com/mosuka/laurus/issues/337)。
-
 **例:**
 
 ```bash

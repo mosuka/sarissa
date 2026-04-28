@@ -60,7 +60,8 @@ pub async fn run_index(schema_path: Option<&Path>, index_dir: &Path) -> Result<(
     Ok(())
 }
 use laurus::lexical::core::field::{
-    BooleanOption, BytesOption, DateTimeOption, FloatOption, GeoOption, IntegerOption, TextOption,
+    BooleanOption, BytesOption, DateTimeOption, FloatOption, Geo3dOption, GeoOption, IntegerOption,
+    TextOption,
 };
 use laurus::vector::DistanceMetric;
 use laurus::vector::core::field::{FlatOption, HnswOption, IvfOption};
@@ -68,7 +69,8 @@ use laurus::{FieldOption, Schema};
 
 /// Field type names shown in the interactive prompt.
 const FIELD_TYPES: &[&str] = &[
-    "Text", "Integer", "Float", "Boolean", "DateTime", "Geo", "Bytes", "Hnsw", "Flat", "Ivf",
+    "Text", "Integer", "Float", "Boolean", "DateTime", "Geo", "Geo3d", "Bytes", "Hnsw", "Flat",
+    "Ivf",
 ];
 
 /// Distance metric names shown in the interactive prompt.
@@ -215,6 +217,7 @@ fn prompt_field_type_and_options() -> Result<FieldOption> {
         "Boolean" => prompt_indexed_stored_option("Boolean"),
         "DateTime" => prompt_indexed_stored_option("DateTime"),
         "Geo" => prompt_indexed_stored_option("Geo"),
+        "Geo3d" => prompt_indexed_stored_option("Geo3d"),
         "Bytes" => prompt_bytes_option(),
         "Hnsw" => prompt_hnsw_option(),
         "Flat" => prompt_flat_option(),
@@ -257,7 +260,7 @@ fn prompt_text_option() -> Result<FieldOption> {
 }
 
 /// Prompt for field types that have indexed + stored options
-/// (Integer, Float, Boolean, DateTime, Geo).
+/// (Integer, Float, Boolean, DateTime, Geo, Geo3d).
 fn prompt_indexed_stored_option(type_name: &str) -> Result<FieldOption> {
     let indexed = Confirm::new()
         .with_prompt("Indexed?")
@@ -291,6 +294,7 @@ fn prompt_indexed_stored_option(type_name: &str) -> Result<FieldOption> {
         "Boolean" => FieldOption::Boolean(BooleanOption { indexed, stored }),
         "DateTime" => FieldOption::DateTime(DateTimeOption { indexed, stored }),
         "Geo" => FieldOption::Geo(GeoOption { indexed, stored }),
+        "Geo3d" => FieldOption::Geo3d(Geo3dOption { indexed, stored }),
         _ => unreachable!(),
     })
 }
@@ -427,5 +431,33 @@ fn field_type_label(option: &FieldOption) -> &'static str {
         FieldOption::Hnsw(_) => "Hnsw",
         FieldOption::Flat(_) => "Flat",
         FieldOption::Ivf(_) => "Ivf",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The interactive wizard must list `Geo3d` so users can declare a 3D
+    /// ECEF field without dropping down to TOML hand-editing. Tracked
+    /// originally in #337.
+    #[test]
+    fn field_types_includes_geo3d() {
+        assert!(
+            FIELD_TYPES.contains(&"Geo3d"),
+            "FIELD_TYPES must include \"Geo3d\""
+        );
+    }
+
+    /// Sanity-check the existing display path: a `FieldOption::Geo3d` value
+    /// must render as `"Geo3d"` and be classified as a lexical field.
+    #[test]
+    fn field_type_label_handles_geo3d() {
+        let opt = FieldOption::Geo3d(Geo3dOption {
+            indexed: true,
+            stored: true,
+        });
+        assert_eq!(field_type_label(&opt), "Geo3d");
+        assert!(is_lexical_field(&opt));
     }
 }

@@ -107,12 +107,6 @@ The wizard guides you through:
 | `Flat` | Vector | `dimension`, `distance` |
 | `Ivf` | Vector | `dimension`, `distance`, `n_clusters`, `n_probe` |
 
-> **Note**: The interactive `create schema` wizard does not yet list `Geo3d`
-> in the field-type prompt. To declare a `Geo3d` field, hand-edit the
-> generated TOML to add `[fields.<name>.Geo3d]` (see
-> [Schema Format → Geo3d](schema_format.md#geo3d)). Tracking issue:
-> [#337](https://github.com/mosuka/laurus/issues/337).
-
 **Example:**
 
 ```bash
