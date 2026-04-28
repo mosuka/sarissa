@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use crate::convert::{data_value_to_json, json_to_document};
 use crate::errors::laurus_err;
-use crate::query::{JsQuery, JsTermQuery, JsVectorQuery, JsVectorQueryInner, JsVectorTextQuery};
+use crate::query::{
+    JsGeo3dBoundingBoxQuery, JsGeo3dDistanceQuery, JsGeo3dNearestQuery, JsQuery, JsTermQuery,
+    JsVectorQuery, JsVectorQueryInner, JsVectorTextQuery,
+};
 use crate::schema::WasmSchema;
 use crate::search::{build_dsl_request, build_lexical_request, build_vector_request};
 use crate::storage::OpfsPersistence;
@@ -339,6 +342,115 @@ impl WasmIndex {
         offset: Option<u32>,
     ) -> Result<JsValue, JsValue> {
         let query = JsQuery::TermQuery(JsTermQuery { field, term });
+        let request = build_lexical_request(
+            &query,
+            limit.unwrap_or(10) as usize,
+            offset.unwrap_or(0) as usize,
+        )?;
+        let results = self.engine.search(request).await.map_err(laurus_err)?;
+        search_results_to_js(results)
+    }
+
+    /// Search using a 3D ECEF distance (sphere) query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The Geo3d field name.
+    /// * `x`, `y`, `z` - Sphere centre in ECEF meters.
+    /// * `radius_m` - Sphere radius in meters.
+    /// * `limit` - Maximum number of results (default 10).
+    /// * `offset` - Pagination offset (default 0).
+    #[wasm_bindgen(js_name = "searchGeo3dDistance")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_geo3d_distance(
+        &self,
+        field: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        radius_m: f64,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<JsValue, JsValue> {
+        let query = JsQuery::Geo3dDistanceQuery(JsGeo3dDistanceQuery {
+            field,
+            x,
+            y,
+            z,
+            radius_m,
+        });
+        let request = build_lexical_request(
+            &query,
+            limit.unwrap_or(10) as usize,
+            offset.unwrap_or(0) as usize,
+        )?;
+        let results = self.engine.search(request).await.map_err(laurus_err)?;
+        search_results_to_js(results)
+    }
+
+    /// Search using a 3D ECEF axis-aligned bounding-box query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The Geo3d field name.
+    /// * `min_x`, `min_y`, `min_z` - Lower corner of the box.
+    /// * `max_x`, `max_y`, `max_z` - Upper corner of the box.
+    /// * `limit` - Maximum number of results (default 10).
+    /// * `offset` - Pagination offset (default 0).
+    #[wasm_bindgen(js_name = "searchGeo3dBoundingBox")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_geo3d_bounding_box(
+        &self,
+        field: String,
+        min_x: f64,
+        min_y: f64,
+        min_z: f64,
+        max_x: f64,
+        max_y: f64,
+        max_z: f64,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<JsValue, JsValue> {
+        let query = JsQuery::Geo3dBoundingBoxQuery(JsGeo3dBoundingBoxQuery {
+            field,
+            min_x,
+            min_y,
+            min_z,
+            max_x,
+            max_y,
+            max_z,
+        });
+        let request = build_lexical_request(
+            &query,
+            limit.unwrap_or(10) as usize,
+            offset.unwrap_or(0) as usize,
+        )?;
+        let results = self.engine.search(request).await.map_err(laurus_err)?;
+        search_results_to_js(results)
+    }
+
+    /// Search using a 3D ECEF k-nearest-neighbours query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The Geo3d field name.
+    /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
+    /// * `k` - Number of nearest neighbours to return.
+    /// * `limit` - Maximum number of results (default 10).
+    /// * `offset` - Pagination offset (default 0).
+    #[wasm_bindgen(js_name = "searchGeo3dNearest")]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_geo3d_nearest(
+        &self,
+        field: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        k: u32,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<JsValue, JsValue> {
+        let query = JsQuery::Geo3dNearestQuery(JsGeo3dNearestQuery { field, x, y, z, k });
         let request = build_lexical_request(
             &query,
             limit.unwrap_or(10) as usize,

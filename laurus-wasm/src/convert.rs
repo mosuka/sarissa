@@ -39,6 +39,7 @@ pub fn json_to_document(value: &Value) -> Result<Document, JsValue> {
 /// - `string`                -> `DataValue::Text` (or `DateTime` if ISO8601)
 /// - `array` of numbers      -> `DataValue::Vector`
 /// - `{ "lat", "lon" }`      -> `DataValue::Geo`
+/// - `{ "x", "y", "z" }`     -> `DataValue::GeoEcef` (3D ECEF Cartesian, meters)
 ///
 /// # Arguments
 ///
@@ -89,8 +90,17 @@ pub fn json_to_data_value(value: &Value) -> Result<DataValue, JsValue> {
                     .map_err(|e| JsValue::from_str(&format!("invalid geo point: {e}")))?;
                 return Ok(DataValue::Geo(point));
             }
+            // Check for geo3d { x, y, z } (must come after the {lat, lon}
+            // check so existing 2D Geo semantics are preserved).
+            if let (Some(x), Some(y), Some(z)) = (
+                obj.get("x").and_then(|v| v.as_f64()),
+                obj.get("y").and_then(|v| v.as_f64()),
+                obj.get("z").and_then(|v| v.as_f64()),
+            ) {
+                return Ok(DataValue::GeoEcef(laurus::GeoEcefPoint::new(x, y, z)));
+            }
             Err(JsValue::from_str(
-                "Cannot convert JSON object to DataValue: expected { lat, lon }",
+                "Cannot convert JSON object to DataValue: expected { lat, lon } or { x, y, z }",
             ))
         }
     }
