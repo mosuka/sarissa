@@ -58,7 +58,7 @@ def test_geo3d_field_round_trip(geo3d_index):
 def test_geo3d_distance_query_small_radius(geo3d_index):
     """A 50 km sphere around Tokyo Tower should return Tower + Skytree only."""
     cx, cy, cz = TOKYO_TOWER
-    query = laurus.Geo3dDistanceQuery("position", cx, cy, cz, 50_000.0)
+    query = laurus.Geo3dDistanceQuery.within_sphere("position", cx, cy, cz, 50_000.0)
     results = geo3d_index.search(query, limit=10)
     ids = {r.id for r in results}
     assert ids == {"tokyo_tower", "tokyo_skytree"}
@@ -67,7 +67,7 @@ def test_geo3d_distance_query_small_radius(geo3d_index):
 def test_geo3d_distance_query_wide_radius(geo3d_index):
     """A 200 km sphere additionally pulls in Mt. Fuji."""
     cx, cy, cz = TOKYO_TOWER
-    query = laurus.Geo3dDistanceQuery("position", cx, cy, cz, 200_000.0)
+    query = laurus.Geo3dDistanceQuery.within_sphere("position", cx, cy, cz, 200_000.0)
     results = geo3d_index.search(query, limit=10)
     ids = {r.id for r in results}
     assert ids == {"tokyo_tower", "tokyo_skytree", "mt_fuji"}
@@ -87,7 +87,7 @@ def test_geo3d_bounding_box_query(geo3d_index):
     (`x ≈ -3.916M`, well above the upper bound) and Sydney (`x ≈ -4.65M`,
     well below the lower bound).
     """
-    query = laurus.Geo3dBoundingBoxQuery(
+    query = laurus.Geo3dBoundingBoxQuery.within_box(
         "position",
         -3_962_000.0, 3_340_000.0, 3_690_000.0,
         -3_954_000.0, 3_360_000.0, 3_710_000.0,
@@ -107,7 +107,7 @@ def test_geo3d_nearest_query(geo3d_index):
     order — exact ordering of the close-pair is implementation defined, so
     only check membership)."""
     cx, cy, cz = MT_FUJI
-    query = laurus.Geo3dNearestQuery("position", cx, cy, cz, 3)
+    query = laurus.Geo3dNearestQuery.k_nearest("position", cx, cy, cz, 3)
     results = geo3d_index.search(query, limit=3)
     assert len(results) == 3
     ids = {r.id for r in results}
@@ -119,7 +119,7 @@ def test_geo3d_nearest_query(geo3d_index):
 def test_geo3d_nearest_query_with_radius_options(geo3d_index):
     """Verify the optional initial / max radius parameters are accepted."""
     cx, cy, cz = TOKYO_TOWER
-    query = laurus.Geo3dNearestQuery(
+    query = laurus.Geo3dNearestQuery.k_nearest(
         "position", cx, cy, cz, 2,
         initial_radius_m=10_000.0,
         max_radius_m=10_000_000.0,
@@ -136,10 +136,14 @@ def test_geo3d_nearest_query_with_radius_options(geo3d_index):
 
 def test_geo3d_query_reprs():
     cx, cy, cz = TOKYO_TOWER
-    assert "Geo3dDistanceQuery" in repr(laurus.Geo3dDistanceQuery("position", cx, cy, cz, 1000.0))
+    assert "Geo3dDistanceQuery" in repr(
+        laurus.Geo3dDistanceQuery.within_sphere("position", cx, cy, cz, 1000.0)
+    )
     assert "Geo3dBoundingBoxQuery" in repr(
-        laurus.Geo3dBoundingBoxQuery("position", 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+        laurus.Geo3dBoundingBoxQuery.within_box(
+            "position", 0.0, 0.0, 0.0, 1.0, 1.0, 1.0
+        )
     )
     assert "Geo3dNearestQuery" in repr(
-        laurus.Geo3dNearestQuery("position", cx, cy, cz, 5)
+        laurus.Geo3dNearestQuery.k_nearest("position", cx, cy, cz, 5)
     )

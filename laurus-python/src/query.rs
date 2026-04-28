@@ -8,7 +8,8 @@ use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
     BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
-    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    GeoBoundingBoxQuery, GeoDistanceQuery, NumericRangeQuery, PhraseQuery, TermQuery,
+    WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -23,8 +24,9 @@ use pyo3::prelude::*;
 /// Extract a Laurus lexical query from an arbitrary Python object.
 ///
 /// Supports: `TermQuery`, `PhraseQuery`, `FuzzyQuery`, `WildcardQuery`,
-/// `NumericRangeQuery`, `GeoQuery`, `Geo3dDistanceQuery`,
-/// `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`, `BooleanQuery`, `SpanQuery`.
+/// `NumericRangeQuery`, `GeoDistanceQuery`, `GeoBoundingBoxQuery`,
+/// `Geo3dDistanceQuery`, `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`,
+/// `BooleanQuery`, `SpanQuery`.
 pub fn extract_lexical_query(
     py: Python,
     obj: &Bound<PyAny>,
@@ -49,7 +51,10 @@ pub fn extract_lexical_query(
     if let Ok(q) = obj.extract::<PyRef<PyNumericRangeQuery>>() {
         return Ok(q.build());
     }
-    if let Ok(q) = obj.extract::<PyRef<PyGeoQuery>>() {
+    if let Ok(q) = obj.extract::<PyRef<PyGeoDistanceQuery>>() {
+        return q.build().map_err(|e| PyValueError::new_err(e.to_string()));
+    }
+    if let Ok(q) = obj.extract::<PyRef<PyGeoBoundingBoxQuery>>() {
         return q.build().map_err(|e| PyValueError::new_err(e.to_string()));
     }
     if let Ok(q) = obj.extract::<PyRef<PyGeo3dDistanceQuery>>() {
@@ -362,44 +367,28 @@ impl PyNumericRangeQuery {
 }
 
 // ---------------------------------------------------------------------------
-// GeoQuery
+// GeoDistanceQuery
 // ---------------------------------------------------------------------------
 
-/// Geographic search query (radius or bounding box).
+/// Geographic distance (radius) search query.
 ///
 /// ## Example
 ///
 /// ```python
-/// # Radius search: within 100 km of San Francisco
-/// q = laurus.GeoQuery.within_radius("location", 37.77, -122.42, 100.0)
-///
-/// # Bounding box search
-/// q = laurus.GeoQuery.within_bounding_box("location", 33.0, -123.0, 48.0, -117.0)
+/// # Within 100 km of San Francisco
+/// q = laurus.GeoDistanceQuery.within_radius("location", 37.77, -122.42, 100.0)
 /// ```
-#[pyclass(name = "GeoQuery")]
-pub struct PyGeoQuery {
+#[pyclass(name = "GeoDistanceQuery")]
+pub struct PyGeoDistanceQuery {
     pub field: String,
-    pub kind: GeoKind,
-}
-
-#[derive(Clone)]
-pub enum GeoKind {
-    Radius {
-        lat: f64,
-        lon: f64,
-        distance_km: f64,
-    },
-    BoundingBox {
-        min_lat: f64,
-        min_lon: f64,
-        max_lat: f64,
-        max_lon: f64,
-    },
+    pub lat: f64,
+    pub lon: f64,
+    pub distance_km: f64,
 }
 
 #[pymethods]
-impl PyGeoQuery {
-    /// Create a radius-based geo query.
+impl PyGeoDistanceQuery {
+    /// Create a radius-based geo distance query.
     ///
     /// Args:
     ///     field: Geo field name.
@@ -410,14 +399,55 @@ impl PyGeoQuery {
     pub fn within_radius(field: String, lat: f64, lon: f64, distance_km: f64) -> Self {
         Self {
             field,
-            kind: GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            },
+            lat,
+            lon,
+            distance_km,
         }
     }
 
+    fn __repr__(&self) -> String {
+        format!(
+            "GeoDistanceQuery.within_radius(field='{}', lat={}, lon={}, distance_km={})",
+            self.field, self.lat, self.lon, self.distance_km
+        )
+    }
+}
+
+impl PyGeoDistanceQuery {
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(GeoDistanceQuery::within_radius(
+            &self.field,
+            self.lat,
+            self.lon,
+            self.distance_km,
+        )?))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GeoBoundingBoxQuery
+// ---------------------------------------------------------------------------
+
+/// Geographic bounding-box search query.
+///
+/// ## Example
+///
+/// ```python
+/// q = laurus.GeoBoundingBoxQuery.within_bounding_box(
+///     "location", 33.0, -123.0, 48.0, -117.0,
+/// )
+/// ```
+#[pyclass(name = "GeoBoundingBoxQuery")]
+pub struct PyGeoBoundingBoxQuery {
+    pub field: String,
+    pub min_lat: f64,
+    pub min_lon: f64,
+    pub max_lat: f64,
+    pub max_lon: f64,
+}
+
+#[pymethods]
+impl PyGeoBoundingBoxQuery {
     /// Create a bounding-box geo query.
     ///
     /// Args:
@@ -436,64 +466,30 @@ impl PyGeoQuery {
     ) -> Self {
         Self {
             field,
-            kind: GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            },
+            min_lat,
+            min_lon,
+            max_lat,
+            max_lon,
         }
     }
 
     fn __repr__(&self) -> String {
-        match &self.kind {
-            GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            } => format!(
-                "GeoQuery.within_radius(field='{}', lat={}, lon={}, distance_km={})",
-                self.field, lat, lon, distance_km
-            ),
-            GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            } => format!(
-                "GeoQuery.within_bounding_box(field='{}', min_lat={}, min_lon={}, max_lat={}, max_lon={})",
-                self.field, min_lat, min_lon, max_lat, max_lon
-            ),
-        }
+        format!(
+            "GeoBoundingBoxQuery.within_bounding_box(field='{}', min_lat={}, min_lon={}, max_lat={}, max_lon={})",
+            self.field, self.min_lat, self.min_lon, self.max_lat, self.max_lon
+        )
     }
 }
 
-impl PyGeoQuery {
+impl PyGeoBoundingBoxQuery {
     pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
-        match &self.kind {
-            GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            } => Ok(Box::new(GeoQuery::within_radius(
-                &self.field,
-                *lat,
-                *lon,
-                *distance_km,
-            )?)),
-            GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            } => Ok(Box::new(GeoQuery::within_bounding_box(
-                &self.field,
-                *min_lat,
-                *min_lon,
-                *max_lat,
-                *max_lon,
-            )?)),
-        }
+        Ok(Box::new(GeoBoundingBoxQuery::within_bounding_box(
+            &self.field,
+            self.min_lat,
+            self.min_lon,
+            self.max_lat,
+            self.max_lon,
+        )?))
     }
 }
 
@@ -507,7 +503,9 @@ impl PyGeoQuery {
 /// ## Example
 ///
 /// ```python
-/// q = laurus.Geo3dDistanceQuery("position", -3955182.0, 3350553.0, 3700276.0, 5000.0)
+/// q = laurus.Geo3dDistanceQuery.within_sphere(
+///     "position", -3955182.0, 3350553.0, 3700276.0, 5000.0,
+/// )
 /// ```
 #[pyclass(name = "Geo3dDistanceQuery")]
 pub struct PyGeo3dDistanceQuery {
@@ -526,8 +524,8 @@ impl PyGeo3dDistanceQuery {
     ///     field: Geo3d field name.
     ///     x, y, z: Centre coordinates in ECEF meters.
     ///     radius_m: Sphere radius in meters.
-    #[new]
-    pub fn new(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
+    #[staticmethod]
+    pub fn within_sphere(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
         Self {
             field,
             x,
@@ -539,7 +537,7 @@ impl PyGeo3dDistanceQuery {
 
     fn __repr__(&self) -> String {
         format!(
-            "Geo3dDistanceQuery(field='{}', x={}, y={}, z={}, radius_m={})",
+            "Geo3dDistanceQuery.within_sphere(field='{}', x={}, y={}, z={}, radius_m={})",
             self.field, self.x, self.y, self.z, self.radius_m
         )
     }
@@ -564,7 +562,7 @@ impl PyGeo3dDistanceQuery {
 /// ## Example
 ///
 /// ```python
-/// q = laurus.Geo3dBoundingBoxQuery(
+/// q = laurus.Geo3dBoundingBoxQuery.within_box(
 ///     "position",
 ///     -3962000.0, 3340000.0, 3690000.0,
 ///     -3958000.0, 3360000.0, 3710000.0,
@@ -589,8 +587,9 @@ impl PyGeo3dBoundingBoxQuery {
     ///     field: Geo3d field name.
     ///     min_x, min_y, min_z: Lower corner of the box.
     ///     max_x, max_y, max_z: Upper corner of the box.
-    #[new]
-    pub fn new(
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    pub fn within_box(
         field: String,
         min_x: f64,
         min_y: f64,
@@ -612,7 +611,7 @@ impl PyGeo3dBoundingBoxQuery {
 
     fn __repr__(&self) -> String {
         format!(
-            "Geo3dBoundingBoxQuery(field='{}', min=({}, {}, {}), max=({}, {}, {}))",
+            "Geo3dBoundingBoxQuery.within_box(field='{}', min=({}, {}, {}), max=({}, {}, {}))",
             self.field, self.min_x, self.min_y, self.min_z, self.max_x, self.max_y, self.max_z
         )
     }
@@ -637,7 +636,9 @@ impl PyGeo3dBoundingBoxQuery {
 /// ## Example
 ///
 /// ```python
-/// q = laurus.Geo3dNearestQuery("position", -3955182.0, 3350553.0, 3700276.0, k=10)
+/// q = laurus.Geo3dNearestQuery.k_nearest(
+///     "position", -3955182.0, 3350553.0, 3700276.0, 10,
+/// )
 /// ```
 #[pyclass(name = "Geo3dNearestQuery")]
 pub struct PyGeo3dNearestQuery {
@@ -662,9 +663,9 @@ impl PyGeo3dNearestQuery {
     ///         search (default 1000 m). Optional.
     ///     max_radius_m: Hard cap on the search radius (default 1e10 m).
     ///         Optional.
-    #[new]
+    #[staticmethod]
     #[pyo3(signature = (field, x, y, z, k, *, initial_radius_m=None, max_radius_m=None))]
-    pub fn new(
+    pub fn k_nearest(
         field: String,
         x: f64,
         y: f64,
@@ -686,7 +687,7 @@ impl PyGeo3dNearestQuery {
 
     fn __repr__(&self) -> String {
         format!(
-            "Geo3dNearestQuery(field='{}', x={}, y={}, z={}, k={})",
+            "Geo3dNearestQuery.k_nearest(field='{}', x={}, y={}, z={}, k={})",
             self.field, self.x, self.y, self.z, self.k
         )
     }
