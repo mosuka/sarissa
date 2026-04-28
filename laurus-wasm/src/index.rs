@@ -449,8 +449,18 @@ impl WasmIndex {
         k: u32,
         limit: Option<u32>,
         offset: Option<u32>,
+        initial_radius_m: Option<f64>,
+        max_radius_m: Option<f64>,
     ) -> Result<JsValue, JsValue> {
-        let query = JsQuery::Geo3dNearestQuery(JsGeo3dNearestQuery { field, x, y, z, k });
+        let query = JsQuery::Geo3dNearestQuery(JsGeo3dNearestQuery {
+            field,
+            x,
+            y,
+            z,
+            k,
+            initial_radius_m,
+            max_radius_m,
+        });
         let request = build_lexical_request(
             &query,
             limit.unwrap_or(10) as usize,
