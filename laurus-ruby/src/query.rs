@@ -5,9 +5,11 @@
 
 use std::cell::RefCell;
 
+use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
-    BooleanQuery, FuzzyQuery, GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
+    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -23,7 +25,8 @@ use magnus::{Error, RArray, RHash, RModule, Ruby, Value};
 /// Extract a Laurus lexical query from an arbitrary Ruby value.
 ///
 /// Supports: `TermQuery`, `PhraseQuery`, `FuzzyQuery`, `WildcardQuery`,
-/// `NumericRangeQuery`, `GeoQuery`, `BooleanQuery`, `SpanQuery`.
+/// `NumericRangeQuery`, `GeoQuery`, `Geo3dDistanceQuery`,
+/// `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`, `BooleanQuery`, `SpanQuery`.
 ///
 /// # Arguments
 ///
@@ -57,6 +60,17 @@ pub fn extract_lexical_query(value: Value) -> Result<Box<dyn laurus::lexical::Qu
         return q
             .build()
             .map_err(|e| Error::new(ruby.exception_arg_error(), e.to_string()));
+    }
+    if let Ok(q) = <&RbGeo3dDistanceQuery>::try_convert(value) {
+        return Ok(q.build());
+    }
+    if let Ok(q) = <&RbGeo3dBoundingBoxQuery>::try_convert(value) {
+        return q
+            .build()
+            .map_err(|e| Error::new(ruby.exception_arg_error(), e.to_string()));
+    }
+    if let Ok(q) = <&RbGeo3dNearestQuery>::try_convert(value) {
+        return Ok(q.build());
     }
     if let Ok(q) = <&RbBooleanQuery>::try_convert(value) {
         return q.build_query();
@@ -548,6 +562,169 @@ impl RbGeoQuery {
 }
 
 // ---------------------------------------------------------------------------
+// Geo3dDistanceQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF sphere query (`Laurus::Geo3dDistanceQuery`).
+///
+/// Matches every document whose stored `(x, y, z)` point lies within
+/// `radius_m` meters of the given centre.
+#[magnus::wrap(class = "Laurus::Geo3dDistanceQuery")]
+pub struct RbGeo3dDistanceQuery {
+    pub field: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub radius_m: f64,
+}
+
+impl RbGeo3dDistanceQuery {
+    /// Create a 3D distance (sphere) query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
+    /// * `radius_m` - Sphere radius in meters.
+    fn within_sphere(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
+        Self {
+            field,
+            x,
+            y,
+            z,
+            radius_m,
+        }
+    }
+
+    fn inspect(&self) -> String {
+        format!(
+            "Geo3dDistanceQuery.within_sphere(field='{}', x={}, y={}, z={}, radius_m={})",
+            self.field, self.x, self.y, self.z, self.radius_m
+        )
+    }
+}
+
+impl RbGeo3dDistanceQuery {
+    /// Build the underlying Rust `Geo3dDistanceQuery`.
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        Box::new(Geo3dDistanceQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.x, self.y, self.z),
+            self.radius_m,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dBoundingBoxQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF axis-aligned bounding box query (`Laurus::Geo3dBoundingBoxQuery`).
+#[magnus::wrap(class = "Laurus::Geo3dBoundingBoxQuery")]
+pub struct RbGeo3dBoundingBoxQuery {
+    pub field: String,
+    pub min_x: f64,
+    pub min_y: f64,
+    pub min_z: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+    pub max_z: f64,
+}
+
+impl RbGeo3dBoundingBoxQuery {
+    /// Create a 3D bounding-box query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `min_x`, `min_y`, `min_z` - Lower corner of the box.
+    /// * `max_x`, `max_y`, `max_z` - Upper corner of the box.
+    #[allow(clippy::too_many_arguments)]
+    fn within_box(
+        field: String,
+        min_x: f64,
+        min_y: f64,
+        min_z: f64,
+        max_x: f64,
+        max_y: f64,
+        max_z: f64,
+    ) -> Self {
+        Self {
+            field,
+            min_x,
+            min_y,
+            min_z,
+            max_x,
+            max_y,
+            max_z,
+        }
+    }
+
+    fn inspect(&self) -> String {
+        format!(
+            "Geo3dBoundingBoxQuery.within_box(field='{}', min=({}, {}, {}), max=({}, {}, {}))",
+            self.field, self.min_x, self.min_y, self.min_z, self.max_x, self.max_y, self.max_z
+        )
+    }
+}
+
+impl RbGeo3dBoundingBoxQuery {
+    /// Build the underlying Rust `Geo3dBoundingBoxQuery`.
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(Geo3dBoundingBoxQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.min_x, self.min_y, self.min_z),
+            GeoEcefPoint::new(self.max_x, self.max_y, self.max_z),
+        )?))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dNearestQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF k-nearest-neighbours query (`Laurus::Geo3dNearestQuery`).
+#[magnus::wrap(class = "Laurus::Geo3dNearestQuery")]
+pub struct RbGeo3dNearestQuery {
+    pub field: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub k: u32,
+}
+
+impl RbGeo3dNearestQuery {
+    /// Create a 3D k-NN query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
+    /// * `k` - Number of nearest neighbours to return.
+    fn k_nearest(field: String, x: f64, y: f64, z: f64, k: u32) -> Self {
+        Self { field, x, y, z, k }
+    }
+
+    fn inspect(&self) -> String {
+        format!(
+            "Geo3dNearestQuery.k_nearest(field='{}', x={}, y={}, z={}, k={})",
+            self.field, self.x, self.y, self.z, self.k
+        )
+    }
+}
+
+impl RbGeo3dNearestQuery {
+    /// Build the underlying Rust `Geo3dNearestQuery`.
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        Box::new(Geo3dNearestQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.x, self.y, self.z),
+            self.k as usize,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // BooleanQuery - stores extracted Rust queries, not Ruby Values
 // ---------------------------------------------------------------------------
 
@@ -872,6 +1049,36 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     )?;
     geo_q.define_method("inspect", magnus::method!(RbGeoQuery::inspect, 0))?;
     geo_q.define_method("to_s", magnus::method!(RbGeoQuery::inspect, 0))?;
+
+    // Geo3dDistanceQuery
+    let g3d_dist = module.define_class("Geo3dDistanceQuery", ruby.class_object())?;
+    g3d_dist.define_singleton_method(
+        "within_sphere",
+        magnus::function!(RbGeo3dDistanceQuery::within_sphere, 5),
+    )?;
+    g3d_dist.define_method("inspect", magnus::method!(RbGeo3dDistanceQuery::inspect, 0))?;
+    g3d_dist.define_method("to_s", magnus::method!(RbGeo3dDistanceQuery::inspect, 0))?;
+
+    // Geo3dBoundingBoxQuery
+    let g3d_bbox = module.define_class("Geo3dBoundingBoxQuery", ruby.class_object())?;
+    g3d_bbox.define_singleton_method(
+        "within_box",
+        magnus::function!(RbGeo3dBoundingBoxQuery::within_box, 7),
+    )?;
+    g3d_bbox.define_method(
+        "inspect",
+        magnus::method!(RbGeo3dBoundingBoxQuery::inspect, 0),
+    )?;
+    g3d_bbox.define_method("to_s", magnus::method!(RbGeo3dBoundingBoxQuery::inspect, 0))?;
+
+    // Geo3dNearestQuery
+    let g3d_near = module.define_class("Geo3dNearestQuery", ruby.class_object())?;
+    g3d_near.define_singleton_method(
+        "k_nearest",
+        magnus::function!(RbGeo3dNearestQuery::k_nearest, 5),
+    )?;
+    g3d_near.define_method("inspect", magnus::method!(RbGeo3dNearestQuery::inspect, 0))?;
+    g3d_near.define_method("to_s", magnus::method!(RbGeo3dNearestQuery::inspect, 0))?;
 
     // BooleanQuery
     let bool_q = module.define_class("BooleanQuery", ruby.class_object())?;

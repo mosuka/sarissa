@@ -55,6 +55,7 @@ pub fn hash_to_document(ruby: &Ruby, hash: RHash) -> Result<Document, Error> {
 /// | `String`                      | `Text`               |
 /// | `Array` of numerics           | `Vector`             |
 /// | `Hash` with `"lat"`, `"lon"`  | `Geo`                |
+/// | `Hash` with `"x"`, `"y"`, `"z"` | `GeoEcef` (3D ECEF Cartesian, meters) |
 /// | `Time` / ISO 8601 string      | `DateTime`           |
 ///
 /// # Arguments
@@ -97,7 +98,7 @@ pub fn rb_to_data_value(ruby: &Ruby, value: Value) -> Result<DataValue, Error> {
         let vec: Vec<f32> = arr.to_vec()?;
         return Ok(DataValue::Vector(vec));
     }
-    // Hash with "lat"/"lon" → Geo
+    // Hash with "lat"/"lon" → Geo, or with "x"/"y"/"z" → Geo3d
     if value.is_kind_of(ruby.class_hash()) {
         let hash = RHash::from_value(value)
             .ok_or_else(|| Error::new(ruby.exception_type_error(), "expected Hash"))?;
@@ -114,9 +115,20 @@ pub fn rb_to_data_value(ruby: &Ruby, value: Value) -> Result<DataValue, Error> {
             })?;
             return Ok(DataValue::Geo(point));
         }
+        // Geo3d (3D ECEF Cartesian point) — must come after the {lat, lon}
+        // check so existing 2D Geo semantics are preserved.
+        let x_val: Option<Value> = hash.get(ruby.str_new("x"));
+        let y_val: Option<Value> = hash.get(ruby.str_new("y"));
+        let z_val: Option<Value> = hash.get(ruby.str_new("z"));
+        if let (Some(xv), Some(yv), Some(zv)) = (x_val, y_val, z_val) {
+            let x: f64 = magnus::TryConvert::try_convert(xv)?;
+            let y: f64 = magnus::TryConvert::try_convert(yv)?;
+            let z: f64 = magnus::TryConvert::try_convert(zv)?;
+            return Ok(DataValue::GeoEcef(laurus::GeoEcefPoint::new(x, y, z)));
+        }
         return Err(Error::new(
             ruby.exception_arg_error(),
-            "Hash must have 'lat' and 'lon' keys for Geo conversion",
+            "Hash must have 'lat' and 'lon' keys for Geo conversion, or 'x', 'y', 'z' keys for Geo3d",
         ));
     }
     // Try Time → DateTime (call .iso8601 or .to_s)
