@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-52b2cbbb.js";
+            window.path_to_searchindex_js = "../searchindex-65846a86.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -308,18 +308,20 @@
 )
 </code></pre>
 <p><code>[min, max]</code> 範囲の数値にマッチ。<code>null</code> で開放端。</p>
-<h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<pre><code class="language-typescript">GeoQuery.withinRadius(
+<h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
+<pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
   field: string, lat: number, lon: number, distanceKm: number,
-): GeoQuery
-
-GeoQuery.withinBoundingBox(
+): GeoDistanceQuery
+</code></pre>
+<p>地理的距離検索（半径指定）。</p>
+<h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
+<pre><code class="language-typescript">GeoBoundingBoxQuery.withinBoundingBox(
   field: string,
   minLat: number, minLon: number,
   maxLat: number, maxLon: number,
-): GeoQuery
+): GeoBoundingBoxQuery
 </code></pre>
-<p>半径またはバウンディングボックスによる地理検索。</p>
+<p>地理的バウンディングボックス検索。</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
   field: string,
@@ -348,8 +350,7 @@ GeoQuery.withinBoundingBox(
 ): Geo3dNearestQuery
 </code></pre>
 <p>3D ECEF 座標フィールドへの k 最近傍検索。<code>initialRadiusM</code> / <code>maxRadiusM</code> は
-反復拡張サーチの探索コーンを調整します（Node.js 専用 — バインディング間の対称化は
-<a href="https://github.com/mosuka/laurus/issues/344">#344</a> を参照）。</p>
+反復拡張サーチの探索コーンを調整します。</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();

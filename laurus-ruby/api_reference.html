@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-d9ba111b.js";
+            window.path_to_searchindex_js = "../searchindex-ca6ba65d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -324,14 +324,18 @@ the full behaviour matrix.</p>
 <pre><code class="language-ruby">Laurus::NumericRangeQuery.new(field, min: nil, max: nil)
 </code></pre>
 <p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>nil</code> for an open bound. The type (integer or float) is inferred from the Ruby type of <code>min</code>/<code>max</code>.</p>
-<h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<pre><code class="language-ruby"># Radius search
-Laurus::GeoQuery.within_radius(field, lat, lon, distance_km)
-
-# Bounding box search
-Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
+<h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
+<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
 </code></pre>
-<p><code>within_radius</code> returns documents whose coordinate is within <code>distance_km</code> of the given point. <code>within_bounding_box</code> returns documents within the specified bounding box.</p>
+<p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
+is within <code>distance_km</code> kilometres of the given point.</p>
+<h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
+<pre><code class="language-ruby">Laurus::GeoBoundingBoxQuery.within_bounding_box(
+  field, min_lat, min_lon, max_lat, max_lon,
+)
+</code></pre>
+<p>Geo bounding-box search. Returns documents whose <code>(lat, lon)</code> coordinate lies
+inside the axis-aligned <code>[min_lat, max_lat] × [min_lon, max_lon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
 </code></pre>
@@ -347,11 +351,15 @@ coordinate is within <code>radius_m</code> metres of the centre. See
 </code></pre>
 <p>Axis-aligned 3D bounding-box search.</p>
 <h3 id="geo3dnearestquery"><a class="header" href="#geo3dnearestquery">Geo3dNearestQuery</a></h3>
-<pre><code class="language-ruby">Laurus::Geo3dNearestQuery.k_nearest(field, x, y, z, k)
+<pre><code class="language-ruby">Laurus::Geo3dNearestQuery.k_nearest(
+  field, x, y, z, k,
+  initial_radius_m: nil,
+  max_radius_m: nil,
+)
 </code></pre>
-<p>k-nearest-neighbour search over a 3D ECEF point field. The <code>initial_radius_m</code> /
-<code>max_radius_m</code> tuning parameters of the core query are not yet exposed in the
-Ruby binding — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings.</p>
+<p>k-nearest-neighbour search over a 3D ECEF point field. The optional
+<code>initial_radius_m:</code> and <code>max_radius_m:</code> keyword arguments tune the
+iterative-expansion search cone.</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-ruby">bq = Laurus::BooleanQuery.new
 bq.must(query)

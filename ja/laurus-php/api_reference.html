@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-52b2cbbb.js";
+            window.path_to_searchindex_js = "../searchindex-65846a86.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -322,14 +322,21 @@
 <pre><code class="language-php">new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $numericType = "integer")
 </code></pre>
 <p><code>[$min, $max]</code> の範囲内の数値を検索します。開いた境界には <code>null</code> を指定します。<code>$numericType</code> には <code>"integer"</code> または <code>"float"</code> を設定します。</p>
-<h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<pre><code class="language-php">// 半径検索
-\Laurus\GeoQuery::withinRadius(string $field, float $lat, float $lon, float $distanceKm): GeoQuery
-
-// バウンディングボックス検索
-\Laurus\GeoQuery::withinBoundingBox(string $field, float $minLat, float $minLon, float $maxLat, float $maxLon): GeoQuery
+<h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
+<pre><code class="language-php">\Laurus\GeoDistanceQuery::withinRadius(
+    string $field, float $lat, float $lon, float $distanceKm,
+): GeoDistanceQuery
 </code></pre>
-<p><code>withinRadius</code> は指定した地点から <code>$distanceKm</code> 以内の座標を持つドキュメントを返します。<code>withinBoundingBox</code> は指定したバウンディングボックス内のドキュメントを返します。</p>
+<p>地理的距離検索（半径指定）。指定した地点から <code>$distanceKm</code> キロメートル以内の
+<code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
+<h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
+<pre><code class="language-php">\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
+    string $field,
+    float $minLat, float $minLon,
+    float $maxLat, float $maxLon,
+): GeoBoundingBoxQuery
+</code></pre>
+<p>地理的範囲（バウンディングボックス）検索。軸並行 <code>[$minLat, $maxLat] × [$minLon, $maxLon]</code> 内の <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-php">\Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
@@ -353,11 +360,12 @@
     string $field,
     float $x, float $y, float $z,
     int $k,
+    ?float $initialRadiusM = null,
+    ?float $maxRadiusM = null,
 ): Geo3dNearestQuery
 </code></pre>
-<p>3D ECEF 座標フィールドへの k 最近傍検索。コアクエリの <code>initial_radius_m</code> /
-<code>max_radius_m</code> チューニングパラメータは PHP バインディングではまだ公開されて
-いません — バインディング間の対称化は <a href="https://github.com/mosuka/laurus/issues/344">#344</a> を参照。</p>
+<p>3D ECEF 座標フィールドへの k 最近傍検索。<code>$initialRadiusM</code> / <code>$maxRadiusM</code>
+（オプション）で反復拡張サーチの探索コーンを調整できます。</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-php">$bq = new \Laurus\BooleanQuery();
 $bq-&gt;must($query);

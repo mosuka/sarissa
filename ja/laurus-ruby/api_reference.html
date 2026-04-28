@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-52b2cbbb.js";
+            window.path_to_searchindex_js = "../searchindex-65846a86.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -322,14 +322,17 @@
 <pre><code class="language-ruby">Laurus::NumericRangeQuery.new(field, min: nil, max: nil)
 </code></pre>
 <p><code>[min, max]</code> の範囲内の数値を検索します。開いた境界には <code>nil</code> を指定します。型（整数または浮動小数点）は <code>min</code>/<code>max</code> の Ruby 型から推論されます。</p>
-<h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<pre><code class="language-ruby"># 半径検索
-Laurus::GeoQuery.within_radius(field, lat, lon, distance_km)
-
-# バウンディングボックス検索
-Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
+<h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
+<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
 </code></pre>
-<p><code>within_radius</code> は指定した地点から <code>distance_km</code> 以内の座標を持つドキュメントを返します。<code>within_bounding_box</code> は指定したバウンディングボックス内のドキュメントを返します。</p>
+<p>地理的距離検索（半径指定）。指定した地点から <code>distance_km</code> キロメートル以内の
+<code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
+<h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
+<pre><code class="language-ruby">Laurus::GeoBoundingBoxQuery.within_bounding_box(
+  field, min_lat, min_lon, max_lat, max_lon,
+)
+</code></pre>
+<p>地理的範囲（バウンディングボックス）検索。軸並行 <code>[min_lat, max_lat] × [min_lon, max_lon]</code> 内の <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
 </code></pre>
@@ -345,11 +348,14 @@ Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
 </code></pre>
 <p>軸並行 3D 範囲（AABB）検索。</p>
 <h3 id="geo3dnearestquery"><a class="header" href="#geo3dnearestquery">Geo3dNearestQuery</a></h3>
-<pre><code class="language-ruby">Laurus::Geo3dNearestQuery.k_nearest(field, x, y, z, k)
+<pre><code class="language-ruby">Laurus::Geo3dNearestQuery.k_nearest(
+  field, x, y, z, k,
+  initial_radius_m: nil,
+  max_radius_m: nil,
+)
 </code></pre>
-<p>3D ECEF 座標フィールドへの k 最近傍検索。コアクエリの <code>initial_radius_m</code> /
-<code>max_radius_m</code> チューニングパラメータは Ruby バインディングではまだ公開されて
-いません — バインディング間の対称化は <a href="https://github.com/mosuka/laurus/issues/344">#344</a> を参照。</p>
+<p>3D ECEF 座標フィールドへの k 最近傍検索。<code>initial_radius_m:</code> / <code>max_radius_m:</code>
+キーワード引数（オプション）で反復拡張サーチの探索コーンを調整できます。</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-ruby">bq = Laurus::BooleanQuery.new
 bq.must(query)

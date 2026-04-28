@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-52b2cbbb.js";
+            window.path_to_searchindex_js = "../searchindex-65846a86.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -297,18 +297,31 @@
 <pre><code class="language-python">NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
 </code></pre>
 <p><code>[min, max]</code> の範囲内の数値を検索します。開いた境界には <code>None</code> を指定します。</p>
-<h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<pre><code class="language-python">GeoQuery(field: str, lat: float, lon: float, radius_km: float)
+<h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
+<pre><code class="language-python">GeoDistanceQuery.within_radius(
+    field: str, lat: float, lon: float, distance_km: float,
+)
 </code></pre>
-<p>地理的距離検索。指定した地点から <code>radius_km</code> 以内の <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
+<p>地理的距離検索（半径指定）。指定した地点から <code>distance_km</code> キロメートル以内の
+<code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
+<h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
+<pre><code class="language-python">GeoBoundingBoxQuery.within_bounding_box(
+    field: str,
+    min_lat: float, min_lon: float,
+    max_lat: float, max_lon: float,
+)
+</code></pre>
+<p>地理的範囲（バウンディングボックス）検索。軸並行 <code>[min_lat, max_lat] × [min_lon, max_lon]</code> 内の <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
-<pre><code class="language-python">Geo3dDistanceQuery(field: str, x: float, y: float, z: float, radius_m: float)
+<pre><code class="language-python">Geo3dDistanceQuery.within_sphere(
+    field: str, x: float, y: float, z: float, radius_m: float,
+)
 </code></pre>
 <p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>radius_m</code> メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 <a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
-<pre><code class="language-python">Geo3dBoundingBoxQuery(
+<pre><code class="language-python">Geo3dBoundingBoxQuery.within_box(
     field: str,
     min_x: float, min_y: float, min_z: float,
     max_x: float, max_y: float, max_z: float,
@@ -317,7 +330,7 @@
 <p>軸並行 3D 範囲（AABB）検索。<code>[min_x, max_x] × [min_y, max_y] × [min_z, max_z]</code> 内
 にある ECEF 座標を持つドキュメントを返します。</p>
 <h3 id="geo3dnearestquery"><a class="header" href="#geo3dnearestquery">Geo3dNearestQuery</a></h3>
-<pre><code class="language-python">Geo3dNearestQuery(
+<pre><code class="language-python">Geo3dNearestQuery.k_nearest(
     field: str,
     x: float, y: float, z: float,
     k: int,
@@ -328,7 +341,7 @@
 </code></pre>
 <p>3D ECEF 座標フィールドへの k 最近傍検索。<code>(x, y, z)</code> から最も近い <code>k</code> 件のドキュ
 メントを返します。<code>initial_radius_m</code> / <code>max_radius_m</code> は反復拡張サーチの探索コーン
-を調整します（Python 専用 — バインディング間の対称化は <a href="https://github.com/mosuka/laurus/issues/344">#344</a> を参照）。</p>
+を調整します。</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-python">BooleanQuery(
     must: list[Query] | None = None,

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-52b2cbbb.js";
+            window.path_to_searchindex_js = "../searchindex-65846a86.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -315,11 +315,10 @@
 </li>
 <li><strong>戻り値:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
-<h4 id="searchgeo3dnearestfield-x-y-z-k-limit-offset"><a class="header" href="#searchgeo3dnearestfield-x-y-z-k-limit-offset"><code>searchGeo3dNearest(field, x, y, z, k, limit?, offset?)</code></a></h4>
+<h4 id="searchgeo3dnearestfield-x-y-z-k-limit-offset-initialradiusm-maxradiusm"><a class="header" href="#searchgeo3dnearestfield-x-y-z-k-limit-offset-initialradiusm-maxradiusm"><code>searchGeo3dNearest(field, x, y, z, k, limit?, offset?, initialRadiusM?, maxRadiusM?)</code></a></h4>
 <p>3D ECEF 座標フィールドへの k 最近傍検索。<code>(x, y, z)</code> から最も近い <code>k</code> 件のドキュ
-メントを返します。コアクエリの <code>initialRadiusM</code> / <code>maxRadiusM</code> チューニングパラ
-メータは WASM バインディングではまだ公開されていません — バインディング間の対称化は
-<a href="https://github.com/mosuka/laurus/issues/344">#344</a> を参照。</p>
+メントを返します。<code>initialRadiusM</code> / <code>maxRadiusM</code>（オプション）で反復拡張サーチの
+探索コーンを調整できます。</p>
 <ul>
 <li><strong>引数:</strong>
 <ul>
@@ -327,6 +326,7 @@
 <li><code>x</code>, <code>y</code>, <code>z</code> (number) – 中心 ECEF 座標（メートル）</li>
 <li><code>k</code> (number) – 返す近傍件数</li>
 <li><code>limit</code>, <code>offset</code> (number, 省略可)</li>
+<li><code>initialRadiusM</code>, <code>maxRadiusM</code> (number, 省略可)</li>
 </ul>
 </li>
 <li><strong>戻り値:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
