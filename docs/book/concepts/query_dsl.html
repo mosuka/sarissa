@@ -232,6 +232,30 @@ test*
 date:{2024-01-01 TO 2024-12-31}
 price:[* TO 100]
 </code></pre>
+<h3 id="2d-geographic-queries-geo_"><a class="header" href="#2d-geographic-queries-geo_">2D Geographic Queries (<code>geo_*</code>)</a></h3>
+<p>Two function-style forms target <code>Geo</code> (2D latitude / longitude) fields. All
+arguments are signed floats; latitudes / longitudes are in degrees and the
+radius is in kilometres:</p>
+<pre><code class="language-text">location:geo_distance(lat, lon, distance_km)
+location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_km)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies within <code>distance_km</code> kilometres of the given centre.</td></tr>
+<tr><td style="text-align: left"><code>geo_bbox(min_lat, min_lon, max_lat, max_lon)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies inside the axis-aligned latitude / longitude rectangle.</td></tr>
+</tbody></table>
+</div>
+<p>Examples:</p>
+<pre><code class="language-text"># Within 10 km of Tokyo (35.6895, 139.6917)
+location:geo_distance(35.6895, 139.6917, 10)
+
+# Inside an axis-aligned lat/lon bounding box
+location:geo_bbox(35.0, 139.0, 36.0, 140.0)
+</code></pre>
+<blockquote>
+<p>The query field must be declared as a <code>Geo</code> field in the schema. Latitudes
+must lie in <code>[-90, 90]</code> and longitudes in <code>[-180, 180]</code>; the parser rejects
+out-of-range values.</p>
+</blockquote>
 <h3 id="3d-geographic-queries-geo3d_"><a class="header" href="#3d-geographic-queries-geo3d_">3D Geographic Queries (<code>geo3d_*</code>)</a></h3>
 <p>Three function-style forms target <code>Geo3d</code> (3D ECEF Cartesian) fields. All
 arguments are signed floats in metres, except <code>k</code> (an unsigned integer):</p>
@@ -280,8 +304,8 @@ sub_clause     = { grouped_query | field_query | term_query }
 grouped_query  = { "(" ~ boolean_query ~ ")" ~ boost? }
 boolean_op     = { ^"AND" | ^"OR" }
 field_query    = { field ~ ":" ~ field_value }
-field_value    = { geo3d_query | range_query | phrase_query | fuzzy_term
-                 | wildcard_term | simple_term }
+field_value    = { geo3d_query | geo_query | range_query | phrase_query
+                 | fuzzy_term | wildcard_term | simple_term }
 geo3d_query    = { geo3d_distance | geo3d_bbox | geo3d_nearest }
 geo3d_distance = { ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
@@ -290,6 +314,11 @@ geo3d_bbox     = { ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ signed_float ~ "," ~ signed_float ~ ")" }
 geo3d_nearest  = { ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")" }
+geo_query      = { geo_distance | geo_bbox }
+geo_distance   = { ^"geo_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ ")" }
+geo_bbox       = { ^"geo_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
 phrase_query   = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
 proximity      = { "~" ~ number }
 fuzzy_term     = { term ~ "~" ~ fuzziness? ~ boost? }

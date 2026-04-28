@@ -135,18 +135,36 @@ NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
 
 Matches numeric values in the range `[min, max]`. Pass `None` for an open bound.
 
-### GeoQuery
+### GeoDistanceQuery
 
 ```python
-GeoQuery(field: str, lat: float, lon: float, radius_km: float)
+GeoDistanceQuery.within_radius(
+    field: str, lat: float, lon: float, distance_km: float,
+)
 ```
 
-Geo-distance search. Returns documents whose `(lat, lon)` coordinate is within `radius_km` of the given point.
+Geo-distance (radius) search. Returns documents whose `(lat, lon)` coordinate
+is within `distance_km` kilometres of the given point.
+
+### GeoBoundingBoxQuery
+
+```python
+GeoBoundingBoxQuery.within_bounding_box(
+    field: str,
+    min_lat: float, min_lon: float,
+    max_lat: float, max_lon: float,
+)
+```
+
+Geo bounding-box search. Returns documents whose `(lat, lon)` coordinate lies
+inside the axis-aligned `[min_lat, max_lat] × [min_lon, max_lon]` rectangle.
 
 ### Geo3dDistanceQuery
 
 ```python
-Geo3dDistanceQuery(field: str, x: float, y: float, z: float, radius_m: float)
+Geo3dDistanceQuery.within_sphere(
+    field: str, x: float, y: float, z: float, radius_m: float,
+)
 ```
 
 Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
@@ -156,7 +174,7 @@ coordinate is within `radius_m` metres of the centre. See
 ### Geo3dBoundingBoxQuery
 
 ```python
-Geo3dBoundingBoxQuery(
+Geo3dBoundingBoxQuery.within_box(
     field: str,
     min_x: float, min_y: float, min_z: float,
     max_x: float, max_y: float, max_z: float,
@@ -169,7 +187,7 @@ inside `[min_x, max_x] × [min_y, max_y] × [min_z, max_z]`.
 ### Geo3dNearestQuery
 
 ```python
-Geo3dNearestQuery(
+Geo3dNearestQuery.k_nearest(
     field: str,
     x: float, y: float, z: float,
     k: int,
@@ -179,12 +197,9 @@ Geo3dNearestQuery(
 )
 ```
 
-k-nearest-neighbour search over a 3D ECEF point field. Returns the `k` documents
-closest to `(x, y, z)`. The optional `initial_radius_m` and `max_radius_m`
-tune the iterative-expansion search cone (Python only — see [#344] for parity
-across bindings).
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+k-nearest-neighbour search over a 3D ECEF point field. Returns the `k`
+documents closest to `(x, y, z)`. The optional `initial_radius_m` and
+`max_radius_m` tune the iterative-expansion search cone.
 
 ### BooleanQuery
 

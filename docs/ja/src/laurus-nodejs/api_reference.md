@@ -141,21 +141,27 @@ new NumericRangeQuery(
 
 `[min, max]` 範囲の数値にマッチ。`null` で開放端。
 
-### GeoQuery
+### GeoDistanceQuery
 
 ```typescript
-GeoQuery.withinRadius(
+GeoDistanceQuery.withinRadius(
   field: string, lat: number, lon: number, distanceKm: number,
-): GeoQuery
+): GeoDistanceQuery
+```
 
-GeoQuery.withinBoundingBox(
+地理的距離検索（半径指定）。
+
+### GeoBoundingBoxQuery
+
+```typescript
+GeoBoundingBoxQuery.withinBoundingBox(
   field: string,
   minLat: number, minLon: number,
   maxLat: number, maxLon: number,
-): GeoQuery
+): GeoBoundingBoxQuery
 ```
 
-半径またはバウンディングボックスによる地理検索。
+地理的バウンディングボックス検索。
 
 ### Geo3dDistanceQuery
 
@@ -196,10 +202,7 @@ Geo3dNearestQuery.kNearest(
 ```
 
 3D ECEF 座標フィールドへの k 最近傍検索。`initialRadiusM` / `maxRadiusM` は
-反復拡張サーチの探索コーンを調整します（Node.js 専用 — バインディング間の対称化は
-[#344] を参照）。
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+反復拡張サーチの探索コーンを調整します。
 
 ### BooleanQuery
 

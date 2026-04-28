@@ -126,20 +126,18 @@ Axis-aligned 3D bounding-box search over a 3D ECEF point field.
   - `limit`, `offset` (number, optional)
 - **Returns:** `Promise<SearchResult[]>`
 
-#### `searchGeo3dNearest(field, x, y, z, k, limit?, offset?)`
+#### `searchGeo3dNearest(field, x, y, z, k, limit?, offset?, initialRadiusM?, maxRadiusM?)`
 
 k-nearest-neighbour search over a 3D ECEF point field. Returns the `k`
-documents closest to `(x, y, z)`. The `initialRadiusM` / `maxRadiusM` tuning
-parameters of the core query are not yet exposed in the WASM binding — see
-[#344] for parity across bindings.
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+documents closest to `(x, y, z)`. The optional `initialRadiusM` and
+`maxRadiusM` parameters tune the iterative-expansion search cone.
 
 - **Parameters:**
   - `field` (string) -- Geo3d field name.
   - `x`, `y`, `z` (number) -- Centre ECEF coordinate (metres).
   - `k` (number) -- Number of nearest neighbours to return.
   - `limit`, `offset` (number, optional)
+  - `initialRadiusM`, `maxRadiusM` (number, optional)
 - **Returns:** `Promise<SearchResult[]>`
 
 #### `stats()`

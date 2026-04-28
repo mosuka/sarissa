@@ -276,18 +276,32 @@ the full behaviour matrix.</p>
 <pre><code class="language-python">NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
 </code></pre>
 <p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>None</code> for an open bound.</p>
-<h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<pre><code class="language-python">GeoQuery(field: str, lat: float, lon: float, radius_km: float)
+<h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
+<pre><code class="language-python">GeoDistanceQuery.within_radius(
+    field: str, lat: float, lon: float, distance_km: float,
+)
 </code></pre>
-<p>Geo-distance search. Returns documents whose <code>(lat, lon)</code> coordinate is within <code>radius_km</code> of the given point.</p>
+<p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
+is within <code>distance_km</code> kilometres of the given point.</p>
+<h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
+<pre><code class="language-python">GeoBoundingBoxQuery.within_bounding_box(
+    field: str,
+    min_lat: float, min_lon: float,
+    max_lat: float, max_lon: float,
+)
+</code></pre>
+<p>Geo bounding-box search. Returns documents whose <code>(lat, lon)</code> coordinate lies
+inside the axis-aligned <code>[min_lat, max_lat] × [min_lon, max_lon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
-<pre><code class="language-python">Geo3dDistanceQuery(field: str, x: float, y: float, z: float, radius_m: float)
+<pre><code class="language-python">Geo3dDistanceQuery.within_sphere(
+    field: str, x: float, y: float, z: float, radius_m: float,
+)
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
 coordinate is within <code>radius_m</code> metres of the centre. See
 <a href="../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
-<pre><code class="language-python">Geo3dBoundingBoxQuery(
+<pre><code class="language-python">Geo3dBoundingBoxQuery.within_box(
     field: str,
     min_x: float, min_y: float, min_z: float,
     max_x: float, max_y: float, max_z: float,
@@ -296,7 +310,7 @@ coordinate is within <code>radius_m</code> metres of the centre. See
 <p>Axis-aligned 3D bounding-box search. Returns documents whose ECEF point lies
 inside <code>[min_x, max_x] × [min_y, max_y] × [min_z, max_z]</code>.</p>
 <h3 id="geo3dnearestquery"><a class="header" href="#geo3dnearestquery">Geo3dNearestQuery</a></h3>
-<pre><code class="language-python">Geo3dNearestQuery(
+<pre><code class="language-python">Geo3dNearestQuery.k_nearest(
     field: str,
     x: float, y: float, z: float,
     k: int,
@@ -305,10 +319,9 @@ inside <code>[min_x, max_x] × [min_y, max_y] × [min_z, max_z]</code>.</p>
     max_radius_m: float | None = None,
 )
 </code></pre>
-<p>k-nearest-neighbour search over a 3D ECEF point field. Returns the <code>k</code> documents
-closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m</code> and <code>max_radius_m</code>
-tune the iterative-expansion search cone (Python only — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity
-across bindings).</p>
+<p>k-nearest-neighbour search over a 3D ECEF point field. Returns the <code>k</code>
+documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m</code> and
+<code>max_radius_m</code> tune the iterative-expansion search cone.</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-python">BooleanQuery(
     must: list[Query] | None = None,

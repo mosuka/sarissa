@@ -145,17 +145,25 @@ Laurus::NumericRangeQuery.new(field, min: nil, max: nil)
 
 `[min, max]` の範囲内の数値を検索します。開いた境界には `nil` を指定します。型（整数または浮動小数点）は `min`/`max` の Ruby 型から推論されます。
 
-### GeoQuery
+### GeoDistanceQuery
 
 ```ruby
-# 半径検索
-Laurus::GeoQuery.within_radius(field, lat, lon, distance_km)
-
-# バウンディングボックス検索
-Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
+Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
 ```
 
-`within_radius` は指定した地点から `distance_km` 以内の座標を持つドキュメントを返します。`within_bounding_box` は指定したバウンディングボックス内のドキュメントを返します。
+地理的距離検索（半径指定）。指定した地点から `distance_km` キロメートル以内の
+`(lat, lon)` 座標を持つドキュメントを返します。
+
+### GeoBoundingBoxQuery
+
+```ruby
+Laurus::GeoBoundingBoxQuery.within_bounding_box(
+  field, min_lat, min_lon, max_lat, max_lon,
+)
+```
+
+地理的範囲（バウンディングボックス）検索。軸並行 `[min_lat, max_lat] ×
+[min_lon, max_lon]` 内の `(lat, lon)` 座標を持つドキュメントを返します。
 
 ### Geo3dDistanceQuery
 
@@ -182,14 +190,15 @@ Laurus::Geo3dBoundingBoxQuery.within_box(
 ### Geo3dNearestQuery
 
 ```ruby
-Laurus::Geo3dNearestQuery.k_nearest(field, x, y, z, k)
+Laurus::Geo3dNearestQuery.k_nearest(
+  field, x, y, z, k,
+  initial_radius_m: nil,
+  max_radius_m: nil,
+)
 ```
 
-3D ECEF 座標フィールドへの k 最近傍検索。コアクエリの `initial_radius_m` /
-`max_radius_m` チューニングパラメータは Ruby バインディングではまだ公開されて
-いません — バインディング間の対称化は [#344] を参照。
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+3D ECEF 座標フィールドへの k 最近傍検索。`initial_radius_m:` / `max_radius_m:`
+キーワード引数（オプション）で反復拡張サーチの探索コーンを調整できます。
 
 ### BooleanQuery
 

@@ -7,7 +7,7 @@
 //! 3. **FuzzyQuery**        — approximate matching (typo tolerance)
 //! 4. **WildcardQuery**     — pattern matching with `*` and `?`
 //! 5. **NumericRangeQuery**  — numeric range filtering
-//! 6. **GeoQuery**          — geographic radius / bounding box (Builder API only)
+//! 6. **GeoDistanceQuery / GeoBoundingBoxQuery** — geographic radius / bounding box (Builder API only)
 //! 7. **BooleanQuery**      — AND / OR / NOT combinations
 //! 8. **SpanQuery**         — positional / proximity search (Builder API only)
 //!
@@ -21,8 +21,8 @@ mod common;
 use laurus::lexical::core::field::{BooleanOption, FloatOption, GeoOption, IntegerOption};
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
-    BooleanQuery, FuzzyQuery, GeoQuery, LexicalQueryParser, NumericRangeQuery, PhraseQuery,
-    TermQuery, TextOption, WildcardQuery,
+    BooleanQuery, FuzzyQuery, GeoBoundingBoxQuery, GeoDistanceQuery, LexicalQueryParser,
+    NumericRangeQuery, PhraseQuery, TermQuery, TextOption, WildcardQuery,
 };
 use laurus::{
     DataValue, Document, Engine, LexicalSearchQuery, Result, Schema, SearchRequestBuilder,
@@ -369,19 +369,19 @@ async fn main() -> Result<()> {
     common::print_search_results(&results);
 
     // =====================================================================
-    // PART 6: GeoQuery — geographic search (Builder API only)
+    // PART 6: GeoDistanceQuery / GeoBoundingBoxQuery — geographic search
     // =====================================================================
     println!("\n{}", "=".repeat(60));
-    println!("PART 6: GeoQuery (Builder API only — no DSL equivalent)");
+    println!("PART 6: GeoDistanceQuery / GeoBoundingBoxQuery");
     println!("{}", "=".repeat(60));
 
     println!("\n[6a] Within 100km of San Francisco (37.77, -122.42):");
     let results = engine
         .search(
             SearchRequestBuilder::new()
-                .lexical_query(LexicalSearchQuery::Obj(Box::new(GeoQuery::within_radius(
-                    "location", 37.7749, -122.4194, 100.0,
-                )?)))
+                .lexical_query(LexicalSearchQuery::Obj(Box::new(
+                    GeoDistanceQuery::within_radius("location", 37.7749, -122.4194, 100.0)?,
+                )))
                 .limit(5)
                 .build(),
         )
@@ -393,7 +393,9 @@ async fn main() -> Result<()> {
         .search(
             SearchRequestBuilder::new()
                 .lexical_query(LexicalSearchQuery::Obj(Box::new(
-                    GeoQuery::within_bounding_box("location", 33.0, -123.0, 48.0, -117.0)?,
+                    GeoBoundingBoxQuery::within_bounding_box(
+                        "location", 33.0, -123.0, 48.0, -117.0,
+                    )?,
                 )))
                 .limit(5)
                 .build(),

@@ -321,11 +321,10 @@ coordinate is within <code>radiusM</code> metres of the centre. See
 </li>
 <li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
-<h4 id="searchgeo3dnearestfield-x-y-z-k-limit-offset"><a class="header" href="#searchgeo3dnearestfield-x-y-z-k-limit-offset"><code>searchGeo3dNearest(field, x, y, z, k, limit?, offset?)</code></a></h4>
+<h4 id="searchgeo3dnearestfield-x-y-z-k-limit-offset-initialradiusm-maxradiusm"><a class="header" href="#searchgeo3dnearestfield-x-y-z-k-limit-offset-initialradiusm-maxradiusm"><code>searchGeo3dNearest(field, x, y, z, k, limit?, offset?, initialRadiusM?, maxRadiusM?)</code></a></h4>
 <p>k-nearest-neighbour search over a 3D ECEF point field. Returns the <code>k</code>
-documents closest to <code>(x, y, z)</code>. The <code>initialRadiusM</code> / <code>maxRadiusM</code> tuning
-parameters of the core query are not yet exposed in the WASM binding — see
-<a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings.</p>
+documents closest to <code>(x, y, z)</code>. The optional <code>initialRadiusM</code> and
+<code>maxRadiusM</code> parameters tune the iterative-expansion search cone.</p>
 <ul>
 <li><strong>Parameters:</strong>
 <ul>
@@ -333,6 +332,7 @@ parameters of the core query are not yet exposed in the WASM binding — see
 <li><code>x</code>, <code>y</code>, <code>z</code> (number) -- Centre ECEF coordinate (metres).</li>
 <li><code>k</code> (number) -- Number of nearest neighbours to return.</li>
 <li><code>limit</code>, <code>offset</code> (number, optional)</li>
+<li><code>initialRadiusM</code>, <code>maxRadiusM</code> (number, optional)</li>
 </ul>
 </li>
 <li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>

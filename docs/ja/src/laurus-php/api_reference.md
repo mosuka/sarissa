@@ -145,17 +145,29 @@ new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $nu
 
 `[$min, $max]` の範囲内の数値を検索します。開いた境界には `null` を指定します。`$numericType` には `"integer"` または `"float"` を設定します。
 
-### GeoQuery
+### GeoDistanceQuery
 
 ```php
-// 半径検索
-\Laurus\GeoQuery::withinRadius(string $field, float $lat, float $lon, float $distanceKm): GeoQuery
-
-// バウンディングボックス検索
-\Laurus\GeoQuery::withinBoundingBox(string $field, float $minLat, float $minLon, float $maxLat, float $maxLon): GeoQuery
+\Laurus\GeoDistanceQuery::withinRadius(
+    string $field, float $lat, float $lon, float $distanceKm,
+): GeoDistanceQuery
 ```
 
-`withinRadius` は指定した地点から `$distanceKm` 以内の座標を持つドキュメントを返します。`withinBoundingBox` は指定したバウンディングボックス内のドキュメントを返します。
+地理的距離検索（半径指定）。指定した地点から `$distanceKm` キロメートル以内の
+`(lat, lon)` 座標を持つドキュメントを返します。
+
+### GeoBoundingBoxQuery
+
+```php
+\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
+    string $field,
+    float $minLat, float $minLon,
+    float $maxLat, float $maxLon,
+): GeoBoundingBoxQuery
+```
+
+地理的範囲（バウンディングボックス）検索。軸並行 `[$minLat, $maxLat] ×
+[$minLon, $maxLon]` 内の `(lat, lon)` 座標を持つドキュメントを返します。
 
 ### Geo3dDistanceQuery
 
@@ -190,14 +202,13 @@ new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $nu
     string $field,
     float $x, float $y, float $z,
     int $k,
+    ?float $initialRadiusM = null,
+    ?float $maxRadiusM = null,
 ): Geo3dNearestQuery
 ```
 
-3D ECEF 座標フィールドへの k 最近傍検索。コアクエリの `initial_radius_m` /
-`max_radius_m` チューニングパラメータは PHP バインディングではまだ公開されて
-いません — バインディング間の対称化は [#344] を参照。
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+3D ECEF 座標フィールドへの k 最近傍検索。`$initialRadiusM` / `$maxRadiusM`
+（オプション）で反復拡張サーチの探索コーンを調整できます。
 
 ### BooleanQuery
 

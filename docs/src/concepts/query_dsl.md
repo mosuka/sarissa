@@ -92,6 +92,36 @@ date:{2024-01-01 TO 2024-12-31}
 price:[* TO 100]
 ```
 
+### 2D Geographic Queries (`geo_*`)
+
+Two function-style forms target `Geo` (2D latitude / longitude) fields. All
+arguments are signed floats; latitudes / longitudes are in degrees and the
+radius is in kilometres:
+
+```text
+location:geo_distance(lat, lon, distance_km)
+location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
+```
+
+| Form | Behaviour |
+| :--- | :--- |
+| `geo_distance(lat, lon, distance_km)` | All docs whose stored `(lat, lon)` lies within `distance_km` kilometres of the given centre. |
+| `geo_bbox(min_lat, min_lon, max_lat, max_lon)` | All docs whose stored `(lat, lon)` lies inside the axis-aligned latitude / longitude rectangle. |
+
+Examples:
+
+```text
+# Within 10 km of Tokyo (35.6895, 139.6917)
+location:geo_distance(35.6895, 139.6917, 10)
+
+# Inside an axis-aligned lat/lon bounding box
+location:geo_bbox(35.0, 139.0, 36.0, 140.0)
+```
+
+> The query field must be declared as a `Geo` field in the schema. Latitudes
+> must lie in `[-90, 90]` and longitudes in `[-180, 180]`; the parser rejects
+> out-of-range values.
+
 ### 3D Geographic Queries (`geo3d_*`)
 
 Three function-style forms target `Geo3d` (3D ECEF Cartesian) fields. All
@@ -157,8 +187,8 @@ sub_clause     = { grouped_query | field_query | term_query }
 grouped_query  = { "(" ~ boolean_query ~ ")" ~ boost? }
 boolean_op     = { ^"AND" | ^"OR" }
 field_query    = { field ~ ":" ~ field_value }
-field_value    = { geo3d_query | range_query | phrase_query | fuzzy_term
-                 | wildcard_term | simple_term }
+field_value    = { geo3d_query | geo_query | range_query | phrase_query
+                 | fuzzy_term | wildcard_term | simple_term }
 geo3d_query    = { geo3d_distance | geo3d_bbox | geo3d_nearest }
 geo3d_distance = { ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
@@ -167,6 +197,11 @@ geo3d_bbox     = { ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ signed_float ~ "," ~ signed_float ~ ")" }
 geo3d_nearest  = { ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")" }
+geo_query      = { geo_distance | geo_bbox }
+geo_distance   = { ^"geo_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ ")" }
+geo_bbox       = { ^"geo_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
 phrase_query   = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
 proximity      = { "~" ~ number }
 fuzzy_term     = { term ~ "~" ~ fuzziness? ~ boost? }

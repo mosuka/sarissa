@@ -149,21 +149,27 @@ new NumericRangeQuery(
 Matches numeric values in `[min, max]`. Pass `null` for an
 open bound.
 
-### GeoQuery
+### GeoDistanceQuery
 
 ```typescript
-GeoQuery.withinRadius(
+GeoDistanceQuery.withinRadius(
   field: string, lat: number, lon: number, distanceKm: number,
-): GeoQuery
+): GeoDistanceQuery
+```
 
-GeoQuery.withinBoundingBox(
+Geographic distance (radius) search.
+
+### GeoBoundingBoxQuery
+
+```typescript
+GeoBoundingBoxQuery.withinBoundingBox(
   field: string,
   minLat: number, minLon: number,
   maxLat: number, maxLon: number,
-): GeoQuery
+): GeoBoundingBoxQuery
 ```
 
-Geographic search by radius or bounding box.
+Geographic bounding-box search.
 
 ### Geo3dDistanceQuery
 
@@ -205,9 +211,7 @@ Geo3dNearestQuery.kNearest(
 
 k-nearest-neighbour search over a 3D ECEF point field. The optional
 `initialRadiusM` and `maxRadiusM` parameters tune the iterative-expansion
-search cone (Node.js only — see [#344] for parity across bindings).
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+search cone.
 
 ### BooleanQuery
 

@@ -150,17 +150,25 @@ Laurus::NumericRangeQuery.new(field, min: nil, max: nil)
 
 Matches numeric values in the range `[min, max]`. Pass `nil` for an open bound. The type (integer or float) is inferred from the Ruby type of `min`/`max`.
 
-### GeoQuery
+### GeoDistanceQuery
 
 ```ruby
-# Radius search
-Laurus::GeoQuery.within_radius(field, lat, lon, distance_km)
-
-# Bounding box search
-Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
+Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
 ```
 
-`within_radius` returns documents whose coordinate is within `distance_km` of the given point. `within_bounding_box` returns documents within the specified bounding box.
+Geo-distance (radius) search. Returns documents whose `(lat, lon)` coordinate
+is within `distance_km` kilometres of the given point.
+
+### GeoBoundingBoxQuery
+
+```ruby
+Laurus::GeoBoundingBoxQuery.within_bounding_box(
+  field, min_lat, min_lon, max_lat, max_lon,
+)
+```
+
+Geo bounding-box search. Returns documents whose `(lat, lon)` coordinate lies
+inside the axis-aligned `[min_lat, max_lat] × [min_lon, max_lon]` rectangle.
 
 ### Geo3dDistanceQuery
 
@@ -187,14 +195,16 @@ Axis-aligned 3D bounding-box search.
 ### Geo3dNearestQuery
 
 ```ruby
-Laurus::Geo3dNearestQuery.k_nearest(field, x, y, z, k)
+Laurus::Geo3dNearestQuery.k_nearest(
+  field, x, y, z, k,
+  initial_radius_m: nil,
+  max_radius_m: nil,
+)
 ```
 
-k-nearest-neighbour search over a 3D ECEF point field. The `initial_radius_m` /
-`max_radius_m` tuning parameters of the core query are not yet exposed in the
-Ruby binding — see [#344] for parity across bindings.
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+k-nearest-neighbour search over a 3D ECEF point field. The optional
+`initial_radius_m:` and `max_radius_m:` keyword arguments tune the
+iterative-expansion search cone.
 
 ### BooleanQuery
 

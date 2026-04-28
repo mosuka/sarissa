@@ -150,17 +150,29 @@ new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $nu
 
 Matches numeric values in the range `[$min, $max]`. Pass `null` for an open bound. Set `$numericType` to `"integer"` or `"float"`.
 
-### GeoQuery
+### GeoDistanceQuery
 
 ```php
-// Radius search
-\Laurus\GeoQuery::withinRadius(string $field, float $lat, float $lon, float $distanceKm): GeoQuery
-
-// Bounding box search
-\Laurus\GeoQuery::withinBoundingBox(string $field, float $minLat, float $minLon, float $maxLat, float $maxLon): GeoQuery
+\Laurus\GeoDistanceQuery::withinRadius(
+    string $field, float $lat, float $lon, float $distanceKm,
+): GeoDistanceQuery
 ```
 
-`withinRadius` returns documents whose coordinate is within `$distanceKm` of the given point. `withinBoundingBox` returns documents within the specified bounding box.
+Geo-distance (radius) search. Returns documents whose `(lat, lon)` coordinate
+is within `$distanceKm` kilometres of the given point.
+
+### GeoBoundingBoxQuery
+
+```php
+\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
+    string $field,
+    float $minLat, float $minLon,
+    float $maxLat, float $maxLon,
+): GeoBoundingBoxQuery
+```
+
+Geo bounding-box search. Returns documents whose `(lat, lon)` coordinate lies
+inside the axis-aligned `[$minLat, $maxLat] × [$minLon, $maxLon]` rectangle.
 
 ### Geo3dDistanceQuery
 
@@ -195,14 +207,14 @@ Axis-aligned 3D bounding-box search.
     string $field,
     float $x, float $y, float $z,
     int $k,
+    ?float $initialRadiusM = null,
+    ?float $maxRadiusM = null,
 ): Geo3dNearestQuery
 ```
 
-k-nearest-neighbour search over a 3D ECEF point field. The `initial_radius_m` /
-`max_radius_m` tuning parameters of the core query are not yet exposed in the
-PHP binding — see [#344] for parity across bindings.
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+k-nearest-neighbour search over a 3D ECEF point field. The optional
+`$initialRadiusM` and `$maxRadiusM` parameters tune the iterative-expansion
+search cone.
 
 ### BooleanQuery
 

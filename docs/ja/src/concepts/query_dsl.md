@@ -86,6 +86,34 @@ date:{2024-01-01 TO 2024-12-31}
 price:[* TO 100]
 ```
 
+### 2D 地理クエリ（`geo_*`)
+
+2 種類の関数形式を `Geo`（2D 緯度 / 経度）フィールドに対して使えます。
+緯度・経度は度単位、半径はキロメートル単位の符号付き浮動小数点数：
+
+```text
+location:geo_distance(lat, lon, distance_km)
+location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
+```
+
+| 形式 | 動作 |
+| :--- | :--- |
+| `geo_distance(lat, lon, distance_km)` | 中心 `(lat, lon)` から `distance_km` キロメートル以内の格納済み座標を返す |
+| `geo_bbox(min_lat, min_lon, max_lat, max_lon)` | 軸並行緯度・経度範囲に含まれる格納済み座標を返す |
+
+例：
+
+```text
+# 東京から 10 km 以内（35.6895, 139.6917）
+location:geo_distance(35.6895, 139.6917, 10)
+
+# 軸並行緯度・経度範囲
+location:geo_bbox(35.0, 139.0, 36.0, 140.0)
+```
+
+> クエリ対象フィールドはスキーマで `Geo` フィールドとして宣言されている必要が
+> あります。緯度は `[-90, 90]`、経度は `[-180, 180]` の範囲外を拒否します。
+
 ### 3D 地理クエリ（`geo3d_*`）
 
 3 種類の関数形式を `Geo3d`（3D ECEF 直交座標）フィールドに対して使えます。
@@ -151,8 +179,8 @@ sub_clause     = { grouped_query | field_query | term_query }
 grouped_query  = { "(" ~ boolean_query ~ ")" ~ boost? }
 boolean_op     = { ^"AND" | ^"OR" }
 field_query    = { field ~ ":" ~ field_value }
-field_value    = { geo3d_query | range_query | phrase_query | fuzzy_term
-                 | wildcard_term | simple_term }
+field_value    = { geo3d_query | geo_query | range_query | phrase_query
+                 | fuzzy_term | wildcard_term | simple_term }
 geo3d_query    = { geo3d_distance | geo3d_bbox | geo3d_nearest }
 geo3d_distance = { ^"geo3d_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
@@ -161,6 +189,11 @@ geo3d_bbox     = { ^"geo3d_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ signed_float ~ "," ~ signed_float ~ ")" }
 geo3d_nearest  = { ^"geo3d_nearest" ~ "(" ~ signed_float ~ "," ~ signed_float
                  ~ "," ~ signed_float ~ "," ~ unsigned_int ~ ")" }
+geo_query      = { geo_distance | geo_bbox }
+geo_distance   = { ^"geo_distance" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ ")" }
+geo_bbox       = { ^"geo_bbox" ~ "(" ~ signed_float ~ "," ~ signed_float
+                 ~ "," ~ signed_float ~ "," ~ signed_float ~ ")" }
 phrase_query   = { "\"" ~ phrase_content ~ "\"" ~ proximity? ~ boost? }
 proximity      = { "~" ~ number }
 fuzzy_term     = { term ~ "~" ~ fuzziness? ~ boost? }

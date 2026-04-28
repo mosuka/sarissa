@@ -290,18 +290,20 @@ character.</p>
 </code></pre>
 <p>Matches numeric values in <code>[min, max]</code>. Pass <code>null</code> for an
 open bound.</p>
-<h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<pre><code class="language-typescript">GeoQuery.withinRadius(
+<h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
+<pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
   field: string, lat: number, lon: number, distanceKm: number,
-): GeoQuery
-
-GeoQuery.withinBoundingBox(
+): GeoDistanceQuery
+</code></pre>
+<p>Geographic distance (radius) search.</p>
+<h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
+<pre><code class="language-typescript">GeoBoundingBoxQuery.withinBoundingBox(
   field: string,
   minLat: number, minLon: number,
   maxLat: number, maxLon: number,
-): GeoQuery
+): GeoBoundingBoxQuery
 </code></pre>
-<p>Geographic search by radius or bounding box.</p>
+<p>Geographic bounding-box search.</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
   field: string,
@@ -331,7 +333,7 @@ coordinate is within <code>radiusM</code> metres of the centre. See
 </code></pre>
 <p>k-nearest-neighbour search over a 3D ECEF point field. The optional
 <code>initialRadiusM</code> and <code>maxRadiusM</code> parameters tune the iterative-expansion
-search cone (Node.js only — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings).</p>
+search cone.</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();
