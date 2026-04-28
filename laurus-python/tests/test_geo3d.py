@@ -80,11 +80,17 @@ def test_geo3d_distance_query_wide_radius(geo3d_index):
 
 def test_geo3d_bounding_box_query(geo3d_index):
     """Central-Tokyo box returns Tower + Skytree only (Mt. Fuji and Sydney
-    are outside the small AABB)."""
+    are outside the small AABB).
+
+    The X bounds are sized to bracket both `TOKYO_TOWER.x ≈ -3.955M` and
+    `TOKYO_SKYTREE.x ≈ -3.961M` while still excluding Mt. Fuji
+    (`x ≈ -3.916M`, well above the upper bound) and Sydney (`x ≈ -4.65M`,
+    well below the lower bound).
+    """
     query = laurus.Geo3dBoundingBoxQuery(
         "position",
         -3_962_000.0, 3_340_000.0, 3_690_000.0,
-        -3_958_000.0, 3_360_000.0, 3_710_000.0,
+        -3_954_000.0, 3_360_000.0, 3_710_000.0,
     )
     results = geo3d_index.search(query, limit=10)
     ids = {r.id for r in results}
