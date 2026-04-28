@@ -102,6 +102,19 @@ class TestGeo3d < Minitest::Test
     assert_equal "mt_fuji", results.first.id
   end
 
+  def test_geo3d_nearest_query_with_radius_options
+    # Verify the optional initial / max radius kwargs are accepted.
+    idx = make_index
+    q = Laurus::Geo3dNearestQuery.k_nearest(
+      "position", TOKYO_TOWER["x"], TOKYO_TOWER["y"], TOKYO_TOWER["z"], 2,
+      initial_radius_m: 10_000.0,
+      max_radius_m: 10_000_000.0,
+    )
+    results = idx.search(q, limit: 2)
+    ids = results.map(&:id).to_set
+    assert_equal Set["tokyo_tower", "tokyo_skytree"], ids
+  end
+
   # ---------------------------------------------------------------------------
   # Factory smoke checks
   # ---------------------------------------------------------------------------

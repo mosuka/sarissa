@@ -9,7 +9,7 @@
 # 3. FuzzyQuery        — approximate matching (typo tolerance)
 # 4. WildcardQuery     — pattern matching with * and ?
 # 5. NumericRangeQuery — numeric range filtering (int and float)
-# 6. GeoQuery          — geographic radius / bounding box
+# 6. GeoDistanceQuery / GeoBoundingBoxQuery — geographic radius / bounding box
 # 7. BooleanQuery      — AND / OR / NOT combinations
 # 8. SpanQuery         — positional / proximity search
 #
@@ -201,17 +201,17 @@ def main
   print_results(index.search("price:[30 TO 50]", limit: 5))
 
   # =====================================================================
-  # PART 6: GeoQuery — geographic search
+  # PART 6: GeoDistanceQuery / GeoBoundingBoxQuery — geographic search
   # =====================================================================
   puts "\n#{"=" * 60}"
-  puts "PART 6: GeoQuery (no DSL equivalent)"
+  puts "PART 6: GeoDistanceQuery / GeoBoundingBoxQuery"
   puts "=" * 60
 
   puts "\n[6a] Within 100 km of San Francisco (37.77, -122.42):"
-  print_results(index.search(Laurus::GeoQuery.within_radius("location", 37.7749, -122.4194, 100.0), limit: 5))
+  print_results(index.search(Laurus::GeoDistanceQuery.within_radius("location", 37.7749, -122.4194, 100.0), limit: 5))
 
   puts "\n[6b] Bounding box — US West Coast (33, -123) to (48, -117):"
-  print_results(index.search(Laurus::GeoQuery.within_bounding_box("location", 33.0, -123.0, 48.0, -117.0), limit: 5))
+  print_results(index.search(Laurus::GeoBoundingBoxQuery.within_bounding_box("location", 33.0, -123.0, 48.0, -117.0), limit: 5))
 
   # =====================================================================
   # PART 7: BooleanQuery — AND / OR / NOT combinations

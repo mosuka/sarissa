@@ -9,7 +9,8 @@ use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
     BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
-    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    GeoBoundingBoxQuery, GeoDistanceQuery, NumericRangeQuery, PhraseQuery, TermQuery,
+    WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -25,7 +26,7 @@ use magnus::{Error, RArray, RHash, RModule, Ruby, Value};
 /// Extract a Laurus lexical query from an arbitrary Ruby value.
 ///
 /// Supports: `TermQuery`, `PhraseQuery`, `FuzzyQuery`, `WildcardQuery`,
-/// `NumericRangeQuery`, `GeoQuery`, `Geo3dDistanceQuery`,
+/// `NumericRangeQuery`, `GeoDistanceQuery`, `GeoBoundingBoxQuery`, `Geo3dDistanceQuery`,
 /// `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`, `BooleanQuery`, `SpanQuery`.
 ///
 /// # Arguments
@@ -56,7 +57,12 @@ pub fn extract_lexical_query(value: Value) -> Result<Box<dyn laurus::lexical::Qu
     if let Ok(q) = <&RbNumericRangeQuery>::try_convert(value) {
         return Ok(q.build());
     }
-    if let Ok(q) = <&RbGeoQuery>::try_convert(value) {
+    if let Ok(q) = <&RbGeoDistanceQuery>::try_convert(value) {
+        return q
+            .build()
+            .map_err(|e| Error::new(ruby.exception_arg_error(), e.to_string()));
+    }
+    if let Ok(q) = <&RbGeoBoundingBoxQuery>::try_convert(value) {
         return q
             .build()
             .map_err(|e| Error::new(ruby.exception_arg_error(), e.to_string()));
@@ -426,43 +432,20 @@ impl RbNumericRangeQuery {
 }
 
 // ---------------------------------------------------------------------------
-// GeoQuery
+// GeoDistanceQuery
 // ---------------------------------------------------------------------------
 
-/// Internal representation of geographic query kind.
-#[derive(Clone)]
-pub enum GeoKind {
-    /// Radius-based search.
-    Radius {
-        /// Center latitude.
-        lat: f64,
-        /// Center longitude.
-        lon: f64,
-        /// Search radius in kilometers.
-        distance_km: f64,
-    },
-    /// Bounding box search.
-    BoundingBox {
-        /// Southern boundary.
-        min_lat: f64,
-        /// Western boundary.
-        min_lon: f64,
-        /// Northern boundary.
-        max_lat: f64,
-        /// Eastern boundary.
-        max_lon: f64,
-    },
-}
-
-/// Geographic search query (`Laurus::GeoQuery`).
-#[magnus::wrap(class = "Laurus::GeoQuery")]
-pub struct RbGeoQuery {
+/// Geographic distance (radius) search query (`Laurus::GeoDistanceQuery`).
+#[magnus::wrap(class = "Laurus::GeoDistanceQuery")]
+pub struct RbGeoDistanceQuery {
     pub field: String,
-    pub kind: GeoKind,
+    pub lat: f64,
+    pub lon: f64,
+    pub distance_km: f64,
 }
 
-impl RbGeoQuery {
-    /// Create a radius-based geo query.
+impl RbGeoDistanceQuery {
+    /// Create a radius-based geo distance query.
     ///
     /// # Arguments
     ///
@@ -473,14 +456,47 @@ impl RbGeoQuery {
     fn within_radius(field: String, lat: f64, lon: f64, distance_km: f64) -> Self {
         Self {
             field,
-            kind: GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            },
+            lat,
+            lon,
+            distance_km,
         }
     }
 
+    fn inspect(&self) -> String {
+        format!(
+            "GeoDistanceQuery.within_radius(field='{}', lat={}, lon={}, distance_km={})",
+            self.field, self.lat, self.lon, self.distance_km
+        )
+    }
+}
+
+impl RbGeoDistanceQuery {
+    /// Build the underlying Rust `GeoDistanceQuery`.
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(GeoDistanceQuery::within_radius(
+            &self.field,
+            self.lat,
+            self.lon,
+            self.distance_km,
+        )?))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GeoBoundingBoxQuery
+// ---------------------------------------------------------------------------
+
+/// Geographic bounding-box search query (`Laurus::GeoBoundingBoxQuery`).
+#[magnus::wrap(class = "Laurus::GeoBoundingBoxQuery")]
+pub struct RbGeoBoundingBoxQuery {
+    pub field: String,
+    pub min_lat: f64,
+    pub min_lon: f64,
+    pub max_lat: f64,
+    pub max_lon: f64,
+}
+
+impl RbGeoBoundingBoxQuery {
     /// Create a bounding-box geo query.
     ///
     /// # Arguments
@@ -499,65 +515,31 @@ impl RbGeoQuery {
     ) -> Self {
         Self {
             field,
-            kind: GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            },
+            min_lat,
+            min_lon,
+            max_lat,
+            max_lon,
         }
     }
 
     fn inspect(&self) -> String {
-        match &self.kind {
-            GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            } => format!(
-                "GeoQuery.within_radius(field='{}', lat={}, lon={}, distance_km={})",
-                self.field, lat, lon, distance_km
-            ),
-            GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            } => format!(
-                "GeoQuery.within_bounding_box(field='{}', min_lat={}, min_lon={}, max_lat={}, max_lon={})",
-                self.field, min_lat, min_lon, max_lat, max_lon
-            ),
-        }
+        format!(
+            "GeoBoundingBoxQuery.within_bounding_box(field='{}', min_lat={}, min_lon={}, max_lat={}, max_lon={})",
+            self.field, self.min_lat, self.min_lon, self.max_lat, self.max_lon
+        )
     }
 }
 
-impl RbGeoQuery {
-    /// Build the underlying Rust `GeoQuery`.
+impl RbGeoBoundingBoxQuery {
+    /// Build the underlying Rust `GeoBoundingBoxQuery`.
     pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
-        match &self.kind {
-            GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            } => Ok(Box::new(GeoQuery::within_radius(
-                &self.field,
-                *lat,
-                *lon,
-                *distance_km,
-            )?)),
-            GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            } => Ok(Box::new(GeoQuery::within_bounding_box(
-                &self.field,
-                *min_lat,
-                *min_lon,
-                *max_lat,
-                *max_lon,
-            )?)),
-        }
+        Ok(Box::new(GeoBoundingBoxQuery::within_bounding_box(
+            &self.field,
+            self.min_lat,
+            self.min_lon,
+            self.max_lat,
+            self.max_lon,
+        )?))
     }
 }
 
@@ -691,6 +673,8 @@ pub struct RbGeo3dNearestQuery {
     pub y: f64,
     pub z: f64,
     pub k: u32,
+    pub initial_radius_m: Option<f64>,
+    pub max_radius_m: Option<f64>,
 }
 
 impl RbGeo3dNearestQuery {
@@ -698,11 +682,32 @@ impl RbGeo3dNearestQuery {
     ///
     /// # Arguments
     ///
-    /// * `field` - Geo3d field name.
-    /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
-    /// * `k` - Number of nearest neighbours to return.
-    fn k_nearest(field: String, x: f64, y: f64, z: f64, k: u32) -> Self {
-        Self { field, x, y, z, k }
+    /// * `args` - Positional and keyword arguments:
+    ///   - `field` (String): Geo3d field name.
+    ///   - `x`, `y`, `z` (Float): Centre coordinates in ECEF meters.
+    ///   - `k` (Integer): Number of nearest neighbours to return.
+    ///   - `initial_radius_m:` (Float, optional): Starting radius for the
+    ///     expanding-radius search (default 1000 m).
+    ///   - `max_radius_m:` (Float, optional): Hard cap on the search radius
+    ///     (default 1e10 m).
+    fn k_nearest(args: &[Value]) -> Result<Self, Error> {
+        let args = scan_args::<(String, f64, f64, f64, u32), (), (), (), RHash, ()>(args)?;
+        let (field, x, y, z, k) = args.required;
+        let kwargs = get_kwargs::<_, (), (Option<f64>, Option<f64>), ()>(
+            args.keywords,
+            &[],
+            &["initial_radius_m", "max_radius_m"],
+        )?;
+        let (initial_radius_m, max_radius_m) = kwargs.optional;
+        Ok(Self {
+            field,
+            x,
+            y,
+            z,
+            k,
+            initial_radius_m,
+            max_radius_m,
+        })
     }
 
     fn inspect(&self) -> String {
@@ -716,11 +721,18 @@ impl RbGeo3dNearestQuery {
 impl RbGeo3dNearestQuery {
     /// Build the underlying Rust `Geo3dNearestQuery`.
     pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
-        Box::new(Geo3dNearestQuery::new(
+        let mut q = Geo3dNearestQuery::new(
             &self.field,
             GeoEcefPoint::new(self.x, self.y, self.z),
             self.k as usize,
-        ))
+        );
+        if let Some(r) = self.initial_radius_m {
+            q = q.with_initial_radius(r);
+        }
+        if let Some(r) = self.max_radius_m {
+            q = q.with_max_radius(r);
+        }
+        Box::new(q)
     }
 }
 
@@ -1037,18 +1049,26 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     nr_q.define_method("inspect", magnus::method!(RbNumericRangeQuery::inspect, 0))?;
     nr_q.define_method("to_s", magnus::method!(RbNumericRangeQuery::inspect, 0))?;
 
-    // GeoQuery
-    let geo_q = module.define_class("GeoQuery", ruby.class_object())?;
-    geo_q.define_singleton_method(
+    // GeoDistanceQuery
+    let geo_dist_q = module.define_class("GeoDistanceQuery", ruby.class_object())?;
+    geo_dist_q.define_singleton_method(
         "within_radius",
-        magnus::function!(RbGeoQuery::within_radius, 4),
+        magnus::function!(RbGeoDistanceQuery::within_radius, 4),
     )?;
-    geo_q.define_singleton_method(
+    geo_dist_q.define_method("inspect", magnus::method!(RbGeoDistanceQuery::inspect, 0))?;
+    geo_dist_q.define_method("to_s", magnus::method!(RbGeoDistanceQuery::inspect, 0))?;
+
+    // GeoBoundingBoxQuery
+    let geo_bbox_q = module.define_class("GeoBoundingBoxQuery", ruby.class_object())?;
+    geo_bbox_q.define_singleton_method(
         "within_bounding_box",
-        magnus::function!(RbGeoQuery::within_bounding_box, 5),
+        magnus::function!(RbGeoBoundingBoxQuery::within_bounding_box, 5),
     )?;
-    geo_q.define_method("inspect", magnus::method!(RbGeoQuery::inspect, 0))?;
-    geo_q.define_method("to_s", magnus::method!(RbGeoQuery::inspect, 0))?;
+    geo_bbox_q.define_method(
+        "inspect",
+        magnus::method!(RbGeoBoundingBoxQuery::inspect, 0),
+    )?;
+    geo_bbox_q.define_method("to_s", magnus::method!(RbGeoBoundingBoxQuery::inspect, 0))?;
 
     // Geo3dDistanceQuery
     let g3d_dist = module.define_class("Geo3dDistanceQuery", ruby.class_object())?;
@@ -1075,7 +1095,7 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     let g3d_near = module.define_class("Geo3dNearestQuery", ruby.class_object())?;
     g3d_near.define_singleton_method(
         "k_nearest",
-        magnus::function!(RbGeo3dNearestQuery::k_nearest, 5),
+        magnus::function!(RbGeo3dNearestQuery::k_nearest, -1),
     )?;
     g3d_near.define_method("inspect", magnus::method!(RbGeo3dNearestQuery::inspect, 0))?;
     g3d_near.define_method("to_s", magnus::method!(RbGeo3dNearestQuery::inspect, 0))?;
