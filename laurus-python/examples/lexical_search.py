@@ -7,7 +7,7 @@ Demonstrates every lexical query type Laurus supports:
 3. FuzzyQuery        — approximate matching (typo tolerance)
 4. WildcardQuery     — pattern matching with * and ?
 5. NumericRangeQuery — numeric range filtering (int and float)
-6. GeoQuery          — geographic radius / bounding box
+6. GeoDistanceQuery / GeoBoundingBoxQuery — geographic radius / bounding box
 7. BooleanQuery      — AND / OR / NOT combinations
 8. SpanQuery         — positional / proximity search
 
@@ -225,16 +225,18 @@ def main() -> None:
     _print_results(index.search("price:[4.5 TO 4.9]", limit=5))
 
     # =====================================================================
-    # PART 6: GeoQuery — geographic search
+    # PART 6: GeoDistanceQuery / GeoBoundingBoxQuery — geographic search
     # =====================================================================
     print("\n" + "=" * 60)
-    print("PART 6: GeoQuery (no DSL equivalent)")
+    print("PART 6: GeoDistanceQuery / GeoBoundingBoxQuery")
     print("=" * 60)
 
     print("\n[6a] Within 100 km of San Francisco (37.77, -122.42):")
     _print_results(
         index.search(
-            laurus.GeoQuery.within_radius("location", 37.7749, -122.4194, 100.0),
+            laurus.GeoDistanceQuery.within_radius(
+                "location", 37.7749, -122.4194, 100.0
+            ),
             limit=5,
         )
     )
@@ -242,7 +244,7 @@ def main() -> None:
     print("\n[6b] Bounding box — US West Coast (33, -123) to (48, -117):")
     _print_results(
         index.search(
-            laurus.GeoQuery.within_bounding_box(
+            laurus.GeoBoundingBoxQuery.within_bounding_box(
                 "location", 33.0, -123.0, 48.0, -117.0
             ),
             limit=5,

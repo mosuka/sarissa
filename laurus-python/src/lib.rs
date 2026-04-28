@@ -21,8 +21,8 @@ use index::PyIndex;
 use pyo3::prelude::*;
 use query::{
     PyBooleanQuery, PyFuzzyQuery, PyGeo3dBoundingBoxQuery, PyGeo3dDistanceQuery,
-    PyGeo3dNearestQuery, PyGeoQuery, PyNumericRangeQuery, PyPhraseQuery, PySpanQuery, PyTermQuery,
-    PyVectorQuery, PyVectorTextQuery, PyWildcardQuery,
+    PyGeo3dNearestQuery, PyGeoBoundingBoxQuery, PyGeoDistanceQuery, PyNumericRangeQuery,
+    PyPhraseQuery, PySpanQuery, PyTermQuery, PyVectorQuery, PyVectorTextQuery, PyWildcardQuery,
 };
 use schema::PySchema;
 use search::{PyRRF, PySearchRequest, PySearchResult, PyWeightedSum};
@@ -68,7 +68,8 @@ fn laurus(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFuzzyQuery>()?;
     m.add_class::<PyWildcardQuery>()?;
     m.add_class::<PyNumericRangeQuery>()?;
-    m.add_class::<PyGeoQuery>()?;
+    m.add_class::<PyGeoDistanceQuery>()?;
+    m.add_class::<PyGeoBoundingBoxQuery>()?;
     m.add_class::<PyGeo3dDistanceQuery>()?;
     m.add_class::<PyGeo3dBoundingBoxQuery>()?;
     m.add_class::<PyGeo3dNearestQuery>()?;
