@@ -103,6 +103,45 @@ Search by text (embedded by the registered embedder).
   - `limit`, `offset` (number, optional)
 - **Returns:** `Promise<SearchResult[]>`
 
+#### `searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)`
+
+Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
+coordinate is within `radiusM` metres of the centre. See
+[Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
+
+- **Parameters:**
+  - `field` (string) -- Geo3d field name.
+  - `x`, `y`, `z` (number) -- Centre ECEF coordinate (metres).
+  - `radiusM` (number) -- Sphere radius (metres).
+  - `limit`, `offset` (number, optional)
+- **Returns:** `Promise<SearchResult[]>`
+
+#### `searchGeo3dBoundingBox(field, minX, minY, minZ, maxX, maxY, maxZ, limit?, offset?)`
+
+Axis-aligned 3D bounding-box search over a 3D ECEF point field.
+
+- **Parameters:**
+  - `field` (string) -- Geo3d field name.
+  - `minX`, `minY`, `minZ`, `maxX`, `maxY`, `maxZ` (number) -- Box bounds (metres).
+  - `limit`, `offset` (number, optional)
+- **Returns:** `Promise<SearchResult[]>`
+
+#### `searchGeo3dNearest(field, x, y, z, k, limit?, offset?)`
+
+k-nearest-neighbour search over a 3D ECEF point field. Returns the `k`
+documents closest to `(x, y, z)`. The `initialRadiusM` / `maxRadiusM` tuning
+parameters of the core query are not yet exposed in the WASM binding — see
+[#344] for parity across bindings.
+
+[#344]: https://github.com/mosuka/laurus/issues/344
+
+- **Parameters:**
+  - `field` (string) -- Geo3d field name.
+  - `x`, `y`, `z` (number) -- Centre ECEF coordinate (metres).
+  - `k` (number) -- Number of nearest neighbours to return.
+  - `limit`, `offset` (number, optional)
+- **Returns:** `Promise<SearchResult[]>`
+
 #### `stats()`
 
 Return index statistics.
@@ -148,6 +187,18 @@ Add a date/time field.
 #### `addGeoField(name, stored?, indexed?)`
 
 Add a geographic coordinate field.
+
+#### `addGeo3dField(name, stored?, indexed?)`
+
+Add a 3D ECEF Cartesian point field. Values are submitted as a `{ x, y, z }`
+object with metres units. See [Geo3d concepts](../concepts/geo3d.md) for
+ECEF theory.
+
+The WASM binding does not expose `Geo3dDistanceQuery` / `Geo3dBoundingBoxQuery`
+/ `Geo3dNearestQuery` as JS classes (wasm-bindgen cannot expose `dyn Query`
+trait objects). Instead, use the `Index.searchGeo3dDistance` /
+`Index.searchGeo3dBoundingBox` / `Index.searchGeo3dNearest` methods documented
+above.
 
 #### `addBytesField(name, stored?)`
 

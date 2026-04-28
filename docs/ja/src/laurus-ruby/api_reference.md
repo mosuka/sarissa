@@ -56,6 +56,7 @@ Laurus::Schema.new
 | `add_boolean_field(name, stored: true, indexed: true)` | ブールフィールド。 |
 | `add_bytes_field(name, stored: true)` | 生バイトフィールド。 |
 | `add_geo_field(name, stored: true, indexed: true)` | 地理座標フィールド（緯度/経度）。 |
+| `add_geo3d_field(name, stored: true, indexed: true)` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
 | `add_datetime_field(name, stored: true, indexed: true)` | UTC 日時フィールド。 |
 | `add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, embedder: nil)` | HNSW 近似最近傍ベクトルフィールド。 |
 | `add_flat_field(name, dimension, distance: "cosine", embedder: nil)` | Flat（総当たり）ベクトルフィールド。 |
@@ -155,6 +156,40 @@ Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
 ```
 
 `within_radius` は指定した地点から `distance_km` 以内の座標を持つドキュメントを返します。`within_bounding_box` は指定したバウンディングボックス内のドキュメントを返します。
+
+### Geo3dDistanceQuery
+
+```ruby
+Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+```
+
+3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `radius_m` メートル以内
+の座標を持つドキュメントを返します。ECEF の理論については
+[Geo3d の概念](../concepts/geo3d.md) を参照。
+
+### Geo3dBoundingBoxQuery
+
+```ruby
+Laurus::Geo3dBoundingBoxQuery.within_box(
+  field,
+  min_x, min_y, min_z,
+  max_x, max_y, max_z,
+)
+```
+
+軸並行 3D 範囲（AABB）検索。
+
+### Geo3dNearestQuery
+
+```ruby
+Laurus::Geo3dNearestQuery.k_nearest(field, x, y, z, k)
+```
+
+3D ECEF 座標フィールドへの k 最近傍検索。コアクエリの `initial_radius_m` /
+`max_radius_m` チューニングパラメータは Ruby バインディングではまだ公開されて
+いません — バインディング間の対称化は [#344] を参照。
+
+[#344]: https://github.com/mosuka/laurus/issues/344
 
 ### BooleanQuery
 

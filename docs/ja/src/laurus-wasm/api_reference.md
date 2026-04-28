@@ -101,6 +101,45 @@ DSL 文字列クエリで検索します。
   - `limit`, `offset` (number, 省略可)
 - **戻り値:** `Promise<SearchResult[]>`
 
+#### `searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)`
+
+3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `radiusM` メートル以内
+の座標を持つドキュメントを返します。ECEF の理論については
+[Geo3d の概念](../concepts/geo3d.md) を参照。
+
+- **引数:**
+  - `field` (string) -- Geo3d フィールド名
+  - `x`, `y`, `z` (number) -- 中心 ECEF 座標（メートル）
+  - `radiusM` (number) -- 球の半径（メートル）
+  - `limit`, `offset` (number, 省略可)
+- **戻り値:** `Promise<SearchResult[]>`
+
+#### `searchGeo3dBoundingBox(field, minX, minY, minZ, maxX, maxY, maxZ, limit?, offset?)`
+
+3D ECEF 座標フィールドへの軸並行範囲（AABB）検索。
+
+- **引数:**
+  - `field` (string) -- Geo3d フィールド名
+  - `minX`, `minY`, `minZ`, `maxX`, `maxY`, `maxZ` (number) -- 範囲境界（メートル）
+  - `limit`, `offset` (number, 省略可)
+- **戻り値:** `Promise<SearchResult[]>`
+
+#### `searchGeo3dNearest(field, x, y, z, k, limit?, offset?)`
+
+3D ECEF 座標フィールドへの k 最近傍検索。`(x, y, z)` から最も近い `k` 件のドキュ
+メントを返します。コアクエリの `initialRadiusM` / `maxRadiusM` チューニングパラ
+メータは WASM バインディングではまだ公開されていません — バインディング間の対称化は
+[#344] を参照。
+
+[#344]: https://github.com/mosuka/laurus/issues/344
+
+- **引数:**
+  - `field` (string) -- Geo3d フィールド名
+  - `x`, `y`, `z` (number) -- 中心 ECEF 座標（メートル）
+  - `k` (number) -- 返す近傍件数
+  - `limit`, `offset` (number, 省略可)
+- **戻り値:** `Promise<SearchResult[]>`
+
 #### `stats()`
 
 インデックス統計を返します。
@@ -144,6 +183,18 @@ DSL 文字列クエリで検索します。
 #### `addGeoField(name, stored?, indexed?)`
 
 地理座標フィールドを追加します。
+
+#### `addGeo3dField(name, stored?, indexed?)`
+
+3D ECEF カルテシアン座標フィールド（x, y, z はメートル）を追加します。値は
+`{ x, y, z }` オブジェクトで投入します。詳細は
+[Geo3d の概念](../concepts/geo3d.md) を参照。
+
+WASM バインディングは `Geo3dDistanceQuery` / `Geo3dBoundingBoxQuery` /
+`Geo3dNearestQuery` を JS クラスとして公開していません（wasm-bindgen は
+`dyn Query` トレイトオブジェクトを公開できないため）。代わりに上記の
+`Index.searchGeo3dDistance` / `Index.searchGeo3dBoundingBox` /
+`Index.searchGeo3dNearest` メソッドを使用してください。
 
 #### `addBytesField(name, stored?)`
 

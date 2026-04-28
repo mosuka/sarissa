@@ -56,6 +56,7 @@ new \Laurus\Schema()
 | `addBooleanField(string $name, bool $stored = true, bool $indexed = true): void` | Boolean field. |
 | `addBytesField(string $name, bool $stored = true): void` | Raw bytes field. |
 | `addGeoField(string $name, bool $stored = true, bool $indexed = true): void` | Geographic coordinate field (lat/lon). |
+| `addGeo3dField(string $name, bool $stored = true, bool $indexed = true): void` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `addDatetimeField(string $name, bool $stored = true, bool $indexed = true): void` | UTC datetime field. |
 | `addHnswField(string $name, int $dimension, ?string $distance = "cosine", int $m = 16, int $efConstruction = 200, ?string $embedder = null): void` | HNSW approximate nearest-neighbor vector field. |
 | `addFlatField(string $name, int $dimension, ?string $distance = "cosine", ?string $embedder = null): void` | Flat (brute-force) vector field. |
@@ -160,6 +161,48 @@ Matches numeric values in the range `[$min, $max]`. Pass `null` for an open boun
 ```
 
 `withinRadius` returns documents whose coordinate is within `$distanceKm` of the given point. `withinBoundingBox` returns documents within the specified bounding box.
+
+### Geo3dDistanceQuery
+
+```php
+\Laurus\Geo3dDistanceQuery::withinSphere(
+    string $field,
+    float $x, float $y, float $z,
+    float $radiusM,
+): Geo3dDistanceQuery
+```
+
+Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
+coordinate is within `$radiusM` metres of the centre. See
+[Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
+
+### Geo3dBoundingBoxQuery
+
+```php
+\Laurus\Geo3dBoundingBoxQuery::withinBox(
+    string $field,
+    float $minX, float $minY, float $minZ,
+    float $maxX, float $maxY, float $maxZ,
+): Geo3dBoundingBoxQuery
+```
+
+Axis-aligned 3D bounding-box search.
+
+### Geo3dNearestQuery
+
+```php
+\Laurus\Geo3dNearestQuery::kNearest(
+    string $field,
+    float $x, float $y, float $z,
+    int $k,
+): Geo3dNearestQuery
+```
+
+k-nearest-neighbour search over a 3D ECEF point field. The `initial_radius_m` /
+`max_radius_m` tuning parameters of the core query are not yet exposed in the
+PHP binding — see [#344] for parity across bindings.
+
+[#344]: https://github.com/mosuka/laurus/issues/344
 
 ### BooleanQuery
 

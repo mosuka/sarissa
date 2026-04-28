@@ -7837,6 +7837,7 @@ print(stats["vector_fields"])
 <tr><td style="text-align: left"><code>add_bool_field(name)</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>add_bytes_field(name)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>add_geo_field(name)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
+<tr><td style="text-align: left"><code>add_geo3d_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">3D ECEF Cartesian point field (x, y, z in metres). See <a href="laurus-python/../concepts/geo3d.html">Geo3d concepts</a>.</td></tr>
 <tr><td style="text-align: left"><code>add_datetime_field(name)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
 <tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
 <tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
@@ -7893,6 +7894,35 @@ the full behaviour matrix.</p>
 <pre><code class="language-python">GeoQuery(field: str, lat: float, lon: float, radius_km: float)
 </code></pre>
 <p>Geo-distance search. Returns documents whose <code>(lat, lon)</code> coordinate is within <code>radius_km</code> of the given point.</p>
+<h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
+<pre><code class="language-python">Geo3dDistanceQuery(field: str, x: float, y: float, z: float, radius_m: float)
+</code></pre>
+<p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
+coordinate is within <code>radius_m</code> metres of the centre. See
+<a href="laurus-python/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
+<h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
+<pre><code class="language-python">Geo3dBoundingBoxQuery(
+    field: str,
+    min_x: float, min_y: float, min_z: float,
+    max_x: float, max_y: float, max_z: float,
+)
+</code></pre>
+<p>Axis-aligned 3D bounding-box search. Returns documents whose ECEF point lies
+inside <code>[min_x, max_x] × [min_y, max_y] × [min_z, max_z]</code>.</p>
+<h3 id="geo3dnearestquery"><a class="header" href="#geo3dnearestquery">Geo3dNearestQuery</a></h3>
+<pre><code class="language-python">Geo3dNearestQuery(
+    field: str,
+    x: float, y: float, z: float,
+    k: int,
+    *,
+    initial_radius_m: float | None = None,
+    max_radius_m: float | None = None,
+)
+</code></pre>
+<p>k-nearest-neighbour search over a 3D ECEF point field. Returns the <code>k</code> documents
+closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m</code> and <code>max_radius_m</code>
+tune the iterative-expansion search cone (Python only — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity
+across bindings).</p>
 <h3 id="booleanquery-1"><a class="header" href="#booleanquery-1">BooleanQuery</a></h3>
 <pre><code class="language-python">BooleanQuery(
     must: list[Query] | None = None,
@@ -8284,6 +8314,7 @@ and return Promises. <code>stats()</code> is synchronous.</p>
 <tr><td style="text-align: left"><code>addBooleanField(name, stored?, indexed?)</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(name, stored?)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(name, stored?, indexed?)</code></td><td style="text-align: left">Geographic coordinate field.</td></tr>
+<tr><td style="text-align: left"><code>addGeo3dField(name, stored?, indexed?)</code></td><td style="text-align: left">3D ECEF Cartesian point field (x, y, z in metres). See <a href="laurus-nodejs/../concepts/geo3d.html">Geo3d concepts</a>.</td></tr>
 <tr><td style="text-align: left"><code>addDatetimeField(name, stored?, indexed?)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
 <tr><td style="text-align: left"><code>addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)</code></td><td style="text-align: left">HNSW vector field.</td></tr>
 <tr><td style="text-align: left"><code>addFlatField(name, dimension, distance?, embedder?)</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
@@ -8359,6 +8390,36 @@ GeoQuery.withinBoundingBox(
 ): GeoQuery
 </code></pre>
 <p>Geographic search by radius or bounding box.</p>
+<h3 id="geo3ddistancequery-1"><a class="header" href="#geo3ddistancequery-1">Geo3dDistanceQuery</a></h3>
+<pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
+  field: string,
+  x: number, y: number, z: number,
+  radiusM: number,
+): Geo3dDistanceQuery
+</code></pre>
+<p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
+coordinate is within <code>radiusM</code> metres of the centre. See
+<a href="laurus-nodejs/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
+<h3 id="geo3dboundingboxquery-1"><a class="header" href="#geo3dboundingboxquery-1">Geo3dBoundingBoxQuery</a></h3>
+<pre><code class="language-typescript">Geo3dBoundingBoxQuery.withinBox(
+  field: string,
+  minX: number, minY: number, minZ: number,
+  maxX: number, maxY: number, maxZ: number,
+): Geo3dBoundingBoxQuery
+</code></pre>
+<p>Axis-aligned 3D bounding-box search.</p>
+<h3 id="geo3dnearestquery-1"><a class="header" href="#geo3dnearestquery-1">Geo3dNearestQuery</a></h3>
+<pre><code class="language-typescript">Geo3dNearestQuery.kNearest(
+  field: string,
+  x: number, y: number, z: number,
+  k: number,
+  initialRadiusM?: number,
+  maxRadiusM?: number,
+): Geo3dNearestQuery
+</code></pre>
+<p>k-nearest-neighbour search over a 3D ECEF point field. The optional
+<code>initialRadiusM</code> and <code>maxRadiusM</code> parameters tune the iterative-expansion
+search cone (Node.js only — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings).</p>
 <h3 id="booleanquery-2"><a class="header" href="#booleanquery-2">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();
@@ -8921,6 +8982,49 @@ module.exports = {
 </li>
 <li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
+<h4 id="searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><code>searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)</code></a></h4>
+<p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
+coordinate is within <code>radiusM</code> metres of the centre. See
+<a href="laurus-wasm/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>field</code> (string) -- Geo3d field name.</li>
+<li><code>x</code>, <code>y</code>, <code>z</code> (number) -- Centre ECEF coordinate (metres).</li>
+<li><code>radiusM</code> (number) -- Sphere radius (metres).</li>
+<li><code>limit</code>, <code>offset</code> (number, optional)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
+<h4 id="searchgeo3dboundingboxfield-minx-miny-minz-maxx-maxy-maxz-limit-offset"><a class="header" href="#searchgeo3dboundingboxfield-minx-miny-minz-maxx-maxy-maxz-limit-offset"><code>searchGeo3dBoundingBox(field, minX, minY, minZ, maxX, maxY, maxZ, limit?, offset?)</code></a></h4>
+<p>Axis-aligned 3D bounding-box search over a 3D ECEF point field.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>field</code> (string) -- Geo3d field name.</li>
+<li><code>minX</code>, <code>minY</code>, <code>minZ</code>, <code>maxX</code>, <code>maxY</code>, <code>maxZ</code> (number) -- Box bounds (metres).</li>
+<li><code>limit</code>, <code>offset</code> (number, optional)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
+<h4 id="searchgeo3dnearestfield-x-y-z-k-limit-offset"><a class="header" href="#searchgeo3dnearestfield-x-y-z-k-limit-offset"><code>searchGeo3dNearest(field, x, y, z, k, limit?, offset?)</code></a></h4>
+<p>k-nearest-neighbour search over a 3D ECEF point field. Returns the <code>k</code>
+documents closest to <code>(x, y, z)</code>. The <code>initialRadiusM</code> / <code>maxRadiusM</code> tuning
+parameters of the core query are not yet exposed in the WASM binding — see
+<a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings.</p>
+<ul>
+<li><strong>Parameters:</strong>
+<ul>
+<li><code>field</code> (string) -- Geo3d field name.</li>
+<li><code>x</code>, <code>y</code>, <code>z</code> (number) -- Centre ECEF coordinate (metres).</li>
+<li><code>k</code> (number) -- Number of nearest neighbours to return.</li>
+<li><code>limit</code>, <code>offset</code> (number, optional)</li>
+</ul>
+</li>
+<li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
 <h4 id="stats"><a class="header" href="#stats"><code>stats()</code></a></h4>
 <p>Return index statistics.</p>
 <ul>
@@ -8948,6 +9052,15 @@ floats; range queries then match if any value satisfies the predicate
 <p>Add a date/time field.</p>
 <h4 id="addgeofieldname-stored-indexed"><a class="header" href="#addgeofieldname-stored-indexed"><code>addGeoField(name, stored?, indexed?)</code></a></h4>
 <p>Add a geographic coordinate field.</p>
+<h4 id="addgeo3dfieldname-stored-indexed"><a class="header" href="#addgeo3dfieldname-stored-indexed"><code>addGeo3dField(name, stored?, indexed?)</code></a></h4>
+<p>Add a 3D ECEF Cartesian point field. Values are submitted as a <code>{ x, y, z }</code>
+object with metres units. See <a href="laurus-wasm/../concepts/geo3d.html">Geo3d concepts</a> for
+ECEF theory.</p>
+<p>The WASM binding does not expose <code>Geo3dDistanceQuery</code> / <code>Geo3dBoundingBoxQuery</code>
+/ <code>Geo3dNearestQuery</code> as JS classes (wasm-bindgen cannot expose <code>dyn Query</code>
+trait objects). Instead, use the <code>Index.searchGeo3dDistance</code> /
+<code>Index.searchGeo3dBoundingBox</code> / <code>Index.searchGeo3dNearest</code> methods documented
+above.</p>
 <h4 id="addbytesfieldname-stored"><a class="header" href="#addbytesfieldname-stored"><code>addBytesField(name, stored?)</code></a></h4>
 <p>Add a binary data field.</p>
 <h4 id="addhnswfieldname-dimension-distance-m-efconstruction-embedder"><a class="header" href="#addhnswfieldname-dimension-distance-m-efconstruction-embedder"><code>addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)</code></a></h4>
@@ -9313,6 +9426,7 @@ puts stats["vector_fields"]
 <tr><td style="text-align: left"><code>add_boolean_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>add_bytes_field(name, stored: true)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>add_geo_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
+<tr><td style="text-align: left"><code>add_geo3d_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">3D ECEF Cartesian point field (x, y, z in metres). See <a href="laurus-ruby/../concepts/geo3d.html">Geo3d concepts</a>.</td></tr>
 <tr><td style="text-align: left"><code>add_datetime_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
 <tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, embedder: nil)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
 <tr><td style="text-align: left"><code>add_flat_field(name, dimension, distance: "cosine", embedder: nil)</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
@@ -9388,6 +9502,26 @@ Laurus::GeoQuery.within_radius(field, lat, lon, distance_km)
 Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
 </code></pre>
 <p><code>within_radius</code> returns documents whose coordinate is within <code>distance_km</code> of the given point. <code>within_bounding_box</code> returns documents within the specified bounding box.</p>
+<h3 id="geo3ddistancequery-2"><a class="header" href="#geo3ddistancequery-2">Geo3dDistanceQuery</a></h3>
+<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+</code></pre>
+<p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
+coordinate is within <code>radius_m</code> metres of the centre. See
+<a href="laurus-ruby/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
+<h3 id="geo3dboundingboxquery-2"><a class="header" href="#geo3dboundingboxquery-2">Geo3dBoundingBoxQuery</a></h3>
+<pre><code class="language-ruby">Laurus::Geo3dBoundingBoxQuery.within_box(
+  field,
+  min_x, min_y, min_z,
+  max_x, max_y, max_z,
+)
+</code></pre>
+<p>Axis-aligned 3D bounding-box search.</p>
+<h3 id="geo3dnearestquery-2"><a class="header" href="#geo3dnearestquery-2">Geo3dNearestQuery</a></h3>
+<pre><code class="language-ruby">Laurus::Geo3dNearestQuery.k_nearest(field, x, y, z, k)
+</code></pre>
+<p>k-nearest-neighbour search over a 3D ECEF point field. The <code>initial_radius_m</code> /
+<code>max_radius_m</code> tuning parameters of the core query are not yet exposed in the
+Ruby binding — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings.</p>
 <h3 id="booleanquery-3"><a class="header" href="#booleanquery-3">BooleanQuery</a></h3>
 <pre><code class="language-ruby">bq = Laurus::BooleanQuery.new
 bq.must(query)
@@ -9829,6 +9963,7 @@ echo $stats["vector_fields"];
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(string $name, bool $stored = true): void</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
+<tr><td style="text-align: left"><code>addGeo3dField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">3D ECEF Cartesian point field (x, y, z in metres). See <a href="laurus-php/../concepts/geo3d.html">Geo3d concepts</a>.</td></tr>
 <tr><td style="text-align: left"><code>addDatetimeField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">UTC datetime field.</td></tr>
 <tr><td style="text-align: left"><code>addHnswField(string $name, int $dimension, ?string $distance = "cosine", int $m = 16, int $efConstruction = 200, ?string $embedder = null): void</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
 <tr><td style="text-align: left"><code>addFlatField(string $name, int $dimension, ?string $distance = "cosine", ?string $embedder = null): void</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
@@ -9904,6 +10039,34 @@ the full behaviour matrix.</p>
 \Laurus\GeoQuery::withinBoundingBox(string $field, float $minLat, float $minLon, float $maxLat, float $maxLon): GeoQuery
 </code></pre>
 <p><code>withinRadius</code> returns documents whose coordinate is within <code>$distanceKm</code> of the given point. <code>withinBoundingBox</code> returns documents within the specified bounding box.</p>
+<h3 id="geo3ddistancequery-3"><a class="header" href="#geo3ddistancequery-3">Geo3dDistanceQuery</a></h3>
+<pre><code class="language-php">\Laurus\Geo3dDistanceQuery::withinSphere(
+    string $field,
+    float $x, float $y, float $z,
+    float $radiusM,
+): Geo3dDistanceQuery
+</code></pre>
+<p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
+coordinate is within <code>$radiusM</code> metres of the centre. See
+<a href="laurus-php/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
+<h3 id="geo3dboundingboxquery-3"><a class="header" href="#geo3dboundingboxquery-3">Geo3dBoundingBoxQuery</a></h3>
+<pre><code class="language-php">\Laurus\Geo3dBoundingBoxQuery::withinBox(
+    string $field,
+    float $minX, float $minY, float $minZ,
+    float $maxX, float $maxY, float $maxZ,
+): Geo3dBoundingBoxQuery
+</code></pre>
+<p>Axis-aligned 3D bounding-box search.</p>
+<h3 id="geo3dnearestquery-3"><a class="header" href="#geo3dnearestquery-3">Geo3dNearestQuery</a></h3>
+<pre><code class="language-php">\Laurus\Geo3dNearestQuery::kNearest(
+    string $field,
+    float $x, float $y, float $z,
+    int $k,
+): Geo3dNearestQuery
+</code></pre>
+<p>k-nearest-neighbour search over a 3D ECEF point field. The <code>initial_radius_m</code> /
+<code>max_radius_m</code> tuning parameters of the core query are not yet exposed in the
+PHP binding — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings.</p>
 <h3 id="booleanquery-4"><a class="header" href="#booleanquery-4">BooleanQuery</a></h3>
 <pre><code class="language-php">$bq = new \Laurus\BooleanQuery();
 $bq-&gt;must($query);

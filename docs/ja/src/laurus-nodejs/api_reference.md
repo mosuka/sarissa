@@ -61,6 +61,7 @@ class Schema {
 | `addBooleanField(name, stored?, indexed?)` | 真偽値フィールド。 |
 | `addBytesField(name, stored?)` | バイナリデータフィールド。 |
 | `addGeoField(name, stored?, indexed?)` | 地理座標フィールド。 |
+| `addGeo3dField(name, stored?, indexed?)` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
 | `addDatetimeField(name, stored?, indexed?)` | UTC 日時フィールド。 |
 | `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)` | HNSW ベクトルフィールド。 |
 | `addFlatField(name, dimension, distance?, embedder?)` | Flat（全探索）ベクトルフィールド。 |
@@ -155,6 +156,50 @@ GeoQuery.withinBoundingBox(
 ```
 
 半径またはバウンディングボックスによる地理検索。
+
+### Geo3dDistanceQuery
+
+```typescript
+Geo3dDistanceQuery.withinSphere(
+  field: string,
+  x: number, y: number, z: number,
+  radiusM: number,
+): Geo3dDistanceQuery
+```
+
+3D ECEF 座標フィールドへの球距離検索。中心から `radiusM` メートル以内の `(x, y, z)`
+座標を持つドキュメントを返します。ECEF の理論については
+[Geo3d の概念](../concepts/geo3d.md) を参照。
+
+### Geo3dBoundingBoxQuery
+
+```typescript
+Geo3dBoundingBoxQuery.withinBox(
+  field: string,
+  minX: number, minY: number, minZ: number,
+  maxX: number, maxY: number, maxZ: number,
+): Geo3dBoundingBoxQuery
+```
+
+軸並行 3D 範囲（AABB）検索。
+
+### Geo3dNearestQuery
+
+```typescript
+Geo3dNearestQuery.kNearest(
+  field: string,
+  x: number, y: number, z: number,
+  k: number,
+  initialRadiusM?: number,
+  maxRadiusM?: number,
+): Geo3dNearestQuery
+```
+
+3D ECEF 座標フィールドへの k 最近傍検索。`initialRadiusM` / `maxRadiusM` は
+反復拡張サーチの探索コーンを調整します（Node.js 専用 — バインディング間の対称化は
+[#344] を参照）。
+
+[#344]: https://github.com/mosuka/laurus/issues/344
 
 ### BooleanQuery
 
