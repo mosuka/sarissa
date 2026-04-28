@@ -26,6 +26,7 @@ use crate::lexical::core::field::NumericType;
 use crate::lexical::query::Query;
 use crate::lexical::query::boolean::{BooleanClause, BooleanQuery, Occur};
 use crate::lexical::query::fuzzy::FuzzyQuery;
+use crate::lexical::query::geo::{GeoBoundingBoxQuery, GeoDistanceQuery};
 use crate::lexical::query::geo3d::{Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery};
 use crate::lexical::query::phrase::PhraseQuery;
 use crate::lexical::query::range::NumericRangeQuery;
@@ -360,6 +361,7 @@ impl LexicalQueryParser {
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::geo3d_query => return self.parse_geo3d_query(inner_pair, field),
+                Rule::geo_query => return self.parse_geo_query(inner_pair, field),
                 Rule::range_query => return self.parse_range_query(inner_pair, field),
                 Rule::phrase_query => return self.parse_phrase_query(inner_pair, field),
                 Rule::fuzzy_term => return self.parse_fuzzy_term(inner_pair, field),
@@ -481,6 +483,72 @@ impl LexicalQueryParser {
         })?;
         let center = GeoEcefPoint::new(floats[0], floats[1], floats[2]);
         Ok(Box::new(Geo3dNearestQuery::new(field, center, k)))
+    }
+
+    /// Parse a 2D geo query (`geo_distance` or `geo_bbox`). Both require a
+    /// target field; the DSL rejects bare invocations like
+    /// `geo_distance(...)` without a `field:` prefix.
+    fn parse_geo_query(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+        field: Option<&str>,
+    ) -> Result<Box<dyn Query>> {
+        let field = field.ok_or_else(|| {
+            LaurusError::parse(
+                "2D geo queries require an explicit field prefix \
+                 (e.g. `location:geo_distance(...)`)"
+                    .to_string(),
+            )
+        })?;
+
+        for inner in pair.into_inner() {
+            match inner.as_rule() {
+                Rule::geo_distance => return self.parse_geo_distance(inner, field),
+                Rule::geo_bbox => return self.parse_geo_bbox(inner, field),
+                _ => {}
+            }
+        }
+        Err(LaurusError::parse(
+            "Invalid 2D geo query (expected geo_distance / geo_bbox)".to_string(),
+        ))
+    }
+
+    fn parse_geo_distance(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+        field: &str,
+    ) -> Result<Box<dyn Query>> {
+        // Grammar: lat, lon, distance_km.
+        let args = collect_signed_floats(pair)?;
+        if args.len() != 3 {
+            return Err(LaurusError::parse(format!(
+                "geo_distance expects 3 numeric arguments (lat, lon, distance_km), got {}",
+                args.len()
+            )));
+        }
+        Ok(Box::new(
+            GeoDistanceQuery::within_radius(field, args[0], args[1], args[2])
+                .map_err(|e| LaurusError::parse(format!("invalid geo_distance arguments: {e}")))?,
+        ))
+    }
+
+    fn parse_geo_bbox(
+        &self,
+        pair: pest::iterators::Pair<Rule>,
+        field: &str,
+    ) -> Result<Box<dyn Query>> {
+        // Grammar: min_lat, min_lon, max_lat, max_lon.
+        let args = collect_signed_floats(pair)?;
+        if args.len() != 4 {
+            return Err(LaurusError::parse(format!(
+                "geo_bbox expects 4 numeric arguments (min_lat, min_lon, max_lat, max_lon), got {}",
+                args.len()
+            )));
+        }
+        Ok(Box::new(
+            GeoBoundingBoxQuery::within_bounding_box(field, args[0], args[1], args[2], args[3])
+                .map_err(|e| LaurusError::parse(format!("invalid geo_bbox arguments: {e}")))?,
+        ))
     }
 
     fn parse_range_query(
@@ -980,6 +1048,76 @@ mod tests {
         let msg = format!("{err:?}");
         assert!(
             msg.contains("3D geo queries require an explicit field prefix"),
+            "got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_geo_distance_basic() {
+        let parser = create_test_parser().with_default_field("content");
+        let q = parser
+            .parse("location:geo_distance(40.7128, -74.0060, 10)")
+            .unwrap();
+        let dbg = format!("{q:?}");
+        assert!(dbg.contains("GeoDistanceQuery"), "got: {dbg}");
+        assert!(dbg.contains("location"), "got: {dbg}");
+    }
+
+    #[test]
+    fn test_geo_distance_invalid_lat_rejected() {
+        // Latitude > 90 should be rejected by GeoPoint::try_new and
+        // surface as a parse error.
+        let parser = create_test_parser().with_default_field("content");
+        let err = parser
+            .parse("location:geo_distance(95.0, 0.0, 10)")
+            .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("invalid geo_distance arguments"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_geo_bbox_basic() {
+        let parser = create_test_parser().with_default_field("content");
+        let q = parser
+            .parse("location:geo_bbox(40.0, -75.0, 41.0, -74.0)")
+            .unwrap();
+        let dbg = format!("{q:?}");
+        assert!(dbg.contains("GeoBoundingBoxQuery"), "got: {dbg}");
+        assert!(dbg.contains("location"), "got: {dbg}");
+    }
+
+    #[test]
+    fn test_geo_bbox_inverted_rejected() {
+        // The pest grammar accepts the syntactic form but the
+        // GeoBoundingBox constructor rejects min > max.
+        let parser = create_test_parser().with_default_field("content");
+        let err = parser
+            .parse("location:geo_bbox(50.0, 0.0, 40.0, 10.0)")
+            .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("invalid geo_bbox arguments"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_geo_query_combined_with_boolean() {
+        // 2D geo queries can mix with the rest of the DSL.
+        let parser = create_test_parser().with_default_field("content");
+        let q = parser
+            .parse("city:Tokyo AND location:geo_distance(35.68, 139.76, 5)")
+            .unwrap();
+        let dbg = format!("{q:?}");
+        assert!(dbg.contains("BooleanQuery"), "got: {dbg}");
+        assert!(dbg.contains("GeoDistanceQuery"), "got: {dbg}");
+    }
+
+    #[test]
+    fn test_geo_without_field_rejected() {
+        // Bare `geo_distance(...)` (without a field prefix) is rejected.
+        let parser = create_test_parser().with_default_field("content");
+        let err = parser.parse("geo_distance(0, 0, 1)").unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("2D geo queries require an explicit field prefix"),
             "got: {msg}"
         );
     }
