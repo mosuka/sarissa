@@ -2,8 +2,9 @@
 
 use crate::convert::data_value_to_json;
 use crate::query::{
-    JsPhraseQuery, JsQuery, JsTermQuery, JsVectorQuery, JsVectorQueryInner, JsVectorTextQuery,
-    extract_lexical_query, query_to_lexical_search_query, vector_query_to_search_query,
+    JsGeo3dBoundingBoxQuery, JsGeo3dDistanceQuery, JsGeo3dNearestQuery, JsPhraseQuery, JsQuery,
+    JsTermQuery, JsVectorQuery, JsVectorQueryInner, JsVectorTextQuery, extract_lexical_query,
+    query_to_lexical_search_query, vector_query_to_search_query,
 };
 use laurus::{FusionAlgorithm, LexicalSearchQuery, SearchRequestBuilder, SearchResult};
 use napi::bindgen_prelude::*;
@@ -208,6 +209,94 @@ impl JsSearchRequest {
     #[napi]
     pub fn set_lexical_phrase_query(&mut self, field: String, terms: Vec<String>) {
         self.lexical_query = Some(JsQuery::PhraseQuery(JsPhraseQuery { field, terms }));
+    }
+
+    /// Set a 3D ECEF distance (sphere) query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The Geo3d field name.
+    /// * `x`, `y`, `z` - Sphere centre in ECEF meters.
+    /// * `radius_m` - Sphere radius in meters.
+    #[napi(js_name = "setLexicalGeo3dDistanceQuery")]
+    pub fn set_lexical_geo3d_distance_query(
+        &mut self,
+        field: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        radius_m: f64,
+    ) {
+        self.lexical_query = Some(JsQuery::Geo3dDistanceQuery(JsGeo3dDistanceQuery {
+            field,
+            x,
+            y,
+            z,
+            radius_m,
+        }));
+    }
+
+    /// Set a 3D ECEF axis-aligned bounding-box query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The Geo3d field name.
+    /// * `min_x`, `min_y`, `min_z` - Lower corner of the box.
+    /// * `max_x`, `max_y`, `max_z` - Upper corner of the box.
+    #[napi(js_name = "setLexicalGeo3dBoundingBoxQuery")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_lexical_geo3d_bounding_box_query(
+        &mut self,
+        field: String,
+        min_x: f64,
+        min_y: f64,
+        min_z: f64,
+        max_x: f64,
+        max_y: f64,
+        max_z: f64,
+    ) {
+        self.lexical_query = Some(JsQuery::Geo3dBoundingBoxQuery(JsGeo3dBoundingBoxQuery {
+            field,
+            min_x,
+            min_y,
+            min_z,
+            max_x,
+            max_y,
+            max_z,
+        }));
+    }
+
+    /// Set a 3D ECEF k-nearest-neighbours query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The Geo3d field name.
+    /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
+    /// * `k` - Number of nearest neighbours to return.
+    /// * `initial_radius_m` - Optional starting radius for the
+    ///   expanding-radius search.
+    /// * `max_radius_m` - Optional hard cap on the search radius.
+    #[napi(js_name = "setLexicalGeo3dNearestQuery")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_lexical_geo3d_nearest_query(
+        &mut self,
+        field: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        k: u32,
+        initial_radius_m: Option<f64>,
+        max_radius_m: Option<f64>,
+    ) {
+        self.lexical_query = Some(JsQuery::Geo3dNearestQuery(JsGeo3dNearestQuery {
+            field,
+            x,
+            y,
+            z,
+            k,
+            initial_radius_m,
+            max_radius_m,
+        }));
     }
 
     /// Set a vector query with a pre-computed embedding.

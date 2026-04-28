@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use laurus::{
     BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
-    EmbedderDefinition, FieldOption, FlatOption, FloatOption, GeoOption, HnswOption, IntegerOption,
-    IvfOption, Schema, TextOption,
+    EmbedderDefinition, FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
+    IntegerOption, IvfOption, Schema, TextOption,
 };
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -198,6 +198,29 @@ impl JsSchema {
         self.inner.fields.insert(
             name,
             FieldOption::Geo(GeoOption {
+                indexed: indexed.unwrap_or(true),
+                stored: stored.unwrap_or(true),
+            }),
+        );
+    }
+
+    /// Add a 3D ECEF Cartesian point field (x, y, z in meters).
+    ///
+    /// Values are submitted as a `{ x, y, z }` JSON object and are queryable
+    /// via `Geo3dDistanceQuery`, `Geo3dBoundingBoxQuery`, and
+    /// `Geo3dNearestQuery` (passed through `SearchRequest.setLexicalGeo3d*`
+    /// setters). See the conceptual docs at `docs/src/concepts/geo3d.md`.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Field name.
+    /// * `stored` - Whether the value is retrievable (default `true`).
+    /// * `indexed` - Whether the field is searchable (default `true`).
+    #[napi(js_name = "addGeo3dField")]
+    pub fn add_geo3d_field(&mut self, name: String, stored: Option<bool>, indexed: Option<bool>) {
+        self.inner.fields.insert(
+            name,
+            FieldOption::Geo3d(Geo3dOption {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
             }),
