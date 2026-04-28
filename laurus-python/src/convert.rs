@@ -20,14 +20,15 @@ pub fn dict_to_document(py: Python, dict: &Bound<PyDict>) -> PyResult<Document> 
 /// Convert a Python value to a [`DataValue`].
 ///
 /// Type mapping:
-/// - `None`             → `DataValue::Null`
-/// - `bool`             → `DataValue::Bool`  (must be checked before int)
-/// - `int`              → `DataValue::Int64`
-/// - `float`            → `DataValue::Float64`
-/// - `str`              → `DataValue::Text`
-/// - `bytes`            → `DataValue::Bytes`
-/// - `list[float|int]`  → `DataValue::Vector`
-/// - `(lat, lon)` tuple → `DataValue::Geo`
+/// - `None`                → `DataValue::Null`
+/// - `bool`                → `DataValue::Bool`  (must be checked before int)
+/// - `int`                 → `DataValue::Int64`
+/// - `float`               → `DataValue::Float64`
+/// - `str`                 → `DataValue::Text`
+/// - `bytes`               → `DataValue::Bytes`
+/// - `list[float|int]`     → `DataValue::Vector`
+/// - `(lat, lon)` tuple    → `DataValue::Geo`
+/// - `(x, y, z)` tuple     → `DataValue::GeoEcef` (3D ECEF Cartesian, meters)
 pub fn py_to_data_value(_py: Python, obj: &Bound<PyAny>) -> PyResult<DataValue> {
     if obj.is_none() {
         return Ok(DataValue::Null);
@@ -72,6 +73,18 @@ pub fn py_to_data_value(_py: Python, obj: &Bound<PyAny>) -> PyResult<DataValue> 
         let point = laurus::lexical::GeoPoint::try_new(lat, lon)
             .map_err(|e| PyValueError::new_err(format!("invalid geo point: {e}")))?;
         return Ok(DataValue::Geo(point));
+    }
+    // Try tuple (x, y, z) for Geo3d (ECEF Cartesian, meters). Must come
+    // after the 2-tuple Geo check so existing semantics are preserved.
+    if let Ok(tup) = obj.cast::<pyo3::types::PyTuple>()
+        && tup.len() == 3
+        && let (Ok(x), Ok(y), Ok(z)) = (
+            tup.get_item(0)?.extract::<f64>(),
+            tup.get_item(1)?.extract::<f64>(),
+            tup.get_item(2)?.extract::<f64>(),
+        )
+    {
+        return Ok(DataValue::GeoEcef(laurus::GeoEcefPoint::new(x, y, z)));
     }
     // Try Python datetime.datetime
     if let Ok(dt_str) = obj.call_method0("isoformat")

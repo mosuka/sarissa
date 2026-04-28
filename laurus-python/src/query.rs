@@ -4,9 +4,11 @@
 //! and provides a `build()` method that materializes it into a `Box<dyn Query>`.
 //! Vector query classes produce `VectorSearchQuery` instead.
 
+use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
-    BooleanQuery, FuzzyQuery, GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
+    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -21,7 +23,8 @@ use pyo3::prelude::*;
 /// Extract a Laurus lexical query from an arbitrary Python object.
 ///
 /// Supports: `TermQuery`, `PhraseQuery`, `FuzzyQuery`, `WildcardQuery`,
-/// `NumericRangeQuery`, `GeoQuery`, `BooleanQuery`, `SpanQuery`.
+/// `NumericRangeQuery`, `GeoQuery`, `Geo3dDistanceQuery`,
+/// `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`, `BooleanQuery`, `SpanQuery`.
 pub fn extract_lexical_query(
     py: Python,
     obj: &Bound<PyAny>,
@@ -48,6 +51,15 @@ pub fn extract_lexical_query(
     }
     if let Ok(q) = obj.extract::<PyRef<PyGeoQuery>>() {
         return q.build().map_err(|e| PyValueError::new_err(e.to_string()));
+    }
+    if let Ok(q) = obj.extract::<PyRef<PyGeo3dDistanceQuery>>() {
+        return Ok(q.build());
+    }
+    if let Ok(q) = obj.extract::<PyRef<PyGeo3dBoundingBoxQuery>>() {
+        return q.build().map_err(|e| PyValueError::new_err(e.to_string()));
+    }
+    if let Ok(q) = obj.extract::<PyRef<PyGeo3dNearestQuery>>() {
+        return Ok(q.build());
     }
     if let Ok(q) = obj.extract::<PyRef<PyBooleanQuery>>() {
         return q.build_query(py);
@@ -482,6 +494,215 @@ impl PyGeoQuery {
                 *max_lon,
             )?)),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dDistanceQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF sphere query: matches documents whose stored `(x, y, z)` point
+/// lies within `radius_m` meters of the given centre.
+///
+/// ## Example
+///
+/// ```python
+/// q = laurus.Geo3dDistanceQuery("position", -3955182.0, 3350553.0, 3700276.0, 5000.0)
+/// ```
+#[pyclass(name = "Geo3dDistanceQuery")]
+pub struct PyGeo3dDistanceQuery {
+    pub field: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub radius_m: f64,
+}
+
+#[pymethods]
+impl PyGeo3dDistanceQuery {
+    /// Create a 3D distance (sphere) query.
+    ///
+    /// Args:
+    ///     field: Geo3d field name.
+    ///     x, y, z: Centre coordinates in ECEF meters.
+    ///     radius_m: Sphere radius in meters.
+    #[new]
+    pub fn new(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
+        Self {
+            field,
+            x,
+            y,
+            z,
+            radius_m,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Geo3dDistanceQuery(field='{}', x={}, y={}, z={}, radius_m={})",
+            self.field, self.x, self.y, self.z, self.radius_m
+        )
+    }
+}
+
+impl PyGeo3dDistanceQuery {
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        Box::new(Geo3dDistanceQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.x, self.y, self.z),
+            self.radius_m,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dBoundingBoxQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF axis-aligned bounding box query.
+///
+/// ## Example
+///
+/// ```python
+/// q = laurus.Geo3dBoundingBoxQuery(
+///     "position",
+///     -3962000.0, 3340000.0, 3690000.0,
+///     -3958000.0, 3360000.0, 3710000.0,
+/// )
+/// ```
+#[pyclass(name = "Geo3dBoundingBoxQuery")]
+pub struct PyGeo3dBoundingBoxQuery {
+    pub field: String,
+    pub min_x: f64,
+    pub min_y: f64,
+    pub min_z: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+    pub max_z: f64,
+}
+
+#[pymethods]
+impl PyGeo3dBoundingBoxQuery {
+    /// Create a 3D bounding-box query.
+    ///
+    /// Args:
+    ///     field: Geo3d field name.
+    ///     min_x, min_y, min_z: Lower corner of the box.
+    ///     max_x, max_y, max_z: Upper corner of the box.
+    #[new]
+    pub fn new(
+        field: String,
+        min_x: f64,
+        min_y: f64,
+        min_z: f64,
+        max_x: f64,
+        max_y: f64,
+        max_z: f64,
+    ) -> Self {
+        Self {
+            field,
+            min_x,
+            min_y,
+            min_z,
+            max_x,
+            max_y,
+            max_z,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Geo3dBoundingBoxQuery(field='{}', min=({}, {}, {}), max=({}, {}, {}))",
+            self.field, self.min_x, self.min_y, self.min_z, self.max_x, self.max_y, self.max_z
+        )
+    }
+}
+
+impl PyGeo3dBoundingBoxQuery {
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(Geo3dBoundingBoxQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.min_x, self.min_y, self.min_z),
+            GeoEcefPoint::new(self.max_x, self.max_y, self.max_z),
+        )?))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dNearestQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF k-nearest-neighbours query.
+///
+/// ## Example
+///
+/// ```python
+/// q = laurus.Geo3dNearestQuery("position", -3955182.0, 3350553.0, 3700276.0, k=10)
+/// ```
+#[pyclass(name = "Geo3dNearestQuery")]
+pub struct PyGeo3dNearestQuery {
+    pub field: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub k: usize,
+    pub initial_radius_m: Option<f64>,
+    pub max_radius_m: Option<f64>,
+}
+
+#[pymethods]
+impl PyGeo3dNearestQuery {
+    /// Create a 3D k-NN query.
+    ///
+    /// Args:
+    ///     field: Geo3d field name.
+    ///     x, y, z: Centre coordinates in ECEF meters.
+    ///     k: Number of nearest neighbours to return.
+    ///     initial_radius_m: Starting radius for the expanding-radius
+    ///         search (default 1000 m). Optional.
+    ///     max_radius_m: Hard cap on the search radius (default 1e10 m).
+    ///         Optional.
+    #[new]
+    #[pyo3(signature = (field, x, y, z, k, *, initial_radius_m=None, max_radius_m=None))]
+    pub fn new(
+        field: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        k: usize,
+        initial_radius_m: Option<f64>,
+        max_radius_m: Option<f64>,
+    ) -> Self {
+        Self {
+            field,
+            x,
+            y,
+            z,
+            k,
+            initial_radius_m,
+            max_radius_m,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Geo3dNearestQuery(field='{}', x={}, y={}, z={}, k={})",
+            self.field, self.x, self.y, self.z, self.k
+        )
+    }
+}
+
+impl PyGeo3dNearestQuery {
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        let centre = GeoEcefPoint::new(self.x, self.y, self.z);
+        let mut q = Geo3dNearestQuery::new(&self.field, centre, self.k);
+        if let Some(r) = self.initial_radius_m {
+            q = q.with_initial_radius(r);
+        }
+        if let Some(r) = self.max_radius_m {
+            q = q.with_max_radius(r);
+        }
+        Box::new(q)
     }
 }
 

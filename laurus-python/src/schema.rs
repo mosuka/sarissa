@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use laurus::{
     BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
-    EmbedderDefinition, FieldOption, FlatOption, FloatOption, GeoOption, HnswOption, IntegerOption,
-    IvfOption, Schema, TextOption,
+    EmbedderDefinition, FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
+    IntegerOption, IvfOption, Schema, TextOption,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -154,6 +154,20 @@ impl PySchema {
         self.inner.fields.insert(
             name.to_string(),
             FieldOption::Geo(GeoOption { indexed, stored }),
+        );
+    }
+
+    /// Add a 3D ECEF Cartesian point field (x, y, z in meters).
+    ///
+    /// Values are submitted as a 3-tuple `(x, y, z)` of floats and are
+    /// queryable via `Geo3dDistanceQuery`, `Geo3dBoundingBoxQuery`, and
+    /// `Geo3dNearestQuery`. See the conceptual docs at
+    /// `docs/src/concepts/geo3d.md` for the coordinate system.
+    #[pyo3(signature = (name, *, stored=true, indexed=true))]
+    pub fn add_geo3d_field(&mut self, name: &str, stored: bool, indexed: bool) {
+        self.inner.fields.insert(
+            name.to_string(),
+            FieldOption::Geo3d(Geo3dOption { indexed, stored }),
         );
     }
 
