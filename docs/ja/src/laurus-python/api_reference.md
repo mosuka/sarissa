@@ -130,18 +130,36 @@ NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
 
 `[min, max]` の範囲内の数値を検索します。開いた境界には `None` を指定します。
 
-### GeoQuery
+### GeoDistanceQuery
 
 ```python
-GeoQuery(field: str, lat: float, lon: float, radius_km: float)
+GeoDistanceQuery.within_radius(
+    field: str, lat: float, lon: float, distance_km: float,
+)
 ```
 
-地理的距離検索。指定した地点から `radius_km` 以内の `(lat, lon)` 座標を持つドキュメントを返します。
+地理的距離検索（半径指定）。指定した地点から `distance_km` キロメートル以内の
+`(lat, lon)` 座標を持つドキュメントを返します。
+
+### GeoBoundingBoxQuery
+
+```python
+GeoBoundingBoxQuery.within_bounding_box(
+    field: str,
+    min_lat: float, min_lon: float,
+    max_lat: float, max_lon: float,
+)
+```
+
+地理的範囲（バウンディングボックス）検索。軸並行 `[min_lat, max_lat] ×
+[min_lon, max_lon]` 内の `(lat, lon)` 座標を持つドキュメントを返します。
 
 ### Geo3dDistanceQuery
 
 ```python
-Geo3dDistanceQuery(field: str, x: float, y: float, z: float, radius_m: float)
+Geo3dDistanceQuery.within_sphere(
+    field: str, x: float, y: float, z: float, radius_m: float,
+)
 ```
 
 3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `radius_m` メートル以内
@@ -151,7 +169,7 @@ Geo3dDistanceQuery(field: str, x: float, y: float, z: float, radius_m: float)
 ### Geo3dBoundingBoxQuery
 
 ```python
-Geo3dBoundingBoxQuery(
+Geo3dBoundingBoxQuery.within_box(
     field: str,
     min_x: float, min_y: float, min_z: float,
     max_x: float, max_y: float, max_z: float,
@@ -164,7 +182,7 @@ Geo3dBoundingBoxQuery(
 ### Geo3dNearestQuery
 
 ```python
-Geo3dNearestQuery(
+Geo3dNearestQuery.k_nearest(
     field: str,
     x: float, y: float, z: float,
     k: int,
@@ -176,9 +194,7 @@ Geo3dNearestQuery(
 
 3D ECEF 座標フィールドへの k 最近傍検索。`(x, y, z)` から最も近い `k` 件のドキュ
 メントを返します。`initial_radius_m` / `max_radius_m` は反復拡張サーチの探索コーン
-を調整します（Python 専用 — バインディング間の対称化は [#344] を参照）。
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+を調整します。
 
 ### BooleanQuery
 

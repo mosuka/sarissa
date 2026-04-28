@@ -124,20 +124,18 @@ DSL 文字列クエリで検索します。
   - `limit`, `offset` (number, 省略可)
 - **戻り値:** `Promise<SearchResult[]>`
 
-#### `searchGeo3dNearest(field, x, y, z, k, limit?, offset?)`
+#### `searchGeo3dNearest(field, x, y, z, k, limit?, offset?, initialRadiusM?, maxRadiusM?)`
 
 3D ECEF 座標フィールドへの k 最近傍検索。`(x, y, z)` から最も近い `k` 件のドキュ
-メントを返します。コアクエリの `initialRadiusM` / `maxRadiusM` チューニングパラ
-メータは WASM バインディングではまだ公開されていません — バインディング間の対称化は
-[#344] を参照。
-
-[#344]: https://github.com/mosuka/laurus/issues/344
+メントを返します。`initialRadiusM` / `maxRadiusM`（オプション）で反復拡張サーチの
+探索コーンを調整できます。
 
 - **引数:**
   - `field` (string) -- Geo3d フィールド名
   - `x`, `y`, `z` (number) -- 中心 ECEF 座標（メートル）
   - `k` (number) -- 返す近傍件数
   - `limit`, `offset` (number, 省略可)
+  - `initialRadiusM`, `maxRadiusM` (number, 省略可)
 - **戻り値:** `Promise<SearchResult[]>`
 
 #### `stats()`

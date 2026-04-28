@@ -289,14 +289,22 @@ the full behaviour matrix.</p>
 <pre><code class="language-php">new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $numericType = "integer")
 </code></pre>
 <p>Matches numeric values in the range <code>[$min, $max]</code>. Pass <code>null</code> for an open bound. Set <code>$numericType</code> to <code>"integer"</code> or <code>"float"</code>.</p>
-<h3 id="geoquery"><a class="header" href="#geoquery">GeoQuery</a></h3>
-<pre><code class="language-php">// Radius search
-\Laurus\GeoQuery::withinRadius(string $field, float $lat, float $lon, float $distanceKm): GeoQuery
-
-// Bounding box search
-\Laurus\GeoQuery::withinBoundingBox(string $field, float $minLat, float $minLon, float $maxLat, float $maxLon): GeoQuery
+<h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
+<pre><code class="language-php">\Laurus\GeoDistanceQuery::withinRadius(
+    string $field, float $lat, float $lon, float $distanceKm,
+): GeoDistanceQuery
 </code></pre>
-<p><code>withinRadius</code> returns documents whose coordinate is within <code>$distanceKm</code> of the given point. <code>withinBoundingBox</code> returns documents within the specified bounding box.</p>
+<p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
+is within <code>$distanceKm</code> kilometres of the given point.</p>
+<h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
+<pre><code class="language-php">\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
+    string $field,
+    float $minLat, float $minLon,
+    float $maxLat, float $maxLon,
+): GeoBoundingBoxQuery
+</code></pre>
+<p>Geo bounding-box search. Returns documents whose <code>(lat, lon)</code> coordinate lies
+inside the axis-aligned <code>[$minLat, $maxLat] × [$minLon, $maxLon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-php">\Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
@@ -320,11 +328,13 @@ coordinate is within <code>$radiusM</code> metres of the centre. See
     string $field,
     float $x, float $y, float $z,
     int $k,
+    ?float $initialRadiusM = null,
+    ?float $maxRadiusM = null,
 ): Geo3dNearestQuery
 </code></pre>
-<p>k-nearest-neighbour search over a 3D ECEF point field. The <code>initial_radius_m</code> /
-<code>max_radius_m</code> tuning parameters of the core query are not yet exposed in the
-PHP binding — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings.</p>
+<p>k-nearest-neighbour search over a 3D ECEF point field. The optional
+<code>$initialRadiusM</code> and <code>$maxRadiusM</code> parameters tune the iterative-expansion
+search cone.</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-php">$bq = new \Laurus\BooleanQuery();
 $bq-&gt;must($query);
