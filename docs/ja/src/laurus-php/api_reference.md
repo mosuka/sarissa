@@ -56,6 +56,7 @@ new \Laurus\Schema()
 | `addBooleanField(string $name, bool $stored = true, bool $indexed = true): void` | ブールフィールド。 |
 | `addBytesField(string $name, bool $stored = true): void` | 生バイトフィールド。 |
 | `addGeoField(string $name, bool $stored = true, bool $indexed = true): void` | 地理座標フィールド（緯度/経度）。 |
+| `addGeo3dField(string $name, bool $stored = true, bool $indexed = true): void` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
 | `addDatetimeField(string $name, bool $stored = true, bool $indexed = true): void` | UTC 日時フィールド。 |
 | `addHnswField(string $name, int $dimension, ?string $distance = "cosine", int $m = 16, int $efConstruction = 200, ?string $embedder = null): void` | HNSW 近似最近傍ベクトルフィールド。 |
 | `addFlatField(string $name, int $dimension, ?string $distance = "cosine", ?string $embedder = null): void` | Flat（総当たり）ベクトルフィールド。 |
@@ -155,6 +156,48 @@ new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $nu
 ```
 
 `withinRadius` は指定した地点から `$distanceKm` 以内の座標を持つドキュメントを返します。`withinBoundingBox` は指定したバウンディングボックス内のドキュメントを返します。
+
+### Geo3dDistanceQuery
+
+```php
+\Laurus\Geo3dDistanceQuery::withinSphere(
+    string $field,
+    float $x, float $y, float $z,
+    float $radiusM,
+): Geo3dDistanceQuery
+```
+
+3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `$radiusM` メートル以内
+の座標を持つドキュメントを返します。ECEF の理論については
+[Geo3d の概念](../concepts/geo3d.md) を参照。
+
+### Geo3dBoundingBoxQuery
+
+```php
+\Laurus\Geo3dBoundingBoxQuery::withinBox(
+    string $field,
+    float $minX, float $minY, float $minZ,
+    float $maxX, float $maxY, float $maxZ,
+): Geo3dBoundingBoxQuery
+```
+
+軸並行 3D 範囲（AABB）検索。
+
+### Geo3dNearestQuery
+
+```php
+\Laurus\Geo3dNearestQuery::kNearest(
+    string $field,
+    float $x, float $y, float $z,
+    int $k,
+): Geo3dNearestQuery
+```
+
+3D ECEF 座標フィールドへの k 最近傍検索。コアクエリの `initial_radius_m` /
+`max_radius_m` チューニングパラメータは PHP バインディングではまだ公開されて
+いません — バインディング間の対称化は [#344] を参照。
+
+[#344]: https://github.com/mosuka/laurus/issues/344
 
 ### BooleanQuery
 

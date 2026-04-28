@@ -56,6 +56,7 @@ Laurus::Schema.new
 | `add_boolean_field(name, stored: true, indexed: true)` | Boolean field. |
 | `add_bytes_field(name, stored: true)` | Raw bytes field. |
 | `add_geo_field(name, stored: true, indexed: true)` | Geographic coordinate field (lat/lon). |
+| `add_geo3d_field(name, stored: true, indexed: true)` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `add_datetime_field(name, stored: true, indexed: true)` | UTC datetime field. |
 | `add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, embedder: nil)` | HNSW approximate nearest-neighbor vector field. |
 | `add_flat_field(name, dimension, distance: "cosine", embedder: nil)` | Flat (brute-force) vector field. |
@@ -160,6 +161,40 @@ Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
 ```
 
 `within_radius` returns documents whose coordinate is within `distance_km` of the given point. `within_bounding_box` returns documents within the specified bounding box.
+
+### Geo3dDistanceQuery
+
+```ruby
+Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+```
+
+Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
+coordinate is within `radius_m` metres of the centre. See
+[Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
+
+### Geo3dBoundingBoxQuery
+
+```ruby
+Laurus::Geo3dBoundingBoxQuery.within_box(
+  field,
+  min_x, min_y, min_z,
+  max_x, max_y, max_z,
+)
+```
+
+Axis-aligned 3D bounding-box search.
+
+### Geo3dNearestQuery
+
+```ruby
+Laurus::Geo3dNearestQuery.k_nearest(field, x, y, z, k)
+```
+
+k-nearest-neighbour search over a 3D ECEF point field. The `initial_radius_m` /
+`max_radius_m` tuning parameters of the core query are not yet exposed in the
+Ruby binding — see [#344] for parity across bindings.
+
+[#344]: https://github.com/mosuka/laurus/issues/344
 
 ### BooleanQuery
 

@@ -58,6 +58,7 @@ class Schema:
 | `add_bool_field(name)` | Boolean field. |
 | `add_bytes_field(name)` | Raw bytes field. |
 | `add_geo_field(name)` | Geographic coordinate field (lat/lon). |
+| `add_geo3d_field(name, *, stored=True, indexed=True)` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `add_datetime_field(name)` | UTC datetime field. |
 | `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)` | HNSW approximate nearest-neighbor vector field. |
 | `add_flat_field(name, dimension, *, distance="cosine")` | Flat (brute-force) vector field. |
@@ -141,6 +142,49 @@ GeoQuery(field: str, lat: float, lon: float, radius_km: float)
 ```
 
 Geo-distance search. Returns documents whose `(lat, lon)` coordinate is within `radius_km` of the given point.
+
+### Geo3dDistanceQuery
+
+```python
+Geo3dDistanceQuery(field: str, x: float, y: float, z: float, radius_m: float)
+```
+
+Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
+coordinate is within `radius_m` metres of the centre. See
+[Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
+
+### Geo3dBoundingBoxQuery
+
+```python
+Geo3dBoundingBoxQuery(
+    field: str,
+    min_x: float, min_y: float, min_z: float,
+    max_x: float, max_y: float, max_z: float,
+)
+```
+
+Axis-aligned 3D bounding-box search. Returns documents whose ECEF point lies
+inside `[min_x, max_x] × [min_y, max_y] × [min_z, max_z]`.
+
+### Geo3dNearestQuery
+
+```python
+Geo3dNearestQuery(
+    field: str,
+    x: float, y: float, z: float,
+    k: int,
+    *,
+    initial_radius_m: float | None = None,
+    max_radius_m: float | None = None,
+)
+```
+
+k-nearest-neighbour search over a 3D ECEF point field. Returns the `k` documents
+closest to `(x, y, z)`. The optional `initial_radius_m` and `max_radius_m`
+tune the iterative-expansion search cone (Python only — see [#344] for parity
+across bindings).
+
+[#344]: https://github.com/mosuka/laurus/issues/344
 
 ### BooleanQuery
 

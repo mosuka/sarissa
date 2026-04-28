@@ -61,6 +61,7 @@ class Schema {
 | `addBooleanField(name, stored?, indexed?)` | Boolean field. |
 | `addBytesField(name, stored?)` | Raw bytes field. |
 | `addGeoField(name, stored?, indexed?)` | Geographic coordinate field. |
+| `addGeo3dField(name, stored?, indexed?)` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
 | `addDatetimeField(name, stored?, indexed?)` | UTC datetime field. |
 | `addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)` | HNSW vector field. |
 | `addFlatField(name, dimension, distance?, embedder?)` | Flat (brute-force) vector field. |
@@ -163,6 +164,50 @@ GeoQuery.withinBoundingBox(
 ```
 
 Geographic search by radius or bounding box.
+
+### Geo3dDistanceQuery
+
+```typescript
+Geo3dDistanceQuery.withinSphere(
+  field: string,
+  x: number, y: number, z: number,
+  radiusM: number,
+): Geo3dDistanceQuery
+```
+
+Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
+coordinate is within `radiusM` metres of the centre. See
+[Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
+
+### Geo3dBoundingBoxQuery
+
+```typescript
+Geo3dBoundingBoxQuery.withinBox(
+  field: string,
+  minX: number, minY: number, minZ: number,
+  maxX: number, maxY: number, maxZ: number,
+): Geo3dBoundingBoxQuery
+```
+
+Axis-aligned 3D bounding-box search.
+
+### Geo3dNearestQuery
+
+```typescript
+Geo3dNearestQuery.kNearest(
+  field: string,
+  x: number, y: number, z: number,
+  k: number,
+  initialRadiusM?: number,
+  maxRadiusM?: number,
+): Geo3dNearestQuery
+```
+
+k-nearest-neighbour search over a 3D ECEF point field. The optional
+`initialRadiusM` and `maxRadiusM` parameters tune the iterative-expansion
+search cone (Node.js only — see [#344] for parity across bindings).
+
+[#344]: https://github.com/mosuka/laurus/issues/344
 
 ### BooleanQuery
 

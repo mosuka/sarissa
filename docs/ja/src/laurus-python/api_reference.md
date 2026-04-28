@@ -58,6 +58,7 @@ class Schema:
 | `add_bool_field(name)` | ブールフィールド。 |
 | `add_bytes_field(name)` | 生バイトフィールド。 |
 | `add_geo_field(name)` | 地理座標フィールド（緯度/経度）。 |
+| `add_geo3d_field(name, *, stored=True, indexed=True)` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
 | `add_datetime_field(name)` | UTC 日時フィールド。 |
 | `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)` | HNSW 近似最近傍ベクトルフィールド。 |
 | `add_flat_field(name, dimension, *, distance="cosine")` | Flat（総当たり）ベクトルフィールド。 |
@@ -136,6 +137,48 @@ GeoQuery(field: str, lat: float, lon: float, radius_km: float)
 ```
 
 地理的距離検索。指定した地点から `radius_km` 以内の `(lat, lon)` 座標を持つドキュメントを返します。
+
+### Geo3dDistanceQuery
+
+```python
+Geo3dDistanceQuery(field: str, x: float, y: float, z: float, radius_m: float)
+```
+
+3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `radius_m` メートル以内
+の座標を持つドキュメントを返します。ECEF の理論については
+[Geo3d の概念](../concepts/geo3d.md) を参照。
+
+### Geo3dBoundingBoxQuery
+
+```python
+Geo3dBoundingBoxQuery(
+    field: str,
+    min_x: float, min_y: float, min_z: float,
+    max_x: float, max_y: float, max_z: float,
+)
+```
+
+軸並行 3D 範囲（AABB）検索。`[min_x, max_x] × [min_y, max_y] × [min_z, max_z]` 内
+にある ECEF 座標を持つドキュメントを返します。
+
+### Geo3dNearestQuery
+
+```python
+Geo3dNearestQuery(
+    field: str,
+    x: float, y: float, z: float,
+    k: int,
+    *,
+    initial_radius_m: float | None = None,
+    max_radius_m: float | None = None,
+)
+```
+
+3D ECEF 座標フィールドへの k 最近傍検索。`(x, y, z)` から最も近い `k` 件のドキュ
+メントを返します。`initial_radius_m` / `max_radius_m` は反復拡張サーチの探索コーン
+を調整します（Python 専用 — バインディング間の対称化は [#344] を参照）。
+
+[#344]: https://github.com/mosuka/laurus/issues/344
 
 ### BooleanQuery
 

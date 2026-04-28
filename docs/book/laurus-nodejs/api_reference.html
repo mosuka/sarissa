@@ -226,6 +226,7 @@ and return Promises. <code>stats()</code> is synchronous.</p>
 <tr><td style="text-align: left"><code>addBooleanField(name, stored?, indexed?)</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(name, stored?)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(name, stored?, indexed?)</code></td><td style="text-align: left">Geographic coordinate field.</td></tr>
+<tr><td style="text-align: left"><code>addGeo3dField(name, stored?, indexed?)</code></td><td style="text-align: left">3D ECEF Cartesian point field (x, y, z in metres). See <a href="../concepts/geo3d.html">Geo3d concepts</a>.</td></tr>
 <tr><td style="text-align: left"><code>addDatetimeField(name, stored?, indexed?)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
 <tr><td style="text-align: left"><code>addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)</code></td><td style="text-align: left">HNSW vector field.</td></tr>
 <tr><td style="text-align: left"><code>addFlatField(name, dimension, distance?, embedder?)</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
@@ -301,6 +302,36 @@ GeoQuery.withinBoundingBox(
 ): GeoQuery
 </code></pre>
 <p>Geographic search by radius or bounding box.</p>
+<h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
+<pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
+  field: string,
+  x: number, y: number, z: number,
+  radiusM: number,
+): Geo3dDistanceQuery
+</code></pre>
+<p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
+coordinate is within <code>radiusM</code> metres of the centre. See
+<a href="../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
+<h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
+<pre><code class="language-typescript">Geo3dBoundingBoxQuery.withinBox(
+  field: string,
+  minX: number, minY: number, minZ: number,
+  maxX: number, maxY: number, maxZ: number,
+): Geo3dBoundingBoxQuery
+</code></pre>
+<p>Axis-aligned 3D bounding-box search.</p>
+<h3 id="geo3dnearestquery"><a class="header" href="#geo3dnearestquery">Geo3dNearestQuery</a></h3>
+<pre><code class="language-typescript">Geo3dNearestQuery.kNearest(
+  field: string,
+  x: number, y: number, z: number,
+  k: number,
+  initialRadiusM?: number,
+  maxRadiusM?: number,
+): Geo3dNearestQuery
+</code></pre>
+<p>k-nearest-neighbour search over a 3D ECEF point field. The optional
+<code>initialRadiusM</code> and <code>maxRadiusM</code> parameters tune the iterative-expansion
+search cone (Node.js only — see <a href="https://github.com/mosuka/laurus/issues/344">#344</a> for parity across bindings).</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();
