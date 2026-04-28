@@ -115,6 +115,37 @@ impl GeoDistanceQuery {
         }
     }
 
+    /// Create a geo distance query from raw lat/lon coordinates.
+    ///
+    /// Validates the latitude / longitude bounds via [`GeoPoint::try_new`]
+    /// (`-90 <= lat <= 90`, `-180 <= lon <= 180`) and returns
+    /// `LaurusError::other` for out-of-range values.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The field containing geographical coordinates.
+    /// * `lat` - Center latitude in degrees (`-90` to `90`).
+    /// * `lon` - Center longitude in degrees (`-180` to `180`).
+    /// * `distance_km` - Search radius in kilometres.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use laurus::lexical::query::GeoDistanceQuery;
+    ///
+    /// let query =
+    ///     GeoDistanceQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
+    /// ```
+    pub fn within_radius<F: Into<String>>(
+        field: F,
+        lat: f64,
+        lon: f64,
+        distance_km: f64,
+    ) -> Result<Self> {
+        let center = GeoPoint::try_new(lat, lon)?;
+        Ok(GeoDistanceQuery::new(field, center, distance_km))
+    }
+
     /// Set the boost factor.
     pub fn with_boost(mut self, boost: f32) -> Self {
         self.boost = boost;
@@ -440,6 +471,42 @@ impl GeoBoundingBoxQuery {
             bounding_box,
             boost: 1.0,
         }
+    }
+
+    /// Create a geo bounding box query from raw lat/lon corner coordinates.
+    ///
+    /// Validates that each corner falls within the latitude / longitude
+    /// bounds (via [`GeoPoint::try_new`]) and that `min_lat <= max_lat`
+    /// / `min_lon <= max_lon` (via [`GeoBoundingBox::new`]).
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The field containing geographical coordinates.
+    /// * `min_lat` - Minimum (south) latitude.
+    /// * `min_lon` - Minimum (west) longitude.
+    /// * `max_lat` - Maximum (north) latitude.
+    /// * `max_lon` - Maximum (east) longitude.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use laurus::lexical::query::GeoBoundingBoxQuery;
+    ///
+    /// let query = GeoBoundingBoxQuery::within_bounding_box(
+    ///     "location", 40.0, -75.0, 41.0, -74.0,
+    /// ).unwrap();
+    /// ```
+    pub fn within_bounding_box<F: Into<String>>(
+        field: F,
+        min_lat: f64,
+        min_lon: f64,
+        max_lat: f64,
+        max_lon: f64,
+    ) -> Result<Self> {
+        let min = GeoPoint::try_new(min_lat, min_lon)?;
+        let max = GeoPoint::try_new(max_lat, max_lon)?;
+        let bbox = GeoBoundingBox::new(min, max)?;
+        Ok(GeoBoundingBoxQuery::new(field, bbox))
     }
 
     /// Set the boost factor.
@@ -1100,6 +1167,45 @@ mod tests {
         assert_eq!(query.field(), "location");
         assert_eq!(query.bounding_box().min, min);
         assert_eq!(query.bounding_box().max, max);
+    }
+
+    #[test]
+    fn test_geo_distance_query_within_radius_factory() {
+        let query = GeoDistanceQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
+
+        assert_eq!(query.field(), "location");
+        assert_eq!(query.center().lat, 40.7128);
+        assert_eq!(query.center().lon, -74.0060);
+        assert_eq!(query.distance_km(), 10.0);
+    }
+
+    #[test]
+    fn test_geo_distance_query_within_radius_invalid_lat() {
+        // Latitude outside [-90, 90] is rejected by GeoPoint::try_new.
+        let err = GeoDistanceQuery::within_radius("location", 95.0, 0.0, 10.0).unwrap_err();
+        assert!(format!("{err}").to_lowercase().contains("lat"));
+    }
+
+    #[test]
+    fn test_geo_bounding_box_query_within_bounding_box_factory() {
+        let query =
+            GeoBoundingBoxQuery::within_bounding_box("location", 40.0, -75.0, 41.0, -74.0).unwrap();
+
+        assert_eq!(query.field(), "location");
+        assert_eq!(query.bounding_box().min.lat, 40.0);
+        assert_eq!(query.bounding_box().min.lon, -75.0);
+        assert_eq!(query.bounding_box().max.lat, 41.0);
+        assert_eq!(query.bounding_box().max.lon, -74.0);
+    }
+
+    #[test]
+    fn test_geo_bounding_box_query_within_bounding_box_inverted() {
+        // min > max is rejected by GeoBoundingBox::new.
+        let err = GeoBoundingBoxQuery::within_bounding_box("location", 50.0, 0.0, 40.0, 10.0)
+            .unwrap_err();
+        // Error mentions either bounding-box or min/max.
+        let msg = format!("{err}").to_lowercase();
+        assert!(msg.contains("bounding") || msg.contains("min") || msg.contains("max"));
     }
 
     #[test]
