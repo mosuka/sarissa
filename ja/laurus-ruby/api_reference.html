@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4ea8e252.js";
+            window.path_to_searchindex_js = "../searchindex-52b2cbbb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -240,6 +240,7 @@
 <tr><td style="text-align: left"><code>add_boolean_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_bytes_field(name, stored: true)</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_geo_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
+<tr><td style="text-align: left"><code>add_geo3d_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は <a href="../concepts/geo3d.html">Geo3d の概念</a>。</td></tr>
 <tr><td style="text-align: left"><code>add_datetime_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">UTC 日時フィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, distance: "cosine", m: 16, ef_construction: 200, embedder: nil)</code></td><td style="text-align: left">HNSW 近似最近傍ベクトルフィールド。</td></tr>
 <tr><td style="text-align: left"><code>add_flat_field(name, dimension, distance: "cosine", embedder: nil)</code></td><td style="text-align: left">Flat（総当たり）ベクトルフィールド。</td></tr>
@@ -329,6 +330,26 @@ Laurus::GeoQuery.within_radius(field, lat, lon, distance_km)
 Laurus::GeoQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)
 </code></pre>
 <p><code>within_radius</code> は指定した地点から <code>distance_km</code> 以内の座標を持つドキュメントを返します。<code>within_bounding_box</code> は指定したバウンディングボックス内のドキュメントを返します。</p>
+<h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
+<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+</code></pre>
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>radius_m</code> メートル以内
+の座標を持つドキュメントを返します。ECEF の理論については
+<a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
+<h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
+<pre><code class="language-ruby">Laurus::Geo3dBoundingBoxQuery.within_box(
+  field,
+  min_x, min_y, min_z,
+  max_x, max_y, max_z,
+)
+</code></pre>
+<p>軸並行 3D 範囲（AABB）検索。</p>
+<h3 id="geo3dnearestquery"><a class="header" href="#geo3dnearestquery">Geo3dNearestQuery</a></h3>
+<pre><code class="language-ruby">Laurus::Geo3dNearestQuery.k_nearest(field, x, y, z, k)
+</code></pre>
+<p>3D ECEF 座標フィールドへの k 最近傍検索。コアクエリの <code>initial_radius_m</code> /
+<code>max_radius_m</code> チューニングパラメータは Ruby バインディングではまだ公開されて
+いません — バインディング間の対称化は <a href="https://github.com/mosuka/laurus/issues/344">#344</a> を参照。</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-ruby">bq = Laurus::BooleanQuery.new
 bq.must(query)

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4ea8e252.js";
+            window.path_to_searchindex_js = "../searchindex-52b2cbbb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -288,6 +288,49 @@
 </li>
 <li><strong>戻り値:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
+<h4 id="searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><code>searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)</code></a></h4>
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>radiusM</code> メートル以内
+の座標を持つドキュメントを返します。ECEF の理論については
+<a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
+<ul>
+<li><strong>引数:</strong>
+<ul>
+<li><code>field</code> (string) – Geo3d フィールド名</li>
+<li><code>x</code>, <code>y</code>, <code>z</code> (number) – 中心 ECEF 座標（メートル）</li>
+<li><code>radiusM</code> (number) – 球の半径（メートル）</li>
+<li><code>limit</code>, <code>offset</code> (number, 省略可)</li>
+</ul>
+</li>
+<li><strong>戻り値:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
+<h4 id="searchgeo3dboundingboxfield-minx-miny-minz-maxx-maxy-maxz-limit-offset"><a class="header" href="#searchgeo3dboundingboxfield-minx-miny-minz-maxx-maxy-maxz-limit-offset"><code>searchGeo3dBoundingBox(field, minX, minY, minZ, maxX, maxY, maxZ, limit?, offset?)</code></a></h4>
+<p>3D ECEF 座標フィールドへの軸並行範囲（AABB）検索。</p>
+<ul>
+<li><strong>引数:</strong>
+<ul>
+<li><code>field</code> (string) – Geo3d フィールド名</li>
+<li><code>minX</code>, <code>minY</code>, <code>minZ</code>, <code>maxX</code>, <code>maxY</code>, <code>maxZ</code> (number) – 範囲境界（メートル）</li>
+<li><code>limit</code>, <code>offset</code> (number, 省略可)</li>
+</ul>
+</li>
+<li><strong>戻り値:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
+<h4 id="searchgeo3dnearestfield-x-y-z-k-limit-offset"><a class="header" href="#searchgeo3dnearestfield-x-y-z-k-limit-offset"><code>searchGeo3dNearest(field, x, y, z, k, limit?, offset?)</code></a></h4>
+<p>3D ECEF 座標フィールドへの k 最近傍検索。<code>(x, y, z)</code> から最も近い <code>k</code> 件のドキュ
+メントを返します。コアクエリの <code>initialRadiusM</code> / <code>maxRadiusM</code> チューニングパラ
+メータは WASM バインディングではまだ公開されていません — バインディング間の対称化は
+<a href="https://github.com/mosuka/laurus/issues/344">#344</a> を参照。</p>
+<ul>
+<li><strong>引数:</strong>
+<ul>
+<li><code>field</code> (string) – Geo3d フィールド名</li>
+<li><code>x</code>, <code>y</code>, <code>z</code> (number) – 中心 ECEF 座標（メートル）</li>
+<li><code>k</code> (number) – 返す近傍件数</li>
+<li><code>limit</code>, <code>offset</code> (number, 省略可)</li>
+</ul>
+</li>
+<li><strong>戻り値:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
+</ul>
 <h4 id="stats"><a class="header" href="#stats"><code>stats()</code></a></h4>
 <p>インデックス統計を返します。</p>
 <ul>
@@ -313,6 +356,15 @@
 <p>日時フィールドを追加します。</p>
 <h4 id="addgeofieldname-stored-indexed"><a class="header" href="#addgeofieldname-stored-indexed"><code>addGeoField(name, stored?, indexed?)</code></a></h4>
 <p>地理座標フィールドを追加します。</p>
+<h4 id="addgeo3dfieldname-stored-indexed"><a class="header" href="#addgeo3dfieldname-stored-indexed"><code>addGeo3dField(name, stored?, indexed?)</code></a></h4>
+<p>3D ECEF カルテシアン座標フィールド（x, y, z はメートル）を追加します。値は
+<code>{ x, y, z }</code> オブジェクトで投入します。詳細は
+<a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
+<p>WASM バインディングは <code>Geo3dDistanceQuery</code> / <code>Geo3dBoundingBoxQuery</code> /
+<code>Geo3dNearestQuery</code> を JS クラスとして公開していません（wasm-bindgen は
+<code>dyn Query</code> トレイトオブジェクトを公開できないため）。代わりに上記の
+<code>Index.searchGeo3dDistance</code> / <code>Index.searchGeo3dBoundingBox</code> /
+<code>Index.searchGeo3dNearest</code> メソッドを使用してください。</p>
 <h4 id="addbytesfieldname-stored"><a class="header" href="#addbytesfieldname-stored"><code>addBytesField(name, stored?)</code></a></h4>
 <p>バイナリデータフィールドを追加します。</p>
 <h4 id="addhnswfieldname-dimension-distance-m-efconstruction-embedder"><a class="header" href="#addhnswfieldname-dimension-distance-m-efconstruction-embedder"><code>addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)</code></a></h4>

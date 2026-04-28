@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4ea8e252.js";
+            window.path_to_searchindex_js = "../searchindex-52b2cbbb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -245,6 +245,7 @@
 <tr><td style="text-align: left"><code>addBooleanField(name, stored?, indexed?)</code></td><td style="text-align: left">真偽値フィールド。</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(name, stored?)</code></td><td style="text-align: left">バイナリデータフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(name, stored?, indexed?)</code></td><td style="text-align: left">地理座標フィールド。</td></tr>
+<tr><td style="text-align: left"><code>addGeo3dField(name, stored?, indexed?)</code></td><td style="text-align: left">3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は <a href="../concepts/geo3d.html">Geo3d の概念</a>。</td></tr>
 <tr><td style="text-align: left"><code>addDatetimeField(name, stored?, indexed?)</code></td><td style="text-align: left">UTC 日時フィールド。</td></tr>
 <tr><td style="text-align: left"><code>addHnswField(name, dimension, distance?, m?, efConstruction?, embedder?)</code></td><td style="text-align: left">HNSW ベクトルフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addFlatField(name, dimension, distance?, embedder?)</code></td><td style="text-align: left">Flat（全探索）ベクトルフィールド。</td></tr>
@@ -319,6 +320,36 @@ GeoQuery.withinBoundingBox(
 ): GeoQuery
 </code></pre>
 <p>半径またはバウンディングボックスによる地理検索。</p>
+<h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
+<pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
+  field: string,
+  x: number, y: number, z: number,
+  radiusM: number,
+): Geo3dDistanceQuery
+</code></pre>
+<p>3D ECEF 座標フィールドへの球距離検索。中心から <code>radiusM</code> メートル以内の <code>(x, y, z)</code>
+座標を持つドキュメントを返します。ECEF の理論については
+<a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
+<h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
+<pre><code class="language-typescript">Geo3dBoundingBoxQuery.withinBox(
+  field: string,
+  minX: number, minY: number, minZ: number,
+  maxX: number, maxY: number, maxZ: number,
+): Geo3dBoundingBoxQuery
+</code></pre>
+<p>軸並行 3D 範囲（AABB）検索。</p>
+<h3 id="geo3dnearestquery"><a class="header" href="#geo3dnearestquery">Geo3dNearestQuery</a></h3>
+<pre><code class="language-typescript">Geo3dNearestQuery.kNearest(
+  field: string,
+  x: number, y: number, z: number,
+  k: number,
+  initialRadiusM?: number,
+  maxRadiusM?: number,
+): Geo3dNearestQuery
+</code></pre>
+<p>3D ECEF 座標フィールドへの k 最近傍検索。<code>initialRadiusM</code> / <code>maxRadiusM</code> は
+反復拡張サーチの探索コーンを調整します（Node.js 専用 — バインディング間の対称化は
+<a href="https://github.com/mosuka/laurus/issues/344">#344</a> を参照）。</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();
