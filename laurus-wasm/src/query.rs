@@ -6,7 +6,8 @@ use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
     BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
-    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    GeoBoundingBoxQuery, GeoDistanceQuery, NumericRangeQuery, PhraseQuery, TermQuery,
+    WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -24,7 +25,8 @@ pub enum JsQuery {
     FuzzyQuery(JsFuzzyQuery),
     WildcardQuery(JsWildcardQuery),
     NumericRangeQuery(JsNumericRangeQuery),
-    GeoQuery(JsGeoQuery),
+    GeoDistanceQuery(JsGeoDistanceQuery),
+    GeoBoundingBoxQuery(JsGeoBoundingBoxQuery),
     Geo3dDistanceQuery(JsGeo3dDistanceQuery),
     Geo3dBoundingBoxQuery(JsGeo3dBoundingBoxQuery),
     Geo3dNearestQuery(JsGeo3dNearestQuery),
@@ -55,7 +57,8 @@ pub fn extract_lexical_query(query: &JsQuery) -> Result<Box<dyn laurus::lexical:
                 .map_err(|e| JsValue::from_str(&e.to_string()))?,
         )),
         JsQuery::NumericRangeQuery(q) => Ok(q.build()),
-        JsQuery::GeoQuery(q) => q.build().map_err(|e| JsValue::from_str(&e.to_string())),
+        JsQuery::GeoDistanceQuery(q) => q.build().map_err(|e| JsValue::from_str(&e.to_string())),
+        JsQuery::GeoBoundingBoxQuery(q) => q.build().map_err(|e| JsValue::from_str(&e.to_string())),
         JsQuery::Geo3dDistanceQuery(q) => Ok(q.build()),
         JsQuery::Geo3dBoundingBoxQuery(q) => {
             q.build().map_err(|e| JsValue::from_str(&e.to_string()))
@@ -168,52 +171,51 @@ impl JsNumericRangeQuery {
     }
 }
 
-pub struct JsGeoQuery {
+/// 2D Geo distance (radius) query (internal).
+///
+/// Construction is internal — JS callers reach 2D Geo through the DSL
+/// (`field:geo_distance(...)`) since `JsGeoDistanceQuery` is not exposed
+/// as a JS class.
+pub struct JsGeoDistanceQuery {
     pub field: String,
-    pub kind: GeoKind,
+    pub lat: f64,
+    pub lon: f64,
+    pub distance_km: f64,
 }
 
-#[derive(Clone)]
-pub enum GeoKind {
-    Radius {
-        lat: f64,
-        lon: f64,
-        distance_km: f64,
-    },
-    BoundingBox {
-        min_lat: f64,
-        min_lon: f64,
-        max_lat: f64,
-        max_lon: f64,
-    },
-}
-
-impl JsGeoQuery {
+impl JsGeoDistanceQuery {
     pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
-        match &self.kind {
-            GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            } => Ok(Box::new(GeoQuery::within_radius(
-                &self.field,
-                *lat,
-                *lon,
-                *distance_km,
-            )?)),
-            GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            } => Ok(Box::new(GeoQuery::within_bounding_box(
-                &self.field,
-                *min_lat,
-                *min_lon,
-                *max_lat,
-                *max_lon,
-            )?)),
-        }
+        Ok(Box::new(GeoDistanceQuery::within_radius(
+            &self.field,
+            self.lat,
+            self.lon,
+            self.distance_km,
+        )?))
+    }
+}
+
+/// 2D Geo bounding-box query (internal).
+///
+/// Construction is internal — JS callers reach 2D Geo through the DSL
+/// (`field:geo_bbox(...)`) since `JsGeoBoundingBoxQuery` is not exposed
+/// as a JS class.
+pub struct JsGeoBoundingBoxQuery {
+    pub field: String,
+    pub min_lat: f64,
+    pub min_lon: f64,
+    pub max_lat: f64,
+    pub max_lon: f64,
+}
+
+impl JsGeoBoundingBoxQuery {
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(GeoBoundingBoxQuery::within_bounding_box(
+            &self.field,
+            self.min_lat,
+            self.min_lon,
+            self.max_lat,
+            self.max_lon,
+        )?))
     }
 }
 
@@ -221,7 +223,7 @@ impl JsGeoQuery {
 ///
 /// Constructed by `Index::searchGeo3dDistance`. JS callers cannot
 /// instantiate this directly; the method-on-Index pattern matches the
-/// existing 2D `JsGeoQuery` and `JsTermQuery` flows.
+/// existing 2D `JsGeoDistanceQuery` and `JsTermQuery` flows.
 pub struct JsGeo3dDistanceQuery {
     pub field: String,
     pub x: f64,
@@ -268,15 +270,24 @@ pub struct JsGeo3dNearestQuery {
     pub y: f64,
     pub z: f64,
     pub k: u32,
+    pub initial_radius_m: Option<f64>,
+    pub max_radius_m: Option<f64>,
 }
 
 impl JsGeo3dNearestQuery {
     pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
-        Box::new(Geo3dNearestQuery::new(
+        let mut q = Geo3dNearestQuery::new(
             &self.field,
             GeoEcefPoint::new(self.x, self.y, self.z),
             self.k as usize,
-        ))
+        );
+        if let Some(r) = self.initial_radius_m {
+            q = q.with_initial_radius(r);
+        }
+        if let Some(r) = self.max_radius_m {
+            q = q.with_max_radius(r);
+        }
+        Box::new(q)
     }
 }
 
