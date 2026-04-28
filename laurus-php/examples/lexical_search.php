@@ -9,7 +9,7 @@
 // 3. FuzzyQuery        — approximate matching (typo tolerance)
 // 4. WildcardQuery     — pattern matching with * and ?
 // 5. NumericRangeQuery — numeric range filtering (int and float)
-// 6. GeoQuery          — geographic radius / bounding box
+// 6. GeoDistanceQuery / GeoBoundingBoxQuery — geographic radius / bounding box
 // 7. BooleanQuery      — AND / OR / NOT combinations
 // 8. SpanQuery         — positional / proximity search
 //
@@ -20,7 +20,8 @@
 
 use Laurus\BooleanQuery;
 use Laurus\FuzzyQuery;
-use Laurus\GeoQuery;
+use Laurus\GeoBoundingBoxQuery;
+use Laurus\GeoDistanceQuery;
 use Laurus\Index;
 use Laurus\NumericRangeQuery;
 use Laurus\PhraseQuery;
@@ -213,17 +214,17 @@ echo PHP_EOL . "[5c] DSL: 'rating:[4.5 TO 5.0]':" . PHP_EOL;
 print_results($index->search("rating:[4.5 TO 5.0]", 5));
 
 // =====================================================================
-// PART 6: GeoQuery — geographic search
+// PART 6: GeoDistanceQuery / GeoBoundingBoxQuery — geographic search
 // =====================================================================
 echo PHP_EOL . str_repeat("=", 60) . PHP_EOL;
-echo "PART 6: GeoQuery (no DSL equivalent)" . PHP_EOL;
+echo "PART 6: GeoDistanceQuery / GeoBoundingBoxQuery" . PHP_EOL;
 echo str_repeat("=", 60) . PHP_EOL;
 
 echo PHP_EOL . "[6a] Within 100 km of Paris (48.86, 2.35):" . PHP_EOL;
-print_results($index->search(GeoQuery::withinRadius("location", 48.8566, 2.3522, 100.0), 5));
+print_results($index->search(GeoDistanceQuery::withinRadius("location", 48.8566, 2.3522, 100.0), 5));
 
 echo PHP_EOL . "[6b] Bounding box — Europe (47, -1) to (53, 14):" . PHP_EOL;
-print_results($index->search(GeoQuery::withinBoundingBox("location", 47.0, -1.0, 53.0, 14.0), 5));
+print_results($index->search(GeoBoundingBoxQuery::withinBoundingBox("location", 47.0, -1.0, 53.0, 14.0), 5));
 
 // =====================================================================
 // PART 7: BooleanQuery — AND / OR / NOT combinations

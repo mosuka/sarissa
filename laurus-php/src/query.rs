@@ -12,7 +12,8 @@ use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
     BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
-    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    GeoBoundingBoxQuery, GeoDistanceQuery, NumericRangeQuery, PhraseQuery, TermQuery,
+    WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -25,7 +26,7 @@ use laurus::{DataValue, LexicalSearchQuery, QueryPayload, VectorSearchQuery};
 /// Extract a Laurus lexical query from an arbitrary PHP Zval.
 ///
 /// Supports: `TermQuery`, `PhraseQuery`, `FuzzyQuery`, `WildcardQuery`,
-/// `NumericRangeQuery`, `GeoQuery`, `Geo3dDistanceQuery`,
+/// `NumericRangeQuery`, `GeoDistanceQuery`, `GeoBoundingBoxQuery`, `Geo3dDistanceQuery`,
 /// `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`, `BooleanQuery`, `SpanQuery`.
 ///
 /// # Arguments
@@ -60,8 +61,14 @@ pub fn extract_lexical_query(zv: &Zval) -> PhpResult<Box<dyn laurus::lexical::Qu
         let q: &PhpNumericRangeQuery = obj;
         return Ok(q.build());
     }
-    if let Some(obj) = <&ZendClassObject<PhpGeoQuery>>::from_zval(zv) {
-        let q: &PhpGeoQuery = obj;
+    if let Some(obj) = <&ZendClassObject<PhpGeoDistanceQuery>>::from_zval(zv) {
+        let q: &PhpGeoDistanceQuery = obj;
+        return q
+            .build()
+            .map_err(|e| ext_php_rs::exception::PhpException::default(e.to_string()));
+    }
+    if let Some(obj) = <&ZendClassObject<PhpGeoBoundingBoxQuery>>::from_zval(zv) {
+        let q: &PhpGeoBoundingBoxQuery = obj;
         return q
             .build()
             .map_err(|e| ext_php_rs::exception::PhpException::default(e.to_string()));
@@ -428,45 +435,22 @@ impl PhpNumericRangeQuery {
 }
 
 // ---------------------------------------------------------------------------
-// GeoQuery
+// GeoDistanceQuery
 // ---------------------------------------------------------------------------
 
-/// Internal representation of geographic query kind.
-#[derive(Clone)]
-pub enum GeoKind {
-    /// Radius-based search.
-    Radius {
-        /// Center latitude.
-        lat: f64,
-        /// Center longitude.
-        lon: f64,
-        /// Search radius in kilometers.
-        distance_km: f64,
-    },
-    /// Bounding box search.
-    BoundingBox {
-        /// Southern boundary.
-        min_lat: f64,
-        /// Western boundary.
-        min_lon: f64,
-        /// Northern boundary.
-        max_lat: f64,
-        /// Eastern boundary.
-        max_lon: f64,
-    },
-}
-
-/// Geographic search query (`Laurus\GeoQuery`).
+/// Geographic distance (radius) search query (`Laurus\GeoDistanceQuery`).
 #[php_class]
-#[php(name = "Laurus\\GeoQuery")]
-pub struct PhpGeoQuery {
+#[php(name = "Laurus\\GeoDistanceQuery")]
+pub struct PhpGeoDistanceQuery {
     pub field: String,
-    pub kind: GeoKind,
+    pub lat: f64,
+    pub lon: f64,
+    pub distance_km: f64,
 }
 
 #[php_impl]
-impl PhpGeoQuery {
-    /// Create a radius-based geo query.
+impl PhpGeoDistanceQuery {
+    /// Create a radius-based geo distance query.
     ///
     /// # Arguments
     ///
@@ -477,14 +461,50 @@ impl PhpGeoQuery {
     pub fn within_radius(field: String, lat: f64, lon: f64, distance_km: f64) -> Self {
         Self {
             field,
-            kind: GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            },
+            lat,
+            lon,
+            distance_km,
         }
     }
 
+    /// Return a string representation.
+    pub fn __to_string(&self) -> String {
+        format!(
+            "GeoDistanceQuery.within_radius(field='{}', lat={}, lon={}, distance_km={})",
+            self.field, self.lat, self.lon, self.distance_km
+        )
+    }
+}
+
+impl PhpGeoDistanceQuery {
+    /// Build the underlying Rust `GeoDistanceQuery`.
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(GeoDistanceQuery::within_radius(
+            &self.field,
+            self.lat,
+            self.lon,
+            self.distance_km,
+        )?))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GeoBoundingBoxQuery
+// ---------------------------------------------------------------------------
+
+/// Geographic bounding-box search query (`Laurus\GeoBoundingBoxQuery`).
+#[php_class]
+#[php(name = "Laurus\\GeoBoundingBoxQuery")]
+pub struct PhpGeoBoundingBoxQuery {
+    pub field: String,
+    pub min_lat: f64,
+    pub min_lon: f64,
+    pub max_lat: f64,
+    pub max_lon: f64,
+}
+
+#[php_impl]
+impl PhpGeoBoundingBoxQuery {
     /// Create a bounding-box geo query.
     ///
     /// # Arguments
@@ -503,66 +523,32 @@ impl PhpGeoQuery {
     ) -> Self {
         Self {
             field,
-            kind: GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            },
+            min_lat,
+            min_lon,
+            max_lat,
+            max_lon,
         }
     }
 
     /// Return a string representation.
     pub fn __to_string(&self) -> String {
-        match &self.kind {
-            GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            } => format!(
-                "GeoQuery.within_radius(field='{}', lat={}, lon={}, distance_km={})",
-                self.field, lat, lon, distance_km
-            ),
-            GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            } => format!(
-                "GeoQuery.within_bounding_box(field='{}', min_lat={}, min_lon={}, max_lat={}, max_lon={})",
-                self.field, min_lat, min_lon, max_lat, max_lon
-            ),
-        }
+        format!(
+            "GeoBoundingBoxQuery.within_bounding_box(field='{}', min_lat={}, min_lon={}, max_lat={}, max_lon={})",
+            self.field, self.min_lat, self.min_lon, self.max_lat, self.max_lon
+        )
     }
 }
 
-impl PhpGeoQuery {
-    /// Build the underlying Rust `GeoQuery`.
+impl PhpGeoBoundingBoxQuery {
+    /// Build the underlying Rust `GeoBoundingBoxQuery`.
     pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
-        match &self.kind {
-            GeoKind::Radius {
-                lat,
-                lon,
-                distance_km,
-            } => Ok(Box::new(GeoQuery::within_radius(
-                &self.field,
-                *lat,
-                *lon,
-                *distance_km,
-            )?)),
-            GeoKind::BoundingBox {
-                min_lat,
-                min_lon,
-                max_lat,
-                max_lon,
-            } => Ok(Box::new(GeoQuery::within_bounding_box(
-                &self.field,
-                *min_lat,
-                *min_lon,
-                *max_lat,
-                *max_lon,
-            )?)),
-        }
+        Ok(Box::new(GeoBoundingBoxQuery::within_bounding_box(
+            &self.field,
+            self.min_lat,
+            self.min_lon,
+            self.max_lat,
+            self.max_lon,
+        )?))
     }
 }
 
@@ -716,6 +702,8 @@ pub struct PhpGeo3dNearestQuery {
     pub y: f64,
     pub z: f64,
     pub k: u32,
+    pub initial_radius_m: Option<f64>,
+    pub max_radius_m: Option<f64>,
 }
 
 #[php_impl]
@@ -729,20 +717,35 @@ impl PhpGeo3dNearestQuery {
     /// * `y` - Centre ECEF Y coordinate (meters).
     /// * `z` - Centre ECEF Z coordinate (meters).
     /// * `k` - Number of nearest neighbours to return.
-    pub fn k_nearest(field: String, x: f64, y: f64, z: f64, k: i64) -> Self {
+    /// * `initial_radius_m` - Starting radius for the expanding-radius search
+    ///   in meters (optional, default 1000.0).
+    /// * `max_radius_m` - Hard cap on the search radius in meters (optional,
+    ///   default 1e10).
+    #[allow(clippy::too_many_arguments)]
+    pub fn k_nearest(
+        field: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        k: i64,
+        initial_radius_m: Option<f64>,
+        max_radius_m: Option<f64>,
+    ) -> Self {
         Self {
             field,
             x,
             y,
             z,
             k: k as u32,
+            initial_radius_m,
+            max_radius_m,
         }
     }
 
     /// Return a string representation.
     pub fn __to_string(&self) -> String {
         format!(
-            "Geo3dNearestQuery(field='{}', x={}, y={}, z={}, k={})",
+            "Geo3dNearestQuery.kNearest(field='{}', x={}, y={}, z={}, k={})",
             self.field, self.x, self.y, self.z, self.k
         )
     }
@@ -751,11 +754,18 @@ impl PhpGeo3dNearestQuery {
 impl PhpGeo3dNearestQuery {
     /// Build the underlying Rust [`Geo3dNearestQuery`].
     pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
-        Box::new(Geo3dNearestQuery::new(
+        let mut q = Geo3dNearestQuery::new(
             &self.field,
             GeoEcefPoint::new(self.x, self.y, self.z),
             self.k as usize,
-        ))
+        );
+        if let Some(r) = self.initial_radius_m {
+            q = q.with_initial_radius(r);
+        }
+        if let Some(r) = self.max_radius_m {
+            q = q.with_max_radius(r);
+        }
+        Box::new(q)
     }
 }
 

@@ -123,8 +123,8 @@ The `Schema` class defines the structure of your index. Use the following method
 | `FuzzyQuery(field, term, maxEdits)` | Approximate term match |
 | `WildcardQuery(field, pattern)` | Wildcard pattern match (`*`, `?`) |
 | `NumericRangeQuery(field, min, max, numericType)` | Numeric range (integer or float) |
-| `GeoQuery::withinRadius(field, lat, lon, distanceKm)` | Geo-distance radius search |
-| `GeoQuery::withinBoundingBox(field, minLat, minLon, maxLat, maxLon)` | Geo bounding box search |
+| `GeoDistanceQuery::withinRadius(field, lat, lon, distanceKm)` | Geo-distance radius search |
+| `GeoBoundingBoxQuery::withinBoundingBox(field, minLat, minLon, maxLat, maxLon)` | Geo bounding box search |
 | `BooleanQuery` | Compound boolean logic (must/should/mustNot) |
 | `SpanQuery::near(field, terms, slop, ordered)` | Proximity / ordered span match |
 | `VectorQuery(field, vector)` | Pre-computed vector similarity |
@@ -147,13 +147,14 @@ $results = $index->search($bq, 10);
 ### Geo Query
 
 ```php
-use Laurus\GeoQuery;
+use Laurus\GeoBoundingBoxQuery;
+use Laurus\GeoDistanceQuery;
 
 // Radius search
-$results = $index->search(GeoQuery::withinRadius("location", 35.6895, 139.6917, 10.0), 10);
+$results = $index->search(GeoDistanceQuery::withinRadius("location", 35.6895, 139.6917, 10.0), 10);
 
 // Bounding box search
-$results = $index->search(GeoQuery::withinBoundingBox("location", 35.0, 139.0, 36.0, 140.0), 10);
+$results = $index->search(GeoBoundingBoxQuery::withinBoundingBox("location", 35.0, 139.0, 36.0, 140.0), 10);
 ```
 
 ## Hybrid Search

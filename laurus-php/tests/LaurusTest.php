@@ -307,6 +307,21 @@ class LaurusTest extends TestCase
         $this->assertEquals(["mt_fuji", "tokyo_skytree", "tokyo_tower"], $ids);
     }
 
+    public function testGeo3dNearestQueryWithRadiusOptions(): void
+    {
+        // Verify the optional initial / max radius parameters are accepted.
+        $idx = $this->createGeo3dIndex();
+        $q = Laurus\Geo3dNearestQuery::kNearest(
+            "position", -3955182.0, 3350553.0, 3700276.0, 2,
+            10000.0,        // initial_radius_m
+            10000000.0,     // max_radius_m
+        );
+        $results = $idx->search($q, 2);
+        $ids = array_map(fn($r) => $r->getId(), $results);
+        sort($ids);
+        $this->assertEquals(["tokyo_skytree", "tokyo_tower"], $ids);
+    }
+
     // ── Vector search ───────────────────────────────────────────────────
 
     public function testVectorQuery(): void

@@ -123,8 +123,8 @@ $index = new Index("./myindex", $schema);
 | `FuzzyQuery(field, term, maxEdits)` | 近似一致検索 |
 | `WildcardQuery(field, pattern)` | ワイルドカード検索（`*`、`?`） |
 | `NumericRangeQuery(field, min, max, numericType)` | 数値範囲検索（integer または float） |
-| `GeoQuery::withinRadius(field, lat, lon, distanceKm)` | 地理的距離検索（半径指定） |
-| `GeoQuery::withinBoundingBox(field, minLat, minLon, maxLat, maxLon)` | 地理的バウンディングボックス検索 |
+| `GeoDistanceQuery::withinRadius(field, lat, lon, distanceKm)` | 地理的距離検索（半径指定） |
+| `GeoBoundingBoxQuery::withinBoundingBox(field, minLat, minLon, maxLat, maxLon)` | 地理的バウンディングボックス検索 |
 | `BooleanQuery` | 複合ブール検索（must/should/mustNot） |
 | `SpanQuery::near(field, terms, slop, ordered)` | 近接検索（スパン） |
 | `VectorQuery(field, vector)` | 事前計算済みベクトルによる類似度検索 |
@@ -147,13 +147,14 @@ $results = $index->search($bq, 10);
 ### 地理クエリ
 
 ```php
-use Laurus\GeoQuery;
+use Laurus\GeoBoundingBoxQuery;
+use Laurus\GeoDistanceQuery;
 
 // 半径検索
-$results = $index->search(GeoQuery::withinRadius("location", 35.6895, 139.6917, 10.0), 10);
+$results = $index->search(GeoDistanceQuery::withinRadius("location", 35.6895, 139.6917, 10.0), 10);
 
 // バウンディングボックス検索
-$results = $index->search(GeoQuery::withinBoundingBox("location", 35.0, 139.0, 36.0, 140.0), 10);
+$results = $index->search(GeoBoundingBoxQuery::withinBoundingBox("location", 35.0, 139.0, 36.0, 140.0), 10);
 ```
 
 ## ハイブリッド検索
