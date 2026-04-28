@@ -41,6 +41,38 @@ class LaurusTest extends TestCase
         return $idx;
     }
 
+    /**
+     * Return an in-memory index with a Geo3d-typed `position` field.
+     *
+     * Coordinates are precomputed ECEF values (in meters) for well-known
+     * landmarks, produced offline via `wgs84_to_ecef(lat, lon, height)`.
+     */
+    private function createGeo3dIndex(): Laurus\Index
+    {
+        $schema = new Laurus\Schema();
+        $schema->addTextField("name");
+        $schema->addGeo3dField("position");
+        $idx = new Laurus\Index(null, $schema);
+        $idx->putDocument("tokyo_tower", [
+            "name" => "Tokyo Tower",
+            "position" => ["x" => -3955182.0, "y" => 3350553.0, "z" => 3700276.0],
+        ]);
+        $idx->putDocument("tokyo_skytree", [
+            "name" => "Tokyo Skytree",
+            "position" => ["x" => -3961178.0, "y" => 3346187.0, "z" => 3702490.0],
+        ]);
+        $idx->putDocument("mt_fuji", [
+            "name" => "Mt. Fuji summit",
+            "position" => ["x" => -3916073.0, "y" => 3437037.0, "z" => 3672751.0],
+        ]);
+        $idx->putDocument("sydney", [
+            "name" => "Sydney Opera House",
+            "position" => ["x" => -4646847.0, "y" => 2553022.0, "z" => -3534121.0],
+        ]);
+        $idx->commit();
+        return $idx;
+    }
+
     // ── Index creation ──────────────────────────────────────────────────
 
     public function testIndexMemory(): void
@@ -216,6 +248,63 @@ class LaurusTest extends TestCase
         $results = $idx->search($q);
         $this->assertCount(1, $results);
         $this->assertEquals("d2", $results[0]->getId());
+    }
+
+    // ── Geo3d (3D ECEF) ─────────────────────────────────────────────────
+
+    public function testGeo3dFieldRoundTrip(): void
+    {
+        $idx = $this->createGeo3dIndex();
+        $docs = $idx->getDocuments("tokyo_tower");
+        $this->assertCount(1, $docs);
+        $this->assertEquals("Tokyo Tower", $docs[0]["name"]);
+        $this->assertEqualsWithDelta(-3955182.0, $docs[0]["position"]["x"], 1.0);
+        $this->assertEqualsWithDelta(3350553.0, $docs[0]["position"]["y"], 1.0);
+        $this->assertEqualsWithDelta(3700276.0, $docs[0]["position"]["z"], 1.0);
+    }
+
+    public function testGeo3dDistanceQuerySmallRadius(): void
+    {
+        // 50 km sphere around Tokyo Tower returns Tower + Skytree only.
+        $idx = $this->createGeo3dIndex();
+        $q = Laurus\Geo3dDistanceQuery::withinSphere(
+            "position", -3955182.0, 3350553.0, 3700276.0, 50000.0
+        );
+        $results = $idx->search($q, 10);
+        $ids = array_map(fn($r) => $r->getId(), $results);
+        sort($ids);
+        $this->assertEquals(["tokyo_skytree", "tokyo_tower"], $ids);
+    }
+
+    public function testGeo3dBoundingBoxQuery(): void
+    {
+        // Central-Tokyo box returns Tower + Skytree only (Mt. Fuji and Sydney
+        // are outside the small AABB).
+        $idx = $this->createGeo3dIndex();
+        $q = Laurus\Geo3dBoundingBoxQuery::withinBox(
+            "position",
+            -3962000.0, 3340000.0, 3690000.0,
+            -3954000.0, 3360000.0, 3710000.0
+        );
+        $results = $idx->search($q, 10);
+        $ids = array_map(fn($r) => $r->getId(), $results);
+        sort($ids);
+        $this->assertEquals(["tokyo_skytree", "tokyo_tower"], $ids);
+    }
+
+    public function testGeo3dNearestQuery(): void
+    {
+        // k = 3 around Mt. Fuji returns Fuji + Tower + Skytree.
+        $idx = $this->createGeo3dIndex();
+        $q = Laurus\Geo3dNearestQuery::kNearest(
+            "position", -3916073.0, 3437037.0, 3672751.0, 3
+        );
+        $results = $idx->search($q, 3);
+        $this->assertCount(3, $results);
+        $this->assertEquals("mt_fuji", $results[0]->getId());
+        $ids = array_map(fn($r) => $r->getId(), $results);
+        sort($ids);
+        $this->assertEquals(["mt_fuji", "tokyo_skytree", "tokyo_tower"], $ids);
     }
 
     // ── Vector search ───────────────────────────────────────────────────

@@ -8,8 +8,8 @@ use ext_php_rs::prelude::*;
 use ext_php_rs::types::ZendHashTable;
 use laurus::{
     BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
-    EmbedderDefinition, FieldOption, FloatOption, GeoOption, HnswOption, IntegerOption, IvfOption,
-    Schema, TextOption,
+    EmbedderDefinition, FieldOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
+    IntegerOption, IvfOption, Schema, TextOption,
 };
 
 /// Parse a distance metric string into [`DistanceMetric`].
@@ -176,6 +176,26 @@ impl PhpSchema {
             .borrow_mut()
             .fields
             .insert(name, FieldOption::Geo(GeoOption { indexed, stored }));
+    }
+
+    /// Add a 3D ECEF Cartesian point field (x, y, z in meters).
+    ///
+    /// Values are submitted as an associative array `["x" => ..., "y" => ...,
+    /// "z" => ...]` and are queryable via `Geo3dDistanceQuery`,
+    /// `Geo3dBoundingBoxQuery`, and `Geo3dNearestQuery`. See the conceptual
+    /// docs at `docs/src/concepts/geo3d.md`.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Field name.
+    /// * `stored` - Whether the value is retrievable (default: true).
+    /// * `indexed` - Whether the field is searchable (default: true).
+    #[php(defaults(stored = true, indexed = true))]
+    pub fn add_geo3d_field(&self, name: String, stored: bool, indexed: bool) {
+        self.inner
+            .borrow_mut()
+            .fields
+            .insert(name, FieldOption::Geo3d(Geo3dOption { indexed, stored }));
     }
 
     /// Add a binary data field.
