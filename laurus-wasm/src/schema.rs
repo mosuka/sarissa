@@ -143,7 +143,7 @@ impl WasmSchema {
     }
 
     /// Add a date/time field.
-    #[wasm_bindgen(js_name = "addDateTimeField")]
+    #[wasm_bindgen(js_name = "addDatetimeField")]
     pub fn add_datetime_field(
         &mut self,
         name: String,
