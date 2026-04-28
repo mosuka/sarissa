@@ -2,9 +2,11 @@
 //!
 //! Each query struct stores the data needed to construct the Rust query.
 
+use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
-    BooleanQuery, FuzzyQuery, GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
+    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -23,6 +25,9 @@ pub enum JsQuery {
     WildcardQuery(JsWildcardQuery),
     NumericRangeQuery(JsNumericRangeQuery),
     GeoQuery(JsGeoQuery),
+    Geo3dDistanceQuery(JsGeo3dDistanceQuery),
+    Geo3dBoundingBoxQuery(JsGeo3dBoundingBoxQuery),
+    Geo3dNearestQuery(JsGeo3dNearestQuery),
     BooleanQuery(JsBooleanQuery),
     SpanQuery(JsSpanQuery),
 }
@@ -51,6 +56,11 @@ pub fn extract_lexical_query(query: &JsQuery) -> Result<Box<dyn laurus::lexical:
         )),
         JsQuery::NumericRangeQuery(q) => Ok(q.build()),
         JsQuery::GeoQuery(q) => q.build().map_err(|e| JsValue::from_str(&e.to_string())),
+        JsQuery::Geo3dDistanceQuery(q) => Ok(q.build()),
+        JsQuery::Geo3dBoundingBoxQuery(q) => {
+            q.build().map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        JsQuery::Geo3dNearestQuery(q) => Ok(q.build()),
         JsQuery::BooleanQuery(q) => q.build_query(),
         JsQuery::SpanQuery(q) => Ok(Box::new(SpanQueryWrapper::new(q.kind.build(&q.field)))),
     }
@@ -204,6 +214,69 @@ impl JsGeoQuery {
                 *max_lon,
             )?)),
         }
+    }
+}
+
+/// 3D ECEF sphere query (internal).
+///
+/// Constructed by `Index::searchGeo3dDistance`. JS callers cannot
+/// instantiate this directly; the method-on-Index pattern matches the
+/// existing 2D `JsGeoQuery` and `JsTermQuery` flows.
+pub struct JsGeo3dDistanceQuery {
+    pub field: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub radius_m: f64,
+}
+
+impl JsGeo3dDistanceQuery {
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        Box::new(Geo3dDistanceQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.x, self.y, self.z),
+            self.radius_m,
+        ))
+    }
+}
+
+/// 3D ECEF axis-aligned bounding-box query (internal).
+pub struct JsGeo3dBoundingBoxQuery {
+    pub field: String,
+    pub min_x: f64,
+    pub min_y: f64,
+    pub min_z: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+    pub max_z: f64,
+}
+
+impl JsGeo3dBoundingBoxQuery {
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(Geo3dBoundingBoxQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.min_x, self.min_y, self.min_z),
+            GeoEcefPoint::new(self.max_x, self.max_y, self.max_z),
+        )?))
+    }
+}
+
+/// 3D ECEF k-nearest-neighbours query (internal).
+pub struct JsGeo3dNearestQuery {
+    pub field: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub k: u32,
+}
+
+impl JsGeo3dNearestQuery {
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        Box::new(Geo3dNearestQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.x, self.y, self.z),
+            self.k as usize,
+        ))
     }
 }
 
