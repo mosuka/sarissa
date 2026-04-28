@@ -3,9 +3,11 @@
 //! Each query class stores the data needed to construct the Rust query.
 //! Vector query classes produce `VectorSearchQuery` instead of lexical queries.
 
+use laurus::GeoEcefPoint;
 use laurus::lexical::span::{SpanQueryBuilder, SpanQueryWrapper};
 use laurus::lexical::{
-    BooleanQuery, FuzzyQuery, GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
+    BooleanQuery, FuzzyQuery, Geo3dBoundingBoxQuery, Geo3dDistanceQuery, Geo3dNearestQuery,
+    GeoQuery, NumericRangeQuery, PhraseQuery, TermQuery, WildcardQuery,
 };
 use laurus::vector::Vector;
 use laurus::vector::store::request::QueryVector;
@@ -41,6 +43,11 @@ pub fn extract_lexical_query(query: &JsQuery) -> Result<Box<dyn laurus::lexical:
         JsQuery::GeoQuery(q) => q
             .build()
             .map_err(|e| napi::Error::from_reason(e.to_string())),
+        JsQuery::Geo3dDistanceQuery(q) => Ok(q.build()),
+        JsQuery::Geo3dBoundingBoxQuery(q) => q
+            .build()
+            .map_err(|e| napi::Error::from_reason(e.to_string())),
+        JsQuery::Geo3dNearestQuery(q) => Ok(q.build()),
         JsQuery::BooleanQuery(q) => q.build_query(),
         JsQuery::SpanQuery(q) => Ok(Box::new(SpanQueryWrapper::new(q.kind.build(&q.field)))),
     }
@@ -96,6 +103,9 @@ pub enum JsQuery {
     WildcardQuery(JsWildcardQuery),
     NumericRangeQuery(JsNumericRangeQuery),
     GeoQuery(JsGeoQuery),
+    Geo3dDistanceQuery(JsGeo3dDistanceQuery),
+    Geo3dBoundingBoxQuery(JsGeo3dBoundingBoxQuery),
+    Geo3dNearestQuery(JsGeo3dNearestQuery),
     BooleanQuery(JsBooleanQuery),
     SpanQuery(JsSpanQuery),
 }
@@ -451,6 +461,203 @@ impl JsGeoQuery {
                 *max_lon,
             )?)),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dDistanceQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF sphere query: matches documents whose stored `(x, y, z)` point
+/// lies within `radius_m` meters of the given centre.
+///
+/// ## Example
+///
+/// ```javascript
+/// const { Geo3dDistanceQuery } = require("laurus-nodejs");
+/// const q = Geo3dDistanceQuery.withinSphere(
+///     "position", -3955182.0, 3350553.0, 3700276.0, 5000.0,
+/// );
+/// ```
+#[napi(js_name = "Geo3dDistanceQuery")]
+pub struct JsGeo3dDistanceQuery {
+    pub(crate) field: String,
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) z: f64,
+    pub(crate) radius_m: f64,
+}
+
+#[napi]
+impl JsGeo3dDistanceQuery {
+    /// Create a 3D distance (sphere) query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
+    /// * `radius_m` - Sphere radius in meters.
+    #[napi(factory)]
+    pub fn within_sphere(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
+        Self {
+            field,
+            x,
+            y,
+            z,
+            radius_m,
+        }
+    }
+}
+
+impl JsGeo3dDistanceQuery {
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        Box::new(Geo3dDistanceQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.x, self.y, self.z),
+            self.radius_m,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dBoundingBoxQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF axis-aligned bounding box query.
+///
+/// ## Example
+///
+/// ```javascript
+/// const { Geo3dBoundingBoxQuery } = require("laurus-nodejs");
+/// const q = Geo3dBoundingBoxQuery.withinBox(
+///     "position",
+///     -3962000.0, 3340000.0, 3690000.0,
+///     -3954000.0, 3360000.0, 3710000.0,
+/// );
+/// ```
+#[napi(js_name = "Geo3dBoundingBoxQuery")]
+pub struct JsGeo3dBoundingBoxQuery {
+    pub(crate) field: String,
+    pub(crate) min_x: f64,
+    pub(crate) min_y: f64,
+    pub(crate) min_z: f64,
+    pub(crate) max_x: f64,
+    pub(crate) max_y: f64,
+    pub(crate) max_z: f64,
+}
+
+#[napi]
+impl JsGeo3dBoundingBoxQuery {
+    /// Create a 3D bounding-box query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `min_x`, `min_y`, `min_z` - Lower corner of the box.
+    /// * `max_x`, `max_y`, `max_z` - Upper corner of the box.
+    #[napi(factory)]
+    pub fn within_box(
+        field: String,
+        min_x: f64,
+        min_y: f64,
+        min_z: f64,
+        max_x: f64,
+        max_y: f64,
+        max_z: f64,
+    ) -> Self {
+        Self {
+            field,
+            min_x,
+            min_y,
+            min_z,
+            max_x,
+            max_y,
+            max_z,
+        }
+    }
+}
+
+impl JsGeo3dBoundingBoxQuery {
+    pub fn build(&self) -> laurus::Result<Box<dyn laurus::lexical::Query>> {
+        Ok(Box::new(Geo3dBoundingBoxQuery::new(
+            &self.field,
+            GeoEcefPoint::new(self.min_x, self.min_y, self.min_z),
+            GeoEcefPoint::new(self.max_x, self.max_y, self.max_z),
+        )?))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Geo3dNearestQuery
+// ---------------------------------------------------------------------------
+
+/// 3D ECEF k-nearest-neighbours query.
+///
+/// ## Example
+///
+/// ```javascript
+/// const { Geo3dNearestQuery } = require("laurus-nodejs");
+/// const q = Geo3dNearestQuery.kNearest(
+///     "position", -3955182.0, 3350553.0, 3700276.0, 10,
+/// );
+/// ```
+#[napi(js_name = "Geo3dNearestQuery")]
+pub struct JsGeo3dNearestQuery {
+    pub(crate) field: String,
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) z: f64,
+    pub(crate) k: u32,
+    pub(crate) initial_radius_m: Option<f64>,
+    pub(crate) max_radius_m: Option<f64>,
+}
+
+#[napi]
+impl JsGeo3dNearestQuery {
+    /// Create a 3D k-NN query.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Geo3d field name.
+    /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
+    /// * `k` - Number of nearest neighbours to return.
+    /// * `initial_radius_m` - Starting radius for the expanding-radius
+    ///   search (default 1000 m). Optional.
+    /// * `max_radius_m` - Hard cap on the search radius (default 1e10 m).
+    ///   Optional.
+    #[napi(factory)]
+    pub fn k_nearest(
+        field: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        k: u32,
+        initial_radius_m: Option<f64>,
+        max_radius_m: Option<f64>,
+    ) -> Self {
+        Self {
+            field,
+            x,
+            y,
+            z,
+            k,
+            initial_radius_m,
+            max_radius_m,
+        }
+    }
+}
+
+impl JsGeo3dNearestQuery {
+    pub fn build(&self) -> Box<dyn laurus::lexical::Query> {
+        let centre = GeoEcefPoint::new(self.x, self.y, self.z);
+        let mut q = Geo3dNearestQuery::new(&self.field, centre, self.k as usize);
+        if let Some(r) = self.initial_radius_m {
+            q = q.with_initial_radius(r);
+        }
+        if let Some(r) = self.max_radius_m {
+            q = q.with_max_radius(r);
+        }
+        Box::new(q)
     }
 }
 
