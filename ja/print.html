@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-eacab5c3.js";
+            window.path_to_searchindex_js = "searchindex-5b892cad.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c423c571.js"></script>
@@ -10666,7 +10666,7 @@ bq.must(query)
 bq.should(query)
 bq.must_not(query)
 </code></pre>
-<p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があります。<code>should</code> 節は少なくとも1つ一致する必要があります。<code>must_not</code> 節は一致してはなりません。</p>
+<p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があり、<code>must_not</code> 節は一致してはなりません。<code>should</code> 節はスコアリングに寄与し、<code>must</code> 節が無い場合は少なくとも1つが一致する必要があります。</p>
 <h3 id="spanquery-2"><a class="header" href="#spanquery-2">SpanQuery</a></h3>
 <pre><code class="language-ruby"># 単一語句
 Laurus::SpanQuery.term(field, term)
@@ -10781,7 +10781,8 @@ token.position_length     # =&gt; Integer -- このトークンがカバーす�
 <tr><td style="text-align: left"><code>String</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>Array</code>（数値）</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">要素は <code>f32</code> に変換</td></tr>
 <tr><td style="text-align: left"><code>Hash</code>（<code>"lat"</code>, <code>"lon"</code>）</td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">2 つの <code>Float</code> 値</td></tr>
-<tr><td style="text-align: left"><code>Time</code>（<code>iso8601</code> に応答）</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left"><code>iso8601</code> 経由で変換</td></tr>
+<tr><td style="text-align: left"><code>Hash</code>（<code>"x"</code>, <code>"y"</code>, <code>"z"</code>）</td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">3 つの <code>Float</code> 値（メートル単位、3D ECEF 直交座標）</td></tr>
+<tr><td style="text-align: left"><code>Time</code> / <code>String</code>（<code>iso8601</code> に応答）</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left"><code>iso8601</code> 経由で変換</td></tr>
 </tbody>
 </table>
 </div>

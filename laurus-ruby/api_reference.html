@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-43488a3f.js";
+            window.path_to_searchindex_js = "../searchindex-77211cce.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -366,7 +366,7 @@ bq.must(query)
 bq.should(query)
 bq.must_not(query)
 </code></pre>
-<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>must_not</code> clauses must not match.</p>
+<p>Compound boolean query. <code>must</code> clauses all have to match; <code>must_not</code> clauses must not match. <code>should</code> clauses contribute to scoring; at least one of them must match if there are no <code>must</code> clauses.</p>
 <h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
 <pre><code class="language-ruby"># Single term
 Laurus::SpanQuery.term(field, term)
@@ -481,7 +481,8 @@ token.position_length     # =&gt; Integer -- Number of positions spanned
 <tr><td style="text-align: left"><code>String</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>Array</code> of numerics</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Elements coerced to <code>f32</code></td></tr>
 <tr><td style="text-align: left"><code>Hash</code> with <code>"lat"</code>, <code>"lon"</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>Float</code> values</td></tr>
-<tr><td style="text-align: left"><code>Time</code> (responds to <code>iso8601</code>)</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Converted via <code>iso8601</code></td></tr>
+<tr><td style="text-align: left"><code>Hash</code> with <code>"x"</code>, <code>"y"</code>, <code>"z"</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">Three <code>Float</code> values, meters (3D ECEF Cartesian)</td></tr>
+<tr><td style="text-align: left"><code>Time</code> / <code>String</code> responding to <code>iso8601</code></td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Converted via <code>iso8601</code></td></tr>
 </tbody>
 </table>
 </div>
