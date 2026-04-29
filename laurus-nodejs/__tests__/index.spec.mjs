@@ -283,6 +283,12 @@ describe("Query types", () => {
     // Use DSL or searchTerm - NumericRangeQuery needs to be used via SearchRequest
     // For now, test that the class can be constructed
     expect(q).toBeDefined();
+    // Explicit "integer" discriminator should also work.
+    expect(new NumericRangeQuery("year", 2022, 2024, "integer")).toBeDefined();
+    // "float" discriminator should also work.
+    expect(new NumericRangeQuery("price", 1.5, 9.5, "float")).toBeDefined();
+    // Anything else throws.
+    expect(() => new NumericRangeQuery("year", 0, 1, "double")).toThrow();
   });
 
   it("boolean query accepts any clause type via mustX/shouldX/mustNotX", async () => {
