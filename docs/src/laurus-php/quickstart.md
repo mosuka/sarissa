@@ -123,7 +123,7 @@ $schema->addGeoField("location");
 $schema->addDatetimeField("created_at");
 $schema->addHnswField("embedding", 384);
 $schema->addFlatField("small_vec", 64);
-$schema->addIvfField("ivf_vec", 128, null, 100, 1);
+$schema->addIvfField("ivf_vec", 128, "cosine", 100, 1);
 ```
 
 ## 8. Index statistics

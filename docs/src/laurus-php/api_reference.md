@@ -51,8 +51,8 @@ new \Laurus\Schema()
 | Method | Description |
 | :--- | :--- |
 | `addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void` | Full-text field (inverted index, BM25). |
-| `addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void` | 64-bit integer field. Pass `$multi_valued = true` to accept arrays of integers (range queries match if any value satisfies the predicate). |
-| `addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void` | 64-bit float field. Pass `$multi_valued = true` to accept arrays of floats (range queries match if any value satisfies the predicate). |
+| `addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void` | 64-bit integer field. Pass `$multiValued = true` to accept arrays of integers (range queries match if any value satisfies the predicate). |
+| `addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void` | 64-bit float field. Pass `$multiValued = true` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `addBooleanField(string $name, bool $stored = true, bool $indexed = true): void` | Boolean field. |
 | `addBytesField(string $name, bool $stored = true): void` | Raw bytes field. |
 | `addGeoField(string $name, bool $stored = true, bool $indexed = true): void` | Geographic coordinate field (lat/lon). |
@@ -225,7 +225,7 @@ $bq->should($query);
 $bq->mustNot($query);
 ```
 
-Compound boolean query. `must` clauses all have to match; at least one `should` clause must match; `mustNot` clauses must not match.
+Compound boolean query. `must` clauses all have to match; `mustNot` clauses must not match. `should` clauses contribute to scoring; at least one of them must match if there are no `must` clauses.
 
 ### SpanQuery
 
@@ -236,6 +236,9 @@ Compound boolean query. `must` clauses all have to match; at least one `should` 
 // Near: terms within slop positions
 \Laurus\SpanQuery::near(string $field, array $terms, int $slop = 0, bool $ordered = true): SpanQuery
 
+// NearSpans: nested SpanQuery clauses within slop positions
+\Laurus\SpanQuery::nearSpans(string $field, array $clauses, int $slop = 0, bool $ordered = true): SpanQuery
+
 // Containing: big span contains little span
 \Laurus\SpanQuery::containing(string $field, SpanQuery $big, SpanQuery $little): SpanQuery
 
@@ -243,7 +246,9 @@ Compound boolean query. `must` clauses all have to match; at least one `should` 
 \Laurus\SpanQuery::within(string $field, SpanQuery $include, SpanQuery $exclude, int $distance): SpanQuery
 ```
 
-Positional / proximity span queries. `near` takes an array of term strings.
+Positional / proximity span queries. `near` takes an array of term strings,
+while `nearSpans` takes an array of `SpanQuery` objects for nested expressions
+(each clause's field is re-rooted to the outer `$field`).
 
 ### VectorQuery
 
@@ -298,7 +303,7 @@ Returned by `Index->search()`.
 ```php
 $result->getId()        // string   -- External document identifier
 $result->getScore()     // float    -- Relevance score
-$result->getDocument()  // array|null -- Retrieved field values, or null if deleted
+$result->getDocument()  // array|null -- Retrieved field values, or null if not stored
 ```
 
 ---
@@ -346,6 +351,16 @@ Splits text on whitespace boundaries and returns an array of `Token` objects.
 ### SynonymGraphFilter
 
 ```php
+new \Laurus\SynonymGraphFilter(SynonymDictionary $dictionary, bool $keepOriginal = true, float $boost = 1.0)
+```
+
+| Parameter | Description |
+| :--- | :--- |
+| `$dictionary` | Source synonym groups. |
+| `$keepOriginal` | When `true` (default), keep the original token alongside the synonyms. |
+| `$boost` | Score boost applied to the inserted synonym tokens (default `1.0`). |
+
+```php
 $filter = new \Laurus\SynonymGraphFilter($dictionary, true, 1.0);
 $expanded = $filter->apply($tokens);
 ```
@@ -380,4 +395,5 @@ PHP values are automatically converted to Laurus `DataValue` types:
 | `string` | `Text` | |
 | `array` of numerics | `Vector` | Elements coerced to `f32` |
 | `array` with `"lat"`, `"lon"` | `Geo` | Two `float` values |
+| `array` with `"x"`, `"y"`, `"z"` | `GeoEcef` | Three `float` values, meters (3D ECEF Cartesian) |
 | `string` (ISO 8601) | `DateTime` | Parsed from ISO 8601 format |
