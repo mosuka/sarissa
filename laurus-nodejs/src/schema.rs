@@ -454,4 +454,14 @@ impl JsSchema {
     pub fn field_names(&self) -> Vec<String> {
         self.inner.fields.keys().cloned().collect()
     }
+
+    /// Return a string representation of this schema, listing the declared
+    /// field names. Convenient for `console.log` / `String(schema)`.
+    #[napi(js_name = "toString")]
+    pub fn to_string_repr(&self) -> String {
+        format!(
+            "Schema(fields={:?})",
+            self.inner.fields.keys().collect::<Vec<_>>()
+        )
+    }
 }
