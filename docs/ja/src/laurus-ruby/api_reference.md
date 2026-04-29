@@ -209,7 +209,7 @@ bq.should(query)
 bq.must_not(query)
 ```
 
-複合ブールクエリ。`must` 節はすべて一致する必要があります。`should` 節は少なくとも1つ一致する必要があります。`must_not` 節は一致してはなりません。
+複合ブールクエリ。`must` 節はすべて一致する必要があり、`must_not` 節は一致してはなりません。`should` 節はスコアリングに寄与し、`must` 節が無い場合は少なくとも1つが一致する必要があります。
 
 ### SpanQuery
 
@@ -367,4 +367,5 @@ Ruby の値は自動的に Laurus の `DataValue` 型に変換されます：
 | `String` | `Text` | |
 | `Array`（数値） | `Vector` | 要素は `f32` に変換 |
 | `Hash`（`"lat"`, `"lon"`） | `Geo` | 2 つの `Float` 値 |
-| `Time`（`iso8601` に応答） | `DateTime` | `iso8601` 経由で変換 |
+| `Hash`（`"x"`, `"y"`, `"z"`） | `GeoEcef` | 3 つの `Float` 値（メートル単位、3D ECEF 直交座標） |
+| `Time` / `String`（`iso8601` に応答） | `DateTime` | `iso8601` 経由で変換 |
