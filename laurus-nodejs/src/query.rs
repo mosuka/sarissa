@@ -100,6 +100,7 @@ pub fn vector_query_to_search_query(query: &JsVectorQuery) -> VectorSearchQuery 
 /// Enum wrapping all supported lexical query types.
 ///
 /// Used internally to pass query objects across the JS/Rust boundary.
+#[derive(Clone)]
 pub enum JsQuery {
     TermQuery(JsTermQuery),
     PhraseQuery(JsPhraseQuery),
@@ -166,6 +167,7 @@ impl SpanKind {
 /// const q = new TermQuery("body", "rust");
 /// const results = await index.search(q, { limit: 5 });
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "TermQuery")]
 pub struct JsTermQuery {
     pub(crate) field: String,
@@ -198,6 +200,7 @@ impl JsTermQuery {
 /// const { PhraseQuery } = require("laurus-nodejs");
 /// const q = new PhraseQuery("body", ["machine", "learning"]);
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "PhraseQuery")]
 pub struct JsPhraseQuery {
     pub(crate) field: String,
@@ -230,6 +233,7 @@ impl JsPhraseQuery {
 /// const { FuzzyQuery } = require("laurus-nodejs");
 /// const q = new FuzzyQuery("body", "programing", 2);
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "FuzzyQuery")]
 pub struct JsFuzzyQuery {
     pub(crate) field: String,
@@ -268,6 +272,7 @@ impl JsFuzzyQuery {
 /// const { WildcardQuery } = require("laurus-nodejs");
 /// const q = new WildcardQuery("filename", "*.pdf");
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "WildcardQuery")]
 pub struct JsWildcardQuery {
     pub(crate) field: String,
@@ -300,6 +305,7 @@ impl JsWildcardQuery {
 /// const { NumericRangeQuery } = require("laurus-nodejs");
 /// const q = new NumericRangeQuery("year", 2020, 2023);
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "NumericRangeQuery")]
 pub struct JsNumericRangeQuery {
     pub(crate) field: String,
@@ -363,6 +369,7 @@ impl JsNumericRangeQuery {
 /// // Radius search: within 100 km of San Francisco
 /// const q = GeoDistanceQuery.withinRadius("location", 37.77, -122.42, 100.0);
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "GeoDistanceQuery")]
 pub struct JsGeoDistanceQuery {
     pub(crate) field: String,
@@ -418,6 +425,7 @@ impl JsGeoDistanceQuery {
 ///   "location", 33.0, -123.0, 48.0, -117.0,
 /// );
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "GeoBoundingBoxQuery")]
 pub struct JsGeoBoundingBoxQuery {
     pub(crate) field: String,
@@ -483,6 +491,7 @@ impl JsGeoBoundingBoxQuery {
 ///     "position", -3955182.0, 3350553.0, 3700276.0, 5000.0,
 /// );
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "Geo3dDistanceQuery")]
 pub struct JsGeo3dDistanceQuery {
     pub(crate) field: String,
@@ -539,6 +548,7 @@ impl JsGeo3dDistanceQuery {
 ///     -3954000.0, 3360000.0, 3710000.0,
 /// );
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "Geo3dBoundingBoxQuery")]
 pub struct JsGeo3dBoundingBoxQuery {
     pub(crate) field: String,
@@ -605,6 +615,7 @@ impl JsGeo3dBoundingBoxQuery {
 ///     "position", -3955182.0, 3350553.0, 3700276.0, 10,
 /// );
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "Geo3dNearestQuery")]
 pub struct JsGeo3dNearestQuery {
     pub(crate) field: String,
@@ -682,6 +693,7 @@ impl JsGeo3dNearestQuery {
 /// bq.should(new TermQuery("category", "data-science"));
 /// const results = await index.search(bq, { limit: 5 });
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "BooleanQuery")]
 pub struct JsBooleanQuery {
     pub(crate) musts: Vec<JsQuery>,
@@ -701,39 +713,71 @@ impl JsBooleanQuery {
         }
     }
 
-    /// Add a MUST (required) clause with a term query.
+    /// Add a MUST (required) clause.
     ///
-    /// # Arguments
-    ///
-    /// * `query` - The lexical query to add as a required clause.
+    /// Accepts any lexical query type: `TermQuery`, `PhraseQuery`,
+    /// `FuzzyQuery`, `WildcardQuery`, `NumericRangeQuery`,
+    /// `GeoDistanceQuery`, `GeoBoundingBoxQuery`, `Geo3dDistanceQuery`,
+    /// `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`, another
+    /// `BooleanQuery`, or `SpanQuery`.
     #[napi]
-    pub fn must_term(&mut self, field: String, term: String) {
-        self.musts
-            .push(JsQuery::TermQuery(JsTermQuery { field, term }));
+    pub fn must(&mut self, query: AnyJsQuery) {
+        self.musts.push(any_to_js_query(query));
     }
 
-    /// Add a SHOULD (optional, boosts score) clause with a term query.
+    /// Add a SHOULD (optional, boosts score) clause.
     ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name.
-    /// * `term` - The term to match.
+    /// Accepts any lexical query type — see [`Self::must`].
     #[napi]
-    pub fn should_term(&mut self, field: String, term: String) {
-        self.shoulds
-            .push(JsQuery::TermQuery(JsTermQuery { field, term }));
+    pub fn should(&mut self, query: AnyJsQuery) {
+        self.shoulds.push(any_to_js_query(query));
     }
 
-    /// Add a MUST_NOT (exclusion) clause with a term query.
+    /// Add a MUST_NOT (exclusion) clause.
     ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name.
-    /// * `term` - The term to exclude.
+    /// Accepts any lexical query type — see [`Self::must`].
     #[napi]
-    pub fn must_not_term(&mut self, field: String, term: String) {
-        self.must_nots
-            .push(JsQuery::TermQuery(JsTermQuery { field, term }));
+    pub fn must_not(&mut self, query: AnyJsQuery) {
+        self.must_nots.push(any_to_js_query(query));
+    }
+}
+
+/// 12-way union accepted by [`JsBooleanQuery::must`],
+/// [`JsBooleanQuery::should`], and [`JsBooleanQuery::must_not`]. Wraps a
+/// reference to any of the lexical-query wrapper classes that are exposed
+/// to JS, so Boolean clauses can compose arbitrary nested queries.
+pub type AnyJsQuery<'a> = napi::bindgen_prelude::Either12<
+    &'a JsTermQuery,
+    &'a JsPhraseQuery,
+    &'a JsFuzzyQuery,
+    &'a JsWildcardQuery,
+    &'a JsNumericRangeQuery,
+    &'a JsGeoDistanceQuery,
+    &'a JsGeoBoundingBoxQuery,
+    &'a JsGeo3dDistanceQuery,
+    &'a JsGeo3dBoundingBoxQuery,
+    &'a JsGeo3dNearestQuery,
+    &'a JsBooleanQuery,
+    &'a JsSpanQuery,
+>;
+
+/// Convert a JS-side query reference into an owned [`JsQuery`] that
+/// `JsBooleanQuery` can store.
+fn any_to_js_query(query: AnyJsQuery) -> JsQuery {
+    use napi::bindgen_prelude::Either12::*;
+    match query {
+        A(q) => JsQuery::TermQuery(q.clone()),
+        B(q) => JsQuery::PhraseQuery(q.clone()),
+        C(q) => JsQuery::FuzzyQuery(q.clone()),
+        D(q) => JsQuery::WildcardQuery(q.clone()),
+        E(q) => JsQuery::NumericRangeQuery(q.clone()),
+        F(q) => JsQuery::GeoDistanceQuery(q.clone()),
+        G(q) => JsQuery::GeoBoundingBoxQuery(q.clone()),
+        H(q) => JsQuery::Geo3dDistanceQuery(q.clone()),
+        I(q) => JsQuery::Geo3dBoundingBoxQuery(q.clone()),
+        J(q) => JsQuery::Geo3dNearestQuery(q.clone()),
+        K(q) => JsQuery::BooleanQuery(q.clone()),
+        L(q) => JsQuery::SpanQuery(q.clone()),
     }
 }
 
@@ -770,6 +814,7 @@ impl JsBooleanQuery {
 /// // SpanNear: "quick" within 1 position of "fox", in order
 /// const q = SpanQuery.near("body", ["quick", "fox"], 1, true);
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "SpanQuery")]
 pub struct JsSpanQuery {
     pub(crate) field: String,
