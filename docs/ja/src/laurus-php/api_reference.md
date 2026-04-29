@@ -51,8 +51,8 @@ new \Laurus\Schema()
 | メソッド | 説明 |
 | :--- | :--- |
 | `addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void` | 全文フィールド（転置インデックス、BM25）。 |
-| `addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void` | 64 ビット整数フィールド。`$multi_valued = true` で整数配列を受け付け（範囲クエリは "any match"）。 |
-| `addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void` | 64 ビット浮動小数点フィールド。`$multi_valued = true` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
+| `addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void` | 64 ビット整数フィールド。`$multiValued = true` で整数配列を受け付け（範囲クエリは "any match"）。 |
+| `addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void` | 64 ビット浮動小数点フィールド。`$multiValued = true` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `addBooleanField(string $name, bool $stored = true, bool $indexed = true): void` | ブールフィールド。 |
 | `addBytesField(string $name, bool $stored = true): void` | 生バイトフィールド。 |
 | `addGeoField(string $name, bool $stored = true, bool $indexed = true): void` | 地理座標フィールド（緯度/経度）。 |
@@ -219,7 +219,7 @@ $bq->should($query);
 $bq->mustNot($query);
 ```
 
-複合ブールクエリ。`must` 節はすべて一致する必要があります。`should` 節は少なくとも1つ一致する必要があります。`mustNot` 節は一致してはなりません。
+複合ブールクエリ。`must` 節はすべて一致する必要があり、`mustNot` 節は一致してはなりません。`should` 節はスコアリングに寄与し、`must` 節が無い場合は少なくとも1つが一致する必要があります。
 
 ### SpanQuery
 
@@ -230,6 +230,9 @@ $bq->mustNot($query);
 // Near: slop 位置以内の語句
 \Laurus\SpanQuery::near(string $field, array $terms, int $slop = 0, bool $ordered = true): SpanQuery
 
+// NearSpans: slop 位置以内のネストされた SpanQuery 句
+\Laurus\SpanQuery::nearSpans(string $field, array $clauses, int $slop = 0, bool $ordered = true): SpanQuery
+
 // Containing: big スパンが little スパンを含む
 \Laurus\SpanQuery::containing(string $field, SpanQuery $big, SpanQuery $little): SpanQuery
 
@@ -237,7 +240,9 @@ $bq->mustNot($query);
 \Laurus\SpanQuery::within(string $field, SpanQuery $include, SpanQuery $exclude, int $distance): SpanQuery
 ```
 
-位置・近接スパンクエリ。`near` は語句文字列の配列を受け取ります。
+位置・近接スパンクエリ。`near` は語句文字列の配列を受け取り、`nearSpans` は
+ネスト式のために `SpanQuery` オブジェクトの配列を受け取ります（各句のフィールド
+は外側の `$field` に再ルートされます）。
 
 ### VectorQuery
 
@@ -292,7 +297,7 @@ new \Laurus\SearchRequest(
 ```php
 $result->getId()        // string   -- 外部ドキュメント識別子
 $result->getScore()     // float    -- 関連性スコア
-$result->getDocument()  // array|null -- 取得されたフィールド値。削除済みの場合は null
+$result->getDocument()  // array|null -- 取得されたフィールド値。stored=false の場合は null
 ```
 
 ---
@@ -340,6 +345,16 @@ $tokens = $tokenizer->tokenize("hello world");
 ### SynonymGraphFilter
 
 ```php
+new \Laurus\SynonymGraphFilter(SynonymDictionary $dictionary, bool $keepOriginal = true, float $boost = 1.0)
+```
+
+| パラメータ | 説明 |
+| :--- | :--- |
+| `$dictionary` | 同義語グループのソース。 |
+| `$keepOriginal` | `true`（デフォルト）の場合は元のトークンも同義語と並べて保持します。 |
+| `$boost` | 挿入される同義語トークンに適用されるスコアブースト（デフォルト `1.0`）。 |
+
+```php
 $filter = new \Laurus\SynonymGraphFilter($dictionary, true, 1.0);
 $expanded = $filter->apply($tokens);
 ```
@@ -374,4 +389,5 @@ PHP の値は自動的に Laurus の `DataValue` 型に変換されます：
 | `string` | `Text` | |
 | `array`（数値） | `Vector` | 要素は `f32` に変換 |
 | `array`（`"lat"`, `"lon"`） | `Geo` | 2 つの `float` 値 |
+| `array`（`"x"`, `"y"`, `"z"`） | `GeoEcef` | 3 つの `float` 値（メートル単位、3D ECEF 直交座標） |
 | `string`（ISO 8601） | `DateTime` | ISO 8601 形式からパース |
