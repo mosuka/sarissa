@@ -2,9 +2,11 @@
 
 use crate::convert::data_value_to_json;
 use crate::query::{
-    JsGeo3dBoundingBoxQuery, JsGeo3dDistanceQuery, JsGeo3dNearestQuery, JsPhraseQuery, JsQuery,
-    JsTermQuery, JsVectorQuery, JsVectorQueryInner, JsVectorTextQuery, extract_lexical_query,
-    query_to_lexical_search_query, vector_query_to_search_query,
+    JsBooleanQuery, JsFuzzyQuery, JsGeo3dBoundingBoxQuery, JsGeo3dDistanceQuery,
+    JsGeo3dNearestQuery, JsGeoBoundingBoxQuery, JsGeoDistanceQuery, JsNumericRangeQuery,
+    JsPhraseQuery, JsQuery, JsSpanQuery, JsTermQuery, JsVectorQuery, JsVectorQueryInner,
+    JsVectorTextQuery, JsWildcardQuery, extract_lexical_query, query_to_lexical_search_query,
+    vector_query_to_search_query,
 };
 use laurus::{FusionAlgorithm, LexicalSearchQuery, SearchRequestBuilder, SearchResult};
 use napi::bindgen_prelude::*;
@@ -158,211 +160,253 @@ pub enum FusionChoice {
     WeightedSum(f32, f32),
 }
 
+/// Options object accepted by [`JsSearchRequest::new`].
+///
+/// Only the primitive fields (`queryDsl`, `limit`, `offset`) live here.
+/// Polymorphic fields (lexical / filter / vector / fusion) are populated
+/// after construction via the per-type `setLexicalX` / `setFilterX` /
+/// `setVector*` / `setRrfFusion` / `setWeightedSumFusion` methods —
+/// napi-rs cannot accept a class-instance union as an `#[napi(object)]`
+/// field because the auto-generated `ValidateNapiValue` for `&T` looks
+/// up the JS class constructor by the *Rust* struct name instead of the
+/// JS name set via `js_name = "..."`, so any polymorphic field on a
+/// napi options struct rejects every instance at runtime.
+#[napi(object)]
+pub struct JsSearchRequestOptions {
+    /// Optional query DSL string (e.g. `"title:hello"`).
+    pub query_dsl: Option<String>,
+    /// Maximum number of results (default 10).
+    pub limit: Option<u32>,
+    /// Pagination offset (default 0).
+    pub offset: Option<u32>,
+}
+
 #[napi]
 impl JsSearchRequest {
     /// Create a new search request.
     ///
-    /// # Arguments
+    /// Accepts an options object containing the primitive fields. Use
+    /// the `setLexicalX` / `setFilterX` / `setVector*` /
+    /// `setRrfFusion` / `setWeightedSumFusion` setters to attach
+    /// query objects after construction.
     ///
-    /// * `limit` - Maximum number of results (default 10).
-    /// * `offset` - Pagination offset (default 0).
+    /// ## Example
+    ///
+    /// ```javascript
+    /// const req = new SearchRequest({ queryDsl: "title:rust", limit: 5 });
+    ///
+    /// // Or build one piece at a time:
+    /// const req2 = new SearchRequest({ limit: 5 });
+    /// req2.setLexicalTerm(new TermQuery("title", "rust"));
+    /// req2.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2]));
+    /// req2.setRrfFusion(new RRF(60.0));
+    /// ```
     #[napi(constructor)]
-    pub fn new(limit: Option<u32>, offset: Option<u32>) -> Self {
-        Self {
+    pub fn new(options: Option<JsSearchRequestOptions>) -> Self {
+        let options = options.unwrap_or(JsSearchRequestOptions {
             query_dsl: None,
+            limit: None,
+            offset: None,
+        });
+        Self {
+            query_dsl: options.query_dsl,
             lexical_query: None,
             vector_query: None,
             filter_query: None,
             fusion: None,
-            limit: limit.unwrap_or(10) as usize,
-            offset: offset.unwrap_or(0) as usize,
+            limit: options.limit.unwrap_or(10) as usize,
+            offset: options.offset.unwrap_or(0) as usize,
         }
     }
 
     /// Set a DSL string query.
-    ///
-    /// # Arguments
-    ///
-    /// * `dsl` - The query DSL string (e.g. `"title:hello"`).
     #[napi]
     pub fn set_query_dsl(&mut self, dsl: String) {
         self.query_dsl = Some(dsl);
     }
 
-    /// Set a lexical term query.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name.
-    /// * `term` - The term to match.
+    // ── Lexical query setters (one per query type) ──────────────────────
+    //
+    // Each takes a `&JsXxxQuery` class instance — the same pattern used
+    // by `JsBooleanQuery` for the same napi-derive limitation around
+    // class-ref unions described above on `JsSearchRequestOptions`.
+
+    /// Set a [`JsTermQuery`] as the lexical clause.
     #[napi]
-    pub fn set_lexical_term_query(&mut self, field: String, term: String) {
-        self.lexical_query = Some(JsQuery::TermQuery(JsTermQuery { field, term }));
+    pub fn set_lexical_term(&mut self, query: &JsTermQuery) {
+        self.lexical_query = Some(JsQuery::TermQuery(query.clone()));
     }
 
-    /// Set a lexical phrase query.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name.
-    /// * `terms` - The ordered list of terms.
+    /// Set a [`JsPhraseQuery`] as the lexical clause.
     #[napi]
-    pub fn set_lexical_phrase_query(&mut self, field: String, terms: Vec<String>) {
-        self.lexical_query = Some(JsQuery::PhraseQuery(JsPhraseQuery { field, terms }));
+    pub fn set_lexical_phrase(&mut self, query: &JsPhraseQuery) {
+        self.lexical_query = Some(JsQuery::PhraseQuery(query.clone()));
     }
 
-    /// Set a 3D ECEF distance (sphere) query.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The Geo3d field name.
-    /// * `x`, `y`, `z` - Sphere centre in ECEF meters.
-    /// * `radius_m` - Sphere radius in meters.
-    #[napi(js_name = "setLexicalGeo3dDistanceQuery")]
-    pub fn set_lexical_geo3d_distance_query(
-        &mut self,
-        field: String,
-        x: f64,
-        y: f64,
-        z: f64,
-        radius_m: f64,
-    ) {
-        self.lexical_query = Some(JsQuery::Geo3dDistanceQuery(JsGeo3dDistanceQuery {
-            field,
-            x,
-            y,
-            z,
-            radius_m,
-        }));
-    }
-
-    /// Set a 3D ECEF axis-aligned bounding-box query.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The Geo3d field name.
-    /// * `min_x`, `min_y`, `min_z` - Lower corner of the box.
-    /// * `max_x`, `max_y`, `max_z` - Upper corner of the box.
-    #[napi(js_name = "setLexicalGeo3dBoundingBoxQuery")]
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_lexical_geo3d_bounding_box_query(
-        &mut self,
-        field: String,
-        min_x: f64,
-        min_y: f64,
-        min_z: f64,
-        max_x: f64,
-        max_y: f64,
-        max_z: f64,
-    ) {
-        self.lexical_query = Some(JsQuery::Geo3dBoundingBoxQuery(JsGeo3dBoundingBoxQuery {
-            field,
-            min_x,
-            min_y,
-            min_z,
-            max_x,
-            max_y,
-            max_z,
-        }));
-    }
-
-    /// Set a 3D ECEF k-nearest-neighbours query.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The Geo3d field name.
-    /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
-    /// * `k` - Number of nearest neighbours to return.
-    /// * `initial_radius_m` - Optional starting radius for the
-    ///   expanding-radius search.
-    /// * `max_radius_m` - Optional hard cap on the search radius.
-    #[napi(js_name = "setLexicalGeo3dNearestQuery")]
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_lexical_geo3d_nearest_query(
-        &mut self,
-        field: String,
-        x: f64,
-        y: f64,
-        z: f64,
-        k: u32,
-        initial_radius_m: Option<f64>,
-        max_radius_m: Option<f64>,
-    ) {
-        self.lexical_query = Some(JsQuery::Geo3dNearestQuery(JsGeo3dNearestQuery {
-            field,
-            x,
-            y,
-            z,
-            k,
-            initial_radius_m,
-            max_radius_m,
-        }));
-    }
-
-    /// Set a vector query with a pre-computed embedding.
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The vector field name.
-    /// * `vector` - The embedding vector as an array of numbers.
+    /// Set a [`JsFuzzyQuery`] as the lexical clause.
     #[napi]
-    pub fn set_vector_query(&mut self, field: String, vector: Vec<f64>) {
-        self.vector_query = Some(JsVectorQuery::VectorQuery(JsVectorQueryInner {
-            field,
-            vector: vector.into_iter().map(|v| v as f32).collect(),
-        }));
+    pub fn set_lexical_fuzzy(&mut self, query: &JsFuzzyQuery) {
+        self.lexical_query = Some(JsQuery::FuzzyQuery(query.clone()));
     }
 
-    /// Set a vector text query (text will be embedded by the registered embedder).
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The vector field name.
-    /// * `text` - The text to embed.
+    /// Set a [`JsWildcardQuery`] as the lexical clause.
     #[napi]
-    pub fn set_vector_text_query(&mut self, field: String, text: String) {
-        self.vector_query = Some(JsVectorQuery::VectorTextQuery(JsVectorTextQuery {
-            field,
-            text,
-        }));
+    pub fn set_lexical_wildcard(&mut self, query: &JsWildcardQuery) {
+        self.lexical_query = Some(JsQuery::WildcardQuery(query.clone()));
     }
 
-    /// Set a filter query (applied after scoring).
-    ///
-    /// # Arguments
-    ///
-    /// * `field` - The field name.
-    /// * `term` - The term to filter on.
+    /// Set a [`JsNumericRangeQuery`] as the lexical clause.
     #[napi]
-    pub fn set_filter_query(&mut self, field: String, term: String) {
-        self.filter_query = Some(JsQuery::TermQuery(JsTermQuery { field, term }));
+    pub fn set_lexical_numeric_range(&mut self, query: &JsNumericRangeQuery) {
+        self.lexical_query = Some(JsQuery::NumericRangeQuery(query.clone()));
     }
 
-    /// Set RRF fusion algorithm.
-    ///
-    /// # Arguments
-    ///
-    /// * `k` - The RRF parameter (default 60.0).
+    /// Set a [`JsGeoDistanceQuery`] as the lexical clause.
     #[napi]
-    pub fn set_rrf_fusion(&mut self, k: Option<f64>) {
-        self.fusion = Some(FusionChoice::RRF(k.unwrap_or(60.0)));
+    pub fn set_lexical_geo_distance(&mut self, query: &JsGeoDistanceQuery) {
+        self.lexical_query = Some(JsQuery::GeoDistanceQuery(query.clone()));
     }
 
-    /// Set weighted sum fusion algorithm.
-    ///
-    /// # Arguments
-    ///
-    /// * `lexical_weight` - Weight for lexical scores (default 0.5).
-    /// * `vector_weight` - Weight for vector scores (default 0.5).
+    /// Set a [`JsGeoBoundingBoxQuery`] as the lexical clause.
     #[napi]
-    pub fn set_weighted_sum_fusion(
-        &mut self,
-        lexical_weight: Option<f64>,
-        vector_weight: Option<f64>,
-    ) {
+    pub fn set_lexical_geo_bounding_box(&mut self, query: &JsGeoBoundingBoxQuery) {
+        self.lexical_query = Some(JsQuery::GeoBoundingBoxQuery(query.clone()));
+    }
+
+    /// Set a [`JsGeo3dDistanceQuery`] as the lexical clause.
+    #[napi(js_name = "setLexicalGeo3dDistance")]
+    pub fn set_lexical_geo3d_distance(&mut self, query: &JsGeo3dDistanceQuery) {
+        self.lexical_query = Some(JsQuery::Geo3dDistanceQuery(query.clone()));
+    }
+
+    /// Set a [`JsGeo3dBoundingBoxQuery`] as the lexical clause.
+    #[napi(js_name = "setLexicalGeo3dBoundingBox")]
+    pub fn set_lexical_geo3d_bounding_box(&mut self, query: &JsGeo3dBoundingBoxQuery) {
+        self.lexical_query = Some(JsQuery::Geo3dBoundingBoxQuery(query.clone()));
+    }
+
+    /// Set a [`JsGeo3dNearestQuery`] as the lexical clause.
+    #[napi(js_name = "setLexicalGeo3dNearest")]
+    pub fn set_lexical_geo3d_nearest(&mut self, query: &JsGeo3dNearestQuery) {
+        self.lexical_query = Some(JsQuery::Geo3dNearestQuery(query.clone()));
+    }
+
+    /// Set a [`JsBooleanQuery`] as the lexical clause.
+    #[napi]
+    pub fn set_lexical_boolean(&mut self, query: &JsBooleanQuery) {
+        self.lexical_query = Some(JsQuery::BooleanQuery(query.clone()));
+    }
+
+    /// Set a [`JsSpanQuery`] as the lexical clause.
+    #[napi]
+    pub fn set_lexical_span(&mut self, query: &JsSpanQuery) {
+        self.lexical_query = Some(JsQuery::SpanQuery(query.clone()));
+    }
+
+    // ── Filter query setters (one per query type) ───────────────────────
+
+    /// Set a [`JsTermQuery`] as the filter clause (applied after scoring).
+    #[napi]
+    pub fn set_filter_term(&mut self, query: &JsTermQuery) {
+        self.filter_query = Some(JsQuery::TermQuery(query.clone()));
+    }
+
+    /// Set a [`JsPhraseQuery`] as the filter clause.
+    #[napi]
+    pub fn set_filter_phrase(&mut self, query: &JsPhraseQuery) {
+        self.filter_query = Some(JsQuery::PhraseQuery(query.clone()));
+    }
+
+    /// Set a [`JsFuzzyQuery`] as the filter clause.
+    #[napi]
+    pub fn set_filter_fuzzy(&mut self, query: &JsFuzzyQuery) {
+        self.filter_query = Some(JsQuery::FuzzyQuery(query.clone()));
+    }
+
+    /// Set a [`JsWildcardQuery`] as the filter clause.
+    #[napi]
+    pub fn set_filter_wildcard(&mut self, query: &JsWildcardQuery) {
+        self.filter_query = Some(JsQuery::WildcardQuery(query.clone()));
+    }
+
+    /// Set a [`JsNumericRangeQuery`] as the filter clause.
+    #[napi]
+    pub fn set_filter_numeric_range(&mut self, query: &JsNumericRangeQuery) {
+        self.filter_query = Some(JsQuery::NumericRangeQuery(query.clone()));
+    }
+
+    /// Set a [`JsGeoDistanceQuery`] as the filter clause.
+    #[napi]
+    pub fn set_filter_geo_distance(&mut self, query: &JsGeoDistanceQuery) {
+        self.filter_query = Some(JsQuery::GeoDistanceQuery(query.clone()));
+    }
+
+    /// Set a [`JsGeoBoundingBoxQuery`] as the filter clause.
+    #[napi]
+    pub fn set_filter_geo_bounding_box(&mut self, query: &JsGeoBoundingBoxQuery) {
+        self.filter_query = Some(JsQuery::GeoBoundingBoxQuery(query.clone()));
+    }
+
+    /// Set a [`JsGeo3dDistanceQuery`] as the filter clause.
+    #[napi(js_name = "setFilterGeo3dDistance")]
+    pub fn set_filter_geo3d_distance(&mut self, query: &JsGeo3dDistanceQuery) {
+        self.filter_query = Some(JsQuery::Geo3dDistanceQuery(query.clone()));
+    }
+
+    /// Set a [`JsGeo3dBoundingBoxQuery`] as the filter clause.
+    #[napi(js_name = "setFilterGeo3dBoundingBox")]
+    pub fn set_filter_geo3d_bounding_box(&mut self, query: &JsGeo3dBoundingBoxQuery) {
+        self.filter_query = Some(JsQuery::Geo3dBoundingBoxQuery(query.clone()));
+    }
+
+    /// Set a [`JsGeo3dNearestQuery`] as the filter clause.
+    #[napi(js_name = "setFilterGeo3dNearest")]
+    pub fn set_filter_geo3d_nearest(&mut self, query: &JsGeo3dNearestQuery) {
+        self.filter_query = Some(JsQuery::Geo3dNearestQuery(query.clone()));
+    }
+
+    /// Set a [`JsBooleanQuery`] as the filter clause.
+    #[napi]
+    pub fn set_filter_boolean(&mut self, query: &JsBooleanQuery) {
+        self.filter_query = Some(JsQuery::BooleanQuery(query.clone()));
+    }
+
+    /// Set a [`JsSpanQuery`] as the filter clause.
+    #[napi]
+    pub fn set_filter_span(&mut self, query: &JsSpanQuery) {
+        self.filter_query = Some(JsQuery::SpanQuery(query.clone()));
+    }
+
+    // ── Vector query setters ────────────────────────────────────────────
+
+    /// Set a [`JsVectorQueryInner`] (pre-computed embedding) as the
+    /// vector clause.
+    #[napi]
+    pub fn set_vector_query(&mut self, query: &JsVectorQueryInner) {
+        self.vector_query = Some(JsVectorQuery::VectorQuery(query.clone()));
+    }
+
+    /// Set a [`JsVectorTextQuery`] (text-to-be-embedded) as the vector
+    /// clause.
+    #[napi]
+    pub fn set_vector_text_query(&mut self, query: &JsVectorTextQuery) {
+        self.vector_query = Some(JsVectorQuery::VectorTextQuery(query.clone()));
+    }
+
+    // ── Fusion algorithm setters ────────────────────────────────────────
+
+    /// Set RRF fusion using a [`JsRRF`] instance.
+    #[napi]
+    pub fn set_rrf_fusion(&mut self, rrf: &JsRRF) {
+        self.fusion = Some(FusionChoice::RRF(rrf.k));
+    }
+
+    /// Set weighted-sum fusion using a [`JsWeightedSum`] instance.
+    #[napi]
+    pub fn set_weighted_sum_fusion(&mut self, ws: &JsWeightedSum) {
         self.fusion = Some(FusionChoice::WeightedSum(
-            lexical_weight.unwrap_or(0.5) as f32,
-            vector_weight.unwrap_or(0.5) as f32,
+            ws.lexical_weight as f32,
+            ws.vector_weight as f32,
         ));
     }
 }

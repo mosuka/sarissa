@@ -1105,6 +1105,7 @@ impl JsSpanQuery {
 /// const { VectorQuery } = require("laurus-nodejs");
 /// const results = await index.search(new VectorQuery("text_vec", [0.1, 0.2, ...]));
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "VectorQuery")]
 pub struct JsVectorQueryInner {
     pub(crate) field: String,
@@ -1140,6 +1141,7 @@ impl JsVectorQueryInner {
 /// const { VectorTextQuery } = require("laurus-nodejs");
 /// const results = await index.search(new VectorTextQuery("text_vec", "memory safety"));
 /// ```
+#[derive(Clone)]
 #[napi(js_name = "VectorTextQuery")]
 pub struct JsVectorTextQuery {
     pub(crate) field: String,

@@ -5,8 +5,8 @@
  * - Schema declaration via `addGeo3dField`.
  * - Document round-trip with `{ x, y, z }` JSON values.
  * - All three 3D query setters on `SearchRequest`:
- *   `setLexicalGeo3dDistanceQuery`, `setLexicalGeo3dBoundingBoxQuery`,
- *   `setLexicalGeo3dNearestQuery`.
+ *   `setLexicalGeo3dDistance`, `setLexicalGeo3dBoundingBox`,
+ *   `setLexicalGeo3dNearest`.
  *
  * Coordinates are precomputed ECEF values for well-known landmarks. They were
  * produced by `laurus::util::ecef::wgs84_to_ecef` so the values match what
@@ -56,12 +56,14 @@ describe("Geo3dDistanceQuery", () => {
   it("50 km sphere around Tokyo Tower returns Tower + Skytree", async () => {
     const index = await createGeo3dIndex();
     const req = new SearchRequest();
-    req.setLexicalGeo3dDistanceQuery(
-      "position",
-      TOKYO_TOWER.x,
-      TOKYO_TOWER.y,
-      TOKYO_TOWER.z,
-      50_000.0,
+    req.setLexicalGeo3dDistance(
+      Geo3dDistanceQuery.withinSphere(
+        "position",
+        TOKYO_TOWER.x,
+        TOKYO_TOWER.y,
+        TOKYO_TOWER.z,
+        50_000.0,
+      ),
     );
     const results = await index.searchWithRequest(req);
     const ids = new Set(results.map((r) => r.id));
@@ -71,12 +73,14 @@ describe("Geo3dDistanceQuery", () => {
   it("200 km sphere additionally pulls in Mt. Fuji", async () => {
     const index = await createGeo3dIndex();
     const req = new SearchRequest();
-    req.setLexicalGeo3dDistanceQuery(
-      "position",
-      TOKYO_TOWER.x,
-      TOKYO_TOWER.y,
-      TOKYO_TOWER.z,
-      200_000.0,
+    req.setLexicalGeo3dDistance(
+      Geo3dDistanceQuery.withinSphere(
+        "position",
+        TOKYO_TOWER.x,
+        TOKYO_TOWER.y,
+        TOKYO_TOWER.z,
+        200_000.0,
+      ),
     );
     const results = await index.searchWithRequest(req);
     const ids = new Set(results.map((r) => r.id));
@@ -92,14 +96,16 @@ describe("Geo3dBoundingBoxQuery", () => {
     // (x ≈ -4.65M, well below the lower bound).
     const index = await createGeo3dIndex();
     const req = new SearchRequest();
-    req.setLexicalGeo3dBoundingBoxQuery(
-      "position",
-      -3_962_000.0,
-      3_340_000.0,
-      3_690_000.0,
-      -3_954_000.0,
-      3_360_000.0,
-      3_710_000.0,
+    req.setLexicalGeo3dBoundingBox(
+      Geo3dBoundingBoxQuery.withinBox(
+        "position",
+        -3_962_000.0,
+        3_340_000.0,
+        3_690_000.0,
+        -3_954_000.0,
+        3_360_000.0,
+        3_710_000.0,
+      ),
     );
     const results = await index.searchWithRequest(req);
     const ids = new Set(results.map((r) => r.id));
@@ -111,7 +117,9 @@ describe("Geo3dNearestQuery", () => {
   it("k = 3 around Mt. Fuji returns Fuji + Tower + Skytree", async () => {
     const index = await createGeo3dIndex();
     const req = new SearchRequest();
-    req.setLexicalGeo3dNearestQuery("position", MT_FUJI.x, MT_FUJI.y, MT_FUJI.z, 3);
+    req.setLexicalGeo3dNearest(
+      Geo3dNearestQuery.kNearest("position", MT_FUJI.x, MT_FUJI.y, MT_FUJI.z, 3),
+    );
     const results = await index.searchWithRequest(req);
     expect(results).toHaveLength(3);
     const ids = new Set(results.map((r) => r.id));
@@ -123,14 +131,16 @@ describe("Geo3dNearestQuery", () => {
   it("accepts optional initial / max radius bounds", async () => {
     const index = await createGeo3dIndex();
     const req = new SearchRequest();
-    req.setLexicalGeo3dNearestQuery(
-      "position",
-      TOKYO_TOWER.x,
-      TOKYO_TOWER.y,
-      TOKYO_TOWER.z,
-      2,
-      10_000.0,
-      10_000_000.0,
+    req.setLexicalGeo3dNearest(
+      Geo3dNearestQuery.kNearest(
+        "position",
+        TOKYO_TOWER.x,
+        TOKYO_TOWER.y,
+        TOKYO_TOWER.z,
+        2,
+        10_000.0,
+        10_000_000.0,
+      ),
     );
     const results = await index.searchWithRequest(req);
     const ids = new Set(results.map((r) => r.id));

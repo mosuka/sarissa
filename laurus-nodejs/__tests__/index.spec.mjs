@@ -227,18 +227,31 @@ describe("Vector search", () => {
 describe("Hybrid search", () => {
   it("searches with SearchRequest (lexical only)", async () => {
     const index = await createTextIndex();
-    const req = new SearchRequest(5);
-    req.setLexicalTermQuery("title", "rust");
+    const req = new SearchRequest({ limit: 5 });
+    req.setLexicalTerm(new TermQuery("title", "rust"));
     const results = await index.searchWithRequest(req);
     expect(results.length).toBeGreaterThanOrEqual(1);
   });
 
   it("searches with SearchRequest (hybrid)", async () => {
     const index = await createVectorIndex();
-    const req = new SearchRequest(5);
-    req.setLexicalTermQuery("title", "rust");
-    req.setVectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]);
-    req.setRrfFusion(60.0);
+    const req = new SearchRequest({ limit: 5 });
+    req.setLexicalTerm(new TermQuery("title", "rust"));
+    req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+    req.setRrfFusion(new RRF(60.0));
+    const results = await index.searchWithRequest(req);
+    expect(results.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("searches with SearchRequest constructed via options object only", async () => {
+    // The constructor accepts an options object with primitive fields.
+    // Polymorphic clauses are still attached via per-type setters.
+    const index = await createTextIndex();
+    const req = new SearchRequest({
+      queryDsl: "title:rust",
+      limit: 5,
+      offset: 0,
+    });
     const results = await index.searchWithRequest(req);
     expect(results.length).toBeGreaterThanOrEqual(1);
   });
@@ -251,8 +264,8 @@ describe("Hybrid search", () => {
 describe("Query types", () => {
   it("phrase query", async () => {
     const index = await createTextIndex();
-    const req = new SearchRequest(5);
-    req.setLexicalPhraseQuery("title", ["introduction", "rust"]);
+    const req = new SearchRequest({ limit: 5 });
+    req.setLexicalPhrase(new PhraseQuery("title", ["introduction", "rust"]));
     const results = await index.searchWithRequest(req);
     expect(results.some((r) => r.id === "doc1")).toBe(true);
   });
@@ -266,7 +279,7 @@ describe("Query types", () => {
     await index.commit();
 
     const q = new NumericRangeQuery("year", 2022, 2024);
-    const req = new SearchRequest(5);
+    const req = new SearchRequest({ limit: 5 });
     // Use DSL or searchTerm - NumericRangeQuery needs to be used via SearchRequest
     // For now, test that the class can be constructed
     expect(q).toBeDefined();
