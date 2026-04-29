@@ -71,6 +71,7 @@ class Schema {
 | `setDynamicFieldPolicy(policy)` | Set how undeclared fields are handled. `policy` is `"strict"`, `"dynamic"` (default), or `"ignore"`. See notes below. |
 | `dynamicFieldPolicy()` | Return the current policy as a lowercase string. |
 | `fieldNames()` | Return all field names. |
+| `toString()` | Return a string representation of the schema (`"Schema(fields=[...])"`). |
 
 #### Dynamic field policy
 
@@ -142,12 +143,13 @@ new NumericRangeQuery(
   field: string,
   min?: number | null,
   max?: number | null,
-  isFloat?: boolean,
+  numericType?: "integer" | "float",
 )
 ```
 
-Matches numeric values in `[min, max]`. Pass `null` for an
-open bound.
+Matches numeric values in `[min, max]`. Pass `null` (or omit) for an
+open bound. `numericType` selects the underlying range type
+(`"integer"` (default) or `"float"`); other values throw.
 
 ### GeoDistanceQuery
 
@@ -218,13 +220,37 @@ search cone.
 ```typescript
 class BooleanQuery {
   constructor();
-  mustTerm(field: string, term: string): void;
-  shouldTerm(field: string, term: string): void;
-  mustNotTerm(field: string, term: string): void;
+  // For each query type X in
+  //   { Term, Phrase, Fuzzy, Wildcard, NumericRange,
+  //     GeoDistance, GeoBoundingBox,
+  //     Geo3dDistance, Geo3dBoundingBox, Geo3dNearest,
+  //     Boolean, Span }:
+  mustX(query: X): void;
+  shouldX(query: X): void;
+  mustNotX(query: X): void;
 }
 ```
 
-Compound boolean query with MUST / SHOULD / MUST_NOT clauses.
+Compound boolean query with MUST / SHOULD / MUST_NOT clauses. Each clause
+takes an instance of a specific query class — for example,
+`mustTerm(new TermQuery("body", "rust"))` or
+`shouldGeo3dNearest(Geo3dNearestQuery.kNearest(...))`.
+
+The Node.js binding exposes 36 per-type methods (12 query types × 3
+polarities) instead of a single polymorphic `must(query)` because of a
+limitation in `napi-derive`'s validation of `Either<&T, ...>` arguments
+for classes with `js_name` overrides.
+
+`must` clauses all have to match; `mustNot` clauses must not match.
+`should` clauses contribute to scoring; at least one of them must match if
+there are no `must` clauses.
+
+```javascript
+const bq = new BooleanQuery();
+bq.mustTerm(new TermQuery("body", "programming"));
+bq.mustNotTerm(new TermQuery("title", "python"));
+bq.shouldFuzzy(new FuzzyQuery("body", "data", 1));
+```
 
 ### SpanQuery
 
@@ -273,23 +299,58 @@ embedder configured on the index.
 Full-featured search request for advanced control.
 
 ```typescript
+interface SearchRequestOptions {
+  queryDsl?: string;
+  limit?: number;   // default 10
+  offset?: number;  // default 0
+}
+
 class SearchRequest {
-  constructor(limit?: number, offset?: number);
+  constructor(options?: SearchRequestOptions);
 }
 ```
 
-### Setter methods
+Construct with primitive options first; attach polymorphic clauses with
+the per-type setters below. As with `BooleanQuery`, the binding exposes
+per-type setters because of `napi-derive`'s limitation on `Either<&T, ...>`
+arguments.
+
+### DSL and fusion setters
 
 | Method | Description |
 | :--- | :--- |
-| `setQueryDsl(dsl)` | Set a DSL string query. |
-| `setLexicalTermQuery(field, term)` | Set a term-based lexical query. |
-| `setLexicalPhraseQuery(field, terms)` | Set a phrase-based lexical query. |
-| `setVectorQuery(field, vector)` | Set a pre-computed vector query. |
-| `setVectorTextQuery(field, text)` | Set a text-based vector query. |
-| `setFilterQuery(field, term)` | Set a post-scoring filter. |
-| `setRrfFusion(k?)` | Use RRF fusion (default k=60). |
-| `setWeightedSumFusion(lexicalWeight?, vectorWeight?)` | Use weighted sum fusion. |
+| `setQueryDsl(dsl: string)` | Set a DSL string query. |
+| `setRrfFusion(rrf: RRF)` | Use RRF fusion. |
+| `setWeightedSumFusion(ws: WeightedSum)` | Use weighted-sum fusion. |
+
+### Vector setters
+
+| Method | Description |
+| :--- | :--- |
+| `setVectorQuery(query: VectorQuery)` | Set a pre-computed vector query. |
+| `setVectorTextQuery(query: VectorTextQuery)` | Set a text-based vector query (auto-embedded by the configured embedder). |
+
+### Lexical setters (per type)
+
+For each query type `X` in `{ Term, Phrase, Fuzzy, Wildcard, NumericRange,
+GeoDistance, GeoBoundingBox, Geo3dDistance, Geo3dBoundingBox, Geo3dNearest,
+Boolean, Span }`, the request exposes:
+
+| Method | Description |
+| :--- | :--- |
+| `setLexicalX(query: X)` | Set the lexical component for an explicit hybrid request. |
+| `setFilterX(query: X)` | Set the post-scoring filter component. |
+
+That is, 24 per-type setters in total (12 lexical + 12 filter), in addition
+to the DSL, vector, and fusion setters above.
+
+```javascript
+const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("title", "rust"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
+const results = await index.searchWithRequest(req);
+```
 
 ---
 
@@ -301,7 +362,7 @@ Returned by search methods as an array.
 interface SearchResult {
   id: string;        // External document identifier
   score: number;     // Relevance score
-  document: object | null; // Retrieved fields, or null
+  document: object | null; // Retrieved fields, or null if not stored
 }
 ```
 
@@ -392,8 +453,7 @@ JavaScript values are automatically converted to Laurus
 | `boolean` | `Bool` | |
 | `number` (integer) | `Int64` | |
 | `number` (float) | `Float64` | |
-| `string` | `Text` | ISO8601 strings become `DateTime` |
+| `string` | `Text` | ISO 8601 strings become `DateTime` |
 | `number[]` | `Vector` | Coerced to `f32` |
 | `{ lat, lon }` | `Geo` | Two `number` values |
-| `Date` | `DateTime` | Via timestamp |
-| `Buffer` | `Bytes` | |
+| `{ x, y, z }` | `GeoEcef` | Three `number` values, meters (3D ECEF Cartesian) |

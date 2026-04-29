@@ -77,12 +77,18 @@ const results = await index.searchVector(
 ## 5. ハイブリッド検索
 
 ```javascript
-import { SearchRequest } from "laurus-nodejs";
+import {
+  Index,
+  RRF,
+  SearchRequest,
+  TermQuery,
+  VectorQuery,
+} from "laurus-nodejs";
 
-const req = new SearchRequest(5);
-req.setLexicalTermQuery("name", "express");
-req.setVectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]);
-req.setRrfFusion(60.0);
+const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("name", "express"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
 
 const results = await index.searchWithRequest(req);
 ```
