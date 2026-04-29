@@ -250,6 +250,46 @@ class LaurusTest extends TestCase
         $this->assertEquals("d2", $results[0]->getId());
     }
 
+    // ── SpanQuery ───────────────────────────────────────────────────────
+
+    public function testSpanQueryNear(): void
+    {
+        // Plain term-only `near` already works via `SpanQuery::near`.
+        $schema = new Laurus\Schema();
+        $schema->addTextField("body", true, true, true);
+        $idx = new Laurus\Index(null, $schema);
+        $idx->putDocument("d1", ["body" => "the quick brown fox"]);
+        $idx->putDocument("d2", ["body" => "the slow red fox"]);
+        $idx->commit();
+        $q = Laurus\SpanQuery::near("body", ["quick", "fox"], 2, true);
+        $results = $idx->search($q);
+        $this->assertCount(1, $results);
+        $this->assertEquals("d1", $results[0]->getId());
+    }
+
+    public function testSpanQueryNearSpansWithNestedClauses(): void
+    {
+        // `nearSpans` accepts pre-built SpanQuery instances, so callers can
+        // nest other span constructions (e.g. another `near`, `containing`,
+        // `within`) inside a `SpanNear`. The simplest exercise wraps two
+        // bare `term` clauses and verifies the result is identical to the
+        // plain `near` form.
+        $schema = new Laurus\Schema();
+        $schema->addTextField("body", true, true, true);
+        $idx = new Laurus\Index(null, $schema);
+        $idx->putDocument("d1", ["body" => "the quick brown fox"]);
+        $idx->putDocument("d2", ["body" => "the slow red fox"]);
+        $idx->commit();
+        $clauses = [
+            Laurus\SpanQuery::term("body", "quick"),
+            Laurus\SpanQuery::term("body", "fox"),
+        ];
+        $q = Laurus\SpanQuery::nearSpans("body", $clauses, 2, true);
+        $results = $idx->search($q);
+        $this->assertCount(1, $results);
+        $this->assertEquals("d1", $results[0]->getId());
+    }
+
     // ── Geo3d (3D ECEF) ─────────────────────────────────────────────────
 
     public function testGeo3dFieldRoundTrip(): void
