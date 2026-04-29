@@ -71,6 +71,7 @@ class Schema {
 | `setDynamicFieldPolicy(policy)` | 未宣言フィールドの扱いを設定。`policy` は `"strict"` / `"dynamic"`（デフォルト）/ `"ignore"`。詳細は下記を参照。 |
 | `dynamicFieldPolicy()` | 現在のポリシーを小文字の文字列で返す。 |
 | `fieldNames()` | 全フィールド名を返す。 |
+| `toString()` | スキーマの文字列表現（`"Schema(fields=[...])"` 形式）を返す。 |
 
 #### Dynamic field policy（動的フィールドポリシー）
 
@@ -135,11 +136,13 @@ new NumericRangeQuery(
   field: string,
   min?: number | null,
   max?: number | null,
-  isFloat?: boolean,
+  numericType?: "integer" | "float",
 )
 ```
 
-`[min, max]` 範囲の数値にマッチ。`null` で開放端。
+`[min, max]` 範囲の数値にマッチします。`null`（または省略）で開放端。
+`numericType` は内部の範囲型を選択します（`"integer"`（デフォルト）または
+`"float"`）。それ以外の値は例外をスローします。
 
 ### GeoDistanceQuery
 
@@ -209,13 +212,37 @@ Geo3dNearestQuery.kNearest(
 ```typescript
 class BooleanQuery {
   constructor();
-  mustTerm(field: string, term: string): void;
-  shouldTerm(field: string, term: string): void;
-  mustNotTerm(field: string, term: string): void;
+  // 各クエリタイプ X について（X は次のいずれか）:
+  //   { Term, Phrase, Fuzzy, Wildcard, NumericRange,
+  //     GeoDistance, GeoBoundingBox,
+  //     Geo3dDistance, Geo3dBoundingBox, Geo3dNearest,
+  //     Boolean, Span }
+  mustX(query: X): void;
+  shouldX(query: X): void;
+  mustNotX(query: X): void;
 }
 ```
 
-MUST / SHOULD / MUST_NOT 句による複合ブーリアンクエリ。
+MUST / SHOULD / MUST_NOT 句による複合ブーリアンクエリ。各句は対応するクエリ
+クラスのインスタンスを引数に取ります。例:
+`mustTerm(new TermQuery("body", "rust"))` や
+`shouldGeo3dNearest(Geo3dNearestQuery.kNearest(...))`。
+
+Node.js バインディングは多態 `must(query)` ではなく 36 個の per-type メソッド
+（12 クエリタイプ × 3 極性）を公開しています。これは `js_name` を上書きした
+クラスに対する `napi-derive` の `Either<&T, ...>` 引数バリデーションの制限を
+回避するためです。
+
+`must` 節はすべて一致する必要があり、`mustNot` 節は一致してはなりません。
+`should` 節はスコアリングに寄与し、`must` 節が無い場合は少なくとも1つが
+一致する必要があります。
+
+```javascript
+const bq = new BooleanQuery();
+bq.mustTerm(new TermQuery("body", "programming"));
+bq.mustNotTerm(new TermQuery("title", "python"));
+bq.shouldFuzzy(new FuzzyQuery("body", "data", 1));
+```
 
 ### SpanQuery
 
@@ -264,23 +291,57 @@ new VectorTextQuery(field: string, text: string)
 高度な制御のための全機能検索リクエスト。
 
 ```typescript
+interface SearchRequestOptions {
+  queryDsl?: string;
+  limit?: number;   // デフォルト 10
+  offset?: number;  // デフォルト 0
+}
+
 class SearchRequest {
-  constructor(limit?: number, offset?: number);
+  constructor(options?: SearchRequestOptions);
 }
 ```
 
-### セッターメソッド
+コンストラクタにはプリミティブな options を渡し、多態クエリ句は下記の
+per-type セッターで設定します。`BooleanQuery` 同様、`napi-derive` の
+`Either<&T, ...>` バリデーション制限を回避するため per-type 化されています。
+
+### DSL とフュージョンセッター
 
 | メソッド | 説明 |
 | :--- | :--- |
-| `setQueryDsl(dsl)` | DSL 文字列クエリを設定。 |
-| `setLexicalTermQuery(field, term)` | Term ベースの Lexical クエリを設定。 |
-| `setLexicalPhraseQuery(field, terms)` | Phrase ベースの Lexical クエリを設定。 |
-| `setVectorQuery(field, vector)` | 事前計算ベクトルクエリを設定。 |
-| `setVectorTextQuery(field, text)` | テキストベースのベクトルクエリを設定。 |
-| `setFilterQuery(field, term)` | スコアリング後のフィルタを設定。 |
-| `setRrfFusion(k?)` | RRF 融合を使用（デフォルト k=60）。 |
-| `setWeightedSumFusion(lexicalWeight?, vectorWeight?)` | 加重和融合を使用。 |
+| `setQueryDsl(dsl: string)` | DSL 文字列クエリを設定。 |
+| `setRrfFusion(rrf: RRF)` | RRF フュージョンを使用。 |
+| `setWeightedSumFusion(ws: WeightedSum)` | 加重和フュージョンを使用。 |
+
+### ベクトルセッター
+
+| メソッド | 説明 |
+| :--- | :--- |
+| `setVectorQuery(query: VectorQuery)` | 事前計算ベクトルクエリを設定。 |
+| `setVectorTextQuery(query: VectorTextQuery)` | テキストベースのベクトルクエリを設定（登録 Embedder で自動埋め込み）。 |
+
+### Lexical セッター（per-type）
+
+`X` を `{ Term, Phrase, Fuzzy, Wildcard, NumericRange, GeoDistance,
+GeoBoundingBox, Geo3dDistance, Geo3dBoundingBox, Geo3dNearest, Boolean,
+Span }` の各クエリタイプとして、以下のメソッドが公開されています:
+
+| メソッド | 説明 |
+| :--- | :--- |
+| `setLexicalX(query: X)` | 明示的なハイブリッドリクエストの Lexical コンポーネントを設定。 |
+| `setFilterX(query: X)` | スコアリング後のフィルタコンポーネントを設定。 |
+
+合計 24 個の per-type セッター（12 lexical + 12 filter）に加え、上記の DSL /
+ベクトル / フュージョンセッターが利用可能です。
+
+```javascript
+const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("title", "rust"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
+const results = await index.searchWithRequest(req);
+```
 
 ---
 
@@ -292,7 +353,7 @@ class SearchRequest {
 interface SearchResult {
   id: string;        // 外部ドキュメント識別子
   score: number;     // 関連度スコア
-  document: object | null; // 取得フィールド、または null
+  document: object | null; // 取得フィールド、stored=false の場合は null
 }
 ```
 
@@ -382,8 +443,7 @@ JavaScript の値は自動的に Laurus の `DataValue` 型に変換されます
 | `boolean` | `Bool` | |
 | `number`（整数） | `Int64` | |
 | `number`（浮動小数点） | `Float64` | |
-| `string` | `Text` | ISO8601 文字列は `DateTime` になる |
+| `string` | `Text` | ISO 8601 文字列は `DateTime` になる |
 | `number[]` | `Vector` | `f32` に変換 |
-| `{ lat, lon }` | `Geo` | 2つの `number` 値 |
-| `Date` | `DateTime` | タイムスタンプ経由 |
-| `Buffer` | `Bytes` | |
+| `{ lat, lon }` | `Geo` | 2 つの `number` 値 |
+| `{ x, y, z }` | `GeoEcef` | 3 つの `number` 値（メートル単位、3D ECEF 直交座標） |
