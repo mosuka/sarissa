@@ -746,38 +746,44 @@ impl JsBooleanQuery {
 /// [`JsBooleanQuery::should`], and [`JsBooleanQuery::must_not`]. Wraps a
 /// reference to any of the lexical-query wrapper classes that are exposed
 /// to JS, so Boolean clauses can compose arbitrary nested queries.
+///
+/// Each variant is a [`napi::bindgen_prelude::ClassInstance`] rather than a
+/// bare reference because napi-rs implements `FromNapiValue` only for the
+/// class-instance wrapper, not for plain `&T` (refs are special-cased in
+/// the napi-derive macro and do not implement the trait Either requires).
 pub type AnyJsQuery<'a> = napi::bindgen_prelude::Either12<
-    &'a JsTermQuery,
-    &'a JsPhraseQuery,
-    &'a JsFuzzyQuery,
-    &'a JsWildcardQuery,
-    &'a JsNumericRangeQuery,
-    &'a JsGeoDistanceQuery,
-    &'a JsGeoBoundingBoxQuery,
-    &'a JsGeo3dDistanceQuery,
-    &'a JsGeo3dBoundingBoxQuery,
-    &'a JsGeo3dNearestQuery,
-    &'a JsBooleanQuery,
-    &'a JsSpanQuery,
+    napi::bindgen_prelude::ClassInstance<'a, JsTermQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsPhraseQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsFuzzyQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsWildcardQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsNumericRangeQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsGeoDistanceQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsGeoBoundingBoxQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsGeo3dDistanceQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsGeo3dBoundingBoxQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsGeo3dNearestQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsBooleanQuery>,
+    napi::bindgen_prelude::ClassInstance<'a, JsSpanQuery>,
 >;
 
-/// Convert a JS-side query reference into an owned [`JsQuery`] that
-/// `JsBooleanQuery` can store.
+/// Convert a JS-side query class instance into an owned [`JsQuery`] that
+/// `JsBooleanQuery` can store. Cloning derefs through `ClassInstance` to
+/// the underlying wrapper struct (each is `#[derive(Clone)]`).
 fn any_to_js_query(query: AnyJsQuery) -> JsQuery {
     use napi::bindgen_prelude::Either12::*;
     match query {
-        A(q) => JsQuery::TermQuery(q.clone()),
-        B(q) => JsQuery::PhraseQuery(q.clone()),
-        C(q) => JsQuery::FuzzyQuery(q.clone()),
-        D(q) => JsQuery::WildcardQuery(q.clone()),
-        E(q) => JsQuery::NumericRangeQuery(q.clone()),
-        F(q) => JsQuery::GeoDistanceQuery(q.clone()),
-        G(q) => JsQuery::GeoBoundingBoxQuery(q.clone()),
-        H(q) => JsQuery::Geo3dDistanceQuery(q.clone()),
-        I(q) => JsQuery::Geo3dBoundingBoxQuery(q.clone()),
-        J(q) => JsQuery::Geo3dNearestQuery(q.clone()),
-        K(q) => JsQuery::BooleanQuery(q.clone()),
-        L(q) => JsQuery::SpanQuery(q.clone()),
+        A(q) => JsQuery::TermQuery((*q).clone()),
+        B(q) => JsQuery::PhraseQuery((*q).clone()),
+        C(q) => JsQuery::FuzzyQuery((*q).clone()),
+        D(q) => JsQuery::WildcardQuery((*q).clone()),
+        E(q) => JsQuery::NumericRangeQuery((*q).clone()),
+        F(q) => JsQuery::GeoDistanceQuery((*q).clone()),
+        G(q) => JsQuery::GeoBoundingBoxQuery((*q).clone()),
+        H(q) => JsQuery::Geo3dDistanceQuery((*q).clone()),
+        I(q) => JsQuery::Geo3dBoundingBoxQuery((*q).clone()),
+        J(q) => JsQuery::Geo3dNearestQuery((*q).clone()),
+        K(q) => JsQuery::BooleanQuery((*q).clone()),
+        L(q) => JsQuery::SpanQuery((*q).clone()),
     }
 }
 
