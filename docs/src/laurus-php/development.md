@@ -47,7 +47,7 @@ use Laurus\Index;
 \$index = new Index();
 print_r(\$index->stats());
 "
-# Array ( [document_count] => 0 [vector_fields] => Array ( ) )
+# Array ( [documentCount] => 0 [vectorFields] => Array ( ) )
 ```
 
 ## Testing

@@ -25,7 +25,7 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null)
 | `deleteDocuments(string $id): void` | 指定 ID の全バージョンを削除します。 |
 | `commit(): void` | バッファリングされた書き込みをフラッシュし、すべての保留中の変更を検索可能にします。 |
 | `search(mixed $query, int $limit = 10, int $offset = 0): array` | 検索クエリを実行します。`SearchResult` の配列を返します。 |
-| `stats(): array` | インデックス統計（`"document_count"`、`"vector_fields"`）を返します。 |
+| `stats(): array` | インデックス統計（`"documentCount"`、`"vectorFields"`）を返します。 |
 
 ### `search` の query 引数
 

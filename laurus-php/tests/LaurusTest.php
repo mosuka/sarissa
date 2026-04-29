@@ -144,16 +144,16 @@ class LaurusTest extends TestCase
     {
         $idx = $this->createIndex();
         $stats = $idx->stats();
-        $this->assertEquals(2, $stats["document_count"]);
+        $this->assertEquals(2, $stats["documentCount"]);
     }
 
     public function testVectorFieldStats(): void
     {
         $idx = $this->createVectorIndex();
         $stats = $idx->stats();
-        $this->assertEquals(2, $stats["document_count"]);
-        $this->assertArrayHasKey("embedding", $stats["vector_fields"]);
-        $this->assertEquals(4, $stats["vector_fields"]["embedding"]["dimension"]);
+        $this->assertEquals(2, $stats["documentCount"]);
+        $this->assertArrayHasKey("embedding", $stats["vectorFields"]);
+        $this->assertEquals(4, $stats["vectorFields"]["embedding"]["dimension"]);
     }
 
     // ── Lexical search ──────────────────────────────────────────────────
