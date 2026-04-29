@@ -178,7 +178,7 @@ floats; range queries then match if any value satisfies the predicate
 
 Add a boolean field.
 
-#### `addDateTimeField(name, stored?, indexed?)`
+#### `addDatetimeField(name, stored?, indexed?)`
 
 Add a date/time field.
 

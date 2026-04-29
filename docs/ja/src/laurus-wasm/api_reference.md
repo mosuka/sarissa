@@ -174,7 +174,7 @@ DSL 文字列クエリで検索します。
 
 真偽値フィールドを追加します。
 
-#### `addDateTimeField(name, stored?, indexed?)`
+#### `addDatetimeField(name, stored?, indexed?)`
 
 日時フィールドを追加します。
 
