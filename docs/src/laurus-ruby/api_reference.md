@@ -215,7 +215,7 @@ bq.should(query)
 bq.must_not(query)
 ```
 
-Compound boolean query. `must` clauses all have to match; at least one `should` clause must match; `must_not` clauses must not match.
+Compound boolean query. `must` clauses all have to match; `must_not` clauses must not match. `should` clauses contribute to scoring; at least one of them must match if there are no `must` clauses.
 
 ### SpanQuery
 
@@ -373,4 +373,5 @@ Ruby values are automatically converted to Laurus `DataValue` types:
 | `String` | `Text` | |
 | `Array` of numerics | `Vector` | Elements coerced to `f32` |
 | `Hash` with `"lat"`, `"lon"` | `Geo` | Two `Float` values |
-| `Time` (responds to `iso8601`) | `DateTime` | Converted via `iso8601` |
+| `Hash` with `"x"`, `"y"`, `"z"` | `GeoEcef` | Three `Float` values, meters (3D ECEF Cartesian) |
+| `Time` / `String` responding to `iso8601` | `DateTime` | Converted via `iso8601` |
