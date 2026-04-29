@@ -22,13 +22,13 @@ embeddings-all = [
 
 [dependencies]
 laurus = { workspace = true, features = ["native"] }
-napi = { version = "3.8.3", features = [
+napi = { version = "3.8.5", features = [
     "async",
     "tokio_rt",
     "napi9",
     "serde-json",
 ] }
-napi-derive = "3.5.2"
+napi-derive = "3.5.4"
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

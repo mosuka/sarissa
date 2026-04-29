@@ -23,6 +23,6 @@ embeddings-all = [
 
 [dependencies]
 laurus = { workspace = true, features = ["native"] }
-ext-php-rs = "0.15.7"
+ext-php-rs = "0.15.12"
 tokio = { workspace = true }
 chrono = { workspace = true }
