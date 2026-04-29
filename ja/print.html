@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1eda23b7.js";
+            window.path_to_searchindex_js = "searchindex-e032ea0a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c423c571.js"></script>
@@ -2677,8 +2677,8 @@ let query = NumericRangeQuery::new(
 </span><span class="boring">fn main() {
 </span>use laurus::lexical::query::geo::GeoQuery;
 
-// Find documents within 10km of Tokyo Station (35.6812, 139.7671)
-let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10.0)?; // radius in kilometers
+// Find documents within 10 km (= 10 000 m) of Tokyo Station (35.6812, 139.7671)
+let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10_000.0)?; // distance in metres
 
 // Find documents within a bounding box (min_lat, min_lon, max_lat, max_lon)
 let query = GeoQuery::within_bounding_box(
@@ -3379,8 +3379,8 @@ price:[* TO 100]
 </code></pre>
 <h3 id="2d-地理クエリgeo_"><a class="header" href="#2d-地理クエリgeo_">2D 地理クエリ（<code>geo_*</code>)</a></h3>
 <p>2 種類の関数形式を <code>Geo</code>（2D 緯度 / 経度）フィールドに対して使えます。
-緯度・経度は度単位、半径はキロメートル単位の符号付き浮動小数点数：</p>
-<pre><code class="language-text">location:geo_distance(lat, lon, distance_km)
+緯度・経度は度単位、距離はメートル単位の符号付き浮動小数点数：</p>
+<pre><code class="language-text">location:geo_distance(lat, lon, distance_m)
 location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 </code></pre>
 <div class="table-wrapper">
@@ -3389,14 +3389,14 @@ location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 <tr><th style="text-align: left">形式</th><th style="text-align: left">動作</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_km)</code></td><td style="text-align: left">中心 <code>(lat, lon)</code> から <code>distance_km</code> キロメートル以内の格納済み座標を返す</td></tr>
+<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_m)</code></td><td style="text-align: left">中心 <code>(lat, lon)</code> から <code>distance_m</code> メートル以内の格納済み座標を返す</td></tr>
 <tr><td style="text-align: left"><code>geo_bbox(min_lat, min_lon, max_lat, max_lon)</code></td><td style="text-align: left">軸並行緯度・経度範囲に含まれる格納済み座標を返す</td></tr>
 </tbody>
 </table>
 </div>
 <p>例：</p>
-<pre><code class="language-text"># 東京から 10 km 以内（35.6895, 139.6917）
-location:geo_distance(35.6895, 139.6917, 10)
+<pre><code class="language-text"># 東京から 10 km（= 10 000 m）以内（35.6895, 139.6917）
+location:geo_distance(35.6895, 139.6917, 10000)
 
 # 軸並行緯度・経度範囲
 location:geo_bbox(35.0, 139.0, 36.0, 140.0)
@@ -3408,7 +3408,7 @@ location:geo_bbox(35.0, 139.0, 36.0, 140.0)
 <h3 id="3d-地理クエリgeo3d_"><a class="header" href="#3d-地理クエリgeo3d_">3D 地理クエリ（<code>geo3d_*</code>）</a></h3>
 <p>3 種類の関数形式を <code>Geo3d</code>（3D ECEF 直交座標）フィールドに対して使えます。
 <code>k</code> 以外の引数はすべてメートル単位の符号付き浮動小数点数、<code>k</code> のみ符号なし整数：</p>
-<pre><code class="language-text">position:geo3d_distance(x, y, z, radius_m)
+<pre><code class="language-text">position:geo3d_distance(x, y, z, distance_m)
 position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
 position:geo3d_nearest(x, y, z, k)
 </code></pre>
@@ -3418,7 +3418,7 @@ position:geo3d_nearest(x, y, z, k)
 <tr><th style="text-align: left">形式</th><th style="text-align: left">動作</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left"><code>(x, y, z)</code> から <code>radius_m</code> メートル以内の格納済みポイントを返す</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left"><code>(x, y, z)</code> から <code>distance_m</code> メートル以内の格納済みポイントを返す</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">軸並行 3D ボックスに含まれる格納済みポイントを返す</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left"><code>(x, y, z)</code> に最も近い <code>k</code> 件をユークリッド距離順で返す</td></tr>
 </tbody>
@@ -3946,7 +3946,7 @@ let (lat, lon, height) = ecef_to_wgs84(&amp;p);
 を共有する <a href="#intersectvisitor-プロトコル"><code>IntersectVisitor</code></a>
 の実装である。</p>
 <h3 id="球半径--geo3ddistancequery"><a class="header" href="#球半径--geo3ddistancequery">球（半径） — <code>Geo3dDistanceQuery</code></a></h3>
-<p>中心点から <code>radius_m</code> メートル以内に格納済みポイントが入っているドキュメントを
+<p>中心点から <code>distance_m</code> メートル以内に格納済みポイントが入っているドキュメントを
 すべて返す。スコアは <code>1 - distance / radius</code> を <code>[0, 1]</code> にクランプした
 値。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -4019,7 +4019,7 @@ position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
 <tr><th style="text-align: left">形式</th><th style="text-align: left">引数</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">中心 <code>(x, y, z)</code> と検索半径（m）</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">中心 <code>(x, y, z)</code> と最大距離（m）</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">AABB の対角の 2 隅</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">中心 <code>(x, y, z)</code> と整数 <code>k</code></td></tr>
 </tbody>
@@ -7843,7 +7843,7 @@ message DeleteFieldResponse {
 <h3 id="3d-地理クエリ-1"><a class="header" href="#3d-地理クエリ-1">3D 地理クエリ</a></h3>
 <p>3D ECEF の地理クエリは <code>SearchRequest.query</code> に渡す Lexical DSL 文字列で表現します。専用のメッセージ型はなく、コアライブラリで使用される DSL 形式がそのまま gRPC 経由でも動作します。3 種類の形式があります（構文の詳細は <a href="#3d-geographic-queries-geo3d_">Query DSL → 3D 地理クエリ</a> を参照）:</p>
 <ul>
-<li><code>position:geo3d_distance(x, y, z, radius_m)</code> — <code>(x, y, z)</code> を中心とした半径（メートル単位）の球</li>
+<li><code>position:geo3d_distance(x, y, z, distance_m)</code> — <code>(x, y, z)</code> を中心とした最大距離（メートル単位）の球</li>
 <li><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code> — 3D 軸並行バウンディングボックス</li>
 <li><code>position:geo3d_nearest(x, y, z, k)</code> — <code>(x, y, z)</code> に最も近い k 個の近傍点</li>
 </ul>
@@ -8560,7 +8560,7 @@ name: "category"
 <tr><th style="text-align: left">クエリ</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left"><code>(x, y, z)</code> を中心とした半径（メートル単位）の球</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left"><code>(x, y, z)</code> を中心とした最大距離（メートル単位）の球</td></tr>
 <tr><td style="text-align: left"><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">3D 軸並行バウンディングボックス</td></tr>
 <tr><td style="text-align: left"><code>position:geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left"><code>(x, y, z)</code> に最も近い k 個の近傍点</td></tr>
 </tbody>
@@ -8977,10 +8977,10 @@ print(stats["vector_fields"])
 数値型（整数または浮動小数点）は <code>min</code>/<code>max</code> の Python 型から推論されます。</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-python">GeoDistanceQuery.within_radius(
-    field: str, lat: float, lon: float, distance_km: float,
+    field: str, lat: float, lon: float, distance_m: float,
 )
 </code></pre>
-<p>地理的距離検索（半径指定）。指定した地点から <code>distance_km</code> キロメートル以内の
+<p>地理的距離検索（半径指定）。指定した地点から <code>distance_m</code> メートル以内の
 <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-python">GeoBoundingBoxQuery.within_bounding_box(
@@ -8992,10 +8992,10 @@ print(stats["vector_fields"])
 <p>地理的範囲（バウンディングボックス）検索。軸並行 <code>[min_lat, max_lat] × [min_lon, max_lon]</code> 内の <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-python">Geo3dDistanceQuery.within_sphere(
-    field: str, x: float, y: float, z: float, radius_m: float,
+    field: str, x: float, y: float, z: float, distance_m: float,
 )
 </code></pre>
-<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>radius_m</code> メートル以内
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>distance_m</code> メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 <a href="#3d-地理検索-ecef">Geo3d の概念</a> を参照。</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
@@ -9540,7 +9540,7 @@ console.log(stats.vectorFields);
 <code>"float"</code>）。それ以外の値は例外をスローします。</p>
 <h3 id="geodistancequery-1"><a class="header" href="#geodistancequery-1">GeoDistanceQuery</a></h3>
 <pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
-  field: string, lat: number, lon: number, distanceKm: number,
+  field: string, lat: number, lon: number, distanceM: number,
 ): GeoDistanceQuery
 </code></pre>
 <p>地理的距離検索（半径指定）。</p>
@@ -9556,10 +9556,10 @@ console.log(stats.vectorFields);
 <pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
   field: string,
   x: number, y: number, z: number,
-  radiusM: number,
+  distanceM: number,
 ): Geo3dDistanceQuery
 </code></pre>
-<p>3D ECEF 座標フィールドへの球距離検索。中心から <code>radiusM</code> メートル以内の <code>(x, y, z)</code>
+<p>3D ECEF 座標フィールドへの球距離検索。中心から <code>distanceM</code> メートル以内の <code>(x, y, z)</code>
 座標を持つドキュメントを返します。ECEF の理論については
 <a href="#3d-地理検索-ecef">Geo3d の概念</a> を参照。</p>
 <h3 id="geo3dboundingboxquery-1"><a class="header" href="#geo3dboundingboxquery-1">Geo3dBoundingBoxQuery</a></h3>
@@ -10256,8 +10256,8 @@ module.exports = {
 </li>
 <li><strong>戻り値:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
-<h4 id="searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><code>searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)</code></a></h4>
-<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>radiusM</code> メートル以内
+<h4 id="searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><code>searchGeo3dDistance(field, x, y, z, distanceM, limit?, offset?)</code></a></h4>
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>distanceM</code> メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 <a href="#3d-地理検索-ecef">Geo3d の概念</a> を参照。</p>
 <ul>
@@ -10265,7 +10265,7 @@ module.exports = {
 <ul>
 <li><code>field</code> (string) – Geo3d フィールド名</li>
 <li><code>x</code>, <code>y</code>, <code>z</code> (number) – 中心 ECEF 座標（メートル）</li>
-<li><code>radiusM</code> (number) – 球の半径（メートル）</li>
+<li><code>distanceM</code> (number) – 中心からの最大距離（メートル）</li>
 <li><code>limit</code>, <code>offset</code> (number, 省略可)</li>
 </ul>
 </li>
@@ -10833,9 +10833,9 @@ puts stats["vector_fields"]
 </code></pre>
 <p><code>[min, max]</code> の範囲内の数値を検索します。開いた境界には <code>nil</code> を指定します。型（整数または浮動小数点）は <code>min</code>/<code>max</code> の Ruby 型から推論されます。</p>
 <h3 id="geodistancequery-2"><a class="header" href="#geodistancequery-2">GeoDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
+<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_m)
 </code></pre>
-<p>地理的距離検索（半径指定）。指定した地点から <code>distance_km</code> キロメートル以内の
+<p>地理的距離検索（半径指定）。指定した地点から <code>distance_m</code> メートル以内の
 <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geoboundingboxquery-2"><a class="header" href="#geoboundingboxquery-2">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-ruby">Laurus::GeoBoundingBoxQuery.within_bounding_box(
@@ -10844,9 +10844,9 @@ puts stats["vector_fields"]
 </code></pre>
 <p>地理的範囲（バウンディングボックス）検索。軸並行 <code>[min_lat, max_lat] × [min_lon, max_lon]</code> 内の <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geo3ddistancequery-2"><a class="header" href="#geo3ddistancequery-2">Geo3dDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)
 </code></pre>
-<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>radius_m</code> メートル以内
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>distance_m</code> メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 <a href="#3d-地理検索-ecef">Geo3d の概念</a> を参照。</p>
 <h3 id="geo3dboundingboxquery-2"><a class="header" href="#geo3dboundingboxquery-2">Geo3dBoundingBoxQuery</a></h3>
@@ -11423,10 +11423,10 @@ echo $stats["vectorFields"];
 <p><code>[$min, $max]</code> の範囲内の数値を検索します。開いた境界には <code>null</code> を指定します。<code>$numericType</code> には <code>"integer"</code> または <code>"float"</code> を設定します。</p>
 <h3 id="geodistancequery-3"><a class="header" href="#geodistancequery-3">GeoDistanceQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoDistanceQuery::withinRadius(
-    string $field, float $lat, float $lon, float $distanceKm,
+    string $field, float $lat, float $lon, float $distanceM,
 ): GeoDistanceQuery
 </code></pre>
-<p>地理的距離検索（半径指定）。指定した地点から <code>$distanceKm</code> キロメートル以内の
+<p>地理的距離検索（半径指定）。指定した地点から <code>$distanceM</code> メートル以内の
 <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geoboundingboxquery-3"><a class="header" href="#geoboundingboxquery-3">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
@@ -11440,10 +11440,10 @@ echo $stats["vectorFields"];
 <pre><code class="language-php">\Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
     float $x, float $y, float $z,
-    float $radiusM,
+    float $distanceM,
 ): Geo3dDistanceQuery
 </code></pre>
-<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>$radiusM</code> メートル以内
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>$distanceM</code> メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 <a href="#3d-地理検索-ecef">Geo3d の概念</a> を参照。</p>
 <h3 id="geo3dboundingboxquery-3"><a class="header" href="#geo3dboundingboxquery-3">Geo3dBoundingBoxQuery</a></h3>

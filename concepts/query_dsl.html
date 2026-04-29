@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
+            window.path_to_searchindex_js = "../searchindex-203f23e2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -234,8 +234,8 @@ price:[* TO 100]
 <h3 id="2d-geographic-queries-geo_"><a class="header" href="#2d-geographic-queries-geo_">2D Geographic Queries (<code>geo_*</code>)</a></h3>
 <p>Two function-style forms target <code>Geo</code> (2D latitude / longitude) fields. All
 arguments are signed floats; latitudes / longitudes are in degrees and the
-radius is in kilometres:</p>
-<pre><code class="language-text">location:geo_distance(lat, lon, distance_km)
+distance is in metres:</p>
+<pre><code class="language-text">location:geo_distance(lat, lon, distance_m)
 location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 </code></pre>
 <div class="table-wrapper">
@@ -244,14 +244,14 @@ location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 <tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_km)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies within <code>distance_km</code> kilometres of the given centre.</td></tr>
+<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_m)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies within <code>distance_m</code> metres of the given centre.</td></tr>
 <tr><td style="text-align: left"><code>geo_bbox(min_lat, min_lon, max_lat, max_lon)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies inside the axis-aligned latitude / longitude rectangle.</td></tr>
 </tbody>
 </table>
 </div>
 <p>Examples:</p>
-<pre><code class="language-text"># Within 10 km of Tokyo (35.6895, 139.6917)
-location:geo_distance(35.6895, 139.6917, 10)
+<pre><code class="language-text"># Within 10 km (= 10 000 m) of Tokyo (35.6895, 139.6917)
+location:geo_distance(35.6895, 139.6917, 10000)
 
 # Inside an axis-aligned lat/lon bounding box
 location:geo_bbox(35.0, 139.0, 36.0, 140.0)
@@ -264,7 +264,7 @@ out-of-range values.</p>
 <h3 id="3d-geographic-queries-geo3d_"><a class="header" href="#3d-geographic-queries-geo3d_">3D Geographic Queries (<code>geo3d_*</code>)</a></h3>
 <p>Three function-style forms target <code>Geo3d</code> (3D ECEF Cartesian) fields. All
 arguments are signed floats in metres, except <code>k</code> (an unsigned integer):</p>
-<pre><code class="language-text">position:geo3d_distance(x, y, z, radius_m)
+<pre><code class="language-text">position:geo3d_distance(x, y, z, distance_m)
 position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
 position:geo3d_nearest(x, y, z, k)
 </code></pre>
@@ -274,7 +274,7 @@ position:geo3d_nearest(x, y, z, k)
 <tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">All docs whose stored point lies within <code>radius_m</code> metres of <code>(x, y, z)</code>.</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">All docs whose stored point lies within <code>distance_m</code> metres of <code>(x, y, z)</code>.</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">All docs whose stored point lies inside the axis-aligned 3D box.</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">The <code>k</code> nearest docs to <code>(x, y, z)</code> by Euclidean distance.</td></tr>
 </tbody>

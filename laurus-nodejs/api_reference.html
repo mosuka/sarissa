@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
+            window.path_to_searchindex_js = "../searchindex-203f23e2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -317,7 +317,7 @@ open bound. <code>numericType</code> selects the underlying range type
 (<code>"integer"</code> (default) or <code>"float"</code>); other values throw.</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
-  field: string, lat: number, lon: number, distanceKm: number,
+  field: string, lat: number, lon: number, distanceM: number,
 ): GeoDistanceQuery
 </code></pre>
 <p>Geographic distance (radius) search.</p>
@@ -333,11 +333,11 @@ open bound. <code>numericType</code> selects the underlying range type
 <pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
   field: string,
   x: number, y: number, z: number,
-  radiusM: number,
+  distanceM: number,
 ): Geo3dDistanceQuery
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radiusM</code> metres of the centre. See
+coordinate is within <code>distanceM</code> metres of the centre. See
 <a href="../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-typescript">Geo3dBoundingBoxQuery.withinBox(

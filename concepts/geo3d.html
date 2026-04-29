@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
+            window.path_to_searchindex_js = "../searchindex-203f23e2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -289,7 +289,7 @@ so external code can reference the exact values laurus uses.</p>
 <a href="bkd_tree.html#query-the-intersectvisitor-protocol"><code>IntersectVisitor</code></a> implementations
 on top of the shared 3D BKD-Tree.</p>
 <h3 id="sphere-radius--geo3ddistancequery"><a class="header" href="#sphere-radius--geo3ddistancequery">Sphere (radius) — <code>Geo3dDistanceQuery</code></a></h3>
-<p>Find every document whose stored point lies within <code>radius_m</code> metres of a
+<p>Find every document whose stored point lies within <code>distance_m</code> metres of a
 centre point. Score is <code>1 - distance / radius</code>, clamped to <code>[0, 1]</code>.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
@@ -362,7 +362,7 @@ position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
 <tr><th style="text-align: left">Form</th><th style="text-align: left">Arguments</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and search radius in metres</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and maximum distance in metres</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">two opposite corners of the AABB</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and the integer <code>k</code></td></tr>
 </tbody>

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1eda23b7.js";
+            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -324,10 +324,10 @@
 <p><code>[$min, $max]</code> の範囲内の数値を検索します。開いた境界には <code>null</code> を指定します。<code>$numericType</code> には <code>"integer"</code> または <code>"float"</code> を設定します。</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoDistanceQuery::withinRadius(
-    string $field, float $lat, float $lon, float $distanceKm,
+    string $field, float $lat, float $lon, float $distanceM,
 ): GeoDistanceQuery
 </code></pre>
-<p>地理的距離検索（半径指定）。指定した地点から <code>$distanceKm</code> キロメートル以内の
+<p>地理的距離検索（半径指定）。指定した地点から <code>$distanceM</code> メートル以内の
 <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
@@ -341,10 +341,10 @@
 <pre><code class="language-php">\Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
     float $x, float $y, float $z,
-    float $radiusM,
+    float $distanceM,
 ): Geo3dDistanceQuery
 </code></pre>
-<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>$radiusM</code> メートル以内
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>$distanceM</code> メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 <a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>

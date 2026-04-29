@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1eda23b7.js";
+            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -323,9 +323,9 @@
 </code></pre>
 <p><code>[min, max]</code> の範囲内の数値を検索します。開いた境界には <code>nil</code> を指定します。型（整数または浮動小数点）は <code>min</code>/<code>max</code> の Ruby 型から推論されます。</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
+<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_m)
 </code></pre>
-<p>地理的距離検索（半径指定）。指定した地点から <code>distance_km</code> キロメートル以内の
+<p>地理的距離検索（半径指定）。指定した地点から <code>distance_m</code> メートル以内の
 <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-ruby">Laurus::GeoBoundingBoxQuery.within_bounding_box(
@@ -334,9 +334,9 @@
 </code></pre>
 <p>地理的範囲（バウンディングボックス）検索。軸並行 <code>[min_lat, max_lat] × [min_lon, max_lon]</code> 内の <code>(lat, lon)</code> 座標を持つドキュメントを返します。</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)
 </code></pre>
-<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>radius_m</code> メートル以内
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>distance_m</code> メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 <a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>

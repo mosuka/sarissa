@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
+            window.path_to_searchindex_js = "../searchindex-203f23e2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -293,16 +293,16 @@
 </li>
 <li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
-<h4 id="searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><code>searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)</code></a></h4>
+<h4 id="searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><code>searchGeo3dDistance(field, x, y, z, distanceM, limit?, offset?)</code></a></h4>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radiusM</code> metres of the centre. See
+coordinate is within <code>distanceM</code> metres of the centre. See
 <a href="../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <ul>
 <li><strong>Parameters:</strong>
 <ul>
 <li><code>field</code> (string) – Geo3d field name.</li>
 <li><code>x</code>, <code>y</code>, <code>z</code> (number) – Centre ECEF coordinate (metres).</li>
-<li><code>radiusM</code> (number) – Sphere radius (metres).</li>
+<li><code>distanceM</code> (number) – Maximum distance from the centre (metres).</li>
 <li><code>limit</code>, <code>offset</code> (number, optional)</li>
 </ul>
 </li>

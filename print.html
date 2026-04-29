@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-af1326ef.js";
+            window.path_to_searchindex_js = "searchindex-203f23e2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a6ad8c0d.js"></script>
@@ -2691,8 +2691,8 @@ let query = NumericRangeQuery::new(
 </span><span class="boring">fn main() {
 </span>use laurus::lexical::query::geo::GeoQuery;
 
-// Find documents within 10km of Tokyo Station (35.6812, 139.7671)
-let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10.0)?; // radius in kilometers
+// Find documents within 10 km (= 10 000 m) of Tokyo Station (35.6812, 139.7671)
+let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10_000.0)?; // distance in metres
 
 // Find documents within a bounding box (min_lat, min_lon, max_lat, max_lon)
 let query = GeoQuery::within_bounding_box(
@@ -3476,8 +3476,8 @@ price:[* TO 100]
 <h3 id="2d-geographic-queries-geo_"><a class="header" href="#2d-geographic-queries-geo_">2D Geographic Queries (<code>geo_*</code>)</a></h3>
 <p>Two function-style forms target <code>Geo</code> (2D latitude / longitude) fields. All
 arguments are signed floats; latitudes / longitudes are in degrees and the
-radius is in kilometres:</p>
-<pre><code class="language-text">location:geo_distance(lat, lon, distance_km)
+distance is in metres:</p>
+<pre><code class="language-text">location:geo_distance(lat, lon, distance_m)
 location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 </code></pre>
 <div class="table-wrapper">
@@ -3486,14 +3486,14 @@ location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 <tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_km)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies within <code>distance_km</code> kilometres of the given centre.</td></tr>
+<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_m)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies within <code>distance_m</code> metres of the given centre.</td></tr>
 <tr><td style="text-align: left"><code>geo_bbox(min_lat, min_lon, max_lat, max_lon)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies inside the axis-aligned latitude / longitude rectangle.</td></tr>
 </tbody>
 </table>
 </div>
 <p>Examples:</p>
-<pre><code class="language-text"># Within 10 km of Tokyo (35.6895, 139.6917)
-location:geo_distance(35.6895, 139.6917, 10)
+<pre><code class="language-text"># Within 10 km (= 10 000 m) of Tokyo (35.6895, 139.6917)
+location:geo_distance(35.6895, 139.6917, 10000)
 
 # Inside an axis-aligned lat/lon bounding box
 location:geo_bbox(35.0, 139.0, 36.0, 140.0)
@@ -3506,7 +3506,7 @@ out-of-range values.</p>
 <h3 id="3d-geographic-queries-geo3d_"><a class="header" href="#3d-geographic-queries-geo3d_">3D Geographic Queries (<code>geo3d_*</code>)</a></h3>
 <p>Three function-style forms target <code>Geo3d</code> (3D ECEF Cartesian) fields. All
 arguments are signed floats in metres, except <code>k</code> (an unsigned integer):</p>
-<pre><code class="language-text">position:geo3d_distance(x, y, z, radius_m)
+<pre><code class="language-text">position:geo3d_distance(x, y, z, distance_m)
 position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
 position:geo3d_nearest(x, y, z, k)
 </code></pre>
@@ -3516,7 +3516,7 @@ position:geo3d_nearest(x, y, z, k)
 <tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">All docs whose stored point lies within <code>radius_m</code> metres of <code>(x, y, z)</code>.</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">All docs whose stored point lies within <code>distance_m</code> metres of <code>(x, y, z)</code>.</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">All docs whose stored point lies inside the axis-aligned 3D box.</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">The <code>k</code> nearest docs to <code>(x, y, z)</code> by Euclidean distance.</td></tr>
 </tbody>
@@ -4048,7 +4048,7 @@ so external code can reference the exact values laurus uses.</p>
 <a href="#query-the-intersectvisitor-protocol"><code>IntersectVisitor</code></a> implementations
 on top of the shared 3D BKD-Tree.</p>
 <h3 id="sphere-radius--geo3ddistancequery"><a class="header" href="#sphere-radius--geo3ddistancequery">Sphere (radius) — <code>Geo3dDistanceQuery</code></a></h3>
-<p>Find every document whose stored point lies within <code>radius_m</code> metres of a
+<p>Find every document whose stored point lies within <code>distance_m</code> metres of a
 centre point. Score is <code>1 - distance / radius</code>, clamped to <code>[0, 1]</code>.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
@@ -4121,7 +4121,7 @@ position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
 <tr><th style="text-align: left">Form</th><th style="text-align: left">Arguments</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and search radius in metres</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and maximum distance in metres</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">two opposite corners of the AABB</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and the integer <code>k</code></td></tr>
 </tbody>
@@ -7956,7 +7956,7 @@ inaccessible. Per-field analyzers and embedders are unregistered.</p>
 <h3 id="3d-geographic-queries-1"><a class="header" href="#3d-geographic-queries-1">3D Geographic Queries</a></h3>
 <p>3D ECEF geographic queries are expressed in the lexical DSL string passed via <code>SearchRequest.query</code>. There is no dedicated message type — the same DSL forms used by the core library work over gRPC. Three forms are available (see <a href="#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for full syntax):</p>
 <ul>
-<li><code>position:geo3d_distance(x, y, z, radius_m)</code> — sphere centered at <code>(x, y, z)</code> with radius in meters</li>
+<li><code>position:geo3d_distance(x, y, z, distance_m)</code> — sphere centered at <code>(x, y, z)</code> with maximum distance in meters</li>
 <li><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code> — 3D axis-aligned bounding box</li>
 <li><code>position:geo3d_nearest(x, y, z, k)</code> — k nearest neighbours to <code>(x, y, z)</code></li>
 </ul>
@@ -8693,7 +8693,7 @@ document: {"title": "Hello World - Part 2", "body": "This is a continuation."}
 <tr><th style="text-align: left">Query</th><th style="text-align: left">Description</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">Sphere with center <code>(x, y, z)</code> and radius in meters</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">Sphere with center <code>(x, y, z)</code> and maximum distance in meters</td></tr>
 <tr><td style="text-align: left"><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">3D axis-aligned bounding box</td></tr>
 <tr><td style="text-align: left"><code>position:geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">k nearest neighbors to <code>(x, y, z)</code></td></tr>
 </tbody>
@@ -9113,11 +9113,11 @@ an open bound. <code>min</code> and <code>max</code> are keyword-only. The numer
 float) is inferred from the Python type of <code>min</code>/<code>max</code>.</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-python">GeoDistanceQuery.within_radius(
-    field: str, lat: float, lon: float, distance_km: float,
+    field: str, lat: float, lon: float, distance_m: float,
 )
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>distance_km</code> kilometres of the given point.</p>
+is within <code>distance_m</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-python">GeoBoundingBoxQuery.within_bounding_box(
     field: str,
@@ -9129,11 +9129,11 @@ is within <code>distance_km</code> kilometres of the given point.</p>
 inside the axis-aligned <code>[min_lat, max_lat] × [min_lon, max_lon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-python">Geo3dDistanceQuery.within_sphere(
-    field: str, x: float, y: float, z: float, radius_m: float,
+    field: str, x: float, y: float, z: float, distance_m: float,
 )
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radius_m</code> metres of the centre. See
+coordinate is within <code>distance_m</code> metres of the centre. See
 <a href="#3d-geographic-search-ecef">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-python">Geo3dBoundingBoxQuery.within_box(
@@ -9686,7 +9686,7 @@ open bound. <code>numericType</code> selects the underlying range type
 (<code>"integer"</code> (default) or <code>"float"</code>); other values throw.</p>
 <h3 id="geodistancequery-1"><a class="header" href="#geodistancequery-1">GeoDistanceQuery</a></h3>
 <pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
-  field: string, lat: number, lon: number, distanceKm: number,
+  field: string, lat: number, lon: number, distanceM: number,
 ): GeoDistanceQuery
 </code></pre>
 <p>Geographic distance (radius) search.</p>
@@ -9702,11 +9702,11 @@ open bound. <code>numericType</code> selects the underlying range type
 <pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
   field: string,
   x: number, y: number, z: number,
-  radiusM: number,
+  distanceM: number,
 ): Geo3dDistanceQuery
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radiusM</code> metres of the centre. See
+coordinate is within <code>distanceM</code> metres of the centre. See
 <a href="#3d-geographic-search-ecef">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery-1"><a class="header" href="#geo3dboundingboxquery-1">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-typescript">Geo3dBoundingBoxQuery.withinBox(
@@ -10421,16 +10421,16 @@ module.exports = {
 </li>
 <li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
-<h4 id="searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><code>searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)</code></a></h4>
+<h4 id="searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><code>searchGeo3dDistance(field, x, y, z, distanceM, limit?, offset?)</code></a></h4>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radiusM</code> metres of the centre. See
+coordinate is within <code>distanceM</code> metres of the centre. See
 <a href="#3d-geographic-search-ecef">Geo3d concepts</a> for ECEF theory.</p>
 <ul>
 <li><strong>Parameters:</strong>
 <ul>
 <li><code>field</code> (string) – Geo3d field name.</li>
 <li><code>x</code>, <code>y</code>, <code>z</code> (number) – Centre ECEF coordinate (metres).</li>
-<li><code>radiusM</code> (number) – Sphere radius (metres).</li>
+<li><code>distanceM</code> (number) – Maximum distance from the centre (metres).</li>
 <li><code>limit</code>, <code>offset</code> (number, optional)</li>
 </ul>
 </li>
@@ -11008,10 +11008,10 @@ the full behaviour matrix.</p>
 </code></pre>
 <p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>nil</code> for an open bound. The type (integer or float) is inferred from the Ruby type of <code>min</code>/<code>max</code>.</p>
 <h3 id="geodistancequery-2"><a class="header" href="#geodistancequery-2">GeoDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
+<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_m)
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>distance_km</code> kilometres of the given point.</p>
+is within <code>distance_m</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery-2"><a class="header" href="#geoboundingboxquery-2">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-ruby">Laurus::GeoBoundingBoxQuery.within_bounding_box(
   field, min_lat, min_lon, max_lat, max_lon,
@@ -11020,10 +11020,10 @@ is within <code>distance_km</code> kilometres of the given point.</p>
 <p>Geo bounding-box search. Returns documents whose <code>(lat, lon)</code> coordinate lies
 inside the axis-aligned <code>[min_lat, max_lat] × [min_lon, max_lon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery-2"><a class="header" href="#geo3ddistancequery-2">Geo3dDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radius_m</code> metres of the centre. See
+coordinate is within <code>distance_m</code> metres of the centre. See
 <a href="#3d-geographic-search-ecef">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery-2"><a class="header" href="#geo3dboundingboxquery-2">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-ruby">Laurus::Geo3dBoundingBoxQuery.within_box(
@@ -11609,11 +11609,11 @@ the full behaviour matrix.</p>
 <p>Matches numeric values in the range <code>[$min, $max]</code>. Pass <code>null</code> for an open bound. Set <code>$numericType</code> to <code>"integer"</code> or <code>"float"</code>.</p>
 <h3 id="geodistancequery-3"><a class="header" href="#geodistancequery-3">GeoDistanceQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoDistanceQuery::withinRadius(
-    string $field, float $lat, float $lon, float $distanceKm,
+    string $field, float $lat, float $lon, float $distanceM,
 ): GeoDistanceQuery
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>$distanceKm</code> kilometres of the given point.</p>
+is within <code>$distanceM</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery-3"><a class="header" href="#geoboundingboxquery-3">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
     string $field,
@@ -11627,11 +11627,11 @@ inside the axis-aligned <code>[$minLat, $maxLat] × [$minLon, $maxLon]</code> re
 <pre><code class="language-php">\Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
     float $x, float $y, float $z,
-    float $radiusM,
+    float $distanceM,
 ): Geo3dDistanceQuery
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>$radiusM</code> metres of the centre. See
+coordinate is within <code>$distanceM</code> metres of the centre. See
 <a href="#3d-geographic-search-ecef">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery-3"><a class="header" href="#geo3dboundingboxquery-3">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-php">\Laurus\Geo3dBoundingBoxQuery::withinBox(

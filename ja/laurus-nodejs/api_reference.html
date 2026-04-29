@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1eda23b7.js";
+            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -313,7 +313,7 @@
 <code>"float"</code>）。それ以外の値は例外をスローします。</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
-  field: string, lat: number, lon: number, distanceKm: number,
+  field: string, lat: number, lon: number, distanceM: number,
 ): GeoDistanceQuery
 </code></pre>
 <p>地理的距離検索（半径指定）。</p>
@@ -329,10 +329,10 @@
 <pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
   field: string,
   x: number, y: number, z: number,
-  radiusM: number,
+  distanceM: number,
 ): Geo3dDistanceQuery
 </code></pre>
-<p>3D ECEF 座標フィールドへの球距離検索。中心から <code>radiusM</code> メートル以内の <code>(x, y, z)</code>
+<p>3D ECEF 座標フィールドへの球距離検索。中心から <code>distanceM</code> メートル以内の <code>(x, y, z)</code>
 座標を持つドキュメントを返します。ECEF の理論については
 <a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>

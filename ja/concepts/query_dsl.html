@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1eda23b7.js";
+            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -230,8 +230,8 @@ price:[* TO 100]
 </code></pre>
 <h3 id="2d-地理クエリgeo_"><a class="header" href="#2d-地理クエリgeo_">2D 地理クエリ（<code>geo_*</code>)</a></h3>
 <p>2 種類の関数形式を <code>Geo</code>（2D 緯度 / 経度）フィールドに対して使えます。
-緯度・経度は度単位、半径はキロメートル単位の符号付き浮動小数点数：</p>
-<pre><code class="language-text">location:geo_distance(lat, lon, distance_km)
+緯度・経度は度単位、距離はメートル単位の符号付き浮動小数点数：</p>
+<pre><code class="language-text">location:geo_distance(lat, lon, distance_m)
 location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 </code></pre>
 <div class="table-wrapper">
@@ -240,14 +240,14 @@ location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 <tr><th style="text-align: left">形式</th><th style="text-align: left">動作</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_km)</code></td><td style="text-align: left">中心 <code>(lat, lon)</code> から <code>distance_km</code> キロメートル以内の格納済み座標を返す</td></tr>
+<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_m)</code></td><td style="text-align: left">中心 <code>(lat, lon)</code> から <code>distance_m</code> メートル以内の格納済み座標を返す</td></tr>
 <tr><td style="text-align: left"><code>geo_bbox(min_lat, min_lon, max_lat, max_lon)</code></td><td style="text-align: left">軸並行緯度・経度範囲に含まれる格納済み座標を返す</td></tr>
 </tbody>
 </table>
 </div>
 <p>例：</p>
-<pre><code class="language-text"># 東京から 10 km 以内（35.6895, 139.6917）
-location:geo_distance(35.6895, 139.6917, 10)
+<pre><code class="language-text"># 東京から 10 km（= 10 000 m）以内（35.6895, 139.6917）
+location:geo_distance(35.6895, 139.6917, 10000)
 
 # 軸並行緯度・経度範囲
 location:geo_bbox(35.0, 139.0, 36.0, 140.0)
@@ -259,7 +259,7 @@ location:geo_bbox(35.0, 139.0, 36.0, 140.0)
 <h3 id="3d-地理クエリgeo3d_"><a class="header" href="#3d-地理クエリgeo3d_">3D 地理クエリ（<code>geo3d_*</code>）</a></h3>
 <p>3 種類の関数形式を <code>Geo3d</code>（3D ECEF 直交座標）フィールドに対して使えます。
 <code>k</code> 以外の引数はすべてメートル単位の符号付き浮動小数点数、<code>k</code> のみ符号なし整数：</p>
-<pre><code class="language-text">position:geo3d_distance(x, y, z, radius_m)
+<pre><code class="language-text">position:geo3d_distance(x, y, z, distance_m)
 position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
 position:geo3d_nearest(x, y, z, k)
 </code></pre>
@@ -269,7 +269,7 @@ position:geo3d_nearest(x, y, z, k)
 <tr><th style="text-align: left">形式</th><th style="text-align: left">動作</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left"><code>(x, y, z)</code> から <code>radius_m</code> メートル以内の格納済みポイントを返す</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left"><code>(x, y, z)</code> から <code>distance_m</code> メートル以内の格納済みポイントを返す</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">軸並行 3D ボックスに含まれる格納済みポイントを返す</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left"><code>(x, y, z)</code> に最も近い <code>k</code> 件をユークリッド距離順で返す</td></tr>
 </tbody>

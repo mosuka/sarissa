@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
+            window.path_to_searchindex_js = "../searchindex-203f23e2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -325,10 +325,10 @@ the full behaviour matrix.</p>
 </code></pre>
 <p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>nil</code> for an open bound. The type (integer or float) is inferred from the Ruby type of <code>min</code>/<code>max</code>.</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
+<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_m)
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>distance_km</code> kilometres of the given point.</p>
+is within <code>distance_m</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-ruby">Laurus::GeoBoundingBoxQuery.within_bounding_box(
   field, min_lat, min_lon, max_lat, max_lon,
@@ -337,10 +337,10 @@ is within <code>distance_km</code> kilometres of the given point.</p>
 <p>Geo bounding-box search. Returns documents whose <code>(lat, lon)</code> coordinate lies
 inside the axis-aligned <code>[min_lat, max_lat] × [min_lon, max_lon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radius_m</code> metres of the centre. See
+coordinate is within <code>distance_m</code> metres of the centre. See
 <a href="../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-ruby">Laurus::Geo3dBoundingBoxQuery.within_box(

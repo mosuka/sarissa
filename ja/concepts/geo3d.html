@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1eda23b7.js";
+            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -293,7 +293,7 @@ let (lat, lon, height) = ecef_to_wgs84(&amp;p);
 を共有する <a href="bkd_tree.html#intersectvisitor-プロトコル"><code>IntersectVisitor</code></a>
 の実装である。</p>
 <h3 id="球半径--geo3ddistancequery"><a class="header" href="#球半径--geo3ddistancequery">球（半径） — <code>Geo3dDistanceQuery</code></a></h3>
-<p>中心点から <code>radius_m</code> メートル以内に格納済みポイントが入っているドキュメントを
+<p>中心点から <code>distance_m</code> メートル以内に格納済みポイントが入っているドキュメントを
 すべて返す。スコアは <code>1 - distance / radius</code> を <code>[0, 1]</code> にクランプした
 値。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -366,7 +366,7 @@ position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
 <tr><th style="text-align: left">形式</th><th style="text-align: left">引数</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">中心 <code>(x, y, z)</code> と検索半径（m）</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">中心 <code>(x, y, z)</code> と最大距離（m）</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">AABB の対角の 2 隅</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">中心 <code>(x, y, z)</code> と整数 <code>k</code></td></tr>
 </tbody>

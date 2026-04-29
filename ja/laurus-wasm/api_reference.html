@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1eda23b7.js";
+            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -288,8 +288,8 @@
 </li>
 <li><strong>戻り値:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
-<h4 id="searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><code>searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)</code></a></h4>
-<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>radiusM</code> メートル以内
+<h4 id="searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><code>searchGeo3dDistance(field, x, y, z, distanceM, limit?, offset?)</code></a></h4>
+<p>3D ECEF 座標フィールドへの球距離検索。中心 <code>(x, y, z)</code> から <code>distanceM</code> メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 <a href="../concepts/geo3d.html">Geo3d の概念</a> を参照。</p>
 <ul>
@@ -297,7 +297,7 @@
 <ul>
 <li><code>field</code> (string) – Geo3d フィールド名</li>
 <li><code>x</code>, <code>y</code>, <code>z</code> (number) – 中心 ECEF 座標（メートル）</li>
-<li><code>radiusM</code> (number) – 球の半径（メートル）</li>
+<li><code>distanceM</code> (number) – 中心からの最大距離（メートル）</li>
 <li><code>limit</code>, <code>offset</code> (number, 省略可)</li>
 </ul>
 </li>

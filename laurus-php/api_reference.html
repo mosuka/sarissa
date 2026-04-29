@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
+            window.path_to_searchindex_js = "../searchindex-203f23e2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -326,11 +326,11 @@ the full behaviour matrix.</p>
 <p>Matches numeric values in the range <code>[$min, $max]</code>. Pass <code>null</code> for an open bound. Set <code>$numericType</code> to <code>"integer"</code> or <code>"float"</code>.</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoDistanceQuery::withinRadius(
-    string $field, float $lat, float $lon, float $distanceKm,
+    string $field, float $lat, float $lon, float $distanceM,
 ): GeoDistanceQuery
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>$distanceKm</code> kilometres of the given point.</p>
+is within <code>$distanceM</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
     string $field,
@@ -344,11 +344,11 @@ inside the axis-aligned <code>[$minLat, $maxLat] × [$minLon, $maxLon]</code> re
 <pre><code class="language-php">\Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
     float $x, float $y, float $z,
-    float $radiusM,
+    float $distanceM,
 ): Geo3dDistanceQuery
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>$radiusM</code> metres of the centre. See
+coordinate is within <code>$distanceM</code> metres of the centre. See
 <a href="../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-php">\Laurus\Geo3dBoundingBoxQuery::withinBox(

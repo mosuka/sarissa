@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
+            window.path_to_searchindex_js = "../searchindex-203f23e2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -540,7 +540,7 @@ inaccessible. Per-field analyzers and embedders are unregistered.</p>
 <h3 id="3d-geographic-queries"><a class="header" href="#3d-geographic-queries">3D Geographic Queries</a></h3>
 <p>3D ECEF geographic queries are expressed in the lexical DSL string passed via <code>SearchRequest.query</code>. There is no dedicated message type — the same DSL forms used by the core library work over gRPC. Three forms are available (see <a href="../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for full syntax):</p>
 <ul>
-<li><code>position:geo3d_distance(x, y, z, radius_m)</code> — sphere centered at <code>(x, y, z)</code> with radius in meters</li>
+<li><code>position:geo3d_distance(x, y, z, distance_m)</code> — sphere centered at <code>(x, y, z)</code> with maximum distance in meters</li>
 <li><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code> — 3D axis-aligned bounding box</li>
 <li><code>position:geo3d_nearest(x, y, z, k)</code> — k nearest neighbours to <code>(x, y, z)</code></li>
 </ul>
