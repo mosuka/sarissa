@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-69bab5ce.js";
+            window.path_to_searchindex_js = "searchindex-db0eb535.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a6ad8c0d.js"></script>
@@ -11269,8 +11269,8 @@ $schema-&gt;addIvfField("ivf_vec", 128, null, 100, 1);
 </code></pre>
 <h2 id="8-index-statistics-3"><a class="header" href="#8-index-statistics-3">8. Index statistics</a></h2>
 <pre><code class="language-php">$stats = $index-&gt;stats();
-echo $stats["document_count"];
-echo $stats["vector_fields"];
+echo $stats["documentCount"];
+echo $stats["vectorFields"];
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="api-reference-5"><a class="header" href="#api-reference-5">API Reference</a></h1>
@@ -11303,7 +11303,7 @@ echo $stats["vector_fields"];
 <tr><td style="text-align: left"><code>deleteDocuments(string $id): void</code></td><td style="text-align: left">Delete all versions for the given ID.</td></tr>
 <tr><td style="text-align: left"><code>commit(): void</code></td><td style="text-align: left">Flush buffered writes and make all pending changes searchable.</td></tr>
 <tr><td style="text-align: left"><code>search(mixed $query, int $limit = 10, int $offset = 0): array</code></td><td style="text-align: left">Execute a search query. Returns an array of <code>SearchResult</code>.</td></tr>
-<tr><td style="text-align: left"><code>stats(): array</code></td><td style="text-align: left">Return index statistics (<code>"document_count"</code>, <code>"vector_fields"</code>).</td></tr>
+<tr><td style="text-align: left"><code>stats(): array</code></td><td style="text-align: left">Return index statistics (<code>"documentCount"</code>, <code>"vectorFields"</code>).</td></tr>
 </tbody>
 </table>
 </div>
@@ -11622,7 +11622,7 @@ use Laurus\Index;
 \$index = new Index();
 print_r(\$index-&gt;stats());
 "
-# Array ( [document_count] =&gt; 0 [vector_fields] =&gt; Array ( ) )
+# Array ( [documentCount] =&gt; 0 [vectorFields] =&gt; Array ( ) )
 </code></pre>
 <h2 id="testing-3"><a class="header" href="#testing-3">Testing</a></h2>
 <p>Tests use <a href="https://phpunit.de/">PHPUnit</a> and are located in
