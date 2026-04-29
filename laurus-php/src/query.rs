@@ -903,6 +903,34 @@ impl PhpSpanQuery {
         }
     }
 
+    /// SpanNear with nested `SpanQuery` clauses instead of plain terms.
+    ///
+    /// Use this when you need a `SpanNear` that contains other span queries
+    /// (e.g. another `SpanNear`, a `SpanContaining`, or a `SpanWithin`)
+    /// rather than just term clauses.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Field to search.
+    /// * `clauses` - Array of `Laurus\\SpanQuery` instances. Each clause's
+    ///   `field` is replaced by `field` at build time, so nested clauses are
+    ///   re-rooted onto the outer field.
+    /// * `slop` - Maximum token distance between clauses (default: 0).
+    /// * `ordered` - Whether clauses must appear in order (default: true).
+    #[php(defaults(slop = 0, ordered = true))]
+    pub fn near_spans(
+        field: String,
+        clauses: Vec<&PhpSpanQuery>,
+        slop: i64,
+        ordered: bool,
+    ) -> Self {
+        let kinds: Vec<SpanKind> = clauses.iter().map(|c| c.kind.clone()).collect();
+        Self {
+            field,
+            kind: SpanKind::Near(kinds, slop as u32, ordered),
+        }
+    }
+
     /// SpanContaining: a span that contains another span.
     ///
     /// # Arguments
