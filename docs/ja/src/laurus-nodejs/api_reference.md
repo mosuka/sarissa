@@ -148,7 +148,7 @@ new NumericRangeQuery(
 
 ```typescript
 GeoDistanceQuery.withinRadius(
-  field: string, lat: number, lon: number, distanceKm: number,
+  field: string, lat: number, lon: number, distanceM: number,
 ): GeoDistanceQuery
 ```
 
@@ -172,11 +172,11 @@ GeoBoundingBoxQuery.withinBoundingBox(
 Geo3dDistanceQuery.withinSphere(
   field: string,
   x: number, y: number, z: number,
-  radiusM: number,
+  distanceM: number,
 ): Geo3dDistanceQuery
 ```
 
-3D ECEF 座標フィールドへの球距離検索。中心から `radiusM` メートル以内の `(x, y, z)`
+3D ECEF 座標フィールドへの球距離検索。中心から `distanceM` メートル以内の `(x, y, z)`
 座標を持つドキュメントを返します。ECEF の理論については
 [Geo3d の概念](../concepts/geo3d.md) を参照。
 

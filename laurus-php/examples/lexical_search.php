@@ -221,7 +221,7 @@ echo "PART 6: GeoDistanceQuery / GeoBoundingBoxQuery" . PHP_EOL;
 echo str_repeat("=", 60) . PHP_EOL;
 
 echo PHP_EOL . "[6a] Within 100 km of Paris (48.86, 2.35):" . PHP_EOL;
-print_results($index->search(GeoDistanceQuery::withinRadius("location", 48.8566, 2.3522, 100.0), 5));
+print_results($index->search(GeoDistanceQuery::withinRadius("location", 48.8566, 2.3522, 100_000.0), 5));
 
 echo PHP_EOL . "[6b] Bounding box — Europe (47, -1) to (53, 14):" . PHP_EOL;
 print_results($index->search(GeoBoundingBoxQuery::withinBoundingBox("location", 47.0, -1.0, 53.0, 14.0), 5));

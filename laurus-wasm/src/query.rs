@@ -180,7 +180,7 @@ pub struct JsGeoDistanceQuery {
     pub field: String,
     pub lat: f64,
     pub lon: f64,
-    pub distance_km: f64,
+    pub distance_m: f64,
 }
 
 impl JsGeoDistanceQuery {
@@ -189,7 +189,7 @@ impl JsGeoDistanceQuery {
             &self.field,
             self.lat,
             self.lon,
-            self.distance_km,
+            self.distance_m,
         )?))
     }
 }
@@ -229,7 +229,7 @@ pub struct JsGeo3dDistanceQuery {
     pub x: f64,
     pub y: f64,
     pub z: f64,
-    pub radius_m: f64,
+    pub distance_m: f64,
 }
 
 impl JsGeo3dDistanceQuery {
@@ -237,7 +237,7 @@ impl JsGeo3dDistanceQuery {
         Box::new(Geo3dDistanceQuery::new(
             &self.field,
             GeoEcefPoint::new(self.x, self.y, self.z),
-            self.radius_m,
+            self.distance_m,
         ))
     }
 }

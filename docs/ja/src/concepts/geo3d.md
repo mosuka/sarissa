@@ -120,7 +120,7 @@ let (lat, lon, height) = ecef_to_wgs84(&p);
 
 ### 球（半径） — `Geo3dDistanceQuery`
 
-中心点から `radius_m` メートル以内に格納済みポイントが入っているドキュメントを
+中心点から `distance_m` メートル以内に格納済みポイントが入っているドキュメントを
 すべて返す。スコアは `1 - distance / radius` を `[0, 1]` にクランプした
 値。
 
@@ -200,7 +200,7 @@ position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
 
 | 形式 | 引数 |
 | :--- | :--- |
-| `geo3d_distance(x, y, z, radius_m)` | 中心 `(x, y, z)` と検索半径（m） |
+| `geo3d_distance(x, y, z, distance_m)` | 中心 `(x, y, z)` と最大距離（m） |
 | `geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | AABB の対角の 2 隅 |
 | `geo3d_nearest(x, y, z, k)` | 中心 `(x, y, z)` と整数 `k` |
 

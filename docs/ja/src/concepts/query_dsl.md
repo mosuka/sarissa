@@ -89,23 +89,23 @@ price:[* TO 100]
 ### 2D 地理クエリ（`geo_*`)
 
 2 種類の関数形式を `Geo`（2D 緯度 / 経度）フィールドに対して使えます。
-緯度・経度は度単位、半径はキロメートル単位の符号付き浮動小数点数：
+緯度・経度は度単位、距離はメートル単位の符号付き浮動小数点数：
 
 ```text
-location:geo_distance(lat, lon, distance_km)
+location:geo_distance(lat, lon, distance_m)
 location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 ```
 
 | 形式 | 動作 |
 | :--- | :--- |
-| `geo_distance(lat, lon, distance_km)` | 中心 `(lat, lon)` から `distance_km` キロメートル以内の格納済み座標を返す |
+| `geo_distance(lat, lon, distance_m)` | 中心 `(lat, lon)` から `distance_m` メートル以内の格納済み座標を返す |
 | `geo_bbox(min_lat, min_lon, max_lat, max_lon)` | 軸並行緯度・経度範囲に含まれる格納済み座標を返す |
 
 例：
 
 ```text
-# 東京から 10 km 以内（35.6895, 139.6917）
-location:geo_distance(35.6895, 139.6917, 10)
+# 東京から 10 km（= 10 000 m）以内（35.6895, 139.6917）
+location:geo_distance(35.6895, 139.6917, 10000)
 
 # 軸並行緯度・経度範囲
 location:geo_bbox(35.0, 139.0, 36.0, 140.0)
@@ -120,14 +120,14 @@ location:geo_bbox(35.0, 139.0, 36.0, 140.0)
 `k` 以外の引数はすべてメートル単位の符号付き浮動小数点数、`k` のみ符号なし整数：
 
 ```text
-position:geo3d_distance(x, y, z, radius_m)
+position:geo3d_distance(x, y, z, distance_m)
 position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
 position:geo3d_nearest(x, y, z, k)
 ```
 
 | 形式 | 動作 |
 | :--- | :--- |
-| `geo3d_distance(x, y, z, radius_m)` | `(x, y, z)` から `radius_m` メートル以内の格納済みポイントを返す |
+| `geo3d_distance(x, y, z, distance_m)` | `(x, y, z)` から `distance_m` メートル以内の格納済みポイントを返す |
 | `geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | 軸並行 3D ボックスに含まれる格納済みポイントを返す |
 | `geo3d_nearest(x, y, z, k)` | `(x, y, z)` に最も近い `k` 件をユークリッド距離順で返す |
 

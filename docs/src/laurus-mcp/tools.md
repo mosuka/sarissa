@@ -313,7 +313,7 @@ Search documents using the laurus unified query DSL. Supports lexical search, ve
 
 | Query | Description |
 | :--- | :--- |
-| `position:geo3d_distance(x, y, z, radius_m)` | Sphere with center `(x, y, z)` and radius in meters |
+| `position:geo3d_distance(x, y, z, distance_m)` | Sphere with center `(x, y, z)` and maximum distance in meters |
 | `position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | 3D axis-aligned bounding box |
 | `position:geo3d_nearest(x, y, z, k)` | k nearest neighbors to `(x, y, z)` |
 

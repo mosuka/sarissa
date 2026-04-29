@@ -445,7 +445,7 @@ pub struct PhpGeoDistanceQuery {
     pub field: String,
     pub lat: f64,
     pub lon: f64,
-    pub distance_km: f64,
+    pub distance_m: f64,
 }
 
 #[php_impl]
@@ -457,21 +457,21 @@ impl PhpGeoDistanceQuery {
     /// * `field` - Geo field name.
     /// * `lat` - Center latitude.
     /// * `lon` - Center longitude.
-    /// * `distance_km` - Search radius in kilometers.
-    pub fn within_radius(field: String, lat: f64, lon: f64, distance_km: f64) -> Self {
+    /// * `distance_m` - Maximum distance from the centre in meters.
+    pub fn within_radius(field: String, lat: f64, lon: f64, distance_m: f64) -> Self {
         Self {
             field,
             lat,
             lon,
-            distance_km,
+            distance_m,
         }
     }
 
     /// Return a string representation.
     pub fn __to_string(&self) -> String {
         format!(
-            "GeoDistanceQuery.within_radius(field='{}', lat={}, lon={}, distance_km={})",
-            self.field, self.lat, self.lon, self.distance_km
+            "GeoDistanceQuery.within_radius(field='{}', lat={}, lon={}, distance_m={})",
+            self.field, self.lat, self.lon, self.distance_m
         )
     }
 }
@@ -483,7 +483,7 @@ impl PhpGeoDistanceQuery {
             &self.field,
             self.lat,
             self.lon,
-            self.distance_km,
+            self.distance_m,
         )?))
     }
 }
@@ -558,7 +558,7 @@ impl PhpGeoBoundingBoxQuery {
 
 /// 3D ECEF sphere query (`Laurus\Geo3dDistanceQuery`).
 ///
-/// Returns documents whose 3D ECEF point lies within `radius_m` meters of the
+/// Returns documents whose 3D ECEF point lies within `distance_m` meters of the
 /// query centre. Construct via the `withinSphere` static factory.
 #[php_class]
 #[php(name = "Laurus\\Geo3dDistanceQuery")]
@@ -567,7 +567,7 @@ pub struct PhpGeo3dDistanceQuery {
     pub x: f64,
     pub y: f64,
     pub z: f64,
-    pub radius_m: f64,
+    pub distance_m: f64,
 }
 
 #[php_impl]
@@ -580,22 +580,23 @@ impl PhpGeo3dDistanceQuery {
     /// * `x` - Centre ECEF X coordinate (meters).
     /// * `y` - Centre ECEF Y coordinate (meters).
     /// * `z` - Centre ECEF Z coordinate (meters).
-    /// * `radius_m` - Sphere radius in meters.
-    pub fn within_sphere(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
+    /// * `distance_m` - Maximum distance from the centre in meters
+    ///   (i.e. the search sphere's radius).
+    pub fn within_sphere(field: String, x: f64, y: f64, z: f64, distance_m: f64) -> Self {
         Self {
             field,
             x,
             y,
             z,
-            radius_m,
+            distance_m,
         }
     }
 
     /// Return a string representation.
     pub fn __to_string(&self) -> String {
         format!(
-            "Geo3dDistanceQuery(field='{}', x={}, y={}, z={}, radius_m={})",
-            self.field, self.x, self.y, self.z, self.radius_m
+            "Geo3dDistanceQuery(field='{}', x={}, y={}, z={}, distance_m={})",
+            self.field, self.x, self.y, self.z, self.distance_m
         )
     }
 }
@@ -606,7 +607,7 @@ impl PhpGeo3dDistanceQuery {
         Box::new(Geo3dDistanceQuery::new(
             &self.field,
             GeoEcefPoint::new(self.x, self.y, self.z),
-            self.radius_m,
+            self.distance_m,
         ))
     }
 }

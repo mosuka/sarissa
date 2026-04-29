@@ -300,7 +300,7 @@ laurus 統一クエリ DSL を使用してドキュメントを検索します�
 
 | クエリ | 説明 |
 | :--- | :--- |
-| `position:geo3d_distance(x, y, z, radius_m)` | `(x, y, z)` を中心とした半径（メートル単位）の球 |
+| `position:geo3d_distance(x, y, z, distance_m)` | `(x, y, z)` を中心とした最大距離（メートル単位）の球 |
 | `position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | 3D 軸並行バウンディングボックス |
 | `position:geo3d_nearest(x, y, z, k)` | `(x, y, z)` に最も近い k 個の近傍点 |
 

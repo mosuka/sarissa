@@ -101,16 +101,16 @@ DSL 文字列クエリで検索します。
   - `limit`, `offset` (number, 省略可)
 - **戻り値:** `Promise<SearchResult[]>`
 
-#### `searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)`
+#### `searchGeo3dDistance(field, x, y, z, distanceM, limit?, offset?)`
 
-3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `radiusM` メートル以内
+3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `distanceM` メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 [Geo3d の概念](../concepts/geo3d.md) を参照。
 
 - **引数:**
   - `field` (string) -- Geo3d フィールド名
   - `x`, `y`, `z` (number) -- 中心 ECEF 座標（メートル）
-  - `radiusM` (number) -- 球の半径（メートル）
+  - `distanceM` (number) -- 中心からの最大距離（メートル）
   - `limit`, `offset` (number, 省略可)
 - **戻り値:** `Promise<SearchResult[]>`
 

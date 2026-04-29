@@ -149,11 +149,11 @@ new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $nu
 
 ```php
 \Laurus\GeoDistanceQuery::withinRadius(
-    string $field, float $lat, float $lon, float $distanceKm,
+    string $field, float $lat, float $lon, float $distanceM,
 ): GeoDistanceQuery
 ```
 
-地理的距離検索（半径指定）。指定した地点から `$distanceKm` キロメートル以内の
+地理的距離検索（半径指定）。指定した地点から `$distanceM` メートル以内の
 `(lat, lon)` 座標を持つドキュメントを返します。
 
 ### GeoBoundingBoxQuery
@@ -175,11 +175,11 @@ new \Laurus\NumericRangeQuery(string $field, mixed $min, mixed $max, ?string $nu
 \Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
     float $x, float $y, float $z,
-    float $radiusM,
+    float $distanceM,
 ): Geo3dDistanceQuery
 ```
 
-3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `$radiusM` メートル以内
+3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `$distanceM` メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 [Geo3d の概念](../concepts/geo3d.md) を参照。
 

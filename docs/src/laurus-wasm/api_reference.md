@@ -103,16 +103,16 @@ Search by text (embedded by the registered embedder).
   - `limit`, `offset` (number, optional)
 - **Returns:** `Promise<SearchResult[]>`
 
-#### `searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)`
+#### `searchGeo3dDistance(field, x, y, z, distanceM, limit?, offset?)`
 
 Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
-coordinate is within `radiusM` metres of the centre. See
+coordinate is within `distanceM` metres of the centre. See
 [Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
 
 - **Parameters:**
   - `field` (string) -- Geo3d field name.
   - `x`, `y`, `z` (number) -- Centre ECEF coordinate (metres).
-  - `radiusM` (number) -- Sphere radius (metres).
+  - `distanceM` (number) -- Maximum distance from the centre (metres).
   - `limit`, `offset` (number, optional)
 - **Returns:** `Promise<SearchResult[]>`
 

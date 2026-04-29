@@ -208,7 +208,7 @@ def main
   puts "=" * 60
 
   puts "\n[6a] Within 100 km of San Francisco (37.77, -122.42):"
-  print_results(index.search(Laurus::GeoDistanceQuery.within_radius("location", 37.7749, -122.4194, 100.0), limit: 5))
+  print_results(index.search(Laurus::GeoDistanceQuery.within_radius("location", 37.7749, -122.4194, 100_000.0), limit: 5))
 
   puts "\n[6b] Bounding box — US West Coast (33, -123) to (48, -117):"
   print_results(index.search(Laurus::GeoBoundingBoxQuery.within_bounding_box("location", 33.0, -123.0, 48.0, -117.0), limit: 5))
