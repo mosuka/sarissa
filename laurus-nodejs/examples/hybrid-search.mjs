@@ -5,7 +5,15 @@
  * with RRF and WeightedSum fusion.
  */
 
-import { Index, Schema, SearchRequest } from "../index.js";
+import {
+  Index,
+  RRF,
+  Schema,
+  SearchRequest,
+  TermQuery,
+  VectorQuery,
+  WeightedSum,
+} from "../index.js";
 
 // Create schema with text + vector fields
 const schema = new Schema();
@@ -35,10 +43,10 @@ await index.commit();
 
 // Hybrid search with RRF fusion
 console.log("=== Hybrid search (RRF) ===");
-const rrfReq = new SearchRequest(5);
-rrfReq.setLexicalTermQuery("description", "fast");
-rrfReq.setVectorQuery("embedding", [0.85, 0.15, 0.2, 0.3]);
-rrfReq.setRrfFusion(60.0);
+const rrfReq = new SearchRequest({ limit: 5 });
+rrfReq.setLexicalTerm(new TermQuery("description", "fast"));
+rrfReq.setVectorQuery(new VectorQuery("embedding", [0.85, 0.15, 0.2, 0.3]));
+rrfReq.setRrfFusion(new RRF(60.0));
 for (const r of await index.searchWithRequest(rrfReq)) {
   console.log(`  ${r.id}  score=${r.score.toFixed(4)}  name="${r.document.name}"`);
 }
@@ -47,10 +55,10 @@ for (const r of await index.searchWithRequest(rrfReq)) {
 console.log(
   "\n=== Hybrid search (WeightedSum: 0.3 lexical, 0.7 vector) ===",
 );
-const wsReq = new SearchRequest(5);
-wsReq.setLexicalTermQuery("description", "fast");
-wsReq.setVectorQuery("embedding", [0.85, 0.15, 0.2, 0.3]);
-wsReq.setWeightedSumFusion(0.3, 0.7);
+const wsReq = new SearchRequest({ limit: 5 });
+wsReq.setLexicalTerm(new TermQuery("description", "fast"));
+wsReq.setVectorQuery(new VectorQuery("embedding", [0.85, 0.15, 0.2, 0.3]));
+wsReq.setWeightedSumFusion(new WeightedSum(0.3, 0.7));
 for (const r of await index.searchWithRequest(wsReq)) {
   console.log(`  ${r.id}  score=${r.score.toFixed(4)}  name="${r.document.name}"`);
 }
