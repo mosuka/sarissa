@@ -52,17 +52,23 @@ class Schema:
 
 | メソッド | 説明 |
 | :--- | :--- |
-| `add_text_field(name)` | 全文フィールド（転置インデックス、BM25）。 |
+| `add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)` | 全文フィールド（転置インデックス、BM25）。 |
 | `add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64 ビット整数フィールド。`multi_valued=True` で整数配列を受け付け（範囲クエリは "any match"）。 |
 | `add_float_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64 ビット浮動小数点フィールド。`multi_valued=True` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
-| `add_bool_field(name)` | ブールフィールド。 |
-| `add_bytes_field(name)` | 生バイトフィールド。 |
-| `add_geo_field(name)` | 地理座標フィールド（緯度/経度）。 |
+| `add_boolean_field(name, *, stored=True, indexed=True)` | ブールフィールド。 |
+| `add_bytes_field(name, *, stored=True)` | 生バイトフィールド。 |
+| `add_geo_field(name, *, stored=True, indexed=True)` | 地理座標フィールド（緯度/経度）。 |
 | `add_geo3d_field(name, *, stored=True, indexed=True)` | 3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は [Geo3d の概念](../concepts/geo3d.md)。 |
-| `add_datetime_field(name)` | UTC 日時フィールド。 |
-| `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)` | HNSW 近似最近傍ベクトルフィールド。 |
-| `add_flat_field(name, dimension, *, distance="cosine")` | Flat（総当たり）ベクトルフィールド。 |
-| `add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)` | IVF 近似最近傍ベクトルフィールド。 |
+| `add_datetime_field(name, *, stored=True, indexed=True)` | UTC 日時フィールド。 |
+| `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None)` | HNSW 近似最近傍ベクトルフィールド。 |
+| `add_flat_field(name, dimension, *, distance="cosine", embedder=None)` | Flat（総当たり）ベクトルフィールド。 |
+| `add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1, embedder=None)` | IVF 近似最近傍ベクトルフィールド。 |
+
+### その他のメソッド
+
+| メソッド | 説明 |
+| :--- | :--- |
+| `add_embedder(name, config)` | 名前付きエンベダー定義を登録します。`config` は `"type"` キーを持つ辞書です（下記参照）。 |
 | `set_default_fields(fields)` | デフォルト検索フィールドを設定（文字列のリスト）。 |
 | `set_dynamic_field_policy(policy)` | 未宣言フィールドの扱いを設定。`policy` は `"strict"` / `"dynamic"`（デフォルト）/ `"ignore"`。詳細は下記を参照。 |
 | `dynamic_field_policy()` | 現在のポリシーを小文字の文字列で返す。 |
@@ -78,6 +84,15 @@ class Schema:
 
 詳細な挙動マトリクスは [スキーマとフィールド](../concepts/schema_and_fields.md#動的スキーマ) を参照してください。
 
+### エンベダータイプ
+
+| `"type"` | 必須キー | Feature Flag |
+| :--- | :--- | :--- |
+| `"precomputed"` | -- | （常に利用可能） |
+| `"candle_bert"` | `"model"` | `embeddings-candle` |
+| `"candle_clip"` | `"model"` | `embeddings-multimodal` |
+| `"openai"` | `"model"` | `embeddings-openai` |
+
 ### 距離メトリクス
 
 | 値 | 説明 |
@@ -85,6 +100,8 @@ class Schema:
 | `"cosine"` | コサイン類似度（デフォルト） |
 | `"euclidean"` | ユークリッド距離 |
 | `"dot_product"` | 内積 |
+| `"manhattan"` | マンハッタン距離 |
+| `"angular"` | 角度距離 |
 
 ---
 
@@ -109,10 +126,10 @@ PhraseQuery(field: str, terms: list[str])
 ### FuzzyQuery
 
 ```python
-FuzzyQuery(field: str, term: str, max_edits: int = 1)
+FuzzyQuery(field: str, term: str, *, max_edits: int = 2)
 ```
 
-編集距離が `max_edits` 以内の近似一致を検索します。
+編集距離が `max_edits` 以内の近似一致を検索します。`max_edits` はキーワード専用引数です。
 
 ### WildcardQuery
 
@@ -125,10 +142,12 @@ WildcardQuery(field: str, pattern: str)
 ### NumericRangeQuery
 
 ```python
-NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
+NumericRangeQuery(field: str, *, min: int | float | None = None, max: int | float | None = None)
 ```
 
-`[min, max]` の範囲内の数値を検索します。開いた境界には `None` を指定します。
+`[min, max]` の範囲内の数値を検索します。開いた境界には `None` を指定する
+（または省略する）と開放されます。`min` と `max` はキーワード専用引数です。
+数値型（整数または浮動小数点）は `min`/`max` の Python 型から推論されます。
 
 ### GeoDistanceQuery
 
@@ -199,22 +218,43 @@ Geo3dNearestQuery.k_nearest(
 ### BooleanQuery
 
 ```python
-BooleanQuery(
-    must: list[Query] | None = None,
-    should: list[Query] | None = None,
-    must_not: list[Query] | None = None,
-)
+bq = BooleanQuery()
+bq.must(query)
+bq.should(query)
+bq.must_not(query)
 ```
 
-複合ブールクエリ。`must` 節はすべて一致する必要があります。`should` 節は少なくとも1つ一致する必要があります。`must_not` 節は一致してはなりません。
+複合ブールクエリ。引数なしでコンストラクタを呼び出し、`must` / `should` /
+`must_not` メソッドで節を一つずつ追加します。各メソッドは任意のクエリ
+オブジェクト（ネストされた `BooleanQuery` も含む）を受け付けます。
 
-### SpanNearQuery
+`must` 節はすべて一致する必要があり、`must_not` 節は一致してはなりません。
+`should` 節はスコアリングに寄与し、`must` 節が無い場合は少なくとも1つが
+一致する必要があります。
+
+### SpanQuery
 
 ```python
-SpanNearQuery(field: str, terms: list[str], slop: int = 0, in_order: bool = True)
+# 単一語句
+SpanQuery.term(field: str, term: str)
+
+# Near: slop 位置以内の語句
+SpanQuery.near(field: str, terms: list[str], *, slop: int = 0, ordered: bool = True)
+
+# ネストされた SpanQuery 句を使った Near
+SpanQuery.near_spans(field: str, clauses: list[SpanQuery], *, slop: int = 0, ordered: bool = True)
+
+# Containing: big スパンが little スパンを含む
+SpanQuery.containing(field: str, big: SpanQuery, little: SpanQuery)
+
+# Within: 最大距離での include スパンと exclude スパン
+SpanQuery.within(field: str, include: SpanQuery, exclude: SpanQuery, distance: int)
 ```
 
-語句が `slop` 位置以内に隣接して現れるドキュメントを検索します。
+位置・近接スパンクエリ。静的ファクトリメソッドで構築します。`near` は語句
+文字列のリストを受け取り、`near_spans` はネスト式のために `SpanQuery`
+オブジェクトのリストを受け取ります。`slop` と `ordered` はキーワード専用
+引数です。
 
 ### VectorQuery
 
@@ -273,7 +313,7 @@ class SearchRequest:
 class SearchResult:
     id: str          # 外部ドキュメント識別子
     score: float     # 関連性スコア
-    document: dict | None  # 取得されたフィールド値。削除済みの場合は None
+    document: dict | None  # 取得されたフィールド値。stored=False の場合は None
 ```
 
 ---
@@ -335,9 +375,12 @@ class SynonymGraphFilter:
 class Token:
     text: str
     position: int
+    start_offset: int
+    end_offset: int
+    boost: float
+    stopped: bool
     position_increment: int
     position_length: int
-    boost: float
 ```
 
 ---
