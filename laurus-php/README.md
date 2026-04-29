@@ -224,7 +224,7 @@ $index->commit();
 
 // Get index statistics
 $stats = $index->stats();
-echo "Document count: " . $stats["document_count"] . "\n";
+echo "Document count: " . $stats["documentCount"] . "\n";
 ```
 
 ## Feature Flags

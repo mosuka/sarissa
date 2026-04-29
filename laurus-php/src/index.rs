@@ -199,8 +199,8 @@ impl PhpIndex {
     /// # Returns
     ///
     /// An associative array with keys:
-    ///   - `"document_count"` (int): total indexed documents.
-    ///   - `"vector_fields"` (array): per-field vector statistics.
+    ///   - `"documentCount"` (int): total indexed documents.
+    ///   - `"vectorFields"` (array): per-field vector statistics.
     pub fn stats(&self) -> PhpResult<Zval> {
         let engine = self.engine.clone();
         let stats: EngineStats = self
@@ -211,8 +211,8 @@ impl PhpIndex {
         let mut ht = ZendHashTable::new();
         let mut count_zv = Zval::new();
         count_zv.set_long(stats.document_count as i64);
-        ht.insert("document_count", count_zv)
-            .map_err(|_| "failed to insert document_count")?;
+        ht.insert("documentCount", count_zv)
+            .map_err(|_| "failed to insert documentCount")?;
 
         let mut vf_ht = ZendHashTable::new();
         for (field, field_stats) in &stats.vector_fields {
@@ -235,8 +235,8 @@ impl PhpIndex {
         }
         let mut vf_zv = Zval::new();
         vf_zv.set_hashtable(vf_ht);
-        ht.insert("vector_fields", vf_zv)
-            .map_err(|_| "failed to insert vector_fields")?;
+        ht.insert("vectorFields", vf_zv)
+            .map_err(|_| "failed to insert vectorFields")?;
 
         let mut result = Zval::new();
         result.set_hashtable(ht);

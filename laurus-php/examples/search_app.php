@@ -217,7 +217,7 @@ $categoryColors = [
 <div class="container">
     <header>
         <h1>Laurus PHP Search</h1>
-        <p>Unified Query DSL -- <?= $stats["document_count"] ?> PHP ecosystem documents indexed</p>
+        <p>Unified Query DSL -- <?= $stats["documentCount"] ?> PHP ecosystem documents indexed</p>
     </header>
 
     <form method="GET">

@@ -44,4 +44,4 @@ foreach ($results as $r) {
 // Index statistics.
 echo PHP_EOL . "=== Stats ===" . PHP_EOL;
 $stats = $index->stats();
-printf("  Document count: %d\n", $stats["document_count"]);
+printf("  Document count: %d\n", $stats["documentCount"]);

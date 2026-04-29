@@ -224,7 +224,7 @@ $index->commit();
 
 // インデックスの統計情報を取得
 $stats = $index->stats();
-echo "ドキュメント数: " . $stats["document_count"] . "\n";
+echo "ドキュメント数: " . $stats["documentCount"] . "\n";
 ```
 
 ## 機能フラグ

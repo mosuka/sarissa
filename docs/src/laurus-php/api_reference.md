@@ -25,7 +25,7 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null)
 | `deleteDocuments(string $id): void` | Delete all versions for the given ID. |
 | `commit(): void` | Flush buffered writes and make all pending changes searchable. |
 | `search(mixed $query, int $limit = 10, int $offset = 0): array` | Execute a search query. Returns an array of `SearchResult`. |
-| `stats(): array` | Return index statistics (`"document_count"`, `"vector_fields"`). |
+| `stats(): array` | Return index statistics (`"documentCount"`, `"vectorFields"`). |
 
 ### `search` query argument
 

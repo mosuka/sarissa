@@ -130,6 +130,6 @@ $schema->addIvfField("ivf_vec", 128, null, 100, 1);
 
 ```php
 $stats = $index->stats();
-echo $stats["document_count"];
-echo $stats["vector_fields"];
+echo $stats["documentCount"];
+echo $stats["vectorFields"];
 ```
