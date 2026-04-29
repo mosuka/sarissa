@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-77211cce.js";
+            window.path_to_searchindex_js = "searchindex-58016f3f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a6ad8c0d.js"></script>
@@ -9934,14 +9934,12 @@ Origin Private File System</li>
     Engine --&gt; MemoryStorage
     WASM -.-&gt;|persist| OPFS
 </code></pre>
-<h2 id="limitation-no-in-engine-auto-embedding"><a class="header" href="#limitation-no-in-engine-auto-embedding">Limitation: No In-Engine Auto-Embedding</a></h2>
-<p>One of Laurus’s key features on native platforms is <strong>automatic embedding</strong> –
-when a document is indexed, the engine can automatically convert text fields
-into vector embeddings using a registered embedder (Candle BERT, Candle CLIP,
-or OpenAI API). This allows <code>searchVectorText("field", "query text")</code> to
-work seamlessly without the caller computing embeddings.</p>
-<p><strong>In laurus-wasm, this feature is not available.</strong> Only the <code>precomputed</code>
-embedder type is supported. The reasons are:</p>
+<h2 id="embedding-strategies"><a class="header" href="#embedding-strategies">Embedding Strategies</a></h2>
+<p>On native platforms Laurus supports several built-in embedders (Candle BERT,
+Candle CLIP, OpenAI API) that the engine can invoke automatically when a
+document is indexed or when <code>searchVectorText("field", "query text")</code> is
+called. These native embedders cannot run inside <code>wasm32-unknown-unknown</code> and
+are therefore disabled in the WASM build:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -9954,10 +9952,21 @@ embedder type is supported. The reasons are:</p>
 </tbody>
 </table>
 </div>
-<p>These dependencies are excluded from the WASM build via feature flags
-(<code>embeddings-candle</code>, <code>embeddings-openai</code>), which depend on the <code>native</code>
-feature that is disabled for <code>wasm32-unknown-unknown</code>.</p>
-<h3 id="recommended-alternative"><a class="header" href="#recommended-alternative">Recommended Alternative</a></h3>
+<p>(They are excluded from the WASM build via the <code>embeddings-candle</code> /
+<code>embeddings-openai</code> feature flags, which depend on the <code>native</code> feature that
+is disabled for <code>wasm32-unknown-unknown</code>.)</p>
+<p><code>laurus-wasm</code> exposes two <code>addEmbedder</code> types instead:</p>
+<ul>
+<li><strong><code>"precomputed"</code></strong> — The caller supplies vectors directly via <code>putDocument()</code>
+and <code>searchVector()</code>. The engine performs no embedding.</li>
+<li><strong><code>"callback"</code></strong> — Register a JavaScript callback
+<code>embed: (text) =&gt; Promise&lt;number[]&gt;</code> and the engine will invoke it during
+ingestion and from <code>searchVectorText()</code>. This enables in-engine
+auto-embedding using Transformers.js (or any other in-browser embedding
+library) so callers can use the same <code>searchVectorText("field", "query text")</code>
+pattern as on native platforms.</li>
+</ul>
+<h3 id="option-a--precomputed-vectors"><a class="header" href="#option-a--precomputed-vectors">Option A — Precomputed vectors</a></h3>
 <p>Compute embeddings on the <strong>JavaScript side</strong> and pass precomputed vectors
 to <code>putDocument()</code> and <code>searchVector()</code>:</p>
 <pre><code class="language-javascript">// Using Transformers.js (all-MiniLM-L6-v2, 384-dim)
@@ -9982,6 +9991,33 @@ const results = await index.searchVector("embedding", queryVec);
 <p>This approach gives you real semantic search in the browser using the same
 sentence-transformer models available on native platforms, with the embedding
 computation handled by Transformers.js (ONNX Runtime Web) instead of candle.</p>
+<h3 id="option-b--callback-embedder"><a class="header" href="#option-b--callback-embedder">Option B — Callback embedder</a></h3>
+<p>Register the same Transformers.js pipeline as a <code>"callback"</code> embedder so that
+the engine can call it automatically. After registration, ingestion and
+<code>searchVectorText()</code> work transparently without the caller managing vectors:</p>
+<pre><code class="language-javascript">import { pipeline } from '@huggingface/transformers';
+
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+
+schema.addEmbedder("transformers", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  },
+});
+schema.addHnswField("embedding", 384, "cosine", undefined, undefined, "transformers");
+const index = await Index.create(schema);
+
+await index.putDocument("doc1", { title: "Introduction to Rust" });
+await index.commit();
+
+const results = await index.searchVectorText("embedding", "safe systems programming");
+</code></pre>
+<p>Compared to Option A, the callback approach lets the engine cache embeddings
+during ingestion and avoids duplicating embedding code between writers and
+readers. The trade-off is that every <code>commit()</code> waits for the JS callback to
+resolve, so heavy bulk ingestion may benefit from precomputing vectors.</p>
 <h2 id="when-to-use-laurus-wasm-vs-laurus-nodejs"><a class="header" href="#when-to-use-laurus-wasm-vs-laurus-nodejs">When to Use laurus-wasm vs laurus-nodejs</a></h2>
 <div class="table-wrapper">
 <table>
@@ -9992,7 +10028,7 @@ computation handled by Transformers.js (ONNX Runtime Web) instead of candle.</p>
 <tr><td>Environment</td><td>Browser, Edge Runtime</td><td>Node.js server</td></tr>
 <tr><td>Performance</td><td>Good (single-threaded)</td><td>Best (native, multi-threaded)</td></tr>
 <tr><td>Storage</td><td>In-memory + OPFS</td><td>In-memory + File system</td></tr>
-<tr><td>Embedding</td><td>Precomputed only</td><td>Candle, OpenAI, Precomputed</td></tr>
+<tr><td>Embedding</td><td>Precomputed + JS callback</td><td>Candle, OpenAI, Precomputed</td></tr>
 <tr><td>Package</td><td><code>npm install laurus-wasm</code></td><td><code>npm install laurus-nodejs</code></td></tr>
 <tr><td>Binary size</td><td>~5-10 MB (WASM)</td><td>Platform-native</td></tr>
 </tbody>
@@ -10361,9 +10397,31 @@ above.</p>
 <p>Add a brute-force vector index field.</p>
 <h4 id="addivffieldname-dimension-distance-nclusters-nprobe-embedder"><a class="header" href="#addivffieldname-dimension-distance-nclusters-nprobe-embedder"><code>addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)</code></a></h4>
 <p>Add an IVF vector index field.</p>
+<ul>
+<li><code>nClusters</code>: Number of partitioning clusters (default 100)</li>
+<li><code>nProbe</code>: Number of clusters to probe at query time (default 1)</li>
+</ul>
 <h4 id="addembeddername-config"><a class="header" href="#addembeddername-config"><code>addEmbedder(name, config)</code></a></h4>
-<p>Register a named embedder. In WASM, only <code>"precomputed"</code> type is supported.</p>
-<pre><code class="language-javascript">schema.addEmbedder("my-embedder", { type: "precomputed" });
+<p>Register a named embedder. WASM supports two <code>type</code> values:</p>
+<ul>
+<li><code>"precomputed"</code> — No embedding is performed; vectors are passed directly via
+<code>putDocument()</code> / <code>searchVector()</code>.</li>
+<li><code>"callback"</code> — Provide a JavaScript callback <code>embed: (text) =&gt; Promise&lt;number[]&gt;</code>
+that the engine will invoke during ingestion and <code>searchVectorText()</code>. This
+enables in-engine auto-embedding using Transformers.js or any other in-browser
+embedding library.</li>
+</ul>
+<pre><code class="language-javascript">// Precomputed embedder
+schema.addEmbedder("precomputed-embedder", { type: "precomputed" });
+
+// Callback embedder (e.g. backed by Transformers.js)
+schema.addEmbedder("callback-embedder", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await pipeline(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
 </code></pre>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>Set the default search fields.</p>
@@ -10384,6 +10442,8 @@ the full behaviour matrix.</p>
 <p>Returns the current policy as a lowercase string.</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>Returns an array of defined field names.</p>
+<h4 id="tostring"><a class="header" href="#tostring"><code>toString()</code></a></h4>
+<p>Returns a string representation of the schema (<code>"Schema(fields=[...])"</code>).</p>
 <h2 id="searchresult-5"><a class="header" href="#searchresult-5">SearchResult</a></h2>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;
@@ -10402,6 +10462,15 @@ const tokens = tokenizer.tokenize("hello world");
 dict.addSynonymGroup(["ml", "machine learning"]);
 </code></pre>
 <h3 id="synonymgraphfilter-2"><a class="header" href="#synonymgraphfilter-2">SynonymGraphFilter</a></h3>
+<pre><code class="language-javascript">new SynonymGraphFilter(dictionary, keepOriginal = true, boost = 1.0)
+</code></pre>
+<ul>
+<li><code>dictionary</code> (<code>SynonymDictionary</code>) — Source synonym groups.</li>
+<li><code>keepOriginal</code> (boolean, default <code>true</code>) — Keep the original token alongside
+the inserted synonyms.</li>
+<li><code>boost</code> (number, default <code>1.0</code>) — Score boost applied to inserted synonym
+tokens.</li>
+</ul>
 <pre><code class="language-javascript">const filter = new SynonymGraphFilter(dict, true, 0.8);
 const expanded = filter.apply(tokens);
 </code></pre>
@@ -11266,7 +11335,7 @@ $schema-&gt;addGeoField("location");
 $schema-&gt;addDatetimeField("created_at");
 $schema-&gt;addHnswField("embedding", 384);
 $schema-&gt;addFlatField("small_vec", 64);
-$schema-&gt;addIvfField("ivf_vec", 128, null, 100, 1);
+$schema-&gt;addIvfField("ivf_vec", 128, "cosine", 100, 1);
 </code></pre>
 <h2 id="8-index-statistics-3"><a class="header" href="#8-index-statistics-3">8. Index statistics</a></h2>
 <pre><code class="language-php">$stats = $index-&gt;stats();
@@ -11329,8 +11398,8 @@ echo $stats["vectorFields"];
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64-bit integer field. Pass <code>$multi_valued = true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64-bit float field. Pass <code>$multi_valued = true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64-bit integer field. Pass <code>$multiValued = true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64-bit float field. Pass <code>$multiValued = true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(string $name, bool $stored = true): void</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
@@ -11473,7 +11542,7 @@ $bq-&gt;must($query);
 $bq-&gt;should($query);
 $bq-&gt;mustNot($query);
 </code></pre>
-<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>mustNot</code> clauses must not match.</p>
+<p>Compound boolean query. <code>must</code> clauses all have to match; <code>mustNot</code> clauses must not match. <code>should</code> clauses contribute to scoring; at least one of them must match if there are no <code>must</code> clauses.</p>
 <h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
 <pre><code class="language-php">// Single term
 \Laurus\SpanQuery::term(string $field, string $term): SpanQuery
@@ -11481,13 +11550,18 @@ $bq-&gt;mustNot($query);
 // Near: terms within slop positions
 \Laurus\SpanQuery::near(string $field, array $terms, int $slop = 0, bool $ordered = true): SpanQuery
 
+// NearSpans: nested SpanQuery clauses within slop positions
+\Laurus\SpanQuery::nearSpans(string $field, array $clauses, int $slop = 0, bool $ordered = true): SpanQuery
+
 // Containing: big span contains little span
 \Laurus\SpanQuery::containing(string $field, SpanQuery $big, SpanQuery $little): SpanQuery
 
 // Within: include span within exclude span at max distance
 \Laurus\SpanQuery::within(string $field, SpanQuery $include, SpanQuery $exclude, int $distance): SpanQuery
 </code></pre>
-<p>Positional / proximity span queries. <code>near</code> takes an array of term strings.</p>
+<p>Positional / proximity span queries. <code>near</code> takes an array of term strings,
+while <code>nearSpans</code> takes an array of <code>SpanQuery</code> objects for nested expressions
+(each clause’s field is re-rooted to the outer <code>$field</code>).</p>
 <h3 id="vectorquery-3"><a class="header" href="#vectorquery-3">VectorQuery</a></h3>
 <pre><code class="language-php">new \Laurus\VectorQuery(string $field, array $vector)
 </code></pre>
@@ -11530,7 +11604,7 @@ $bq-&gt;mustNot($query);
 <p>Returned by <code>Index-&gt;search()</code>.</p>
 <pre><code class="language-php">$result-&gt;getId()        // string   -- External document identifier
 $result-&gt;getScore()     // float    -- Relevance score
-$result-&gt;getDocument()  // array|null -- Retrieved field values, or null if deleted
+$result-&gt;getDocument()  // array|null -- Retrieved field values, or null if not stored
 </code></pre>
 <hr>
 <h2 id="fusion-algorithms-5"><a class="header" href="#fusion-algorithms-5">Fusion algorithms</a></h2>
@@ -11555,6 +11629,20 @@ $tokens = $tokenizer-&gt;tokenize("hello world");
 </code></pre>
 <p>Splits text on whitespace boundaries and returns an array of <code>Token</code> objects.</p>
 <h3 id="synonymgraphfilter-4"><a class="header" href="#synonymgraphfilter-4">SynonymGraphFilter</a></h3>
+<pre><code class="language-php">new \Laurus\SynonymGraphFilter(SynonymDictionary $dictionary, bool $keepOriginal = true, float $boost = 1.0)
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Parameter</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>$dictionary</code></td><td style="text-align: left">Source synonym groups.</td></tr>
+<tr><td style="text-align: left"><code>$keepOriginal</code></td><td style="text-align: left">When <code>true</code> (default), keep the original token alongside the synonyms.</td></tr>
+<tr><td style="text-align: left"><code>$boost</code></td><td style="text-align: left">Score boost applied to the inserted synonym tokens (default <code>1.0</code>).</td></tr>
+</tbody>
+</table>
+</div>
 <pre><code class="language-php">$filter = new \Laurus\SynonymGraphFilter($dictionary, true, 1.0);
 $expanded = $filter-&gt;apply($tokens);
 </code></pre>
@@ -11585,6 +11673,7 @@ $token-&gt;getPositionLength()     // int     -- Number of positions spanned
 <tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>array</code> of numerics</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Elements coerced to <code>f32</code></td></tr>
 <tr><td style="text-align: left"><code>array</code> with <code>"lat"</code>, <code>"lon"</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>float</code> values</td></tr>
+<tr><td style="text-align: left"><code>array</code> with <code>"x"</code>, <code>"y"</code>, <code>"z"</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">Three <code>float</code> values, meters (3D ECEF Cartesian)</td></tr>
 <tr><td style="text-align: left"><code>string</code> (ISO 8601)</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Parsed from ISO 8601 format</td></tr>
 </tbody>
 </table>

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-77211cce.js";
+            window.path_to_searchindex_js = "../searchindex-58016f3f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -232,8 +232,8 @@
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64-bit integer field. Pass <code>$multi_valued = true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64-bit float field. Pass <code>$multi_valued = true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64-bit integer field. Pass <code>$multiValued = true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64-bit float field. Pass <code>$multiValued = true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(string $name, bool $stored = true): void</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
@@ -376,7 +376,7 @@ $bq-&gt;must($query);
 $bq-&gt;should($query);
 $bq-&gt;mustNot($query);
 </code></pre>
-<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>mustNot</code> clauses must not match.</p>
+<p>Compound boolean query. <code>must</code> clauses all have to match; <code>mustNot</code> clauses must not match. <code>should</code> clauses contribute to scoring; at least one of them must match if there are no <code>must</code> clauses.</p>
 <h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
 <pre><code class="language-php">// Single term
 \Laurus\SpanQuery::term(string $field, string $term): SpanQuery
@@ -384,13 +384,18 @@ $bq-&gt;mustNot($query);
 // Near: terms within slop positions
 \Laurus\SpanQuery::near(string $field, array $terms, int $slop = 0, bool $ordered = true): SpanQuery
 
+// NearSpans: nested SpanQuery clauses within slop positions
+\Laurus\SpanQuery::nearSpans(string $field, array $clauses, int $slop = 0, bool $ordered = true): SpanQuery
+
 // Containing: big span contains little span
 \Laurus\SpanQuery::containing(string $field, SpanQuery $big, SpanQuery $little): SpanQuery
 
 // Within: include span within exclude span at max distance
 \Laurus\SpanQuery::within(string $field, SpanQuery $include, SpanQuery $exclude, int $distance): SpanQuery
 </code></pre>
-<p>Positional / proximity span queries. <code>near</code> takes an array of term strings.</p>
+<p>Positional / proximity span queries. <code>near</code> takes an array of term strings,
+while <code>nearSpans</code> takes an array of <code>SpanQuery</code> objects for nested expressions
+(each clause’s field is re-rooted to the outer <code>$field</code>).</p>
 <h3 id="vectorquery"><a class="header" href="#vectorquery">VectorQuery</a></h3>
 <pre><code class="language-php">new \Laurus\VectorQuery(string $field, array $vector)
 </code></pre>
@@ -433,7 +438,7 @@ $bq-&gt;mustNot($query);
 <p>Returned by <code>Index-&gt;search()</code>.</p>
 <pre><code class="language-php">$result-&gt;getId()        // string   -- External document identifier
 $result-&gt;getScore()     // float    -- Relevance score
-$result-&gt;getDocument()  // array|null -- Retrieved field values, or null if deleted
+$result-&gt;getDocument()  // array|null -- Retrieved field values, or null if not stored
 </code></pre>
 <hr>
 <h2 id="fusion-algorithms"><a class="header" href="#fusion-algorithms">Fusion algorithms</a></h2>
@@ -458,6 +463,20 @@ $tokens = $tokenizer-&gt;tokenize("hello world");
 </code></pre>
 <p>Splits text on whitespace boundaries and returns an array of <code>Token</code> objects.</p>
 <h3 id="synonymgraphfilter"><a class="header" href="#synonymgraphfilter">SynonymGraphFilter</a></h3>
+<pre><code class="language-php">new \Laurus\SynonymGraphFilter(SynonymDictionary $dictionary, bool $keepOriginal = true, float $boost = 1.0)
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Parameter</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>$dictionary</code></td><td style="text-align: left">Source synonym groups.</td></tr>
+<tr><td style="text-align: left"><code>$keepOriginal</code></td><td style="text-align: left">When <code>true</code> (default), keep the original token alongside the synonyms.</td></tr>
+<tr><td style="text-align: left"><code>$boost</code></td><td style="text-align: left">Score boost applied to the inserted synonym tokens (default <code>1.0</code>).</td></tr>
+</tbody>
+</table>
+</div>
 <pre><code class="language-php">$filter = new \Laurus\SynonymGraphFilter($dictionary, true, 1.0);
 $expanded = $filter-&gt;apply($tokens);
 </code></pre>
@@ -488,6 +507,7 @@ $token-&gt;getPositionLength()     // int     -- Number of positions spanned
 <tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>array</code> of numerics</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Elements coerced to <code>f32</code></td></tr>
 <tr><td style="text-align: left"><code>array</code> with <code>"lat"</code>, <code>"lon"</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>float</code> values</td></tr>
+<tr><td style="text-align: left"><code>array</code> with <code>"x"</code>, <code>"y"</code>, <code>"z"</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">Three <code>float</code> values, meters (3D ECEF Cartesian)</td></tr>
 <tr><td style="text-align: left"><code>string</code> (ISO 8601)</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Parsed from ISO 8601 format</td></tr>
 </tbody>
 </table>

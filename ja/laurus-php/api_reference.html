@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-5b892cad.js";
+            window.path_to_searchindex_js = "../searchindex-1720beab.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -235,8 +235,8 @@
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64 ビット整数フィールド。<code>$multi_valued = true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>$multi_valued = true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64 ビット整数フィールド。<code>$multiValued = true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>$multiValued = true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">ブールフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(string $name, bool $stored = true): void</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
@@ -372,7 +372,7 @@ $bq-&gt;must($query);
 $bq-&gt;should($query);
 $bq-&gt;mustNot($query);
 </code></pre>
-<p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があります。<code>should</code> 節は少なくとも1つ一致する必要があります。<code>mustNot</code> 節は一致してはなりません。</p>
+<p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があり、<code>mustNot</code> 節は一致してはなりません。<code>should</code> 節はスコアリングに寄与し、<code>must</code> 節が無い場合は少なくとも1つが一致する必要があります。</p>
 <h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
 <pre><code class="language-php">// 単一語句
 \Laurus\SpanQuery::term(string $field, string $term): SpanQuery
@@ -380,13 +380,18 @@ $bq-&gt;mustNot($query);
 // Near: slop 位置以内の語句
 \Laurus\SpanQuery::near(string $field, array $terms, int $slop = 0, bool $ordered = true): SpanQuery
 
+// NearSpans: slop 位置以内のネストされた SpanQuery 句
+\Laurus\SpanQuery::nearSpans(string $field, array $clauses, int $slop = 0, bool $ordered = true): SpanQuery
+
 // Containing: big スパンが little スパンを含む
 \Laurus\SpanQuery::containing(string $field, SpanQuery $big, SpanQuery $little): SpanQuery
 
 // Within: 最大距離での include スパンと exclude スパン
 \Laurus\SpanQuery::within(string $field, SpanQuery $include, SpanQuery $exclude, int $distance): SpanQuery
 </code></pre>
-<p>位置・近接スパンクエリ。<code>near</code> は語句文字列の配列を受け取ります。</p>
+<p>位置・近接スパンクエリ。<code>near</code> は語句文字列の配列を受け取り、<code>nearSpans</code> は
+ネスト式のために <code>SpanQuery</code> オブジェクトの配列を受け取ります（各句のフィールド
+は外側の <code>$field</code> に再ルートされます）。</p>
 <h3 id="vectorquery"><a class="header" href="#vectorquery">VectorQuery</a></h3>
 <pre><code class="language-php">new \Laurus\VectorQuery(string $field, array $vector)
 </code></pre>
@@ -429,7 +434,7 @@ $bq-&gt;mustNot($query);
 <p><code>Index-&gt;search()</code> が返すクラスです。</p>
 <pre><code class="language-php">$result-&gt;getId()        // string   -- 外部ドキュメント識別子
 $result-&gt;getScore()     // float    -- 関連性スコア
-$result-&gt;getDocument()  // array|null -- 取得されたフィールド値。削除済みの場合は null
+$result-&gt;getDocument()  // array|null -- 取得されたフィールド値。stored=false の場合は null
 </code></pre>
 <hr>
 <h2 id="フュージョンアルゴリズム"><a class="header" href="#フュージョンアルゴリズム">フュージョンアルゴリズム</a></h2>
@@ -454,6 +459,20 @@ $tokens = $tokenizer-&gt;tokenize("hello world");
 </code></pre>
 <p>空白で分割してテキストをトークン化し、<code>Token</code> オブジェクトの配列を返します。</p>
 <h3 id="synonymgraphfilter"><a class="header" href="#synonymgraphfilter">SynonymGraphFilter</a></h3>
+<pre><code class="language-php">new \Laurus\SynonymGraphFilter(SynonymDictionary $dictionary, bool $keepOriginal = true, float $boost = 1.0)
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">パラメータ</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>$dictionary</code></td><td style="text-align: left">同義語グループのソース。</td></tr>
+<tr><td style="text-align: left"><code>$keepOriginal</code></td><td style="text-align: left"><code>true</code>（デフォルト）の場合は元のトークンも同義語と並べて保持します。</td></tr>
+<tr><td style="text-align: left"><code>$boost</code></td><td style="text-align: left">挿入される同義語トークンに適用されるスコアブースト（デフォルト <code>1.0</code>）。</td></tr>
+</tbody>
+</table>
+</div>
 <pre><code class="language-php">$filter = new \Laurus\SynonymGraphFilter($dictionary, true, 1.0);
 $expanded = $filter-&gt;apply($tokens);
 </code></pre>
@@ -484,6 +503,7 @@ $token-&gt;getPositionLength()     // int     -- このトークンがカバー�
 <tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>array</code>（数値）</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">要素は <code>f32</code> に変換</td></tr>
 <tr><td style="text-align: left"><code>array</code>（<code>"lat"</code>, <code>"lon"</code>）</td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">2 つの <code>float</code> 値</td></tr>
+<tr><td style="text-align: left"><code>array</code>（<code>"x"</code>, <code>"y"</code>, <code>"z"</code>）</td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">3 つの <code>float</code> 値（メートル単位、3D ECEF 直交座標）</td></tr>
 <tr><td style="text-align: left"><code>string</code>（ISO 8601）</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">ISO 8601 形式からパース</td></tr>
 </tbody>
 </table>

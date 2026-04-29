@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5b892cad.js";
+            window.path_to_searchindex_js = "searchindex-1720beab.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c423c571.js"></script>
@@ -9778,14 +9778,12 @@ rm -rf node_modules
     Engine --&gt; MemoryStorage
     WASM -.-&gt;|永続化| OPFS
 </code></pre>
-<h2 id="制限事項-エンジン内自動-embedding-の非対応"><a class="header" href="#制限事項-エンジン内自動-embedding-の非対応">制限事項: エンジン内自動 Embedding の非対応</a></h2>
-<p>ネイティブ環境での Laurus の特徴の一つに<strong>自動 Embedding</strong> があります。
-ドキュメントをインデックスする際、エンジンが登録された Embedder（Candle BERT、
-Candle CLIP、OpenAI API）を使ってテキストフィールドを自動的にベクトル埋め込みに
-変換します。これにより <code>searchVectorText("field", "query text")</code> がシームレスに
-動作し、呼び出し側で埋め込みを計算する必要がありません。</p>
-<p><strong>laurus-wasm ではこの機能を利用できません。</strong> <code>precomputed</code>（事前計算済み）
-Embedder のみがサポートされます。理由は以下の通りです:</p>
+<h2 id="embedding-戦略"><a class="header" href="#embedding-戦略">Embedding 戦略</a></h2>
+<p>ネイティブ環境では Laurus に複数の組み込み Embedder（Candle BERT、Candle CLIP、
+OpenAI API）が用意されており、ドキュメントのインデックス時や
+<code>searchVectorText("field", "query text")</code> 実行時にエンジンが自動で呼び出します。
+これらネイティブ Embedder は <code>wasm32-unknown-unknown</code> 上で動作しないため、
+WASM ビルドでは無効化されています:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -9798,10 +9796,20 @@ Embedder のみがサポートされます。理由は以下の通りです:</p>
 </tbody>
 </table>
 </div>
-<p>これらの依存は Feature Flags（<code>embeddings-candle</code>、<code>embeddings-openai</code>）で
-管理されており、<code>wasm32-unknown-unknown</code> ビルドで無効化される <code>native</code> feature
-に依存しているため除外されます。</p>
-<h3 id="推奨される代替手段"><a class="header" href="#推奨される代替手段">推奨される代替手段</a></h3>
+<p>（これらは <code>embeddings-candle</code> / <code>embeddings-openai</code> Feature Flags で管理されており、
+<code>wasm32-unknown-unknown</code> で無効化される <code>native</code> feature に依存するため
+WASM ビルドから除外されます。）</p>
+<p><code>laurus-wasm</code> ではその代わりに以下 2 種類の <code>addEmbedder</code> タイプを公開しています:</p>
+<ul>
+<li><strong><code>"precomputed"</code></strong> — 呼び出し側が <code>putDocument()</code> / <code>searchVector()</code> 経由で
+ベクトルを直接渡します。エンジンは埋め込みを行いません。</li>
+<li><strong><code>"callback"</code></strong> — JavaScript コールバック
+<code>embed: (text) =&gt; Promise&lt;number[]&gt;</code> を登録し、エンジンがインジェスト時および
+<code>searchVectorText()</code> から呼び出します。Transformers.js 等のブラウザ内埋め込み
+ライブラリと組み合わせることでエンジン内自動埋め込みが実現でき、ネイティブ環境と
+同じく <code>searchVectorText("field", "query text")</code> を呼び出すだけで利用できます。</li>
+</ul>
+<h3 id="option-a--事前計算済みベクトル"><a class="header" href="#option-a--事前計算済みベクトル">Option A — 事前計算済みベクトル</a></h3>
 <p><strong>JavaScript 側で埋め込みを計算</strong>し、事前計算済みベクトルを <code>putDocument()</code> と
 <code>searchVector()</code> に渡します:</p>
 <pre><code class="language-javascript">// Transformers.js を使用（all-MiniLM-L6-v2、384次元）
@@ -9826,6 +9834,33 @@ const results = await index.searchVector("embedding", queryVec);
 <p>このアプローチにより、ネイティブ環境と同じ Sentence Transformer モデルを使った
 セマンティック検索がブラウザ内で実現できます。埋め込み計算は candle ではなく
 Transformers.js（ONNX Runtime Web）が担当します。</p>
+<h3 id="option-b--callback-embedder"><a class="header" href="#option-b--callback-embedder">Option B — Callback Embedder</a></h3>
+<p>Transformers.js の同じパイプラインを <code>"callback"</code> Embedder として登録すれば、
+エンジンが自動で呼び出してくれます。登録後は呼び出し側がベクトルを管理することなく、
+インジェストおよび <code>searchVectorText()</code> が透過的に動作します:</p>
+<pre><code class="language-javascript">import { pipeline } from '@huggingface/transformers';
+
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+
+schema.addEmbedder("transformers", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  },
+});
+schema.addHnswField("embedding", 384, "cosine", undefined, undefined, "transformers");
+const index = await Index.create(schema);
+
+await index.putDocument("doc1", { title: "Rust 入門" });
+await index.commit();
+
+const results = await index.searchVectorText("embedding", "安全なシステムプログラミング");
+</code></pre>
+<p>Option A と比べると、Callback アプローチではエンジンがインジェスト時に埋め込みを
+キャッシュでき、書き込み側と読み出し側で埋め込みコードを重複させずに済みます。
+ただし <code>commit()</code> のたびに JS コールバックの解決を待つため、大量バルク投入時には
+事前計算ベクトルのほうが有利な場合があります。</p>
 <h2 id="laurus-wasm-と-laurus-nodejs-の使い分け"><a class="header" href="#laurus-wasm-と-laurus-nodejs-の使い分け">laurus-wasm と laurus-nodejs の使い分け</a></h2>
 <div class="table-wrapper">
 <table>
@@ -9836,7 +9871,7 @@ Transformers.js（ONNX Runtime Web）が担当します。</p>
 <tr><td>実行環境</td><td>ブラウザ、エッジランタイム</td><td>Node.js サーバー</td></tr>
 <tr><td>パフォーマンス</td><td>良好（シングルスレッド）</td><td>最高（ネイティブ、マルチスレッド）</td></tr>
 <tr><td>ストレージ</td><td>インメモリ + OPFS</td><td>インメモリ + ファイルシステム</td></tr>
-<tr><td>埋め込み</td><td>事前計算のみ</td><td>Candle、OpenAI、事前計算</td></tr>
+<tr><td>埋め込み</td><td>事前計算 + JS コールバック</td><td>Candle、OpenAI、事前計算</td></tr>
 <tr><td>パッケージ</td><td><code>npm install laurus-wasm</code></td><td><code>npm install laurus-nodejs</code></td></tr>
 <tr><td>バイナリサイズ</td><td>約 5-10 MB（WASM）</td><td>プラットフォームネイティブ</td></tr>
 </tbody>
@@ -10187,13 +10222,39 @@ module.exports = {
 <p>HNSW ベクトルインデックスフィールドを追加します。</p>
 <ul>
 <li><code>distance</code>: <code>"cosine"</code>（デフォルト）、<code>"euclidean"</code>、<code>"dot_product"</code>、<code>"manhattan"</code>、<code>"angular"</code></li>
+<li><code>m</code>: 分岐係数（デフォルト 16）</li>
+<li><code>efConstruction</code>: 構築時の探索幅（デフォルト 200）</li>
 </ul>
 <h4 id="addflatfieldname-dimension-distance-embedder"><a class="header" href="#addflatfieldname-dimension-distance-embedder"><code>addFlatField(name, dimension, distance?, embedder?)</code></a></h4>
 <p>全探索ベクトルインデックスフィールドを追加します。</p>
 <h4 id="addivffieldname-dimension-distance-nclusters-nprobe-embedder"><a class="header" href="#addivffieldname-dimension-distance-nclusters-nprobe-embedder"><code>addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)</code></a></h4>
 <p>IVF ベクトルインデックスフィールドを追加します。</p>
+<ul>
+<li><code>nClusters</code>: パーティショニングクラスタ数（デフォルト 100）</li>
+<li><code>nProbe</code>: 検索時にプローブするクラスタ数（デフォルト 1）</li>
+</ul>
 <h4 id="addembeddername-config"><a class="header" href="#addembeddername-config"><code>addEmbedder(name, config)</code></a></h4>
-<p>名前付き埋め込み器を登録します。WASM では <code>"precomputed"</code> のみ対応しています。</p>
+<p>名前付き埋め込み器を登録します。WASM では以下の 2 種類の <code>type</code> をサポートします:</p>
+<ul>
+<li><code>"precomputed"</code> — 埋め込みは行いません。ベクトルは <code>putDocument()</code> /
+<code>searchVector()</code> 経由で直接渡します。</li>
+<li><code>"callback"</code> — JavaScript コールバック <code>embed: (text) =&gt; Promise&lt;number[]&gt;</code> を
+登録します。エンジンがインジェスト時および <code>searchVectorText()</code> で呼び出します。
+Transformers.js などのブラウザ内埋め込みライブラリと組み合わせることで、
+エンジン内自動埋め込みが可能になります。</li>
+</ul>
+<pre><code class="language-javascript">// Precomputed embedder
+schema.addEmbedder("precomputed-embedder", { type: "precomputed" });
+
+// Callback embedder（例: Transformers.js）
+schema.addEmbedder("callback-embedder", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await pipeline(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
+</code></pre>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>デフォルト検索フィールドを設定します。</p>
 <h4 id="setdynamicfieldpolicypolicy"><a class="header" href="#setdynamicfieldpolicypolicy"><code>setDynamicFieldPolicy(policy)</code></a></h4>
@@ -10208,6 +10269,8 @@ module.exports = {
 <p>現在のポリシーを小文字の文字列で返します。</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>定義済みフィールド名の配列を返します。</p>
+<h4 id="tostring"><a class="header" href="#tostring"><code>toString()</code></a></h4>
+<p>スキーマの文字列表現（<code>"Schema(fields=[...])"</code> 形式）を返します。</p>
 <h2 id="searchresult-5"><a class="header" href="#searchresult-5">SearchResult</a></h2>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;
@@ -10215,6 +10278,32 @@ module.exports = {
   document: object | null;
 }
 </code></pre>
+<h2 id="analysis"><a class="header" href="#analysis">Analysis</a></h2>
+<h3 id="whitespacetokenizer-2"><a class="header" href="#whitespacetokenizer-2">WhitespaceTokenizer</a></h3>
+<pre><code class="language-javascript">const tokenizer = new WhitespaceTokenizer();
+const tokens = tokenizer.tokenize("hello world");
+// [{ text, position, startOffset, endOffset, boost, stopped, positionIncrement, positionLength }]
+</code></pre>
+<p>空白を境界としてテキストを分割し、<code>Token</code> オブジェクトの配列を返します。</p>
+<h3 id="synonymdictionary-2"><a class="header" href="#synonymdictionary-2">SynonymDictionary</a></h3>
+<pre><code class="language-javascript">const dict = new SynonymDictionary();
+dict.addSynonymGroup(["ml", "machine learning"]);
+</code></pre>
+<p>同義語グループの辞書。グループ内のすべての語句が互いに同義語として扱われます。</p>
+<h3 id="synonymgraphfilter-2"><a class="header" href="#synonymgraphfilter-2">SynonymGraphFilter</a></h3>
+<pre><code class="language-javascript">new SynonymGraphFilter(dictionary, keepOriginal = true, boost = 1.0)
+</code></pre>
+<ul>
+<li><code>dictionary</code> (<code>SynonymDictionary</code>) — 同義語グループのソース。</li>
+<li><code>keepOriginal</code> (boolean, デフォルト <code>true</code>) — 元のトークンを挿入された同義語と
+並べて保持します。</li>
+<li><code>boost</code> (number, デフォルト <code>1.0</code>) — 挿入される同義語トークンに適用される
+スコアブースト。</li>
+</ul>
+<pre><code class="language-javascript">const filter = new SynonymGraphFilter(dict, true, 0.8);
+const expanded = filter.apply(tokens);
+</code></pre>
+<p><code>SynonymDictionary</code> の同義語でトークンを展開するトークンフィルターです。</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="開発"><a class="header" href="#開発">開発</a></h1>
 <h2 id="前提条件-5"><a class="header" href="#前提条件-5">前提条件</a></h2>
@@ -10740,17 +10829,17 @@ result.document  # =&gt; Hash|nil -- 取得されたフィールド値。削除�
 <p>両スコアリストをそれぞれ正規化した後、<code>lexical_weight * lexical_score + vector_weight * vector_score</code> として結合します。</p>
 <hr>
 <h2 id="テキスト解析-3"><a class="header" href="#テキスト解析-3">テキスト解析</a></h2>
-<h3 id="synonymdictionary-2"><a class="header" href="#synonymdictionary-2">SynonymDictionary</a></h3>
+<h3 id="synonymdictionary-3"><a class="header" href="#synonymdictionary-3">SynonymDictionary</a></h3>
 <pre><code class="language-ruby">dict = Laurus::SynonymDictionary.new
 dict.add_synonym_group(["fast", "quick", "rapid"])
 </code></pre>
 <p>同義語グループの辞書です。グループ内のすべての語句は互いの同義語として扱われます。</p>
-<h3 id="whitespacetokenizer-2"><a class="header" href="#whitespacetokenizer-2">WhitespaceTokenizer</a></h3>
+<h3 id="whitespacetokenizer-3"><a class="header" href="#whitespacetokenizer-3">WhitespaceTokenizer</a></h3>
 <pre><code class="language-ruby">tokenizer = Laurus::WhitespaceTokenizer.new
 tokens = tokenizer.tokenize("hello world")
 </code></pre>
 <p>空白で分割してテキストをトークン化し、<code>Token</code> オブジェクトの配列を返します。</p>
-<h3 id="synonymgraphfilter-2"><a class="header" href="#synonymgraphfilter-2">SynonymGraphFilter</a></h3>
+<h3 id="synonymgraphfilter-3"><a class="header" href="#synonymgraphfilter-3">SynonymGraphFilter</a></h3>
 <pre><code class="language-ruby">filter = Laurus::SynonymGraphFilter.new(dictionary, keep_original: true, boost: 1.0)
 expanded = filter.apply(tokens)
 </code></pre>
@@ -11065,7 +11154,7 @@ $schema-&gt;addGeoField("location");
 $schema-&gt;addDatetimeField("created_at");
 $schema-&gt;addHnswField("embedding", 384);
 $schema-&gt;addFlatField("small_vec", 64);
-$schema-&gt;addIvfField("ivf_vec", 128, null, 100, 1);
+$schema-&gt;addIvfField("ivf_vec", 128, "cosine", 100, 1);
 </code></pre>
 <h2 id="8-インデックス統計-3"><a class="header" href="#8-インデックス統計-3">8. インデックス統計</a></h2>
 <pre><code class="language-php">$stats = $index-&gt;stats();
@@ -11128,8 +11217,8 @@ echo $stats["vectorFields"];
 </thead>
 <tbody>
 <tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64 ビット整数フィールド。<code>$multi_valued = true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>$multi_valued = true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64 ビット整数フィールド。<code>$multiValued = true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>$multiValued = true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">ブールフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(string $name, bool $stored = true): void</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
@@ -11265,7 +11354,7 @@ $bq-&gt;must($query);
 $bq-&gt;should($query);
 $bq-&gt;mustNot($query);
 </code></pre>
-<p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があります。<code>should</code> 節は少なくとも1つ一致する必要があります。<code>mustNot</code> 節は一致してはなりません。</p>
+<p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があり、<code>mustNot</code> 節は一致してはなりません。<code>should</code> 節はスコアリングに寄与し、<code>must</code> 節が無い場合は少なくとも1つが一致する必要があります。</p>
 <h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
 <pre><code class="language-php">// 単一語句
 \Laurus\SpanQuery::term(string $field, string $term): SpanQuery
@@ -11273,13 +11362,18 @@ $bq-&gt;mustNot($query);
 // Near: slop 位置以内の語句
 \Laurus\SpanQuery::near(string $field, array $terms, int $slop = 0, bool $ordered = true): SpanQuery
 
+// NearSpans: slop 位置以内のネストされた SpanQuery 句
+\Laurus\SpanQuery::nearSpans(string $field, array $clauses, int $slop = 0, bool $ordered = true): SpanQuery
+
 // Containing: big スパンが little スパンを含む
 \Laurus\SpanQuery::containing(string $field, SpanQuery $big, SpanQuery $little): SpanQuery
 
 // Within: 最大距離での include スパンと exclude スパン
 \Laurus\SpanQuery::within(string $field, SpanQuery $include, SpanQuery $exclude, int $distance): SpanQuery
 </code></pre>
-<p>位置・近接スパンクエリ。<code>near</code> は語句文字列の配列を受け取ります。</p>
+<p>位置・近接スパンクエリ。<code>near</code> は語句文字列の配列を受け取り、<code>nearSpans</code> は
+ネスト式のために <code>SpanQuery</code> オブジェクトの配列を受け取ります（各句のフィールド
+は外側の <code>$field</code> に再ルートされます）。</p>
 <h3 id="vectorquery-3"><a class="header" href="#vectorquery-3">VectorQuery</a></h3>
 <pre><code class="language-php">new \Laurus\VectorQuery(string $field, array $vector)
 </code></pre>
@@ -11322,7 +11416,7 @@ $bq-&gt;mustNot($query);
 <p><code>Index-&gt;search()</code> が返すクラスです。</p>
 <pre><code class="language-php">$result-&gt;getId()        // string   -- 外部ドキュメント識別子
 $result-&gt;getScore()     // float    -- 関連性スコア
-$result-&gt;getDocument()  // array|null -- 取得されたフィールド値。削除済みの場合は null
+$result-&gt;getDocument()  // array|null -- 取得されたフィールド値。stored=false の場合は null
 </code></pre>
 <hr>
 <h2 id="フュージョンアルゴリズム-3"><a class="header" href="#フュージョンアルゴリズム-3">フュージョンアルゴリズム</a></h2>
@@ -11336,17 +11430,31 @@ $result-&gt;getDocument()  // array|null -- 取得されたフィールド値。
 <p>両スコアリストをそれぞれ正規化した後、<code>$lexicalWeight * lexical_score + $vectorWeight * vector_score</code> として結合します。</p>
 <hr>
 <h2 id="テキスト解析-4"><a class="header" href="#テキスト解析-4">テキスト解析</a></h2>
-<h3 id="synonymdictionary-3"><a class="header" href="#synonymdictionary-3">SynonymDictionary</a></h3>
+<h3 id="synonymdictionary-4"><a class="header" href="#synonymdictionary-4">SynonymDictionary</a></h3>
 <pre><code class="language-php">$dict = new \Laurus\SynonymDictionary();
 $dict-&gt;addSynonymGroup(["fast", "quick", "rapid"]);
 </code></pre>
 <p>同義語グループの辞書です。グループ内のすべての語句は互いの同義語として扱われます。</p>
-<h3 id="whitespacetokenizer-3"><a class="header" href="#whitespacetokenizer-3">WhitespaceTokenizer</a></h3>
+<h3 id="whitespacetokenizer-4"><a class="header" href="#whitespacetokenizer-4">WhitespaceTokenizer</a></h3>
 <pre><code class="language-php">$tokenizer = new \Laurus\WhitespaceTokenizer();
 $tokens = $tokenizer-&gt;tokenize("hello world");
 </code></pre>
 <p>空白で分割してテキストをトークン化し、<code>Token</code> オブジェクトの配列を返します。</p>
-<h3 id="synonymgraphfilter-3"><a class="header" href="#synonymgraphfilter-3">SynonymGraphFilter</a></h3>
+<h3 id="synonymgraphfilter-4"><a class="header" href="#synonymgraphfilter-4">SynonymGraphFilter</a></h3>
+<pre><code class="language-php">new \Laurus\SynonymGraphFilter(SynonymDictionary $dictionary, bool $keepOriginal = true, float $boost = 1.0)
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">パラメータ</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>$dictionary</code></td><td style="text-align: left">同義語グループのソース。</td></tr>
+<tr><td style="text-align: left"><code>$keepOriginal</code></td><td style="text-align: left"><code>true</code>（デフォルト）の場合は元のトークンも同義語と並べて保持します。</td></tr>
+<tr><td style="text-align: left"><code>$boost</code></td><td style="text-align: left">挿入される同義語トークンに適用されるスコアブースト（デフォルト <code>1.0</code>）。</td></tr>
+</tbody>
+</table>
+</div>
 <pre><code class="language-php">$filter = new \Laurus\SynonymGraphFilter($dictionary, true, 1.0);
 $expanded = $filter-&gt;apply($tokens);
 </code></pre>
@@ -11377,6 +11485,7 @@ $token-&gt;getPositionLength()     // int     -- このトークンがカバー�
 <tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>array</code>（数値）</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">要素は <code>f32</code> に変換</td></tr>
 <tr><td style="text-align: left"><code>array</code>（<code>"lat"</code>, <code>"lon"</code>）</td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">2 つの <code>float</code> 値</td></tr>
+<tr><td style="text-align: left"><code>array</code>（<code>"x"</code>, <code>"y"</code>, <code>"z"</code>）</td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">3 つの <code>float</code> 値（メートル単位、3D ECEF 直交座標）</td></tr>
 <tr><td style="text-align: left"><code>string</code>（ISO 8601）</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">ISO 8601 形式からパース</td></tr>
 </tbody>
 </table>

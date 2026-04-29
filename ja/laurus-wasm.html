@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5b892cad.js";
+            window.path_to_searchindex_js = "searchindex-1720beab.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c423c571.js"></script>
@@ -214,14 +214,12 @@
     Engine --&gt; MemoryStorage
     WASM -.-&gt;|永続化| OPFS
 </code></pre>
-<h2 id="制限事項-エンジン内自動-embedding-の非対応"><a class="header" href="#制限事項-エンジン内自動-embedding-の非対応">制限事項: エンジン内自動 Embedding の非対応</a></h2>
-<p>ネイティブ環境での Laurus の特徴の一つに<strong>自動 Embedding</strong> があります。
-ドキュメントをインデックスする際、エンジンが登録された Embedder（Candle BERT、
-Candle CLIP、OpenAI API）を使ってテキストフィールドを自動的にベクトル埋め込みに
-変換します。これにより <code>searchVectorText("field", "query text")</code> がシームレスに
-動作し、呼び出し側で埋め込みを計算する必要がありません。</p>
-<p><strong>laurus-wasm ではこの機能を利用できません。</strong> <code>precomputed</code>（事前計算済み）
-Embedder のみがサポートされます。理由は以下の通りです:</p>
+<h2 id="embedding-戦略"><a class="header" href="#embedding-戦略">Embedding 戦略</a></h2>
+<p>ネイティブ環境では Laurus に複数の組み込み Embedder（Candle BERT、Candle CLIP、
+OpenAI API）が用意されており、ドキュメントのインデックス時や
+<code>searchVectorText("field", "query text")</code> 実行時にエンジンが自動で呼び出します。
+これらネイティブ Embedder は <code>wasm32-unknown-unknown</code> 上で動作しないため、
+WASM ビルドでは無効化されています:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -234,10 +232,20 @@ Embedder のみがサポートされます。理由は以下の通りです:</p>
 </tbody>
 </table>
 </div>
-<p>これらの依存は Feature Flags（<code>embeddings-candle</code>、<code>embeddings-openai</code>）で
-管理されており、<code>wasm32-unknown-unknown</code> ビルドで無効化される <code>native</code> feature
-に依存しているため除外されます。</p>
-<h3 id="推奨される代替手段"><a class="header" href="#推奨される代替手段">推奨される代替手段</a></h3>
+<p>（これらは <code>embeddings-candle</code> / <code>embeddings-openai</code> Feature Flags で管理されており、
+<code>wasm32-unknown-unknown</code> で無効化される <code>native</code> feature に依存するため
+WASM ビルドから除外されます。）</p>
+<p><code>laurus-wasm</code> ではその代わりに以下 2 種類の <code>addEmbedder</code> タイプを公開しています:</p>
+<ul>
+<li><strong><code>"precomputed"</code></strong> — 呼び出し側が <code>putDocument()</code> / <code>searchVector()</code> 経由で
+ベクトルを直接渡します。エンジンは埋め込みを行いません。</li>
+<li><strong><code>"callback"</code></strong> — JavaScript コールバック
+<code>embed: (text) =&gt; Promise&lt;number[]&gt;</code> を登録し、エンジンがインジェスト時および
+<code>searchVectorText()</code> から呼び出します。Transformers.js 等のブラウザ内埋め込み
+ライブラリと組み合わせることでエンジン内自動埋め込みが実現でき、ネイティブ環境と
+同じく <code>searchVectorText("field", "query text")</code> を呼び出すだけで利用できます。</li>
+</ul>
+<h3 id="option-a--事前計算済みベクトル"><a class="header" href="#option-a--事前計算済みベクトル">Option A — 事前計算済みベクトル</a></h3>
 <p><strong>JavaScript 側で埋め込みを計算</strong>し、事前計算済みベクトルを <code>putDocument()</code> と
 <code>searchVector()</code> に渡します:</p>
 <pre><code class="language-javascript">// Transformers.js を使用（all-MiniLM-L6-v2、384次元）
@@ -262,6 +270,33 @@ const results = await index.searchVector("embedding", queryVec);
 <p>このアプローチにより、ネイティブ環境と同じ Sentence Transformer モデルを使った
 セマンティック検索がブラウザ内で実現できます。埋め込み計算は candle ではなく
 Transformers.js（ONNX Runtime Web）が担当します。</p>
+<h3 id="option-b--callback-embedder"><a class="header" href="#option-b--callback-embedder">Option B — Callback Embedder</a></h3>
+<p>Transformers.js の同じパイプラインを <code>"callback"</code> Embedder として登録すれば、
+エンジンが自動で呼び出してくれます。登録後は呼び出し側がベクトルを管理することなく、
+インジェストおよび <code>searchVectorText()</code> が透過的に動作します:</p>
+<pre><code class="language-javascript">import { pipeline } from '@huggingface/transformers';
+
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+
+schema.addEmbedder("transformers", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  },
+});
+schema.addHnswField("embedding", 384, "cosine", undefined, undefined, "transformers");
+const index = await Index.create(schema);
+
+await index.putDocument("doc1", { title: "Rust 入門" });
+await index.commit();
+
+const results = await index.searchVectorText("embedding", "安全なシステムプログラミング");
+</code></pre>
+<p>Option A と比べると、Callback アプローチではエンジンがインジェスト時に埋め込みを
+キャッシュでき、書き込み側と読み出し側で埋め込みコードを重複させずに済みます。
+ただし <code>commit()</code> のたびに JS コールバックの解決を待つため、大量バルク投入時には
+事前計算ベクトルのほうが有利な場合があります。</p>
 <h2 id="laurus-wasm-と-laurus-nodejs-の使い分け"><a class="header" href="#laurus-wasm-と-laurus-nodejs-の使い分け">laurus-wasm と laurus-nodejs の使い分け</a></h2>
 <div class="table-wrapper">
 <table>
@@ -272,7 +307,7 @@ Transformers.js（ONNX Runtime Web）が担当します。</p>
 <tr><td>実行環境</td><td>ブラウザ、エッジランタイム</td><td>Node.js サーバー</td></tr>
 <tr><td>パフォーマンス</td><td>良好（シングルスレッド）</td><td>最高（ネイティブ、マルチスレッド）</td></tr>
 <tr><td>ストレージ</td><td>インメモリ + OPFS</td><td>インメモリ + ファイルシステム</td></tr>
-<tr><td>埋め込み</td><td>事前計算のみ</td><td>Candle、OpenAI、事前計算</td></tr>
+<tr><td>埋め込み</td><td>事前計算 + JS コールバック</td><td>Candle、OpenAI、事前計算</td></tr>
 <tr><td>パッケージ</td><td><code>npm install laurus-wasm</code></td><td><code>npm install laurus-nodejs</code></td></tr>
 <tr><td>バイナリサイズ</td><td>約 5-10 MB（WASM）</td><td>プラットフォームネイティブ</td></tr>
 </tbody>

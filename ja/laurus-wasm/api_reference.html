@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-5b892cad.js";
+            window.path_to_searchindex_js = "../searchindex-1720beab.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -371,13 +371,39 @@
 <p>HNSW ベクトルインデックスフィールドを追加します。</p>
 <ul>
 <li><code>distance</code>: <code>"cosine"</code>（デフォルト）、<code>"euclidean"</code>、<code>"dot_product"</code>、<code>"manhattan"</code>、<code>"angular"</code></li>
+<li><code>m</code>: 分岐係数（デフォルト 16）</li>
+<li><code>efConstruction</code>: 構築時の探索幅（デフォルト 200）</li>
 </ul>
 <h4 id="addflatfieldname-dimension-distance-embedder"><a class="header" href="#addflatfieldname-dimension-distance-embedder"><code>addFlatField(name, dimension, distance?, embedder?)</code></a></h4>
 <p>全探索ベクトルインデックスフィールドを追加します。</p>
 <h4 id="addivffieldname-dimension-distance-nclusters-nprobe-embedder"><a class="header" href="#addivffieldname-dimension-distance-nclusters-nprobe-embedder"><code>addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)</code></a></h4>
 <p>IVF ベクトルインデックスフィールドを追加します。</p>
+<ul>
+<li><code>nClusters</code>: パーティショニングクラスタ数（デフォルト 100）</li>
+<li><code>nProbe</code>: 検索時にプローブするクラスタ数（デフォルト 1）</li>
+</ul>
 <h4 id="addembeddername-config"><a class="header" href="#addembeddername-config"><code>addEmbedder(name, config)</code></a></h4>
-<p>名前付き埋め込み器を登録します。WASM では <code>"precomputed"</code> のみ対応しています。</p>
+<p>名前付き埋め込み器を登録します。WASM では以下の 2 種類の <code>type</code> をサポートします:</p>
+<ul>
+<li><code>"precomputed"</code> — 埋め込みは行いません。ベクトルは <code>putDocument()</code> /
+<code>searchVector()</code> 経由で直接渡します。</li>
+<li><code>"callback"</code> — JavaScript コールバック <code>embed: (text) =&gt; Promise&lt;number[]&gt;</code> を
+登録します。エンジンがインジェスト時および <code>searchVectorText()</code> で呼び出します。
+Transformers.js などのブラウザ内埋め込みライブラリと組み合わせることで、
+エンジン内自動埋め込みが可能になります。</li>
+</ul>
+<pre><code class="language-javascript">// Precomputed embedder
+schema.addEmbedder("precomputed-embedder", { type: "precomputed" });
+
+// Callback embedder（例: Transformers.js）
+schema.addEmbedder("callback-embedder", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await pipeline(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
+</code></pre>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>デフォルト検索フィールドを設定します。</p>
 <h4 id="setdynamicfieldpolicypolicy"><a class="header" href="#setdynamicfieldpolicypolicy"><code>setDynamicFieldPolicy(policy)</code></a></h4>
@@ -392,6 +418,8 @@
 <p>現在のポリシーを小文字の文字列で返します。</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>定義済みフィールド名の配列を返します。</p>
+<h4 id="tostring"><a class="header" href="#tostring"><code>toString()</code></a></h4>
+<p>スキーマの文字列表現（<code>"Schema(fields=[...])"</code> 形式）を返します。</p>
 <h2 id="searchresult"><a class="header" href="#searchresult">SearchResult</a></h2>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;
@@ -399,6 +427,32 @@
   document: object | null;
 }
 </code></pre>
+<h2 id="analysis"><a class="header" href="#analysis">Analysis</a></h2>
+<h3 id="whitespacetokenizer"><a class="header" href="#whitespacetokenizer">WhitespaceTokenizer</a></h3>
+<pre><code class="language-javascript">const tokenizer = new WhitespaceTokenizer();
+const tokens = tokenizer.tokenize("hello world");
+// [{ text, position, startOffset, endOffset, boost, stopped, positionIncrement, positionLength }]
+</code></pre>
+<p>空白を境界としてテキストを分割し、<code>Token</code> オブジェクトの配列を返します。</p>
+<h3 id="synonymdictionary"><a class="header" href="#synonymdictionary">SynonymDictionary</a></h3>
+<pre><code class="language-javascript">const dict = new SynonymDictionary();
+dict.addSynonymGroup(["ml", "machine learning"]);
+</code></pre>
+<p>同義語グループの辞書。グループ内のすべての語句が互いに同義語として扱われます。</p>
+<h3 id="synonymgraphfilter"><a class="header" href="#synonymgraphfilter">SynonymGraphFilter</a></h3>
+<pre><code class="language-javascript">new SynonymGraphFilter(dictionary, keepOriginal = true, boost = 1.0)
+</code></pre>
+<ul>
+<li><code>dictionary</code> (<code>SynonymDictionary</code>) — 同義語グループのソース。</li>
+<li><code>keepOriginal</code> (boolean, デフォルト <code>true</code>) — 元のトークンを挿入された同義語と
+並べて保持します。</li>
+<li><code>boost</code> (number, デフォルト <code>1.0</code>) — 挿入される同義語トークンに適用される
+スコアブースト。</li>
+</ul>
+<pre><code class="language-javascript">const filter = new SynonymGraphFilter(dict, true, 0.8);
+const expanded = filter.apply(tokens);
+</code></pre>
+<p><code>SynonymDictionary</code> の同義語でトークンを展開するトークンフィルターです。</p>
 
                     </main>
 

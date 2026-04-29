@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-77211cce.js";
+            window.path_to_searchindex_js = "../searchindex-58016f3f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -386,9 +386,31 @@ above.</p>
 <p>Add a brute-force vector index field.</p>
 <h4 id="addivffieldname-dimension-distance-nclusters-nprobe-embedder"><a class="header" href="#addivffieldname-dimension-distance-nclusters-nprobe-embedder"><code>addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)</code></a></h4>
 <p>Add an IVF vector index field.</p>
+<ul>
+<li><code>nClusters</code>: Number of partitioning clusters (default 100)</li>
+<li><code>nProbe</code>: Number of clusters to probe at query time (default 1)</li>
+</ul>
 <h4 id="addembeddername-config"><a class="header" href="#addembeddername-config"><code>addEmbedder(name, config)</code></a></h4>
-<p>Register a named embedder. In WASM, only <code>"precomputed"</code> type is supported.</p>
-<pre><code class="language-javascript">schema.addEmbedder("my-embedder", { type: "precomputed" });
+<p>Register a named embedder. WASM supports two <code>type</code> values:</p>
+<ul>
+<li><code>"precomputed"</code> — No embedding is performed; vectors are passed directly via
+<code>putDocument()</code> / <code>searchVector()</code>.</li>
+<li><code>"callback"</code> — Provide a JavaScript callback <code>embed: (text) =&gt; Promise&lt;number[]&gt;</code>
+that the engine will invoke during ingestion and <code>searchVectorText()</code>. This
+enables in-engine auto-embedding using Transformers.js or any other in-browser
+embedding library.</li>
+</ul>
+<pre><code class="language-javascript">// Precomputed embedder
+schema.addEmbedder("precomputed-embedder", { type: "precomputed" });
+
+// Callback embedder (e.g. backed by Transformers.js)
+schema.addEmbedder("callback-embedder", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await pipeline(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
 </code></pre>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>Set the default search fields.</p>
@@ -409,6 +431,8 @@ the full behaviour matrix.</p>
 <p>Returns the current policy as a lowercase string.</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>Returns an array of defined field names.</p>
+<h4 id="tostring"><a class="header" href="#tostring"><code>toString()</code></a></h4>
+<p>Returns a string representation of the schema (<code>"Schema(fields=[...])"</code>).</p>
 <h2 id="searchresult"><a class="header" href="#searchresult">SearchResult</a></h2>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;
@@ -427,6 +451,15 @@ const tokens = tokenizer.tokenize("hello world");
 dict.addSynonymGroup(["ml", "machine learning"]);
 </code></pre>
 <h3 id="synonymgraphfilter"><a class="header" href="#synonymgraphfilter">SynonymGraphFilter</a></h3>
+<pre><code class="language-javascript">new SynonymGraphFilter(dictionary, keepOriginal = true, boost = 1.0)
+</code></pre>
+<ul>
+<li><code>dictionary</code> (<code>SynonymDictionary</code>) — Source synonym groups.</li>
+<li><code>keepOriginal</code> (boolean, default <code>true</code>) — Keep the original token alongside
+the inserted synonyms.</li>
+<li><code>boost</code> (number, default <code>1.0</code>) — Score boost applied to inserted synonym
+tokens.</li>
+</ul>
 <pre><code class="language-javascript">const filter = new SynonymGraphFilter(dict, true, 0.8);
 const expanded = filter.apply(tokens);
 </code></pre>
