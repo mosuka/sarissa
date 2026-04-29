@@ -6,9 +6,6 @@ on:
       - main
     paths:
       - 'docs/**'
-      - 'laurus/**'
-      - 'laurus-wasm/**'
-      - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
 jobs:
@@ -24,23 +21,6 @@ jobs:
         with:
           mdbook-version: 'latest'
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
-          target: wasm32-unknown-unknown
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "stable-wasm32-unknown-unknown"
-
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - name: Build laurus-wasm (web target)
-        working-directory: laurus-wasm
-        run: wasm-pack build --target web --release
 
       - name: Build Book (English)
         run: mdbook build docs
@@ -50,18 +30,6 @@ jobs:
 
       - name: Copy Japanese docs into publish directory
         run: cp -r target/docs/ja docs/book/ja
-
-      - name: Stage WASM demo into publish directory
-        run: |
-          mkdir -p docs/book/demo/pkg
-          cp -r laurus-wasm/pkg/. docs/book/demo/pkg/
-          # wasm-pack writes a `*` .gitignore inside pkg/. peaceiris/actions-gh-pages
-          # publishes via `git add --all`, so this .gitignore would silently exclude
-          # every generated binding from gh-pages. Drop it before deploy.
-          rm -f docs/book/demo/pkg/.gitignore
-          # Rewrite the relative `../pkg/...` import so the demo can sit at /demo/.
-          sed 's|\.\./pkg/laurus_wasm\.js|./pkg/laurus_wasm.js|g' \
-            laurus-wasm/examples/index.html > docs/book/demo/index.html
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
