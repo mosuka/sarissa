@@ -299,11 +299,22 @@ impl JsWildcardQuery {
 
 /// Numeric range filter query (integer or float).
 ///
+/// Use the `numericType` parameter to choose between an integer range
+/// (default `"integer"`) and a float range (`"float"`). The same string
+/// discriminator is used by the PHP binding's `NumericRangeQuery`, so the
+/// two bindings now agree on the call shape.
+///
 /// ## Example
 ///
 /// ```javascript
 /// const { NumericRangeQuery } = require("laurus-nodejs");
-/// const q = new NumericRangeQuery("year", 2020, 2023);
+///
+/// // Integer range (default).
+/// const q1 = new NumericRangeQuery("year", 2020, 2023);
+/// const q2 = new NumericRangeQuery("year", 2020, 2023, "integer");
+///
+/// // Float range.
+/// const q3 = new NumericRangeQuery("price", 9.99, 19.99, "float");
 /// ```
 #[derive(Clone)]
 #[napi(js_name = "NumericRangeQuery")]
@@ -318,22 +329,35 @@ pub struct JsNumericRangeQuery {
 impl JsNumericRangeQuery {
     /// Create a new numeric range query.
     ///
-    /// Pass integer values for integer range, or use `isFloat: true` for float range.
-    ///
     /// # Arguments
     ///
     /// * `field` - The field name to filter on.
     /// * `min` - Minimum value (inclusive), or `null` for unbounded.
     /// * `max` - Maximum value (inclusive), or `null` for unbounded.
-    /// * `is_float` - Whether to treat values as float (default `false`, integer).
+    /// * `numeric_type` - Either `"integer"` or `"float"`. Defaults to
+    ///   `"integer"` when omitted. Anything else throws an `Error`.
     #[napi(constructor)]
-    pub fn new(field: String, min: Option<f64>, max: Option<f64>, is_float: Option<bool>) -> Self {
-        Self {
+    pub fn new(
+        field: String,
+        min: Option<f64>,
+        max: Option<f64>,
+        numeric_type: Option<String>,
+    ) -> Result<Self> {
+        let is_float = match numeric_type.as_deref() {
+            Some("integer") | None => false,
+            Some("float") => true,
+            Some(other) => {
+                return Err(napi::Error::from_reason(format!(
+                    "numericType must be \"integer\" or \"float\", got {other:?}"
+                )));
+            }
+        };
+        Ok(Self {
             field,
             min,
             max,
-            is_float: is_float.unwrap_or(false),
-        }
+            is_float,
+        })
     }
 }
 
