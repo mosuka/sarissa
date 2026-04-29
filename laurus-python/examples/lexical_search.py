@@ -235,7 +235,7 @@ def main() -> None:
     _print_results(
         index.search(
             laurus.GeoDistanceQuery.within_radius(
-                "location", 37.7749, -122.4194, 100.0
+                "location", 37.7749, -122.4194, 100_000.0
             ),
             limit=5,
         )

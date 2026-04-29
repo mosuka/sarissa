@@ -154,12 +154,12 @@ Matches numeric values in the range `[$min, $max]`. Pass `null` for an open boun
 
 ```php
 \Laurus\GeoDistanceQuery::withinRadius(
-    string $field, float $lat, float $lon, float $distanceKm,
+    string $field, float $lat, float $lon, float $distanceM,
 ): GeoDistanceQuery
 ```
 
 Geo-distance (radius) search. Returns documents whose `(lat, lon)` coordinate
-is within `$distanceKm` kilometres of the given point.
+is within `$distanceM` metres of the given point.
 
 ### GeoBoundingBoxQuery
 
@@ -180,12 +180,12 @@ inside the axis-aligned `[$minLat, $maxLat] × [$minLon, $maxLon]` rectangle.
 \Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
     float $x, float $y, float $z,
-    float $radiusM,
+    float $distanceM,
 ): Geo3dDistanceQuery
 ```
 
 Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
-coordinate is within `$radiusM` metres of the centre. See
+coordinate is within `$distanceM` metres of the centre. See
 [Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
 
 ### Geo3dBoundingBoxQuery

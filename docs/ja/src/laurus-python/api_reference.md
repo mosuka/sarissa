@@ -153,11 +153,11 @@ NumericRangeQuery(field: str, *, min: int | float | None = None, max: int | floa
 
 ```python
 GeoDistanceQuery.within_radius(
-    field: str, lat: float, lon: float, distance_km: float,
+    field: str, lat: float, lon: float, distance_m: float,
 )
 ```
 
-地理的距離検索（半径指定）。指定した地点から `distance_km` キロメートル以内の
+地理的距離検索（半径指定）。指定した地点から `distance_m` メートル以内の
 `(lat, lon)` 座標を持つドキュメントを返します。
 
 ### GeoBoundingBoxQuery
@@ -177,11 +177,11 @@ GeoBoundingBoxQuery.within_bounding_box(
 
 ```python
 Geo3dDistanceQuery.within_sphere(
-    field: str, x: float, y: float, z: float, radius_m: float,
+    field: str, x: float, y: float, z: float, distance_m: float,
 )
 ```
 
-3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `radius_m` メートル以内
+3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `distance_m` メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 [Geo3d の概念](../concepts/geo3d.md) を参照。
 

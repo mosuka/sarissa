@@ -441,7 +441,7 @@ pub struct RbGeoDistanceQuery {
     pub field: String,
     pub lat: f64,
     pub lon: f64,
-    pub distance_km: f64,
+    pub distance_m: f64,
 }
 
 impl RbGeoDistanceQuery {
@@ -452,20 +452,20 @@ impl RbGeoDistanceQuery {
     /// * `field` - Geo field name.
     /// * `lat` - Center latitude.
     /// * `lon` - Center longitude.
-    /// * `distance_km` - Search radius in kilometers.
-    fn within_radius(field: String, lat: f64, lon: f64, distance_km: f64) -> Self {
+    /// * `distance_m` - Maximum distance from the centre in meters.
+    fn within_radius(field: String, lat: f64, lon: f64, distance_m: f64) -> Self {
         Self {
             field,
             lat,
             lon,
-            distance_km,
+            distance_m,
         }
     }
 
     fn inspect(&self) -> String {
         format!(
-            "GeoDistanceQuery.within_radius(field='{}', lat={}, lon={}, distance_km={})",
-            self.field, self.lat, self.lon, self.distance_km
+            "GeoDistanceQuery.within_radius(field='{}', lat={}, lon={}, distance_m={})",
+            self.field, self.lat, self.lon, self.distance_m
         )
     }
 }
@@ -477,7 +477,7 @@ impl RbGeoDistanceQuery {
             &self.field,
             self.lat,
             self.lon,
-            self.distance_km,
+            self.distance_m,
         )?))
     }
 }
@@ -550,14 +550,14 @@ impl RbGeoBoundingBoxQuery {
 /// 3D ECEF sphere query (`Laurus::Geo3dDistanceQuery`).
 ///
 /// Matches every document whose stored `(x, y, z)` point lies within
-/// `radius_m` meters of the given centre.
+/// `distance_m` meters of the given centre.
 #[magnus::wrap(class = "Laurus::Geo3dDistanceQuery")]
 pub struct RbGeo3dDistanceQuery {
     pub field: String,
     pub x: f64,
     pub y: f64,
     pub z: f64,
-    pub radius_m: f64,
+    pub distance_m: f64,
 }
 
 impl RbGeo3dDistanceQuery {
@@ -567,21 +567,22 @@ impl RbGeo3dDistanceQuery {
     ///
     /// * `field` - Geo3d field name.
     /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
-    /// * `radius_m` - Sphere radius in meters.
-    fn within_sphere(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
+    /// * `distance_m` - Maximum distance from the centre in meters
+    ///   (i.e. the search sphere's radius).
+    fn within_sphere(field: String, x: f64, y: f64, z: f64, distance_m: f64) -> Self {
         Self {
             field,
             x,
             y,
             z,
-            radius_m,
+            distance_m,
         }
     }
 
     fn inspect(&self) -> String {
         format!(
-            "Geo3dDistanceQuery.within_sphere(field='{}', x={}, y={}, z={}, radius_m={})",
-            self.field, self.x, self.y, self.z, self.radius_m
+            "Geo3dDistanceQuery.within_sphere(field='{}', x={}, y={}, z={}, distance_m={})",
+            self.field, self.x, self.y, self.z, self.distance_m
         )
     }
 }
@@ -592,7 +593,7 @@ impl RbGeo3dDistanceQuery {
         Box::new(Geo3dDistanceQuery::new(
             &self.field,
             GeoEcefPoint::new(self.x, self.y, self.z),
-            self.radius_m,
+            self.distance_m,
         ))
     }
 }

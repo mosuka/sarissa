@@ -155,7 +155,7 @@ open bound. `numericType` selects the underlying range type
 
 ```typescript
 GeoDistanceQuery.withinRadius(
-  field: string, lat: number, lon: number, distanceKm: number,
+  field: string, lat: number, lon: number, distanceM: number,
 ): GeoDistanceQuery
 ```
 
@@ -179,12 +179,12 @@ Geographic bounding-box search.
 Geo3dDistanceQuery.withinSphere(
   field: string,
   x: number, y: number, z: number,
-  radiusM: number,
+  distanceM: number,
 ): Geo3dDistanceQuery
 ```
 
 Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
-coordinate is within `radiusM` metres of the centre. See
+coordinate is within `distanceM` metres of the centre. See
 [Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
 
 ### Geo3dBoundingBoxQuery

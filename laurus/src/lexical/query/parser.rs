@@ -410,17 +410,17 @@ impl LexicalQueryParser {
         pair: pest::iterators::Pair<Rule>,
         field: &str,
     ) -> Result<Box<dyn Query>> {
-        // Grammar guarantees four signed_float arguments: x, y, z, radius_m.
+        // Grammar guarantees four signed_float arguments: x, y, z, distance_m.
         let args = collect_signed_floats(pair)?;
         if args.len() != 4 {
             return Err(LaurusError::parse(format!(
-                "geo3d_distance expects 4 numeric arguments (x, y, z, radius_m), got {}",
+                "geo3d_distance expects 4 numeric arguments (x, y, z, distance_m), got {}",
                 args.len()
             )));
         }
         let center = GeoEcefPoint::new(args[0], args[1], args[2]);
-        let radius_m = args[3];
-        Ok(Box::new(Geo3dDistanceQuery::new(field, center, radius_m)))
+        let distance_m = args[3];
+        Ok(Box::new(Geo3dDistanceQuery::new(field, center, distance_m)))
     }
 
     fn parse_geo3d_bbox(
@@ -518,11 +518,11 @@ impl LexicalQueryParser {
         pair: pest::iterators::Pair<Rule>,
         field: &str,
     ) -> Result<Box<dyn Query>> {
-        // Grammar: lat, lon, distance_km.
+        // Grammar: lat, lon, distance_m.
         let args = collect_signed_floats(pair)?;
         if args.len() != 3 {
             return Err(LaurusError::parse(format!(
-                "geo_distance expects 3 numeric arguments (lat, lon, distance_km), got {}",
+                "geo_distance expects 3 numeric arguments (lat, lon, distance_m), got {}",
                 args.len()
             )));
         }

@@ -391,7 +391,7 @@ impl JsNumericRangeQuery {
 /// const { GeoDistanceQuery } = require("laurus-nodejs");
 ///
 /// // Radius search: within 100 km of San Francisco
-/// const q = GeoDistanceQuery.withinRadius("location", 37.77, -122.42, 100.0);
+/// const q = GeoDistanceQuery.withinRadius("location", 37.77, -122.42, 100_000.0);
 /// ```
 #[derive(Clone)]
 #[napi(js_name = "GeoDistanceQuery")]
@@ -399,7 +399,7 @@ pub struct JsGeoDistanceQuery {
     pub(crate) field: String,
     pub(crate) lat: f64,
     pub(crate) lon: f64,
-    pub(crate) distance_km: f64,
+    pub(crate) distance_m: f64,
 }
 
 #[napi]
@@ -411,14 +411,14 @@ impl JsGeoDistanceQuery {
     /// * `field` - Geo field name.
     /// * `lat` - Center latitude.
     /// * `lon` - Center longitude.
-    /// * `distance_km` - Search radius in kilometers.
+    /// * `distance_m` - Maximum distance from the centre in meters.
     #[napi(factory)]
-    pub fn within_radius(field: String, lat: f64, lon: f64, distance_km: f64) -> Self {
+    pub fn within_radius(field: String, lat: f64, lon: f64, distance_m: f64) -> Self {
         Self {
             field,
             lat,
             lon,
-            distance_km,
+            distance_m,
         }
     }
 }
@@ -429,7 +429,7 @@ impl JsGeoDistanceQuery {
             &self.field,
             self.lat,
             self.lon,
-            self.distance_km,
+            self.distance_m,
         )?))
     }
 }
@@ -505,7 +505,7 @@ impl JsGeoBoundingBoxQuery {
 // ---------------------------------------------------------------------------
 
 /// 3D ECEF sphere query: matches documents whose stored `(x, y, z)` point
-/// lies within `radius_m` meters of the given centre.
+/// lies within `distance_m` meters of the given centre.
 ///
 /// ## Example
 ///
@@ -522,7 +522,7 @@ pub struct JsGeo3dDistanceQuery {
     pub(crate) x: f64,
     pub(crate) y: f64,
     pub(crate) z: f64,
-    pub(crate) radius_m: f64,
+    pub(crate) distance_m: f64,
 }
 
 #[napi]
@@ -533,15 +533,16 @@ impl JsGeo3dDistanceQuery {
     ///
     /// * `field` - Geo3d field name.
     /// * `x`, `y`, `z` - Centre coordinates in ECEF meters.
-    /// * `radius_m` - Sphere radius in meters.
+    /// * `distance_m` - Maximum distance from the centre in meters
+    ///   (i.e. the search sphere's radius).
     #[napi(factory)]
-    pub fn within_sphere(field: String, x: f64, y: f64, z: f64, radius_m: f64) -> Self {
+    pub fn within_sphere(field: String, x: f64, y: f64, z: f64, distance_m: f64) -> Self {
         Self {
             field,
             x,
             y,
             z,
-            radius_m,
+            distance_m,
         }
     }
 }
@@ -551,7 +552,7 @@ impl JsGeo3dDistanceQuery {
         Box::new(Geo3dDistanceQuery::new(
             &self.field,
             GeoEcefPoint::new(self.x, self.y, self.z),
-            self.radius_m,
+            self.distance_m,
         ))
     }
 }

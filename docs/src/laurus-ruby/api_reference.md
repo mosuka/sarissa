@@ -153,11 +153,11 @@ Matches numeric values in the range `[min, max]`. Pass `nil` for an open bound. 
 ### GeoDistanceQuery
 
 ```ruby
-Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
+Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_m)
 ```
 
 Geo-distance (radius) search. Returns documents whose `(lat, lon)` coordinate
-is within `distance_km` kilometres of the given point.
+is within `distance_m` metres of the given point.
 
 ### GeoBoundingBoxQuery
 
@@ -173,11 +173,11 @@ inside the axis-aligned `[min_lat, max_lat] × [min_lon, max_lon]` rectangle.
 ### Geo3dDistanceQuery
 
 ```ruby
-Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)
 ```
 
 Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
-coordinate is within `radius_m` metres of the centre. See
+coordinate is within `distance_m` metres of the centre. See
 [Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
 
 ### Geo3dBoundingBoxQuery

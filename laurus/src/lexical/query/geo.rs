@@ -74,7 +74,7 @@ impl GeoBoundingBox {
     }
 
     /// Greatest great-circle distance from the box's center to any of its
-    /// four corners, in kilometers.
+    /// four corners, in meters.
     pub fn max_distance_from_center(&self) -> f64 {
         let center = self.center();
         let sw = self.min;
@@ -98,19 +98,19 @@ pub struct GeoDistanceQuery {
     field: String,
     /// Center point for the search
     center: GeoPoint,
-    /// Maximum distance in kilometers
-    distance_km: f64,
+    /// Maximum distance in meters
+    distance_m: f64,
     /// Boost factor for the query
     boost: f32,
 }
 
 impl GeoDistanceQuery {
     /// Create a new geo distance query.
-    pub fn new<F: Into<String>>(field: F, center: GeoPoint, distance_km: f64) -> Self {
+    pub fn new<F: Into<String>>(field: F, center: GeoPoint, distance_m: f64) -> Self {
         GeoDistanceQuery {
             field: field.into(),
             center,
-            distance_km,
+            distance_m,
             boost: 1.0,
         }
     }
@@ -126,7 +126,7 @@ impl GeoDistanceQuery {
     /// * `field` - The field containing geographical coordinates.
     /// * `lat` - Center latitude in degrees (`-90` to `90`).
     /// * `lon` - Center longitude in degrees (`-180` to `180`).
-    /// * `distance_km` - Search radius in kilometres.
+    /// * `distance_m` - Maximum distance from the centre in meters.
     ///
     /// # Example
     ///
@@ -134,16 +134,16 @@ impl GeoDistanceQuery {
     /// use laurus::lexical::query::GeoDistanceQuery;
     ///
     /// let query =
-    ///     GeoDistanceQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
+    ///     GeoDistanceQuery::within_radius("location", 40.7128, -74.0060, 10_000.0).unwrap();
     /// ```
     pub fn within_radius<F: Into<String>>(
         field: F,
         lat: f64,
         lon: f64,
-        distance_km: f64,
+        distance_m: f64,
     ) -> Result<Self> {
         let center = GeoPoint::try_new(lat, lon)?;
-        Ok(GeoDistanceQuery::new(field, center, distance_km))
+        Ok(GeoDistanceQuery::new(field, center, distance_m))
     }
 
     /// Set the boost factor.
@@ -162,9 +162,9 @@ impl GeoDistanceQuery {
         self.center
     }
 
-    /// Get the search distance.
-    pub fn distance_km(&self) -> f64 {
-        self.distance_km
+    /// Get the search distance in meters.
+    pub fn distance_m(&self) -> f64 {
+        self.distance_m
     }
 
     /// Find matching documents and their distances using spatial indexing.
@@ -186,18 +186,18 @@ impl GeoDistanceQuery {
             seen_docs.insert(doc_id);
 
             let distance = self.center.distance_to(&point);
-            if distance <= self.distance_km {
+            if distance <= self.distance_m {
                 let score = if distance == 0.0 {
                     1.0
                 } else {
                     // Simple inverse distance scoring
-                    (1.0 - (distance / self.distance_km)).max(0.0) as f32
+                    (1.0 - (distance / self.distance_m)).max(0.0) as f32
                 };
 
                 matches.push(GeoMatch {
                     doc_id,
                     point,
-                    distance_km: distance,
+                    distance_m: distance,
                     relevance_score: score,
                 });
             }
@@ -205,8 +205,8 @@ impl GeoDistanceQuery {
 
         // Sort by distance (closest first), then by relevance score
         matches.sort_by(|a, b| {
-            a.distance_km
-                .partial_cmp(&b.distance_km)
+            a.distance_m
+                .partial_cmp(&b.distance_m)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| {
                     b.relevance_score
@@ -221,12 +221,12 @@ impl GeoDistanceQuery {
     /// Create a bounding box for efficient spatial filtering.
     fn create_bounding_box(&self) -> GeoBoundingBox {
         // Approximate degree distance at the center latitude
-        let lat_deg_km = 111.0; // ~111 km per degree latitude
+        let lat_deg_m = 111_000.0; // ~111 km (= 111 000 m) per degree latitude
         // At poles cos(lat) ≈ 0 → clamp to avoid division by zero
-        let lon_deg_km = (111.0 * self.center.lat.to_radians().cos()).max(0.001);
+        let lon_deg_m = (111_000.0 * self.center.lat.to_radians().cos()).max(1.0);
 
-        let lat_delta = self.distance_km / lat_deg_km;
-        let lon_delta = self.distance_km / lon_deg_km;
+        let lat_delta = self.distance_m / lat_deg_m;
+        let lon_delta = self.distance_m / lon_deg_m;
 
         // Clamp to the valid lat/lon ranges so the resulting GeoPoints are
         // always in-range (the infallible `GeoPoint::new` debug-asserts).
@@ -305,7 +305,7 @@ impl GeoDistanceQuery {
                         if bounding_box.contains(&geo_point) {
                             let distance = self.center.distance_to(&geo_point);
                             // Double-check with exact distance calculation
-                            if distance <= self.distance_km {
+                            if distance <= self.distance_m {
                                 candidates.push((doc_id, geo_point));
                             }
                         }
@@ -321,28 +321,28 @@ impl GeoDistanceQuery {
 #[cfg(test)]
 impl GeoDistanceQuery {
     /// Calculate relevance score based on distance (closer = higher score).
-    fn calculate_distance_score(&self, distance_km: f64) -> f32 {
-        if distance_km > self.distance_km {
+    fn calculate_distance_score(&self, distance_m: f64) -> f32 {
+        if distance_m > self.distance_m {
             return 0.0;
         }
 
         // Linear decay: score = 1.0 at center, 0.0 at max distance
-        let normalized_distance = distance_km / self.distance_km;
+        let normalized_distance = distance_m / self.distance_m;
         (1.0 - normalized_distance) as f32
     }
 
     /// Calculate enhanced relevance score with multiple factors.
-    fn calculate_distance_score_enhanced(&self, distance_km: f64, point: &GeoPoint) -> f32 {
-        if distance_km > self.distance_km {
+    fn calculate_distance_score_enhanced(&self, distance_m: f64, point: &GeoPoint) -> f32 {
+        if distance_m > self.distance_m {
             return 0.0;
         }
 
         // Base distance score (exponential decay for better distance weighting)
-        let normalized_distance = distance_km / self.distance_km;
+        let normalized_distance = distance_m / self.distance_m;
         let base_score = (-2.0 * normalized_distance).exp() as f32;
 
-        // Precision bonus for exact location matches
-        let precision_bonus = if distance_km < 0.1 { 0.1 } else { 0.0 };
+        // Precision bonus for exact location matches (within 100 m)
+        let precision_bonus = if distance_m < 100.0 { 0.1 } else { 0.0 };
 
         // Geographic relevance bonus (e.g., prefer points in certain regions)
         let geo_bonus = self.calculate_geographic_relevance(point);
@@ -416,13 +416,13 @@ impl Query for GeoDistanceQuery {
 
     fn description(&self) -> String {
         format!(
-            "GeoDistanceQuery(field: {}, center: {:?}, distance: {}km)",
-            self.field, self.center, self.distance_km
+            "GeoDistanceQuery(field: {}, center: {:?}, distance: {}m)",
+            self.field, self.center, self.distance_m
         )
     }
 
     fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
-        Ok(self.distance_km <= 0.0)
+        Ok(self.distance_m <= 0.0)
     }
 
     fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
@@ -556,7 +556,7 @@ impl GeoBoundingBoxQuery {
                 matches.push(GeoMatch {
                     doc_id,
                     point,
-                    distance_km: distance,
+                    distance_m: distance,
                     relevance_score,
                 });
             }
@@ -567,7 +567,7 @@ impl GeoBoundingBoxQuery {
             b.relevance_score
                 .partial_cmp(&a.relevance_score)
                 .unwrap()
-                .then_with(|| a.distance_km.partial_cmp(&b.distance_km).unwrap())
+                .then_with(|| a.distance_m.partial_cmp(&b.distance_m).unwrap())
         });
 
         Ok(matches)
@@ -679,8 +679,8 @@ impl GeoBoundingBoxQuery {
 
         // Distance from center as a fraction of the bounding box diagonal
         let distance_to_center = center.distance_to(point);
-        let diagonal_km = ((width * 111.0).powi(2) + (height * 111.0).powi(2)).sqrt();
-        let normalized_distance = distance_to_center / diagonal_km;
+        let diagonal_m = ((width * 111_000.0).powi(2) + (height * 111_000.0).powi(2)).sqrt();
+        let normalized_distance = distance_to_center / diagonal_m;
 
         // Base score: higher for points closer to center
         let base_score = (1.0 - normalized_distance.min(1.0)) as f32;
@@ -728,7 +728,7 @@ impl GeoBoundingBoxQuery {
             GeoPoint::new(bbox.min.lat, bbox.max.lon), // SE
         ];
 
-        let corner_threshold_km = 1.0; // Within 1km of corner
+        let corner_threshold_m = 1_000.0; // Within 1 km (= 1 000 m) of corner
         let mut min_corner_distance = f64::INFINITY;
 
         for corner in &corners {
@@ -736,7 +736,7 @@ impl GeoBoundingBoxQuery {
             min_corner_distance = min_corner_distance.min(distance);
         }
 
-        if min_corner_distance < corner_threshold_km {
+        if min_corner_distance < corner_threshold_m {
             0.1 // Corner bonus
         } else {
             0.0
@@ -796,8 +796,8 @@ pub struct GeoMatch {
     pub doc_id: u64,
     /// Geographical point of the document
     pub point: GeoPoint,
-    /// Distance from query center in kilometers
-    pub distance_km: f64,
+    /// Distance from query center in meters
+    pub distance_m: f64,
     /// Relevance score based on distance
     pub relevance_score: f32,
 }
@@ -816,8 +816,8 @@ impl GeoMatcher {
     pub fn new(mut matches: Vec<GeoMatch>) -> Self {
         // Sort matches by distance (closest first)
         matches.sort_by(|a, b| {
-            a.distance_km
-                .partial_cmp(&b.distance_km)
+            a.distance_m
+                .partial_cmp(&b.distance_m)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -936,8 +936,8 @@ mod tests {
         let la = GeoPoint::try_new(34.0522, -118.2437).unwrap();
 
         let distance = nyc.distance_to(&la);
-        // Distance between NYC and LA is approximately 3,944 km
-        assert!((distance - 3944.0).abs() < 100.0); // Allow some tolerance
+        // Distance between NYC and LA is approximately 3 944 km (3 944 000 m)
+        assert!((distance - 3_944_000.0).abs() < 100_000.0); // Allow ~100 km tolerance
     }
 
     #[test]
@@ -970,24 +970,24 @@ mod tests {
     #[test]
     fn test_geo_distance_query() {
         let center = GeoPoint::try_new(40.7128, -74.0060).unwrap();
-        let query = GeoDistanceQuery::new("location", center, 10.0).with_boost(1.5);
+        let query = GeoDistanceQuery::new("location", center, 10_000.0).with_boost(1.5);
 
         assert_eq!(query.field(), "location");
         assert_eq!(query.center(), center);
-        assert_eq!(query.distance_km(), 10.0);
+        assert_eq!(query.distance_m(), 10_000.0);
         assert_eq!(query.boost(), 1.5);
     }
 
     #[test]
     fn test_geo_distance_scoring() {
         let center = GeoPoint::try_new(0.0, 0.0).unwrap();
-        let query = GeoDistanceQuery::new("location", center, 10.0);
+        let query = GeoDistanceQuery::new("location", center, 10_000.0);
 
-        // Test scoring at different distances
+        // Test scoring at different distances (meters)
         assert_eq!(query.calculate_distance_score(0.0), 1.0); // At center
-        assert_eq!(query.calculate_distance_score(5.0), 0.5); // Half distance
-        assert_eq!(query.calculate_distance_score(10.0), 0.0); // At max distance
-        assert_eq!(query.calculate_distance_score(15.0), 0.0); // Beyond max distance
+        assert_eq!(query.calculate_distance_score(5_000.0), 0.5); // Half distance
+        assert_eq!(query.calculate_distance_score(10_000.0), 0.0); // At max distance
+        assert_eq!(query.calculate_distance_score(15_000.0), 0.0); // Beyond max distance
     }
 
     #[test]
@@ -1004,18 +1004,19 @@ mod tests {
 
     #[test]
     fn test_geo_distance_query_within_radius_factory() {
-        let query = GeoDistanceQuery::within_radius("location", 40.7128, -74.0060, 10.0).unwrap();
+        let query =
+            GeoDistanceQuery::within_radius("location", 40.7128, -74.0060, 10_000.0).unwrap();
 
         assert_eq!(query.field(), "location");
         assert_eq!(query.center().lat, 40.7128);
         assert_eq!(query.center().lon, -74.0060);
-        assert_eq!(query.distance_km(), 10.0);
+        assert_eq!(query.distance_m(), 10_000.0);
     }
 
     #[test]
     fn test_geo_distance_query_within_radius_invalid_lat() {
         // Latitude outside [-90, 90] is rejected by GeoPoint::try_new.
-        let err = GeoDistanceQuery::within_radius("location", 95.0, 0.0, 10.0).unwrap_err();
+        let err = GeoDistanceQuery::within_radius("location", 95.0, 0.0, 10_000.0).unwrap_err();
         assert!(format!("{err}").to_lowercase().contains("lat"));
     }
 
@@ -1047,13 +1048,13 @@ mod tests {
             GeoMatch {
                 doc_id: 3,
                 point: GeoPoint::try_new(0.0, 0.0).unwrap(),
-                distance_km: 1.0,
+                distance_m: 1_000.0,
                 relevance_score: 0.9,
             },
             GeoMatch {
                 doc_id: 1,
                 point: GeoPoint::try_new(0.0, 0.0).unwrap(),
-                distance_km: 2.0,
+                distance_m: 2_000.0,
                 relevance_score: 0.8,
             },
         ];
@@ -1061,7 +1062,7 @@ mod tests {
         let mut matcher = GeoMatcher::new(matches);
 
         // Should return documents in distance-sorted order (closest first)
-        // After sorting: doc_id: 3 (1.0km) comes before doc_id: 1 (2.0km)
+        // After sorting: doc_id: 3 (1 km) comes before doc_id: 1 (2 km)
         assert_eq!(matcher.doc_id(), 3); // Initial position: closest document
 
         assert!(matcher.next().unwrap()); // Move to next
@@ -1075,7 +1076,7 @@ mod tests {
         let matches = vec![GeoMatch {
             doc_id: 1,
             point: GeoPoint::try_new(0.0, 0.0).unwrap(),
-            distance_km: 1.0,
+            distance_m: 1_000.0,
             relevance_score: 0.9,
         }];
 
@@ -1090,19 +1091,19 @@ mod tests {
     #[test]
     fn test_enhanced_distance_scoring() {
         let center = GeoPoint::try_new(40.7128, -74.0060).unwrap(); // NYC
-        let query = GeoDistanceQuery::new("location", center, 10.0);
+        let query = GeoDistanceQuery::new("location", center, 10_000.0);
 
-        // Test point very close to center
+        // Test point very close to centre (50 m away)
         let close_point = GeoPoint::try_new(40.7130, -74.0062).unwrap();
-        let close_score = query.calculate_distance_score_enhanced(0.05, &close_point);
+        let close_score = query.calculate_distance_score_enhanced(50.0, &close_point);
 
-        // Test point at moderate distance
+        // Test point at moderate distance (1 km)
         let mid_point = GeoPoint::try_new(40.7200, -74.0100).unwrap();
-        let mid_score = query.calculate_distance_score_enhanced(1.0, &mid_point);
+        let mid_score = query.calculate_distance_score_enhanced(1_000.0, &mid_point);
 
-        // Test point at max distance
+        // Test point at almost max distance (9 km)
         let far_point = GeoPoint::try_new(40.8000, -74.1000).unwrap();
-        let far_score = query.calculate_distance_score_enhanced(9.0, &far_point);
+        let far_score = query.calculate_distance_score_enhanced(9_000.0, &far_point);
 
         // Scores should decrease with distance, and close points should get precision bonus
         assert!(close_score > mid_score);
@@ -1142,7 +1143,7 @@ mod tests {
     #[test]
     fn test_spatial_bounding_box_creation() {
         let center = GeoPoint::try_new(40.7128, -74.0060).unwrap(); // NYC
-        let query = GeoDistanceQuery::new("location", center, 5.0); // 5km radius
+        let query = GeoDistanceQuery::new("location", center, 5_000.0); // 5 km radius
 
         let bbox = query.create_bounding_box();
 
@@ -1155,15 +1156,16 @@ mod tests {
         assert!(height > 0.0 && height < 1.0);
 
         // The center should be approximately in the middle of the bounding box
+        // (within ~1 km).
         let bbox_center = bbox.center();
         let center_distance = center.distance_to(&bbox_center);
-        assert!(center_distance < 1.0); // Should be very close
+        assert!(center_distance < 1_000.0);
     }
 
     #[test]
     fn test_geographic_relevance_calculation() {
         let center = GeoPoint::try_new(40.7128, -74.0060).unwrap();
-        let query = GeoDistanceQuery::new("location", center, 10.0);
+        let query = GeoDistanceQuery::new("location", center, 10_000.0);
 
         // Test temperate zone bonus
         let temperate_point = GeoPoint::try_new(45.0, 0.0).unwrap(); // Temperate zone

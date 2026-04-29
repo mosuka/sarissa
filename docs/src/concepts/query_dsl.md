@@ -96,23 +96,23 @@ price:[* TO 100]
 
 Two function-style forms target `Geo` (2D latitude / longitude) fields. All
 arguments are signed floats; latitudes / longitudes are in degrees and the
-radius is in kilometres:
+distance is in metres:
 
 ```text
-location:geo_distance(lat, lon, distance_km)
+location:geo_distance(lat, lon, distance_m)
 location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 ```
 
 | Form | Behaviour |
 | :--- | :--- |
-| `geo_distance(lat, lon, distance_km)` | All docs whose stored `(lat, lon)` lies within `distance_km` kilometres of the given centre. |
+| `geo_distance(lat, lon, distance_m)` | All docs whose stored `(lat, lon)` lies within `distance_m` metres of the given centre. |
 | `geo_bbox(min_lat, min_lon, max_lat, max_lon)` | All docs whose stored `(lat, lon)` lies inside the axis-aligned latitude / longitude rectangle. |
 
 Examples:
 
 ```text
-# Within 10 km of Tokyo (35.6895, 139.6917)
-location:geo_distance(35.6895, 139.6917, 10)
+# Within 10 km (= 10 000 m) of Tokyo (35.6895, 139.6917)
+location:geo_distance(35.6895, 139.6917, 10000)
 
 # Inside an axis-aligned lat/lon bounding box
 location:geo_bbox(35.0, 139.0, 36.0, 140.0)
@@ -128,14 +128,14 @@ Three function-style forms target `Geo3d` (3D ECEF Cartesian) fields. All
 arguments are signed floats in metres, except `k` (an unsigned integer):
 
 ```text
-position:geo3d_distance(x, y, z, radius_m)
+position:geo3d_distance(x, y, z, distance_m)
 position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
 position:geo3d_nearest(x, y, z, k)
 ```
 
 | Form | Behaviour |
 | :--- | :--- |
-| `geo3d_distance(x, y, z, radius_m)` | All docs whose stored point lies within `radius_m` metres of `(x, y, z)`. |
+| `geo3d_distance(x, y, z, distance_m)` | All docs whose stored point lies within `distance_m` metres of `(x, y, z)`. |
 | `geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | All docs whose stored point lies inside the axis-aligned 3D box. |
 | `geo3d_nearest(x, y, z, k)` | The `k` nearest docs to `(x, y, z)` by Euclidean distance. |
 

@@ -153,13 +153,13 @@ fn test_geo_bkd_query() {
 
     let reader = writer.build_reader().unwrap();
 
-    // Distance query: Near Tokyo (within 50km) -> Should match Tokyo (0km) and Yokohama (~30km)
-    let query = GeoDistanceQuery::new("location", tokyo, 50.0);
+    // Distance query: Near Tokyo (within 50 km) -> Should match Tokyo (0 km) and Yokohama (~30 km)
+    let query = GeoDistanceQuery::new("location", tokyo, 50_000.0);
     let matched_docs = collect_matcher_results(query.matcher(&*reader).unwrap());
     assert_eq!(matched_docs, vec![0, 1]);
 
-    // Near Osaka (within 20km) -> Should match Osaka
-    let query_osaka = GeoDistanceQuery::new("location", osaka, 20.0);
+    // Near Osaka (within 20 km) -> Should match Osaka
+    let query_osaka = GeoDistanceQuery::new("location", osaka, 20_000.0);
     let matched_osaka = collect_matcher_results(query_osaka.matcher(&*reader).unwrap());
     assert_eq!(matched_osaka, vec![2]);
 }

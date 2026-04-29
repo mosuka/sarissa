@@ -78,9 +78,9 @@ index = laurus.Index(path="./myindex", schema=schema)
 | `FuzzyQuery(field, term, max_edits)` | Approximate term match |
 | `WildcardQuery(field, pattern)` | Wildcard pattern match (`*`, `?`) |
 | `NumericRangeQuery(field, min, max)` | Numeric range (int or float) |
-| `GeoDistanceQuery.within_radius(field, lat, lon, distance_km)` | Geo-distance radius search |
+| `GeoDistanceQuery.within_radius(field, lat, lon, distance_m)` | Geo-distance radius search |
 | `GeoBoundingBoxQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)` | Geo bounding-box search |
-| `Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)` | 3D ECEF sphere search |
+| `Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)` | 3D ECEF sphere search |
 | `Geo3dBoundingBoxQuery.within_box(field, min_x, min_y, min_z, max_x, max_y, max_z)` | 3D ECEF AABB search |
 | `Geo3dNearestQuery.k_nearest(field, x, y, z, k)` | 3D ECEF k-nearest neighbours |
 | `BooleanQuery(must, should, must_not)` | Compound boolean logic |

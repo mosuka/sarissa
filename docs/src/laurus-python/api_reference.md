@@ -158,12 +158,12 @@ float) is inferred from the Python type of `min`/`max`.
 
 ```python
 GeoDistanceQuery.within_radius(
-    field: str, lat: float, lon: float, distance_km: float,
+    field: str, lat: float, lon: float, distance_m: float,
 )
 ```
 
 Geo-distance (radius) search. Returns documents whose `(lat, lon)` coordinate
-is within `distance_km` kilometres of the given point.
+is within `distance_m` metres of the given point.
 
 ### GeoBoundingBoxQuery
 
@@ -182,12 +182,12 @@ inside the axis-aligned `[min_lat, max_lat] × [min_lon, max_lon]` rectangle.
 
 ```python
 Geo3dDistanceQuery.within_sphere(
-    field: str, x: float, y: float, z: float, radius_m: float,
+    field: str, x: float, y: float, z: float, distance_m: float,
 )
 ```
 
 Sphere search over a 3D ECEF point field. Returns documents whose `(x, y, z)`
-coordinate is within `radius_m` metres of the centre. See
+coordinate is within `distance_m` metres of the centre. See
 [Geo3d concepts](../concepts/geo3d.md) for ECEF theory.
 
 ### Geo3dBoundingBoxQuery

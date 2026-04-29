@@ -148,10 +148,10 @@ Laurus::NumericRangeQuery.new(field, min: nil, max: nil)
 ### GeoDistanceQuery
 
 ```ruby
-Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
+Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_m)
 ```
 
-地理的距離検索（半径指定）。指定した地点から `distance_km` キロメートル以内の
+地理的距離検索（半径指定）。指定した地点から `distance_m` メートル以内の
 `(lat, lon)` 座標を持つドキュメントを返します。
 
 ### GeoBoundingBoxQuery
@@ -168,10 +168,10 @@ Laurus::GeoBoundingBoxQuery.within_bounding_box(
 ### Geo3dDistanceQuery
 
 ```ruby
-Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)
 ```
 
-3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `radius_m` メートル以内
+3D ECEF 座標フィールドへの球距離検索。中心 `(x, y, z)` から `distance_m` メートル以内
 の座標を持つドキュメントを返します。ECEF の理論については
 [Geo3d の概念](../concepts/geo3d.md) を参照。
 

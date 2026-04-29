@@ -100,10 +100,10 @@ impl GeoPoint {
         Ok(GeoPoint { lat, lon })
     }
 
-    /// Great-circle distance to another point in kilometers, using the
-    /// Haversine formula on a sphere of mean Earth radius (6371 km).
+    /// Great-circle distance to another point in meters, using the
+    /// Haversine formula on a sphere of mean Earth radius (6 371 000 m).
     pub fn distance_to(&self, other: &GeoPoint) -> f64 {
-        const EARTH_RADIUS_KM: f64 = 6371.0;
+        const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
         let lat1_rad = self.lat.to_radians();
         let lat2_rad = other.lat.to_radians();
@@ -114,7 +114,7 @@ impl GeoPoint {
             + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
         let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
 
-        EARTH_RADIUS_KM * c
+        EARTH_RADIUS_M * c
     }
 
     /// Initial bearing toward `other`, in degrees in `[0, 360)` clockwise

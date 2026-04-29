@@ -78,9 +78,9 @@ index = laurus.Index(path="./myindex", schema=schema)
 | `FuzzyQuery(field, term, max_edits)` | 近似一致検索 |
 | `WildcardQuery(field, pattern)` | ワイルドカード検索（`*`、`?`） |
 | `NumericRangeQuery(field, min, max)` | 数値範囲検索（int または float） |
-| `GeoDistanceQuery.within_radius(field, lat, lon, distance_km)` | 地理的距離検索（半径指定） |
+| `GeoDistanceQuery.within_radius(field, lat, lon, distance_m)` | 地理的距離検索（半径指定） |
 | `GeoBoundingBoxQuery.within_bounding_box(field, min_lat, min_lon, max_lat, max_lon)` | 地理的範囲検索（バウンディングボックス） |
-| `Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)` | 3D ECEF 球距離検索 |
+| `Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)` | 3D ECEF 球距離検索 |
 | `Geo3dBoundingBoxQuery.within_box(field, min_x, min_y, min_z, max_x, max_y, max_z)` | 3D ECEF AABB 検索 |
 | `Geo3dNearestQuery.k_nearest(field, x, y, z, k)` | 3D ECEF k 最近傍検索 |
 | `BooleanQuery(must, should, must_not)` | 複合ブール検索 |

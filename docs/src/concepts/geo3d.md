@@ -120,7 +120,7 @@ on top of the shared 3D BKD-Tree.
 
 ### Sphere (radius) — `Geo3dDistanceQuery`
 
-Find every document whose stored point lies within `radius_m` metres of a
+Find every document whose stored point lies within `distance_m` metres of a
 centre point. Score is `1 - distance / radius`, clamped to `[0, 1]`.
 
 ```rust
@@ -200,7 +200,7 @@ position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
 
 | Form | Arguments |
 | :--- | :--- |
-| `geo3d_distance(x, y, z, radius_m)` | centre `(x, y, z)` and search radius in metres |
+| `geo3d_distance(x, y, z, distance_m)` | centre `(x, y, z)` and maximum distance in metres |
 | `geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)` | two opposite corners of the AABB |
 | `geo3d_nearest(x, y, z, k)` | centre `(x, y, z)` and the integer `k` |
 

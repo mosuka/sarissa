@@ -162,8 +162,8 @@ let query = NumericRangeQuery::new(
 ```rust
 use laurus::lexical::query::geo::GeoQuery;
 
-// Find documents within 10km of Tokyo Station (35.6812, 139.7671)
-let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10.0)?; // radius in kilometers
+// Find documents within 10 km (= 10 000 m) of Tokyo Station (35.6812, 139.7671)
+let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10_000.0)?; // distance in metres
 
 // Find documents within a bounding box (min_lat, min_lon, max_lat, max_lon)
 let query = GeoQuery::within_bounding_box(

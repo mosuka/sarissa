@@ -11,7 +11,7 @@
 //! # Implemented queries
 //!
 //! - [`Geo3dDistanceQuery`] — sphere-radius search: every doc whose stored
-//!   ECEF point lies within `radius_m` meters of the query center.
+//!   ECEF point lies within `distance_m` meters of the query center.
 //! - [`Geo3dBoundingBoxQuery`] — 3D axis-aligned box search: every doc
 //!   whose stored ECEF point falls inside the closed `[min, max]` box.
 //! - [`Geo3dNearestQuery`] — k-nearest-neighbour search: the `k` docs
@@ -46,8 +46,8 @@ use crate::lexical::reader::LexicalIndexReader;
 /// A 3D distance (sphere) query against an ECEF-typed field.
 ///
 /// Matches every document whose stored [`GeoEcefPoint`] lies within
-/// `radius_m` meters of `center`. Distance is straight-line Euclidean in
-/// ECEF space; a `radius_m` of 1000 means "within 1 km of `center`",
+/// `distance_m` meters of `center`. Distance is straight-line Euclidean in
+/// ECEF space; a `distance_m` of 1000 means "within 1 km of `center`",
 /// regardless of latitude or altitude.
 ///
 /// Scoring follows the same shape as the 2D
@@ -63,8 +63,8 @@ pub struct Geo3dDistanceQuery {
     field: String,
     /// Center point of the search sphere.
     center: GeoEcefPoint,
-    /// Sphere radius in meters.
-    radius_m: f64,
+    /// Maximum distance from `center` in meters (sphere radius).
+    distance_m: f64,
     /// Boost factor applied to the final score.
     boost: f32,
 }
@@ -72,14 +72,15 @@ pub struct Geo3dDistanceQuery {
 impl Geo3dDistanceQuery {
     /// Construct a new query.
     ///
-    /// `radius_m` is interpreted as straight-line distance in ECEF meters.
-    /// Negative or zero radii produce a query that matches no documents
-    /// (see [`Geo3dDistanceQuery::is_empty`]).
-    pub fn new<F: Into<String>>(field: F, center: GeoEcefPoint, radius_m: f64) -> Self {
+    /// `distance_m` is interpreted as straight-line distance in ECEF meters
+    /// and represents the maximum distance from `center` (i.e. the search
+    /// sphere's radius). Negative or zero values produce a query that matches
+    /// no documents (see [`Geo3dDistanceQuery::is_empty`]).
+    pub fn new<F: Into<String>>(field: F, center: GeoEcefPoint, distance_m: f64) -> Self {
         Self {
             field: field.into(),
             center,
-            radius_m,
+            distance_m,
             boost: 1.0,
         }
     }
@@ -100,9 +101,9 @@ impl Geo3dDistanceQuery {
         self.center
     }
 
-    /// Search radius in meters.
-    pub fn radius_m(&self) -> f64 {
-        self.radius_m
+    /// Maximum distance from `center` in meters (sphere radius).
+    pub fn distance_m(&self) -> f64 {
+        self.distance_m
     }
 
     /// Run the query against `reader` and return the matches sorted by
@@ -113,10 +114,10 @@ impl Geo3dDistanceQuery {
             return Ok(matches);
         };
 
-        let mut visitor = SphereVisitor::new(self.center, self.radius_m);
+        let mut visitor = SphereVisitor::new(self.center, self.distance_m);
         bkd.intersect(&mut visitor)?;
 
-        let radius = self.radius_m;
+        let radius = self.distance_m;
         for hit in visitor.hits {
             let distance = hit.distance_sq.sqrt();
             let score = if hit.from_inside_cell {
@@ -169,7 +170,7 @@ pub struct Geo3dMatch {
 }
 
 /// `IntersectVisitor` that collects every doc whose stored point lies
-/// within a sphere of radius `radius_m` centered at `center`.
+/// within a sphere of radius `distance_m` centered at `center`.
 ///
 /// The classification logic uses [`AABB::min_distance_sq_to_point`] (for
 /// the Outside test) and [`AABB::max_distance_sq_to_point`] (for the
@@ -376,13 +377,13 @@ impl Query for Geo3dDistanceQuery {
 
     fn description(&self) -> String {
         format!(
-            "Geo3dDistanceQuery(field: {}, center: {:?}, radius: {}m)",
-            self.field, self.center, self.radius_m
+            "Geo3dDistanceQuery(field: {}, center: {:?}, distance: {}m)",
+            self.field, self.center, self.distance_m
         )
     }
 
     fn is_empty(&self, _reader: &dyn LexicalIndexReader) -> Result<bool> {
-        Ok(self.radius_m <= 0.0)
+        Ok(self.distance_m <= 0.0)
     }
 
     fn cost(&self, reader: &dyn LexicalIndexReader) -> Result<u64> {
@@ -954,7 +955,7 @@ mod tests {
             .with_boost(2.0);
         assert_eq!(q.field(), "position");
         assert_eq!(q.center(), GeoEcefPoint::new(1.0, 2.0, 3.0));
-        assert_eq!(q.radius_m(), 500.0);
+        assert_eq!(q.distance_m(), 500.0);
         assert_eq!(q.boost(), 2.0);
         let cloned = q.clone_box();
         assert!(cloned.description().contains("Geo3dDistanceQuery"));
