@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-1720beab.js";
+            window.path_to_searchindex_js = "../searchindex-1eda23b7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -236,17 +236,28 @@
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>add_text_field(name)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multi_valued=True</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multi_valued=True</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
-<tr><td style="text-align: left"><code>add_bool_field(name)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_bytes_field(name)</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_geo_field(name)</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
+<tr><td style="text-align: left"><code>add_boolean_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_bytes_field(name, *, stored=True)</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_geo_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
 <tr><td style="text-align: left"><code>add_geo3d_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は <a href="../concepts/geo3d.html">Geo3d の概念</a>。</td></tr>
-<tr><td style="text-align: left"><code>add_datetime_field(name)</code></td><td style="text-align: left">UTC 日時フィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW 近似最近傍ベクトルフィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat（総当たり）ベクトルフィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF 近似最近傍ベクトルフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_datetime_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">UTC 日時フィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None)</code></td><td style="text-align: left">HNSW 近似最近傍ベクトルフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine", embedder=None)</code></td><td style="text-align: left">Flat（総当たり）ベクトルフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1, embedder=None)</code></td><td style="text-align: left">IVF 近似最近傍ベクトルフィールド。</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="その他のメソッド"><a class="header" href="#その他のメソッド">その他のメソッド</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>add_embedder(name, config)</code></td><td style="text-align: left">名前付きエンベダー定義を登録します。<code>config</code> は <code>"type"</code> キーを持つ辞書です（下記参照）。</td></tr>
 <tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">デフォルト検索フィールドを設定（文字列のリスト）。</td></tr>
 <tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">未宣言フィールドの扱いを設定。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code>。詳細は下記を参照。</td></tr>
 <tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">現在のポリシーを小文字の文字列で返す。</td></tr>
@@ -262,6 +273,20 @@
 <li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
 </ul>
 <p>詳細な挙動マトリクスは <a href="../concepts/schema_and_fields.html#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
+<h3 id="エンベダータイプ"><a class="header" href="#エンベダータイプ">エンベダータイプ</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left"><code>"type"</code></th><th style="text-align: left">必須キー</th><th style="text-align: left">Feature Flag</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>"precomputed"</code></td><td style="text-align: left">–</td><td style="text-align: left">（常に利用可能）</td></tr>
+<tr><td style="text-align: left"><code>"candle_bert"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-candle</code></td></tr>
+<tr><td style="text-align: left"><code>"candle_clip"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-multimodal</code></td></tr>
+<tr><td style="text-align: left"><code>"openai"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-openai</code></td></tr>
+</tbody>
+</table>
+</div>
 <h3 id="距離メトリクス"><a class="header" href="#距離メトリクス">距離メトリクス</a></h3>
 <div class="table-wrapper">
 <table>
@@ -272,6 +297,8 @@
 <tr><td style="text-align: left"><code>"cosine"</code></td><td style="text-align: left">コサイン類似度（デフォルト）</td></tr>
 <tr><td style="text-align: left"><code>"euclidean"</code></td><td style="text-align: left">ユークリッド距離</td></tr>
 <tr><td style="text-align: left"><code>"dot_product"</code></td><td style="text-align: left">内積</td></tr>
+<tr><td style="text-align: left"><code>"manhattan"</code></td><td style="text-align: left">マンハッタン距離</td></tr>
+<tr><td style="text-align: left"><code>"angular"</code></td><td style="text-align: left">角度距離</td></tr>
 </tbody>
 </table>
 </div>
@@ -286,17 +313,19 @@
 </code></pre>
 <p>指定した語句が順序どおりに含まれるドキュメントを検索します。</p>
 <h3 id="fuzzyquery"><a class="header" href="#fuzzyquery">FuzzyQuery</a></h3>
-<pre><code class="language-python">FuzzyQuery(field: str, term: str, max_edits: int = 1)
+<pre><code class="language-python">FuzzyQuery(field: str, term: str, *, max_edits: int = 2)
 </code></pre>
-<p>編集距離が <code>max_edits</code> 以内の近似一致を検索します。</p>
+<p>編集距離が <code>max_edits</code> 以内の近似一致を検索します。<code>max_edits</code> はキーワード専用引数です。</p>
 <h3 id="wildcardquery"><a class="header" href="#wildcardquery">WildcardQuery</a></h3>
 <pre><code class="language-python">WildcardQuery(field: str, pattern: str)
 </code></pre>
 <p>ワイルドカードパターン検索。<code>*</code> は任意の文字列、<code>?</code> は任意の1文字に一致します。</p>
 <h3 id="numericrangequery"><a class="header" href="#numericrangequery">NumericRangeQuery</a></h3>
-<pre><code class="language-python">NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
+<pre><code class="language-python">NumericRangeQuery(field: str, *, min: int | float | None = None, max: int | float | None = None)
 </code></pre>
-<p><code>[min, max]</code> の範囲内の数値を検索します。開いた境界には <code>None</code> を指定します。</p>
+<p><code>[min, max]</code> の範囲内の数値を検索します。開いた境界には <code>None</code> を指定する
+（または省略する）と開放されます。<code>min</code> と <code>max</code> はキーワード専用引数です。
+数値型（整数または浮動小数点）は <code>min</code>/<code>max</code> の Python 型から推論されます。</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-python">GeoDistanceQuery.within_radius(
     field: str, lat: float, lon: float, distance_km: float,
@@ -343,17 +372,37 @@
 メントを返します。<code>initial_radius_m</code> / <code>max_radius_m</code> は反復拡張サーチの探索コーン
 を調整します。</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
-<pre><code class="language-python">BooleanQuery(
-    must: list[Query] | None = None,
-    should: list[Query] | None = None,
-    must_not: list[Query] | None = None,
-)
+<pre><code class="language-python">bq = BooleanQuery()
+bq.must(query)
+bq.should(query)
+bq.must_not(query)
 </code></pre>
-<p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があります。<code>should</code> 節は少なくとも1つ一致する必要があります。<code>must_not</code> 節は一致してはなりません。</p>
-<h3 id="spannearquery"><a class="header" href="#spannearquery">SpanNearQuery</a></h3>
-<pre><code class="language-python">SpanNearQuery(field: str, terms: list[str], slop: int = 0, in_order: bool = True)
+<p>複合ブールクエリ。引数なしでコンストラクタを呼び出し、<code>must</code> / <code>should</code> /
+<code>must_not</code> メソッドで節を一つずつ追加します。各メソッドは任意のクエリ
+オブジェクト（ネストされた <code>BooleanQuery</code> も含む）を受け付けます。</p>
+<p><code>must</code> 節はすべて一致する必要があり、<code>must_not</code> 節は一致してはなりません。
+<code>should</code> 節はスコアリングに寄与し、<code>must</code> 節が無い場合は少なくとも1つが
+一致する必要があります。</p>
+<h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
+<pre><code class="language-python"># 単一語句
+SpanQuery.term(field: str, term: str)
+
+# Near: slop 位置以内の語句
+SpanQuery.near(field: str, terms: list[str], *, slop: int = 0, ordered: bool = True)
+
+# ネストされた SpanQuery 句を使った Near
+SpanQuery.near_spans(field: str, clauses: list[SpanQuery], *, slop: int = 0, ordered: bool = True)
+
+# Containing: big スパンが little スパンを含む
+SpanQuery.containing(field: str, big: SpanQuery, little: SpanQuery)
+
+# Within: 最大距離での include スパンと exclude スパン
+SpanQuery.within(field: str, include: SpanQuery, exclude: SpanQuery, distance: int)
 </code></pre>
-<p>語句が <code>slop</code> 位置以内に隣接して現れるドキュメントを検索します。</p>
+<p>位置・近接スパンクエリ。静的ファクトリメソッドで構築します。<code>near</code> は語句
+文字列のリストを受け取り、<code>near_spans</code> はネスト式のために <code>SpanQuery</code>
+オブジェクトのリストを受け取ります。<code>slop</code> と <code>ordered</code> はキーワード専用
+引数です。</p>
 <h3 id="vectorquery"><a class="header" href="#vectorquery">VectorQuery</a></h3>
 <pre><code class="language-python">VectorQuery(field: str, vector: list[float])
 </code></pre>
@@ -400,7 +449,7 @@
 <pre><code class="language-python">class SearchResult:
     id: str          # 外部ドキュメント識別子
     score: float     # 関連性スコア
-    document: dict | None  # 取得されたフィールド値。削除済みの場合は None
+    document: dict | None  # 取得されたフィールド値。stored=False の場合は None
 </code></pre>
 <hr>
 <h2 id="フュージョンアルゴリズム"><a class="header" href="#フュージョンアルゴリズム">フュージョンアルゴリズム</a></h2>
@@ -438,9 +487,12 @@
 <pre><code class="language-python">class Token:
     text: str
     position: int
+    start_offset: int
+    end_offset: int
+    boost: float
+    stopped: bool
     position_increment: int
     position_length: int
-    boost: float
 </code></pre>
 <hr>
 <h2 id="フィールド値の型マッピング"><a class="header" href="#フィールド値の型マッピング">フィールド値の型マッピング</a></h2>

@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1720beab.js";
+            window.path_to_searchindex_js = "searchindex-1eda23b7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c423c571.js"></script>
@@ -8813,9 +8813,9 @@ index.commit()
 <pre><code class="language-python">schema = laurus.Schema()
 schema.add_text_field("title")
 schema.add_text_field("body")
-schema.add_int_field("year")
+schema.add_integer_field("year")
 schema.add_float_field("score")
-schema.add_bool_field("published")
+schema.add_boolean_field("published")
 schema.add_bytes_field("thumbnail")
 schema.add_geo_field("location")
 schema.add_datetime_field("created_at")
@@ -8885,17 +8885,28 @@ print(stats["vector_fields"])
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>add_text_field(name)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multi_valued=True</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multi_valued=True</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
-<tr><td style="text-align: left"><code>add_bool_field(name)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_bytes_field(name)</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_geo_field(name)</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
+<tr><td style="text-align: left"><code>add_boolean_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_bytes_field(name, *, stored=True)</code></td><td style="text-align: left">生バイトフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_geo_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">地理座標フィールド（緯度/経度）。</td></tr>
 <tr><td style="text-align: left"><code>add_geo3d_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">3D ECEF カルテシアン座標フィールド（x, y, z はメートル）。詳細は <a href="#3d-地理検索-ecef">Geo3d の概念</a>。</td></tr>
-<tr><td style="text-align: left"><code>add_datetime_field(name)</code></td><td style="text-align: left">UTC 日時フィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW 近似最近傍ベクトルフィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat（総当たり）ベクトルフィールド。</td></tr>
-<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF 近似最近傍ベクトルフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_datetime_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">UTC 日時フィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None)</code></td><td style="text-align: left">HNSW 近似最近傍ベクトルフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine", embedder=None)</code></td><td style="text-align: left">Flat（総当たり）ベクトルフィールド。</td></tr>
+<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1, embedder=None)</code></td><td style="text-align: left">IVF 近似最近傍ベクトルフィールド。</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="その他のメソッド"><a class="header" href="#その他のメソッド">その他のメソッド</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>add_embedder(name, config)</code></td><td style="text-align: left">名前付きエンベダー定義を登録します。<code>config</code> は <code>"type"</code> キーを持つ辞書です（下記参照）。</td></tr>
 <tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">デフォルト検索フィールドを設定（文字列のリスト）。</td></tr>
 <tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">未宣言フィールドの扱いを設定。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code>。詳細は下記を参照。</td></tr>
 <tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">現在のポリシーを小文字の文字列で返す。</td></tr>
@@ -8911,6 +8922,20 @@ print(stats["vector_fields"])
 <li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
 </ul>
 <p>詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
+<h3 id="エンベダータイプ"><a class="header" href="#エンベダータイプ">エンベダータイプ</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left"><code>"type"</code></th><th style="text-align: left">必須キー</th><th style="text-align: left">Feature Flag</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>"precomputed"</code></td><td style="text-align: left">–</td><td style="text-align: left">（常に利用可能）</td></tr>
+<tr><td style="text-align: left"><code>"candle_bert"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-candle</code></td></tr>
+<tr><td style="text-align: left"><code>"candle_clip"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-multimodal</code></td></tr>
+<tr><td style="text-align: left"><code>"openai"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-openai</code></td></tr>
+</tbody>
+</table>
+</div>
 <h3 id="距離メトリクス-1"><a class="header" href="#距離メトリクス-1">距離メトリクス</a></h3>
 <div class="table-wrapper">
 <table>
@@ -8921,6 +8946,8 @@ print(stats["vector_fields"])
 <tr><td style="text-align: left"><code>"cosine"</code></td><td style="text-align: left">コサイン類似度（デフォルト）</td></tr>
 <tr><td style="text-align: left"><code>"euclidean"</code></td><td style="text-align: left">ユークリッド距離</td></tr>
 <tr><td style="text-align: left"><code>"dot_product"</code></td><td style="text-align: left">内積</td></tr>
+<tr><td style="text-align: left"><code>"manhattan"</code></td><td style="text-align: left">マンハッタン距離</td></tr>
+<tr><td style="text-align: left"><code>"angular"</code></td><td style="text-align: left">角度距離</td></tr>
 </tbody>
 </table>
 </div>
@@ -8935,17 +8962,19 @@ print(stats["vector_fields"])
 </code></pre>
 <p>指定した語句が順序どおりに含まれるドキュメントを検索します。</p>
 <h3 id="fuzzyquery-1"><a class="header" href="#fuzzyquery-1">FuzzyQuery</a></h3>
-<pre><code class="language-python">FuzzyQuery(field: str, term: str, max_edits: int = 1)
+<pre><code class="language-python">FuzzyQuery(field: str, term: str, *, max_edits: int = 2)
 </code></pre>
-<p>編集距離が <code>max_edits</code> 以内の近似一致を検索します。</p>
+<p>編集距離が <code>max_edits</code> 以内の近似一致を検索します。<code>max_edits</code> はキーワード専用引数です。</p>
 <h3 id="wildcardquery-1"><a class="header" href="#wildcardquery-1">WildcardQuery</a></h3>
 <pre><code class="language-python">WildcardQuery(field: str, pattern: str)
 </code></pre>
 <p>ワイルドカードパターン検索。<code>*</code> は任意の文字列、<code>?</code> は任意の1文字に一致します。</p>
 <h3 id="numericrangequery-1"><a class="header" href="#numericrangequery-1">NumericRangeQuery</a></h3>
-<pre><code class="language-python">NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
+<pre><code class="language-python">NumericRangeQuery(field: str, *, min: int | float | None = None, max: int | float | None = None)
 </code></pre>
-<p><code>[min, max]</code> の範囲内の数値を検索します。開いた境界には <code>None</code> を指定します。</p>
+<p><code>[min, max]</code> の範囲内の数値を検索します。開いた境界には <code>None</code> を指定する
+（または省略する）と開放されます。<code>min</code> と <code>max</code> はキーワード専用引数です。
+数値型（整数または浮動小数点）は <code>min</code>/<code>max</code> の Python 型から推論されます。</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-python">GeoDistanceQuery.within_radius(
     field: str, lat: float, lon: float, distance_km: float,
@@ -8992,17 +9021,37 @@ print(stats["vector_fields"])
 メントを返します。<code>initial_radius_m</code> / <code>max_radius_m</code> は反復拡張サーチの探索コーン
 を調整します。</p>
 <h3 id="booleanquery-1"><a class="header" href="#booleanquery-1">BooleanQuery</a></h3>
-<pre><code class="language-python">BooleanQuery(
-    must: list[Query] | None = None,
-    should: list[Query] | None = None,
-    must_not: list[Query] | None = None,
-)
+<pre><code class="language-python">bq = BooleanQuery()
+bq.must(query)
+bq.should(query)
+bq.must_not(query)
 </code></pre>
-<p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があります。<code>should</code> 節は少なくとも1つ一致する必要があります。<code>must_not</code> 節は一致してはなりません。</p>
-<h3 id="spannearquery"><a class="header" href="#spannearquery">SpanNearQuery</a></h3>
-<pre><code class="language-python">SpanNearQuery(field: str, terms: list[str], slop: int = 0, in_order: bool = True)
+<p>複合ブールクエリ。引数なしでコンストラクタを呼び出し、<code>must</code> / <code>should</code> /
+<code>must_not</code> メソッドで節を一つずつ追加します。各メソッドは任意のクエリ
+オブジェクト（ネストされた <code>BooleanQuery</code> も含む）を受け付けます。</p>
+<p><code>must</code> 節はすべて一致する必要があり、<code>must_not</code> 節は一致してはなりません。
+<code>should</code> 節はスコアリングに寄与し、<code>must</code> 節が無い場合は少なくとも1つが
+一致する必要があります。</p>
+<h3 id="spanquery-1"><a class="header" href="#spanquery-1">SpanQuery</a></h3>
+<pre><code class="language-python"># 単一語句
+SpanQuery.term(field: str, term: str)
+
+# Near: slop 位置以内の語句
+SpanQuery.near(field: str, terms: list[str], *, slop: int = 0, ordered: bool = True)
+
+# ネストされた SpanQuery 句を使った Near
+SpanQuery.near_spans(field: str, clauses: list[SpanQuery], *, slop: int = 0, ordered: bool = True)
+
+# Containing: big スパンが little スパンを含む
+SpanQuery.containing(field: str, big: SpanQuery, little: SpanQuery)
+
+# Within: 最大距離での include スパンと exclude スパン
+SpanQuery.within(field: str, include: SpanQuery, exclude: SpanQuery, distance: int)
 </code></pre>
-<p>語句が <code>slop</code> 位置以内に隣接して現れるドキュメントを検索します。</p>
+<p>位置・近接スパンクエリ。静的ファクトリメソッドで構築します。<code>near</code> は語句
+文字列のリストを受け取り、<code>near_spans</code> はネスト式のために <code>SpanQuery</code>
+オブジェクトのリストを受け取ります。<code>slop</code> と <code>ordered</code> はキーワード専用
+引数です。</p>
 <h3 id="vectorquery"><a class="header" href="#vectorquery">VectorQuery</a></h3>
 <pre><code class="language-python">VectorQuery(field: str, vector: list[float])
 </code></pre>
@@ -9049,7 +9098,7 @@ print(stats["vector_fields"])
 <pre><code class="language-python">class SearchResult:
     id: str          # 外部ドキュメント識別子
     score: float     # 関連性スコア
-    document: dict | None  # 取得されたフィールド値。削除済みの場合は None
+    document: dict | None  # 取得されたフィールド値。stored=False の場合は None
 </code></pre>
 <hr>
 <h2 id="フュージョンアルゴリズム-1"><a class="header" href="#フュージョンアルゴリズム-1">フュージョンアルゴリズム</a></h2>
@@ -9087,9 +9136,12 @@ print(stats["vector_fields"])
 <pre><code class="language-python">class Token:
     text: str
     position: int
+    start_offset: int
+    end_offset: int
+    boost: float
+    stopped: bool
     position_increment: int
     position_length: int
-    boost: float
 </code></pre>
 <hr>
 <h2 id="フィールド値の型マッピング"><a class="header" href="#フィールド値の型マッピング">フィールド値の型マッピング</a></h2>
@@ -9298,12 +9350,18 @@ const results = await index.searchVector(
 );
 </code></pre>
 <h2 id="5-ハイブリッド検索-1"><a class="header" href="#5-ハイブリッド検索-1">5. ハイブリッド検索</a></h2>
-<pre><code class="language-javascript">import { SearchRequest } from "laurus-nodejs";
+<pre><code class="language-javascript">import {
+  Index,
+  RRF,
+  SearchRequest,
+  TermQuery,
+  VectorQuery,
+} from "laurus-nodejs";
 
-const req = new SearchRequest(5);
-req.setLexicalTermQuery("name", "express");
-req.setVectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]);
-req.setRrfFusion(60.0);
+const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("name", "express"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
 
 const results = await index.searchWithRequest(req);
 </code></pre>
@@ -9424,6 +9482,7 @@ console.log(stats.vectorFields);
 <tr><td style="text-align: left"><code>setDynamicFieldPolicy(policy)</code></td><td style="text-align: left">未宣言フィールドの扱いを設定。<code>policy</code> は <code>"strict"</code> / <code>"dynamic"</code>（デフォルト）/ <code>"ignore"</code>。詳細は下記を参照。</td></tr>
 <tr><td style="text-align: left"><code>dynamicFieldPolicy()</code></td><td style="text-align: left">現在のポリシーを小文字の文字列で返す。</td></tr>
 <tr><td style="text-align: left"><code>fieldNames()</code></td><td style="text-align: left">全フィールド名を返す。</td></tr>
+<tr><td style="text-align: left"><code>toString()</code></td><td style="text-align: left">スキーマの文字列表現（<code>"Schema(fields=[...])"</code> 形式）を返す。</td></tr>
 </tbody>
 </table>
 </div>
@@ -9473,10 +9532,12 @@ console.log(stats.vectorFields);
   field: string,
   min?: number | null,
   max?: number | null,
-  isFloat?: boolean,
+  numericType?: "integer" | "float",
 )
 </code></pre>
-<p><code>[min, max]</code> 範囲の数値にマッチ。<code>null</code> で開放端。</p>
+<p><code>[min, max]</code> 範囲の数値にマッチします。<code>null</code>（または省略）で開放端。
+<code>numericType</code> は内部の範囲型を選択します（<code>"integer"</code>（デフォルト）または
+<code>"float"</code>）。それ以外の値は例外をスローします。</p>
 <h3 id="geodistancequery-1"><a class="header" href="#geodistancequery-1">GeoDistanceQuery</a></h3>
 <pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
   field: string, lat: number, lon: number, distanceKm: number,
@@ -9523,13 +9584,33 @@ console.log(stats.vectorFields);
 <h3 id="booleanquery-2"><a class="header" href="#booleanquery-2">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();
-  mustTerm(field: string, term: string): void;
-  shouldTerm(field: string, term: string): void;
-  mustNotTerm(field: string, term: string): void;
+  // 各クエリタイプ X について（X は次のいずれか）:
+  //   { Term, Phrase, Fuzzy, Wildcard, NumericRange,
+  //     GeoDistance, GeoBoundingBox,
+  //     Geo3dDistance, Geo3dBoundingBox, Geo3dNearest,
+  //     Boolean, Span }
+  mustX(query: X): void;
+  shouldX(query: X): void;
+  mustNotX(query: X): void;
 }
 </code></pre>
-<p>MUST / SHOULD / MUST_NOT 句による複合ブーリアンクエリ。</p>
-<h3 id="spanquery-1"><a class="header" href="#spanquery-1">SpanQuery</a></h3>
+<p>MUST / SHOULD / MUST_NOT 句による複合ブーリアンクエリ。各句は対応するクエリ
+クラスのインスタンスを引数に取ります。例:
+<code>mustTerm(new TermQuery("body", "rust"))</code> や
+<code>shouldGeo3dNearest(Geo3dNearestQuery.kNearest(...))</code>。</p>
+<p>Node.js バインディングは多態 <code>must(query)</code> ではなく 36 個の per-type メソッド
+（12 クエリタイプ × 3 極性）を公開しています。これは <code>js_name</code> を上書きした
+クラスに対する <code>napi-derive</code> の <code>Either&lt;&amp;T, ...&gt;</code> 引数バリデーションの制限を
+回避するためです。</p>
+<p><code>must</code> 節はすべて一致する必要があり、<code>mustNot</code> 節は一致してはなりません。
+<code>should</code> 節はスコアリングに寄与し、<code>must</code> 節が無い場合は少なくとも1つが
+一致する必要があります。</p>
+<pre><code class="language-javascript">const bq = new BooleanQuery();
+bq.mustTerm(new TermQuery("body", "programming"));
+bq.mustNotTerm(new TermQuery("title", "python"));
+bq.shouldFuzzy(new FuzzyQuery("body", "data", 1));
+</code></pre>
+<h3 id="spanquery-2"><a class="header" href="#spanquery-2">SpanQuery</a></h3>
 <pre><code class="language-typescript">SpanQuery.term(field: string, term: string): SpanQuery
 SpanQuery.near(
   field: string, terms: string[],
@@ -9560,35 +9641,72 @@ SpanQuery.within(
 <hr>
 <h2 id="searchrequest-2"><a class="header" href="#searchrequest-2">SearchRequest</a></h2>
 <p>高度な制御のための全機能検索リクエスト。</p>
-<pre><code class="language-typescript">class SearchRequest {
-  constructor(limit?: number, offset?: number);
+<pre><code class="language-typescript">interface SearchRequestOptions {
+  queryDsl?: string;
+  limit?: number;   // デフォルト 10
+  offset?: number;  // デフォルト 0
+}
+
+class SearchRequest {
+  constructor(options?: SearchRequestOptions);
 }
 </code></pre>
-<h3 id="セッターメソッド"><a class="header" href="#セッターメソッド">セッターメソッド</a></h3>
+<p>コンストラクタにはプリミティブな options を渡し、多態クエリ句は下記の
+per-type セッターで設定します。<code>BooleanQuery</code> 同様、<code>napi-derive</code> の
+<code>Either&lt;&amp;T, ...&gt;</code> バリデーション制限を回避するため per-type 化されています。</p>
+<h3 id="dsl-とフュージョンセッター"><a class="header" href="#dsl-とフュージョンセッター">DSL とフュージョンセッター</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>setQueryDsl(dsl)</code></td><td style="text-align: left">DSL 文字列クエリを設定。</td></tr>
-<tr><td style="text-align: left"><code>setLexicalTermQuery(field, term)</code></td><td style="text-align: left">Term ベースの Lexical クエリを設定。</td></tr>
-<tr><td style="text-align: left"><code>setLexicalPhraseQuery(field, terms)</code></td><td style="text-align: left">Phrase ベースの Lexical クエリを設定。</td></tr>
-<tr><td style="text-align: left"><code>setVectorQuery(field, vector)</code></td><td style="text-align: left">事前計算ベクトルクエリを設定。</td></tr>
-<tr><td style="text-align: left"><code>setVectorTextQuery(field, text)</code></td><td style="text-align: left">テキストベースのベクトルクエリを設定。</td></tr>
-<tr><td style="text-align: left"><code>setFilterQuery(field, term)</code></td><td style="text-align: left">スコアリング後のフィルタを設定。</td></tr>
-<tr><td style="text-align: left"><code>setRrfFusion(k?)</code></td><td style="text-align: left">RRF 融合を使用（デフォルト k=60）。</td></tr>
-<tr><td style="text-align: left"><code>setWeightedSumFusion(lexicalWeight?, vectorWeight?)</code></td><td style="text-align: left">加重和融合を使用。</td></tr>
+<tr><td style="text-align: left"><code>setQueryDsl(dsl: string)</code></td><td style="text-align: left">DSL 文字列クエリを設定。</td></tr>
+<tr><td style="text-align: left"><code>setRrfFusion(rrf: RRF)</code></td><td style="text-align: left">RRF フュージョンを使用。</td></tr>
+<tr><td style="text-align: left"><code>setWeightedSumFusion(ws: WeightedSum)</code></td><td style="text-align: left">加重和フュージョンを使用。</td></tr>
 </tbody>
 </table>
 </div>
+<h3 id="ベクトルセッター"><a class="header" href="#ベクトルセッター">ベクトルセッター</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>setVectorQuery(query: VectorQuery)</code></td><td style="text-align: left">事前計算ベクトルクエリを設定。</td></tr>
+<tr><td style="text-align: left"><code>setVectorTextQuery(query: VectorTextQuery)</code></td><td style="text-align: left">テキストベースのベクトルクエリを設定（登録 Embedder で自動埋め込み）。</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="lexical-セッターper-type"><a class="header" href="#lexical-セッターper-type">Lexical セッター（per-type）</a></h3>
+<p><code>X</code> を <code>{ Term, Phrase, Fuzzy, Wildcard, NumericRange, GeoDistance, GeoBoundingBox, Geo3dDistance, Geo3dBoundingBox, Geo3dNearest, Boolean, Span }</code> の各クエリタイプとして、以下のメソッドが公開されています:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>setLexicalX(query: X)</code></td><td style="text-align: left">明示的なハイブリッドリクエストの Lexical コンポーネントを設定。</td></tr>
+<tr><td style="text-align: left"><code>setFilterX(query: X)</code></td><td style="text-align: left">スコアリング後のフィルタコンポーネントを設定。</td></tr>
+</tbody>
+</table>
+</div>
+<p>合計 24 個の per-type セッター（12 lexical + 12 filter）に加え、上記の DSL /
+ベクトル / フュージョンセッターが利用可能です。</p>
+<pre><code class="language-javascript">const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("title", "rust"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
+const results = await index.searchWithRequest(req);
+</code></pre>
 <hr>
 <h2 id="searchresult-4"><a class="header" href="#searchresult-4">SearchResult</a></h2>
 <p>検索メソッドが配列として返す結果。</p>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;        // 外部ドキュメント識別子
   score: number;     // 関連度スコア
-  document: object | null; // 取得フィールド、または null
+  document: object | null; // 取得フィールド、stored=false の場合は null
 }
 </code></pre>
 <hr>
@@ -9654,11 +9772,10 @@ SpanQuery.within(
 <tr><td style="text-align: left"><code>boolean</code></td><td style="text-align: left"><code>Bool</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>number</code>（整数）</td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>number</code>（浮動小数点）</td><td style="text-align: left"><code>Float64</code></td><td style="text-align: left"></td></tr>
-<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left">ISO8601 文字列は <code>DateTime</code> になる</td></tr>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left">ISO 8601 文字列は <code>DateTime</code> になる</td></tr>
 <tr><td style="text-align: left"><code>number[]</code></td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left"><code>f32</code> に変換</td></tr>
-<tr><td style="text-align: left"><code>{ lat, lon }</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">2つの <code>number</code> 値</td></tr>
-<tr><td style="text-align: left"><code>Date</code></td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">タイムスタンプ経由</td></tr>
-<tr><td style="text-align: left"><code>Buffer</code></td><td style="text-align: left"><code>Bytes</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>{ lat, lon }</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">2 つの <code>number</code> 値</td></tr>
+<tr><td style="text-align: left"><code>{ x, y, z }</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">3 つの <code>number</code> 値（メートル単位、3D ECEF 直交座標）</td></tr>
 </tbody>
 </table>
 </div>
@@ -10641,7 +10758,7 @@ puts stats["vector_fields"]
 </tbody>
 </table>
 </div>
-<h3 id="その他のメソッド"><a class="header" href="#その他のメソッド">その他のメソッド</a></h3>
+<h3 id="その他のメソッド-1"><a class="header" href="#その他のメソッド-1">その他のメソッド</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -10664,7 +10781,7 @@ puts stats["vector_fields"]
 <li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
 </ul>
 <p>詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
-<h3 id="エンベダータイプ"><a class="header" href="#エンベダータイプ">エンベダータイプ</a></h3>
+<h3 id="エンベダータイプ-1"><a class="header" href="#エンベダータイプ-1">エンベダータイプ</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -10756,7 +10873,7 @@ bq.should(query)
 bq.must_not(query)
 </code></pre>
 <p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があり、<code>must_not</code> 節は一致してはなりません。<code>should</code> 節はスコアリングに寄与し、<code>must</code> 節が無い場合は少なくとも1つが一致する必要があります。</p>
-<h3 id="spanquery-2"><a class="header" href="#spanquery-2">SpanQuery</a></h3>
+<h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
 <pre><code class="language-ruby"># 単一語句
 Laurus::SpanQuery.term(field, term)
 
@@ -11230,7 +11347,7 @@ echo $stats["vectorFields"];
 </tbody>
 </table>
 </div>
-<h3 id="その他のメソッド-1"><a class="header" href="#その他のメソッド-1">その他のメソッド</a></h3>
+<h3 id="その他のメソッド-2"><a class="header" href="#その他のメソッド-2">その他のメソッド</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -11253,7 +11370,7 @@ echo $stats["vectorFields"];
 <li><code>"ignore"</code> — 未宣言フィールドを静かに破棄</li>
 </ul>
 <p>詳細な挙動マトリクスは <a href="#動的スキーマ">スキーマとフィールド</a> を参照してください。</p>
-<h3 id="エンベダータイプ-1"><a class="header" href="#エンベダータイプ-1">エンベダータイプ</a></h3>
+<h3 id="エンベダータイプ-2"><a class="header" href="#エンベダータイプ-2">エンベダータイプ</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -11355,7 +11472,7 @@ $bq-&gt;should($query);
 $bq-&gt;mustNot($query);
 </code></pre>
 <p>複合ブールクエリ。<code>must</code> 節はすべて一致する必要があり、<code>mustNot</code> 節は一致してはなりません。<code>should</code> 節はスコアリングに寄与し、<code>must</code> 節が無い場合は少なくとも1つが一致する必要があります。</p>
-<h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
+<h3 id="spanquery-4"><a class="header" href="#spanquery-4">SpanQuery</a></h3>
 <pre><code class="language-php">// 単一語句
 \Laurus\SpanQuery::term(string $field, string $term): SpanQuery
 

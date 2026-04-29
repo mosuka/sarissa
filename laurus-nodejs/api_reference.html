@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-58016f3f.js";
+            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -252,6 +252,7 @@ and return Promises. <code>stats()</code> is synchronous.</p>
 <tr><td style="text-align: left"><code>setDynamicFieldPolicy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
 <tr><td style="text-align: left"><code>dynamicFieldPolicy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
 <tr><td style="text-align: left"><code>fieldNames()</code></td><td style="text-align: left">Return all field names.</td></tr>
+<tr><td style="text-align: left"><code>toString()</code></td><td style="text-align: left">Return a string representation of the schema (<code>"Schema(fields=[...])"</code>).</td></tr>
 </tbody>
 </table>
 </div>
@@ -308,11 +309,12 @@ character.</p>
   field: string,
   min?: number | null,
   max?: number | null,
-  isFloat?: boolean,
+  numericType?: "integer" | "float",
 )
 </code></pre>
-<p>Matches numeric values in <code>[min, max]</code>. Pass <code>null</code> for an
-open bound.</p>
+<p>Matches numeric values in <code>[min, max]</code>. Pass <code>null</code> (or omit) for an
+open bound. <code>numericType</code> selects the underlying range type
+(<code>"integer"</code> (default) or <code>"float"</code>); other values throw.</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
   field: string, lat: number, lon: number, distanceKm: number,
@@ -360,12 +362,32 @@ search cone.</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();
-  mustTerm(field: string, term: string): void;
-  shouldTerm(field: string, term: string): void;
-  mustNotTerm(field: string, term: string): void;
+  // For each query type X in
+  //   { Term, Phrase, Fuzzy, Wildcard, NumericRange,
+  //     GeoDistance, GeoBoundingBox,
+  //     Geo3dDistance, Geo3dBoundingBox, Geo3dNearest,
+  //     Boolean, Span }:
+  mustX(query: X): void;
+  shouldX(query: X): void;
+  mustNotX(query: X): void;
 }
 </code></pre>
-<p>Compound boolean query with MUST / SHOULD / MUST_NOT clauses.</p>
+<p>Compound boolean query with MUST / SHOULD / MUST_NOT clauses. Each clause
+takes an instance of a specific query class — for example,
+<code>mustTerm(new TermQuery("body", "rust"))</code> or
+<code>shouldGeo3dNearest(Geo3dNearestQuery.kNearest(...))</code>.</p>
+<p>The Node.js binding exposes 36 per-type methods (12 query types × 3
+polarities) instead of a single polymorphic <code>must(query)</code> because of a
+limitation in <code>napi-derive</code>’s validation of <code>Either&lt;&amp;T, ...&gt;</code> arguments
+for classes with <code>js_name</code> overrides.</p>
+<p><code>must</code> clauses all have to match; <code>mustNot</code> clauses must not match.
+<code>should</code> clauses contribute to scoring; at least one of them must match if
+there are no <code>must</code> clauses.</p>
+<pre><code class="language-javascript">const bq = new BooleanQuery();
+bq.mustTerm(new TermQuery("body", "programming"));
+bq.mustNotTerm(new TermQuery("title", "python"));
+bq.shouldFuzzy(new FuzzyQuery("body", "data", 1));
+</code></pre>
 <h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
 <pre><code class="language-typescript">SpanQuery.term(field: string, term: string): SpanQuery
 SpanQuery.near(
@@ -397,35 +419,73 @@ embedder configured on the index.</p>
 <hr>
 <h2 id="searchrequest"><a class="header" href="#searchrequest">SearchRequest</a></h2>
 <p>Full-featured search request for advanced control.</p>
-<pre><code class="language-typescript">class SearchRequest {
-  constructor(limit?: number, offset?: number);
+<pre><code class="language-typescript">interface SearchRequestOptions {
+  queryDsl?: string;
+  limit?: number;   // default 10
+  offset?: number;  // default 0
+}
+
+class SearchRequest {
+  constructor(options?: SearchRequestOptions);
 }
 </code></pre>
-<h3 id="setter-methods"><a class="header" href="#setter-methods">Setter methods</a></h3>
+<p>Construct with primitive options first; attach polymorphic clauses with
+the per-type setters below. As with <code>BooleanQuery</code>, the binding exposes
+per-type setters because of <code>napi-derive</code>’s limitation on <code>Either&lt;&amp;T, ...&gt;</code>
+arguments.</p>
+<h3 id="dsl-and-fusion-setters"><a class="header" href="#dsl-and-fusion-setters">DSL and fusion setters</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>setQueryDsl(dsl)</code></td><td style="text-align: left">Set a DSL string query.</td></tr>
-<tr><td style="text-align: left"><code>setLexicalTermQuery(field, term)</code></td><td style="text-align: left">Set a term-based lexical query.</td></tr>
-<tr><td style="text-align: left"><code>setLexicalPhraseQuery(field, terms)</code></td><td style="text-align: left">Set a phrase-based lexical query.</td></tr>
-<tr><td style="text-align: left"><code>setVectorQuery(field, vector)</code></td><td style="text-align: left">Set a pre-computed vector query.</td></tr>
-<tr><td style="text-align: left"><code>setVectorTextQuery(field, text)</code></td><td style="text-align: left">Set a text-based vector query.</td></tr>
-<tr><td style="text-align: left"><code>setFilterQuery(field, term)</code></td><td style="text-align: left">Set a post-scoring filter.</td></tr>
-<tr><td style="text-align: left"><code>setRrfFusion(k?)</code></td><td style="text-align: left">Use RRF fusion (default k=60).</td></tr>
-<tr><td style="text-align: left"><code>setWeightedSumFusion(lexicalWeight?, vectorWeight?)</code></td><td style="text-align: left">Use weighted sum fusion.</td></tr>
+<tr><td style="text-align: left"><code>setQueryDsl(dsl: string)</code></td><td style="text-align: left">Set a DSL string query.</td></tr>
+<tr><td style="text-align: left"><code>setRrfFusion(rrf: RRF)</code></td><td style="text-align: left">Use RRF fusion.</td></tr>
+<tr><td style="text-align: left"><code>setWeightedSumFusion(ws: WeightedSum)</code></td><td style="text-align: left">Use weighted-sum fusion.</td></tr>
 </tbody>
 </table>
 </div>
+<h3 id="vector-setters"><a class="header" href="#vector-setters">Vector setters</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>setVectorQuery(query: VectorQuery)</code></td><td style="text-align: left">Set a pre-computed vector query.</td></tr>
+<tr><td style="text-align: left"><code>setVectorTextQuery(query: VectorTextQuery)</code></td><td style="text-align: left">Set a text-based vector query (auto-embedded by the configured embedder).</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="lexical-setters-per-type"><a class="header" href="#lexical-setters-per-type">Lexical setters (per type)</a></h3>
+<p>For each query type <code>X</code> in <code>{ Term, Phrase, Fuzzy, Wildcard, NumericRange, GeoDistance, GeoBoundingBox, Geo3dDistance, Geo3dBoundingBox, Geo3dNearest, Boolean, Span }</code>, the request exposes:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>setLexicalX(query: X)</code></td><td style="text-align: left">Set the lexical component for an explicit hybrid request.</td></tr>
+<tr><td style="text-align: left"><code>setFilterX(query: X)</code></td><td style="text-align: left">Set the post-scoring filter component.</td></tr>
+</tbody>
+</table>
+</div>
+<p>That is, 24 per-type setters in total (12 lexical + 12 filter), in addition
+to the DSL, vector, and fusion setters above.</p>
+<pre><code class="language-javascript">const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("title", "rust"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
+const results = await index.searchWithRequest(req);
+</code></pre>
 <hr>
 <h2 id="searchresult"><a class="header" href="#searchresult">SearchResult</a></h2>
 <p>Returned by search methods as an array.</p>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;        // External document identifier
   score: number;     // Relevance score
-  document: object | null; // Retrieved fields, or null
+  document: object | null; // Retrieved fields, or null if not stored
 }
 </code></pre>
 <hr>
@@ -492,11 +552,10 @@ by rank position.</p>
 <tr><td style="text-align: left"><code>boolean</code></td><td style="text-align: left"><code>Bool</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>number</code> (integer)</td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>number</code> (float)</td><td style="text-align: left"><code>Float64</code></td><td style="text-align: left"></td></tr>
-<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left">ISO8601 strings become <code>DateTime</code></td></tr>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left">ISO 8601 strings become <code>DateTime</code></td></tr>
 <tr><td style="text-align: left"><code>number[]</code></td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Coerced to <code>f32</code></td></tr>
 <tr><td style="text-align: left"><code>{ lat, lon }</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>number</code> values</td></tr>
-<tr><td style="text-align: left"><code>Date</code></td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Via timestamp</td></tr>
-<tr><td style="text-align: left"><code>Buffer</code></td><td style="text-align: left"><code>Bytes</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>{ x, y, z }</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">Three <code>number</code> values, meters (3D ECEF Cartesian)</td></tr>
 </tbody>
 </table>
 </div>

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-58016f3f.js";
+            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -258,9 +258,9 @@ index.commit()
 <pre><code class="language-python">schema = laurus.Schema()
 schema.add_text_field("title")
 schema.add_text_field("body")
-schema.add_int_field("year")
+schema.add_integer_field("year")
 schema.add_float_field("score")
-schema.add_bool_field("published")
+schema.add_boolean_field("published")
 schema.add_bytes_field("thumbnail")
 schema.add_geo_field("location")
 schema.add_datetime_field("created_at")

@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-58016f3f.js";
+            window.path_to_searchindex_js = "searchindex-af1326ef.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-a6ad8c0d.js"></script>
@@ -8944,9 +8944,9 @@ index.commit()
 <pre><code class="language-python">schema = laurus.Schema()
 schema.add_text_field("title")
 schema.add_text_field("body")
-schema.add_int_field("year")
+schema.add_integer_field("year")
 schema.add_float_field("score")
-schema.add_bool_field("published")
+schema.add_boolean_field("published")
 schema.add_bytes_field("thumbnail")
 schema.add_geo_field("location")
 schema.add_datetime_field("created_at")
@@ -9016,17 +9016,28 @@ print(stats["vector_fields"])
 <tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>add_text_field(name)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64-bit integer field. Set <code>multi_valued=True</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64-bit float field. Set <code>multi_valued=True</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
-<tr><td style="text-align: left"><code>add_bool_field(name)</code></td><td style="text-align: left">Boolean field.</td></tr>
-<tr><td style="text-align: left"><code>add_bytes_field(name)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
-<tr><td style="text-align: left"><code>add_geo_field(name)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
+<tr><td style="text-align: left"><code>add_boolean_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">Boolean field.</td></tr>
+<tr><td style="text-align: left"><code>add_bytes_field(name, *, stored=True)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
+<tr><td style="text-align: left"><code>add_geo_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
 <tr><td style="text-align: left"><code>add_geo3d_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">3D ECEF Cartesian point field (x, y, z in metres). See <a href="#3d-geographic-search-ecef">Geo3d concepts</a>.</td></tr>
-<tr><td style="text-align: left"><code>add_datetime_field(name)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
-<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
-<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
-<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_datetime_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
+<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine", embedder=None)</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1, embedder=None)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="other-methods"><a class="header" href="#other-methods">Other methods</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>add_embedder(name, config)</code></td><td style="text-align: left">Register a named embedder definition. <code>config</code> is a dict with a <code>"type"</code> key (see below).</td></tr>
 <tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">Set default search fields (list of strings).</td></tr>
 <tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
 <tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
@@ -9047,6 +9058,20 @@ type mismatches.</li>
 </ul>
 <p>See <a href="#dynamic-schema">Schema &amp; Fields</a> for
 the full behaviour matrix.</p>
+<h3 id="embedder-types"><a class="header" href="#embedder-types">Embedder types</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left"><code>"type"</code></th><th style="text-align: left">Required keys</th><th style="text-align: left">Feature flag</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>"precomputed"</code></td><td style="text-align: left">–</td><td style="text-align: left">(always available)</td></tr>
+<tr><td style="text-align: left"><code>"candle_bert"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-candle</code></td></tr>
+<tr><td style="text-align: left"><code>"candle_clip"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-multimodal</code></td></tr>
+<tr><td style="text-align: left"><code>"openai"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-openai</code></td></tr>
+</tbody>
+</table>
+</div>
 <h3 id="distance-metrics-3"><a class="header" href="#distance-metrics-3">Distance metrics</a></h3>
 <div class="table-wrapper">
 <table>
@@ -9057,6 +9082,8 @@ the full behaviour matrix.</p>
 <tr><td style="text-align: left"><code>"cosine"</code></td><td style="text-align: left">Cosine similarity (default)</td></tr>
 <tr><td style="text-align: left"><code>"euclidean"</code></td><td style="text-align: left">Euclidean distance</td></tr>
 <tr><td style="text-align: left"><code>"dot_product"</code></td><td style="text-align: left">Dot product</td></tr>
+<tr><td style="text-align: left"><code>"manhattan"</code></td><td style="text-align: left">Manhattan distance</td></tr>
+<tr><td style="text-align: left"><code>"angular"</code></td><td style="text-align: left">Angular distance</td></tr>
 </tbody>
 </table>
 </div>
@@ -9071,17 +9098,19 @@ the full behaviour matrix.</p>
 </code></pre>
 <p>Matches documents containing the terms in order.</p>
 <h3 id="fuzzyquery-1"><a class="header" href="#fuzzyquery-1">FuzzyQuery</a></h3>
-<pre><code class="language-python">FuzzyQuery(field: str, term: str, max_edits: int = 1)
+<pre><code class="language-python">FuzzyQuery(field: str, term: str, *, max_edits: int = 2)
 </code></pre>
-<p>Approximate match allowing up to <code>max_edits</code> edit-distance errors.</p>
+<p>Approximate match allowing up to <code>max_edits</code> edit-distance errors. <code>max_edits</code> is keyword-only.</p>
 <h3 id="wildcardquery-1"><a class="header" href="#wildcardquery-1">WildcardQuery</a></h3>
 <pre><code class="language-python">WildcardQuery(field: str, pattern: str)
 </code></pre>
 <p>Pattern match. <code>*</code> matches any sequence of characters, <code>?</code> matches any single character.</p>
 <h3 id="numericrangequery-1"><a class="header" href="#numericrangequery-1">NumericRangeQuery</a></h3>
-<pre><code class="language-python">NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
+<pre><code class="language-python">NumericRangeQuery(field: str, *, min: int | float | None = None, max: int | float | None = None)
 </code></pre>
-<p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>None</code> for an open bound.</p>
+<p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>None</code> (or omit) for
+an open bound. <code>min</code> and <code>max</code> are keyword-only. The numeric type (integer or
+float) is inferred from the Python type of <code>min</code>/<code>max</code>.</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-python">GeoDistanceQuery.within_radius(
     field: str, lat: float, lon: float, distance_km: float,
@@ -9129,17 +9158,37 @@ inside <code>[min_x, max_x] × [min_y, max_y] × [min_z, max_z]</code>.</p>
 documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m</code> and
 <code>max_radius_m</code> tune the iterative-expansion search cone.</p>
 <h3 id="booleanquery-1"><a class="header" href="#booleanquery-1">BooleanQuery</a></h3>
-<pre><code class="language-python">BooleanQuery(
-    must: list[Query] | None = None,
-    should: list[Query] | None = None,
-    must_not: list[Query] | None = None,
-)
+<pre><code class="language-python">bq = BooleanQuery()
+bq.must(query)
+bq.should(query)
+bq.must_not(query)
 </code></pre>
-<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>must_not</code> clauses must not match.</p>
-<h3 id="spannearquery"><a class="header" href="#spannearquery">SpanNearQuery</a></h3>
-<pre><code class="language-python">SpanNearQuery(field: str, terms: list[str], slop: int = 0, in_order: bool = True)
+<p>Compound boolean query. Construct with no arguments and add clauses one at a
+time via the <code>must</code> / <code>should</code> / <code>must_not</code> methods. Each method accepts any
+query object (including a nested <code>BooleanQuery</code>).</p>
+<p><code>must</code> clauses all have to match; <code>must_not</code> clauses must not match.
+<code>should</code> clauses contribute to scoring; at least one of them must match if
+there are no <code>must</code> clauses.</p>
+<h3 id="spanquery-1"><a class="header" href="#spanquery-1">SpanQuery</a></h3>
+<pre><code class="language-python"># Single term
+SpanQuery.term(field: str, term: str)
+
+# Near: terms appearing within `slop` positions of each other
+SpanQuery.near(field: str, terms: list[str], *, slop: int = 0, ordered: bool = True)
+
+# Near with nested SpanQuery clauses
+SpanQuery.near_spans(field: str, clauses: list[SpanQuery], *, slop: int = 0, ordered: bool = True)
+
+# Containing: big span contains little span
+SpanQuery.containing(field: str, big: SpanQuery, little: SpanQuery)
+
+# Within: include span within exclude span at max distance
+SpanQuery.within(field: str, include: SpanQuery, exclude: SpanQuery, distance: int)
 </code></pre>
-<p>Matches documents where the terms appear within <code>slop</code> positions of each other.</p>
+<p>Positional / proximity span queries. Construct via the static factory
+methods. <code>near</code> takes a list of term strings, while <code>near_spans</code> takes a
+list of <code>SpanQuery</code> objects for nested expressions. <code>slop</code> and <code>ordered</code>
+are keyword-only.</p>
 <h3 id="vectorquery"><a class="header" href="#vectorquery">VectorQuery</a></h3>
 <pre><code class="language-python">VectorQuery(field: str, vector: list[float])
 </code></pre>
@@ -9186,7 +9235,7 @@ documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m
 <pre><code class="language-python">class SearchResult:
     id: str          # External document identifier
     score: float     # Relevance score
-    document: dict | None  # Retrieved field values, or None if deleted
+    document: dict | None  # Retrieved field values, or None if not stored
 </code></pre>
 <hr>
 <h2 id="fusion-algorithms-2"><a class="header" href="#fusion-algorithms-2">Fusion algorithms</a></h2>
@@ -9224,9 +9273,12 @@ documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m
 <pre><code class="language-python">class Token:
     text: str
     position: int
+    start_offset: int
+    end_offset: int
+    boost: float
+    stopped: bool
     position_increment: int
     position_length: int
-    boost: float
 </code></pre>
 <hr>
 <h2 id="field-value-types"><a class="header" href="#field-value-types">Field value types</a></h2>
@@ -9437,12 +9489,18 @@ const results = await index.searchVector(
 );
 </code></pre>
 <h2 id="5-hybrid-search-1"><a class="header" href="#5-hybrid-search-1">5. Hybrid search</a></h2>
-<pre><code class="language-javascript">import { SearchRequest } from "laurus-nodejs";
+<pre><code class="language-javascript">import {
+  Index,
+  RRF,
+  SearchRequest,
+  TermQuery,
+  VectorQuery,
+} from "laurus-nodejs";
 
-const req = new SearchRequest(5);
-req.setLexicalTermQuery("name", "express");
-req.setVectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]);
-req.setRrfFusion(60.0);
+const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("name", "express"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
 
 const results = await index.searchWithRequest(req);
 </code></pre>
@@ -9563,6 +9621,7 @@ and return Promises. <code>stats()</code> is synchronous.</p>
 <tr><td style="text-align: left"><code>setDynamicFieldPolicy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
 <tr><td style="text-align: left"><code>dynamicFieldPolicy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
 <tr><td style="text-align: left"><code>fieldNames()</code></td><td style="text-align: left">Return all field names.</td></tr>
+<tr><td style="text-align: left"><code>toString()</code></td><td style="text-align: left">Return a string representation of the schema (<code>"Schema(fields=[...])"</code>).</td></tr>
 </tbody>
 </table>
 </div>
@@ -9619,11 +9678,12 @@ character.</p>
   field: string,
   min?: number | null,
   max?: number | null,
-  isFloat?: boolean,
+  numericType?: "integer" | "float",
 )
 </code></pre>
-<p>Matches numeric values in <code>[min, max]</code>. Pass <code>null</code> for an
-open bound.</p>
+<p>Matches numeric values in <code>[min, max]</code>. Pass <code>null</code> (or omit) for an
+open bound. <code>numericType</code> selects the underlying range type
+(<code>"integer"</code> (default) or <code>"float"</code>); other values throw.</p>
 <h3 id="geodistancequery-1"><a class="header" href="#geodistancequery-1">GeoDistanceQuery</a></h3>
 <pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
   field: string, lat: number, lon: number, distanceKm: number,
@@ -9671,13 +9731,33 @@ search cone.</p>
 <h3 id="booleanquery-2"><a class="header" href="#booleanquery-2">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();
-  mustTerm(field: string, term: string): void;
-  shouldTerm(field: string, term: string): void;
-  mustNotTerm(field: string, term: string): void;
+  // For each query type X in
+  //   { Term, Phrase, Fuzzy, Wildcard, NumericRange,
+  //     GeoDistance, GeoBoundingBox,
+  //     Geo3dDistance, Geo3dBoundingBox, Geo3dNearest,
+  //     Boolean, Span }:
+  mustX(query: X): void;
+  shouldX(query: X): void;
+  mustNotX(query: X): void;
 }
 </code></pre>
-<p>Compound boolean query with MUST / SHOULD / MUST_NOT clauses.</p>
-<h3 id="spanquery-1"><a class="header" href="#spanquery-1">SpanQuery</a></h3>
+<p>Compound boolean query with MUST / SHOULD / MUST_NOT clauses. Each clause
+takes an instance of a specific query class — for example,
+<code>mustTerm(new TermQuery("body", "rust"))</code> or
+<code>shouldGeo3dNearest(Geo3dNearestQuery.kNearest(...))</code>.</p>
+<p>The Node.js binding exposes 36 per-type methods (12 query types × 3
+polarities) instead of a single polymorphic <code>must(query)</code> because of a
+limitation in <code>napi-derive</code>’s validation of <code>Either&lt;&amp;T, ...&gt;</code> arguments
+for classes with <code>js_name</code> overrides.</p>
+<p><code>must</code> clauses all have to match; <code>mustNot</code> clauses must not match.
+<code>should</code> clauses contribute to scoring; at least one of them must match if
+there are no <code>must</code> clauses.</p>
+<pre><code class="language-javascript">const bq = new BooleanQuery();
+bq.mustTerm(new TermQuery("body", "programming"));
+bq.mustNotTerm(new TermQuery("title", "python"));
+bq.shouldFuzzy(new FuzzyQuery("body", "data", 1));
+</code></pre>
+<h3 id="spanquery-2"><a class="header" href="#spanquery-2">SpanQuery</a></h3>
 <pre><code class="language-typescript">SpanQuery.term(field: string, term: string): SpanQuery
 SpanQuery.near(
   field: string, terms: string[],
@@ -9708,35 +9788,73 @@ embedder configured on the index.</p>
 <hr>
 <h2 id="searchrequest-2"><a class="header" href="#searchrequest-2">SearchRequest</a></h2>
 <p>Full-featured search request for advanced control.</p>
-<pre><code class="language-typescript">class SearchRequest {
-  constructor(limit?: number, offset?: number);
+<pre><code class="language-typescript">interface SearchRequestOptions {
+  queryDsl?: string;
+  limit?: number;   // default 10
+  offset?: number;  // default 0
+}
+
+class SearchRequest {
+  constructor(options?: SearchRequestOptions);
 }
 </code></pre>
-<h3 id="setter-methods"><a class="header" href="#setter-methods">Setter methods</a></h3>
+<p>Construct with primitive options first; attach polymorphic clauses with
+the per-type setters below. As with <code>BooleanQuery</code>, the binding exposes
+per-type setters because of <code>napi-derive</code>’s limitation on <code>Either&lt;&amp;T, ...&gt;</code>
+arguments.</p>
+<h3 id="dsl-and-fusion-setters"><a class="header" href="#dsl-and-fusion-setters">DSL and fusion setters</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>setQueryDsl(dsl)</code></td><td style="text-align: left">Set a DSL string query.</td></tr>
-<tr><td style="text-align: left"><code>setLexicalTermQuery(field, term)</code></td><td style="text-align: left">Set a term-based lexical query.</td></tr>
-<tr><td style="text-align: left"><code>setLexicalPhraseQuery(field, terms)</code></td><td style="text-align: left">Set a phrase-based lexical query.</td></tr>
-<tr><td style="text-align: left"><code>setVectorQuery(field, vector)</code></td><td style="text-align: left">Set a pre-computed vector query.</td></tr>
-<tr><td style="text-align: left"><code>setVectorTextQuery(field, text)</code></td><td style="text-align: left">Set a text-based vector query.</td></tr>
-<tr><td style="text-align: left"><code>setFilterQuery(field, term)</code></td><td style="text-align: left">Set a post-scoring filter.</td></tr>
-<tr><td style="text-align: left"><code>setRrfFusion(k?)</code></td><td style="text-align: left">Use RRF fusion (default k=60).</td></tr>
-<tr><td style="text-align: left"><code>setWeightedSumFusion(lexicalWeight?, vectorWeight?)</code></td><td style="text-align: left">Use weighted sum fusion.</td></tr>
+<tr><td style="text-align: left"><code>setQueryDsl(dsl: string)</code></td><td style="text-align: left">Set a DSL string query.</td></tr>
+<tr><td style="text-align: left"><code>setRrfFusion(rrf: RRF)</code></td><td style="text-align: left">Use RRF fusion.</td></tr>
+<tr><td style="text-align: left"><code>setWeightedSumFusion(ws: WeightedSum)</code></td><td style="text-align: left">Use weighted-sum fusion.</td></tr>
 </tbody>
 </table>
 </div>
+<h3 id="vector-setters"><a class="header" href="#vector-setters">Vector setters</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>setVectorQuery(query: VectorQuery)</code></td><td style="text-align: left">Set a pre-computed vector query.</td></tr>
+<tr><td style="text-align: left"><code>setVectorTextQuery(query: VectorTextQuery)</code></td><td style="text-align: left">Set a text-based vector query (auto-embedded by the configured embedder).</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="lexical-setters-per-type"><a class="header" href="#lexical-setters-per-type">Lexical setters (per type)</a></h3>
+<p>For each query type <code>X</code> in <code>{ Term, Phrase, Fuzzy, Wildcard, NumericRange, GeoDistance, GeoBoundingBox, Geo3dDistance, Geo3dBoundingBox, Geo3dNearest, Boolean, Span }</code>, the request exposes:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: left"><code>setLexicalX(query: X)</code></td><td style="text-align: left">Set the lexical component for an explicit hybrid request.</td></tr>
+<tr><td style="text-align: left"><code>setFilterX(query: X)</code></td><td style="text-align: left">Set the post-scoring filter component.</td></tr>
+</tbody>
+</table>
+</div>
+<p>That is, 24 per-type setters in total (12 lexical + 12 filter), in addition
+to the DSL, vector, and fusion setters above.</p>
+<pre><code class="language-javascript">const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("title", "rust"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
+const results = await index.searchWithRequest(req);
+</code></pre>
 <hr>
 <h2 id="searchresult-4"><a class="header" href="#searchresult-4">SearchResult</a></h2>
 <p>Returned by search methods as an array.</p>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;        // External document identifier
   score: number;     // Relevance score
-  document: object | null; // Retrieved fields, or null
+  document: object | null; // Retrieved fields, or null if not stored
 }
 </code></pre>
 <hr>
@@ -9803,11 +9921,10 @@ by rank position.</p>
 <tr><td style="text-align: left"><code>boolean</code></td><td style="text-align: left"><code>Bool</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>number</code> (integer)</td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>number</code> (float)</td><td style="text-align: left"><code>Float64</code></td><td style="text-align: left"></td></tr>
-<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left">ISO8601 strings become <code>DateTime</code></td></tr>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left">ISO 8601 strings become <code>DateTime</code></td></tr>
 <tr><td style="text-align: left"><code>number[]</code></td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Coerced to <code>f32</code></td></tr>
 <tr><td style="text-align: left"><code>{ lat, lon }</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>number</code> values</td></tr>
-<tr><td style="text-align: left"><code>Date</code></td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Via timestamp</td></tr>
-<tr><td style="text-align: left"><code>Buffer</code></td><td style="text-align: left"><code>Bytes</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>{ x, y, z }</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">Three <code>number</code> values, meters (3D ECEF Cartesian)</td></tr>
 </tbody>
 </table>
 </div>
@@ -10811,7 +10928,7 @@ puts stats["vector_fields"]
 </tbody>
 </table>
 </div>
-<h3 id="other-methods"><a class="header" href="#other-methods">Other methods</a></h3>
+<h3 id="other-methods-1"><a class="header" href="#other-methods-1">Other methods</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -10839,7 +10956,7 @@ type mismatches.</li>
 </ul>
 <p>See <a href="#dynamic-schema">Schema &amp; Fields</a> for
 the full behaviour matrix.</p>
-<h3 id="embedder-types"><a class="header" href="#embedder-types">Embedder types</a></h3>
+<h3 id="embedder-types-1"><a class="header" href="#embedder-types-1">Embedder types</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -10933,7 +11050,7 @@ bq.should(query)
 bq.must_not(query)
 </code></pre>
 <p>Compound boolean query. <code>must</code> clauses all have to match; <code>must_not</code> clauses must not match. <code>should</code> clauses contribute to scoring; at least one of them must match if there are no <code>must</code> clauses.</p>
-<h3 id="spanquery-2"><a class="header" href="#spanquery-2">SpanQuery</a></h3>
+<h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
 <pre><code class="language-ruby"># Single term
 Laurus::SpanQuery.term(field, term)
 
@@ -11411,7 +11528,7 @@ echo $stats["vectorFields"];
 </tbody>
 </table>
 </div>
-<h3 id="other-methods-1"><a class="header" href="#other-methods-1">Other methods</a></h3>
+<h3 id="other-methods-2"><a class="header" href="#other-methods-2">Other methods</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -11439,7 +11556,7 @@ type mismatches.</li>
 </ul>
 <p>See <a href="#dynamic-schema">Schema &amp; Fields</a> for
 the full behaviour matrix.</p>
-<h3 id="embedder-types-1"><a class="header" href="#embedder-types-1">Embedder types</a></h3>
+<h3 id="embedder-types-2"><a class="header" href="#embedder-types-2">Embedder types</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -11543,7 +11660,7 @@ $bq-&gt;should($query);
 $bq-&gt;mustNot($query);
 </code></pre>
 <p>Compound boolean query. <code>must</code> clauses all have to match; <code>mustNot</code> clauses must not match. <code>should</code> clauses contribute to scoring; at least one of them must match if there are no <code>must</code> clauses.</p>
-<h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
+<h3 id="spanquery-4"><a class="header" href="#spanquery-4">SpanQuery</a></h3>
 <pre><code class="language-php">// Single term
 \Laurus\SpanQuery::term(string $field, string $term): SpanQuery
 

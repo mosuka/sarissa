@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-58016f3f.js";
+            window.path_to_searchindex_js = "../searchindex-af1326ef.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-a6ad8c0d.js"></script>
@@ -240,12 +240,18 @@ const results = await index.searchVector(
 );
 </code></pre>
 <h2 id="5-hybrid-search"><a class="header" href="#5-hybrid-search">5. Hybrid search</a></h2>
-<pre><code class="language-javascript">import { SearchRequest } from "laurus-nodejs";
+<pre><code class="language-javascript">import {
+  Index,
+  RRF,
+  SearchRequest,
+  TermQuery,
+  VectorQuery,
+} from "laurus-nodejs";
 
-const req = new SearchRequest(5);
-req.setLexicalTermQuery("name", "express");
-req.setVectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]);
-req.setRrfFusion(60.0);
+const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("name", "express"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
 
 const results = await index.searchWithRequest(req);
 </code></pre>
