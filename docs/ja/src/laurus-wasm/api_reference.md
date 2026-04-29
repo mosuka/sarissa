@@ -203,6 +203,8 @@ WASM バインディングは `Geo3dDistanceQuery` / `Geo3dBoundingBoxQuery` /
 HNSW ベクトルインデックスフィールドを追加します。
 
 - `distance`: `"cosine"`（デフォルト）、`"euclidean"`、`"dot_product"`、`"manhattan"`、`"angular"`
+- `m`: 分岐係数（デフォルト 16）
+- `efConstruction`: 構築時の探索幅（デフォルト 200）
 
 #### `addFlatField(name, dimension, distance?, embedder?)`
 
@@ -212,9 +214,33 @@ HNSW ベクトルインデックスフィールドを追加します。
 
 IVF ベクトルインデックスフィールドを追加します。
 
+- `nClusters`: パーティショニングクラスタ数（デフォルト 100）
+- `nProbe`: 検索時にプローブするクラスタ数（デフォルト 1）
+
 #### `addEmbedder(name, config)`
 
-名前付き埋め込み器を登録します。WASM では `"precomputed"` のみ対応しています。
+名前付き埋め込み器を登録します。WASM では以下の 2 種類の `type` をサポートします:
+
+- `"precomputed"` — 埋め込みは行いません。ベクトルは `putDocument()` /
+  `searchVector()` 経由で直接渡します。
+- `"callback"` — JavaScript コールバック `embed: (text) => Promise<number[]>` を
+  登録します。エンジンがインジェスト時および `searchVectorText()` で呼び出します。
+  Transformers.js などのブラウザ内埋め込みライブラリと組み合わせることで、
+  エンジン内自動埋め込みが可能になります。
+
+```javascript
+// Precomputed embedder
+schema.addEmbedder("precomputed-embedder", { type: "precomputed" });
+
+// Callback embedder（例: Transformers.js）
+schema.addEmbedder("callback-embedder", {
+  type: "callback",
+  embed: async (text) => {
+    const output = await pipeline(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
+```
 
 #### `setDefaultFields(fields)`
 
@@ -238,6 +264,10 @@ IVF ベクトルインデックスフィールドを追加します。
 
 定義済みフィールド名の配列を返します。
 
+#### `toString()`
+
+スキーマの文字列表現（`"Schema(fields=[...])"` 形式）を返します。
+
 ## SearchResult
 
 ```typescript
@@ -247,3 +277,43 @@ interface SearchResult {
   document: object | null;
 }
 ```
+
+## Analysis
+
+### WhitespaceTokenizer
+
+```javascript
+const tokenizer = new WhitespaceTokenizer();
+const tokens = tokenizer.tokenize("hello world");
+// [{ text, position, startOffset, endOffset, boost, stopped, positionIncrement, positionLength }]
+```
+
+空白を境界としてテキストを分割し、`Token` オブジェクトの配列を返します。
+
+### SynonymDictionary
+
+```javascript
+const dict = new SynonymDictionary();
+dict.addSynonymGroup(["ml", "machine learning"]);
+```
+
+同義語グループの辞書。グループ内のすべての語句が互いに同義語として扱われます。
+
+### SynonymGraphFilter
+
+```javascript
+new SynonymGraphFilter(dictionary, keepOriginal = true, boost = 1.0)
+```
+
+- `dictionary` (`SynonymDictionary`) — 同義語グループのソース。
+- `keepOriginal` (boolean, デフォルト `true`) — 元のトークンを挿入された同義語と
+  並べて保持します。
+- `boost` (number, デフォルト `1.0`) — 挿入される同義語トークンに適用される
+  スコアブースト。
+
+```javascript
+const filter = new SynonymGraphFilter(dict, true, 0.8);
+const expanded = filter.apply(tokens);
+```
+
+`SynonymDictionary` の同義語でトークンを展開するトークンフィルターです。

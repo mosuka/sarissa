@@ -219,12 +219,32 @@ Add a brute-force vector index field.
 
 Add an IVF vector index field.
 
+- `nClusters`: Number of partitioning clusters (default 100)
+- `nProbe`: Number of clusters to probe at query time (default 1)
+
 #### `addEmbedder(name, config)`
 
-Register a named embedder. In WASM, only `"precomputed"` type is supported.
+Register a named embedder. WASM supports two `type` values:
+
+- `"precomputed"` — No embedding is performed; vectors are passed directly via
+  `putDocument()` / `searchVector()`.
+- `"callback"` — Provide a JavaScript callback `embed: (text) => Promise<number[]>`
+  that the engine will invoke during ingestion and `searchVectorText()`. This
+  enables in-engine auto-embedding using Transformers.js or any other in-browser
+  embedding library.
 
 ```javascript
-schema.addEmbedder("my-embedder", { type: "precomputed" });
+// Precomputed embedder
+schema.addEmbedder("precomputed-embedder", { type: "precomputed" });
+
+// Callback embedder (e.g. backed by Transformers.js)
+schema.addEmbedder("callback-embedder", {
+  type: "callback",
+  embed: async (text) => {
+    const output = await pipeline(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
 ```
 
 #### `setDefaultFields(fields)`
@@ -254,6 +274,10 @@ Returns the current policy as a lowercase string.
 
 Returns an array of defined field names.
 
+#### `toString()`
+
+Returns a string representation of the schema (`"Schema(fields=[...])"`).
+
 ## SearchResult
 
 ```typescript
@@ -282,6 +306,16 @@ dict.addSynonymGroup(["ml", "machine learning"]);
 ```
 
 ### SynonymGraphFilter
+
+```javascript
+new SynonymGraphFilter(dictionary, keepOriginal = true, boost = 1.0)
+```
+
+- `dictionary` (`SynonymDictionary`) — Source synonym groups.
+- `keepOriginal` (boolean, default `true`) — Keep the original token alongside
+  the inserted synonyms.
+- `boost` (number, default `1.0`) — Score boost applied to inserted synonym
+  tokens.
 
 ```javascript
 const filter = new SynonymGraphFilter(dict, true, 0.8);

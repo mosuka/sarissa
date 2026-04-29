@@ -43,16 +43,13 @@ graph LR
     WASM -.->|persist| OPFS
 ```
 
-## Limitation: No In-Engine Auto-Embedding
+## Embedding Strategies
 
-One of Laurus's key features on native platforms is **automatic embedding** --
-when a document is indexed, the engine can automatically convert text fields
-into vector embeddings using a registered embedder (Candle BERT, Candle CLIP,
-or OpenAI API). This allows `searchVectorText("field", "query text")` to
-work seamlessly without the caller computing embeddings.
-
-**In laurus-wasm, this feature is not available.** Only the `precomputed`
-embedder type is supported. The reasons are:
+On native platforms Laurus supports several built-in embedders (Candle BERT,
+Candle CLIP, OpenAI API) that the engine can invoke automatically when a
+document is indexed or when `searchVectorText("field", "query text")` is
+called. These native embedders cannot run inside `wasm32-unknown-unknown` and
+are therefore disabled in the WASM build:
 
 | Embedder      | Dependency        | Why it cannot run in WASM                                   |
 | ------------- | ----------------- | ----------------------------------------------------------- |
@@ -60,11 +57,22 @@ embedder type is supported. The reasons are:
 | `candle_clip` | candle            | Same as above                                               |
 | `openai`      | reqwest (HTTP)    | Requires a full async HTTP client (tokio + TLS)             |
 
-These dependencies are excluded from the WASM build via feature flags
-(`embeddings-candle`, `embeddings-openai`), which depend on the `native`
-feature that is disabled for `wasm32-unknown-unknown`.
+(They are excluded from the WASM build via the `embeddings-candle` /
+`embeddings-openai` feature flags, which depend on the `native` feature that
+is disabled for `wasm32-unknown-unknown`.)
 
-### Recommended Alternative
+`laurus-wasm` exposes two `addEmbedder` types instead:
+
+- **`"precomputed"`** — The caller supplies vectors directly via `putDocument()`
+  and `searchVector()`. The engine performs no embedding.
+- **`"callback"`** — Register a JavaScript callback
+  `embed: (text) => Promise<number[]>` and the engine will invoke it during
+  ingestion and from `searchVectorText()`. This enables in-engine
+  auto-embedding using Transformers.js (or any other in-browser embedding
+  library) so callers can use the same `searchVectorText("field", "query text")`
+  pattern as on native platforms.
+
+### Option A — Precomputed vectors
 
 Compute embeddings on the **JavaScript side** and pass precomputed vectors
 to `putDocument()` and `searchVector()`:
@@ -94,6 +102,38 @@ This approach gives you real semantic search in the browser using the same
 sentence-transformer models available on native platforms, with the embedding
 computation handled by Transformers.js (ONNX Runtime Web) instead of candle.
 
+### Option B — Callback embedder
+
+Register the same Transformers.js pipeline as a `"callback"` embedder so that
+the engine can call it automatically. After registration, ingestion and
+`searchVectorText()` work transparently without the caller managing vectors:
+
+```javascript
+import { pipeline } from '@huggingface/transformers';
+
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+
+schema.addEmbedder("transformers", {
+  type: "callback",
+  embed: async (text) => {
+    const output = await extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  },
+});
+schema.addHnswField("embedding", 384, "cosine", undefined, undefined, "transformers");
+const index = await Index.create(schema);
+
+await index.putDocument("doc1", { title: "Introduction to Rust" });
+await index.commit();
+
+const results = await index.searchVectorText("embedding", "safe systems programming");
+```
+
+Compared to Option A, the callback approach lets the engine cache embeddings
+during ingestion and avoids duplicating embedding code between writers and
+readers. The trade-off is that every `commit()` waits for the JS callback to
+resolve, so heavy bulk ingestion may benefit from precomputing vectors.
+
 ## When to Use laurus-wasm vs laurus-nodejs
 
 | Criterion   | `laurus-wasm`              | `laurus-nodejs`               |
@@ -101,6 +141,6 @@ computation handled by Transformers.js (ONNX Runtime Web) instead of candle.
 | Environment | Browser, Edge Runtime      | Node.js server                |
 | Performance | Good (single-threaded)     | Best (native, multi-threaded) |
 | Storage     | In-memory + OPFS           | In-memory + File system       |
-| Embedding   | Precomputed only           | Candle, OpenAI, Precomputed   |
+| Embedding   | Precomputed + JS callback  | Candle, OpenAI, Precomputed   |
 | Package     | `npm install laurus-wasm`  | `npm install laurus-nodejs`   |
 | Binary size | ~5-10 MB (WASM)            | Platform-native               |
