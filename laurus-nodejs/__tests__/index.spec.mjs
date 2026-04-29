@@ -272,18 +272,18 @@ describe("Query types", () => {
     expect(q).toBeDefined();
   });
 
-  it("boolean query (must / mustNot accept any query type)", async () => {
+  it("boolean query accepts any clause type via mustX/shouldX/mustNotX", async () => {
     const index = await createTextIndex();
     const bq = new BooleanQuery();
-    // `must` accepts any lexical query, not just TermQuery — exercise the
-    // polymorphic API by mixing TermQuery and FuzzyQuery clauses.
-    bq.must(new TermQuery("body", "programming"));
-    bq.mustNot(new TermQuery("title", "python"));
-    bq.should(new FuzzyQuery("body", "data", 1));
+    // Exercise the polymorphic API surface by mixing query types beyond
+    // plain TermQuery.
+    bq.mustTerm(new TermQuery("body", "programming"));
+    bq.mustNotTerm(new TermQuery("title", "python"));
+    bq.shouldFuzzy(new FuzzyQuery("body", "data", 1));
     expect(bq).toBeDefined();
     // BooleanQuery itself can be nested inside another BooleanQuery.
     const outer = new BooleanQuery();
-    outer.must(bq);
+    outer.mustBoolean(bq);
     expect(outer).toBeDefined();
     void index;
   });

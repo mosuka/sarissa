@@ -713,77 +713,242 @@ impl JsBooleanQuery {
         }
     }
 
-    /// Add a MUST (required) clause.
-    ///
-    /// Accepts any lexical query type: `TermQuery`, `PhraseQuery`,
-    /// `FuzzyQuery`, `WildcardQuery`, `NumericRangeQuery`,
-    /// `GeoDistanceQuery`, `GeoBoundingBoxQuery`, `Geo3dDistanceQuery`,
-    /// `Geo3dBoundingBoxQuery`, `Geo3dNearestQuery`, another
-    /// `BooleanQuery`, or `SpanQuery`.
+    // The 36 methods below cover {must, should, must_not} × 12 query
+    // types. We have to expose one method per concrete query type rather
+    // than a single polymorphic `must(query)` taking a union, because
+    // napi-derive's auto-generated `ValidateNapiValue` impl for `&T`
+    // looks the constructor up by the **Rust struct name** instead of
+    // the JS class name (set via `#[napi(js_name = ...)]`). That bug
+    // makes any `Either<&T, ...>`-style polymorphic argument fail at
+    // runtime ("Value is non of these types `&JsTermQuery`, …") even
+    // when the caller passes a correctly constructed instance. Direct
+    // `&T` arguments still work because napi-derive special-cases them
+    // at the function-signature level via `FromNapiRef`.
+
+    /// Add a MUST clause from a [`JsTermQuery`].
     #[napi]
-    pub fn must(&mut self, query: AnyJsQuery) {
-        self.musts.push(any_to_js_query(query));
+    pub fn must_term(&mut self, query: &JsTermQuery) {
+        self.musts.push(JsQuery::TermQuery(query.clone()));
     }
 
-    /// Add a SHOULD (optional, boosts score) clause.
-    ///
-    /// Accepts any lexical query type — see [`Self::must`].
+    /// Add a MUST clause from a [`JsPhraseQuery`].
     #[napi]
-    pub fn should(&mut self, query: AnyJsQuery) {
-        self.shoulds.push(any_to_js_query(query));
+    pub fn must_phrase(&mut self, query: &JsPhraseQuery) {
+        self.musts.push(JsQuery::PhraseQuery(query.clone()));
     }
 
-    /// Add a MUST_NOT (exclusion) clause.
-    ///
-    /// Accepts any lexical query type — see [`Self::must`].
+    /// Add a MUST clause from a [`JsFuzzyQuery`].
     #[napi]
-    pub fn must_not(&mut self, query: AnyJsQuery) {
-        self.must_nots.push(any_to_js_query(query));
+    pub fn must_fuzzy(&mut self, query: &JsFuzzyQuery) {
+        self.musts.push(JsQuery::FuzzyQuery(query.clone()));
     }
-}
 
-/// 12-way union accepted by [`JsBooleanQuery::must`],
-/// [`JsBooleanQuery::should`], and [`JsBooleanQuery::must_not`]. Wraps a
-/// reference to any of the lexical-query wrapper classes that are exposed
-/// to JS, so Boolean clauses can compose arbitrary nested queries.
-///
-/// Each variant is a [`napi::bindgen_prelude::ClassInstance`] rather than a
-/// bare reference because napi-rs implements `FromNapiValue` only for the
-/// class-instance wrapper, not for plain `&T` (refs are special-cased in
-/// the napi-derive macro and do not implement the trait Either requires).
-pub type AnyJsQuery<'a> = napi::bindgen_prelude::Either12<
-    napi::bindgen_prelude::ClassInstance<'a, JsTermQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsPhraseQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsFuzzyQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsWildcardQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsNumericRangeQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsGeoDistanceQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsGeoBoundingBoxQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsGeo3dDistanceQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsGeo3dBoundingBoxQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsGeo3dNearestQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsBooleanQuery>,
-    napi::bindgen_prelude::ClassInstance<'a, JsSpanQuery>,
->;
+    /// Add a MUST clause from a [`JsWildcardQuery`].
+    #[napi]
+    pub fn must_wildcard(&mut self, query: &JsWildcardQuery) {
+        self.musts.push(JsQuery::WildcardQuery(query.clone()));
+    }
 
-/// Convert a JS-side query class instance into an owned [`JsQuery`] that
-/// `JsBooleanQuery` can store. Cloning derefs through `ClassInstance` to
-/// the underlying wrapper struct (each is `#[derive(Clone)]`).
-fn any_to_js_query(query: AnyJsQuery) -> JsQuery {
-    use napi::bindgen_prelude::Either12::*;
-    match query {
-        A(q) => JsQuery::TermQuery((*q).clone()),
-        B(q) => JsQuery::PhraseQuery((*q).clone()),
-        C(q) => JsQuery::FuzzyQuery((*q).clone()),
-        D(q) => JsQuery::WildcardQuery((*q).clone()),
-        E(q) => JsQuery::NumericRangeQuery((*q).clone()),
-        F(q) => JsQuery::GeoDistanceQuery((*q).clone()),
-        G(q) => JsQuery::GeoBoundingBoxQuery((*q).clone()),
-        H(q) => JsQuery::Geo3dDistanceQuery((*q).clone()),
-        I(q) => JsQuery::Geo3dBoundingBoxQuery((*q).clone()),
-        J(q) => JsQuery::Geo3dNearestQuery((*q).clone()),
-        K(q) => JsQuery::BooleanQuery((*q).clone()),
-        L(q) => JsQuery::SpanQuery((*q).clone()),
+    /// Add a MUST clause from a [`JsNumericRangeQuery`].
+    #[napi]
+    pub fn must_numeric_range(&mut self, query: &JsNumericRangeQuery) {
+        self.musts.push(JsQuery::NumericRangeQuery(query.clone()));
+    }
+
+    /// Add a MUST clause from a [`JsGeoDistanceQuery`].
+    #[napi]
+    pub fn must_geo_distance(&mut self, query: &JsGeoDistanceQuery) {
+        self.musts.push(JsQuery::GeoDistanceQuery(query.clone()));
+    }
+
+    /// Add a MUST clause from a [`JsGeoBoundingBoxQuery`].
+    #[napi]
+    pub fn must_geo_bounding_box(&mut self, query: &JsGeoBoundingBoxQuery) {
+        self.musts.push(JsQuery::GeoBoundingBoxQuery(query.clone()));
+    }
+
+    /// Add a MUST clause from a [`JsGeo3dDistanceQuery`].
+    #[napi(js_name = "mustGeo3dDistance")]
+    pub fn must_geo3d_distance(&mut self, query: &JsGeo3dDistanceQuery) {
+        self.musts.push(JsQuery::Geo3dDistanceQuery(query.clone()));
+    }
+
+    /// Add a MUST clause from a [`JsGeo3dBoundingBoxQuery`].
+    #[napi(js_name = "mustGeo3dBoundingBox")]
+    pub fn must_geo3d_bounding_box(&mut self, query: &JsGeo3dBoundingBoxQuery) {
+        self.musts
+            .push(JsQuery::Geo3dBoundingBoxQuery(query.clone()));
+    }
+
+    /// Add a MUST clause from a [`JsGeo3dNearestQuery`].
+    #[napi(js_name = "mustGeo3dNearest")]
+    pub fn must_geo3d_nearest(&mut self, query: &JsGeo3dNearestQuery) {
+        self.musts.push(JsQuery::Geo3dNearestQuery(query.clone()));
+    }
+
+    /// Add a MUST clause from another [`JsBooleanQuery`] (nested).
+    #[napi]
+    pub fn must_boolean(&mut self, query: &JsBooleanQuery) {
+        self.musts.push(JsQuery::BooleanQuery(query.clone()));
+    }
+
+    /// Add a MUST clause from a [`JsSpanQuery`].
+    #[napi]
+    pub fn must_span(&mut self, query: &JsSpanQuery) {
+        self.musts.push(JsQuery::SpanQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsTermQuery`].
+    #[napi]
+    pub fn should_term(&mut self, query: &JsTermQuery) {
+        self.shoulds.push(JsQuery::TermQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsPhraseQuery`].
+    #[napi]
+    pub fn should_phrase(&mut self, query: &JsPhraseQuery) {
+        self.shoulds.push(JsQuery::PhraseQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsFuzzyQuery`].
+    #[napi]
+    pub fn should_fuzzy(&mut self, query: &JsFuzzyQuery) {
+        self.shoulds.push(JsQuery::FuzzyQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsWildcardQuery`].
+    #[napi]
+    pub fn should_wildcard(&mut self, query: &JsWildcardQuery) {
+        self.shoulds.push(JsQuery::WildcardQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsNumericRangeQuery`].
+    #[napi]
+    pub fn should_numeric_range(&mut self, query: &JsNumericRangeQuery) {
+        self.shoulds.push(JsQuery::NumericRangeQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsGeoDistanceQuery`].
+    #[napi]
+    pub fn should_geo_distance(&mut self, query: &JsGeoDistanceQuery) {
+        self.shoulds.push(JsQuery::GeoDistanceQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsGeoBoundingBoxQuery`].
+    #[napi]
+    pub fn should_geo_bounding_box(&mut self, query: &JsGeoBoundingBoxQuery) {
+        self.shoulds
+            .push(JsQuery::GeoBoundingBoxQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsGeo3dDistanceQuery`].
+    #[napi(js_name = "shouldGeo3dDistance")]
+    pub fn should_geo3d_distance(&mut self, query: &JsGeo3dDistanceQuery) {
+        self.shoulds
+            .push(JsQuery::Geo3dDistanceQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsGeo3dBoundingBoxQuery`].
+    #[napi(js_name = "shouldGeo3dBoundingBox")]
+    pub fn should_geo3d_bounding_box(&mut self, query: &JsGeo3dBoundingBoxQuery) {
+        self.shoulds
+            .push(JsQuery::Geo3dBoundingBoxQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsGeo3dNearestQuery`].
+    #[napi(js_name = "shouldGeo3dNearest")]
+    pub fn should_geo3d_nearest(&mut self, query: &JsGeo3dNearestQuery) {
+        self.shoulds.push(JsQuery::Geo3dNearestQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from another [`JsBooleanQuery`] (nested).
+    #[napi]
+    pub fn should_boolean(&mut self, query: &JsBooleanQuery) {
+        self.shoulds.push(JsQuery::BooleanQuery(query.clone()));
+    }
+
+    /// Add a SHOULD clause from a [`JsSpanQuery`].
+    #[napi]
+    pub fn should_span(&mut self, query: &JsSpanQuery) {
+        self.shoulds.push(JsQuery::SpanQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsTermQuery`].
+    #[napi]
+    pub fn must_not_term(&mut self, query: &JsTermQuery) {
+        self.must_nots.push(JsQuery::TermQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsPhraseQuery`].
+    #[napi]
+    pub fn must_not_phrase(&mut self, query: &JsPhraseQuery) {
+        self.must_nots.push(JsQuery::PhraseQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsFuzzyQuery`].
+    #[napi]
+    pub fn must_not_fuzzy(&mut self, query: &JsFuzzyQuery) {
+        self.must_nots.push(JsQuery::FuzzyQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsWildcardQuery`].
+    #[napi]
+    pub fn must_not_wildcard(&mut self, query: &JsWildcardQuery) {
+        self.must_nots.push(JsQuery::WildcardQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsNumericRangeQuery`].
+    #[napi]
+    pub fn must_not_numeric_range(&mut self, query: &JsNumericRangeQuery) {
+        self.must_nots
+            .push(JsQuery::NumericRangeQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsGeoDistanceQuery`].
+    #[napi]
+    pub fn must_not_geo_distance(&mut self, query: &JsGeoDistanceQuery) {
+        self.must_nots
+            .push(JsQuery::GeoDistanceQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsGeoBoundingBoxQuery`].
+    #[napi]
+    pub fn must_not_geo_bounding_box(&mut self, query: &JsGeoBoundingBoxQuery) {
+        self.must_nots
+            .push(JsQuery::GeoBoundingBoxQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsGeo3dDistanceQuery`].
+    #[napi(js_name = "mustNotGeo3dDistance")]
+    pub fn must_not_geo3d_distance(&mut self, query: &JsGeo3dDistanceQuery) {
+        self.must_nots
+            .push(JsQuery::Geo3dDistanceQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsGeo3dBoundingBoxQuery`].
+    #[napi(js_name = "mustNotGeo3dBoundingBox")]
+    pub fn must_not_geo3d_bounding_box(&mut self, query: &JsGeo3dBoundingBoxQuery) {
+        self.must_nots
+            .push(JsQuery::Geo3dBoundingBoxQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsGeo3dNearestQuery`].
+    #[napi(js_name = "mustNotGeo3dNearest")]
+    pub fn must_not_geo3d_nearest(&mut self, query: &JsGeo3dNearestQuery) {
+        self.must_nots
+            .push(JsQuery::Geo3dNearestQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from another [`JsBooleanQuery`] (nested).
+    #[napi]
+    pub fn must_not_boolean(&mut self, query: &JsBooleanQuery) {
+        self.must_nots.push(JsQuery::BooleanQuery(query.clone()));
+    }
+
+    /// Add a MUST_NOT clause from a [`JsSpanQuery`].
+    #[napi]
+    pub fn must_not_span(&mut self, query: &JsSpanQuery) {
+        self.must_nots.push(JsQuery::SpanQuery(query.clone()));
     }
 }
 
