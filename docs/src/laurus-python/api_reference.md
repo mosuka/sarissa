@@ -52,17 +52,23 @@ class Schema:
 
 | Method | Description |
 | :--- | :--- |
-| `add_text_field(name)` | Full-text field (inverted index, BM25). |
+| `add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)` | Full-text field (inverted index, BM25). |
 | `add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64-bit integer field. Set `multi_valued=True` to accept arrays of integers (range queries match if any value satisfies the predicate). |
 | `add_float_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64-bit float field. Set `multi_valued=True` to accept arrays of floats (range queries match if any value satisfies the predicate). |
-| `add_bool_field(name)` | Boolean field. |
-| `add_bytes_field(name)` | Raw bytes field. |
-| `add_geo_field(name)` | Geographic coordinate field (lat/lon). |
+| `add_boolean_field(name, *, stored=True, indexed=True)` | Boolean field. |
+| `add_bytes_field(name, *, stored=True)` | Raw bytes field. |
+| `add_geo_field(name, *, stored=True, indexed=True)` | Geographic coordinate field (lat/lon). |
 | `add_geo3d_field(name, *, stored=True, indexed=True)` | 3D ECEF Cartesian point field (x, y, z in metres). See [Geo3d concepts](../concepts/geo3d.md). |
-| `add_datetime_field(name)` | UTC datetime field. |
-| `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)` | HNSW approximate nearest-neighbor vector field. |
-| `add_flat_field(name, dimension, *, distance="cosine")` | Flat (brute-force) vector field. |
-| `add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)` | IVF approximate nearest-neighbor vector field. |
+| `add_datetime_field(name, *, stored=True, indexed=True)` | UTC datetime field. |
+| `add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None)` | HNSW approximate nearest-neighbor vector field. |
+| `add_flat_field(name, dimension, *, distance="cosine", embedder=None)` | Flat (brute-force) vector field. |
+| `add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1, embedder=None)` | IVF approximate nearest-neighbor vector field. |
+
+### Other methods
+
+| Method | Description |
+| :--- | :--- |
+| `add_embedder(name, config)` | Register a named embedder definition. `config` is a dict with a `"type"` key (see below). |
 | `set_default_fields(fields)` | Set default search fields (list of strings). |
 | `set_dynamic_field_policy(policy)` | Set how undeclared fields are handled. `policy` is `"strict"`, `"dynamic"` (default), or `"ignore"`. See notes below. |
 | `dynamic_field_policy()` | Return the current policy as a lowercase string. |
@@ -83,6 +89,15 @@ not declared in the schema:
 See [Schema & Fields](../concepts/schema_and_fields.md#dynamic-schema) for
 the full behaviour matrix.
 
+### Embedder types
+
+| `"type"` | Required keys | Feature flag |
+| :--- | :--- | :--- |
+| `"precomputed"` | -- | (always available) |
+| `"candle_bert"` | `"model"` | `embeddings-candle` |
+| `"candle_clip"` | `"model"` | `embeddings-multimodal` |
+| `"openai"` | `"model"` | `embeddings-openai` |
+
 ### Distance metrics
 
 | Value | Description |
@@ -90,6 +105,8 @@ the full behaviour matrix.
 | `"cosine"` | Cosine similarity (default) |
 | `"euclidean"` | Euclidean distance |
 | `"dot_product"` | Dot product |
+| `"manhattan"` | Manhattan distance |
+| `"angular"` | Angular distance |
 
 ---
 
@@ -114,10 +131,10 @@ Matches documents containing the terms in order.
 ### FuzzyQuery
 
 ```python
-FuzzyQuery(field: str, term: str, max_edits: int = 1)
+FuzzyQuery(field: str, term: str, *, max_edits: int = 2)
 ```
 
-Approximate match allowing up to `max_edits` edit-distance errors.
+Approximate match allowing up to `max_edits` edit-distance errors. `max_edits` is keyword-only.
 
 ### WildcardQuery
 
@@ -130,10 +147,12 @@ Pattern match. `*` matches any sequence of characters, `?` matches any single ch
 ### NumericRangeQuery
 
 ```python
-NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
+NumericRangeQuery(field: str, *, min: int | float | None = None, max: int | float | None = None)
 ```
 
-Matches numeric values in the range `[min, max]`. Pass `None` for an open bound.
+Matches numeric values in the range `[min, max]`. Pass `None` (or omit) for
+an open bound. `min` and `max` are keyword-only. The numeric type (integer or
+float) is inferred from the Python type of `min`/`max`.
 
 ### GeoDistanceQuery
 
@@ -204,22 +223,43 @@ documents closest to `(x, y, z)`. The optional `initial_radius_m` and
 ### BooleanQuery
 
 ```python
-BooleanQuery(
-    must: list[Query] | None = None,
-    should: list[Query] | None = None,
-    must_not: list[Query] | None = None,
-)
+bq = BooleanQuery()
+bq.must(query)
+bq.should(query)
+bq.must_not(query)
 ```
 
-Compound boolean query. `must` clauses all have to match; at least one `should` clause must match; `must_not` clauses must not match.
+Compound boolean query. Construct with no arguments and add clauses one at a
+time via the `must` / `should` / `must_not` methods. Each method accepts any
+query object (including a nested `BooleanQuery`).
 
-### SpanNearQuery
+`must` clauses all have to match; `must_not` clauses must not match.
+`should` clauses contribute to scoring; at least one of them must match if
+there are no `must` clauses.
+
+### SpanQuery
 
 ```python
-SpanNearQuery(field: str, terms: list[str], slop: int = 0, in_order: bool = True)
+# Single term
+SpanQuery.term(field: str, term: str)
+
+# Near: terms appearing within `slop` positions of each other
+SpanQuery.near(field: str, terms: list[str], *, slop: int = 0, ordered: bool = True)
+
+# Near with nested SpanQuery clauses
+SpanQuery.near_spans(field: str, clauses: list[SpanQuery], *, slop: int = 0, ordered: bool = True)
+
+# Containing: big span contains little span
+SpanQuery.containing(field: str, big: SpanQuery, little: SpanQuery)
+
+# Within: include span within exclude span at max distance
+SpanQuery.within(field: str, include: SpanQuery, exclude: SpanQuery, distance: int)
 ```
 
-Matches documents where the terms appear within `slop` positions of each other.
+Positional / proximity span queries. Construct via the static factory
+methods. `near` takes a list of term strings, while `near_spans` takes a
+list of `SpanQuery` objects for nested expressions. `slop` and `ordered`
+are keyword-only.
 
 ### VectorQuery
 
@@ -278,7 +318,7 @@ Returned by `Index.search()`.
 class SearchResult:
     id: str          # External document identifier
     score: float     # Relevance score
-    document: dict | None  # Retrieved field values, or None if deleted
+    document: dict | None  # Retrieved field values, or None if not stored
 ```
 
 ---
@@ -340,9 +380,12 @@ class SynonymGraphFilter:
 class Token:
     text: str
     position: int
+    start_offset: int
+    end_offset: int
+    boost: float
+    stopped: bool
     position_increment: int
     position_length: int
-    boost: float
 ```
 
 ---
