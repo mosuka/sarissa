@@ -37,16 +37,13 @@ graph LR
     WASM -.->|永続化| OPFS
 ```
 
-## 制限事項: エンジン内自動 Embedding の非対応
+## Embedding 戦略
 
-ネイティブ環境での Laurus の特徴の一つに**自動 Embedding** があります。
-ドキュメントをインデックスする際、エンジンが登録された Embedder（Candle BERT、
-Candle CLIP、OpenAI API）を使ってテキストフィールドを自動的にベクトル埋め込みに
-変換します。これにより `searchVectorText("field", "query text")` がシームレスに
-動作し、呼び出し側で埋め込みを計算する必要がありません。
-
-**laurus-wasm ではこの機能を利用できません。** `precomputed`（事前計算済み）
-Embedder のみがサポートされます。理由は以下の通りです:
+ネイティブ環境では Laurus に複数の組み込み Embedder（Candle BERT、Candle CLIP、
+OpenAI API）が用意されており、ドキュメントのインデックス時や
+`searchVectorText("field", "query text")` 実行時にエンジンが自動で呼び出します。
+これらネイティブ Embedder は `wasm32-unknown-unknown` 上で動作しないため、
+WASM ビルドでは無効化されています:
 
 | Embedder | Dependency | Why it cannot run in WASM |
 | --- | --- | --- |
@@ -54,11 +51,21 @@ Embedder のみがサポートされます。理由は以下の通りです:
 | `candle_clip` | candle | Same as above |
 | `openai` | reqwest (HTTP) | Requires a full async HTTP client (tokio + TLS) |
 
-これらの依存は Feature Flags（`embeddings-candle`、`embeddings-openai`）で
-管理されており、`wasm32-unknown-unknown` ビルドで無効化される `native` feature
-に依存しているため除外されます。
+（これらは `embeddings-candle` / `embeddings-openai` Feature Flags で管理されており、
+`wasm32-unknown-unknown` で無効化される `native` feature に依存するため
+WASM ビルドから除外されます。）
 
-### 推奨される代替手段
+`laurus-wasm` ではその代わりに以下 2 種類の `addEmbedder` タイプを公開しています:
+
+- **`"precomputed"`** — 呼び出し側が `putDocument()` / `searchVector()` 経由で
+  ベクトルを直接渡します。エンジンは埋め込みを行いません。
+- **`"callback"`** — JavaScript コールバック
+  `embed: (text) => Promise<number[]>` を登録し、エンジンがインジェスト時および
+  `searchVectorText()` から呼び出します。Transformers.js 等のブラウザ内埋め込み
+  ライブラリと組み合わせることでエンジン内自動埋め込みが実現でき、ネイティブ環境と
+  同じく `searchVectorText("field", "query text")` を呼び出すだけで利用できます。
+
+### Option A — 事前計算済みベクトル
 
 **JavaScript 側で埋め込みを計算**し、事前計算済みベクトルを `putDocument()` と
 `searchVector()` に渡します:
@@ -88,6 +95,38 @@ const results = await index.searchVector("embedding", queryVec);
 セマンティック検索がブラウザ内で実現できます。埋め込み計算は candle ではなく
 Transformers.js（ONNX Runtime Web）が担当します。
 
+### Option B — Callback Embedder
+
+Transformers.js の同じパイプラインを `"callback"` Embedder として登録すれば、
+エンジンが自動で呼び出してくれます。登録後は呼び出し側がベクトルを管理することなく、
+インジェストおよび `searchVectorText()` が透過的に動作します:
+
+```javascript
+import { pipeline } from '@huggingface/transformers';
+
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+
+schema.addEmbedder("transformers", {
+  type: "callback",
+  embed: async (text) => {
+    const output = await extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  },
+});
+schema.addHnswField("embedding", 384, "cosine", undefined, undefined, "transformers");
+const index = await Index.create(schema);
+
+await index.putDocument("doc1", { title: "Rust 入門" });
+await index.commit();
+
+const results = await index.searchVectorText("embedding", "安全なシステムプログラミング");
+```
+
+Option A と比べると、Callback アプローチではエンジンがインジェスト時に埋め込みを
+キャッシュでき、書き込み側と読み出し側で埋め込みコードを重複させずに済みます。
+ただし `commit()` のたびに JS コールバックの解決を待つため、大量バルク投入時には
+事前計算ベクトルのほうが有利な場合があります。
+
 ## laurus-wasm と laurus-nodejs の使い分け
 
 | 基準           | `laurus-wasm`              | `laurus-nodejs`                    |
@@ -95,6 +134,6 @@ Transformers.js（ONNX Runtime Web）が担当します。
 | 実行環境       | ブラウザ、エッジランタイム | Node.js サーバー                   |
 | パフォーマンス | 良好（シングルスレッド）   | 最高（ネイティブ、マルチスレッド） |
 | ストレージ     | インメモリ + OPFS          | インメモリ + ファイルシステム      |
-| 埋め込み       | 事前計算のみ               | Candle、OpenAI、事前計算           |
+| 埋め込み       | 事前計算 + JS コールバック | Candle、OpenAI、事前計算           |
 | パッケージ     | `npm install laurus-wasm`  | `npm install laurus-nodejs`        |
 | バイナリサイズ | 約 5-10 MB（WASM）         | プラットフォームネイティブ         |
