@@ -67,7 +67,7 @@ new \Laurus\Schema()
 | Method | Description |
 | :--- | :--- |
 | `addEmbedder(string $name, array $config): void` | Register a named embedder definition. `$config` is an associative array with a `"type"` key (see below). |
-| `setDefaultFields(array $fieldNames): void` | Set the default fields used when no field is specified in a query. `$fieldNames` is an array of strings. |
+| `setDefaultFields(array $fields): void` | Set the default fields used when no field is specified in a query. `$fields` is an array of strings. |
 | `setDynamicFieldPolicy(string $policy): void` | Set how undeclared fields are handled. `$policy` is `"strict"`, `"dynamic"` (default), or `"ignore"`. See notes below. |
 | `dynamicFieldPolicy(): string` | Return the current policy as a lowercase string. |
 | `fieldNames(): array` | Return the list of field names defined in this schema. |

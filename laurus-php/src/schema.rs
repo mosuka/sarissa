@@ -362,9 +362,9 @@ impl PhpSchema {
     ///
     /// # Arguments
     ///
-    /// * `field_names` - Array of field name strings.
-    pub fn set_default_fields(&self, field_names: Vec<String>) {
-        self.inner.borrow_mut().default_fields = field_names;
+    /// * `fields` - Array of field name strings.
+    pub fn set_default_fields(&self, fields: Vec<String>) {
+        self.inner.borrow_mut().default_fields = fields;
     }
 
     /// Set the policy for fields that are not declared in this schema.
