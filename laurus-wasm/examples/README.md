@@ -1,41 +1,66 @@
-# Laurus WASM Demo
+# Laurus WASM — Samples
 
-A single-page application demonstrating full-text search in the browser
-using laurus-wasm.
+Each subdirectory under `examples/` is a self-contained
+single-page application that boots laurus-wasm directly from
+`../pkg/` and runs entirely in the browser. Open
+[`examples/index.html`](./index.html) in a local HTTP server for
+the landing page, or jump straight to a specific sample.
 
-## How to Run
+## Samples
 
-1. Build the WASM package:
+| Sample | What it shows |
+| --- | --- |
+| [`basic/`](./basic/) | Japanese full-text, vector, and hybrid search with the unified query DSL. Adds documents interactively. |
+| [`geo/`](./geo/) | Tokyo points-of-interest on a Leaflet map. Combines a bounding-box constraint (`location:geo_bbox(...)`) drawn from the current viewport with text and vector queries. |
 
-   ```bash
-   cd laurus-wasm
-   wasm-pack build --target web --dev
-   ```
+The [`shared/`](./shared/) directory holds assets reused by every
+sample (theme stylesheet, logger, dictionary loader, embedder
+helper).
 
-2. Serve the files with any HTTP server (WASM requires HTTP, not `file://`):
+## How to run
 
-   ```bash
-   # Python
-   python3 -m http.server 8080
+```bash
+cd laurus-wasm
+wasm-pack build --target web --dev
+./scripts/postbuild.sh
+```
 
-   # Node.js (npx)
-   npx serve .
-   ```
+The samples expect the UniDic zip (~52 MB) at
+`examples/dict/lindera-unidic.zip`. The deploy workflow fetches it
+automatically; for local development, download a matching version
+from the [Lindera releases][lindera-releases] and drop it under
+`examples/dict/`.
 
-3. Open <http://localhost:8080/examples/> in your browser.
+```bash
+# from the repository root
+mkdir -p laurus-wasm/examples/dict
+curl -fsSL -o laurus-wasm/examples/dict/lindera-unidic.zip \
+  "https://github.com/lindera/lindera/releases/download/v<version>/lindera-unidic-<version>.zip"
+```
 
-## What the Demo Does
+Then start any HTTP server (WASM cannot be loaded over `file://`):
 
-- Creates an OPFS-persistent search index with `title` and `body` fields
-  (data survives page reloads)
-- Seeds 8 sample documents on first visit; skips seeding when existing
-  data is loaded from OPFS
-- Uses Transformers.js (all-MiniLM-L6-v2) for real 384-dim semantic
-  embeddings via the callback embedder
-- Provides a search box with unified query DSL support:
-  - Lexical: `rust`, `title:wasm`, `"memory safety"`
-  - Vector: `embedding:"how to make code faster"`, `embedding:python`
-  - Hybrid: `rust embedding:"systems programming"`
-- Allows adding new documents interactively
-- Shows search results with relevance scores
-- Logs all operations in the console panel
+```bash
+# Python
+python3 -m http.server 8080
+# or Node
+npx serve .
+```
+
+Open <http://localhost:8080/examples/> in your browser.
+
+[lindera-releases]: https://github.com/lindera/lindera/releases
+
+## Adding a new sample
+
+1. Create `examples/<name>/index.html`. Import laurus-wasm from
+   `../../pkg/laurus_wasm.js` and use helpers from
+   `../shared/`.
+2. Add `examples/<name>/README.md` and `README_ja.md`.
+3. Link the new sample from this README and from the landing page
+   `examples/index.html`.
+4. The deploy workflow ([`.github/workflows/deploy-docs.yml`][deploy])
+   copies all of `examples/` into the published Pages site, so no CI
+   change is needed for additional samples.
+
+[deploy]: ../../.github/workflows/deploy-docs.yml

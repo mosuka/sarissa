@@ -106,8 +106,22 @@ schema.setDefaultFields(["title", "body"]);
 
 ## Examples
 
-See the [examples/](examples/) directory for a full demo with
-Transformers.js embeddings and OPFS persistence.
+The [examples/](examples/) directory hosts several self-contained
+single-page demos. Open
+[`examples/index.html`](examples/index.html) for the landing page,
+or jump into a specific sample:
+
+- [`examples/basic/`](examples/basic/) — Basic Japanese hybrid
+  search (full-text + vector) via the unified query DSL with
+  Transformers.js embeddings.
+- [`examples/geo/`](examples/geo/) — Tokyo points-of-interest on a
+  Leaflet map, combining a viewport-driven
+  `location:geo_bbox(...)` constraint with text and embedding
+  queries.
+
+Shared assets (theme stylesheet, logger, dictionary loader,
+embedder helper) live under `examples/shared/` so each sample stays
+focused on its own behaviour.
 
 ## Building from Source
 
@@ -123,9 +137,9 @@ wasm-pack build --target web --release
 # Bundle the OPFS helper (./opfs subpath) into pkg/
 ./scripts/postbuild.sh
 
-# Serve the demo
+# Serve the demo landing page
 python3 -m http.server 8080
-# Open http://localhost:8080/examples/
+# Open http://localhost:8080/examples/ — pick a sample from there.
 ```
 
 The post-build script copies `js/opfs.js` and `js/opfs.d.ts` into `pkg/`

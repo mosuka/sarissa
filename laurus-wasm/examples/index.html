@@ -3,648 +3,77 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Laurus WASM Search Demo</title>
-  <style>
-    :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --border: #2a2d3a;
-      --text: #e1e4ed;
-      --muted: #8b8fa3;
-      --accent: #6c8aff;
-      --accent-hover: #8ba3ff;
-      --success: #4ade80;
-      --code-bg: #131620;
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      min-height: 100vh;
-    }
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 2rem 1.5rem;
-    }
-    h1 {
-      font-size: 1.75rem;
-      font-weight: 600;
-      margin-bottom: 0.25rem;
-    }
-    .subtitle {
-      color: var(--muted);
-      margin-bottom: 2rem;
-    }
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-    .card h2 {
-      font-size: 1rem;
-      font-weight: 600;
-      margin-bottom: 1rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .badge {
-      font-size: 0.7rem;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-weight: 500;
-    }
-    .badge-ready { background: #1a3a2a; color: var(--success); }
-    .badge-loading { background: #3a2a1a; color: #fbbf24; }
-    .search-box {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 0.75rem;
-    }
-    input[type="text"] {
-      flex: 1;
-      padding: 0.625rem 1rem;
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      font-size: 0.9rem;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-    input[type="text"]:focus {
-      border-color: var(--accent);
-    }
-    button {
-      padding: 0.625rem 1.25rem;
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.2s;
-      white-space: nowrap;
-    }
-    button:hover { background: var(--accent-hover); }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .results {
-      list-style: none;
-    }
-    .results li {
-      padding: 0.75rem 1rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin-bottom: 0.5rem;
-      background: var(--code-bg);
-    }
-    .results li .meta {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .results li .score {
-      color: var(--accent);
-      font-size: 0.8rem;
-      font-weight: 500;
-    }
-    .results li .title {
-      font-weight: 600;
-    }
-    .results li .body {
-      color: var(--muted);
-      font-size: 0.85rem;
-      margin-top: 0.25rem;
-    }
-    .empty {
-      color: var(--muted);
-      text-align: center;
-      padding: 1rem;
-      font-size: 0.9rem;
-    }
-    .stats {
-      display: flex;
-      gap: 1.5rem;
-      color: var(--muted);
-      font-size: 0.85rem;
-    }
-    .stats span { color: var(--text); font-weight: 600; }
-    .add-form {
-      display: grid;
-      gap: 0.5rem;
-    }
-    .add-form .row {
-      display: flex;
-      gap: 0.5rem;
-    }
-    .add-form label {
-      font-size: 0.8rem;
-      color: var(--muted);
-      margin-bottom: 0.125rem;
-    }
-    .add-form .field {
-      flex: 1;
-    }
-    textarea {
-      width: 100%;
-      padding: 0.625rem 1rem;
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      font-size: 0.9rem;
-      font-family: inherit;
-      resize: vertical;
-      min-height: 60px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-    textarea:focus { border-color: var(--accent); }
-    .log {
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 0.8rem;
-      color: var(--muted);
-      background: var(--code-bg);
-      border-radius: 8px;
-      padding: 1rem;
-      max-height: 150px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    .log .ok { color: var(--success); }
-    .log .err { color: #f87171; }
-    .dsl-hint {
-      color: var(--muted);
-      font-size: 0.8rem;
-      margin-bottom: 0.75rem;
-    }
-    .dsl-hint code {
-      background: var(--code-bg);
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-size: 0.78rem;
-    }
-  </style>
+  <title>Laurus WASM — Samples</title>
+  <link rel="stylesheet" href="shared/theme.css">
 </head>
 <body>
   <div class="container">
-    <h1>Laurus WASM Search Demo</h1>
-    <p class="subtitle">Japanese morphological search in the browser (OPFS persistent storage)</p>
+    <h1>Laurus WASM Samples</h1>
+    <p class="subtitle">
+      Browser-side search built on the laurus-wasm package
+      (Rust → WebAssembly). Each sample below boots the engine
+      directly from <code>../pkg/</code>, persists data in OPFS, and
+      ships its own UI.
+    </p>
 
-    <!-- Status -->
     <div class="card">
-      <h2>Engine <span id="status" class="badge badge-loading">loading...</span></h2>
-      <div class="stats">
-        <div>Documents: <span id="doc-count">0</span></div>
-        <div>Analyzer: <span id="analyzer-mode">loading...</span></div>
-        <div>Embedder: <span id="embed-dim">loading...</span></div>
-        <div>Storage: <span id="storage-mode">OPFS</span></div>
-      </div>
-      <p class="dsl-hint">
-        On first visit the demo fetches the IPADIC dictionary (~16 MB)
-        and the multilingual MiniLM embedding model (~120 MB). Both are
-        cached for offline reuse.
-      </p>
-    </div>
-
-    <!-- Search -->
-    <div class="card">
-      <h2>Search — Unified Query DSL</h2>
-      <p class="dsl-hint">
-        Lexical: <code>形態素</code> <code>title:検索</code> <code>"日本語"</code> &nbsp;
-        Vector: <code>embedding:"ブラウザで動く検索"</code> &nbsp;
-        Hybrid: <code>形態素 embedding:"日本語の検索"</code>
-      </p>
-      <div class="search-box">
-        <input type="text" id="query" placeholder='例: 形態素 / title:検索 / "日本語"' disabled>
-        <button id="search-btn" onclick="doSearch()" disabled>Search</button>
-      </div>
-      <ul class="results" id="results">
-        <li class="empty">Index some documents first, then search.</li>
+      <h2>Available samples</h2>
+      <ul class="sample-list">
+        <li>
+          <a href="basic/">
+            <div class="sample-title">Basic Hybrid Search</div>
+            <div class="sample-summary">
+              Japanese morphological full-text search combined with
+              384-dim semantic embeddings. Add documents
+              interactively and query with the unified DSL
+              (<code>title:wasm</code>, <code>embedding:"…"</code>,
+              hybrid).
+            </div>
+          </a>
+        </li>
+        <li>
+          <a href="geo/">
+            <div class="sample-title">Geo Search (map + bbox + embedding)</div>
+            <div class="sample-summary">
+              Tokyo points-of-interest plotted on Leaflet. Combine a
+              bounding-box constraint
+              (<code>location:geo_bbox(...)</code>) drawn from the
+              current map viewport with text and vector queries.
+            </div>
+          </a>
+        </li>
       </ul>
     </div>
 
-    <!-- Maintenance -->
     <div class="card">
-      <h2>Maintenance</h2>
+      <h2>How to run locally</h2>
       <p class="dsl-hint">
-        Delete persisted state if you have stale data from a previous
-        demo version (for example, an older schema with a different
-        vector dimensionality). Reloads the page after clearing.
+        Each sample loads <code>../pkg/laurus_wasm.js</code> and
+        <code>../pkg/opfs.js</code>, so you have to build the WASM
+        package first. The browser also needs HTTP — opening the HTML
+        with <code>file://</code> will not work.
       </p>
-      <div class="row">
-        <button id="reset-index-btn" type="button" onclick="resetIndex()" disabled>Reset index</button>
-        <button id="reset-all-btn" type="button" onclick="resetAll()" disabled>Reset everything (index + dictionary)</button>
-      </div>
+      <pre class="log">cd laurus-wasm
+wasm-pack build --target web --dev
+./scripts/postbuild.sh
+
+# Place the UniDic zip at examples/dict/lindera-unidic.zip
+# (the deploy workflow does this for the published demo).
+
+python3 -m http.server 8080
+# Then open http://localhost:8080/examples/ in your browser.</pre>
     </div>
 
-    <!-- Add Document -->
     <div class="card">
-      <h2>Add Document</h2>
-      <div class="add-form">
-        <div class="row">
-          <div class="field">
-            <label>ID</label>
-            <input type="text" id="doc-id" placeholder="doc1" disabled>
-          </div>
-          <div class="field">
-            <label>Title</label>
-            <input type="text" id="doc-title" placeholder="WebAssembly 入門" disabled>
-          </div>
-        </div>
-        <div>
-          <label>Body</label>
-          <textarea id="doc-body" placeholder="WebAssembly はブラウザで動作するバイナリ命令フォーマットです。" disabled></textarea>
-        </div>
-        <div class="row">
-          <button id="add-btn" onclick="addDocument()" disabled>Add &amp; Commit</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Log -->
-    <div class="card">
-      <h2>Log</h2>
-      <div class="log" id="log"></div>
+      <h2>Layout</h2>
+      <p class="dsl-hint">
+        Shared assets live in <code>shared/</code> and are imported
+        by every sample with relative paths
+        (<code>../shared/...</code>). The UniDic zip is fetched from
+        <code>../dict/lindera-unidic.zip</code> so all samples share
+        a single OPFS-cached dictionary.
+      </p>
     </div>
   </div>
-
-  <script type="module">
-    // ------------------------------------------------------------------
-    // Import and initialize laurus-wasm
-    // ------------------------------------------------------------------
-    // Adjust the path to point to your wasm-pack output:
-    //   wasm-pack build --target web --release
-    //   ./scripts/postbuild.sh
-    // Then serve this file from the laurus-wasm directory.
-    import init, { Index, Schema, JapaneseAnalyzer } from '../pkg/laurus_wasm.js';
-    import {
-      downloadDictionary,
-      hasDictionary,
-      loadDictionaryFiles,
-      removeDictionary,
-    } from '../pkg/opfs.js';
-    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
-
-    /** Dictionary configuration. The zip is fetched from the same origin
-     *  to avoid CORS issues with cross-origin GitHub Releases assets. */
-    const DICT_NAME = 'ipadic';
-    const DICT_URL = './dict/lindera-ipadic.zip';
-    const ANALYZER_NAME = 'ja-ipadic';
-    /**
-     * Bump the suffix whenever the persisted schema changes (field
-     * dimensionality, vector index type, etc.). Without a bump,
-     * returning visitors hit "Dimension mismatch: stored N, config M"
-     * because Index.open replays an OPFS-persisted index whose stored
-     * shape no longer matches the schema. v2 covers the addition of
-     * the 384-dim HNSW embedding field on top of the v1 (lexical-only)
-     * shape introduced with the OPFS demo.
-     */
-    const INDEX_NAME = 'ja-demo-index-v2';
-
-    /** Multilingual MiniLM (paraphrase-multilingual-MiniLM-L12-v2) — 384-dim
-     *  text embeddings that work cleanly for both Japanese and English
-     *  without requiring per-call prefixes. The model is downloaded
-     *  through Hugging Face Transformers.js on first use and cached by
-     *  the browser. ~120 MB compressed. */
-    const EMBEDDER_NAME = 'multilingual-minilm';
-    const EMBED_FIELD = 'embedding';
-    const EMBED_DIM = 384;
-
-    let index = null;
-    let docCounter = 0;
-    let embedder = null;
-
-    // ------------------------------------------------------------------
-    // Logging
-    // ------------------------------------------------------------------
-    const logEl = document.getElementById('log');
-    function appendLog(msg, cls = '') {
-      const line = document.createElement('span');
-      line.className = cls;
-      line.textContent = msg + '\n';
-      logEl.appendChild(line);
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-
-    /**
-     * Ensure the IPADIC dictionary is present in OPFS, downloading it
-     * from the bundled zip on first visit.
-     */
-    async function ensureDictionary() {
-      if (await hasDictionary(DICT_NAME)) {
-        appendLog(`Dictionary "${DICT_NAME}" found in OPFS cache.`, 'ok');
-        return;
-      }
-      appendLog(`Downloading dictionary "${DICT_NAME}" from ${DICT_URL}...`);
-      const t0 = performance.now();
-      await downloadDictionary(DICT_URL, DICT_NAME, {
-        onProgress: ({ phase, loaded, total }) => {
-          if (phase === 'downloading' && total) {
-            const pct = ((loaded / total) * 100).toFixed(0);
-            const mb = (loaded / 1024 / 1024).toFixed(1);
-            const totalMb = (total / 1024 / 1024).toFixed(1);
-            const status = document.getElementById('status');
-            status.textContent = `downloading ${pct}% (${mb}/${totalMb} MB)`;
-          } else if (phase === 'extracting') {
-            document.getElementById('status').textContent = 'extracting...';
-          } else if (phase === 'storing') {
-            document.getElementById('status').textContent = 'storing to OPFS...';
-          }
-        },
-      });
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      appendLog(`Dictionary downloaded and cached in OPFS in ${elapsed}s.`, 'ok');
-    }
-
-    /**
-     * Load the multilingual MiniLM model via Transformers.js. The first
-     * call triggers a ~120 MB download that the browser caches.
-     */
-    async function ensureEmbedder() {
-      appendLog('Loading embedding model (paraphrase-multilingual-MiniLM-L12-v2)...');
-      const t0 = performance.now();
-      embedder = await pipeline(
-        'feature-extraction',
-        'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-      );
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      appendLog(`Embedding model ready in ${elapsed}s.`, 'ok');
-      document.getElementById('embed-dim').textContent = `${EMBED_DIM}-dim multilingual MiniLM`;
-    }
-
-    // ------------------------------------------------------------------
-    // Boot
-    // ------------------------------------------------------------------
-    async function boot() {
-      try {
-        appendLog('Initializing WASM module...');
-        const t0 = performance.now();
-        await init();
-        const wasmTime = ((performance.now() - t0) / 1000).toFixed(1);
-        appendLog(`WASM module loaded in ${wasmTime}s.`, 'ok');
-
-        // 1. Make sure IPADIC bytes are available in OPFS.
-        await ensureDictionary();
-
-        // 2. Load the multilingual MiniLM model for query / passage
-        //    embeddings. The browser caches the model after first load.
-        await ensureEmbedder();
-
-        // 3. Read the eight dictionary files back as Uint8Arrays and
-        //    construct the JapaneseAnalyzer in WASM.
-        const files = await loadDictionaryFiles(DICT_NAME);
-        const ja = JapaneseAnalyzer.fromBytes(
-          files.metadata,
-          files.dictDa,
-          files.dictVals,
-          files.dictWordsIdx,
-          files.dictWords,
-          files.matrixMtx,
-          files.charDef,
-          files.unk,
-          'normal',
-        );
-        appendLog('JapaneseAnalyzer built from OPFS-loaded IPADIC.', 'ok');
-        document.getElementById('analyzer-mode').textContent = 'JapaneseAnalyzer (IPADIC)';
-
-        // 4. Build schema. title / body are tokenized with the
-        //    runtime-registered Japanese analyzer; embedding is an HNSW
-        //    vector field auto-populated by the callback embedder.
-        const schema = new Schema();
-        schema.addAnalyzer(ANALYZER_NAME, ja);
-        schema.addTextField('title', undefined, undefined, undefined, ANALYZER_NAME);
-        schema.addTextField('body', undefined, undefined, undefined, ANALYZER_NAME);
-        schema.addEmbedder(EMBEDDER_NAME, {
-          type: 'callback',
-          embed: async (text) => {
-            const out = await embedder(text, { pooling: 'mean', normalize: true });
-            return Array.from(out.data);
-          },
-        });
-        schema.addHnswField(EMBED_FIELD, EMBED_DIM, undefined, undefined, undefined, EMBEDDER_NAME);
-        schema.setDefaultFields(['title', 'body']);
-        appendLog(`Schema: title + body (analyzer="${ANALYZER_NAME}"), ${EMBED_FIELD} (HNSW, ${EMBED_DIM}-dim, embedder="${EMBEDDER_NAME}").`);
-
-        // 5. Open OPFS-persistent index (data survives page reloads).
-        index = await Index.open(INDEX_NAME, schema);
-        appendLog(`OPFS index "${INDEX_NAME}" opened.`, 'ok');
-
-        const stats = index.stats();
-        docCounter = stats.documentCount;
-
-        if (docCounter > 0) {
-          appendLog(`Loaded ${docCounter} document(s) from OPFS — persisted from previous session.`, 'ok');
-        } else {
-          // Seed with Japanese sample documents on first visit.
-          const samples = [
-            { id: 'wasm-core', title: 'WebAssembly コア仕様', body: 'WebAssembly はスタックベース仮想マシン向けのバイナリ命令フォーマットで、ブラウザでネイティブに近い性能を発揮します。' },
-            { id: 'wasm-pack', title: 'wasm-pack ビルドツール', body: 'wasm-pack は Rust 製の WebAssembly パッケージのビルドと公開を支援します。npm との連携やバンドラ統合に対応しています。' },
-            { id: 'wasm-bindgen', title: 'wasm-bindgen 連携', body: 'wasm-bindgen は WebAssembly と JavaScript の双方向呼び出しを支えるツールで、DOM API やクロージャの橋渡しを自動生成します。' },
-            { id: 'opfs', title: 'OPFS 永続化ストレージ', body: 'Origin Private File System はブラウザ内で WebAssembly アプリ向けに高速かつ永続的なストレージを提供します。' },
-            { id: 'lindera', title: 'Lindera 形態素解析', body: 'Lindera は Rust 製の形態素解析ライブラリで、IPADIC や ko-dic、cc-cedict を用いた日本語・韓国語・中国語の解析に対応します。' },
-            { id: 'ipadic', title: 'IPADIC 辞書', body: 'IPADIC は MeCab 由来の日本語形態素解析辞書で、品詞・読み・基本形といった豊富な語彙情報を提供します。' },
-            { id: 'laurus', title: 'Laurus 検索エンジン', body: 'Laurus は Rust で実装された統合検索ライブラリで、転置索引による全文検索と HNSW などのベクトル検索を組み合わせたハイブリッド検索を提供します。' },
-            { id: 'simd', title: 'WASM SIMD 命令', body: 'WebAssembly SIMD は 128 ビットのベクトル演算命令を追加し、画像処理や機械学習の推論を高速化します。' },
-          ];
-
-          appendLog('Indexing sample documents (embedding auto-computed by engine)...');
-          for (const doc of samples) {
-            // Pass text in the embedding field — the engine invokes the
-            // registered callback embedder during ingestion.
-            await index.putDocument(doc.id, {
-              title: doc.title,
-              body: doc.body,
-              [EMBED_FIELD]: `${doc.title} ${doc.body}`,
-            });
-            docCounter++;
-          }
-          await index.commit();
-          appendLog(`Indexed ${samples.length} documents and persisted to OPFS.`, 'ok');
-        }
-
-        document.getElementById('doc-count').textContent = docCounter;
-        document.getElementById('status').textContent = 'ready';
-        document.getElementById('status').className = 'badge badge-ready';
-
-        for (const el of document.querySelectorAll('input, textarea, button')) {
-          el.disabled = false;
-        }
-        document.getElementById('doc-id').value = `doc${docCounter + 1}`;
-
-      } catch (e) {
-        appendLog(`Error: ${e}`, 'err');
-        document.getElementById('status').textContent = 'error';
-        document.getElementById('status').className = 'badge';
-        document.getElementById('status').style.cssText = 'background:#3a1a1a;color:#f87171';
-        console.error(e);
-      }
-    }
-
-    // ------------------------------------------------------------------
-    // Search
-    // ------------------------------------------------------------------
-    window.doSearch = async function() {
-      const query = document.getElementById('query').value.trim();
-      if (!query) return;
-
-      const resultsEl = document.getElementById('results');
-
-      try {
-        const t0 = performance.now();
-        const results = await index.search(query);
-        const elapsed = (performance.now() - t0).toFixed(1);
-
-        appendLog(`"${query}" -> ${results.length} hit(s) in ${elapsed}ms`);
-
-        if (results.length === 0) {
-          resultsEl.innerHTML = '<li class="empty">No results found.</li>';
-          return;
-        }
-
-        resultsEl.innerHTML = results.map(r => `
-          <li>
-            <div class="meta">
-              <span class="score">${r.score.toFixed(4)}</span>
-            </div>
-            <div class="title">${escapeHtml(r.document?.title ?? r.id)}</div>
-            <div class="body">${escapeHtml(r.document?.body ?? '')}</div>
-          </li>
-        `).join('');
-
-      } catch (e) {
-        appendLog(`Search error: ${e}`, 'err');
-        console.error(e);
-      }
-    };
-
-    // Search on Enter key
-    document.getElementById('query').addEventListener('keydown', e => {
-      if (e.key === 'Enter') window.doSearch();
-    });
-
-    // ------------------------------------------------------------------
-    // Add Document
-    // ------------------------------------------------------------------
-    window.addDocument = async function() {
-      const id = document.getElementById('doc-id').value.trim();
-      const title = document.getElementById('doc-title').value.trim();
-      const body = document.getElementById('doc-body').value.trim();
-
-      if (!id || !title) {
-        appendLog('ID and Title are required.', 'err');
-        return;
-      }
-
-      try {
-        await index.putDocument(id, {
-          title,
-          body,
-          [EMBED_FIELD]: `${title} ${body}`,
-        });
-        await index.commit();
-        docCounter++;
-
-        document.getElementById('doc-count').textContent = docCounter;
-        appendLog(`Added "${title}" (${id}) — embedding auto-computed`, 'ok');
-
-        // Reset form
-        document.getElementById('doc-id').value = `doc${docCounter + 1}`;
-        document.getElementById('doc-title').value = '';
-        document.getElementById('doc-body').value = '';
-
-      } catch (e) {
-        appendLog(`Add error: ${e}`, 'err');
-        console.error(e);
-      }
-    };
-
-    // ------------------------------------------------------------------
-    // Maintenance — delete persisted OPFS state and reload
-    // ------------------------------------------------------------------
-    /**
-     * Index names that the demo has persisted across versions. Listed
-     * explicitly so we can clean up legacy directories left over from
-     * earlier demo iterations (different vector dimensionality, etc.).
-     */
-    const KNOWN_INDEX_NAMES = ['ja-demo-index', 'ja-demo-index-v2'];
-
-    /**
-     * Remove all known demo index directories from the OPFS root.
-     * The dictionary cache is preserved.
-     */
-    async function deleteAllIndexes() {
-      const root = await navigator.storage.getDirectory();
-      for (const name of KNOWN_INDEX_NAMES) {
-        try {
-          await root.removeEntry(name, { recursive: true });
-          appendLog(`Removed OPFS index "${name}".`, 'ok');
-        } catch (e) {
-          // Directory may not exist (e.g. v1 was never created).
-          if (e?.name !== 'NotFoundError') {
-            appendLog(`Failed to remove "${name}": ${e}`, 'err');
-          }
-        }
-      }
-    }
-
-    window.resetIndex = async function() {
-      if (!confirm('Delete the persisted index and reload? IPADIC and the embedding model stay cached.')) {
-        return;
-      }
-      try {
-        await deleteAllIndexes();
-        appendLog('Index reset complete. Reloading...', 'ok');
-        setTimeout(() => location.reload(), 250);
-      } catch (e) {
-        appendLog(`Reset failed: ${e}`, 'err');
-        console.error(e);
-      }
-    };
-
-    window.resetAll = async function() {
-      if (!confirm('Delete the index AND the IPADIC dictionary, then reload? The 16 MB dictionary will re-download on next visit.')) {
-        return;
-      }
-      try {
-        await deleteAllIndexes();
-        try {
-          await removeDictionary(DICT_NAME);
-          appendLog(`Removed OPFS dictionary "${DICT_NAME}".`, 'ok');
-        } catch (e) {
-          if (e?.name !== 'NotFoundError') {
-            appendLog(`Failed to remove dictionary: ${e}`, 'err');
-          }
-        }
-        appendLog('Full reset complete. Reloading...', 'ok');
-        setTimeout(() => location.reload(), 250);
-      } catch (e) {
-        appendLog(`Reset failed: ${e}`, 'err');
-        console.error(e);
-      }
-    };
-
-    // ------------------------------------------------------------------
-    // Helpers
-    // ------------------------------------------------------------------
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
-    }
-
-    // Boot
-    boot();
-  </script>
 </body>
 </html>

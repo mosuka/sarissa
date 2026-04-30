@@ -59,12 +59,18 @@ jobs:
       - name: Stage demo into Pages publish directory
         run: |
           mkdir -p docs/book/demo
-          cp laurus-wasm/examples/index.html docs/book/demo/
-          # The demo HTML imports `../pkg/laurus_wasm.js` and
-          # `../pkg/opfs.js`, so pkg/ must live at the site root
-          # (one level up from /demo/). This mirrors the local
-          # development layout where the demo is served from
-          # laurus-wasm/examples/ and pkg/ sits at laurus-wasm/pkg/.
+          # Copy every sample (and shared/) under docs/book/demo/.
+          # `cp -r src/. dest/` copies the *contents* of src into
+          # dest, mirroring the laurus-wasm/examples/ layout
+          # (landing page at /demo/, samples at /demo/lexical/,
+          # /demo/geo/, etc.).
+          cp -r laurus-wasm/examples/. docs/book/demo/
+          # Each sample HTML imports `../../pkg/laurus_wasm.js`
+          # and `../../pkg/opfs.js`, so pkg/ must live at the site
+          # root (two levels up from /demo/<sample>/). This mirrors
+          # the local development layout where samples are served
+          # from laurus-wasm/examples/<sample>/ and pkg/ sits at
+          # laurus-wasm/pkg/.
           cp -r laurus-wasm/pkg docs/book/pkg
 
       - name: Resolve lindera version from cargo metadata
@@ -79,18 +85,18 @@ jobs:
           echo "Resolved lindera version: $VERSION"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Download IPADIC dictionary
+      - name: Download UniDic dictionary
         run: |
           mkdir -p docs/book/demo/dict
-          curl -fsSL -o docs/book/demo/dict/lindera-ipadic.zip \
-            "https://github.com/lindera/lindera/releases/download/v${{ steps.lindera_version.outputs.version }}/lindera-ipadic-${{ steps.lindera_version.outputs.version }}.zip"
+          curl -fsSL -o docs/book/demo/dict/lindera-unidic.zip \
+            "https://github.com/lindera/lindera/releases/download/v${{ steps.lindera_version.outputs.version }}/lindera-unidic-${{ steps.lindera_version.outputs.version }}.zip"
           ls -la docs/book/demo/dict/
 
       - name: Generate dictionary manifest
         run: |
           cat > docs/book/demo/dict/manifest.json <<EOF
           {
-            "ipadic": "lindera-ipadic.zip",
+            "unidic": "lindera-unidic.zip",
             "lindera_version": "${{ steps.lindera_version.outputs.version }}"
           }
           EOF

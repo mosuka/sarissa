@@ -1,0 +1,364 @@
+/*
+ * Shared theme for laurus-wasm demo samples.
+ *
+ * Uses CSS custom properties so each sample can override individual
+ * tokens if needed. All samples should `@import` or `<link>` this
+ * stylesheet from `../shared/theme.css`.
+ */
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --border: #2a2d3a;
+  --text: #e1e4ed;
+  --muted: #8b8fa3;
+  --accent: #6c8aff;
+  --accent-hover: #8ba3ff;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --code-bg: #131620;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.container-wide {
+  max-width: 1200px;
+}
+
+h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.subtitle {
+  color: var(--muted);
+  margin-bottom: 2rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.card h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.badge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+.badge-ready {
+  background: #1a3a2a;
+  color: var(--success);
+}
+
+.badge-loading {
+  background: #3a2a1a;
+  color: var(--warning);
+}
+
+.badge-error {
+  background: #3a1a1a;
+  color: var(--danger);
+}
+
+.search-box {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+input[type="text"],
+input[type="number"] {
+  flex: 1;
+  padding: 0.625rem 1rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+  border-color: var(--accent);
+}
+
+button {
+  padding: 0.625rem 1.25rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+button:hover {
+  background: var(--accent-hover);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+button.secondary:hover {
+  background: var(--surface);
+}
+
+.results {
+  list-style: none;
+}
+
+.results li {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  background: var(--code-bg);
+  cursor: default;
+}
+
+.results li.clickable {
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.results li.clickable:hover {
+  border-color: var(--accent);
+}
+
+.results li.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.results li .meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.results li .score {
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.results li .extra {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.results li .title {
+  font-weight: 600;
+}
+
+.results li .body {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 1rem;
+  font-size: 0.9rem;
+}
+
+.stats {
+  display: flex;
+  gap: 1.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.stats span {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.add-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.add-form .row,
+.row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.add-form label,
+label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.125rem;
+}
+
+.add-form .field {
+  flex: 1;
+}
+
+textarea {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+textarea:focus {
+  border-color: var(--accent);
+}
+
+.log {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--code-bg);
+  border-radius: 8px;
+  padding: 1rem;
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log .ok {
+  color: var(--success);
+}
+
+.log .err {
+  color: var(--danger);
+}
+
+.dsl-hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.dsl-hint code {
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.toggle input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.sample-list {
+  display: grid;
+  gap: 1rem;
+  list-style: none;
+}
+
+.sample-list a {
+  display: block;
+  padding: 1.25rem 1.5rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.sample-list a:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.sample-list .sample-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  color: var(--text);
+}
+
+.sample-list .sample-summary {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
