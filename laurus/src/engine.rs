@@ -617,16 +617,15 @@ impl Engine {
                 && let Some(ref analyzer_spec) = text_opt.analyzer
             {
                 let schema = self.schema.read();
-                let analyzer =
-                    crate::analysis::analyzer::registry::create_analyzer_from_spec(
-                        analyzer_spec,
-                        &schema.analyzers,
-                    )
-                    .map_err(|e| {
-                        crate::error::LaurusError::invalid_argument(format!(
-                            "Failed to resolve analyzer for field '{name}': {e}"
-                        ))
-                    })?;
+                let analyzer = crate::analysis::analyzer::registry::create_analyzer_from_spec(
+                    analyzer_spec,
+                    &schema.analyzers,
+                )
+                .map_err(|e| {
+                    crate::error::LaurusError::invalid_argument(format!(
+                        "Failed to resolve analyzer for field '{name}': {e}"
+                    ))
+                })?;
                 Some(analyzer)
             } else {
                 None

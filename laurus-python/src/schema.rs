@@ -33,9 +33,7 @@ fn analyzer_spec_from_py(py: Python<'_>, obj: Py<PyAny>) -> PyResult<AnalyzerSpe
                 let dict_path = dict
                     .get_item("dict")?
                     .ok_or_else(|| {
-                        PyValueError::new_err(
-                            "japanese analyzer requires a 'dict' path",
-                        )
+                        PyValueError::new_err("japanese analyzer requires a 'dict' path")
                     })?
                     .extract::<String>()?;
                 let mode = dict

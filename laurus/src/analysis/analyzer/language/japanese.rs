@@ -107,11 +107,7 @@ impl JapaneseAnalyzer {
     /// let analyzer = JapaneseAnalyzer::new("normal", "embedded://ipadic", None).unwrap();
     /// assert_eq!(analyzer.name(), "japanese");
     /// ```
-    pub fn new(
-        mode_str: &str,
-        dict_uri: &str,
-        user_dict_uri: Option<&str>,
-    ) -> Result<Self> {
+    pub fn new(mode_str: &str, dict_uri: &str, user_dict_uri: Option<&str>) -> Result<Self> {
         let tokenizer = Arc::new(LinderaTokenizer::new(mode_str, dict_uri, user_dict_uri)?);
         let analyzer = PipelineAnalyzer::new(tokenizer)
             .add_char_filter(Arc::new(UnicodeNormalizationCharFilter::new(

@@ -180,10 +180,7 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
             indexed: o.indexed,
             stored: o.stored,
             term_vectors: o.term_vectors,
-            analyzer: o
-                .analyzer
-                .as_ref()
-                .and_then(analyzer_spec_from_proto),
+            analyzer: o.analyzer.as_ref().and_then(analyzer_spec_from_proto),
         })),
         Some(Opt::Integer(o)) => Some(FieldOption::Integer(IntegerOption {
             indexed: o.indexed,

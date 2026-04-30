@@ -363,9 +363,7 @@ fn json_to_analyzer_spec(value: &Value) -> Result<v1::AnalyzerSpec, String> {
                 let dict = obj
                     .get("dict")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        "japanese analyzer requires a \"dict\" path".to_string()
-                    })?;
+                    .ok_or_else(|| "japanese analyzer requires a \"dict\" path".to_string())?;
                 let mode = obj
                     .get("mode")
                     .and_then(|v| v.as_str())
@@ -406,7 +404,10 @@ fn analyzer_spec_to_json(spec: &v1::AnalyzerSpec) -> Option<Value> {
         Spec::Builtin(builtin) => match builtin.preset.as_ref()? {
             v1::builtin_analyzer_spec::Preset::Japanese(jp) => {
                 let mut obj = Map::new();
-                obj.insert("language".to_string(), Value::String("japanese".to_string()));
+                obj.insert(
+                    "language".to_string(),
+                    Value::String("japanese".to_string()),
+                );
                 let mode = if jp.mode.is_empty() {
                     "normal".to_string()
                 } else {
@@ -438,10 +439,7 @@ pub fn json_to_proto_field_option(json: &Value) -> Result<v1::FieldOption, Strin
                 .get("term_vectors")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            analyzer: v
-                .get("analyzer")
-                .map(json_to_analyzer_spec)
-                .transpose()?,
+            analyzer: v.get("analyzer").map(json_to_analyzer_spec).transpose()?,
         })
     } else if let Some(v) = obj.get("integer") {
         Opt::Integer(v1::IntegerOption {
