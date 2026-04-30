@@ -57,7 +57,12 @@ jobs:
         run: |
           mkdir -p docs/book/demo
           cp laurus-wasm/examples/index.html docs/book/demo/
-          cp -r laurus-wasm/pkg docs/book/demo/pkg
+          # The demo HTML imports `../pkg/laurus_wasm.js` and
+          # `../pkg/opfs.js`, so pkg/ must live at the site root
+          # (one level up from /demo/). This mirrors the local
+          # development layout where the demo is served from
+          # laurus-wasm/examples/ and pkg/ sits at laurus-wasm/pkg/.
+          cp -r laurus-wasm/pkg docs/book/pkg
 
       - name: Resolve lindera version from cargo metadata
         id: lindera_version
