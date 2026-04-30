@@ -42,6 +42,10 @@ python3 -m http.server 8080
   clause stays in sync with what the user is looking at
 - A clickable result list that pans the map and opens the popup of
   the corresponding marker
+- A live Debug card that prints the current map center, zoom
+  level, the (clamped) bbox values fed into `geo_bbox(...)`, and
+  the most recent DSL query the demo sent to `index.search()` —
+  handy when you want to copy the query into a CLI or unit test
 
 ### Example queries
 
@@ -71,7 +75,11 @@ samples.
 
 - Map tiles are fetched from OpenStreetMap. The browser must be
   online for tiles to render even though laurus itself runs locally.
-- The `geo_bbox(...)` clause uses the wrapping latitude/longitude of
-  the current Leaflet view. Around the antimeridian (longitude
-  ±180°), the bbox is *not* unwrapped — Tokyo data is far enough
-  from the seam that this does not matter for the demo.
+- When the user zooms out enough that the visible viewport spans
+  more than the world, or wraps across the antimeridian, Leaflet
+  reports bounds outside `[-90, 90]` × `[-180, 180]`. Feeding those
+  values straight to `geo_bbox(...)` would fail validation and
+  silently return zero hits, so the demo clamps the bbox to the
+  full valid range in that case (the Debug card flags it). A
+  proper antimeridian-aware split-bbox query is out of scope for
+  this sample.
