@@ -71,9 +71,12 @@ fuzzy_term = { term ~ "~" ~ fuzziness? ~ boost? }
 fuzziness = { number }
 
 // Wildcard queries: te?t or test*
+// Use Unicode `LETTER | NUMBER` so CJK / Cyrillic / Greek terms are accepted
+// alongside ASCII. `LETTER` and `NUMBER` general categories together
+// cover the cases users actually write.
 wildcard_term = { wildcard_pattern ~ boost? }
 wildcard_pattern = @{
-    (ASCII_ALPHANUMERIC | "_")* ~ wildcard_char ~ (ASCII_ALPHANUMERIC | "_" | wildcard_char)*
+    (LETTER | NUMBER | "_")* ~ wildcard_char ~ (LETTER | NUMBER | "_" | wildcard_char)*
 }
 wildcard_char = { "?" | "*" }
 
@@ -87,15 +90,19 @@ term_query = { field_value }
 boost = { "^" ~ boost_value }
 boost_value = @{ number ~ ("." ~ number)? }
 
-// Field name
+// Field name (ASCII-only on purpose; field identifiers stay portable)
 field = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ".")* }
 
 // Term (word)
+// `LETTER | NUMBER` is Unicode-aware (Letter / Number general categories),
+// so CJK / Cyrillic / Greek / accented Latin etc. all parse as bare
+// terms without requiring quoting. `boolean_op` keywords (AND / OR)
+// remain whitespace-bounded as before.
 term = @{ escaped_char+ | unescaped_term }
-unescaped_term = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+unescaped_term = @{ (LETTER | NUMBER | "_" | "-")+ }
 escaped_char = @{ "\\" ~ special_char | normal_char }
 special_char = { "+" | "-" | "!" | "(" | ")" | "{" | "}" | "[" | "]" | "^" | "\"" | "~" | "*" | "?" | ":" | "\\" | "/" }
-normal_char = @{ ASCII_ALPHANUMERIC | "_" | "-" }
+normal_char = @{ LETTER | NUMBER | "_" | "-" }
 
 // Quoted string
 quoted_string = { "\"" ~ quoted_content ~ "\"" }

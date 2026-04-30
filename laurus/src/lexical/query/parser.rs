@@ -956,6 +956,41 @@ mod tests {
     }
 
     #[test]
+    fn test_unquoted_cjk_term() {
+        // Bare CJK / Cyrillic / Greek terms must parse without quoting.
+        // Previously the grammar restricted unescaped terms to
+        // ASCII_ALPHANUMERIC, so `日本語` would surface a pest "expected
+        // clause" error to the user.
+        let parser = create_test_parser().with_default_field("content");
+
+        for term in ["日本語", "形態素", "Привет", "Ελληνικά", "café"] {
+            let query = parser
+                .parse(term)
+                .unwrap_or_else(|e| panic!("failed to parse {term:?}: {e}"));
+            assert!(
+                format!("{query:?}").contains("TermQuery"),
+                "expected TermQuery for {term:?}, got {query:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_unquoted_cjk_field_query() {
+        // CJK term following an ASCII field name and colon.
+        let parser = create_test_parser().with_default_field("content");
+        let query = parser.parse("title:形態素").unwrap();
+        assert!(format!("{query:?}").contains("TermQuery"));
+    }
+
+    #[test]
+    fn test_unquoted_cjk_boolean() {
+        // Whitespace-bounded boolean ops still kick in between CJK terms.
+        let parser = create_test_parser().with_default_field("content");
+        let query = parser.parse("形態素 AND 解析").unwrap();
+        assert!(format!("{query:?}").contains("BooleanQuery"));
+    }
+
+    #[test]
     fn test_multiple_default_fields() {
         let parser =
             create_test_parser().with_default_fields(vec!["title".to_string(), "body".to_string()]);
