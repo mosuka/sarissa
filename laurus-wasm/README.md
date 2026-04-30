@@ -120,10 +120,18 @@ wasm-pack build --target web --dev
 # Release build
 wasm-pack build --target web --release
 
+# Bundle the OPFS helper (./opfs subpath) into pkg/
+./scripts/postbuild.sh
+
 # Serve the demo
 python3 -m http.server 8080
 # Open http://localhost:8080/examples/
 ```
+
+The post-build script copies `js/opfs.js` and `js/opfs.d.ts` into `pkg/`
+and patches `pkg/package.json` so consumers can
+`import { downloadDictionary } from "laurus-wasm/opfs"`. Run it after
+every `wasm-pack build` (it is idempotent).
 
 ## License
 

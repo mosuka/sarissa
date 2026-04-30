@@ -150,6 +150,7 @@ impl WasmIndex {
     pub async fn create(schema: WasmSchema) -> Result<WasmIndex, JsValue> {
         let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
         let js_embedders = schema.js_embedders;
+        let runtime_analyzers = schema.runtime_analyzers;
         let schema = schema.inner;
 
         // Build embedder BEFORE moving schema into EngineBuilder
@@ -162,6 +163,9 @@ impl WasmIndex {
         let mut builder = EngineBuilder::new(storage.clone() as Arc<dyn Storage>, schema);
         if let Some(emb) = embedder {
             builder = builder.embedder(emb);
+        }
+        for (name, analyzer) in runtime_analyzers {
+            builder = builder.register_runtime_analyzer(name, analyzer);
         }
 
         let engine = builder.build().await.map_err(laurus_err)?;
@@ -193,6 +197,7 @@ impl WasmIndex {
         let opfs = OpfsPersistence::open(&name).await?;
         let storage = opfs.load().await?;
         let js_embedders = schema.js_embedders;
+        let runtime_analyzers = schema.runtime_analyzers;
         let schema = schema.inner;
 
         let embedder = if js_embedders.is_empty() {
@@ -204,6 +209,9 @@ impl WasmIndex {
         let mut builder = EngineBuilder::new(storage.clone() as Arc<dyn Storage>, schema);
         if let Some(emb) = embedder {
             builder = builder.embedder(emb);
+        }
+        for (name, analyzer) in runtime_analyzers {
+            builder = builder.register_runtime_analyzer(name, analyzer);
         }
 
         let engine = builder.build().await.map_err(laurus_err)?;

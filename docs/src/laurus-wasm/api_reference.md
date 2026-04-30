@@ -162,9 +162,12 @@ Create an empty schema.
 
 Add a full-text field. `analyzer` is the name of a parameter-less
 built-in (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`)
-or a custom name registered via `addAnalyzer`. The Japanese preset
-requires a Lindera dictionary path, so register it as a custom
-analyzer with a `lindera` tokenizer and reference it here by name.
+or the name of a runtime analyzer registered via `addAnalyzer()`.
+
+For Japanese morphological analysis, build a `JapaneseAnalyzer` from
+raw IPADIC bytes and register it with `addAnalyzer()` first; see
+[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dictda--mode)
+and [`addAnalyzer`](#addanalyzername-analyzer) below.
 
 #### `addIntegerField(name, stored?, indexed?, multiValued?)`
 
@@ -225,6 +228,35 @@ Add an IVF vector index field.
 
 - `nClusters`: Number of partitioning clusters (default 100)
 - `nProbe`: Number of clusters to probe at query time (default 1)
+
+#### `addAnalyzer(name, analyzer)`
+
+Register a pre-built analyzer instance under `name`. Resolved before the
+parameter-less built-in names and before `schema.analyzers` definitions
+when text fields reference an analyzer by name.
+
+Currently only `JapaneseAnalyzer` instances built via
+[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dictda--mode)
+are accepted here. The runtime registry is the only practical way to use
+the Japanese analyzer in browser WASM, where the
+`{ "language": "japanese", "dict": ... }` preset cannot resolve a
+filesystem path.
+
+```javascript
+import { JapaneseAnalyzer, Schema } from "laurus-wasm";
+import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
+
+await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
+const f = await loadDictionaryFiles("ipadic");
+const ja = JapaneseAnalyzer.fromBytes(
+  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
+  f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
+);
+
+const schema = new Schema();
+schema.addAnalyzer("ja-ipadic", ja);
+schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
+```
 
 #### `addEmbedder(name, config)`
 
@@ -293,6 +325,82 @@ interface SearchResult {
 ```
 
 ## Analysis
+
+### JapaneseAnalyzer
+
+Japanese morphological analyzer constructed from raw Lindera dictionary
+bytes. Browser WASM has no real filesystem, so the standard
+`{ "language": "japanese", "dict": "/path/to/ipadic" }` preset cannot
+be used. Instead, fetch a Lindera dictionary archive (typically
+`lindera-ipadic-X.Y.Z.zip`), store it in OPFS via the
+[OPFS helpers](#opfs-helpers), and pass the eight component byte
+arrays to `JapaneseAnalyzer.fromBytes`.
+
+#### `JapaneseAnalyzer.fromBytes(metadata, dictDa, ..., mode?)`
+
+Static factory that builds an analyzer from raw IPADIC bytes.
+
+Arguments (all `Uint8Array` except `mode`):
+
+| Argument | Source file |
+| ---- | ---- |
+| `metadata` | `metadata.json` |
+| `dictDa` | `dict.da` (Double-Array Trie) |
+| `dictVals` | `dict.vals` |
+| `dictWordsIdx` | `dict.wordsidx` |
+| `dictWords` | `dict.words` |
+| `matrixMtx` | `matrix.mtx` |
+| `charDef` | `char_def.bin` |
+| `unk` | `unk.bin` |
+| `mode` | `"normal"` (default), `"search"`, or `"decompose"` |
+
+Throws if any component fails to deserialize or the mode string is
+invalid.
+
+```javascript
+import { JapaneseAnalyzer } from "laurus-wasm";
+import { loadDictionaryFiles } from "laurus-wasm/opfs";
+
+const f = await loadDictionaryFiles("ipadic");
+const ja = JapaneseAnalyzer.fromBytes(
+  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
+  f.dictWords, f.matrixMtx, f.charDef, f.unk,
+  "normal",
+);
+```
+
+The pipeline is `NFKC normalization → Japanese iteration mark
+normalization → Lindera morphological tokenization → lowercase →
+Japanese stop word filter` — identical to the `japanese` preset on the
+native side.
+
+### OPFS Helpers
+
+The `laurus-wasm/opfs` subpath bundles helpers for downloading,
+storing, and loading Lindera dictionaries from the browser's Origin
+Private File System. Used together with `JapaneseAnalyzer.fromBytes`.
+
+```javascript
+import {
+  downloadDictionary,
+  loadDictionaryFiles,
+  hasDictionary,
+  listDictionaries,
+  removeDictionary,
+} from "laurus-wasm/opfs";
+```
+
+| Function | Description |
+| ---- | ---- |
+| `downloadDictionary(url, name, options?)` | Fetch a `.zip`, decompress with the Web `DecompressionStream` API, and store the eight Lindera files under `laurus/dictionaries/<name>/` in OPFS. `options.onProgress({ phase, loaded?, total? })` reports progress. |
+| `loadDictionaryFiles(name)` | Read the eight files back as a `{ metadata, dictDa, dictVals, dictWordsIdx, dictWords, matrixMtx, charDef, unk }` object suitable for `JapaneseAnalyzer.fromBytes`. |
+| `hasDictionary(name)` | `true` if the dictionary directory exists in OPFS. |
+| `listDictionaries()` | Return an array of stored dictionary names. |
+| `removeDictionary(name)` | Delete the dictionary directory. |
+
+Browser CORS prevents fetching directly from GitHub Releases, so host
+the zip on the same origin as your app (the Laurus demo bundles
+`./dict/lindera-ipadic.zip` alongside the WASM at deploy time).
 
 ### WhitespaceTokenizer
 

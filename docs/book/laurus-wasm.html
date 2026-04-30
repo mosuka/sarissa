@@ -218,24 +218,33 @@ Origin Private File System</li>
     Engine --&gt; MemoryStorage
     WASM -.-&gt;|persist| OPFS
 </code></pre>
-<h2 id="limitation-no-in-engine-auto-embedding"><a class="header" href="#limitation-no-in-engine-auto-embedding">Limitation: No In-Engine Auto-Embedding</a></h2>
-<p>One of Laurus's key features on native platforms is <strong>automatic embedding</strong> --
-when a document is indexed, the engine can automatically convert text fields
-into vector embeddings using a registered embedder (Candle BERT, Candle CLIP,
-or OpenAI API). This allows <code>searchVectorText("field", "query text")</code> to
-work seamlessly without the caller computing embeddings.</p>
-<p><strong>In laurus-wasm, this feature is not available.</strong> Only the <code>precomputed</code>
-embedder type is supported. The reasons are:</p>
+<h2 id="embedding-strategies"><a class="header" href="#embedding-strategies">Embedding Strategies</a></h2>
+<p>On native platforms Laurus supports several built-in embedders (Candle BERT,
+Candle CLIP, OpenAI API) that the engine can invoke automatically when a
+document is indexed or when <code>searchVectorText("field", "query text")</code> is
+called. These native embedders cannot run inside <code>wasm32-unknown-unknown</code> and
+are therefore disabled in the WASM build:</p>
 <div class="table-wrapper"><table><thead><tr><th>Embedder</th><th>Dependency</th><th>Why it cannot run in WASM</th></tr></thead><tbody>
 <tr><td><code>candle_bert</code></td><td>candle (GPU/SIMD)</td><td>Requires native SIMD intrinsics and file system for models</td></tr>
 <tr><td><code>candle_clip</code></td><td>candle</td><td>Same as above</td></tr>
 <tr><td><code>openai</code></td><td>reqwest (HTTP)</td><td>Requires a full async HTTP client (tokio + TLS)</td></tr>
 </tbody></table>
 </div>
-<p>These dependencies are excluded from the WASM build via feature flags
-(<code>embeddings-candle</code>, <code>embeddings-openai</code>), which depend on the <code>native</code>
-feature that is disabled for <code>wasm32-unknown-unknown</code>.</p>
-<h3 id="recommended-alternative"><a class="header" href="#recommended-alternative">Recommended Alternative</a></h3>
+<p>(They are excluded from the WASM build via the <code>embeddings-candle</code> /
+<code>embeddings-openai</code> feature flags, which depend on the <code>native</code> feature that
+is disabled for <code>wasm32-unknown-unknown</code>.)</p>
+<p><code>laurus-wasm</code> exposes two <code>addEmbedder</code> types instead:</p>
+<ul>
+<li><strong><code>"precomputed"</code></strong> — The caller supplies vectors directly via <code>putDocument()</code>
+and <code>searchVector()</code>. The engine performs no embedding.</li>
+<li><strong><code>"callback"</code></strong> — Register a JavaScript callback
+<code>embed: (text) =&gt; Promise&lt;number[]&gt;</code> and the engine will invoke it during
+ingestion and from <code>searchVectorText()</code>. This enables in-engine
+auto-embedding using Transformers.js (or any other in-browser embedding
+library) so callers can use the same <code>searchVectorText("field", "query text")</code>
+pattern as on native platforms.</li>
+</ul>
+<h3 id="option-a--precomputed-vectors"><a class="header" href="#option-a--precomputed-vectors">Option A — Precomputed vectors</a></h3>
 <p>Compute embeddings on the <strong>JavaScript side</strong> and pass precomputed vectors
 to <code>putDocument()</code> and <code>searchVector()</code>:</p>
 <pre><code class="language-javascript">// Using Transformers.js (all-MiniLM-L6-v2, 384-dim)
@@ -260,12 +269,39 @@ const results = await index.searchVector("embedding", queryVec);
 <p>This approach gives you real semantic search in the browser using the same
 sentence-transformer models available on native platforms, with the embedding
 computation handled by Transformers.js (ONNX Runtime Web) instead of candle.</p>
+<h3 id="option-b--callback-embedder"><a class="header" href="#option-b--callback-embedder">Option B — Callback embedder</a></h3>
+<p>Register the same Transformers.js pipeline as a <code>"callback"</code> embedder so that
+the engine can call it automatically. After registration, ingestion and
+<code>searchVectorText()</code> work transparently without the caller managing vectors:</p>
+<pre><code class="language-javascript">import { pipeline } from '@huggingface/transformers';
+
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+
+schema.addEmbedder("transformers", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  },
+});
+schema.addHnswField("embedding", 384, "cosine", undefined, undefined, "transformers");
+const index = await Index.create(schema);
+
+await index.putDocument("doc1", { title: "Introduction to Rust" });
+await index.commit();
+
+const results = await index.searchVectorText("embedding", "safe systems programming");
+</code></pre>
+<p>Compared to Option A, the callback approach lets the engine cache embeddings
+during ingestion and avoids duplicating embedding code between writers and
+readers. The trade-off is that every <code>commit()</code> waits for the JS callback to
+resolve, so heavy bulk ingestion may benefit from precomputing vectors.</p>
 <h2 id="when-to-use-laurus-wasm-vs-laurus-nodejs"><a class="header" href="#when-to-use-laurus-wasm-vs-laurus-nodejs">When to Use laurus-wasm vs laurus-nodejs</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>Criterion</th><th><code>laurus-wasm</code></th><th><code>laurus-nodejs</code></th></tr></thead><tbody>
 <tr><td>Environment</td><td>Browser, Edge Runtime</td><td>Node.js server</td></tr>
 <tr><td>Performance</td><td>Good (single-threaded)</td><td>Best (native, multi-threaded)</td></tr>
 <tr><td>Storage</td><td>In-memory + OPFS</td><td>In-memory + File system</td></tr>
-<tr><td>Embedding</td><td>Precomputed only</td><td>Candle, OpenAI, Precomputed</td></tr>
+<tr><td>Embedding</td><td>Precomputed + JS callback</td><td>Candle, OpenAI, Precomputed</td></tr>
 <tr><td>Package</td><td><code>npm install laurus-wasm</code></td><td><code>npm install laurus-nodejs</code></td></tr>
 <tr><td>Binary size</td><td>~5-10 MB (WASM)</td><td>Platform-native</td></tr>
 </tbody></table>

@@ -1,6 +1,10 @@
 //! WASM wrappers for the Laurus analysis pipeline.
 
+use std::sync::Arc;
+
 use crate::errors::laurus_err;
+use laurus::Analyzer;
+use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 use laurus::analysis::synonym::dictionary::SynonymDictionary;
 use laurus::analysis::token_filter::Filter;
 use laurus::analysis::token_filter::synonym_graph::SynonymGraphFilter;
@@ -178,5 +182,163 @@ impl WasmSynonymGraphFilter {
 
         serde_wasm_bindgen::to_value(&result)
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JapaneseAnalyzer
+// ---------------------------------------------------------------------------
+
+/// Japanese morphological analyzer constructed from raw Lindera dictionary
+/// bytes.
+///
+/// Browser WASM has no real filesystem, so the standard
+/// `{ "language": "japanese", "dict": "/path/to/ipadic" }` analyzer
+/// spec cannot be used. Instead, fetch the eight Lindera dictionary
+/// files (typically extracted from a `lindera-ipadic-X.Y.Z.zip` and
+/// stored in OPFS), pass them to `JapaneseAnalyzer.fromBytes()`, and
+/// register the result on a `Schema` via `Schema.addAnalyzer(name, ...)`.
+///
+/// ```javascript
+/// import { JapaneseAnalyzer, Schema, Index } from "laurus-wasm";
+/// import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
+///
+/// await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
+/// const f = await loadDictionaryFiles("ipadic");
+/// const ja = JapaneseAnalyzer.fromBytes(
+///   f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
+///   f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal"
+/// );
+/// const schema = new Schema();
+/// schema.addAnalyzer("ja-ipadic", ja);
+/// schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
+/// const index = await Index.create(schema);
+/// ```
+#[wasm_bindgen(js_name = "JapaneseAnalyzer")]
+pub struct WasmJapaneseAnalyzer {
+    pub(crate) inner: Arc<dyn Analyzer>,
+}
+
+#[wasm_bindgen(js_class = "JapaneseAnalyzer")]
+impl WasmJapaneseAnalyzer {
+    /// Build a Japanese analyzer from raw dictionary byte arrays.
+    ///
+    /// The eight byte arrays must come from a built Lindera dictionary
+    /// directory (e.g. `lindera-ipadic-X.Y.Z.zip` extracted to OPFS).
+    /// A trailing `mode` argument (default `"normal"`) selects the
+    /// Lindera segmentation mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - `metadata.json`
+    /// * `dict_da` - `dict.da` (Double-Array Trie)
+    /// * `dict_vals` - `dict.vals`
+    /// * `dict_words_idx` - `dict.wordsidx`
+    /// * `dict_words` - `dict.words`
+    /// * `matrix_mtx` - `matrix.mtx`
+    /// * `char_def` - `char_def.bin`
+    /// * `unk` - `unk.bin`
+    /// * `mode` - `"normal"` (default), `"search"`, or `"decompose"`
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if any component fails to deserialize or the
+    /// mode string is not recognized.
+    #[wasm_bindgen(js_name = "fromBytes")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_bytes(
+        metadata: &[u8],
+        dict_da: &[u8],
+        dict_vals: &[u8],
+        dict_words_idx: &[u8],
+        dict_words: &[u8],
+        matrix_mtx: &[u8],
+        char_def: &[u8],
+        unk: &[u8],
+        mode: Option<String>,
+    ) -> Result<WasmJapaneseAnalyzer, JsValue> {
+        let mode_str = mode.as_deref().unwrap_or("normal");
+        let analyzer = JapaneseAnalyzer::from_bytes(
+            mode_str,
+            metadata,
+            dict_da,
+            dict_vals,
+            dict_words_idx,
+            dict_words,
+            matrix_mtx,
+            char_def,
+            unk,
+        )
+        .map_err(laurus_err)?;
+        Ok(Self {
+            inner: Arc::new(analyzer),
+        })
+    }
+}
+
+impl WasmJapaneseAnalyzer {
+    /// Internal accessor used by `WasmSchema.addAnalyzer` to clone the
+    /// underlying `Arc<dyn Analyzer>` into the schema's runtime registry.
+    pub(crate) fn analyzer(&self) -> Arc<dyn Analyzer> {
+        self.inner.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    /// Bad metadata bytes must surface a JS error mentioning metadata.
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    fn from_bytes_invalid_metadata_returns_js_error() {
+        use super::WasmJapaneseAnalyzer;
+
+        let empty: &[u8] = &[];
+        let result = WasmJapaneseAnalyzer::from_bytes(
+            b"not valid json",
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            None,
+        );
+        assert!(result.is_err());
+        let msg = result
+            .err()
+            .unwrap()
+            .as_string()
+            .unwrap_or_default()
+            .to_lowercase();
+        assert!(
+            msg.contains("metadata"),
+            "expected metadata error, got: {msg}"
+        );
+    }
+
+    /// An invalid mode string must short-circuit before any
+    /// dictionary-component deserialization is attempted.
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    fn from_bytes_invalid_mode_returns_js_error() {
+        use super::WasmJapaneseAnalyzer;
+
+        let empty: &[u8] = &[];
+        let result = WasmJapaneseAnalyzer::from_bytes(
+            b"{}",
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            Some("not-a-mode".into()),
+        );
+        assert!(result.is_err());
     }
 }

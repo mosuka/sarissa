@@ -2,14 +2,16 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use laurus::{
-    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
+    Analyzer, BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
     EmbedderDefinition, FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
     IntegerOption, IvfOption, Schema, TextOption,
 };
 use wasm_bindgen::prelude::*;
 
+use crate::analysis::WasmJapaneseAnalyzer;
 use crate::embedder::JsCallbackEmbedder;
 
 /// Parse a distance metric string into [`DistanceMetric`].
@@ -50,6 +52,11 @@ pub struct WasmSchema {
     /// JS callback embedders registered via `addEmbedder({ type: "callback" })`.
     /// Stored separately because they can't be serialized into `EmbedderDefinition`.
     pub(crate) js_embedders: HashMap<String, JsCallbackEmbedder>,
+    /// Pre-constructed analyzers registered via `addAnalyzer(...)`.
+    /// These are injected into the Engine at build time as runtime
+    /// analyzers because they hold non-serializable state (e.g. a
+    /// Lindera dictionary loaded from raw bytes).
+    pub(crate) runtime_analyzers: HashMap<String, Arc<dyn Analyzer>>,
 }
 
 #[wasm_bindgen(js_class = "Schema")]
@@ -60,6 +67,7 @@ impl WasmSchema {
         Self {
             inner: Schema::new(),
             js_embedders: HashMap::new(),
+            runtime_analyzers: HashMap::new(),
         }
     }
 
@@ -71,12 +79,15 @@ impl WasmSchema {
     /// * `stored` - Whether the original value is retrievable (default `true`).
     /// * `indexed` - Whether the field is searchable (default `true`).
     /// * `term_vectors` - Whether term position information is stored (default `false`).
-    /// * `analyzer` - Optional analyzer name. Use parameter-less built-in
-    ///   names (`"standard"`, `"english"`, `"keyword"`, `"simple"`,
-    ///   `"noop"`) directly. For parameterized presets such as the
-    ///   Japanese analyzer (which needs a Lindera dictionary path),
-    ///   register a custom analyzer via `addAnalyzer` and reference it
-    ///   here by name.
+    /// * `analyzer` - Optional analyzer name. Pass a parameter-less
+    ///   built-in directly: `"standard"`, `"english"`, `"keyword"`,
+    ///   `"simple"`, `"noop"`. For the Japanese analyzer, build it
+    ///   from raw IPADIC bytes via [`JapaneseAnalyzer.fromBytes`] and
+    ///   register it on the schema via [`Schema.addAnalyzer`], then
+    ///   reference it here by the registered name.
+    ///
+    /// [`JapaneseAnalyzer.fromBytes`]: crate::analysis::WasmJapaneseAnalyzer::from_bytes
+    /// [`Schema.addAnalyzer`]: WasmSchema::add_analyzer
     #[wasm_bindgen(js_name = "addTextField")]
     pub fn add_text_field(
         &mut self,
@@ -342,6 +353,31 @@ impl WasmSchema {
         }
 
         Ok(())
+    }
+
+    /// Register a pre-built analyzer under a name.
+    ///
+    /// The registered analyzer takes precedence over the parameter-less
+    /// built-in names (`"standard"`, `"english"`, `"keyword"`, `"simple"`,
+    /// `"noop"`) and over `schema.analyzers` definitions when text fields
+    /// reference an analyzer by `Named` form.
+    ///
+    /// Currently only Japanese analyzers built via
+    /// [`JapaneseAnalyzer.fromBytes`] are supported here. The runtime
+    /// registry is the only practical way to use the Japanese analyzer in
+    /// browser WASM, where the `{ "language": "japanese", "dict": ... }`
+    /// preset cannot resolve a filesystem path.
+    ///
+    /// ```javascript
+    /// const ja = JapaneseAnalyzer.fromBytes(/* ... */);
+    /// schema.addAnalyzer("ja-ipadic", ja);
+    /// schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
+    /// ```
+    ///
+    /// [`JapaneseAnalyzer.fromBytes`]: crate::analysis::WasmJapaneseAnalyzer::from_bytes
+    #[wasm_bindgen(js_name = "addAnalyzer")]
+    pub fn add_analyzer(&mut self, name: String, analyzer: &WasmJapaneseAnalyzer) {
+        self.runtime_analyzers.insert(name, analyzer.analyzer());
     }
 
     /// Set the default fields used when no field is specified in a query.

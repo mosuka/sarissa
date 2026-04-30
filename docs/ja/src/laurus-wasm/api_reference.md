@@ -158,7 +158,15 @@ DSL 文字列クエリで検索します。
 
 #### `addTextField(name, stored?, indexed?, termVectors?, analyzer?)`
 
-全文検索テキストフィールドを追加します。`analyzer` にはパラメータ不要の組込名（`"standard"` / `"english"` / `"keyword"` / `"simple"` / `"noop"`、または `addAnalyzer` で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、`lindera` tokenizer を含むカスタム analyzer として登録し、名前で参照してください。
+全文検索テキストフィールドを追加します。`analyzer` にはパラメータ不要の
+組込名（`"standard"` / `"english"` / `"keyword"` / `"simple"` /
+`"noop"`）または `addAnalyzer()` で登録したランタイム analyzer 名を
+指定します。
+
+日本語の形態素解析を行う場合は、まず `JapaneseAnalyzer` を IPADIC の
+バイト列から構築し、`addAnalyzer()` で登録してください。
+[`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dictda--mode)
+と [`addAnalyzer`](#addanalyzername-analyzer) を参照。
 
 #### `addIntegerField(name, stored?, indexed?, multiValued?)`
 
@@ -216,6 +224,34 @@ IVF ベクトルインデックスフィールドを追加します。
 
 - `nClusters`: パーティショニングクラスタ数（デフォルト 100）
 - `nProbe`: 検索時にプローブするクラスタ数（デフォルト 1）
+
+#### `addAnalyzer(name, analyzer)`
+
+事前に構築した analyzer インスタンスを `name` で登録します。テキスト
+フィールドが `Named` 形式で analyzer を参照するときに、組込名や
+`schema.analyzers` 定義よりも先に解決されます。
+
+現状は [`JapaneseAnalyzer.fromBytes`](#japaneseanalyzerfrombytesmetadata-dictda--mode)
+で構築した `JapaneseAnalyzer` のみ受け付けます。ブラウザ WASM では
+`{ "language": "japanese", "dict": ... }` プリセットがファイルシステム
+パスを解決できないため、ランタイムレジストリ経由が日本語 analyzer を
+利用する唯一の現実的な経路です。
+
+```javascript
+import { JapaneseAnalyzer, Schema } from "laurus-wasm";
+import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
+
+await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
+const f = await loadDictionaryFiles("ipadic");
+const ja = JapaneseAnalyzer.fromBytes(
+  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
+  f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
+);
+
+const schema = new Schema();
+schema.addAnalyzer("ja-ipadic", ja);
+schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
+```
 
 #### `addEmbedder(name, config)`
 
@@ -279,6 +315,81 @@ interface SearchResult {
 ```
 
 ## Analysis
+
+### JapaneseAnalyzer
+
+Lindera 辞書のバイト列から構築する日本語形態素解析 analyzer。
+ブラウザ WASM には実ファイルシステムが無いため、標準の
+`{ "language": "japanese", "dict": "/path/to/ipadic" }` プリセットは
+利用できません。代わりに Lindera 辞書アーカイブ（典型的には
+`lindera-ipadic-X.Y.Z.zip`）を取得して [OPFS ヘルパ](#opfs-ヘルパ) で
+OPFS に保存し、8 つのコンポーネントバイト配列を
+`JapaneseAnalyzer.fromBytes` に渡してください。
+
+#### `JapaneseAnalyzer.fromBytes(metadata, dictDa, ..., mode?)`
+
+IPADIC のバイト列から analyzer を構築する static ファクトリ。
+
+引数（`mode` 以外はすべて `Uint8Array`）:
+
+| 引数 | 対応するファイル |
+| ---- | ---- |
+| `metadata` | `metadata.json` |
+| `dictDa` | `dict.da`（Double-Array Trie） |
+| `dictVals` | `dict.vals` |
+| `dictWordsIdx` | `dict.wordsidx` |
+| `dictWords` | `dict.words` |
+| `matrixMtx` | `matrix.mtx` |
+| `charDef` | `char_def.bin` |
+| `unk` | `unk.bin` |
+| `mode` | `"normal"`（デフォルト）/ `"search"` / `"decompose"` |
+
+いずれかのコンポーネントの deserialization に失敗した場合、または
+mode 文字列が不正な場合は throw します。
+
+```javascript
+import { JapaneseAnalyzer } from "laurus-wasm";
+import { loadDictionaryFiles } from "laurus-wasm/opfs";
+
+const f = await loadDictionaryFiles("ipadic");
+const ja = JapaneseAnalyzer.fromBytes(
+  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
+  f.dictWords, f.matrixMtx, f.charDef, f.unk,
+  "normal",
+);
+```
+
+パイプラインは
+`NFKC 正規化 → 日本語 iteration mark 正規化 → Lindera 形態素解析 → lowercase → 日本語 stop word フィルタ`
+で、ネイティブ側の `japanese` プリセットと完全に一致します。
+
+### OPFS ヘルパ
+
+`laurus-wasm/opfs` サブパスは、Lindera 辞書をブラウザの Origin
+Private File System にダウンロード・保存・読込するヘルパを提供します。
+`JapaneseAnalyzer.fromBytes` と組み合わせて使用します。
+
+```javascript
+import {
+  downloadDictionary,
+  loadDictionaryFiles,
+  hasDictionary,
+  listDictionaries,
+  removeDictionary,
+} from "laurus-wasm/opfs";
+```
+
+| 関数 | 説明 |
+| ---- | ---- |
+| `downloadDictionary(url, name, options?)` | `.zip` を fetch し、Web の `DecompressionStream` API で展開して、Lindera 8 ファイルを OPFS の `laurus/dictionaries/<name>/` 配下に保存します。`options.onProgress({ phase, loaded?, total? })` で進捗通知を受け取れます。 |
+| `loadDictionaryFiles(name)` | 8 ファイルを `{ metadata, dictDa, dictVals, dictWordsIdx, dictWords, matrixMtx, charDef, unk }` オブジェクトとして読み出し、`JapaneseAnalyzer.fromBytes` にそのまま渡せる形にします。 |
+| `hasDictionary(name)` | 辞書ディレクトリが OPFS にあれば `true`。 |
+| `listDictionaries()` | 保存済み辞書名の配列を返します。 |
+| `removeDictionary(name)` | 辞書ディレクトリを削除します。 |
+
+ブラウザ CORS の制約により GitHub Releases から直接 fetch できないため、
+zip はアプリと同一オリジンで配信してください（Laurus デモではデプロイ
+時に `./dict/lindera-ipadic.zip` を WASM と同じパスに同梱します）。
 
 ### WhitespaceTokenizer
 

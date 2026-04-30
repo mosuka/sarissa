@@ -49,6 +49,11 @@ pub struct Engine {
     lexical: LexicalStore,
     vector: VectorStore,
     log: Arc<DocumentLog>,
+    /// Pre-constructed analyzers registered at build time and consulted
+    /// before built-in names and `schema.analyzers` when resolving
+    /// per-field analyzer references. See
+    /// [`EngineBuilder::register_runtime_analyzer`].
+    runtime_analyzers: HashMap<String, Arc<dyn Analyzer>>,
 }
 
 use crate::engine::search::{FusionAlgorithm, SearchResult};
@@ -620,6 +625,7 @@ impl Engine {
                 let analyzer = crate::analysis::analyzer::registry::create_analyzer_from_spec(
                     analyzer_spec,
                     &schema.analyzers,
+                    &self.runtime_analyzers,
                 )
                 .map_err(|e| {
                     crate::error::LaurusError::invalid_argument(format!(
@@ -991,6 +997,7 @@ impl Engine {
         schema: &Schema,
         analyzer: Option<Arc<dyn Analyzer>>,
         embedder: Option<Arc<dyn Embedder>>,
+        runtime_analyzers: &HashMap<String, Arc<dyn Analyzer>>,
     ) -> Result<(LexicalIndexConfig, VectorIndexConfig)> {
         // Construct Lexical Config
         let analyzer = match analyzer {
@@ -1022,6 +1029,7 @@ impl Engine {
                     crate::analysis::analyzer::registry::create_analyzer_from_spec(
                         spec,
                         &schema.analyzers,
+                        runtime_analyzers,
                     )
                     .map_err(|e| {
                         crate::error::LaurusError::invalid_argument(format!(
@@ -1535,6 +1543,7 @@ pub struct EngineBuilder {
     schema: Schema,
     analyzer: Option<Arc<dyn Analyzer>>,
     embedder: Option<Arc<dyn Embedder>>,
+    runtime_analyzers: HashMap<String, Arc<dyn Analyzer>>,
 }
 
 impl EngineBuilder {
@@ -1545,6 +1554,7 @@ impl EngineBuilder {
             schema,
             analyzer: None,
             embedder: None,
+            runtime_analyzers: HashMap::new(),
         }
     }
 
@@ -1557,6 +1567,29 @@ impl EngineBuilder {
     /// If not set, [`StandardAnalyzer`] is used as the default.
     pub fn analyzer(mut self, analyzer: Arc<dyn Analyzer>) -> Self {
         self.analyzer = Some(analyzer);
+        self
+    }
+
+    /// Register a pre-constructed analyzer under a name, resolved at
+    /// build time before built-in names and `schema.analyzers`.
+    ///
+    /// Useful when an analyzer cannot be expressed as a serializable
+    /// [`crate::AnalyzerSpec`] — for example, a Japanese analyzer
+    /// constructed from raw dictionary bytes loaded from OPFS in a
+    /// browser WASM context. Schema text fields can refer to the
+    /// runtime-registered analyzer by its `Named` form.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name used in `TextOption.analyzer` (e.g.
+    ///   `"ja-ipadic"`).
+    /// * `analyzer` - The pre-built analyzer instance.
+    pub fn register_runtime_analyzer(
+        mut self,
+        name: impl Into<String>,
+        analyzer: Arc<dyn Analyzer>,
+    ) -> Self {
+        self.runtime_analyzers.insert(name.into(), analyzer);
         self
     }
 
@@ -1583,8 +1616,13 @@ impl EngineBuilder {
     /// Returns an error if storage initialization, index creation, WAL
     /// opening, or recovery replay fails.
     pub async fn build(self) -> Result<Engine> {
-        let (lexical_config, vector_config) =
-            Engine::split_schema(&self.schema, self.analyzer, self.embedder).await?;
+        let (lexical_config, vector_config) = Engine::split_schema(
+            &self.schema,
+            self.analyzer,
+            self.embedder,
+            &self.runtime_analyzers,
+        )
+        .await?;
 
         let lexical_storage = Arc::new(PrefixedStorage::new("lexical", self.storage.clone()));
         let vector_storage = Arc::new(PrefixedStorage::new("vector", self.storage.clone()));
@@ -1605,6 +1643,7 @@ impl EngineBuilder {
             lexical,
             vector,
             log,
+            runtime_analyzers: self.runtime_analyzers,
         };
 
         engine.recover().await?;

@@ -120,10 +120,19 @@ wasm-pack build --target web --dev
 # リリースビルド
 wasm-pack build --target web --release
 
+# OPFS ヘルパ（./opfs サブパス）を pkg/ に同梱
+./scripts/postbuild.sh
+
 # デモの起動
 python3 -m http.server 8080
 # http://localhost:8080/examples/ を開く
 ```
+
+ポストビルドスクリプトは `js/opfs.js` と `js/opfs.d.ts` を `pkg/` に
+コピーし、利用者が
+`import { downloadDictionary } from "laurus-wasm/opfs"` できるよう
+`pkg/package.json` を書き換えます。`wasm-pack build` 後に毎回実行
+してください（冪等です）。
 
 ## ライセンス
 

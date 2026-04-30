@@ -137,6 +137,89 @@ impl LinderaTokenizer {
         Ok(Self { inner })
     }
 
+    /// Create a Lindera tokenizer from raw dictionary byte arrays.
+    ///
+    /// Builds the underlying [`lindera::dictionary::Dictionary`] in
+    /// memory from each component file, bypassing filesystem access.
+    /// Useful for environments without a real filesystem (browser
+    /// WASM with OPFS-loaded dictionaries) and for embedding
+    /// dictionaries shipped through alternate channels.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode_str` - Segmentation mode: `"normal"`, `"search"`, or
+    ///   `"decompose"`.
+    /// * `metadata` - Contents of `metadata.json`.
+    /// * `dict_da` - Contents of `dict.da` (Double-Array Trie).
+    /// * `dict_vals` - Contents of `dict.vals` (word value data).
+    /// * `dict_words_idx` - Contents of `dict.wordsidx` (word details
+    ///   index).
+    /// * `dict_words` - Contents of `dict.words` (word details).
+    /// * `matrix_mtx` - Contents of `matrix.mtx` (connection cost
+    ///   matrix).
+    /// * `char_def` - Contents of `char_def.bin` (character
+    ///   definitions).
+    /// * `unk` - Contents of `unk.bin` (unknown word dictionary).
+    ///
+    /// # Returns
+    ///
+    /// A new `LinderaTokenizer` instance with no user dictionary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the mode is invalid or any component fails
+    /// to deserialize from the supplied bytes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_bytes(
+        mode_str: &str,
+        metadata: &[u8],
+        dict_da: &[u8],
+        dict_vals: &[u8],
+        dict_words_idx: &[u8],
+        dict_words: &[u8],
+        matrix_mtx: &[u8],
+        char_def: &[u8],
+        unk: &[u8],
+    ) -> Result<Self> {
+        use lindera::dictionary::Dictionary;
+        use lindera_dictionary::dictionary::character_definition::CharacterDefinition;
+        use lindera_dictionary::dictionary::connection_cost_matrix::ConnectionCostMatrix;
+        use lindera_dictionary::dictionary::metadata::Metadata;
+        use lindera_dictionary::dictionary::prefix_dictionary::PrefixDictionary;
+        use lindera_dictionary::dictionary::unknown_dictionary::UnknownDictionary;
+
+        let mode = Mode::from_str(mode_str)
+            .map_err(|e| LaurusError::analysis(format!("Invalid mode '{}': {}", mode_str, e)))?;
+        let meta = Metadata::load(metadata)
+            .map_err(|e| LaurusError::analysis(format!("Failed to load metadata: {}", e)))?;
+        let prefix_dictionary = PrefixDictionary::load(
+            dict_da.to_vec(),
+            dict_vals.to_vec(),
+            dict_words_idx.to_vec(),
+            dict_words.to_vec(),
+            true,
+        )
+        .map_err(|e| LaurusError::analysis(format!("Failed to load prefix dictionary: {}", e)))?;
+        let connection_cost_matrix = ConnectionCostMatrix::load(matrix_mtx.to_vec())
+            .map_err(|e| LaurusError::analysis(format!("Failed to load cost matrix: {}", e)))?;
+        let character_definition = CharacterDefinition::load(char_def).map_err(|e| {
+            LaurusError::analysis(format!("Failed to load character definition: {}", e))
+        })?;
+        let unknown_dictionary = UnknownDictionary::load(unk).map_err(|e| {
+            LaurusError::analysis(format!("Failed to load unknown dictionary: {}", e))
+        })?;
+
+        let dict = Dictionary {
+            prefix_dictionary,
+            connection_cost_matrix,
+            character_definition,
+            unknown_dictionary,
+            metadata: meta,
+        };
+        let inner = Segmenter::new(mode, dict, None);
+        Ok(Self { inner })
+    }
+
     /// Detect token type based on character content.
     ///
     /// Analyzes the token text to determine its type:
@@ -307,5 +390,48 @@ mod tests {
         let tokenizer = LinderaTokenizer::new("normal", "embedded://ipadic", None).unwrap();
 
         assert_eq!(tokenizer.name(), "lindera");
+    }
+
+    #[test]
+    fn test_from_bytes_invalid_metadata_errors() {
+        let empty: &[u8] = &[];
+        let result = LinderaTokenizer::from_bytes(
+            "normal",
+            b"not valid json".as_slice(),
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+        );
+        assert!(result.is_err());
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("metadata"),
+            "expected metadata error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_from_bytes_invalid_mode_errors() {
+        // An invalid mode string must short-circuit before any
+        // deserialization is attempted.
+        let empty: &[u8] = &[];
+        let result = LinderaTokenizer::from_bytes(
+            "not-a-mode",
+            b"{}".as_slice(),
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+        );
+        assert!(result.is_err());
+        let msg = format!("{}", result.err().unwrap());
+        assert!(msg.contains("mode"), "expected mode error, got: {msg}");
     }
 }
