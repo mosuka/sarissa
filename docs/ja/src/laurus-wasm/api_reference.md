@@ -158,7 +158,7 @@ DSL 文字列クエリで検索します。
 
 #### `addTextField(name, stored?, indexed?, termVectors?, analyzer?)`
 
-全文検索テキストフィールドを追加します。
+全文検索テキストフィールドを追加します。`analyzer` にはパラメータ不要の組込名（`"standard"` / `"english"` / `"keyword"` / `"simple"` / `"noop"`、または `addAnalyzer` で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、`lindera` tokenizer を含むカスタム analyzer として登録し、名前で参照してください。
 
 #### `addIntegerField(name, stored?, indexed?, multiValued?)`
 

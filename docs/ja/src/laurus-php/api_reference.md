@@ -50,7 +50,7 @@ new \Laurus\Schema()
 
 | メソッド | 説明 |
 | :--- | :--- |
-| `addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void` | 全文フィールド（転置インデックス、BM25）。 |
+| `addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void` | 全文フィールド（転置インデックス、BM25）。`$analyzer` にはパラメータ不要の組込名（`"standard"` / `"english"` / `"keyword"` / `"simple"` / `"noop"`、または `addAnalyzer` で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、`lindera` tokenizer を含むカスタム analyzer として登録し、名前で参照してください。 |
 | `addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void` | 64 ビット整数フィールド。`$multiValued = true` で整数配列を受け付け（範囲クエリは "any match"）。 |
 | `addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void` | 64 ビット浮動小数点フィールド。`$multiValued = true` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `addBooleanField(string $name, bool $stored = true, bool $indexed = true): void` | ブールフィールド。 |

@@ -237,13 +237,25 @@ let analyzer = StandardAnalyzer::default();
 <h3 id="japaneseanalyzer"><a class="header" href="#japaneseanalyzer">JapaneseAnalyzer</a></h3>
 <p>Uses morphological analysis for Japanese text segmentation.</p>
 <p>Pipeline: <code>UnicodeNormalizationCharFilter</code> (NFKC) → <code>JapaneseIterationMarkCharFilter</code> → <code>LinderaTokenizer</code> → <code>LowercaseFilter</code> → <code>StopFilter</code> (Japanese stop words)</p>
+<p><code>JapaneseAnalyzer::new</code> takes the same arguments as <code>LinderaTokenizer::new</code>:
+the segmentation mode, a path to a Lindera dictionary directory, and an
+optional user dictionary path. <code>laurus</code> does not enable Lindera's
+<code>embed-*</code> features by default, so a real filesystem path (typically an
+IPADIC build) is required at runtime.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::analysis::analyzer::japanese::JapaneseAnalyzer;
+</span>use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 
-let analyzer = JapaneseAnalyzer::new()?;
-// "東京都に住んでいる" → ["東京", "都", "に", "住ん", "で", "いる"]
+// Pass the path where you have unpacked the Lindera dictionary.
+let analyzer = JapaneseAnalyzer::new(
+    "normal",
+    "/var/lib/lindera/ipadic",
+    None,
+)?;
+// "東京都に住んでいる" → ["東京", "都", "住ん", "いる"]
 <span class="boring">}</span></code></pre></pre>
+<p>When the analyzer is referenced from a <code>Schema</code>, supply the parameters
+through the structured <code>AnalyzerSpec</code> form (see <a href="#perfieldanalyzer">PerFieldAnalyzer</a> below).</p>
 <h3 id="keywordanalyzer"><a class="header" href="#keywordanalyzer">KeywordAnalyzer</a></h3>
 <p>Treats the entire input as a single token. No tokenization or normalization.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -332,6 +344,31 @@ let engine = Engine::builder(storage, schema)
 <blockquote>
 <p><strong>Note:</strong> The <code>_id</code> field is always analyzed with <code>KeywordAnalyzer</code> regardless of configuration.</p>
 </blockquote>
+<h3 id="configuring-per-field-analyzers-from-a-schema"><a class="header" href="#configuring-per-field-analyzers-from-a-schema">Configuring per-field analyzers from a Schema</a></h3>
+<p>Most callers configure analyzers declaratively on the schema rather than
+wiring them up by hand. The <code>analyzer</code> setting on a text field accepts
+two shapes:</p>
+<pre><code class="language-jsonc">// 1. A bare name for a parameter-less built-in or a user-registered analyzer.
+{ "analyzer": "standard" }
+{ "analyzer": "english" }
+{ "analyzer": "my_custom_pipeline" }
+
+// 2. A structured object for a parameterised built-in preset. Today only
+//    the Japanese preset uses this form (it requires a Lindera dictionary
+//    path).
+{
+  "analyzer": {
+    "language": "japanese",
+    "mode": "normal",
+    "dict": "/var/lib/lindera/ipadic"
+  }
+}
+</code></pre>
+<p>The bare string <code>"japanese"</code> is rejected because the preset cannot be
+constructed without a dictionary. Schemas that previously stored
+<code>"analyzer": "japanese"</code> must migrate to the structured form above.</p>
+<p>For full pipelines that do not fit a preset, register the pipeline under
+<code>schema.analyzers</code> as an <code>AnalyzerDefinition</code> and reference it by name.</p>
 <h2 id="char-filters"><a class="header" href="#char-filters">Char Filters</a></h2>
 <p>Char filters operate on the raw input text <strong>before</strong> it reaches the tokenizer. They perform character-level normalization such as Unicode normalization, character mapping, and pattern-based replacement. This ensures that the tokenizer receives clean, normalized text.</p>
 <p>All char filters implement the <code>CharFilter</code> trait:</p>

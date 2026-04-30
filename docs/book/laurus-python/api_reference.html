@@ -217,17 +217,22 @@
 </code></pre>
 <h3 id="field-methods"><a class="header" href="#field-methods">Field methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>add_text_field(name)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">Full-text field (inverted index, BM25). <code>analyzer</code> accepts a built-in name (<code>"standard"</code>, <code>"english"</code>, <code>"keyword"</code>, <code>"simple"</code>, <code>"noop"</code>, or any custom name registered via <code>add_analyzer</code>) or a dict configuring a parameterised preset such as <code>{"language": "japanese", "mode": "normal", "dict": "/var/lib/lindera/ipadic"}</code>. The bare string <code>"japanese"</code> is rejected because the preset requires a Lindera dictionary path.</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64-bit integer field. Set <code>multi_valued=True</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64-bit float field. Set <code>multi_valued=True</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
-<tr><td style="text-align: left"><code>add_bool_field(name)</code></td><td style="text-align: left">Boolean field.</td></tr>
-<tr><td style="text-align: left"><code>add_bytes_field(name)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
-<tr><td style="text-align: left"><code>add_geo_field(name)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
+<tr><td style="text-align: left"><code>add_boolean_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">Boolean field.</td></tr>
+<tr><td style="text-align: left"><code>add_bytes_field(name, *, stored=True)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
+<tr><td style="text-align: left"><code>add_geo_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
 <tr><td style="text-align: left"><code>add_geo3d_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">3D ECEF Cartesian point field (x, y, z in metres). See <a href="../concepts/geo3d.html">Geo3d concepts</a>.</td></tr>
-<tr><td style="text-align: left"><code>add_datetime_field(name)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
-<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
-<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
-<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_datetime_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
+<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine", embedder=None)</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1, embedder=None)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+</tbody></table>
+</div>
+<h3 id="other-methods"><a class="header" href="#other-methods">Other methods</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>add_embedder(name, config)</code></td><td style="text-align: left">Register a named embedder definition. <code>config</code> is a dict with a <code>"type"</code> key (see below).</td></tr>
 <tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">Set default search fields (list of strings).</td></tr>
 <tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
 <tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
@@ -247,11 +252,21 @@ type mismatches.</li>
 </ul>
 <p>See <a href="../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for
 the full behaviour matrix.</p>
+<h3 id="embedder-types"><a class="header" href="#embedder-types">Embedder types</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left"><code>"type"</code></th><th style="text-align: left">Required keys</th><th style="text-align: left">Feature flag</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>"precomputed"</code></td><td style="text-align: left">--</td><td style="text-align: left">(always available)</td></tr>
+<tr><td style="text-align: left"><code>"candle_bert"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-candle</code></td></tr>
+<tr><td style="text-align: left"><code>"candle_clip"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-multimodal</code></td></tr>
+<tr><td style="text-align: left"><code>"openai"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-openai</code></td></tr>
+</tbody></table>
+</div>
 <h3 id="distance-metrics"><a class="header" href="#distance-metrics">Distance metrics</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Value</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>"cosine"</code></td><td style="text-align: left">Cosine similarity (default)</td></tr>
 <tr><td style="text-align: left"><code>"euclidean"</code></td><td style="text-align: left">Euclidean distance</td></tr>
 <tr><td style="text-align: left"><code>"dot_product"</code></td><td style="text-align: left">Dot product</td></tr>
+<tr><td style="text-align: left"><code>"manhattan"</code></td><td style="text-align: left">Manhattan distance</td></tr>
+<tr><td style="text-align: left"><code>"angular"</code></td><td style="text-align: left">Angular distance</td></tr>
 </tbody></table>
 </div>
 <hr />
@@ -265,24 +280,26 @@ the full behaviour matrix.</p>
 </code></pre>
 <p>Matches documents containing the terms in order.</p>
 <h3 id="fuzzyquery"><a class="header" href="#fuzzyquery">FuzzyQuery</a></h3>
-<pre><code class="language-python">FuzzyQuery(field: str, term: str, max_edits: int = 1)
+<pre><code class="language-python">FuzzyQuery(field: str, term: str, *, max_edits: int = 2)
 </code></pre>
-<p>Approximate match allowing up to <code>max_edits</code> edit-distance errors.</p>
+<p>Approximate match allowing up to <code>max_edits</code> edit-distance errors. <code>max_edits</code> is keyword-only.</p>
 <h3 id="wildcardquery"><a class="header" href="#wildcardquery">WildcardQuery</a></h3>
 <pre><code class="language-python">WildcardQuery(field: str, pattern: str)
 </code></pre>
 <p>Pattern match. <code>*</code> matches any sequence of characters, <code>?</code> matches any single character.</p>
 <h3 id="numericrangequery"><a class="header" href="#numericrangequery">NumericRangeQuery</a></h3>
-<pre><code class="language-python">NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
+<pre><code class="language-python">NumericRangeQuery(field: str, *, min: int | float | None = None, max: int | float | None = None)
 </code></pre>
-<p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>None</code> for an open bound.</p>
+<p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>None</code> (or omit) for
+an open bound. <code>min</code> and <code>max</code> are keyword-only. The numeric type (integer or
+float) is inferred from the Python type of <code>min</code>/<code>max</code>.</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-python">GeoDistanceQuery.within_radius(
-    field: str, lat: float, lon: float, distance_km: float,
+    field: str, lat: float, lon: float, distance_m: float,
 )
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>distance_km</code> kilometres of the given point.</p>
+is within <code>distance_m</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-python">GeoBoundingBoxQuery.within_bounding_box(
     field: str,
@@ -294,11 +311,11 @@ is within <code>distance_km</code> kilometres of the given point.</p>
 inside the axis-aligned <code>[min_lat, max_lat] × [min_lon, max_lon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-python">Geo3dDistanceQuery.within_sphere(
-    field: str, x: float, y: float, z: float, radius_m: float,
+    field: str, x: float, y: float, z: float, distance_m: float,
 )
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radius_m</code> metres of the centre. See
+coordinate is within <code>distance_m</code> metres of the centre. See
 <a href="../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-python">Geo3dBoundingBoxQuery.within_box(
@@ -323,17 +340,37 @@ inside <code>[min_x, max_x] × [min_y, max_y] × [min_z, max_z]</code>.</p>
 documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m</code> and
 <code>max_radius_m</code> tune the iterative-expansion search cone.</p>
 <h3 id="booleanquery"><a class="header" href="#booleanquery">BooleanQuery</a></h3>
-<pre><code class="language-python">BooleanQuery(
-    must: list[Query] | None = None,
-    should: list[Query] | None = None,
-    must_not: list[Query] | None = None,
-)
+<pre><code class="language-python">bq = BooleanQuery()
+bq.must(query)
+bq.should(query)
+bq.must_not(query)
 </code></pre>
-<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>must_not</code> clauses must not match.</p>
-<h3 id="spannearquery"><a class="header" href="#spannearquery">SpanNearQuery</a></h3>
-<pre><code class="language-python">SpanNearQuery(field: str, terms: list[str], slop: int = 0, in_order: bool = True)
+<p>Compound boolean query. Construct with no arguments and add clauses one at a
+time via the <code>must</code> / <code>should</code> / <code>must_not</code> methods. Each method accepts any
+query object (including a nested <code>BooleanQuery</code>).</p>
+<p><code>must</code> clauses all have to match; <code>must_not</code> clauses must not match.
+<code>should</code> clauses contribute to scoring; at least one of them must match if
+there are no <code>must</code> clauses.</p>
+<h3 id="spanquery"><a class="header" href="#spanquery">SpanQuery</a></h3>
+<pre><code class="language-python"># Single term
+SpanQuery.term(field: str, term: str)
+
+# Near: terms appearing within `slop` positions of each other
+SpanQuery.near(field: str, terms: list[str], *, slop: int = 0, ordered: bool = True)
+
+# Near with nested SpanQuery clauses
+SpanQuery.near_spans(field: str, clauses: list[SpanQuery], *, slop: int = 0, ordered: bool = True)
+
+# Containing: big span contains little span
+SpanQuery.containing(field: str, big: SpanQuery, little: SpanQuery)
+
+# Within: include span within exclude span at max distance
+SpanQuery.within(field: str, include: SpanQuery, exclude: SpanQuery, distance: int)
 </code></pre>
-<p>Matches documents where the terms appear within <code>slop</code> positions of each other.</p>
+<p>Positional / proximity span queries. Construct via the static factory
+methods. <code>near</code> takes a list of term strings, while <code>near_spans</code> takes a
+list of <code>SpanQuery</code> objects for nested expressions. <code>slop</code> and <code>ordered</code>
+are keyword-only.</p>
 <h3 id="vectorquery"><a class="header" href="#vectorquery">VectorQuery</a></h3>
 <pre><code class="language-python">VectorQuery(field: str, vector: list[float])
 </code></pre>
@@ -374,7 +411,7 @@ documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m
 <pre><code class="language-python">class SearchResult:
     id: str          # External document identifier
     score: float     # Relevance score
-    document: dict | None  # Retrieved field values, or None if deleted
+    document: dict | None  # Retrieved field values, or None if not stored
 </code></pre>
 <hr />
 <h2 id="fusion-algorithms"><a class="header" href="#fusion-algorithms">Fusion algorithms</a></h2>
@@ -412,9 +449,12 @@ documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m
 <pre><code class="language-python">class Token:
     text: str
     position: int
+    start_offset: int
+    end_offset: int
+    boost: float
+    stopped: bool
     position_increment: int
     position_length: int
-    boost: float
 </code></pre>
 <hr />
 <h2 id="field-value-types"><a class="header" href="#field-value-types">Field value types</a></h2>

@@ -73,12 +73,21 @@ let analyzer = StandardAnalyzer::default();
 
 パイプライン: `UnicodeNormalizationCharFilter`（NFKC） → `JapaneseIterationMarkCharFilter` → `LinderaTokenizer` → `LowercaseFilter` → `StopFilter`（日本語ストップワード）
 
-```rust
-use laurus::analysis::analyzer::japanese::JapaneseAnalyzer;
+`JapaneseAnalyzer::new` は `LinderaTokenizer::new` と同じ引数（segmentation mode、Lindera 辞書ディレクトリのパス、任意のユーザー辞書パス）を受け取ります。`laurus` は Lindera の `embed-*` features をデフォルトで有効化しないため、IPADIC 等の辞書を実ファイルパスとして必ず指定する必要があります。
 
-let analyzer = JapaneseAnalyzer::new()?;
-// "東京都に住んでいる" → ["東京", "都", "に", "住ん", "で", "いる"]
+```rust
+use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+
+// Lindera 辞書を展開済みのパスを指定する。
+let analyzer = JapaneseAnalyzer::new(
+    "normal",
+    "/var/lib/lindera/ipadic",
+    None,
+)?;
+// "東京都に住んでいる" → ["東京", "都", "住ん", "いる"]
 ```
+
+`Schema` 経由で参照する場合は構造化された `AnalyzerSpec` 形式でパラメータを渡します（後述の [PerFieldAnalyzer](#perfieldanalyzer) を参照）。
 
 ### KeywordAnalyzer
 
@@ -182,6 +191,30 @@ let engine = Engine::builder(storage, schema)
 ```
 
 > **注意:** `_id` フィールドは設定に関係なく、常に `KeywordAnalyzer` で解析されます。
+
+### Schema からの per-field analyzer 設定
+
+実装で直接 `PerFieldAnalyzer` を組み立てる代わりに、スキーマ宣言で analyzer を割り当てる場合がほとんどです。テキストフィールドの `analyzer` 設定は次の 2 つの形式を受け付けます。
+
+```jsonc
+// 1. パラメータ不要の組込 analyzer、または schema.analyzers に登録した名前。
+{ "analyzer": "standard" }
+{ "analyzer": "english" }
+{ "analyzer": "my_custom_pipeline" }
+
+// 2. パラメータ付きの組込プリセット。現状は Japanese プリセットのみで、Lindera 辞書のパスが必須。
+{
+  "analyzer": {
+    "language": "japanese",
+    "mode": "normal",
+    "dict": "/var/lib/lindera/ipadic"
+  }
+}
+```
+
+文字列単独の `"japanese"` は辞書パスを伴わないためエラーとなります。既存スキーマで `"analyzer": "japanese"` を保存していた場合は、上記の構造化形式に移行してください。
+
+プリセットに収まらないパイプラインを使いたい場合は、`schema.analyzers` に `AnalyzerDefinition` として登録し、フィールドからは名前で参照します。
 
 ## Char Filter
 

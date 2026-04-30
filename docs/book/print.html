@@ -1250,13 +1250,25 @@ let analyzer = StandardAnalyzer::default();
 <h3 id="japaneseanalyzer"><a class="header" href="#japaneseanalyzer">JapaneseAnalyzer</a></h3>
 <p>Uses morphological analysis for Japanese text segmentation.</p>
 <p>Pipeline: <code>UnicodeNormalizationCharFilter</code> (NFKC) → <code>JapaneseIterationMarkCharFilter</code> → <code>LinderaTokenizer</code> → <code>LowercaseFilter</code> → <code>StopFilter</code> (Japanese stop words)</p>
+<p><code>JapaneseAnalyzer::new</code> takes the same arguments as <code>LinderaTokenizer::new</code>:
+the segmentation mode, a path to a Lindera dictionary directory, and an
+optional user dictionary path. <code>laurus</code> does not enable Lindera's
+<code>embed-*</code> features by default, so a real filesystem path (typically an
+IPADIC build) is required at runtime.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::analysis::analyzer::japanese::JapaneseAnalyzer;
+</span>use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 
-let analyzer = JapaneseAnalyzer::new()?;
-// "東京都に住んでいる" → ["東京", "都", "に", "住ん", "で", "いる"]
+// Pass the path where you have unpacked the Lindera dictionary.
+let analyzer = JapaneseAnalyzer::new(
+    "normal",
+    "/var/lib/lindera/ipadic",
+    None,
+)?;
+// "東京都に住んでいる" → ["東京", "都", "住ん", "いる"]
 <span class="boring">}</span></code></pre></pre>
+<p>When the analyzer is referenced from a <code>Schema</code>, supply the parameters
+through the structured <code>AnalyzerSpec</code> form (see <a href="concepts/analysis.html#perfieldanalyzer">PerFieldAnalyzer</a> below).</p>
 <h3 id="keywordanalyzer"><a class="header" href="#keywordanalyzer">KeywordAnalyzer</a></h3>
 <p>Treats the entire input as a single token. No tokenization or normalization.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -1345,6 +1357,31 @@ let engine = Engine::builder(storage, schema)
 <blockquote>
 <p><strong>Note:</strong> The <code>_id</code> field is always analyzed with <code>KeywordAnalyzer</code> regardless of configuration.</p>
 </blockquote>
+<h3 id="configuring-per-field-analyzers-from-a-schema"><a class="header" href="#configuring-per-field-analyzers-from-a-schema">Configuring per-field analyzers from a Schema</a></h3>
+<p>Most callers configure analyzers declaratively on the schema rather than
+wiring them up by hand. The <code>analyzer</code> setting on a text field accepts
+two shapes:</p>
+<pre><code class="language-jsonc">// 1. A bare name for a parameter-less built-in or a user-registered analyzer.
+{ "analyzer": "standard" }
+{ "analyzer": "english" }
+{ "analyzer": "my_custom_pipeline" }
+
+// 2. A structured object for a parameterised built-in preset. Today only
+//    the Japanese preset uses this form (it requires a Lindera dictionary
+//    path).
+{
+  "analyzer": {
+    "language": "japanese",
+    "mode": "normal",
+    "dict": "/var/lib/lindera/ipadic"
+  }
+}
+</code></pre>
+<p>The bare string <code>"japanese"</code> is rejected because the preset cannot be
+constructed without a dictionary. Schemas that previously stored
+<code>"analyzer": "japanese"</code> must migrate to the structured form above.</p>
+<p>For full pipelines that do not fit a preset, register the pipeline under
+<code>schema.analyzers</code> as an <code>AnalyzerDefinition</code> and reference it by name.</p>
 <h2 id="char-filters"><a class="header" href="#char-filters">Char Filters</a></h2>
 <p>Char filters operate on the raw input text <strong>before</strong> it reaches the tokenizer. They perform character-level normalization such as Unicode normalization, character mapping, and pattern-based replacement. This ensures that the tokenizer receives clean, normalized text.</p>
 <p>All char filters implement the <code>CharFilter</code> trait:</p>
@@ -2406,8 +2443,8 @@ let query = NumericRangeQuery::new(
 </span><span class="boring">fn main() {
 </span>use laurus::lexical::query::geo::GeoQuery;
 
-// Find documents within 10km of Tokyo Station (35.6812, 139.7671)
-let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10.0)?; // radius in kilometers
+// Find documents within 10 km (= 10 000 m) of Tokyo Station (35.6812, 139.7671)
+let query = GeoQuery::within_radius("location", 35.6812, 139.7671, 10_000.0)?; // distance in metres
 
 // Find documents within a bounding box (min_lat, min_lon, max_lat, max_lon)
 let query = GeoQuery::within_bounding_box(
@@ -3128,18 +3165,18 @@ price:[* TO 100]
 <h3 id="2d-geographic-queries-geo_"><a class="header" href="#2d-geographic-queries-geo_">2D Geographic Queries (<code>geo_*</code>)</a></h3>
 <p>Two function-style forms target <code>Geo</code> (2D latitude / longitude) fields. All
 arguments are signed floats; latitudes / longitudes are in degrees and the
-radius is in kilometres:</p>
-<pre><code class="language-text">location:geo_distance(lat, lon, distance_km)
+distance is in metres:</p>
+<pre><code class="language-text">location:geo_distance(lat, lon, distance_m)
 location:geo_bbox(min_lat, min_lon, max_lat, max_lon)
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_km)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies within <code>distance_km</code> kilometres of the given centre.</td></tr>
+<tr><td style="text-align: left"><code>geo_distance(lat, lon, distance_m)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies within <code>distance_m</code> metres of the given centre.</td></tr>
 <tr><td style="text-align: left"><code>geo_bbox(min_lat, min_lon, max_lat, max_lon)</code></td><td style="text-align: left">All docs whose stored <code>(lat, lon)</code> lies inside the axis-aligned latitude / longitude rectangle.</td></tr>
 </tbody></table>
 </div>
 <p>Examples:</p>
-<pre><code class="language-text"># Within 10 km of Tokyo (35.6895, 139.6917)
-location:geo_distance(35.6895, 139.6917, 10)
+<pre><code class="language-text"># Within 10 km (= 10 000 m) of Tokyo (35.6895, 139.6917)
+location:geo_distance(35.6895, 139.6917, 10000)
 
 # Inside an axis-aligned lat/lon bounding box
 location:geo_bbox(35.0, 139.0, 36.0, 140.0)
@@ -3152,12 +3189,12 @@ out-of-range values.</p>
 <h3 id="3d-geographic-queries-geo3d_"><a class="header" href="#3d-geographic-queries-geo3d_">3D Geographic Queries (<code>geo3d_*</code>)</a></h3>
 <p>Three function-style forms target <code>Geo3d</code> (3D ECEF Cartesian) fields. All
 arguments are signed floats in metres, except <code>k</code> (an unsigned integer):</p>
-<pre><code class="language-text">position:geo3d_distance(x, y, z, radius_m)
+<pre><code class="language-text">position:geo3d_distance(x, y, z, distance_m)
 position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
 position:geo3d_nearest(x, y, z, k)
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Form</th><th style="text-align: left">Behaviour</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">All docs whose stored point lies within <code>radius_m</code> metres of <code>(x, y, z)</code>.</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">All docs whose stored point lies within <code>distance_m</code> metres of <code>(x, y, z)</code>.</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">All docs whose stored point lies inside the axis-aligned 3D box.</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">The <code>k</code> nearest docs to <code>(x, y, z)</code> by Euclidean distance.</td></tr>
 </tbody></table>
@@ -3638,7 +3675,7 @@ so external code can reference the exact values laurus uses.</p>
 <a href="concepts/bkd_tree.html#query-the-intersectvisitor-protocol"><code>IntersectVisitor</code></a> implementations
 on top of the shared 3D BKD-Tree.</p>
 <h3 id="sphere-radius--geo3ddistancequery"><a class="header" href="#sphere-radius--geo3ddistancequery">Sphere (radius) — <code>Geo3dDistanceQuery</code></a></h3>
-<p>Find every document whose stored point lies within <code>radius_m</code> metres of a
+<p>Find every document whose stored point lies within <code>distance_m</code> metres of a
 centre point. Score is <code>1 - distance / radius</code>, clamped to <code>[0, 1]</code>.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
@@ -3706,7 +3743,7 @@ position:geo3d_bbox(-4000000, 3300000, 3650000, -3900000, 3400000, 3750000)
 position:geo3d_nearest(-3955182, 3350553, 3700276, 10)
 </code></pre>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Form</th><th style="text-align: left">Arguments</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and search radius in metres</td></tr>
+<tr><td style="text-align: left"><code>geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and maximum distance in metres</td></tr>
 <tr><td style="text-align: left"><code>geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">two opposite corners of the AABB</td></tr>
 <tr><td style="text-align: left"><code>geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">centre <code>(x, y, z)</code> and the integer <code>k</code></td></tr>
 </tbody></table>
@@ -6952,7 +6989,7 @@ inaccessible. Per-field analyzers and embedders are unregistered.</p>
 <h3 id="3d-geographic-queries-1"><a class="header" href="#3d-geographic-queries-1">3D Geographic Queries</a></h3>
 <p>3D ECEF geographic queries are expressed in the lexical DSL string passed via <code>SearchRequest.query</code>. There is no dedicated message type — the same DSL forms used by the core library work over gRPC. Three forms are available (see <a href="laurus-server/../concepts/query_dsl.html#3d-geographic-queries-geo3d_">Query DSL → 3D Geographic Queries</a> for full syntax):</p>
 <ul>
-<li><code>position:geo3d_distance(x, y, z, radius_m)</code> — sphere centered at <code>(x, y, z)</code> with radius in meters</li>
+<li><code>position:geo3d_distance(x, y, z, distance_m)</code> — sphere centered at <code>(x, y, z)</code> with maximum distance in meters</li>
 <li><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code> — 3D axis-aligned bounding box</li>
 <li><code>position:geo3d_nearest(x, y, z, k)</code> — k nearest neighbours to <code>(x, y, z)</code></li>
 </ul>
@@ -7571,7 +7608,7 @@ document: {"title": "Hello World - Part 2", "body": "This is a continuation."}
 </div>
 <h4 id="3d-geographic-search"><a class="header" href="#3d-geographic-search">3D geographic search</a></h4>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Query</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, radius_m)</code></td><td style="text-align: left">Sphere with center <code>(x, y, z)</code> and radius in meters</td></tr>
+<tr><td style="text-align: left"><code>position:geo3d_distance(x, y, z, distance_m)</code></td><td style="text-align: left">Sphere with center <code>(x, y, z)</code> and maximum distance in meters</td></tr>
 <tr><td style="text-align: left"><code>position:geo3d_bbox(min_x, min_y, min_z, max_x, max_y, max_z)</code></td><td style="text-align: left">3D axis-aligned bounding box</td></tr>
 <tr><td style="text-align: left"><code>position:geo3d_nearest(x, y, z, k)</code></td><td style="text-align: left">k nearest neighbors to <code>(x, y, z)</code></td></tr>
 </tbody></table>
@@ -7806,9 +7843,9 @@ index.commit()
 <pre><code class="language-python">schema = laurus.Schema()
 schema.add_text_field("title")
 schema.add_text_field("body")
-schema.add_int_field("year")
+schema.add_integer_field("year")
 schema.add_float_field("score")
-schema.add_bool_field("published")
+schema.add_boolean_field("published")
 schema.add_bytes_field("thumbnail")
 schema.add_geo_field("location")
 schema.add_datetime_field("created_at")
@@ -7860,17 +7897,22 @@ print(stats["vector_fields"])
 </code></pre>
 <h3 id="field-methods"><a class="header" href="#field-methods">Field methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>add_text_field(name)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">Full-text field (inverted index, BM25). <code>analyzer</code> accepts a built-in name (<code>"standard"</code>, <code>"english"</code>, <code>"keyword"</code>, <code>"simple"</code>, <code>"noop"</code>, or any custom name registered via <code>add_analyzer</code>) or a dict configuring a parameterised preset such as <code>{"language": "japanese", "mode": "normal", "dict": "/var/lib/lindera/ipadic"}</code>. The bare string <code>"japanese"</code> is rejected because the preset requires a Lindera dictionary path.</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64-bit integer field. Set <code>multi_valued=True</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64-bit float field. Set <code>multi_valued=True</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
-<tr><td style="text-align: left"><code>add_bool_field(name)</code></td><td style="text-align: left">Boolean field.</td></tr>
-<tr><td style="text-align: left"><code>add_bytes_field(name)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
-<tr><td style="text-align: left"><code>add_geo_field(name)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
+<tr><td style="text-align: left"><code>add_boolean_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">Boolean field.</td></tr>
+<tr><td style="text-align: left"><code>add_bytes_field(name, *, stored=True)</code></td><td style="text-align: left">Raw bytes field.</td></tr>
+<tr><td style="text-align: left"><code>add_geo_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
 <tr><td style="text-align: left"><code>add_geo3d_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">3D ECEF Cartesian point field (x, y, z in metres). See <a href="laurus-python/../concepts/geo3d.html">Geo3d concepts</a>.</td></tr>
-<tr><td style="text-align: left"><code>add_datetime_field(name)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
-<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=100)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
-<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine")</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
-<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_datetime_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">UTC datetime field.</td></tr>
+<tr><td style="text-align: left"><code>add_hnsw_field(name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None)</code></td><td style="text-align: left">HNSW approximate nearest-neighbor vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_flat_field(name, dimension, *, distance="cosine", embedder=None)</code></td><td style="text-align: left">Flat (brute-force) vector field.</td></tr>
+<tr><td style="text-align: left"><code>add_ivf_field(name, dimension, *, distance="cosine", n_clusters=100, n_probe=1, embedder=None)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
+</tbody></table>
+</div>
+<h3 id="other-methods"><a class="header" href="#other-methods">Other methods</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>add_embedder(name, config)</code></td><td style="text-align: left">Register a named embedder definition. <code>config</code> is a dict with a <code>"type"</code> key (see below).</td></tr>
 <tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">Set default search fields (list of strings).</td></tr>
 <tr><td style="text-align: left"><code>set_dynamic_field_policy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
 <tr><td style="text-align: left"><code>dynamic_field_policy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
@@ -7890,11 +7932,21 @@ type mismatches.</li>
 </ul>
 <p>See <a href="laurus-python/../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for
 the full behaviour matrix.</p>
+<h3 id="embedder-types"><a class="header" href="#embedder-types">Embedder types</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left"><code>"type"</code></th><th style="text-align: left">Required keys</th><th style="text-align: left">Feature flag</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>"precomputed"</code></td><td style="text-align: left">--</td><td style="text-align: left">(always available)</td></tr>
+<tr><td style="text-align: left"><code>"candle_bert"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-candle</code></td></tr>
+<tr><td style="text-align: left"><code>"candle_clip"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-multimodal</code></td></tr>
+<tr><td style="text-align: left"><code>"openai"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-openai</code></td></tr>
+</tbody></table>
+</div>
 <h3 id="distance-metrics-3"><a class="header" href="#distance-metrics-3">Distance metrics</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Value</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>"cosine"</code></td><td style="text-align: left">Cosine similarity (default)</td></tr>
 <tr><td style="text-align: left"><code>"euclidean"</code></td><td style="text-align: left">Euclidean distance</td></tr>
 <tr><td style="text-align: left"><code>"dot_product"</code></td><td style="text-align: left">Dot product</td></tr>
+<tr><td style="text-align: left"><code>"manhattan"</code></td><td style="text-align: left">Manhattan distance</td></tr>
+<tr><td style="text-align: left"><code>"angular"</code></td><td style="text-align: left">Angular distance</td></tr>
 </tbody></table>
 </div>
 <hr />
@@ -7908,24 +7960,26 @@ the full behaviour matrix.</p>
 </code></pre>
 <p>Matches documents containing the terms in order.</p>
 <h3 id="fuzzyquery-1"><a class="header" href="#fuzzyquery-1">FuzzyQuery</a></h3>
-<pre><code class="language-python">FuzzyQuery(field: str, term: str, max_edits: int = 1)
+<pre><code class="language-python">FuzzyQuery(field: str, term: str, *, max_edits: int = 2)
 </code></pre>
-<p>Approximate match allowing up to <code>max_edits</code> edit-distance errors.</p>
+<p>Approximate match allowing up to <code>max_edits</code> edit-distance errors. <code>max_edits</code> is keyword-only.</p>
 <h3 id="wildcardquery-1"><a class="header" href="#wildcardquery-1">WildcardQuery</a></h3>
 <pre><code class="language-python">WildcardQuery(field: str, pattern: str)
 </code></pre>
 <p>Pattern match. <code>*</code> matches any sequence of characters, <code>?</code> matches any single character.</p>
 <h3 id="numericrangequery-1"><a class="header" href="#numericrangequery-1">NumericRangeQuery</a></h3>
-<pre><code class="language-python">NumericRangeQuery(field: str, min: int | float | None, max: int | float | None)
+<pre><code class="language-python">NumericRangeQuery(field: str, *, min: int | float | None = None, max: int | float | None = None)
 </code></pre>
-<p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>None</code> for an open bound.</p>
+<p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>None</code> (or omit) for
+an open bound. <code>min</code> and <code>max</code> are keyword-only. The numeric type (integer or
+float) is inferred from the Python type of <code>min</code>/<code>max</code>.</p>
 <h3 id="geodistancequery"><a class="header" href="#geodistancequery">GeoDistanceQuery</a></h3>
 <pre><code class="language-python">GeoDistanceQuery.within_radius(
-    field: str, lat: float, lon: float, distance_km: float,
+    field: str, lat: float, lon: float, distance_m: float,
 )
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>distance_km</code> kilometres of the given point.</p>
+is within <code>distance_m</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery"><a class="header" href="#geoboundingboxquery">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-python">GeoBoundingBoxQuery.within_bounding_box(
     field: str,
@@ -7937,11 +7991,11 @@ is within <code>distance_km</code> kilometres of the given point.</p>
 inside the axis-aligned <code>[min_lat, max_lat] × [min_lon, max_lon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery"><a class="header" href="#geo3ddistancequery">Geo3dDistanceQuery</a></h3>
 <pre><code class="language-python">Geo3dDistanceQuery.within_sphere(
-    field: str, x: float, y: float, z: float, radius_m: float,
+    field: str, x: float, y: float, z: float, distance_m: float,
 )
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radius_m</code> metres of the centre. See
+coordinate is within <code>distance_m</code> metres of the centre. See
 <a href="laurus-python/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery"><a class="header" href="#geo3dboundingboxquery">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-python">Geo3dBoundingBoxQuery.within_box(
@@ -7966,17 +8020,37 @@ inside <code>[min_x, max_x] × [min_y, max_y] × [min_z, max_z]</code>.</p>
 documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m</code> and
 <code>max_radius_m</code> tune the iterative-expansion search cone.</p>
 <h3 id="booleanquery-1"><a class="header" href="#booleanquery-1">BooleanQuery</a></h3>
-<pre><code class="language-python">BooleanQuery(
-    must: list[Query] | None = None,
-    should: list[Query] | None = None,
-    must_not: list[Query] | None = None,
-)
+<pre><code class="language-python">bq = BooleanQuery()
+bq.must(query)
+bq.should(query)
+bq.must_not(query)
 </code></pre>
-<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>must_not</code> clauses must not match.</p>
-<h3 id="spannearquery"><a class="header" href="#spannearquery">SpanNearQuery</a></h3>
-<pre><code class="language-python">SpanNearQuery(field: str, terms: list[str], slop: int = 0, in_order: bool = True)
+<p>Compound boolean query. Construct with no arguments and add clauses one at a
+time via the <code>must</code> / <code>should</code> / <code>must_not</code> methods. Each method accepts any
+query object (including a nested <code>BooleanQuery</code>).</p>
+<p><code>must</code> clauses all have to match; <code>must_not</code> clauses must not match.
+<code>should</code> clauses contribute to scoring; at least one of them must match if
+there are no <code>must</code> clauses.</p>
+<h3 id="spanquery-1"><a class="header" href="#spanquery-1">SpanQuery</a></h3>
+<pre><code class="language-python"># Single term
+SpanQuery.term(field: str, term: str)
+
+# Near: terms appearing within `slop` positions of each other
+SpanQuery.near(field: str, terms: list[str], *, slop: int = 0, ordered: bool = True)
+
+# Near with nested SpanQuery clauses
+SpanQuery.near_spans(field: str, clauses: list[SpanQuery], *, slop: int = 0, ordered: bool = True)
+
+# Containing: big span contains little span
+SpanQuery.containing(field: str, big: SpanQuery, little: SpanQuery)
+
+# Within: include span within exclude span at max distance
+SpanQuery.within(field: str, include: SpanQuery, exclude: SpanQuery, distance: int)
 </code></pre>
-<p>Matches documents where the terms appear within <code>slop</code> positions of each other.</p>
+<p>Positional / proximity span queries. Construct via the static factory
+methods. <code>near</code> takes a list of term strings, while <code>near_spans</code> takes a
+list of <code>SpanQuery</code> objects for nested expressions. <code>slop</code> and <code>ordered</code>
+are keyword-only.</p>
 <h3 id="vectorquery"><a class="header" href="#vectorquery">VectorQuery</a></h3>
 <pre><code class="language-python">VectorQuery(field: str, vector: list[float])
 </code></pre>
@@ -8017,7 +8091,7 @@ documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m
 <pre><code class="language-python">class SearchResult:
     id: str          # External document identifier
     score: float     # Relevance score
-    document: dict | None  # Retrieved field values, or None if deleted
+    document: dict | None  # Retrieved field values, or None if not stored
 </code></pre>
 <hr />
 <h2 id="fusion-algorithms-2"><a class="header" href="#fusion-algorithms-2">Fusion algorithms</a></h2>
@@ -8055,9 +8129,12 @@ documents closest to <code>(x, y, z)</code>. The optional <code>initial_radius_m
 <pre><code class="language-python">class Token:
     text: str
     position: int
+    start_offset: int
+    end_offset: int
+    boost: float
+    stopped: bool
     position_increment: int
     position_length: int
-    boost: float
 </code></pre>
 <hr />
 <h2 id="field-value-types"><a class="header" href="#field-value-types">Field value types</a></h2>
@@ -8258,12 +8335,18 @@ const results = await index.searchVector(
 );
 </code></pre>
 <h2 id="5-hybrid-search-1"><a class="header" href="#5-hybrid-search-1">5. Hybrid search</a></h2>
-<pre><code class="language-javascript">import { SearchRequest } from "laurus-nodejs";
+<pre><code class="language-javascript">import {
+  Index,
+  RRF,
+  SearchRequest,
+  TermQuery,
+  VectorQuery,
+} from "laurus-nodejs";
 
-const req = new SearchRequest(5);
-req.setLexicalTermQuery("name", "express");
-req.setVectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]);
-req.setRrfFusion(60.0);
+const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("name", "express"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
 
 const results = await index.searchWithRequest(req);
 </code></pre>
@@ -8350,7 +8433,7 @@ and return Promises. <code>stats()</code> is synchronous.</p>
 </code></pre>
 <h3 id="field-methods-1"><a class="header" href="#field-methods-1">Field methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
+<tr><td style="text-align: left"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></td><td style="text-align: left">Full-text field (inverted index, BM25). <code>analyzer</code> is the name of a parameter-less built-in (<code>"standard"</code>, <code>"english"</code>, <code>"keyword"</code>, <code>"simple"</code>, <code>"noop"</code>) or any custom name registered via <code>addAnalyzer</code>. For the parameterised Japanese preset (which requires a Lindera dictionary path), register a custom analyzer with a <code>lindera</code> tokenizer and reference it by name.</td></tr>
 <tr><td style="text-align: left"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64-bit integer field. Pass <code>multiValued: true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>addFloatField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64-bit float field. Pass <code>multiValued: true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(name, stored?, indexed?)</code></td><td style="text-align: left">Boolean field.</td></tr>
@@ -8366,6 +8449,7 @@ and return Promises. <code>stats()</code> is synchronous.</p>
 <tr><td style="text-align: left"><code>setDynamicFieldPolicy(policy)</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
 <tr><td style="text-align: left"><code>dynamicFieldPolicy()</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
 <tr><td style="text-align: left"><code>fieldNames()</code></td><td style="text-align: left">Return all field names.</td></tr>
+<tr><td style="text-align: left"><code>toString()</code></td><td style="text-align: left">Return a string representation of the schema (<code>"Schema(fields=[...])"</code>).</td></tr>
 </tbody></table>
 </div>
 <h4 id="dynamic-field-policy-1"><a class="header" href="#dynamic-field-policy-1">Dynamic field policy</a></h4>
@@ -8415,14 +8499,15 @@ character.</p>
   field: string,
   min?: number | null,
   max?: number | null,
-  isFloat?: boolean,
+  numericType?: "integer" | "float",
 )
 </code></pre>
-<p>Matches numeric values in <code>[min, max]</code>. Pass <code>null</code> for an
-open bound.</p>
+<p>Matches numeric values in <code>[min, max]</code>. Pass <code>null</code> (or omit) for an
+open bound. <code>numericType</code> selects the underlying range type
+(<code>"integer"</code> (default) or <code>"float"</code>); other values throw.</p>
 <h3 id="geodistancequery-1"><a class="header" href="#geodistancequery-1">GeoDistanceQuery</a></h3>
 <pre><code class="language-typescript">GeoDistanceQuery.withinRadius(
-  field: string, lat: number, lon: number, distanceKm: number,
+  field: string, lat: number, lon: number, distanceM: number,
 ): GeoDistanceQuery
 </code></pre>
 <p>Geographic distance (radius) search.</p>
@@ -8438,11 +8523,11 @@ open bound.</p>
 <pre><code class="language-typescript">Geo3dDistanceQuery.withinSphere(
   field: string,
   x: number, y: number, z: number,
-  radiusM: number,
+  distanceM: number,
 ): Geo3dDistanceQuery
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radiusM</code> metres of the centre. See
+coordinate is within <code>distanceM</code> metres of the centre. See
 <a href="laurus-nodejs/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery-1"><a class="header" href="#geo3dboundingboxquery-1">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-typescript">Geo3dBoundingBoxQuery.withinBox(
@@ -8467,13 +8552,33 @@ search cone.</p>
 <h3 id="booleanquery-2"><a class="header" href="#booleanquery-2">BooleanQuery</a></h3>
 <pre><code class="language-typescript">class BooleanQuery {
   constructor();
-  mustTerm(field: string, term: string): void;
-  shouldTerm(field: string, term: string): void;
-  mustNotTerm(field: string, term: string): void;
+  // For each query type X in
+  //   { Term, Phrase, Fuzzy, Wildcard, NumericRange,
+  //     GeoDistance, GeoBoundingBox,
+  //     Geo3dDistance, Geo3dBoundingBox, Geo3dNearest,
+  //     Boolean, Span }:
+  mustX(query: X): void;
+  shouldX(query: X): void;
+  mustNotX(query: X): void;
 }
 </code></pre>
-<p>Compound boolean query with MUST / SHOULD / MUST_NOT clauses.</p>
-<h3 id="spanquery-1"><a class="header" href="#spanquery-1">SpanQuery</a></h3>
+<p>Compound boolean query with MUST / SHOULD / MUST_NOT clauses. Each clause
+takes an instance of a specific query class — for example,
+<code>mustTerm(new TermQuery("body", "rust"))</code> or
+<code>shouldGeo3dNearest(Geo3dNearestQuery.kNearest(...))</code>.</p>
+<p>The Node.js binding exposes 36 per-type methods (12 query types × 3
+polarities) instead of a single polymorphic <code>must(query)</code> because of a
+limitation in <code>napi-derive</code>'s validation of <code>Either&lt;&amp;T, ...&gt;</code> arguments
+for classes with <code>js_name</code> overrides.</p>
+<p><code>must</code> clauses all have to match; <code>mustNot</code> clauses must not match.
+<code>should</code> clauses contribute to scoring; at least one of them must match if
+there are no <code>must</code> clauses.</p>
+<pre><code class="language-javascript">const bq = new BooleanQuery();
+bq.mustTerm(new TermQuery("body", "programming"));
+bq.mustNotTerm(new TermQuery("title", "python"));
+bq.shouldFuzzy(new FuzzyQuery("body", "data", 1));
+</code></pre>
+<h3 id="spanquery-2"><a class="header" href="#spanquery-2">SpanQuery</a></h3>
 <pre><code class="language-typescript">SpanQuery.term(field: string, term: string): SpanQuery
 SpanQuery.near(
   field: string, terms: string[],
@@ -8504,29 +8609,55 @@ embedder configured on the index.</p>
 <hr />
 <h2 id="searchrequest-2"><a class="header" href="#searchrequest-2">SearchRequest</a></h2>
 <p>Full-featured search request for advanced control.</p>
-<pre><code class="language-typescript">class SearchRequest {
-  constructor(limit?: number, offset?: number);
+<pre><code class="language-typescript">interface SearchRequestOptions {
+  queryDsl?: string;
+  limit?: number;   // default 10
+  offset?: number;  // default 0
+}
+
+class SearchRequest {
+  constructor(options?: SearchRequestOptions);
 }
 </code></pre>
-<h3 id="setter-methods"><a class="header" href="#setter-methods">Setter methods</a></h3>
+<p>Construct with primitive options first; attach polymorphic clauses with
+the per-type setters below. As with <code>BooleanQuery</code>, the binding exposes
+per-type setters because of <code>napi-derive</code>'s limitation on <code>Either&lt;&amp;T, ...&gt;</code>
+arguments.</p>
+<h3 id="dsl-and-fusion-setters"><a class="header" href="#dsl-and-fusion-setters">DSL and fusion setters</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>setQueryDsl(dsl)</code></td><td style="text-align: left">Set a DSL string query.</td></tr>
-<tr><td style="text-align: left"><code>setLexicalTermQuery(field, term)</code></td><td style="text-align: left">Set a term-based lexical query.</td></tr>
-<tr><td style="text-align: left"><code>setLexicalPhraseQuery(field, terms)</code></td><td style="text-align: left">Set a phrase-based lexical query.</td></tr>
-<tr><td style="text-align: left"><code>setVectorQuery(field, vector)</code></td><td style="text-align: left">Set a pre-computed vector query.</td></tr>
-<tr><td style="text-align: left"><code>setVectorTextQuery(field, text)</code></td><td style="text-align: left">Set a text-based vector query.</td></tr>
-<tr><td style="text-align: left"><code>setFilterQuery(field, term)</code></td><td style="text-align: left">Set a post-scoring filter.</td></tr>
-<tr><td style="text-align: left"><code>setRrfFusion(k?)</code></td><td style="text-align: left">Use RRF fusion (default k=60).</td></tr>
-<tr><td style="text-align: left"><code>setWeightedSumFusion(lexicalWeight?, vectorWeight?)</code></td><td style="text-align: left">Use weighted sum fusion.</td></tr>
+<tr><td style="text-align: left"><code>setQueryDsl(dsl: string)</code></td><td style="text-align: left">Set a DSL string query.</td></tr>
+<tr><td style="text-align: left"><code>setRrfFusion(rrf: RRF)</code></td><td style="text-align: left">Use RRF fusion.</td></tr>
+<tr><td style="text-align: left"><code>setWeightedSumFusion(ws: WeightedSum)</code></td><td style="text-align: left">Use weighted-sum fusion.</td></tr>
 </tbody></table>
 </div>
+<h3 id="vector-setters"><a class="header" href="#vector-setters">Vector setters</a></h3>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>setVectorQuery(query: VectorQuery)</code></td><td style="text-align: left">Set a pre-computed vector query.</td></tr>
+<tr><td style="text-align: left"><code>setVectorTextQuery(query: VectorTextQuery)</code></td><td style="text-align: left">Set a text-based vector query (auto-embedded by the configured embedder).</td></tr>
+</tbody></table>
+</div>
+<h3 id="lexical-setters-per-type"><a class="header" href="#lexical-setters-per-type">Lexical setters (per type)</a></h3>
+<p>For each query type <code>X</code> in <code>{ Term, Phrase, Fuzzy, Wildcard, NumericRange, GeoDistance, GeoBoundingBox, Geo3dDistance, Geo3dBoundingBox, Geo3dNearest, Boolean, Span }</code>, the request exposes:</p>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>setLexicalX(query: X)</code></td><td style="text-align: left">Set the lexical component for an explicit hybrid request.</td></tr>
+<tr><td style="text-align: left"><code>setFilterX(query: X)</code></td><td style="text-align: left">Set the post-scoring filter component.</td></tr>
+</tbody></table>
+</div>
+<p>That is, 24 per-type setters in total (12 lexical + 12 filter), in addition
+to the DSL, vector, and fusion setters above.</p>
+<pre><code class="language-javascript">const req = new SearchRequest({ limit: 5 });
+req.setLexicalTerm(new TermQuery("title", "rust"));
+req.setVectorQuery(new VectorQuery("embedding", [0.1, 0.2, 0.3, 0.4]));
+req.setRrfFusion(new RRF(60.0));
+const results = await index.searchWithRequest(req);
+</code></pre>
 <hr />
 <h2 id="searchresult-4"><a class="header" href="#searchresult-4">SearchResult</a></h2>
 <p>Returned by search methods as an array.</p>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;        // External document identifier
   score: number;     // Relevance score
-  document: object | null; // Retrieved fields, or null
+  document: object | null; // Retrieved fields, or null if not stored
 }
 </code></pre>
 <hr />
@@ -8588,11 +8719,10 @@ by rank position.</p>
 <tr><td style="text-align: left"><code>boolean</code></td><td style="text-align: left"><code>Bool</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>number</code> (integer)</td><td style="text-align: left"><code>Int64</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>number</code> (float)</td><td style="text-align: left"><code>Float64</code></td><td style="text-align: left"></td></tr>
-<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left">ISO8601 strings become <code>DateTime</code></td></tr>
+<tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left">ISO 8601 strings become <code>DateTime</code></td></tr>
 <tr><td style="text-align: left"><code>number[]</code></td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Coerced to <code>f32</code></td></tr>
 <tr><td style="text-align: left"><code>{ lat, lon }</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>number</code> values</td></tr>
-<tr><td style="text-align: left"><code>Date</code></td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Via timestamp</td></tr>
-<tr><td style="text-align: left"><code>Buffer</code></td><td style="text-align: left"><code>Bytes</code></td><td style="text-align: left"></td></tr>
+<tr><td style="text-align: left"><code>{ x, y, z }</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">Three <code>number</code> values, meters (3D ECEF Cartesian)</td></tr>
 </tbody></table>
 </div><div style="break-before: page; page-break-before: always;"></div><h1 id="development-setup"><a class="header" href="#development-setup">Development Setup</a></h1>
 <p>This page covers how to set up a local development environment
@@ -8715,24 +8845,33 @@ Origin Private File System</li>
     Engine --&gt; MemoryStorage
     WASM -.-&gt;|persist| OPFS
 </code></pre>
-<h2 id="limitation-no-in-engine-auto-embedding"><a class="header" href="#limitation-no-in-engine-auto-embedding">Limitation: No In-Engine Auto-Embedding</a></h2>
-<p>One of Laurus's key features on native platforms is <strong>automatic embedding</strong> --
-when a document is indexed, the engine can automatically convert text fields
-into vector embeddings using a registered embedder (Candle BERT, Candle CLIP,
-or OpenAI API). This allows <code>searchVectorText("field", "query text")</code> to
-work seamlessly without the caller computing embeddings.</p>
-<p><strong>In laurus-wasm, this feature is not available.</strong> Only the <code>precomputed</code>
-embedder type is supported. The reasons are:</p>
+<h2 id="embedding-strategies"><a class="header" href="#embedding-strategies">Embedding Strategies</a></h2>
+<p>On native platforms Laurus supports several built-in embedders (Candle BERT,
+Candle CLIP, OpenAI API) that the engine can invoke automatically when a
+document is indexed or when <code>searchVectorText("field", "query text")</code> is
+called. These native embedders cannot run inside <code>wasm32-unknown-unknown</code> and
+are therefore disabled in the WASM build:</p>
 <div class="table-wrapper"><table><thead><tr><th>Embedder</th><th>Dependency</th><th>Why it cannot run in WASM</th></tr></thead><tbody>
 <tr><td><code>candle_bert</code></td><td>candle (GPU/SIMD)</td><td>Requires native SIMD intrinsics and file system for models</td></tr>
 <tr><td><code>candle_clip</code></td><td>candle</td><td>Same as above</td></tr>
 <tr><td><code>openai</code></td><td>reqwest (HTTP)</td><td>Requires a full async HTTP client (tokio + TLS)</td></tr>
 </tbody></table>
 </div>
-<p>These dependencies are excluded from the WASM build via feature flags
-(<code>embeddings-candle</code>, <code>embeddings-openai</code>), which depend on the <code>native</code>
-feature that is disabled for <code>wasm32-unknown-unknown</code>.</p>
-<h3 id="recommended-alternative"><a class="header" href="#recommended-alternative">Recommended Alternative</a></h3>
+<p>(They are excluded from the WASM build via the <code>embeddings-candle</code> /
+<code>embeddings-openai</code> feature flags, which depend on the <code>native</code> feature that
+is disabled for <code>wasm32-unknown-unknown</code>.)</p>
+<p><code>laurus-wasm</code> exposes two <code>addEmbedder</code> types instead:</p>
+<ul>
+<li><strong><code>"precomputed"</code></strong> — The caller supplies vectors directly via <code>putDocument()</code>
+and <code>searchVector()</code>. The engine performs no embedding.</li>
+<li><strong><code>"callback"</code></strong> — Register a JavaScript callback
+<code>embed: (text) =&gt; Promise&lt;number[]&gt;</code> and the engine will invoke it during
+ingestion and from <code>searchVectorText()</code>. This enables in-engine
+auto-embedding using Transformers.js (or any other in-browser embedding
+library) so callers can use the same <code>searchVectorText("field", "query text")</code>
+pattern as on native platforms.</li>
+</ul>
+<h3 id="option-a--precomputed-vectors"><a class="header" href="#option-a--precomputed-vectors">Option A — Precomputed vectors</a></h3>
 <p>Compute embeddings on the <strong>JavaScript side</strong> and pass precomputed vectors
 to <code>putDocument()</code> and <code>searchVector()</code>:</p>
 <pre><code class="language-javascript">// Using Transformers.js (all-MiniLM-L6-v2, 384-dim)
@@ -8757,12 +8896,39 @@ const results = await index.searchVector("embedding", queryVec);
 <p>This approach gives you real semantic search in the browser using the same
 sentence-transformer models available on native platforms, with the embedding
 computation handled by Transformers.js (ONNX Runtime Web) instead of candle.</p>
+<h3 id="option-b--callback-embedder"><a class="header" href="#option-b--callback-embedder">Option B — Callback embedder</a></h3>
+<p>Register the same Transformers.js pipeline as a <code>"callback"</code> embedder so that
+the engine can call it automatically. After registration, ingestion and
+<code>searchVectorText()</code> work transparently without the caller managing vectors:</p>
+<pre><code class="language-javascript">import { pipeline } from '@huggingface/transformers';
+
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+
+schema.addEmbedder("transformers", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  },
+});
+schema.addHnswField("embedding", 384, "cosine", undefined, undefined, "transformers");
+const index = await Index.create(schema);
+
+await index.putDocument("doc1", { title: "Introduction to Rust" });
+await index.commit();
+
+const results = await index.searchVectorText("embedding", "safe systems programming");
+</code></pre>
+<p>Compared to Option A, the callback approach lets the engine cache embeddings
+during ingestion and avoids duplicating embedding code between writers and
+readers. The trade-off is that every <code>commit()</code> waits for the JS callback to
+resolve, so heavy bulk ingestion may benefit from precomputing vectors.</p>
 <h2 id="when-to-use-laurus-wasm-vs-laurus-nodejs"><a class="header" href="#when-to-use-laurus-wasm-vs-laurus-nodejs">When to Use laurus-wasm vs laurus-nodejs</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>Criterion</th><th><code>laurus-wasm</code></th><th><code>laurus-nodejs</code></th></tr></thead><tbody>
 <tr><td>Environment</td><td>Browser, Edge Runtime</td><td>Node.js server</td></tr>
 <tr><td>Performance</td><td>Good (single-threaded)</td><td>Best (native, multi-threaded)</td></tr>
 <tr><td>Storage</td><td>In-memory + OPFS</td><td>In-memory + File system</td></tr>
-<tr><td>Embedding</td><td>Precomputed only</td><td>Candle, OpenAI, Precomputed</td></tr>
+<tr><td>Embedding</td><td>Precomputed + JS callback</td><td>Candle, OpenAI, Precomputed</td></tr>
 <tr><td>Package</td><td><code>npm install laurus-wasm</code></td><td><code>npm install laurus-nodejs</code></td></tr>
 <tr><td>Binary size</td><td>~5-10 MB (WASM)</td><td>Platform-native</td></tr>
 </tbody></table>
@@ -9026,16 +9192,16 @@ module.exports = {
 </li>
 <li><strong>Returns:</strong> <code>Promise&lt;SearchResult[]&gt;</code></li>
 </ul>
-<h4 id="searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-radiusm-limit-offset"><code>searchGeo3dDistance(field, x, y, z, radiusM, limit?, offset?)</code></a></h4>
+<h4 id="searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><a class="header" href="#searchgeo3ddistancefield-x-y-z-distancem-limit-offset"><code>searchGeo3dDistance(field, x, y, z, distanceM, limit?, offset?)</code></a></h4>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radiusM</code> metres of the centre. See
+coordinate is within <code>distanceM</code> metres of the centre. See
 <a href="laurus-wasm/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <ul>
 <li><strong>Parameters:</strong>
 <ul>
 <li><code>field</code> (string) -- Geo3d field name.</li>
 <li><code>x</code>, <code>y</code>, <code>z</code> (number) -- Centre ECEF coordinate (metres).</li>
-<li><code>radiusM</code> (number) -- Sphere radius (metres).</li>
+<li><code>distanceM</code> (number) -- Maximum distance from the centre (metres).</li>
 <li><code>limit</code>, <code>offset</code> (number, optional)</li>
 </ul>
 </li>
@@ -9081,7 +9247,11 @@ documents closest to <code>(x, y, z)</code>. The optional <code>initialRadiusM</
 <p>Create an empty schema.</p>
 <h3 id="methods-2"><a class="header" href="#methods-2">Methods</a></h3>
 <h4 id="addtextfieldname-stored-indexed-termvectors-analyzer"><a class="header" href="#addtextfieldname-stored-indexed-termvectors-analyzer"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></a></h4>
-<p>Add a full-text field.</p>
+<p>Add a full-text field. <code>analyzer</code> is the name of a parameter-less
+built-in (<code>"standard"</code>, <code>"english"</code>, <code>"keyword"</code>, <code>"simple"</code>, <code>"noop"</code>)
+or a custom name registered via <code>addAnalyzer</code>. The Japanese preset
+requires a Lindera dictionary path, so register it as a custom
+analyzer with a <code>lindera</code> tokenizer and reference it here by name.</p>
 <h4 id="addintegerfieldname-stored-indexed-multivalued"><a class="header" href="#addintegerfieldname-stored-indexed-multivalued"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></a></h4>
 <p>Add a 64-bit integer field. Pass <code>multiValued: true</code> to accept arrays of
 integers; range queries then match if any value satisfies the predicate
@@ -9119,9 +9289,31 @@ above.</p>
 <p>Add a brute-force vector index field.</p>
 <h4 id="addivffieldname-dimension-distance-nclusters-nprobe-embedder"><a class="header" href="#addivffieldname-dimension-distance-nclusters-nprobe-embedder"><code>addIvfField(name, dimension, distance?, nClusters?, nProbe?, embedder?)</code></a></h4>
 <p>Add an IVF vector index field.</p>
+<ul>
+<li><code>nClusters</code>: Number of partitioning clusters (default 100)</li>
+<li><code>nProbe</code>: Number of clusters to probe at query time (default 1)</li>
+</ul>
 <h4 id="addembeddername-config"><a class="header" href="#addembeddername-config"><code>addEmbedder(name, config)</code></a></h4>
-<p>Register a named embedder. In WASM, only <code>"precomputed"</code> type is supported.</p>
-<pre><code class="language-javascript">schema.addEmbedder("my-embedder", { type: "precomputed" });
+<p>Register a named embedder. WASM supports two <code>type</code> values:</p>
+<ul>
+<li><code>"precomputed"</code> — No embedding is performed; vectors are passed directly via
+<code>putDocument()</code> / <code>searchVector()</code>.</li>
+<li><code>"callback"</code> — Provide a JavaScript callback <code>embed: (text) =&gt; Promise&lt;number[]&gt;</code>
+that the engine will invoke during ingestion and <code>searchVectorText()</code>. This
+enables in-engine auto-embedding using Transformers.js or any other in-browser
+embedding library.</li>
+</ul>
+<pre><code class="language-javascript">// Precomputed embedder
+schema.addEmbedder("precomputed-embedder", { type: "precomputed" });
+
+// Callback embedder (e.g. backed by Transformers.js)
+schema.addEmbedder("callback-embedder", {
+  type: "callback",
+  embed: async (text) =&gt; {
+    const output = await pipeline(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
 </code></pre>
 <h4 id="setdefaultfieldsfields"><a class="header" href="#setdefaultfieldsfields"><code>setDefaultFields(fields)</code></a></h4>
 <p>Set the default search fields.</p>
@@ -9142,6 +9334,8 @@ the full behaviour matrix.</p>
 <p>Returns the current policy as a lowercase string.</p>
 <h4 id="fieldnames"><a class="header" href="#fieldnames"><code>fieldNames()</code></a></h4>
 <p>Returns an array of defined field names.</p>
+<h4 id="tostring"><a class="header" href="#tostring"><code>toString()</code></a></h4>
+<p>Returns a string representation of the schema (<code>"Schema(fields=[...])"</code>).</p>
 <h2 id="searchresult-5"><a class="header" href="#searchresult-5">SearchResult</a></h2>
 <pre><code class="language-typescript">interface SearchResult {
   id: string;
@@ -9160,6 +9354,15 @@ const tokens = tokenizer.tokenize("hello world");
 dict.addSynonymGroup(["ml", "machine learning"]);
 </code></pre>
 <h3 id="synonymgraphfilter-2"><a class="header" href="#synonymgraphfilter-2">SynonymGraphFilter</a></h3>
+<pre><code class="language-javascript">new SynonymGraphFilter(dictionary, keepOriginal = true, boost = 1.0)
+</code></pre>
+<ul>
+<li><code>dictionary</code> (<code>SynonymDictionary</code>) — Source synonym groups.</li>
+<li><code>keepOriginal</code> (boolean, default <code>true</code>) — Keep the original token alongside
+the inserted synonyms.</li>
+<li><code>boost</code> (number, default <code>1.0</code>) — Score boost applied to inserted synonym
+tokens.</li>
+</ul>
 <pre><code class="language-javascript">const filter = new SynonymGraphFilter(dict, true, 0.8);
 const expanded = filter.apply(tokens);
 </code></pre>
@@ -9464,7 +9667,7 @@ puts stats["vector_fields"]
 </code></pre>
 <h3 id="field-methods-2"><a class="header" href="#field-methods-2">Field methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)</code></td><td style="text-align: left">Full-text field (inverted index, BM25). <code>analyzer:</code> is the name of a parameter-less built-in (<code>"standard"</code>, <code>"english"</code>, <code>"keyword"</code>, <code>"simple"</code>, <code>"noop"</code>) or a custom name registered via <code>add_analyzer</code>. The Japanese preset requires a Lindera dictionary path, so register it as a custom analyzer with a <code>lindera</code> tokenizer and reference it by name.</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, stored: true, indexed: true, multi_valued: false)</code></td><td style="text-align: left">64-bit integer field. Pass <code>multi_valued: true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, stored: true, indexed: true, multi_valued: false)</code></td><td style="text-align: left">64-bit float field. Pass <code>multi_valued: true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>add_boolean_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">Boolean field.</td></tr>
@@ -9477,7 +9680,7 @@ puts stats["vector_fields"]
 <tr><td style="text-align: left"><code>add_ivf_field(name, dimension, distance: "cosine", n_clusters: 100, n_probe: 1, embedder: nil)</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
 </tbody></table>
 </div>
-<h3 id="other-methods"><a class="header" href="#other-methods">Other methods</a></h3>
+<h3 id="other-methods-1"><a class="header" href="#other-methods-1">Other methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>add_embedder(name, config)</code></td><td style="text-align: left">Register a named embedder definition. <code>config</code> is a Hash with a <code>"type"</code> key (see below).</td></tr>
 <tr><td style="text-align: left"><code>set_default_fields(fields)</code></td><td style="text-align: left">Set the default fields used when no field is specified in a query. <code>fields</code> is an Array of Strings.</td></tr>
@@ -9499,7 +9702,7 @@ type mismatches.</li>
 </ul>
 <p>See <a href="laurus-ruby/../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for
 the full behaviour matrix.</p>
-<h3 id="embedder-types"><a class="header" href="#embedder-types">Embedder types</a></h3>
+<h3 id="embedder-types-1"><a class="header" href="#embedder-types-1">Embedder types</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left"><code>"type"</code></th><th style="text-align: left">Required keys</th><th style="text-align: left">Feature flag</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>"precomputed"</code></td><td style="text-align: left">--</td><td style="text-align: left">(always available)</td></tr>
 <tr><td style="text-align: left"><code>"candle_bert"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-candle</code></td></tr>
@@ -9539,10 +9742,10 @@ the full behaviour matrix.</p>
 </code></pre>
 <p>Matches numeric values in the range <code>[min, max]</code>. Pass <code>nil</code> for an open bound. The type (integer or float) is inferred from the Ruby type of <code>min</code>/<code>max</code>.</p>
 <h3 id="geodistancequery-2"><a class="header" href="#geodistancequery-2">GeoDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_km)
+<pre><code class="language-ruby">Laurus::GeoDistanceQuery.within_radius(field, lat, lon, distance_m)
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>distance_km</code> kilometres of the given point.</p>
+is within <code>distance_m</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery-2"><a class="header" href="#geoboundingboxquery-2">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-ruby">Laurus::GeoBoundingBoxQuery.within_bounding_box(
   field, min_lat, min_lon, max_lat, max_lon,
@@ -9551,10 +9754,10 @@ is within <code>distance_km</code> kilometres of the given point.</p>
 <p>Geo bounding-box search. Returns documents whose <code>(lat, lon)</code> coordinate lies
 inside the axis-aligned <code>[min_lat, max_lat] × [min_lon, max_lon]</code> rectangle.</p>
 <h3 id="geo3ddistancequery-2"><a class="header" href="#geo3ddistancequery-2">Geo3dDistanceQuery</a></h3>
-<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, radius_m)
+<pre><code class="language-ruby">Laurus::Geo3dDistanceQuery.within_sphere(field, x, y, z, distance_m)
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>radius_m</code> metres of the centre. See
+coordinate is within <code>distance_m</code> metres of the centre. See
 <a href="laurus-ruby/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery-2"><a class="header" href="#geo3dboundingboxquery-2">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-ruby">Laurus::Geo3dBoundingBoxQuery.within_box(
@@ -9580,8 +9783,8 @@ bq.must(query)
 bq.should(query)
 bq.must_not(query)
 </code></pre>
-<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>must_not</code> clauses must not match.</p>
-<h3 id="spanquery-2"><a class="header" href="#spanquery-2">SpanQuery</a></h3>
+<p>Compound boolean query. <code>must</code> clauses all have to match; <code>must_not</code> clauses must not match. <code>should</code> clauses contribute to scoring; at least one of them must match if there are no <code>must</code> clauses.</p>
+<h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
 <pre><code class="language-ruby"># Single term
 Laurus::SpanQuery.term(field, term)
 
@@ -9684,7 +9887,8 @@ token.position_length     # =&gt; Integer -- Number of positions spanned
 <tr><td style="text-align: left"><code>String</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>Array</code> of numerics</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Elements coerced to <code>f32</code></td></tr>
 <tr><td style="text-align: left"><code>Hash</code> with <code>"lat"</code>, <code>"lon"</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>Float</code> values</td></tr>
-<tr><td style="text-align: left"><code>Time</code> (responds to <code>iso8601</code>)</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Converted via <code>iso8601</code></td></tr>
+<tr><td style="text-align: left"><code>Hash</code> with <code>"x"</code>, <code>"y"</code>, <code>"z"</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">Three <code>Float</code> values, meters (3D ECEF Cartesian)</td></tr>
+<tr><td style="text-align: left"><code>Time</code> / <code>String</code> responding to <code>iso8601</code></td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Converted via <code>iso8601</code></td></tr>
 </tbody></table>
 </div><div style="break-before: page; page-break-before: always;"></div><h1 id="development-setup-1"><a class="header" href="#development-setup-1">Development Setup</a></h1>
 <p>This page covers how to set up a local development environment
@@ -9965,7 +10169,7 @@ $schema-&gt;addGeoField("location");
 $schema-&gt;addDatetimeField("created_at");
 $schema-&gt;addHnswField("embedding", 384);
 $schema-&gt;addFlatField("small_vec", 64);
-$schema-&gt;addIvfField("ivf_vec", 128, null, 100, 1);
+$schema-&gt;addIvfField("ivf_vec", 128, "cosine", 100, 1);
 </code></pre>
 <h2 id="8-index-statistics-3"><a class="header" href="#8-index-statistics-3">8. Index statistics</a></h2>
 <pre><code class="language-php">$stats = $index-&gt;stats();
@@ -10009,9 +10213,9 @@ echo $stats["vectorFields"];
 </code></pre>
 <h3 id="field-methods-3"><a class="header" href="#field-methods-3">Field methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
-<tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">Full-text field (inverted index, BM25).</td></tr>
-<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64-bit integer field. Pass <code>$multi_valued = true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
-<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multi_valued = false): void</code></td><td style="text-align: left">64-bit float field. Pass <code>$multi_valued = true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">Full-text field (inverted index, BM25). <code>$analyzer</code> is the name of a parameter-less built-in (<code>"standard"</code>, <code>"english"</code>, <code>"keyword"</code>, <code>"simple"</code>, <code>"noop"</code>) or a custom name registered via <code>addAnalyzer</code>. The Japanese preset requires a Lindera dictionary path, so register it as a custom analyzer with a <code>lindera</code> tokenizer and reference it by name.</td></tr>
+<tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64-bit integer field. Pass <code>$multiValued = true</code> to accept arrays of integers (range queries match if any value satisfies the predicate).</td></tr>
+<tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64-bit float field. Pass <code>$multiValued = true</code> to accept arrays of floats (range queries match if any value satisfies the predicate).</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Boolean field.</td></tr>
 <tr><td style="text-align: left"><code>addBytesField(string $name, bool $stored = true): void</code></td><td style="text-align: left">Raw bytes field.</td></tr>
 <tr><td style="text-align: left"><code>addGeoField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">Geographic coordinate field (lat/lon).</td></tr>
@@ -10022,10 +10226,10 @@ echo $stats["vectorFields"];
 <tr><td style="text-align: left"><code>addIvfField(string $name, int $dimension, ?string $distance = "cosine", int $nClusters = 100, int $nProbe = 1, ?string $embedder = null): void</code></td><td style="text-align: left">IVF approximate nearest-neighbor vector field.</td></tr>
 </tbody></table>
 </div>
-<h3 id="other-methods-1"><a class="header" href="#other-methods-1">Other methods</a></h3>
+<h3 id="other-methods-2"><a class="header" href="#other-methods-2">Other methods</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left">Method</th><th style="text-align: left">Description</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>addEmbedder(string $name, array $config): void</code></td><td style="text-align: left">Register a named embedder definition. <code>$config</code> is an associative array with a <code>"type"</code> key (see below).</td></tr>
-<tr><td style="text-align: left"><code>setDefaultFields(array $fieldNames): void</code></td><td style="text-align: left">Set the default fields used when no field is specified in a query. <code>$fieldNames</code> is an array of strings.</td></tr>
+<tr><td style="text-align: left"><code>setDefaultFields(array $fields): void</code></td><td style="text-align: left">Set the default fields used when no field is specified in a query. <code>$fields</code> is an array of strings.</td></tr>
 <tr><td style="text-align: left"><code>setDynamicFieldPolicy(string $policy): void</code></td><td style="text-align: left">Set how undeclared fields are handled. <code>$policy</code> is <code>"strict"</code>, <code>"dynamic"</code> (default), or <code>"ignore"</code>. See notes below.</td></tr>
 <tr><td style="text-align: left"><code>dynamicFieldPolicy(): string</code></td><td style="text-align: left">Return the current policy as a lowercase string.</td></tr>
 <tr><td style="text-align: left"><code>fieldNames(): array</code></td><td style="text-align: left">Return the list of field names defined in this schema.</td></tr>
@@ -10044,7 +10248,7 @@ type mismatches.</li>
 </ul>
 <p>See <a href="laurus-php/../concepts/schema_and_fields.html#dynamic-schema">Schema &amp; Fields</a> for
 the full behaviour matrix.</p>
-<h3 id="embedder-types-1"><a class="header" href="#embedder-types-1">Embedder types</a></h3>
+<h3 id="embedder-types-2"><a class="header" href="#embedder-types-2">Embedder types</a></h3>
 <div class="table-wrapper"><table><thead><tr><th style="text-align: left"><code>"type"</code></th><th style="text-align: left">Required keys</th><th style="text-align: left">Feature flag</th></tr></thead><tbody>
 <tr><td style="text-align: left"><code>"precomputed"</code></td><td style="text-align: left">--</td><td style="text-align: left">(always available)</td></tr>
 <tr><td style="text-align: left"><code>"candle_bert"</code></td><td style="text-align: left"><code>"model"</code></td><td style="text-align: left"><code>embeddings-candle</code></td></tr>
@@ -10085,11 +10289,11 @@ the full behaviour matrix.</p>
 <p>Matches numeric values in the range <code>[$min, $max]</code>. Pass <code>null</code> for an open bound. Set <code>$numericType</code> to <code>"integer"</code> or <code>"float"</code>.</p>
 <h3 id="geodistancequery-3"><a class="header" href="#geodistancequery-3">GeoDistanceQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoDistanceQuery::withinRadius(
-    string $field, float $lat, float $lon, float $distanceKm,
+    string $field, float $lat, float $lon, float $distanceM,
 ): GeoDistanceQuery
 </code></pre>
 <p>Geo-distance (radius) search. Returns documents whose <code>(lat, lon)</code> coordinate
-is within <code>$distanceKm</code> kilometres of the given point.</p>
+is within <code>$distanceM</code> metres of the given point.</p>
 <h3 id="geoboundingboxquery-3"><a class="header" href="#geoboundingboxquery-3">GeoBoundingBoxQuery</a></h3>
 <pre><code class="language-php">\Laurus\GeoBoundingBoxQuery::withinBoundingBox(
     string $field,
@@ -10103,11 +10307,11 @@ inside the axis-aligned <code>[$minLat, $maxLat] × [$minLon, $maxLon]</code> re
 <pre><code class="language-php">\Laurus\Geo3dDistanceQuery::withinSphere(
     string $field,
     float $x, float $y, float $z,
-    float $radiusM,
+    float $distanceM,
 ): Geo3dDistanceQuery
 </code></pre>
 <p>Sphere search over a 3D ECEF point field. Returns documents whose <code>(x, y, z)</code>
-coordinate is within <code>$radiusM</code> metres of the centre. See
+coordinate is within <code>$distanceM</code> metres of the centre. See
 <a href="laurus-php/../concepts/geo3d.html">Geo3d concepts</a> for ECEF theory.</p>
 <h3 id="geo3dboundingboxquery-3"><a class="header" href="#geo3dboundingboxquery-3">Geo3dBoundingBoxQuery</a></h3>
 <pre><code class="language-php">\Laurus\Geo3dBoundingBoxQuery::withinBox(
@@ -10135,13 +10339,16 @@ $bq-&gt;must($query);
 $bq-&gt;should($query);
 $bq-&gt;mustNot($query);
 </code></pre>
-<p>Compound boolean query. <code>must</code> clauses all have to match; at least one <code>should</code> clause must match; <code>mustNot</code> clauses must not match.</p>
-<h3 id="spanquery-3"><a class="header" href="#spanquery-3">SpanQuery</a></h3>
+<p>Compound boolean query. <code>must</code> clauses all have to match; <code>mustNot</code> clauses must not match. <code>should</code> clauses contribute to scoring; at least one of them must match if there are no <code>must</code> clauses.</p>
+<h3 id="spanquery-4"><a class="header" href="#spanquery-4">SpanQuery</a></h3>
 <pre><code class="language-php">// Single term
 \Laurus\SpanQuery::term(string $field, string $term): SpanQuery
 
 // Near: terms within slop positions
 \Laurus\SpanQuery::near(string $field, array $terms, int $slop = 0, bool $ordered = true): SpanQuery
+
+// NearSpans: nested SpanQuery clauses within slop positions
+\Laurus\SpanQuery::nearSpans(string $field, array $clauses, int $slop = 0, bool $ordered = true): SpanQuery
 
 // Containing: big span contains little span
 \Laurus\SpanQuery::containing(string $field, SpanQuery $big, SpanQuery $little): SpanQuery
@@ -10149,7 +10356,9 @@ $bq-&gt;mustNot($query);
 // Within: include span within exclude span at max distance
 \Laurus\SpanQuery::within(string $field, SpanQuery $include, SpanQuery $exclude, int $distance): SpanQuery
 </code></pre>
-<p>Positional / proximity span queries. <code>near</code> takes an array of term strings.</p>
+<p>Positional / proximity span queries. <code>near</code> takes an array of term strings,
+while <code>nearSpans</code> takes an array of <code>SpanQuery</code> objects for nested expressions
+(each clause's field is re-rooted to the outer <code>$field</code>).</p>
 <h3 id="vectorquery-3"><a class="header" href="#vectorquery-3">VectorQuery</a></h3>
 <pre><code class="language-php">new \Laurus\VectorQuery(string $field, array $vector)
 </code></pre>
@@ -10186,7 +10395,7 @@ $bq-&gt;mustNot($query);
 <p>Returned by <code>Index-&gt;search()</code>.</p>
 <pre><code class="language-php">$result-&gt;getId()        // string   -- External document identifier
 $result-&gt;getScore()     // float    -- Relevance score
-$result-&gt;getDocument()  // array|null -- Retrieved field values, or null if deleted
+$result-&gt;getDocument()  // array|null -- Retrieved field values, or null if not stored
 </code></pre>
 <hr />
 <h2 id="fusion-algorithms-5"><a class="header" href="#fusion-algorithms-5">Fusion algorithms</a></h2>
@@ -10211,6 +10420,14 @@ $tokens = $tokenizer-&gt;tokenize("hello world");
 </code></pre>
 <p>Splits text on whitespace boundaries and returns an array of <code>Token</code> objects.</p>
 <h3 id="synonymgraphfilter-4"><a class="header" href="#synonymgraphfilter-4">SynonymGraphFilter</a></h3>
+<pre><code class="language-php">new \Laurus\SynonymGraphFilter(SynonymDictionary $dictionary, bool $keepOriginal = true, float $boost = 1.0)
+</code></pre>
+<div class="table-wrapper"><table><thead><tr><th style="text-align: left">Parameter</th><th style="text-align: left">Description</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>$dictionary</code></td><td style="text-align: left">Source synonym groups.</td></tr>
+<tr><td style="text-align: left"><code>$keepOriginal</code></td><td style="text-align: left">When <code>true</code> (default), keep the original token alongside the synonyms.</td></tr>
+<tr><td style="text-align: left"><code>$boost</code></td><td style="text-align: left">Score boost applied to the inserted synonym tokens (default <code>1.0</code>).</td></tr>
+</tbody></table>
+</div>
 <pre><code class="language-php">$filter = new \Laurus\SynonymGraphFilter($dictionary, true, 1.0);
 $expanded = $filter-&gt;apply($tokens);
 </code></pre>
@@ -10236,6 +10453,7 @@ $token-&gt;getPositionLength()     // int     -- Number of positions spanned
 <tr><td style="text-align: left"><code>string</code></td><td style="text-align: left"><code>Text</code></td><td style="text-align: left"></td></tr>
 <tr><td style="text-align: left"><code>array</code> of numerics</td><td style="text-align: left"><code>Vector</code></td><td style="text-align: left">Elements coerced to <code>f32</code></td></tr>
 <tr><td style="text-align: left"><code>array</code> with <code>"lat"</code>, <code>"lon"</code></td><td style="text-align: left"><code>Geo</code></td><td style="text-align: left">Two <code>float</code> values</td></tr>
+<tr><td style="text-align: left"><code>array</code> with <code>"x"</code>, <code>"y"</code>, <code>"z"</code></td><td style="text-align: left"><code>GeoEcef</code></td><td style="text-align: left">Three <code>float</code> values, meters (3D ECEF Cartesian)</td></tr>
 <tr><td style="text-align: left"><code>string</code> (ISO 8601)</td><td style="text-align: left"><code>DateTime</code></td><td style="text-align: left">Parsed from ISO 8601 format</td></tr>
 </tbody></table>
 </div><div style="break-before: page; page-break-before: always;"></div><h1 id="development-setup-2"><a class="header" href="#development-setup-2">Development Setup</a></h1>

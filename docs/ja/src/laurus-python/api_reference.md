@@ -52,7 +52,7 @@ class Schema:
 
 | メソッド | 説明 |
 | :--- | :--- |
-| `add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)` | 全文フィールド（転置インデックス、BM25）。 |
+| `add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)` | 全文フィールド（転置インデックス、BM25）。`analyzer` には組込名（`"standard"` / `"english"` / `"keyword"` / `"simple"` / `"noop"`、または `add_analyzer` で登録したカスタム名）か、`{"language": "japanese", "mode": "normal", "dict": "/var/lib/lindera/ipadic"}` のようなパラメータ付きプリセットの dict を渡せます。文字列単独の `"japanese"` は Lindera 辞書パスが必須なため拒否されます。 |
 | `add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64 ビット整数フィールド。`multi_valued=True` で整数配列を受け付け（範囲クエリは "any match"）。 |
 | `add_float_field(name, *, stored=True, indexed=True, multi_valued=False)` | 64 ビット浮動小数点フィールド。`multi_valued=True` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `add_boolean_field(name, *, stored=True, indexed=True)` | ブールフィールド。 |

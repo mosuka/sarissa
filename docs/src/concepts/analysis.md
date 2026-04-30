@@ -73,12 +73,26 @@ Uses morphological analysis for Japanese text segmentation.
 
 Pipeline: `UnicodeNormalizationCharFilter` (NFKC) → `JapaneseIterationMarkCharFilter` → `LinderaTokenizer` → `LowercaseFilter` → `StopFilter` (Japanese stop words)
 
-```rust
-use laurus::analysis::analyzer::japanese::JapaneseAnalyzer;
+`JapaneseAnalyzer::new` takes the same arguments as `LinderaTokenizer::new`:
+the segmentation mode, a path to a Lindera dictionary directory, and an
+optional user dictionary path. `laurus` does not enable Lindera's
+`embed-*` features by default, so a real filesystem path (typically an
+IPADIC build) is required at runtime.
 
-let analyzer = JapaneseAnalyzer::new()?;
-// "東京都に住んでいる" → ["東京", "都", "に", "住ん", "で", "いる"]
+```rust
+use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
+
+// Pass the path where you have unpacked the Lindera dictionary.
+let analyzer = JapaneseAnalyzer::new(
+    "normal",
+    "/var/lib/lindera/ipadic",
+    None,
+)?;
+// "東京都に住んでいる" → ["東京", "都", "住ん", "いる"]
 ```
+
+When the analyzer is referenced from a `Schema`, supply the parameters
+through the structured `AnalyzerSpec` form (see [PerFieldAnalyzer](#perfieldanalyzer) below).
 
 ### KeywordAnalyzer
 
@@ -182,6 +196,37 @@ let engine = Engine::builder(storage, schema)
 ```
 
 > **Note:** The `_id` field is always analyzed with `KeywordAnalyzer` regardless of configuration.
+
+### Configuring per-field analyzers from a Schema
+
+Most callers configure analyzers declaratively on the schema rather than
+wiring them up by hand. The `analyzer` setting on a text field accepts
+two shapes:
+
+```jsonc
+// 1. A bare name for a parameter-less built-in or a user-registered analyzer.
+{ "analyzer": "standard" }
+{ "analyzer": "english" }
+{ "analyzer": "my_custom_pipeline" }
+
+// 2. A structured object for a parameterised built-in preset. Today only
+//    the Japanese preset uses this form (it requires a Lindera dictionary
+//    path).
+{
+  "analyzer": {
+    "language": "japanese",
+    "mode": "normal",
+    "dict": "/var/lib/lindera/ipadic"
+  }
+}
+```
+
+The bare string `"japanese"` is rejected because the preset cannot be
+constructed without a dictionary. Schemas that previously stored
+`"analyzer": "japanese"` must migrate to the structured form above.
+
+For full pipelines that do not fit a preset, register the pipeline under
+`schema.analyzers` as an `AnalyzerDefinition` and reference it by name.
 
 ## Char Filters
 
