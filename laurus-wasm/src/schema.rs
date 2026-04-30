@@ -369,7 +369,7 @@ impl WasmSchema {
     /// preset cannot resolve a filesystem path.
     ///
     /// ```javascript
-    /// const ja = JapaneseAnalyzer.fromBytes(/* ... */);
+    /// const ja = JapaneseAnalyzer.fromBytes(...);
     /// schema.addAnalyzer("ja-ipadic", ja);
     /// schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
     /// ```
