@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
+            window.path_to_searchindex_js = "../searchindex-cc67bc7d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -234,7 +234,7 @@
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
+<tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。<code>$analyzer</code> にはパラメータ不要の組込名（<code>"standard"</code> / <code>"english"</code> / <code>"keyword"</code> / <code>"simple"</code> / <code>"noop"</code>、または <code>addAnalyzer</code> で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、<code>lindera</code> tokenizer を含むカスタム analyzer として登録し、名前で参照してください。</td></tr>
 <tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64 ビット整数フィールド。<code>$multiValued = true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>$multiValued = true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">ブールフィールド。</td></tr>

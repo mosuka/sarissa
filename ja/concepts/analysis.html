@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
+            window.path_to_searchindex_js = "../searchindex-cc67bc7d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -245,13 +245,20 @@ let analyzer = StandardAnalyzer::default();
 <h3 id="japaneseanalyzer"><a class="header" href="#japaneseanalyzer">JapaneseAnalyzer</a></h3>
 <p>日本語テキストの分割に形態素解析を使用します。</p>
 <p>パイプライン: <code>UnicodeNormalizationCharFilter</code>（NFKC） → <code>JapaneseIterationMarkCharFilter</code> → <code>LinderaTokenizer</code> → <code>LowercaseFilter</code> → <code>StopFilter</code>（日本語ストップワード）</p>
+<p><code>JapaneseAnalyzer::new</code> は <code>LinderaTokenizer::new</code> と同じ引数（segmentation mode、Lindera 辞書ディレクトリのパス、任意のユーザー辞書パス）を受け取ります。<code>laurus</code> は Lindera の <code>embed-*</code> features をデフォルトで有効化しないため、IPADIC 等の辞書を実ファイルパスとして必ず指定する必要があります。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::analysis::analyzer::japanese::JapaneseAnalyzer;
+</span>use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 
-let analyzer = JapaneseAnalyzer::new()?;
-// "東京都に住んでいる" → ["東京", "都", "に", "住ん", "で", "いる"]
+// Lindera 辞書を展開済みのパスを指定する。
+let analyzer = JapaneseAnalyzer::new(
+    "normal",
+    "/var/lib/lindera/ipadic",
+    None,
+)?;
+// "東京都に住んでいる" → ["東京", "都", "住ん", "いる"]
 <span class="boring">}</span></code></pre>
+<p><code>Schema</code> 経由で参照する場合は構造化された <code>AnalyzerSpec</code> 形式でパラメータを渡します（後述の <a href="#perfieldanalyzer">PerFieldAnalyzer</a> を参照）。</p>
 <h3 id="keywordanalyzer"><a class="header" href="#keywordanalyzer">KeywordAnalyzer</a></h3>
 <p>入力全体を単一のトークンとして扱います。トークン化や正規化は行いません。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -340,6 +347,24 @@ let engine = Engine::builder(storage, schema)
 <blockquote>
 <p><strong>注意:</strong> <code>_id</code> フィールドは設定に関係なく、常に <code>KeywordAnalyzer</code> で解析されます。</p>
 </blockquote>
+<h3 id="schema-からの-per-field-analyzer-設定"><a class="header" href="#schema-からの-per-field-analyzer-設定">Schema からの per-field analyzer 設定</a></h3>
+<p>実装で直接 <code>PerFieldAnalyzer</code> を組み立てる代わりに、スキーマ宣言で analyzer を割り当てる場合がほとんどです。テキストフィールドの <code>analyzer</code> 設定は次の 2 つの形式を受け付けます。</p>
+<pre><code class="language-jsonc">// 1. パラメータ不要の組込 analyzer、または schema.analyzers に登録した名前。
+{ "analyzer": "standard" }
+{ "analyzer": "english" }
+{ "analyzer": "my_custom_pipeline" }
+
+// 2. パラメータ付きの組込プリセット。現状は Japanese プリセットのみで、Lindera 辞書のパスが必須。
+{
+  "analyzer": {
+    "language": "japanese",
+    "mode": "normal",
+    "dict": "/var/lib/lindera/ipadic"
+  }
+}
+</code></pre>
+<p>文字列単独の <code>"japanese"</code> は辞書パスを伴わないためエラーとなります。既存スキーマで <code>"analyzer": "japanese"</code> を保存していた場合は、上記の構造化形式に移行してください。</p>
+<p>プリセットに収まらないパイプラインを使いたい場合は、<code>schema.analyzers</code> に <code>AnalyzerDefinition</code> として登録し、フィールドからは名前で参照します。</p>
 <h2 id="char-filter"><a class="header" href="#char-filter">Char Filter</a></h2>
 <p>Char Filter は Tokenizer に渡される<strong>前の</strong>生入力テキストに対して動作します。Unicode 正規化、文字マッピング、パターンベースの置換などの文字レベルの正規化を行います。これにより、Tokenizer がクリーンで正規化されたテキストを受け取ることが保証されます。</p>
 <p>すべての Char Filter は <code>CharFilter</code> トレイトを実装します。</p>

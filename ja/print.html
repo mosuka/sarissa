@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-e032ea0a.js";
+            window.path_to_searchindex_js = "searchindex-cc67bc7d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c423c571.js"></script>
@@ -1352,13 +1352,20 @@ let analyzer = StandardAnalyzer::default();
 <h3 id="japaneseanalyzer"><a class="header" href="#japaneseanalyzer">JapaneseAnalyzer</a></h3>
 <p>日本語テキストの分割に形態素解析を使用します。</p>
 <p>パイプライン: <code>UnicodeNormalizationCharFilter</code>（NFKC） → <code>JapaneseIterationMarkCharFilter</code> → <code>LinderaTokenizer</code> → <code>LowercaseFilter</code> → <code>StopFilter</code>（日本語ストップワード）</p>
+<p><code>JapaneseAnalyzer::new</code> は <code>LinderaTokenizer::new</code> と同じ引数（segmentation mode、Lindera 辞書ディレクトリのパス、任意のユーザー辞書パス）を受け取ります。<code>laurus</code> は Lindera の <code>embed-*</code> features をデフォルトで有効化しないため、IPADIC 等の辞書を実ファイルパスとして必ず指定する必要があります。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>use laurus::analysis::analyzer::japanese::JapaneseAnalyzer;
+</span>use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 
-let analyzer = JapaneseAnalyzer::new()?;
-// "東京都に住んでいる" → ["東京", "都", "に", "住ん", "で", "いる"]
+// Lindera 辞書を展開済みのパスを指定する。
+let analyzer = JapaneseAnalyzer::new(
+    "normal",
+    "/var/lib/lindera/ipadic",
+    None,
+)?;
+// "東京都に住んでいる" → ["東京", "都", "住ん", "いる"]
 <span class="boring">}</span></code></pre>
+<p><code>Schema</code> 経由で参照する場合は構造化された <code>AnalyzerSpec</code> 形式でパラメータを渡します（後述の <a href="#perfieldanalyzer">PerFieldAnalyzer</a> を参照）。</p>
 <h3 id="keywordanalyzer"><a class="header" href="#keywordanalyzer">KeywordAnalyzer</a></h3>
 <p>入力全体を単一のトークンとして扱います。トークン化や正規化は行いません。</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -1447,6 +1454,24 @@ let engine = Engine::builder(storage, schema)
 <blockquote>
 <p><strong>注意:</strong> <code>_id</code> フィールドは設定に関係なく、常に <code>KeywordAnalyzer</code> で解析されます。</p>
 </blockquote>
+<h3 id="schema-からの-per-field-analyzer-設定"><a class="header" href="#schema-からの-per-field-analyzer-設定">Schema からの per-field analyzer 設定</a></h3>
+<p>実装で直接 <code>PerFieldAnalyzer</code> を組み立てる代わりに、スキーマ宣言で analyzer を割り当てる場合がほとんどです。テキストフィールドの <code>analyzer</code> 設定は次の 2 つの形式を受け付けます。</p>
+<pre><code class="language-jsonc">// 1. パラメータ不要の組込 analyzer、または schema.analyzers に登録した名前。
+{ "analyzer": "standard" }
+{ "analyzer": "english" }
+{ "analyzer": "my_custom_pipeline" }
+
+// 2. パラメータ付きの組込プリセット。現状は Japanese プリセットのみで、Lindera 辞書のパスが必須。
+{
+  "analyzer": {
+    "language": "japanese",
+    "mode": "normal",
+    "dict": "/var/lib/lindera/ipadic"
+  }
+}
+</code></pre>
+<p>文字列単独の <code>"japanese"</code> は辞書パスを伴わないためエラーとなります。既存スキーマで <code>"analyzer": "japanese"</code> を保存していた場合は、上記の構造化形式に移行してください。</p>
+<p>プリセットに収まらないパイプラインを使いたい場合は、<code>schema.analyzers</code> に <code>AnalyzerDefinition</code> として登録し、フィールドからは名前で参照します。</p>
 <h2 id="char-filter"><a class="header" href="#char-filter">Char Filter</a></h2>
 <p>Char Filter は Tokenizer に渡される<strong>前の</strong>生入力テキストに対して動作します。Unicode 正規化、文字マッピング、パターンベースの置換などの文字レベルの正規化を行います。これにより、Tokenizer がクリーンで正規化されたテキストを受け取ることが保証されます。</p>
 <p>すべての Char Filter は <code>CharFilter</code> トレイトを実装します。</p>
@@ -8885,7 +8910,7 @@ print(stats["vector_fields"])
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。<code>analyzer</code> には組込名（<code>"standard"</code> / <code>"english"</code> / <code>"keyword"</code> / <code>"simple"</code> / <code>"noop"</code>、または <code>add_analyzer</code> で登録したカスタム名）か、<code>{"language": "japanese", "mode": "normal", "dict": "/var/lib/lindera/ipadic"}</code> のようなパラメータ付きプリセットの dict を渡せます。文字列単独の <code>"japanese"</code> は Lindera 辞書パスが必須なため拒否されます。</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multi_valued=True</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multi_valued=True</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_boolean_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
@@ -9466,7 +9491,7 @@ console.log(stats.vectorFields);
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></td><td style="text-align: left">全文検索フィールド（転置インデックス、BM25）。</td></tr>
+<tr><td style="text-align: left"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></td><td style="text-align: left">全文検索フィールド（転置インデックス、BM25）。<code>analyzer</code> にはパラメータ不要の組込名（<code>"standard"</code> / <code>"english"</code> / <code>"keyword"</code> / <code>"simple"</code> / <code>"noop"</code>、または <code>addAnalyzer</code> で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットを使う場合は、<code>lindera</code> tokenizer を含むカスタム analyzer を登録して、その名前を参照してください。</td></tr>
 <tr><td style="text-align: left"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multiValued: true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addFloatField(name, stored?, indexed?, multiValued?)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multiValued: true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(name, stored?, indexed?)</code></td><td style="text-align: left">真偽値フィールド。</td></tr>
@@ -10311,7 +10336,7 @@ module.exports = {
 <p>空のスキーマを作成します。</p>
 <h3 id="メソッド-3"><a class="header" href="#メソッド-3">メソッド</a></h3>
 <h4 id="addtextfieldname-stored-indexed-termvectors-analyzer"><a class="header" href="#addtextfieldname-stored-indexed-termvectors-analyzer"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></a></h4>
-<p>全文検索テキストフィールドを追加します。</p>
+<p>全文検索テキストフィールドを追加します。<code>analyzer</code> にはパラメータ不要の組込名（<code>"standard"</code> / <code>"english"</code> / <code>"keyword"</code> / <code>"simple"</code> / <code>"noop"</code>、または <code>addAnalyzer</code> で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、<code>lindera</code> tokenizer を含むカスタム analyzer として登録し、名前で参照してください。</p>
 <h4 id="addintegerfieldname-stored-indexed-multivalued"><a class="header" href="#addintegerfieldname-stored-indexed-multivalued"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></a></h4>
 <p>64 ビット整数フィールドを追加します。<code>multiValued: true</code> を指定すると整数配列を受け付け、
 範囲クエリは<strong>いずれかの値</strong>が条件を満たせばマッチ（Lucene 流の “any match”、constant スコア）します。</p>
@@ -10744,7 +10769,7 @@ puts stats["vector_fields"]
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。<code>analyzer:</code> にはパラメータ不要の組込名（<code>"standard"</code> / <code>"english"</code> / <code>"keyword"</code> / <code>"simple"</code> / <code>"noop"</code>、または <code>add_analyzer</code> で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、<code>lindera</code> tokenizer を含むカスタム analyzer として登録し、名前で参照してください。</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, stored: true, indexed: true, multi_valued: false)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multi_valued: true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, stored: true, indexed: true, multi_valued: false)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multi_valued: true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_boolean_field(name, stored: true, indexed: true)</code></td><td style="text-align: left">ブールフィールド。</td></tr>
@@ -11333,7 +11358,7 @@ echo $stats["vectorFields"];
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
+<tr><td style="text-align: left"><code>addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。<code>$analyzer</code> にはパラメータ不要の組込名（<code>"standard"</code> / <code>"english"</code> / <code>"keyword"</code> / <code>"simple"</code> / <code>"noop"</code>、または <code>addAnalyzer</code> で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、<code>lindera</code> tokenizer を含むカスタム analyzer として登録し、名前で参照してください。</td></tr>
 <tr><td style="text-align: left"><code>addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64 ビット整数フィールド。<code>$multiValued = true</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>$multiValued = true</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>addBooleanField(string $name, bool $stored = true, bool $indexed = true): void</code></td><td style="text-align: left">ブールフィールド。</td></tr>

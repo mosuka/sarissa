@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
+            window.path_to_searchindex_js = "../searchindex-cc67bc7d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -236,7 +236,7 @@
 <tr><th style="text-align: left">メソッド</th><th style="text-align: left">説明</th></tr>
 </thead>
 <tbody>
-<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。</td></tr>
+<tr><td style="text-align: left"><code>add_text_field(name, *, stored=True, indexed=True, term_vectors=False, analyzer=None)</code></td><td style="text-align: left">全文フィールド（転置インデックス、BM25）。<code>analyzer</code> には組込名（<code>"standard"</code> / <code>"english"</code> / <code>"keyword"</code> / <code>"simple"</code> / <code>"noop"</code>、または <code>add_analyzer</code> で登録したカスタム名）か、<code>{"language": "japanese", "mode": "normal", "dict": "/var/lib/lindera/ipadic"}</code> のようなパラメータ付きプリセットの dict を渡せます。文字列単独の <code>"japanese"</code> は Lindera 辞書パスが必須なため拒否されます。</td></tr>
 <tr><td style="text-align: left"><code>add_integer_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット整数フィールド。<code>multi_valued=True</code> で整数配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_float_field(name, *, stored=True, indexed=True, multi_valued=False)</code></td><td style="text-align: left">64 ビット浮動小数点フィールド。<code>multi_valued=True</code> で浮動小数点配列を受け付け（範囲クエリは “any match”）。</td></tr>
 <tr><td style="text-align: left"><code>add_boolean_field(name, *, stored=True, indexed=True)</code></td><td style="text-align: left">ブールフィールド。</td></tr>

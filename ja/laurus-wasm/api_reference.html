@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-e032ea0a.js";
+            window.path_to_searchindex_js = "../searchindex-cc67bc7d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-c423c571.js"></script>
@@ -343,7 +343,7 @@
 <p>空のスキーマを作成します。</p>
 <h3 id="メソッド"><a class="header" href="#メソッド">メソッド</a></h3>
 <h4 id="addtextfieldname-stored-indexed-termvectors-analyzer"><a class="header" href="#addtextfieldname-stored-indexed-termvectors-analyzer"><code>addTextField(name, stored?, indexed?, termVectors?, analyzer?)</code></a></h4>
-<p>全文検索テキストフィールドを追加します。</p>
+<p>全文検索テキストフィールドを追加します。<code>analyzer</code> にはパラメータ不要の組込名（<code>"standard"</code> / <code>"english"</code> / <code>"keyword"</code> / <code>"simple"</code> / <code>"noop"</code>、または <code>addAnalyzer</code> で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、<code>lindera</code> tokenizer を含むカスタム analyzer として登録し、名前で参照してください。</p>
 <h4 id="addintegerfieldname-stored-indexed-multivalued"><a class="header" href="#addintegerfieldname-stored-indexed-multivalued"><code>addIntegerField(name, stored?, indexed?, multiValued?)</code></a></h4>
 <p>64 ビット整数フィールドを追加します。<code>multiValued: true</code> を指定すると整数配列を受け付け、
 範囲クエリは<strong>いずれかの値</strong>が条件を満たせばマッチ（Lucene 流の “any match”、constant スコア）します。</p>
