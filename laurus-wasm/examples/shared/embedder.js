@@ -19,6 +19,13 @@ export const EMBEDDER_MODEL = 'Xenova/paraphrase-multilingual-MiniLM-L12-v2';
 export const EMBED_DIM = 384;
 
 /**
+ * Quantization dtype passed to Transformers.js. `q8` matches the
+ * WASM backend default while silencing the v3 warning that fires
+ * when the dtype is left unspecified.
+ */
+const EMBEDDER_DTYPE = 'q8';
+
+/**
  * Load the embedder pipeline. Returns an async function suitable
  * for use as a laurus-wasm callback embedder.
  *
@@ -27,9 +34,11 @@ export const EMBED_DIM = 384;
  * @returns {Promise<(text: string) => Promise<number[]>>}
  */
 export async function loadEmbedder({ logger } = {}) {
-  logger?.log?.(`Loading embedding model (${EMBEDDER_MODEL})...`);
+  logger?.log?.(`Loading embedding model (${EMBEDDER_MODEL}, dtype=${EMBEDDER_DTYPE})...`);
   const t0 = performance.now();
-  const pipe = await pipeline('feature-extraction', EMBEDDER_MODEL);
+  const pipe = await pipeline('feature-extraction', EMBEDDER_MODEL, {
+    dtype: EMBEDDER_DTYPE,
+  });
   const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
   logger?.ok?.(`Embedding model ready in ${elapsed}s.`);
 

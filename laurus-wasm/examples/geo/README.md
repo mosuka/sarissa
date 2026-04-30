@@ -23,17 +23,20 @@ python3 -m http.server 8080
 
 ## What this sample demonstrates
 
-- An OPFS-persistent geo index (`geo-demo-index-v1`) seeded with
+- An OPFS-persistent geo index (`geo-demo-index`) seeded with
   ~14 Tokyo points-of-interest on first visit
 - A schema with three Japanese-tokenised text fields
   (`title`, `description`, `category`), one geo field
   (`location` — indexed via the BKD tree) and one HNSW vector field
   (`embedding`, 384-dim multilingual MiniLM)
-- A search box that builds a unified DSL string. With *Restrict to
+- A search box that builds a unified DSL string. With *Filter by
   current map view* turned on, the user query is wrapped in
   parentheses and AND-combined with
   `location:geo_bbox(min_lat, min_lon, max_lat, max_lon)` derived
   from the current Leaflet bounds
+- Map markers track the search hits — non-matching points are
+  removed from the map after each query, so the visible pins always
+  mirror the result list
 - A clickable result list that pans the map and opens the popup of
   the corresponding marker
 
