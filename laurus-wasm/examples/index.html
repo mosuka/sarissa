@@ -199,28 +199,32 @@
 <body>
   <div class="container">
     <h1>Laurus WASM Search Demo</h1>
-    <p class="subtitle">Lexical, vector, and hybrid search in the browser (OPFS persistent storage)</p>
+    <p class="subtitle">Japanese morphological search in the browser (OPFS persistent storage)</p>
 
     <!-- Status -->
     <div class="card">
-      <h2>Engine <span id="status" class="badge badge-loading">loading (71 MB)...</span></h2>
+      <h2>Engine <span id="status" class="badge badge-loading">loading...</span></h2>
       <div class="stats">
         <div>Documents: <span id="doc-count">0</span></div>
-        <div>Embedding: <span id="embed-dim">loading...</span></div>
+        <div>Analyzer: <span id="analyzer-mode">loading...</span></div>
         <div>Storage: <span id="storage-mode">OPFS</span></div>
       </div>
+      <p class="dsl-hint">
+        On first visit, the IPADIC dictionary (~16 MB) is fetched from the
+        same origin and cached in OPFS for offline reuse.
+      </p>
     </div>
 
     <!-- Search -->
     <div class="card">
       <h2>Search — Unified Query DSL</h2>
       <p class="dsl-hint">
-        Lexical: <code>wasm</code> <code>title:wasm-pack</code> <code>"browser API"</code> &nbsp;
-        Vector: <code>embedding:"how to run native code in the browser"</code> &nbsp;
-        Hybrid: <code>wasm embedding:"compile to web"</code>
+        Lexical: <code>形態素</code> <code>title:検索</code> <code>"日本語"</code> &nbsp;
+        Vector: <code>embedding:"ブラウザで動く検索"</code> &nbsp;
+        Hybrid: <code>形態素 embedding:"日本語の検索"</code>
       </p>
       <div class="search-box">
-        <input type="text" id="query" placeholder='Try: wasm, embedding:"browser performance", or both!' disabled>
+        <input type="text" id="query" placeholder='例: 形態素 / title:検索 / "日本語"' disabled>
         <button id="search-btn" onclick="doSearch()" disabled>Search</button>
       </div>
       <ul class="results" id="results">
@@ -239,15 +243,15 @@
           </div>
           <div class="field">
             <label>Title</label>
-            <input type="text" id="doc-title" placeholder="Introduction to WebAssembly" disabled>
+            <input type="text" id="doc-title" placeholder="WebAssembly 入門" disabled>
           </div>
         </div>
         <div>
           <label>Body</label>
-          <textarea id="doc-body" placeholder="WebAssembly enables near-native performance for web applications in the browser." disabled></textarea>
+          <textarea id="doc-body" placeholder="WebAssembly はブラウザで動作するバイナリ命令フォーマットです。" disabled></textarea>
         </div>
         <div class="row">
-          <button id="add-btn" onclick="addDocument()" disabled>Add & Commit</button>
+          <button id="add-btn" onclick="addDocument()" disabled>Add &amp; Commit</button>
         </div>
       </div>
     </div>
@@ -264,26 +268,25 @@
     // Import and initialize laurus-wasm
     // ------------------------------------------------------------------
     // Adjust the path to point to your wasm-pack output:
-    //   wasm-pack build --target web --dev
+    //   wasm-pack build --target web --release
+    //   ./scripts/postbuild.sh
     // Then serve this file from the laurus-wasm directory.
-    import init, { Index, Schema } from '../pkg/laurus_wasm.js';
-    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
+    import init, { Index, Schema, JapaneseAnalyzer } from '../pkg/laurus_wasm.js';
+    import {
+      downloadDictionary,
+      hasDictionary,
+      loadDictionaryFiles,
+    } from '../pkg/opfs.js';
+
+    /** Dictionary configuration. The zip is fetched from the same origin
+     *  to avoid CORS issues with cross-origin GitHub Releases assets. */
+    const DICT_NAME = 'ipadic';
+    const DICT_URL = './dict/lindera-ipadic.zip';
+    const ANALYZER_NAME = 'ja-ipadic';
+    const INDEX_NAME = 'ja-demo-index';
 
     let index = null;
     let docCounter = 0;
-
-    // ------------------------------------------------------------------
-    // Semantic Embedding via Transformers.js
-    // ------------------------------------------------------------------
-    // Uses all-MiniLM-L6-v2 (384-dim) for real semantic embeddings.
-    // The model is downloaded and cached by the browser on first use.
-    const EMBED_DIM = 384;
-    let embedder = null;
-
-    async function initEmbedder() {
-      embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-    }
-
 
     // ------------------------------------------------------------------
     // Logging
@@ -297,89 +300,114 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
+    /**
+     * Ensure the IPADIC dictionary is present in OPFS, downloading it
+     * from the bundled zip on first visit.
+     */
+    async function ensureDictionary() {
+      if (await hasDictionary(DICT_NAME)) {
+        appendLog(`Dictionary "${DICT_NAME}" found in OPFS cache.`, 'ok');
+        return;
+      }
+      appendLog(`Downloading dictionary "${DICT_NAME}" from ${DICT_URL}...`);
+      const t0 = performance.now();
+      await downloadDictionary(DICT_URL, DICT_NAME, {
+        onProgress: ({ phase, loaded, total }) => {
+          if (phase === 'downloading' && total) {
+            const pct = ((loaded / total) * 100).toFixed(0);
+            const mb = (loaded / 1024 / 1024).toFixed(1);
+            const totalMb = (total / 1024 / 1024).toFixed(1);
+            const status = document.getElementById('status');
+            status.textContent = `downloading ${pct}% (${mb}/${totalMb} MB)`;
+          } else if (phase === 'extracting') {
+            document.getElementById('status').textContent = 'extracting...';
+          } else if (phase === 'storing') {
+            document.getElementById('status').textContent = 'storing to OPFS...';
+          }
+        },
+      });
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      appendLog(`Dictionary downloaded and cached in OPFS in ${elapsed}s.`, 'ok');
+    }
+
     // ------------------------------------------------------------------
     // Boot
     // ------------------------------------------------------------------
     async function boot() {
       try {
-        appendLog('Loading embedding model (all-MiniLM-L6-v2)...');
+        appendLog('Initializing WASM module...');
         const t0 = performance.now();
-        await initEmbedder();
-        const embedTime = ((performance.now() - t0) / 1000).toFixed(1);
-        appendLog(`Embedding model loaded in ${embedTime}s.`, 'ok');
-        document.getElementById('embed-dim').textContent = '384-dim MiniLM';
-
-        appendLog('Initializing WASM module (71 MB with dictionaries, may take a moment)...');
-        const t1 = performance.now();
         await init();
-        const wasmTime = ((performance.now() - t1) / 1000).toFixed(1);
+        const wasmTime = ((performance.now() - t0) / 1000).toFixed(1);
         appendLog(`WASM module loaded in ${wasmTime}s.`, 'ok');
 
-        // Build schema: text fields + vector field with callback embedder
-        const schema = new Schema();
-        schema.addTextField('title');
-        schema.addTextField('body');
-        schema.addEmbedder('minilm', {
-          type: 'callback',
-          embed: async (text) => {
-            const output = await embedder(text, { pooling: 'mean', normalize: true });
-            return Array.from(output.data);
-          }
-        });
-        schema.addHnswField('embedding', EMBED_DIM, undefined, undefined, undefined, 'minilm');
-        schema.setDefaultFields(['title', 'body']);
-        appendLog(`Schema: title (text), body (text), embedding (hnsw ${EMBED_DIM}-dim, embedder: minilm)`);
+        // 1. Make sure IPADIC bytes are available in OPFS.
+        await ensureDictionary();
 
-        // Open OPFS-persistent index (data survives page reloads)
-        const INDEX_NAME = 'demo-index';
+        // 2. Read the eight dictionary files back as Uint8Arrays and
+        //    construct the JapaneseAnalyzer in WASM.
+        const files = await loadDictionaryFiles(DICT_NAME);
+        const ja = JapaneseAnalyzer.fromBytes(
+          files.metadata,
+          files.dictDa,
+          files.dictVals,
+          files.dictWordsIdx,
+          files.dictWords,
+          files.matrixMtx,
+          files.charDef,
+          files.unk,
+          'normal',
+        );
+        appendLog('JapaneseAnalyzer built from OPFS-loaded IPADIC.', 'ok');
+        document.getElementById('analyzer-mode').textContent = 'JapaneseAnalyzer (IPADIC)';
+
+        // 3. Build schema. Both title and body are tokenized with the
+        //    runtime-registered Japanese analyzer.
+        const schema = new Schema();
+        schema.addAnalyzer(ANALYZER_NAME, ja);
+        schema.addTextField('title', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('body', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.setDefaultFields(['title', 'body']);
+        appendLog(`Schema: title + body (analyzer="${ANALYZER_NAME}").`);
+
+        // 4. Open OPFS-persistent index (data survives page reloads).
         index = await Index.open(INDEX_NAME, schema);
         appendLog(`OPFS index "${INDEX_NAME}" opened.`, 'ok');
 
-        // Check if the index already has data (persisted from a previous session)
         const stats = index.stats();
         docCounter = stats.documentCount;
 
         if (docCounter > 0) {
-          appendLog(`Loaded ${docCounter} document(s) from OPFS — data persisted from previous session.`, 'ok');
+          appendLog(`Loaded ${docCounter} document(s) from OPFS — persisted from previous session.`, 'ok');
         } else {
-          // Seed with sample documents on first visit
+          // Seed with Japanese sample documents on first visit.
           const samples = [
-            { id: 'wasm-core', title: 'WebAssembly Core Specification', body: 'WebAssembly is a binary instruction format for a stack-based virtual machine. It enables deployment on the web for client and server applications with near-native performance.' },
-            { id: 'wasm-pack', title: 'wasm-pack Build Tool', body: 'wasm-pack helps build and publish Rust-generated WebAssembly packages. It integrates with npm and bundlers like webpack and vite for seamless web development.' },
-            { id: 'wasm-bindgen', title: 'wasm-bindgen Interop', body: 'wasm-bindgen facilitates communication between WebAssembly modules and JavaScript. It generates bindings for DOM APIs, closures, and complex data types.' },
-            { id: 'wasi', title: 'WASI System Interface', body: 'WASI provides a standardized system interface for WebAssembly modules running outside the browser. It enables file access, networking, and environment variables.' },
-            { id: 'browser-api', title: 'Browser APIs from WASM', body: 'WebAssembly modules can access browser APIs through JavaScript bindings including fetch, canvas, WebGL, and Web Workers for parallel computation.' },
-            { id: 'component-model', title: 'WASM Component Model', body: 'The WebAssembly Component Model defines how WASM modules compose and communicate through typed interfaces and shared-nothing linking.' },
-            { id: 'opfs', title: 'OPFS Persistent Storage', body: 'The Origin Private File System provides fast persistent storage for WebAssembly applications in the browser with synchronous access from dedicated workers.' },
-            { id: 'simd', title: 'WASM SIMD Instructions', body: 'WebAssembly SIMD extends the instruction set with 128-bit vector operations for accelerating numerical computation, image processing, and machine learning inference.' },
+            { id: 'wasm-core', title: 'WebAssembly コア仕様', body: 'WebAssembly はスタックベース仮想マシン向けのバイナリ命令フォーマットで、ブラウザでネイティブに近い性能を発揮します。' },
+            { id: 'wasm-pack', title: 'wasm-pack ビルドツール', body: 'wasm-pack は Rust 製の WebAssembly パッケージのビルドと公開を支援します。npm との連携やバンドラ統合に対応しています。' },
+            { id: 'wasm-bindgen', title: 'wasm-bindgen 連携', body: 'wasm-bindgen は WebAssembly と JavaScript の双方向呼び出しを支えるツールで、DOM API やクロージャの橋渡しを自動生成します。' },
+            { id: 'opfs', title: 'OPFS 永続化ストレージ', body: 'Origin Private File System はブラウザ内で WebAssembly アプリ向けに高速かつ永続的なストレージを提供します。' },
+            { id: 'lindera', title: 'Lindera 形態素解析', body: 'Lindera は Rust 製の形態素解析ライブラリで、IPADIC や ko-dic、cc-cedict を用いた日本語・韓国語・中国語の解析に対応します。' },
+            { id: 'ipadic', title: 'IPADIC 辞書', body: 'IPADIC は MeCab 由来の日本語形態素解析辞書で、品詞・読み・基本形といった豊富な語彙情報を提供します。' },
+            { id: 'laurus', title: 'Laurus 検索エンジン', body: 'Laurus は Rust で実装された統合検索ライブラリで、転置索引による全文検索と HNSW などのベクトル検索を組み合わせたハイブリッド検索を提供します。' },
+            { id: 'simd', title: 'WASM SIMD 命令', body: 'WebAssembly SIMD は 128 ビットのベクトル演算命令を追加し、画像処理や機械学習の推論を高速化します。' },
           ];
 
-          appendLog('Indexing sample documents (auto-embedding by engine)...');
+          appendLog('Indexing sample documents...');
           for (const doc of samples) {
-            // Pass text in the vector field — the engine auto-embeds it
-            // via the registered callback embedder
-            await index.putDocument(doc.id, {
-              title: doc.title,
-              body: doc.body,
-              embedding: `${doc.title} ${doc.body}`,
-            });
+            await index.putDocument(doc.id, { title: doc.title, body: doc.body });
             docCounter++;
           }
           await index.commit();
-          appendLog(`Indexed ${samples.length} documents. Embeddings computed and persisted to OPFS.`, 'ok');
+          appendLog(`Indexed ${samples.length} documents and persisted to OPFS.`, 'ok');
         }
 
-        // Update UI
         document.getElementById('doc-count').textContent = docCounter;
         document.getElementById('status').textContent = 'ready';
         document.getElementById('status').className = 'badge badge-ready';
 
-        // Enable controls
         for (const el of document.querySelectorAll('input, textarea, button')) {
           el.disabled = false;
         }
-
-        // Set default doc ID
         document.getElementById('doc-id').value = `doc${docCounter + 1}`;
 
       } catch (e) {
@@ -447,7 +475,7 @@
       }
 
       try {
-        await index.putDocument(id, { title, body, embedding: `${title} ${body}` });
+        await index.putDocument(id, { title, body });
         await index.commit();
         docCounter++;
 
