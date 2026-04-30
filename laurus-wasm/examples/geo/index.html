@@ -36,6 +36,37 @@
     .leaflet-control-attribution a {
       color: var(--accent) !important;
     }
+    .debug-grid {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      column-gap: 0.75rem;
+      row-gap: 0.4rem;
+      font-size: 0.85rem;
+      align-items: baseline;
+    }
+    .debug-grid dt {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .debug-grid dd {
+      margin: 0;
+    }
+    .debug-grid code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      word-break: break-all;
+      display: inline-block;
+    }
+    .debug-note {
+      color: var(--warning);
+      font-size: 0.78rem;
+      margin-top: 0.5rem;
+    }
+    .debug-note[hidden] {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -98,6 +129,27 @@
       <ul class="results" id="results">
         <li class="empty">Loading sample data…</li>
       </ul>
+    </div>
+
+    <!-- Debug -->
+    <div class="card">
+      <h2>Debug</h2>
+      <p class="dsl-hint">
+        Live view of the map state and the DSL string the demo
+        sends to <code>index.search()</code>. Updates while you
+        pan or zoom.
+      </p>
+      <dl class="debug-grid">
+        <dt>Map center</dt>
+        <dd><code id="dbg-center">—</code></dd>
+        <dt>Zoom level</dt>
+        <dd><code id="dbg-zoom">—</code></dd>
+        <dt>Bbox (south, west &rarr; north, east)</dt>
+        <dd><code id="dbg-bbox">—</code></dd>
+        <dt>Last DSL query</dt>
+        <dd><code id="dbg-query">—</code></dd>
+      </dl>
+      <p class="debug-note" id="dbg-note" hidden></p>
     </div>
 
     <!-- Maintenance -->
@@ -266,6 +318,11 @@
     const docCountEl = document.getElementById('doc-count');
     const resultsEl = document.getElementById('results');
     const restrictEl = document.getElementById('restrict-bbox');
+    const dbgCenterEl = document.getElementById('dbg-center');
+    const dbgZoomEl = document.getElementById('dbg-zoom');
+    const dbgBboxEl = document.getElementById('dbg-bbox');
+    const dbgQueryEl = document.getElementById('dbg-query');
+    const dbgNoteEl = document.getElementById('dbg-note');
 
     let index = null;
     /** @type {L.Map | null} */
@@ -331,6 +388,13 @@
       };
       map.on('dragend', maybeAutoSearch);
       map.on('zoomend', maybeAutoSearch);
+
+      // Keep the Debug card in sync with the live map state. We
+      // use `move` (not `moveend`) so the values update smoothly
+      // while the user is dragging or zooming, and seed it once
+      // here so the card never starts blank.
+      map.on('move', updateDebugDisplay);
+      updateDebugDisplay();
     }
 
     function highlightMarker(id) {
@@ -362,41 +426,108 @@
     }
 
     /**
+     * Read `map.getBounds()` and return a bbox safe to feed into
+     * `geo_bbox(...)`. Leaflet's bounds can extend beyond the
+     * standard `[-90, 90]` / `[-180, 180]` ranges when the user
+     * zooms out far enough that the visible area spans more than
+     * the world or the map has been wrapped horizontally; passing
+     * those values straight to laurus would either fail
+     * validation (`GeoPoint::try_new` rejects out-of-range lat/lon
+     * and returns 0 hits via a parse error) or skip every doc.
+     *
+     * The returned object contains the four floats in laurus
+     * `geo_bbox(min_lat, min_lon, max_lat, max_lon)` order plus a
+     * `clamped` flag that the debug card uses to flag the
+     * adjustment to the user.
+     */
+    function getNormalizedBounds() {
+      const bounds = map.getBounds();
+      const rawSouth = bounds.getSouth();
+      const rawNorth = bounds.getNorth();
+      const rawWest = bounds.getWest();
+      const rawEast = bounds.getEast();
+
+      const minLat = Math.max(-90, rawSouth);
+      const maxLat = Math.min(90, rawNorth);
+
+      let minLon = rawWest;
+      let maxLon = rawEast;
+      let clamped = false;
+      if (
+        maxLon - minLon >= 360
+        || minLon < -180
+        || maxLon > 180
+      ) {
+        minLon = -180;
+        maxLon = 180;
+        clamped = true;
+      }
+      if (minLat !== rawSouth || maxLat !== rawNorth) {
+        clamped = true;
+      }
+
+      return { minLat, minLon, maxLat, maxLon, clamped };
+    }
+
+    /**
      * Build a unified DSL query string. The text portion (if any)
      * is left untouched so users can still write
      * `title:...` / `embedding:"..."`.
      *
      * When the restrict-to-view toggle is on, the text query and
      * the bbox clause are combined with `+` (required) prefixes
-     * rather than the `AND` keyword. The DSL parser's `AND` only
-     * promotes the *following* clause to Must — the preceding
-     * clause stays at the default Should — so writing
-     * `(text) AND geo_bbox(...)` would let any document inside
-     * the bbox match regardless of the text. Explicit `+` makes
-     * both sides required, which is what users expect.
+     * rather than the `AND` keyword. The `+` form is the most
+     * explicit way to mark a clause required and works regardless
+     * of the parser's `AND` semantics.
      */
     function buildQuery(rawText) {
       const text = rawText.trim();
       if (!restrictEl.checked) {
         return text;
       }
-      const bounds = map.getBounds();
-      const minLat = bounds.getSouth();
-      const maxLat = bounds.getNorth();
-      const minLon = bounds.getWest();
-      const maxLon = bounds.getEast();
+      const b = getNormalizedBounds();
       const bboxClause =
-        `${LOCATION_FIELD}:geo_bbox(${minLat.toFixed(6)}, ${minLon.toFixed(6)}, `
-        + `${maxLat.toFixed(6)}, ${maxLon.toFixed(6)})`;
+        `${LOCATION_FIELD}:geo_bbox(${b.minLat.toFixed(6)}, ${b.minLon.toFixed(6)}, `
+        + `${b.maxLat.toFixed(6)}, ${b.maxLon.toFixed(6)})`;
       if (!text) {
         return bboxClause;
       }
       return `+(${text}) +${bboxClause}`;
     }
 
+    /**
+     * Refresh the Debug card with the current map state. Called on
+     * every `move` event so the center / zoom / bbox stay live
+     * while the user drags or zooms.
+     */
+    function updateDebugDisplay() {
+      if (!map) {
+        return;
+      }
+      const center = map.getCenter();
+      dbgCenterEl.textContent =
+        `${center.lat.toFixed(6)}, ${center.lng.toFixed(6)}`;
+      dbgZoomEl.textContent = String(map.getZoom());
+      const b = getNormalizedBounds();
+      dbgBboxEl.textContent =
+        `${b.minLat.toFixed(6)}, ${b.minLon.toFixed(6)} `
+        + `→ ${b.maxLat.toFixed(6)}, ${b.maxLon.toFixed(6)}`;
+      if (b.clamped) {
+        dbgNoteEl.textContent =
+          'Bbox was clamped to valid lat/lon ranges. '
+          + 'Leaflet returned bounds outside [-90,90] × [-180,180] '
+          + '(usually because the view is zoomed out far enough '
+          + 'to wrap the world or include the poles).';
+        dbgNoteEl.hidden = false;
+      } else {
+        dbgNoteEl.hidden = true;
+      }
+    }
+
     async function doSearch() {
       const text = document.getElementById('query').value;
       const query = buildQuery(text);
+      dbgQueryEl.textContent = query || '(empty)';
       if (!query) {
         return;
       }
