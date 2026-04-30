@@ -84,9 +84,43 @@ message TextOption {
   bool indexed = 1;
   bool stored = 2;
   bool term_vectors = 3;
-  // Analyzer name (e.g. "standard", "keyword", "japanese").
-  // Empty string means use the engine default.
-  string analyzer = 4;
+  // Analyzer reference. Unset means use the engine default analyzer.
+  AnalyzerSpec analyzer = 4;
+}
+
+// Reference to an analyzer for a text field.
+//
+// One of:
+//  - `named`: built-in or user-defined analyzer name (e.g. "standard",
+//    "english", "keyword", "simple", "noop", or any name registered in
+//    `Schema.analyzers`). Note that the bare name "japanese" is not
+//    accepted because the Japanese preset requires a Lindera dictionary
+//    path; supply the structured form via `builtin` instead.
+//  - `builtin`: parameterized built-in preset (currently only Japanese).
+message AnalyzerSpec {
+  oneof spec {
+    string named = 1;
+    BuiltinAnalyzerSpec builtin = 2;
+  }
+}
+
+// Parameterized built-in analyzer preset. Currently only the Japanese
+// preset is supported, but the variant set is expected to grow.
+message BuiltinAnalyzerSpec {
+  oneof preset {
+    JapaneseAnalyzerSpec japanese = 1;
+  }
+}
+
+// Japanese-language preset built on Lindera.
+message JapaneseAnalyzerSpec {
+  // Segmentation mode: "normal", "search", or "decompose".
+  // Empty string is treated as "normal".
+  string mode = 1;
+  // Filesystem path to a Lindera dictionary directory (typically IPADIC).
+  string dict = 2;
+  // Optional user dictionary path. Empty string means none.
+  string user_dict = 3;
 }
 
 message IntegerOption {

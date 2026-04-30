@@ -5,11 +5,19 @@
 //! Lindera performs dictionary-based word segmentation, which is essential
 //! for languages that don't use spaces to separate words.
 //!
-//! # Supported Languages
+//! # Dictionary loading
 //!
-//! - **Japanese**: Using IPADIC dictionary (`embedded://ipadic`)
-//! - **Korean**: Using KO-DIC dictionary (`embedded://ko-dic`)
-//! - **Chinese**: Using CC-CEDICT dictionary (`embedded://cc-cedict`)
+//! Pass a filesystem path to a Lindera dictionary directory as the
+//! `dict_uri` argument:
+//!
+//! - Japanese: an IPADIC build (e.g. `/var/lib/lindera/ipadic`)
+//! - Korean: a ko-dic build (e.g. `/var/lib/lindera/ko-dic`)
+//! - Chinese: a cc-cedict build (e.g. `/var/lib/lindera/cc-cedict`)
+//!
+//! `laurus` no longer enables Lindera's `embed-*` features by default,
+//! so `embedded://*` URIs are not resolvable at runtime. The
+//! laurus test suite continues to use `embedded://*` URIs because the
+//! features are activated for the test build via `[dev-dependencies]`.
 //!
 //! # Examples
 //!
@@ -17,7 +25,7 @@
 //! use laurus::analysis::tokenizer::lindera::LinderaTokenizer;
 //! use laurus::analysis::tokenizer::Tokenizer;
 //!
-//! // Japanese tokenization
+//! // In tests, the embedded ipadic is available; in production, supply a path.
 //! let tokenizer = LinderaTokenizer::new("normal", "embedded://ipadic", None).unwrap();
 //! let tokens: Vec<_> = tokenizer.tokenize("日本語の解析").unwrap().collect();
 //!
@@ -40,7 +48,8 @@ use crate::error::{LaurusError, Result};
 ///
 /// This tokenizer performs dictionary-based word segmentation for CJK languages,
 /// breaking text into meaningful morphemes (words, particles, suffixes, etc.).
-/// It supports multiple dictionaries and segmentation modes.
+/// Pass a filesystem path to a Lindera dictionary directory at construction
+/// time.
 ///
 /// # Segmentation Modes
 ///
@@ -54,11 +63,12 @@ use crate::error::{LaurusError, Result};
 /// use laurus::analysis::tokenizer::lindera::LinderaTokenizer;
 /// use laurus::analysis::tokenizer::Tokenizer;
 ///
-/// // Japanese with IPADIC
+/// // Japanese with IPADIC at runtime: pass a path like
+/// // "/var/lib/lindera/ipadic". In tests we use the embedded form.
 /// let tokenizer = LinderaTokenizer::new("normal", "embedded://ipadic", None).unwrap();
 /// let tokens: Vec<_> = tokenizer.tokenize("形態素解析").unwrap().collect();
 ///
-/// // Korean with KO-DIC
+/// // Korean with ko-dic
 /// let tokenizer = LinderaTokenizer::new("normal", "embedded://ko-dic", None).unwrap();
 /// let tokens: Vec<_> = tokenizer.tokenize("한국어").unwrap().collect();
 /// ```
@@ -73,8 +83,12 @@ impl LinderaTokenizer {
     /// # Arguments
     ///
     /// * `mode_str` - Segmentation mode: "normal", "search", or "decompose"
-    /// * `dict_uri` - Dictionary URI (e.g., "embedded://ipadic", "embedded://ko-dic")
-    /// * `user_dict_uri` - Optional user dictionary URI for custom words
+    /// * `dict_uri` - Lindera dictionary URI. In production, supply a
+    ///   filesystem path to a dictionary directory (e.g.,
+    ///   `"/var/lib/lindera/ipadic"`). `embedded://*` URIs only resolve
+    ///   when the matching `embed-*` Lindera feature is enabled, which
+    ///   `laurus` does not enable by default.
+    /// * `user_dict_uri` - Optional user dictionary path for custom words
     ///
     /// # Returns
     ///
@@ -92,7 +106,7 @@ impl LinderaTokenizer {
     /// ```
     /// use laurus::analysis::tokenizer::lindera::LinderaTokenizer;
     ///
-    /// // Japanese tokenizer
+    /// // Japanese tokenizer (test-only embedded URI; in production use a path).
     /// let tokenizer = LinderaTokenizer::new(
     ///     "normal",
     ///     "embedded://ipadic",
@@ -102,8 +116,8 @@ impl LinderaTokenizer {
     /// // With user dictionary
     /// // let tokenizer = LinderaTokenizer::new(
     /// //     "normal",
-    /// //     "embedded://ipadic",
-    /// //     Some("/path/to/user_dict.csv")
+    /// //     "/var/lib/lindera/ipadic",
+    /// //     Some("/etc/laurus/user_dict.csv")
     /// // ).unwrap();
     /// ```
     pub fn new(mode_str: &str, dict_uri: &str, user_dict_uri: Option<&str>) -> Result<Self> {

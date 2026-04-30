@@ -68,7 +68,12 @@ impl JsSchema {
     /// * `stored` - Whether the original value is retrievable (default `true`).
     /// * `indexed` - Whether the field is searchable (default `true`).
     /// * `term_vectors` - Whether term position information is stored (default `false`).
-    /// * `analyzer` - Optional named analyzer to use.
+    /// * `analyzer` - Optional analyzer name. For parameter-less built-ins
+    ///   (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`)
+    ///   pass the name directly. For parameterized presets such as the
+    ///   Japanese analyzer (which requires a Lindera dictionary path),
+    ///   register a custom analyzer via `addAnalyzer` and reference it
+    ///   here by name.
     #[napi]
     pub fn add_text_field(
         &mut self,
@@ -84,7 +89,7 @@ impl JsSchema {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
                 term_vectors: term_vectors.unwrap_or(false),
-                analyzer,
+                analyzer: analyzer.map(laurus::AnalyzerSpec::Named),
             }),
         );
     }

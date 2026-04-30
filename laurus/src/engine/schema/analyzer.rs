@@ -19,6 +19,78 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Reference to an analyzer for a text field.
+///
+/// Two shapes are accepted (decoded via serde's untagged representation):
+///
+/// 1. **A bare string** — the name of a built-in or user-defined analyzer.
+///    Example: `"standard"`, `"english"`, `"keyword"`, `"simple"`,
+///    `"noop"`, or any name registered in [`Schema::analyzers`].
+/// 2. **A structured object** — a parameterized built-in analyzer.
+///    Currently only the language-specific Japanese preset:
+///    `{"language": "japanese", "mode": "normal", "dict": "/path/to/ipadic"}`.
+///
+/// # JSON Examples
+///
+/// ```json
+/// // Built-in preset that needs no parameters.
+/// "standard"
+///
+/// // Japanese preset that requires a dictionary path.
+/// {"language": "japanese", "mode": "normal", "dict": "/var/lib/lindera/ipadic"}
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AnalyzerSpec {
+    /// Built-in or user-defined analyzer referenced by name.
+    Named(String),
+    /// Parameterized built-in analyzer.
+    Builtin(BuiltinAnalyzerSpec),
+}
+
+/// Parameterized built-in analyzer presets.
+///
+/// Variants are tagged by the `"language"` discriminator in JSON.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "language", rename_all = "snake_case")]
+pub enum BuiltinAnalyzerSpec {
+    /// Japanese analyzer (Lindera + Japanese filters).
+    Japanese {
+        /// Lindera segmentation mode: `"normal"`, `"search"`, or
+        /// `"decompose"`. Defaults to `"normal"` when omitted.
+        #[serde(default = "default_lindera_mode")]
+        mode: String,
+        /// Filesystem path to the lindera dictionary directory
+        /// (e.g. `/var/lib/lindera/ipadic`).
+        dict: String,
+        /// Optional user dictionary path.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user_dict: Option<String>,
+    },
+}
+
+impl From<&str> for AnalyzerSpec {
+    fn from(value: &str) -> Self {
+        AnalyzerSpec::Named(value.to_string())
+    }
+}
+
+impl From<String> for AnalyzerSpec {
+    fn from(value: String) -> Self {
+        AnalyzerSpec::Named(value)
+    }
+}
+
+impl From<BuiltinAnalyzerSpec> for AnalyzerSpec {
+    fn from(value: BuiltinAnalyzerSpec) -> Self {
+        AnalyzerSpec::Builtin(value)
+    }
+}
+
+fn default_lindera_mode() -> String {
+    "normal".to_string()
+}
+
 /// A custom analyzer definition composed of a tokenizer and optional
 /// char/token filter chains.
 ///
@@ -78,9 +150,13 @@ pub enum TokenizerConfig {
     Lindera {
         /// Tokenization mode: `"normal"`, `"search"`, or `"decompose"`.
         mode: String,
-        /// Dictionary URI (e.g. `"embedded://ipadic"`).
+        /// Dictionary URI. In production builds, supply a filesystem path
+        /// to a Lindera dictionary directory (e.g. `"/var/lib/lindera/ipadic"`).
+        /// `embedded://*` URIs are only resolvable when the matching
+        /// `embed-*` Lindera feature is enabled, which `laurus` does not do
+        /// by default.
         dict: String,
-        /// Optional user dictionary URI.
+        /// Optional user dictionary URI (filesystem path).
         #[serde(default)]
         user_dict: Option<String>,
     },
@@ -275,5 +351,78 @@ mod tests {
         let def: AnalyzerDefinition = serde_json::from_str(json).unwrap();
         assert!(def.char_filters.is_empty());
         assert!(def.token_filters.is_empty());
+    }
+
+    #[test]
+    fn test_analyzer_spec_named_string_form() {
+        let spec: AnalyzerSpec = serde_json::from_str(r#""standard""#).unwrap();
+        assert!(matches!(spec, AnalyzerSpec::Named(ref s) if s == "standard"));
+
+        let serialized = serde_json::to_string(&spec).unwrap();
+        assert_eq!(serialized, r#""standard""#);
+    }
+
+    #[test]
+    fn test_analyzer_spec_japanese_struct_form() {
+        let json = r#"{"language": "japanese", "dict": "/var/lib/lindera/ipadic"}"#;
+        let spec: AnalyzerSpec = serde_json::from_str(json).unwrap();
+        match spec {
+            AnalyzerSpec::Builtin(BuiltinAnalyzerSpec::Japanese {
+                mode,
+                dict,
+                user_dict,
+            }) => {
+                assert_eq!(mode, "normal"); // default
+                assert_eq!(dict, "/var/lib/lindera/ipadic");
+                assert!(user_dict.is_none());
+            }
+            other => panic!("expected Japanese variant, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_analyzer_spec_japanese_with_mode_and_user_dict() {
+        let json = r#"{
+            "language": "japanese",
+            "mode": "search",
+            "dict": "/var/lib/lindera/ipadic",
+            "user_dict": "/etc/laurus/user.csv"
+        }"#;
+        let spec: AnalyzerSpec = serde_json::from_str(json).unwrap();
+        match spec {
+            AnalyzerSpec::Builtin(BuiltinAnalyzerSpec::Japanese {
+                mode,
+                dict,
+                user_dict,
+            }) => {
+                assert_eq!(mode, "search");
+                assert_eq!(dict, "/var/lib/lindera/ipadic");
+                assert_eq!(user_dict.as_deref(), Some("/etc/laurus/user.csv"));
+            }
+            other => panic!("expected Japanese variant, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_analyzer_spec_serialize_japanese() {
+        let spec = AnalyzerSpec::Builtin(BuiltinAnalyzerSpec::Japanese {
+            mode: "normal".into(),
+            dict: "/var/lib/lindera/ipadic".into(),
+            user_dict: None,
+        });
+        let serialized = serde_json::to_string(&spec).unwrap();
+        // Round-trip and inspect.
+        let roundtrip: AnalyzerSpec = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(spec, roundtrip);
+        // The serialized form must include the language discriminator.
+        assert!(serialized.contains(r#""language":"japanese""#));
+        // user_dict is None and skipped.
+        assert!(!serialized.contains("user_dict"));
+    }
+
+    #[test]
+    fn test_analyzer_spec_from_str_into() {
+        let spec: AnalyzerSpec = "english".into();
+        assert!(matches!(spec, AnalyzerSpec::Named(ref s) if s == "english"));
     }
 }

@@ -86,7 +86,8 @@ pub use engine::EngineBuilder;
 pub use engine::EngineStats;
 pub use engine::query::UnifiedQueryParser;
 pub use engine::schema::analyzer::{
-    AnalyzerDefinition, CharFilterConfig, TokenFilterConfig, TokenizerConfig,
+    AnalyzerDefinition, AnalyzerSpec, BuiltinAnalyzerSpec, CharFilterConfig, TokenFilterConfig,
+    TokenizerConfig,
 };
 pub use engine::schema::embedder::EmbedderDefinition;
 pub use engine::schema::{DynamicFieldPolicy, FieldOption, Schema};

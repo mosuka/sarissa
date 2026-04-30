@@ -7,10 +7,10 @@
 use std::collections::HashMap;
 
 use laurus::{
-    AnalyzerDefinition, BooleanOption, BytesOption, CharFilterConfig, DateTimeOption,
-    DistanceMetric, DynamicFieldPolicy, EmbedderDefinition, FieldOption, FlatOption, FloatOption,
-    Geo3dOption, GeoOption, HnswOption, IntegerOption, IvfOption, QuantizationMethod, Schema,
-    TextOption, TokenFilterConfig, TokenizerConfig,
+    AnalyzerDefinition, AnalyzerSpec, BooleanOption, BuiltinAnalyzerSpec, BytesOption,
+    CharFilterConfig, DateTimeOption, DistanceMetric, DynamicFieldPolicy, EmbedderDefinition,
+    FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption, IntegerOption,
+    IvfOption, QuantizationMethod, Schema, TextOption, TokenFilterConfig, TokenizerConfig,
 };
 
 use crate::proto::laurus::v1;
@@ -108,7 +108,7 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             indexed: o.indexed,
             stored: o.stored,
             term_vectors: o.term_vectors,
-            analyzer: o.analyzer.clone().unwrap_or_default(),
+            analyzer: o.analyzer.as_ref().map(analyzer_spec_to_proto),
         })),
         FieldOption::Integer(o) => Some(Opt::Integer(v1::IntegerOption {
             indexed: o.indexed,
@@ -180,11 +180,10 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
             indexed: o.indexed,
             stored: o.stored,
             term_vectors: o.term_vectors,
-            analyzer: if o.analyzer.is_empty() {
-                None
-            } else {
-                Some(o.analyzer.clone())
-            },
+            analyzer: o
+                .analyzer
+                .as_ref()
+                .and_then(analyzer_spec_from_proto),
         })),
         Some(Opt::Integer(o)) => Some(FieldOption::Integer(IntegerOption {
             indexed: o.indexed,
@@ -302,6 +301,72 @@ fn quantization_from_proto(q: &v1::QuantizationConfig) -> QuantizationMethod {
             }
         }
         Err(_) => QuantizationMethod::None,
+    }
+}
+
+// ---- Analyzer spec conversion ----
+
+/// Convert a laurus [`AnalyzerSpec`] into the proto wire form.
+fn analyzer_spec_to_proto(spec: &AnalyzerSpec) -> v1::AnalyzerSpec {
+    let proto_spec = match spec {
+        AnalyzerSpec::Named(name) => v1::analyzer_spec::Spec::Named(name.clone()),
+        AnalyzerSpec::Builtin(builtin) => {
+            v1::analyzer_spec::Spec::Builtin(builtin_analyzer_spec_to_proto(builtin))
+        }
+    };
+    v1::AnalyzerSpec {
+        spec: Some(proto_spec),
+    }
+}
+
+/// Convert a proto [`v1::AnalyzerSpec`] into a laurus [`AnalyzerSpec`].
+///
+/// Returns `None` when the proto message has no spec set, which means the
+/// engine default analyzer should be used.
+fn analyzer_spec_from_proto(proto: &v1::AnalyzerSpec) -> Option<AnalyzerSpec> {
+    match proto.spec.as_ref()? {
+        v1::analyzer_spec::Spec::Named(name) if name.is_empty() => None,
+        v1::analyzer_spec::Spec::Named(name) => Some(AnalyzerSpec::Named(name.clone())),
+        v1::analyzer_spec::Spec::Builtin(builtin) => {
+            builtin_analyzer_spec_from_proto(builtin).map(AnalyzerSpec::Builtin)
+        }
+    }
+}
+
+fn builtin_analyzer_spec_to_proto(spec: &BuiltinAnalyzerSpec) -> v1::BuiltinAnalyzerSpec {
+    let preset = match spec {
+        BuiltinAnalyzerSpec::Japanese {
+            mode,
+            dict,
+            user_dict,
+        } => v1::builtin_analyzer_spec::Preset::Japanese(v1::JapaneseAnalyzerSpec {
+            mode: mode.clone(),
+            dict: dict.clone(),
+            user_dict: user_dict.clone().unwrap_or_default(),
+        }),
+    };
+    v1::BuiltinAnalyzerSpec {
+        preset: Some(preset),
+    }
+}
+
+fn builtin_analyzer_spec_from_proto(
+    proto: &v1::BuiltinAnalyzerSpec,
+) -> Option<BuiltinAnalyzerSpec> {
+    match proto.preset.as_ref()? {
+        v1::builtin_analyzer_spec::Preset::Japanese(jp) => Some(BuiltinAnalyzerSpec::Japanese {
+            mode: if jp.mode.is_empty() {
+                "normal".to_string()
+            } else {
+                jp.mode.clone()
+            },
+            dict: jp.dict.clone(),
+            user_dict: if jp.user_dict.is_empty() {
+                None
+            } else {
+                Some(jp.user_dict.clone())
+            },
+        }),
     }
 }
 

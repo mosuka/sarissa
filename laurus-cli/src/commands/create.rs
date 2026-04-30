@@ -65,7 +65,7 @@ use laurus::lexical::core::field::{
 };
 use laurus::vector::DistanceMetric;
 use laurus::vector::core::field::{FlatOption, HnswOption, IvfOption};
-use laurus::{FieldOption, Schema};
+use laurus::{AnalyzerSpec, BuiltinAnalyzerSpec, FieldOption, Schema};
 
 /// Field type names shown in the interactive prompt.
 const FIELD_TYPES: &[&str] = &[
@@ -249,7 +249,35 @@ fn prompt_text_option() -> Result<FieldOption> {
         .items(analyzer_choices)
         .default(0)
         .interact()?;
-    let analyzer = Some(analyzer_choices[analyzer_idx].to_string());
+    let analyzer = if analyzer_choices[analyzer_idx] == "japanese" {
+        // The Japanese preset requires a Lindera dictionary path.
+        let dict: String = dialoguer::Input::new()
+            .with_prompt("Lindera dictionary path (e.g. /var/lib/lindera/ipadic)")
+            .interact_text()?;
+        let mode_choices = ["normal", "search", "decompose"];
+        let mode_idx = dialoguer::Select::new()
+            .with_prompt("Lindera segmentation mode")
+            .items(mode_choices)
+            .default(0)
+            .interact()?;
+        let user_dict: String = dialoguer::Input::new()
+            .with_prompt("User dictionary path (leave empty for none)")
+            .allow_empty(true)
+            .interact_text()?;
+        Some(AnalyzerSpec::Builtin(BuiltinAnalyzerSpec::Japanese {
+            mode: mode_choices[mode_idx].to_string(),
+            dict,
+            user_dict: if user_dict.is_empty() {
+                None
+            } else {
+                Some(user_dict)
+            },
+        }))
+    } else {
+        Some(AnalyzerSpec::Named(
+            analyzer_choices[analyzer_idx].to_string(),
+        ))
+    };
 
     Ok(FieldOption::Text(TextOption {
         indexed,

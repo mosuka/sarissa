@@ -194,11 +194,13 @@ pub struct TextOption {
     #[serde(default = "default_true")]
     pub term_vectors: bool,
 
-    /// Analyzer name for this field (e.g. `"standard"`, `"japanese"`).
+    /// Analyzer reference for this field. Either a bare name
+    /// (e.g. `"standard"`, `"english"`) or a parameterized built-in
+    /// preset (e.g. `{"language": "japanese", "dict": "/path/to/ipadic"}`).
     /// When `None`, the engine's default analyzer is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[rkyv(with = rkyv::with::Skip)]
-    pub analyzer: Option<String>,
+    pub analyzer: Option<crate::engine::schema::analyzer::AnalyzerSpec>,
 }
 
 impl TextOption {
@@ -247,22 +249,29 @@ impl TextOption {
         self
     }
 
-    /// Sets the analyzer name for this field.
+    /// Sets the analyzer for this field.
     ///
-    /// When set, the engine constructs the corresponding analyzer for this
-    /// field instead of using the default. Supported names include
-    /// `"standard"`, `"keyword"`, `"english"`, `"japanese"`, `"simple"`,
-    /// and `"noop"`.
+    /// Accepts either a bare name (`&str` / `String`) for analyzers that
+    /// require no parameters (`"standard"`, `"keyword"`, `"english"`,
+    /// `"simple"`, `"noop"`, or any user-defined analyzer registered in
+    /// `Schema::analyzers`) or a [`BuiltinAnalyzerSpec`] for parameterized
+    /// presets (currently only Japanese, which requires a Lindera
+    /// dictionary path).
     ///
     /// # Arguments
     ///
-    /// * `name` - The analyzer name.
+    /// * `spec` - The analyzer reference.
     ///
     /// # Returns
     ///
     /// The modified `TextOption` for method chaining.
-    pub fn analyzer(mut self, name: impl Into<String>) -> Self {
-        self.analyzer = Some(name.into());
+    ///
+    /// [`BuiltinAnalyzerSpec`]: crate::engine::schema::analyzer::BuiltinAnalyzerSpec
+    pub fn analyzer(
+        mut self,
+        spec: impl Into<crate::engine::schema::analyzer::AnalyzerSpec>,
+    ) -> Self {
+        self.analyzer = Some(spec.into());
         self
     }
 }

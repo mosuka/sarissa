@@ -344,6 +344,85 @@ pub fn proto_schema_to_json(schema: &v1::Schema) -> Value {
 ///
 /// Returns an error string if the JSON is not an object or contains an
 /// unknown field option type.
+/// Convert a JSON analyzer reference into the proto wire form.
+///
+/// Accepts either a bare string (`"standard"`) or a structured object
+/// (`{"language": "japanese", "dict": "..."}`). The structured form
+/// currently supports only the Japanese preset.
+fn json_to_analyzer_spec(value: &Value) -> Result<v1::AnalyzerSpec, String> {
+    use v1::analyzer_spec::Spec;
+    let inner = if let Some(name) = value.as_str() {
+        Spec::Named(name.to_string())
+    } else if let Some(obj) = value.as_object() {
+        let language = obj
+            .get("language")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "analyzer object must include a \"language\" field".to_string())?;
+        match language {
+            "japanese" => {
+                let dict = obj
+                    .get("dict")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        "japanese analyzer requires a \"dict\" path".to_string()
+                    })?;
+                let mode = obj
+                    .get("mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("normal")
+                    .to_string();
+                let user_dict = obj
+                    .get("user_dict")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                Spec::Builtin(v1::BuiltinAnalyzerSpec {
+                    preset: Some(v1::builtin_analyzer_spec::Preset::Japanese(
+                        v1::JapaneseAnalyzerSpec {
+                            mode,
+                            dict: dict.to_string(),
+                            user_dict,
+                        },
+                    )),
+                })
+            }
+            other => return Err(format!("unsupported analyzer language: {other}")),
+        }
+    } else {
+        return Err("analyzer must be a string or object".to_string());
+    };
+    Ok(v1::AnalyzerSpec { spec: Some(inner) })
+}
+
+/// Convert a proto [`v1::AnalyzerSpec`] into its JSON wire form.
+///
+/// Returns `None` when the proto message has no spec set or the named
+/// variant carries an empty string (which means "use the default").
+fn analyzer_spec_to_json(spec: &v1::AnalyzerSpec) -> Option<Value> {
+    use v1::analyzer_spec::Spec;
+    match spec.spec.as_ref()? {
+        Spec::Named(name) if name.is_empty() => None,
+        Spec::Named(name) => Some(Value::String(name.clone())),
+        Spec::Builtin(builtin) => match builtin.preset.as_ref()? {
+            v1::builtin_analyzer_spec::Preset::Japanese(jp) => {
+                let mut obj = Map::new();
+                obj.insert("language".to_string(), Value::String("japanese".to_string()));
+                let mode = if jp.mode.is_empty() {
+                    "normal".to_string()
+                } else {
+                    jp.mode.clone()
+                };
+                obj.insert("mode".to_string(), Value::String(mode));
+                obj.insert("dict".to_string(), Value::String(jp.dict.clone()));
+                if !jp.user_dict.is_empty() {
+                    obj.insert("user_dict".to_string(), Value::String(jp.user_dict.clone()));
+                }
+                Some(Value::Object(obj))
+            }
+        },
+    }
+}
+
 pub fn json_to_proto_field_option(json: &Value) -> Result<v1::FieldOption, String> {
     let obj = json
         .as_object()
@@ -361,9 +440,8 @@ pub fn json_to_proto_field_option(json: &Value) -> Result<v1::FieldOption, Strin
                 .unwrap_or(false),
             analyzer: v
                 .get("analyzer")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
+                .map(json_to_analyzer_spec)
+                .transpose()?,
         })
     } else if let Some(v) = obj.get("integer") {
         Opt::Integer(v1::IntegerOption {
@@ -431,8 +509,8 @@ fn proto_field_option_to_json(opt: &v1::FieldOption) -> Value {
                 "stored": v.stored,
                 "term_vectors": v.term_vectors,
             });
-            if !v.analyzer.is_empty() {
-                text_obj["analyzer"] = json!(v.analyzer);
+            if let Some(spec) = v.analyzer.as_ref().and_then(analyzer_spec_to_json) {
+                text_obj["analyzer"] = spec;
             }
             json!({ "text": text_obj })
         }
