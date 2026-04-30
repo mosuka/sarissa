@@ -6,13 +6,22 @@ on:
       - main
     paths:
       - 'docs/**'
+      - 'laurus-wasm/**'
+      - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # To push to the gh-pages branch.
     steps:
       - uses: actions/checkout@v4
 
@@ -21,18 +30,75 @@ jobs:
         with:
           mdbook-version: 'latest'
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
-      - name: Build Book (English)
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build mdBook (English)
         run: mdbook build docs
 
-      - name: Build Book (Japanese)
+      - name: Build mdBook (Japanese)
         run: mdbook build docs/ja
 
-      - name: Copy Japanese docs into publish directory
+      - name: Copy Japanese book into publish directory
         run: cp -r target/docs/ja docs/book/ja
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Build laurus-wasm
+        run: wasm-pack build laurus-wasm --target web --release
+
+      - name: Bundle OPFS helper into pkg/
+        run: ./laurus-wasm/scripts/postbuild.sh
+
+      - name: Stage demo into Pages publish directory
+        run: |
+          mkdir -p docs/book/demo
+          cp laurus-wasm/examples/index.html docs/book/demo/
+          cp -r laurus-wasm/pkg docs/book/demo/pkg
+
+      - name: Resolve lindera version from cargo metadata
+        id: lindera_version
+        run: |
+          VERSION=$(cargo metadata --format-version 1 --filter-platform wasm32-unknown-unknown 2>/dev/null \
+            | python3 -c "import json,sys; m=json.load(sys.stdin); print(next(p['version'] for p in m['packages'] if p['name']=='lindera'))")
+          if [ -z "$VERSION" ]; then
+            echo "Failed to resolve lindera version" >&2
+            exit 1
+          fi
+          echo "Resolved lindera version: $VERSION"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Download IPADIC dictionary
+        run: |
+          mkdir -p docs/book/demo/dict
+          curl -fsSL -o docs/book/demo/dict/lindera-ipadic.zip \
+            "https://github.com/lindera/lindera/releases/download/v${{ steps.lindera_version.outputs.version }}/lindera-ipadic-${{ steps.lindera_version.outputs.version }}.zip"
+          ls -la docs/book/demo/dict/
+
+      - name: Generate dictionary manifest
+        run: |
+          cat > docs/book/demo/dict/manifest.json <<EOF
+          {
+            "ipadic": "lindera-ipadic.zip",
+            "lindera_version": "${{ steps.lindera_version.outputs.version }}"
+          }
+          EOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs/book
+          path: docs/book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
