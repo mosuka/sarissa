@@ -315,6 +315,22 @@
           );
         markers.set(doc.id, marker);
       }
+
+      // Re-run the search when the user finishes panning or
+      // zooming. We use `dragend` + `zoomend` rather than the
+      // catch-all `moveend` so that programmatic pans triggered by
+      // `highlightMarker` (when clicking a result row) don't
+      // re-trigger the search. The `index && restrictEl.checked`
+      // guard skips the call when the engine isn't ready yet, and
+      // when the bbox clause — the only viewport-dependent part of
+      // the query — is disabled.
+      const maybeAutoSearch = () => {
+        if (index && restrictEl.checked) {
+          doSearch();
+        }
+      };
+      map.on('dragend', maybeAutoSearch);
+      map.on('zoomend', maybeAutoSearch);
     }
 
     function highlightMarker(id) {
