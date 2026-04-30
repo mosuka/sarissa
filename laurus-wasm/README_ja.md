@@ -106,8 +106,22 @@ schema.setDefaultFields(["title", "body"]);
 
 ## サンプル
 
-[examples/](examples/) ディレクトリに、Transformers.js エンベディングと
-OPFS 永続化を使用したデモがあります。
+[examples/](examples/) ディレクトリには、複数のシングルページ
+デモが配置されています。サンプル一覧トップは
+[`examples/index.html`](examples/index.html) です。個別のサンプル
+にも直接アクセスできます。
+
+- [`examples/basic/`](examples/basic/) — 統合クエリ DSL を用いた
+  日本語の基本的なハイブリッド検索（全文検索 + ベクトル検索、
+  Transformers.js エンベディング併用）
+- [`examples/geo/`](examples/geo/) — Leaflet 地図に東京の観光
+  スポットをプロットし、ビューポートから生成した
+  `location:geo_bbox(...)` をテキスト検索・ベクトル検索と組み
+  合わせるサンプル
+
+共通アセット（テーマスタイル、ロガー、辞書ローダー、Embedder
+ヘルパ）は `examples/shared/` 配下にまとめており、各サンプルは
+それぞれの本題に集中できる構成にしています。
 
 ## ソースからのビルド
 
@@ -123,9 +137,9 @@ wasm-pack build --target web --release
 # OPFS ヘルパ（./opfs サブパス）を pkg/ に同梱
 ./scripts/postbuild.sh
 
-# デモの起動
+# デモの起動（サンプル一覧トップ）
 python3 -m http.server 8080
-# http://localhost:8080/examples/ を開く
+# http://localhost:8080/examples/ を開いて、サンプルを選択
 ```
 
 ポストビルドスクリプトは `js/opfs.js` と `js/opfs.d.ts` を `pkg/` に

@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Laurus WASM — Geo Search Sample</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin="anonymous">
+  <link rel="stylesheet" href="../shared/theme.css">
+  <style>
+    .map-card {
+      padding: 0;
+      overflow: hidden;
+    }
+    #map {
+      width: 100%;
+      height: 420px;
+    }
+    .leaflet-container {
+      background: var(--code-bg);
+    }
+    .leaflet-popup-content-wrapper,
+    .leaflet-popup-tip {
+      background: var(--surface);
+      color: var(--text);
+    }
+    .leaflet-popup-content {
+      font-size: 0.85rem;
+    }
+    .leaflet-control-attribution {
+      background: rgba(15, 17, 23, 0.85) !important;
+      color: var(--muted) !important;
+    }
+    .leaflet-control-attribution a {
+      color: var(--accent) !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container container-wide">
+    <p class="subtitle"><a href="../">&larr; All samples</a></p>
+
+    <h1>Geo Search Sample</h1>
+    <p class="subtitle">
+      Tokyo points-of-interest with map-driven bounding-box search
+      combined with Japanese full-text and embedding queries.
+    </p>
+
+    <!-- Status -->
+    <div class="card">
+      <h2>Engine <span id="status" class="badge badge-loading">loading...</span></h2>
+      <div class="stats">
+        <div>Documents: <span id="doc-count">0</span></div>
+        <div>Analyzer: <span id="analyzer-mode">loading...</span></div>
+        <div>Embedder: <span id="embed-dim">loading...</span></div>
+        <div>Storage: <span id="storage-mode">OPFS</span></div>
+      </div>
+      <p class="dsl-hint">
+        On first visit the demo fetches the UniDic dictionary
+        (~52 MB) and the multilingual MiniLM embedding model
+        (~120 MB). Both are cached for offline reuse and shared with
+        the basic sample.
+      </p>
+    </div>
+
+    <!-- Map -->
+    <div class="card map-card">
+      <div id="map"></div>
+    </div>
+
+    <!-- Search -->
+    <div class="card">
+      <h2>Search</h2>
+      <p class="dsl-hint">
+        Text input is wrapped in the unified DSL. Examples:
+        <code>東京</code> <code>title:浅草寺</code>
+        <code>embedding:"夜景がきれいなスポット"</code>.
+        Toggle <em>Restrict to map view</em> to AND the query with a
+        <code>location:geo_bbox(...)</code> clause derived from the
+        current map viewport.
+      </p>
+      <div class="search-box">
+        <input type="text" id="query" placeholder="例: 公園 / 浅草 / embedding:&quot;夜景&quot;" disabled>
+        <button id="search-btn" disabled>Search</button>
+      </div>
+      <div class="row" style="margin-bottom: 0.5rem;">
+        <label class="toggle">
+          <input type="checkbox" id="restrict-bbox" checked disabled>
+          Restrict to current map view
+          (<code>location:geo_bbox(...)</code>)
+        </label>
+      </div>
+      <ul class="results" id="results">
+        <li class="empty">Loading sample data…</li>
+      </ul>
+    </div>
+
+    <!-- Maintenance -->
+    <div class="card">
+      <h2>Maintenance</h2>
+      <p class="dsl-hint">
+        Delete persisted state if you have stale data from a
+        previous demo version. Reloads the page after clearing.
+      </p>
+      <div class="row">
+        <button id="reset-index-btn" class="secondary" type="button" disabled>Reset geo index</button>
+        <button id="reset-all-btn" class="secondary" type="button" disabled>Reset everything (index + dictionary)</button>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="card">
+      <h2>Log</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+          crossorigin="anonymous"></script>
+
+  <script type="module">
+    import init, { Index, Schema } from '../../pkg/laurus_wasm.js';
+    import { createLogger } from '../shared/log.js';
+    import {
+      ANALYZER_NAME,
+      buildJapaneseAnalyzer,
+      clearDictionary,
+      DICT_NAME,
+      ensureDictionary,
+    } from '../shared/dictionary.js';
+    import { EMBED_DIM, EMBEDDER_NAME, loadEmbedder } from '../shared/embedder.js';
+
+    /**
+     * OPFS directory holding the persisted geo index. Reset buttons
+     * below clear this directory if a schema or analyzer change
+     * makes the persisted shape incompatible.
+     */
+    const INDEX_NAME = 'geo-demo-index';
+    const LOCATION_FIELD = 'location';
+    const EMBED_FIELD = 'embedding';
+
+    /** Initial Tokyo points-of-interest seeded on first visit. */
+    const SAMPLES = [
+      {
+        id: 'tokyo-station',
+        title: '東京駅',
+        description: '赤レンガ造りの丸の内駅舎で知られる、首都圏の代表的なターミナル駅。',
+        category: '駅',
+        lat: 35.6812,
+        lon: 139.7671,
+      },
+      {
+        id: 'imperial-palace',
+        title: '皇居外苑',
+        description: '江戸城跡に整備された広大な公園。二重橋や芝生の広場が観光名所。',
+        category: '公園',
+        lat: 35.6852,
+        lon: 139.7528,
+      },
+      {
+        id: 'sensoji',
+        title: '浅草寺',
+        description: '雷門と仲見世通りで有名な、東京最古の寺院。下町情緒を味わえる。',
+        category: '寺社',
+        lat: 35.7148,
+        lon: 139.7967,
+      },
+      {
+        id: 'tokyo-skytree',
+        title: '東京スカイツリー',
+        description: '高さ634mの電波塔。展望デッキからは東京の夜景が一望できる。',
+        category: '展望',
+        lat: 35.7101,
+        lon: 139.8107,
+      },
+      {
+        id: 'ueno-park',
+        title: '上野恩賜公園',
+        description: '美術館や動物園が集まる広大な公園。春は桜の名所として賑わう。',
+        category: '公園',
+        lat: 35.7156,
+        lon: 139.7745,
+      },
+      {
+        id: 'akihabara',
+        title: '秋葉原電気街',
+        description: '電気店やアニメショップが密集する、世界的に有名なオタク文化の中心地。',
+        category: '商店街',
+        lat: 35.7022,
+        lon: 139.7745,
+      },
+      {
+        id: 'shinjuku-gyoen',
+        title: '新宿御苑',
+        description: '日本庭園・イギリス風景式庭園・フランス式整形庭園が共存する都心の庭園。',
+        category: '公園',
+        lat: 35.6852,
+        lon: 139.7100,
+      },
+      {
+        id: 'shibuya-scramble',
+        title: '渋谷スクランブル交差点',
+        description: '一度に最大3000人が行き交う、世界で最も有名な交差点のひとつ。',
+        category: '街並み',
+        lat: 35.6595,
+        lon: 139.7005,
+      },
+      {
+        id: 'meiji-jingu',
+        title: '明治神宮',
+        description: '原宿駅前の鎮守の杜に鎮座する、明治天皇と昭憲皇太后を祀る神社。',
+        category: '寺社',
+        lat: 35.6764,
+        lon: 139.6993,
+      },
+      {
+        id: 'roppongi-hills',
+        title: '六本木ヒルズ',
+        description: 'オフィス・住居・美術館・展望台が一体となった複合再開発地区。',
+        category: '展望',
+        lat: 35.6604,
+        lon: 139.7292,
+      },
+      {
+        id: 'tokyo-tower',
+        title: '東京タワー',
+        description: '芝公園にそびえる赤と白の電波塔。夜のライトアップが観光名物。',
+        category: '展望',
+        lat: 35.6586,
+        lon: 139.7454,
+      },
+      {
+        id: 'tsukiji',
+        title: '築地場外市場',
+        description: '寿司や海鮮丼の名店が並ぶ食の街。豊洲移転後も賑わいを保つ。',
+        category: '市場',
+        lat: 35.6654,
+        lon: 139.7707,
+      },
+      {
+        id: 'odaiba',
+        title: 'お台場海浜公園',
+        description: '東京湾を一望できるベイエリアの公園。レインボーブリッジの夜景が見どころ。',
+        category: '公園',
+        lat: 35.6298,
+        lon: 139.7745,
+      },
+      {
+        id: 'ginza',
+        title: '銀座中央通り',
+        description: '高級百貨店やブランド旗艦店が並ぶ、東京を代表する商業エリア。',
+        category: '商店街',
+        lat: 35.6717,
+        lon: 139.7650,
+      },
+    ];
+
+    const logger = createLogger('log');
+    const statusEl = document.getElementById('status');
+    const docCountEl = document.getElementById('doc-count');
+    const resultsEl = document.getElementById('results');
+    const restrictEl = document.getElementById('restrict-bbox');
+
+    let index = null;
+    /** @type {L.Map | null} */
+    let map = null;
+    /** @type {Map<string, L.Marker>} */
+    const markers = new Map();
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    /**
+     * Compute the great-circle distance (meters) between two
+     * lat/lon pairs using the haversine formula. Used only for
+     * displaying the distance from the map centre alongside each
+     * result; the actual filtering happens in the index.
+     */
+    function haversineMeters(a, b) {
+      const R = 6_371_000;
+      const phi1 = (a.lat * Math.PI) / 180;
+      const phi2 = (b.lat * Math.PI) / 180;
+      const dPhi = ((b.lat - a.lat) * Math.PI) / 180;
+      const dLambda = ((b.lon - a.lon) * Math.PI) / 180;
+      const h =
+        Math.sin(dPhi / 2) ** 2
+        + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+
+    function initMap() {
+      map = L.map('map', { preferCanvas: false }).setView([35.682, 139.766], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
+
+      for (const doc of SAMPLES) {
+        const marker = L.marker([doc.lat, doc.lon])
+          .addTo(map)
+          .bindPopup(
+            `<strong>${escapeHtml(doc.title)}</strong><br>`
+            + `<small>${escapeHtml(doc.category)}</small><br>`
+            + `${escapeHtml(doc.description)}`,
+          );
+        markers.set(doc.id, marker);
+      }
+    }
+
+    function highlightMarker(id) {
+      const marker = markers.get(id);
+      if (!marker) {
+        return;
+      }
+      marker.openPopup();
+      map.panTo(marker.getLatLng(), { animate: true });
+    }
+
+    /**
+     * Build a unified DSL query string. The text portion (if any)
+     * is left untouched so users can still write
+     * `title:...` / `embedding:"..."`. The bbox clause is appended
+     * with AND when the restrict-to-view toggle is on.
+     */
+    function buildQuery(rawText) {
+      const text = rawText.trim();
+      if (!restrictEl.checked) {
+        return text;
+      }
+      const bounds = map.getBounds();
+      const minLat = bounds.getSouth();
+      const maxLat = bounds.getNorth();
+      const minLon = bounds.getWest();
+      const maxLon = bounds.getEast();
+      const bboxClause =
+        `${LOCATION_FIELD}:geo_bbox(${minLat.toFixed(6)}, ${minLon.toFixed(6)}, `
+        + `${maxLat.toFixed(6)}, ${maxLon.toFixed(6)})`;
+      if (!text) {
+        return bboxClause;
+      }
+      return `(${text}) AND ${bboxClause}`;
+    }
+
+    async function doSearch() {
+      const text = document.getElementById('query').value;
+      const query = buildQuery(text);
+      if (!query) {
+        return;
+      }
+
+      try {
+        const t0 = performance.now();
+        const results = await index.search(query);
+        const elapsed = (performance.now() - t0).toFixed(1);
+        logger.log(`"${query}" -> ${results.length} hit(s) in ${elapsed}ms`);
+
+        if (results.length === 0) {
+          resultsEl.innerHTML = '<li class="empty">No results found in the current view.</li>';
+          return;
+        }
+
+        const center = map.getCenter();
+        resultsEl.innerHTML = results
+          .map((r) => {
+            const doc = r.document ?? {};
+            const lat = typeof doc.location?.lat === 'number' ? doc.location.lat : null;
+            const lon = typeof doc.location?.lon === 'number' ? doc.location.lon : null;
+            let extra = '';
+            if (lat !== null && lon !== null) {
+              const meters = haversineMeters({ lat: center.lat, lon: center.lng }, { lat, lon });
+              const km = (meters / 1000).toFixed(2);
+              extra = `${km} km from view centre`;
+            }
+            return `
+              <li class="clickable" data-id="${escapeHtml(r.id)}">
+                <div class="meta">
+                  <span class="score">${r.score.toFixed(4)}</span>
+                  <span class="extra">${escapeHtml(doc.category ?? '')} · ${escapeHtml(extra)}</span>
+                </div>
+                <div class="title">${escapeHtml(doc.title ?? r.id)}</div>
+                <div class="body">${escapeHtml(doc.description ?? '')}</div>
+              </li>
+            `;
+          })
+          .join('');
+
+        for (const li of resultsEl.querySelectorAll('li.clickable')) {
+          li.addEventListener('click', () => {
+            for (const el of resultsEl.querySelectorAll('li.active')) {
+              el.classList.remove('active');
+            }
+            li.classList.add('active');
+            highlightMarker(li.dataset.id);
+          });
+        }
+      } catch (e) {
+        logger.err(`Search error: ${e}`);
+        console.error(e);
+      }
+    }
+
+    async function boot() {
+      try {
+        initMap();
+
+        logger.log('Initializing WASM module...');
+        const t0 = performance.now();
+        await init();
+        logger.ok(`WASM module loaded in ${((performance.now() - t0) / 1000).toFixed(1)}s.`);
+
+        await ensureDictionary({
+          logger,
+          setStatus: (text) => {
+            statusEl.textContent = text;
+          },
+        });
+
+        const embed = await loadEmbedder({ logger });
+        document.getElementById('embed-dim').textContent =
+          `${EMBED_DIM}-dim multilingual MiniLM`;
+
+        const analyzer = await buildJapaneseAnalyzer({ mode: 'normal' });
+        logger.ok('JapaneseAnalyzer built from OPFS-loaded UniDic.');
+        document.getElementById('analyzer-mode').textContent =
+          'JapaneseAnalyzer (UniDic)';
+
+        const schema = new Schema();
+        schema.addAnalyzer(ANALYZER_NAME, analyzer);
+        schema.addTextField('title', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('description', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('category', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addGeoField(LOCATION_FIELD, true, true);
+        schema.addEmbedder(EMBEDDER_NAME, {
+          type: 'callback',
+          embed,
+        });
+        schema.addHnswField(
+          EMBED_FIELD,
+          EMBED_DIM,
+          undefined,
+          undefined,
+          undefined,
+          EMBEDDER_NAME,
+        );
+        schema.setDefaultFields(['title', 'description', 'category']);
+        logger.log(
+          `Schema: title + description + category (analyzer="${ANALYZER_NAME}"), `
+          + `${LOCATION_FIELD} (geo, indexed), `
+          + `${EMBED_FIELD} (HNSW, ${EMBED_DIM}-dim, embedder="${EMBEDDER_NAME}").`,
+        );
+
+        index = await Index.open(INDEX_NAME, schema);
+        logger.ok(`OPFS index "${INDEX_NAME}" opened.`);
+
+        const stats = index.stats();
+        let docCounter = stats.documentCount;
+
+        if (docCounter > 0) {
+          logger.ok(
+            `Loaded ${docCounter} document(s) from OPFS — persisted from previous session.`,
+          );
+        } else {
+          logger.log('Indexing Tokyo points-of-interest...');
+          for (const doc of SAMPLES) {
+            await index.putDocument(doc.id, {
+              title: doc.title,
+              description: doc.description,
+              category: doc.category,
+              [LOCATION_FIELD]: { lat: doc.lat, lon: doc.lon },
+              [EMBED_FIELD]: `${doc.title} ${doc.description} ${doc.category}`,
+            });
+            docCounter++;
+          }
+          await index.commit();
+          logger.ok(`Indexed ${SAMPLES.length} documents and persisted to OPFS.`);
+        }
+
+        docCountEl.textContent = docCounter;
+        statusEl.textContent = 'ready';
+        statusEl.className = 'badge badge-ready';
+
+        for (const el of document.querySelectorAll('input, button')) {
+          el.disabled = false;
+        }
+        resultsEl.innerHTML = '<li class="empty">Search to filter the points above.</li>';
+
+        await doSearch();
+      } catch (e) {
+        logger.err(`Error: ${e}`);
+        statusEl.textContent = 'error';
+        statusEl.className = 'badge badge-error';
+        console.error(e);
+      }
+    }
+
+    /**
+     * Index names that the geo demo has persisted. Listed
+     * explicitly so we can clean up legacy directories left over
+     * from earlier demo iterations.
+     */
+    const KNOWN_INDEX_NAMES = [INDEX_NAME];
+
+    async function deleteAllIndexes() {
+      const root = await navigator.storage.getDirectory();
+      for (const name of KNOWN_INDEX_NAMES) {
+        try {
+          await root.removeEntry(name, { recursive: true });
+          logger.ok(`Removed OPFS index "${name}".`);
+        } catch (e) {
+          if (e?.name !== 'NotFoundError') {
+            logger.err(`Failed to remove "${name}": ${e}`);
+          }
+        }
+      }
+    }
+
+    async function resetIndex() {
+      if (!confirm(
+        'Delete the persisted geo index and reload? '
+        + 'UniDic and the embedding model stay cached.',
+      )) {
+        return;
+      }
+      try {
+        await deleteAllIndexes();
+        logger.ok('Index reset complete. Reloading...');
+        setTimeout(() => location.reload(), 250);
+      } catch (e) {
+        logger.err(`Reset failed: ${e}`);
+        console.error(e);
+      }
+    }
+
+    async function resetAll() {
+      if (!confirm(
+        'Delete the geo index AND the UniDic dictionary, then reload? '
+        + 'The ~52 MB dictionary will re-download on next visit.',
+      )) {
+        return;
+      }
+      try {
+        await deleteAllIndexes();
+        if (await clearDictionary()) {
+          logger.ok(`Removed OPFS dictionary "${DICT_NAME}".`);
+        }
+        logger.ok('Full reset complete. Reloading...');
+        setTimeout(() => location.reload(), 250);
+      } catch (e) {
+        logger.err(`Reset failed: ${e}`);
+        console.error(e);
+      }
+    }
+
+    document.getElementById('search-btn').addEventListener('click', doSearch);
+    document.getElementById('query').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        doSearch();
+      }
+    });
+    document.getElementById('reset-index-btn').addEventListener('click', resetIndex);
+    document.getElementById('reset-all-btn').addEventListener('click', resetAll);
+    restrictEl.addEventListener('change', () => {
+      if (index) {
+        doSearch();
+      }
+    });
+
+    boot();
+  </script>
+</body>
+</html>

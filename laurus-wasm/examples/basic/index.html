@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Laurus WASM — Basic Hybrid Search</title>
+  <link rel="stylesheet" href="../shared/theme.css">
+</head>
+<body>
+  <div class="container">
+    <p class="subtitle"><a href="../">&larr; All samples</a></p>
+
+    <h1>Basic Hybrid Search</h1>
+    <p class="subtitle">Japanese morphological search in the browser (OPFS persistent storage)</p>
+
+    <!-- Status -->
+    <div class="card">
+      <h2>Engine <span id="status" class="badge badge-loading">loading...</span></h2>
+      <div class="stats">
+        <div>Documents: <span id="doc-count">0</span></div>
+        <div>Analyzer: <span id="analyzer-mode">loading...</span></div>
+        <div>Embedder: <span id="embed-dim">loading...</span></div>
+        <div>Storage: <span id="storage-mode">OPFS</span></div>
+      </div>
+      <p class="dsl-hint">
+        On first visit the demo fetches the UniDic dictionary
+        (~52 MB) and the multilingual MiniLM embedding model
+        (~120 MB). Both are cached for offline reuse.
+      </p>
+    </div>
+
+    <!-- Search -->
+    <div class="card">
+      <h2>Search — Unified Query DSL</h2>
+      <p class="dsl-hint">
+        Lexical: <code>形態素</code> <code>title:検索</code> <code>"日本語"</code> &nbsp;
+        Vector: <code>embedding:"ブラウザで動く検索"</code> &nbsp;
+        Hybrid: <code>形態素 embedding:"日本語の検索"</code>
+      </p>
+      <div class="search-box">
+        <input type="text" id="query" placeholder='例: 形態素 / title:検索 / "日本語"' disabled>
+        <button id="search-btn" disabled>Search</button>
+      </div>
+      <ul class="results" id="results">
+        <li class="empty">Index some documents first, then search.</li>
+      </ul>
+    </div>
+
+    <!-- Maintenance -->
+    <div class="card">
+      <h2>Maintenance</h2>
+      <p class="dsl-hint">
+        Delete persisted state if you have stale data from a previous
+        demo version (for example, an older schema with a different
+        vector dimensionality). Reloads the page after clearing.
+      </p>
+      <div class="row">
+        <button id="reset-index-btn" class="secondary" type="button" disabled>Reset index</button>
+        <button id="reset-all-btn" class="secondary" type="button" disabled>Reset everything (index + dictionary)</button>
+      </div>
+    </div>
+
+    <!-- Add Document -->
+    <div class="card">
+      <h2>Add Document</h2>
+      <div class="add-form">
+        <div class="row">
+          <div class="field">
+            <label>ID</label>
+            <input type="text" id="doc-id" placeholder="doc1" disabled>
+          </div>
+          <div class="field">
+            <label>Title</label>
+            <input type="text" id="doc-title" placeholder="WebAssembly 入門" disabled>
+          </div>
+        </div>
+        <div>
+          <label>Body</label>
+          <textarea id="doc-body" placeholder="WebAssembly はブラウザで動作するバイナリ命令フォーマットです。" disabled></textarea>
+        </div>
+        <div class="row">
+          <button id="add-btn" disabled>Add &amp; Commit</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="card">
+      <h2>Log</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import init, { Index, Schema } from '../../pkg/laurus_wasm.js';
+    import { createLogger } from '../shared/log.js';
+    import {
+      ANALYZER_NAME,
+      buildJapaneseAnalyzer,
+      clearDictionary,
+      DICT_NAME,
+      ensureDictionary,
+    } from '../shared/dictionary.js';
+    import { EMBED_DIM, EMBEDDER_NAME, loadEmbedder } from '../shared/embedder.js';
+
+    /**
+     * OPFS directory holding the persisted index. If a returning
+     * visitor sees stale or empty results after a schema or analyzer
+     * change, the Reset buttons below clear this directory.
+     */
+    const INDEX_NAME = 'ja-demo-index';
+    const EMBED_FIELD = 'embedding';
+
+    const logger = createLogger('log');
+    const statusEl = document.getElementById('status');
+    const docCountEl = document.getElementById('doc-count');
+
+    let index = null;
+    let docCounter = 0;
+
+    async function boot() {
+      try {
+        logger.log('Initializing WASM module...');
+        const t0 = performance.now();
+        await init();
+        logger.ok(`WASM module loaded in ${((performance.now() - t0) / 1000).toFixed(1)}s.`);
+
+        await ensureDictionary({
+          logger,
+          setStatus: (text) => {
+            statusEl.textContent = text;
+          },
+        });
+
+        const embed = await loadEmbedder({ logger });
+        document.getElementById('embed-dim').textContent =
+          `${EMBED_DIM}-dim multilingual MiniLM`;
+
+        const analyzer = await buildJapaneseAnalyzer({ mode: 'normal' });
+        logger.ok('JapaneseAnalyzer built from OPFS-loaded UniDic.');
+        document.getElementById('analyzer-mode').textContent =
+          'JapaneseAnalyzer (UniDic)';
+
+        const schema = new Schema();
+        schema.addAnalyzer(ANALYZER_NAME, analyzer);
+        schema.addTextField('title', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('body', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addEmbedder(EMBEDDER_NAME, {
+          type: 'callback',
+          embed,
+        });
+        schema.addHnswField(
+          EMBED_FIELD,
+          EMBED_DIM,
+          undefined,
+          undefined,
+          undefined,
+          EMBEDDER_NAME,
+        );
+        schema.setDefaultFields(['title', 'body']);
+        logger.log(
+          `Schema: title + body (analyzer="${ANALYZER_NAME}"), `
+          + `${EMBED_FIELD} (HNSW, ${EMBED_DIM}-dim, embedder="${EMBEDDER_NAME}").`,
+        );
+
+        index = await Index.open(INDEX_NAME, schema);
+        logger.ok(`OPFS index "${INDEX_NAME}" opened.`);
+
+        const stats = index.stats();
+        docCounter = stats.documentCount;
+
+        if (docCounter > 0) {
+          logger.ok(
+            `Loaded ${docCounter} document(s) from OPFS — persisted from previous session.`,
+          );
+        } else {
+          const samples = [
+            { id: 'wasm-core', title: 'WebAssembly コア仕様', body: 'WebAssembly はスタックベース仮想マシン向けのバイナリ命令フォーマットで、ブラウザでネイティブに近い性能を発揮します。' },
+            { id: 'wasm-pack', title: 'wasm-pack ビルドツール', body: 'wasm-pack は Rust 製の WebAssembly パッケージのビルドと公開を支援します。npm との連携やバンドラ統合に対応しています。' },
+            { id: 'wasm-bindgen', title: 'wasm-bindgen 連携', body: 'wasm-bindgen は WebAssembly と JavaScript の双方向呼び出しを支えるツールで、DOM API やクロージャの橋渡しを自動生成します。' },
+            { id: 'opfs', title: 'OPFS 永続化ストレージ', body: 'Origin Private File System はブラウザ内で WebAssembly アプリ向けに高速かつ永続的なストレージを提供します。' },
+            { id: 'lindera', title: 'Lindera 形態素解析', body: 'Lindera は Rust 製の形態素解析ライブラリで、UniDic や IPADIC、ko-dic、cc-cedict を用いた日本語・韓国語・中国語の解析に対応します。' },
+            { id: 'unidic', title: 'UniDic 辞書', body: 'UniDic は国立国語研究所が整備する日本語形態素解析辞書で、短単位処理に基づく一貫した語形・品詞情報を提供します。' },
+            { id: 'laurus', title: 'Laurus 検索エンジン', body: 'Laurus は Rust で実装された統合検索ライブラリで、転置索引による全文検索と HNSW などのベクトル検索を組み合わせたハイブリッド検索を提供します。' },
+            { id: 'simd', title: 'WASM SIMD 命令', body: 'WebAssembly SIMD は 128 ビットのベクトル演算命令を追加し、画像処理や機械学習の推論を高速化します。' },
+          ];
+
+          logger.log('Indexing sample documents (embedding auto-computed by engine)...');
+          for (const doc of samples) {
+            await index.putDocument(doc.id, {
+              title: doc.title,
+              body: doc.body,
+              [EMBED_FIELD]: `${doc.title} ${doc.body}`,
+            });
+            docCounter++;
+          }
+          await index.commit();
+          logger.ok(`Indexed ${samples.length} documents and persisted to OPFS.`);
+        }
+
+        docCountEl.textContent = docCounter;
+        statusEl.textContent = 'ready';
+        statusEl.className = 'badge badge-ready';
+
+        for (const el of document.querySelectorAll('input, textarea, button')) {
+          el.disabled = false;
+        }
+        document.getElementById('doc-id').value = `doc${docCounter + 1}`;
+      } catch (e) {
+        logger.err(`Error: ${e}`);
+        statusEl.textContent = 'error';
+        statusEl.className = 'badge badge-error';
+        console.error(e);
+      }
+    }
+
+    async function doSearch() {
+      const query = document.getElementById('query').value.trim();
+      if (!query) {
+        return;
+      }
+
+      const resultsEl = document.getElementById('results');
+      try {
+        const t0 = performance.now();
+        const results = await index.search(query);
+        const elapsed = (performance.now() - t0).toFixed(1);
+
+        logger.log(`"${query}" -> ${results.length} hit(s) in ${elapsed}ms`);
+
+        if (results.length === 0) {
+          resultsEl.innerHTML = '<li class="empty">No results found.</li>';
+          return;
+        }
+
+        resultsEl.innerHTML = results
+          .map((r) => `
+            <li>
+              <div class="meta">
+                <span class="score">${r.score.toFixed(4)}</span>
+              </div>
+              <div class="title">${escapeHtml(r.document?.title ?? r.id)}</div>
+              <div class="body">${escapeHtml(r.document?.body ?? '')}</div>
+            </li>
+          `)
+          .join('');
+      } catch (e) {
+        logger.err(`Search error: ${e}`);
+        console.error(e);
+      }
+    }
+
+    async function addDocument() {
+      const id = document.getElementById('doc-id').value.trim();
+      const title = document.getElementById('doc-title').value.trim();
+      const body = document.getElementById('doc-body').value.trim();
+
+      if (!id || !title) {
+        logger.err('ID and Title are required.');
+        return;
+      }
+
+      try {
+        await index.putDocument(id, {
+          title,
+          body,
+          [EMBED_FIELD]: `${title} ${body}`,
+        });
+        await index.commit();
+        docCounter++;
+
+        docCountEl.textContent = docCounter;
+        logger.ok(`Added "${title}" (${id}) — embedding auto-computed`);
+
+        document.getElementById('doc-id').value = `doc${docCounter + 1}`;
+        document.getElementById('doc-title').value = '';
+        document.getElementById('doc-body').value = '';
+      } catch (e) {
+        logger.err(`Add error: ${e}`);
+        console.error(e);
+      }
+    }
+
+    const KNOWN_INDEX_NAMES = [INDEX_NAME];
+
+    async function deleteAllIndexes() {
+      const root = await navigator.storage.getDirectory();
+      for (const name of KNOWN_INDEX_NAMES) {
+        try {
+          await root.removeEntry(name, { recursive: true });
+          logger.ok(`Removed OPFS index "${name}".`);
+        } catch (e) {
+          if (e?.name !== 'NotFoundError') {
+            logger.err(`Failed to remove "${name}": ${e}`);
+          }
+        }
+      }
+    }
+
+    async function resetIndex() {
+      if (!confirm(
+        'Delete the persisted index and reload? '
+        + 'UniDic and the embedding model stay cached.',
+      )) {
+        return;
+      }
+      try {
+        await deleteAllIndexes();
+        logger.ok('Index reset complete. Reloading...');
+        setTimeout(() => location.reload(), 250);
+      } catch (e) {
+        logger.err(`Reset failed: ${e}`);
+        console.error(e);
+      }
+    }
+
+    async function resetAll() {
+      if (!confirm(
+        'Delete the index AND the UniDic dictionary, then reload? '
+        + 'The ~52 MB dictionary will re-download on next visit.',
+      )) {
+        return;
+      }
+      try {
+        await deleteAllIndexes();
+        if (await clearDictionary()) {
+          logger.ok(`Removed OPFS dictionary "${DICT_NAME}".`);
+        }
+        logger.ok('Full reset complete. Reloading...');
+        setTimeout(() => location.reload(), 250);
+      } catch (e) {
+        logger.err(`Reset failed: ${e}`);
+        console.error(e);
+      }
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    document.getElementById('search-btn').addEventListener('click', doSearch);
+    document.getElementById('query').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        doSearch();
+      }
+    });
+    document.getElementById('add-btn').addEventListener('click', addDocument);
+    document.getElementById('reset-index-btn').addEventListener('click', resetIndex);
+    document.getElementById('reset-all-btn').addEventListener('click', resetAll);
+
+    boot();
+  </script>
+</body>
+</html>
