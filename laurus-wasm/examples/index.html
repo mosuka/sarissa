@@ -286,7 +286,16 @@
     const DICT_NAME = 'ipadic';
     const DICT_URL = './dict/lindera-ipadic.zip';
     const ANALYZER_NAME = 'ja-ipadic';
-    const INDEX_NAME = 'ja-demo-index';
+    /**
+     * Bump the suffix whenever the persisted schema changes (field
+     * dimensionality, vector index type, etc.). Without a bump,
+     * returning visitors hit "Dimension mismatch: stored N, config M"
+     * because Index.open replays an OPFS-persisted index whose stored
+     * shape no longer matches the schema. v2 covers the addition of
+     * the 384-dim HNSW embedding field on top of the v1 (lexical-only)
+     * shape introduced with the OPFS demo.
+     */
+    const INDEX_NAME = 'ja-demo-index-v2';
 
     /** Multilingual MiniLM (paraphrase-multilingual-MiniLM-L12-v2) — 384-dim
      *  text embeddings that work cleanly for both Japanese and English
