@@ -24,17 +24,20 @@ python3 -m http.server 8080
 
 ## このサンプルでできること
 
-- OPFS 永続化された geo インデックス（`geo-demo-index-v1`）を
-  作成し、初回アクセス時に東京の観光スポット約 14 件を投入します
+- OPFS 永続化された geo インデックス（`geo-demo-index`）を作成し、
+  初回アクセス時に東京の観光スポット約 14 件を投入します
 - スキーマは日本語形態素解析対応のテキストフィールド 3 種
   （`title`、`description`、`category`）、geo フィールド 1 種
   （`location` — BKD ツリーでインデックス化）、HNSW ベクトル
   フィールド 1 種（`embedding`、multilingual MiniLM 384 次元）
 - 検索ボックスは統合クエリ DSL の文字列を生成します。
-  *Restrict to current map view* が ON のとき、入力クエリは括弧で
+  *Filter by current map view* が ON のとき、入力クエリは括弧で
   囲まれ、現在の Leaflet ビューから生成した
   `location:geo_bbox(min_lat, min_lon, max_lat, max_lon)` と AND
   結合されます
+- 地図のピンは検索結果と連動し、マッチしなかったポイントは
+  検索のたびに地図から取り除かれるため、表示されているピンは
+  常に結果リストと一致します
 - 結果リストの項目をクリックすると、地図上の該当マーカーが
   展開され、ビューがそのマーカーへパンします
 

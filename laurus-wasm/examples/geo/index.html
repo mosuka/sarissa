@@ -85,13 +85,16 @@
         <input type="text" id="query" placeholder="例: 公園 / 浅草 / embedding:&quot;夜景&quot;" disabled>
         <button id="search-btn" disabled>Search</button>
       </div>
-      <div class="row" style="margin-bottom: 0.5rem;">
+      <div class="row">
         <label class="toggle">
           <input type="checkbox" id="restrict-bbox" checked disabled>
-          Restrict to current map view
-          (<code>location:geo_bbox(...)</code>)
+          Filter by current map view
         </label>
       </div>
+      <p class="dsl-hint">
+        Adds <code>location:geo_bbox(min_lat, min_lon, max_lat, max_lon)</code>
+        (derived from the current Leaflet bounds) to your query.
+      </p>
       <ul class="results" id="results">
         <li class="empty">Loading sample data…</li>
       </ul>
@@ -324,6 +327,25 @@
     }
 
     /**
+     * Reconcile the markers shown on the map with the current
+     * search hits. Markers in `resultIds` are added if missing,
+     * everything else is removed. Keeping the marker objects in
+     * `markers` (only toggling map membership) preserves popup
+     * state and lets `highlightMarker` keep working after the
+     * marker is re-added.
+     */
+    function syncMarkersWithResults(resultIds) {
+      for (const [id, marker] of markers) {
+        const inResults = resultIds.has(id);
+        if (inResults && !map.hasLayer(marker)) {
+          map.addLayer(marker);
+        } else if (!inResults && map.hasLayer(marker)) {
+          map.removeLayer(marker);
+        }
+      }
+    }
+
+    /**
      * Build a unified DSL query string. The text portion (if any)
      * is left untouched so users can still write
      * `title:...` / `embedding:"..."`. The bbox clause is appended
@@ -360,6 +382,9 @@
         const results = await index.search(query);
         const elapsed = (performance.now() - t0).toFixed(1);
         logger.log(`"${query}" -> ${results.length} hit(s) in ${elapsed}ms`);
+
+        const resultIds = new Set(results.map((r) => r.id));
+        syncMarkersWithResults(resultIds);
 
         if (results.length === 0) {
           resultsEl.innerHTML = '<li class="empty">No results found in the current view.</li>';
