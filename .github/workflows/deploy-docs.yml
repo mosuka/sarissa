@@ -6,7 +6,10 @@ on:
       - main
     paths:
       - 'docs/**'
+      - 'laurus/**'
       - 'laurus-wasm/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
