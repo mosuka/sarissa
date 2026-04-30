@@ -37,6 +37,9 @@ python3 -m http.server 8080
 - Map markers track the search hits — non-matching points are
   removed from the map after each query, so the visible pins always
   mirror the result list
+- Panning or zooming the map re-runs the search automatically
+  (only while *Filter by current map view* is on), so the bbox
+  clause stays in sync with what the user is looking at
 - A clickable result list that pans the map and opens the popup of
   the corresponding marker
 
