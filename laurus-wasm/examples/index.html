@@ -207,11 +207,13 @@
       <div class="stats">
         <div>Documents: <span id="doc-count">0</span></div>
         <div>Analyzer: <span id="analyzer-mode">loading...</span></div>
+        <div>Embedder: <span id="embed-dim">loading...</span></div>
         <div>Storage: <span id="storage-mode">OPFS</span></div>
       </div>
       <p class="dsl-hint">
-        On first visit, the IPADIC dictionary (~16 MB) is fetched from the
-        same origin and cached in OPFS for offline reuse.
+        On first visit the demo fetches the IPADIC dictionary (~16 MB)
+        and the multilingual MiniLM embedding model (~120 MB). Both are
+        cached for offline reuse.
       </p>
     </div>
 
@@ -220,8 +222,8 @@
       <h2>Search — Unified Query DSL</h2>
       <p class="dsl-hint">
         Lexical: <code>形態素</code> <code>title:検索</code> <code>"日本語"</code> &nbsp;
-        Boolean: <code>形態素 AND 解析</code> <code>+辞書 -英語</code> &nbsp;
-        Phrase: <code>"形態素 解析"~3</code>
+        Vector: <code>embedding:"ブラウザで動く検索"</code> &nbsp;
+        Hybrid: <code>形態素 embedding:"日本語の検索"</code>
       </p>
       <div class="search-box">
         <input type="text" id="query" placeholder='例: 形態素 / title:検索 / "日本語"' disabled>
@@ -277,6 +279,7 @@
       hasDictionary,
       loadDictionaryFiles,
     } from '../pkg/opfs.js';
+    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
 
     /** Dictionary configuration. The zip is fetched from the same origin
      *  to avoid CORS issues with cross-origin GitHub Releases assets. */
@@ -285,8 +288,18 @@
     const ANALYZER_NAME = 'ja-ipadic';
     const INDEX_NAME = 'ja-demo-index';
 
+    /** Multilingual MiniLM (paraphrase-multilingual-MiniLM-L12-v2) — 384-dim
+     *  text embeddings that work cleanly for both Japanese and English
+     *  without requiring per-call prefixes. The model is downloaded
+     *  through Hugging Face Transformers.js on first use and cached by
+     *  the browser. ~120 MB compressed. */
+    const EMBEDDER_NAME = 'multilingual-minilm';
+    const EMBED_FIELD = 'embedding';
+    const EMBED_DIM = 384;
+
     let index = null;
     let docCounter = 0;
+    let embedder = null;
 
     // ------------------------------------------------------------------
     // Logging
@@ -330,6 +343,22 @@
       appendLog(`Dictionary downloaded and cached in OPFS in ${elapsed}s.`, 'ok');
     }
 
+    /**
+     * Load the multilingual MiniLM model via Transformers.js. The first
+     * call triggers a ~120 MB download that the browser caches.
+     */
+    async function ensureEmbedder() {
+      appendLog('Loading embedding model (paraphrase-multilingual-MiniLM-L12-v2)...');
+      const t0 = performance.now();
+      embedder = await pipeline(
+        'feature-extraction',
+        'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+      );
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      appendLog(`Embedding model ready in ${elapsed}s.`, 'ok');
+      document.getElementById('embed-dim').textContent = `${EMBED_DIM}-dim multilingual MiniLM`;
+    }
+
     // ------------------------------------------------------------------
     // Boot
     // ------------------------------------------------------------------
@@ -344,7 +373,11 @@
         // 1. Make sure IPADIC bytes are available in OPFS.
         await ensureDictionary();
 
-        // 2. Read the eight dictionary files back as Uint8Arrays and
+        // 2. Load the multilingual MiniLM model for query / passage
+        //    embeddings. The browser caches the model after first load.
+        await ensureEmbedder();
+
+        // 3. Read the eight dictionary files back as Uint8Arrays and
         //    construct the JapaneseAnalyzer in WASM.
         const files = await loadDictionaryFiles(DICT_NAME);
         const ja = JapaneseAnalyzer.fromBytes(
@@ -361,16 +394,25 @@
         appendLog('JapaneseAnalyzer built from OPFS-loaded IPADIC.', 'ok');
         document.getElementById('analyzer-mode').textContent = 'JapaneseAnalyzer (IPADIC)';
 
-        // 3. Build schema. Both title and body are tokenized with the
-        //    runtime-registered Japanese analyzer.
+        // 4. Build schema. title / body are tokenized with the
+        //    runtime-registered Japanese analyzer; embedding is an HNSW
+        //    vector field auto-populated by the callback embedder.
         const schema = new Schema();
         schema.addAnalyzer(ANALYZER_NAME, ja);
         schema.addTextField('title', undefined, undefined, undefined, ANALYZER_NAME);
         schema.addTextField('body', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addEmbedder(EMBEDDER_NAME, {
+          type: 'callback',
+          embed: async (text) => {
+            const out = await embedder(text, { pooling: 'mean', normalize: true });
+            return Array.from(out.data);
+          },
+        });
+        schema.addHnswField(EMBED_FIELD, EMBED_DIM, undefined, undefined, undefined, EMBEDDER_NAME);
         schema.setDefaultFields(['title', 'body']);
-        appendLog(`Schema: title + body (analyzer="${ANALYZER_NAME}").`);
+        appendLog(`Schema: title + body (analyzer="${ANALYZER_NAME}"), ${EMBED_FIELD} (HNSW, ${EMBED_DIM}-dim, embedder="${EMBEDDER_NAME}").`);
 
-        // 4. Open OPFS-persistent index (data survives page reloads).
+        // 5. Open OPFS-persistent index (data survives page reloads).
         index = await Index.open(INDEX_NAME, schema);
         appendLog(`OPFS index "${INDEX_NAME}" opened.`, 'ok');
 
@@ -392,9 +434,15 @@
             { id: 'simd', title: 'WASM SIMD 命令', body: 'WebAssembly SIMD は 128 ビットのベクトル演算命令を追加し、画像処理や機械学習の推論を高速化します。' },
           ];
 
-          appendLog('Indexing sample documents...');
+          appendLog('Indexing sample documents (embedding auto-computed by engine)...');
           for (const doc of samples) {
-            await index.putDocument(doc.id, { title: doc.title, body: doc.body });
+            // Pass text in the embedding field — the engine invokes the
+            // registered callback embedder during ingestion.
+            await index.putDocument(doc.id, {
+              title: doc.title,
+              body: doc.body,
+              [EMBED_FIELD]: `${doc.title} ${doc.body}`,
+            });
             docCounter++;
           }
           await index.commit();
@@ -475,12 +523,16 @@
       }
 
       try {
-        await index.putDocument(id, { title, body });
+        await index.putDocument(id, {
+          title,
+          body,
+          [EMBED_FIELD]: `${title} ${body}`,
+        });
         await index.commit();
         docCounter++;
 
         document.getElementById('doc-count').textContent = docCounter;
-        appendLog(`Added "${title}" (${id})`, 'ok');
+        appendLog(`Added "${title}" (${id}) — embedding auto-computed`, 'ok');
 
         // Reset form
         document.getElementById('doc-id').value = `doc${docCounter + 1}`;
