@@ -30,10 +30,10 @@ python3 -m http.server 8080
   (`location` — indexed via the BKD tree) and one HNSW vector field
   (`embedding`, 384-dim multilingual MiniLM)
 - A search box that builds a unified DSL string. With *Filter by
-  current map view* turned on, the user query is wrapped in
-  parentheses and AND-combined with
-  `location:geo_bbox(min_lat, min_lon, max_lat, max_lon)` derived
-  from the current Leaflet bounds
+  current map view* turned on, the demo emits
+  `+(<query>) +location:geo_bbox(min_lat, min_lon, max_lat, max_lon)`
+  — both clauses are marked `+` (required) so a document has to
+  match the text *and* sit inside the current Leaflet bounds
 - Map markers track the search hits — non-matching points are
   removed from the map after each query, so the visible pins always
   mirror the result list

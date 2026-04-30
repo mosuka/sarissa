@@ -31,10 +31,11 @@ python3 -m http.server 8080
   （`location` — BKD ツリーでインデックス化）、HNSW ベクトル
   フィールド 1 種（`embedding`、multilingual MiniLM 384 次元）
 - 検索ボックスは統合クエリ DSL の文字列を生成します。
-  *Filter by current map view* が ON のとき、入力クエリは括弧で
-  囲まれ、現在の Leaflet ビューから生成した
-  `location:geo_bbox(min_lat, min_lon, max_lat, max_lon)` と AND
-  結合されます
+  *Filter by current map view* が ON のときは
+  `+(<クエリ>) +location:geo_bbox(min_lat, min_lon, max_lat, max_lon)`
+  という文字列を投げます。両方の clause に `+`（必須）を付けて
+  いるため、テキスト条件と現在の Leaflet ビューポート条件の
+  どちらも満たすドキュメントだけがマッチします
 - 地図のピンは検索結果と連動し、マッチしなかったポイントは
   検索のたびに地図から取り除かれるため、表示されているピンは
   常に結果リストと一致します
