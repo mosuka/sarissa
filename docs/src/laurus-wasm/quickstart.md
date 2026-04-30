@@ -62,6 +62,60 @@ await index.commit();
 // On next page load, Index.open("my-index") will restore the data
 ```
 
+## Japanese Morphological Search
+
+Browser WASM cannot use a filesystem path for the Lindera dictionary,
+so build the analyzer from raw IPADIC bytes loaded from OPFS.
+
+```javascript
+import init, { Index, Schema, JapaneseAnalyzer } from 'laurus-wasm';
+import {
+  downloadDictionary,
+  loadDictionaryFiles,
+  hasDictionary,
+} from 'laurus-wasm/opfs';
+
+await init();
+
+// 1. Cache the IPADIC archive in OPFS on first visit. The zip must be
+//    served from the same origin as the page — GitHub Releases assets
+//    are blocked by CORS. (~16 MB compressed, ~58 MB extracted.)
+if (!(await hasDictionary("ipadic"))) {
+  await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic", {
+    onProgress: ({ phase, loaded, total }) => console.log(phase, loaded, total),
+  });
+}
+
+// 2. Read the eight component files back and construct the analyzer.
+const f = await loadDictionaryFiles("ipadic");
+const ja = JapaneseAnalyzer.fromBytes(
+  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
+  f.dictWords, f.matrixMtx, f.charDef, f.unk,
+  "normal",
+);
+
+// 3. Register the analyzer on the schema and reference it from text fields.
+const schema = new Schema();
+schema.addAnalyzer("ja-ipadic", ja);
+schema.addTextField("title", undefined, undefined, undefined, "ja-ipadic");
+schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
+schema.setDefaultFields(["title", "body"]);
+
+const index = await Index.create(schema);
+
+await index.putDocument("doc1", {
+  title: "形態素解析",
+  body: "Lindera は Rust 製の形態素解析ライブラリです。",
+});
+await index.commit();
+
+const results = await index.search("形態素");
+console.log(results[0].document.title); // "形態素解析"
+```
+
+See the [API Reference](api_reference.md#japaneseanalyzer) for the full
+`JapaneseAnalyzer.fromBytes` signature and the OPFS helper API.
+
 ## Vector Search
 
 ```javascript
