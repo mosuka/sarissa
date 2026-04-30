@@ -234,6 +234,20 @@
       </ul>
     </div>
 
+    <!-- Maintenance -->
+    <div class="card">
+      <h2>Maintenance</h2>
+      <p class="dsl-hint">
+        Delete persisted state if you have stale data from a previous
+        demo version (for example, an older schema with a different
+        vector dimensionality). Reloads the page after clearing.
+      </p>
+      <div class="row">
+        <button id="reset-index-btn" type="button" onclick="resetIndex()" disabled>Reset index</button>
+        <button id="reset-all-btn" type="button" onclick="resetAll()" disabled>Reset everything (index + dictionary)</button>
+      </div>
+    </div>
+
     <!-- Add Document -->
     <div class="card">
       <h2>Add Document</h2>
@@ -278,6 +292,7 @@
       downloadDictionary,
       hasDictionary,
       loadDictionaryFiles,
+      removeDictionary,
     } from '../pkg/opfs.js';
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
 
@@ -286,7 +301,16 @@
     const DICT_NAME = 'ipadic';
     const DICT_URL = './dict/lindera-ipadic.zip';
     const ANALYZER_NAME = 'ja-ipadic';
-    const INDEX_NAME = 'ja-demo-index';
+    /**
+     * Bump the suffix whenever the persisted schema changes (field
+     * dimensionality, vector index type, etc.). Without a bump,
+     * returning visitors hit "Dimension mismatch: stored N, config M"
+     * because Index.open replays an OPFS-persisted index whose stored
+     * shape no longer matches the schema. v2 covers the addition of
+     * the 384-dim HNSW embedding field on top of the v1 (lexical-only)
+     * shape introduced with the OPFS demo.
+     */
+    const INDEX_NAME = 'ja-demo-index-v2';
 
     /** Multilingual MiniLM (paraphrase-multilingual-MiniLM-L12-v2) — 384-dim
      *  text embeddings that work cleanly for both Japanese and English
@@ -541,6 +565,71 @@
 
       } catch (e) {
         appendLog(`Add error: ${e}`, 'err');
+        console.error(e);
+      }
+    };
+
+    // ------------------------------------------------------------------
+    // Maintenance — delete persisted OPFS state and reload
+    // ------------------------------------------------------------------
+    /**
+     * Index names that the demo has persisted across versions. Listed
+     * explicitly so we can clean up legacy directories left over from
+     * earlier demo iterations (different vector dimensionality, etc.).
+     */
+    const KNOWN_INDEX_NAMES = ['ja-demo-index', 'ja-demo-index-v2'];
+
+    /**
+     * Remove all known demo index directories from the OPFS root.
+     * The dictionary cache is preserved.
+     */
+    async function deleteAllIndexes() {
+      const root = await navigator.storage.getDirectory();
+      for (const name of KNOWN_INDEX_NAMES) {
+        try {
+          await root.removeEntry(name, { recursive: true });
+          appendLog(`Removed OPFS index "${name}".`, 'ok');
+        } catch (e) {
+          // Directory may not exist (e.g. v1 was never created).
+          if (e?.name !== 'NotFoundError') {
+            appendLog(`Failed to remove "${name}": ${e}`, 'err');
+          }
+        }
+      }
+    }
+
+    window.resetIndex = async function() {
+      if (!confirm('Delete the persisted index and reload? IPADIC and the embedding model stay cached.')) {
+        return;
+      }
+      try {
+        await deleteAllIndexes();
+        appendLog('Index reset complete. Reloading...', 'ok');
+        setTimeout(() => location.reload(), 250);
+      } catch (e) {
+        appendLog(`Reset failed: ${e}`, 'err');
+        console.error(e);
+      }
+    };
+
+    window.resetAll = async function() {
+      if (!confirm('Delete the index AND the IPADIC dictionary, then reload? The 16 MB dictionary will re-download on next visit.')) {
+        return;
+      }
+      try {
+        await deleteAllIndexes();
+        try {
+          await removeDictionary(DICT_NAME);
+          appendLog(`Removed OPFS dictionary "${DICT_NAME}".`, 'ok');
+        } catch (e) {
+          if (e?.name !== 'NotFoundError') {
+            appendLog(`Failed to remove dictionary: ${e}`, 'err');
+          }
+        }
+        appendLog('Full reset complete. Reloading...', 'ok');
+        setTimeout(() => location.reload(), 250);
+      } catch (e) {
+        appendLog(`Reset failed: ${e}`, 'err');
         console.error(e);
       }
     };
