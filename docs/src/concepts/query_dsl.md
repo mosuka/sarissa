@@ -45,7 +45,9 @@ title:hello AND body:world
 title:hello OR title:goodbye
 ```
 
-Space-separated clauses without an explicit operator use implicit boolean (behaves like OR with scoring).
+`AND` is symmetric — it makes the clauses on **both** sides required (`Must`). For example, `title:hello AND body:world` returns only documents that match **both** clauses. The same is true for chains: `a AND b AND c` requires all three. A clause that was already explicitly marked with `+` (required) or `-` (prohibited) keeps that intent — `AND` does not override an explicit prefix.
+
+Space-separated clauses without an explicit operator use implicit boolean (behaves like OR with scoring), so `a b AND c` reads as "optionally match `a`, and require both `b` and `c`".
 
 ### Required / Prohibited Clauses
 

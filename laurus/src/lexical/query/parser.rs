@@ -219,17 +219,32 @@ impl LexicalQueryParser {
             match inner_pair.as_rule() {
                 Rule::boolean_op => {
                     let op = inner_pair.as_str();
-                    current_occur = match op.to_uppercase().as_str() {
+                    let new_occur = match op.to_uppercase().as_str() {
                         "AND" => Occur::Must,
                         "OR" => Occur::Should,
                         _ => Occur::Should,
                     };
+                    current_occur = new_occur;
+                    // `AND` is symmetric: it makes both the preceding and the
+                    // following clause required. The preceding clause has
+                    // already been pushed under the default `Should` occur,
+                    // so retroactively promote it to `Must` here. Skip the
+                    // promotion if the previous clause was explicitly marked
+                    // with `+` (already `Must`) or `-` (`MustNot`) so we
+                    // don't override the user's intent.
+                    if matches!(new_occur, Occur::Must)
+                        && let Some(last) = terms.last_mut()
+                        && matches!(last.0, Occur::Should)
+                    {
+                        last.0 = Occur::Must;
+                    }
                 }
                 Rule::clause => {
                     let (occur, query) = self.parse_clause(inner_pair, current_occur)?;
                     terms.push((occur, query));
-                    // Reset to default so that the operator only applies to the
-                    // immediately following clause (e.g. "a AND b c" → a Must, b Must, c default).
+                    // Reset to default so that the operator only applies to
+                    // the clauses on either side of it (e.g. `a AND b c` →
+                    // `a Must`, `b Must`, `c Should`).
                     current_occur = self.default_occur;
                 }
                 _ => {}
@@ -904,6 +919,93 @@ mod tests {
         let parser = create_test_parser().with_default_field("content");
         let query = parser.parse("hello AND world").unwrap();
         assert!(format!("{query:?}").contains("BooleanQuery"));
+    }
+
+    /// Helper that downcasts the parsed query to a `BooleanQuery`
+    /// and returns the per-clause occurs in source order.
+    fn parsed_occurs(query_str: &str) -> Vec<Occur> {
+        let parser = create_test_parser().with_default_field("content");
+        let query = parser.parse(query_str).unwrap();
+        let bool_q = query
+            .as_any()
+            .downcast_ref::<crate::lexical::query::BooleanQuery>()
+            .unwrap_or_else(|| panic!("expected BooleanQuery for '{query_str}', got {query:?}"));
+        bool_q.clauses().iter().map(|c| c.occur).collect()
+    }
+
+    #[test]
+    fn test_and_is_symmetric() {
+        // `a AND b` should mark BOTH clauses as Must — not just the
+        // right-hand side. Before the fix the left clause stayed at
+        // the default `Should`, which made `(text) AND geo_bbox(...)`
+        // match every doc inside the bbox regardless of the text.
+        assert_eq!(
+            parsed_occurs("hello AND world"),
+            vec![Occur::Must, Occur::Must],
+        );
+    }
+
+    #[test]
+    fn test_and_chain_promotes_all_to_must() {
+        // `a AND b AND c` → all three required.
+        assert_eq!(
+            parsed_occurs("hello AND world AND foo"),
+            vec![Occur::Must, Occur::Must, Occur::Must],
+        );
+    }
+
+    #[test]
+    fn test_and_then_default_clause_keeps_default() {
+        // `a AND b c`: the AND only governs the pair around it.
+        // The trailing `c` (with no operator) keeps the default
+        // (Should) — this matches the behaviour described in the
+        // inline parser comment.
+        assert_eq!(
+            parsed_occurs("hello AND world foo"),
+            vec![Occur::Must, Occur::Must, Occur::Should],
+        );
+    }
+
+    #[test]
+    fn test_or_does_not_change_should() {
+        // `a OR b` is the default operator anyway: both Should.
+        assert_eq!(
+            parsed_occurs("hello OR world"),
+            vec![Occur::Should, Occur::Should],
+        );
+    }
+
+    #[test]
+    fn test_explicit_required_clause_is_preserved_through_and() {
+        // `+a AND b`: the explicit `+` already marked `a` as Must,
+        // so the AND promotion is a no-op for it. `b` becomes Must
+        // through the normal AND path.
+        assert_eq!(
+            parsed_occurs("+hello AND world"),
+            vec![Occur::Must, Occur::Must],
+        );
+    }
+
+    #[test]
+    fn test_explicit_prohibited_clause_survives_and() {
+        // `-a AND b`: do not silently turn the prohibited clause
+        // into a required one. `a` stays MustNot, `b` is promoted
+        // to Must by the AND.
+        assert_eq!(
+            parsed_occurs("-hello AND world"),
+            vec![Occur::MustNot, Occur::Must],
+        );
+    }
+
+    #[test]
+    fn test_and_promotes_only_immediate_predecessor() {
+        // `a b AND c`: only the clause directly to the left of
+        // the AND is promoted to Must. The earlier `a` stays at
+        // the default `Should`.
+        assert_eq!(
+            parsed_occurs("hello world AND foo"),
+            vec![Occur::Should, Occur::Must, Occur::Must],
+        );
     }
 
     #[test]
