@@ -77,9 +77,9 @@
         Text input is wrapped in the unified DSL. Examples:
         <code>東京</code> <code>title:浅草寺</code>
         <code>embedding:"夜景がきれいなスポット"</code>.
-        Toggle <em>Restrict to map view</em> to AND the query with a
-        <code>location:geo_bbox(...)</code> clause derived from the
-        current map viewport.
+        With <em>Filter by current map view</em> on, the demo emits
+        <code>+(query) +location:geo_bbox(...)</code> so a document
+        must match both the text and the current map viewport.
       </p>
       <div class="search-box">
         <input type="text" id="query" placeholder="例: 公園 / 浅草 / embedding:&quot;夜景&quot;" disabled>
@@ -364,8 +364,16 @@
     /**
      * Build a unified DSL query string. The text portion (if any)
      * is left untouched so users can still write
-     * `title:...` / `embedding:"..."`. The bbox clause is appended
-     * with AND when the restrict-to-view toggle is on.
+     * `title:...` / `embedding:"..."`.
+     *
+     * When the restrict-to-view toggle is on, the text query and
+     * the bbox clause are combined with `+` (required) prefixes
+     * rather than the `AND` keyword. The DSL parser's `AND` only
+     * promotes the *following* clause to Must — the preceding
+     * clause stays at the default Should — so writing
+     * `(text) AND geo_bbox(...)` would let any document inside
+     * the bbox match regardless of the text. Explicit `+` makes
+     * both sides required, which is what users expect.
      */
     function buildQuery(rawText) {
       const text = rawText.trim();
@@ -383,7 +391,7 @@
       if (!text) {
         return bboxClause;
       }
-      return `(${text}) AND ${bboxClause}`;
+      return `+(${text}) +${bboxClause}`;
     }
 
     async function doSearch() {
