@@ -109,7 +109,61 @@ impl JapaneseAnalyzer {
     /// ```
     pub fn new(mode_str: &str, dict_uri: &str, user_dict_uri: Option<&str>) -> Result<Self> {
         let tokenizer = Arc::new(LinderaTokenizer::new(mode_str, dict_uri, user_dict_uri)?);
-        let analyzer = PipelineAnalyzer::new(tokenizer)
+        Ok(Self {
+            inner: Self::build_pipeline(tokenizer),
+        })
+    }
+
+    /// Create a Japanese analyzer from raw Lindera dictionary bytes.
+    ///
+    /// Bypasses filesystem-based dictionary loading. Useful for browser
+    /// WASM where the dictionary has been fetched and stored in OPFS or
+    /// any other in-memory source. The pipeline (NFKC, iteration marks,
+    /// Lindera, lowercase, Japanese stop words) is identical to
+    /// [`Self::new`].
+    ///
+    /// # Arguments
+    ///
+    /// * `mode_str` - Lindera segmentation mode: `"normal"`, `"search"`,
+    ///   or `"decompose"`.
+    /// * `metadata` / `dict_da` / `dict_vals` / `dict_words_idx` /
+    ///   `dict_words` / `matrix_mtx` / `char_def` / `unk` - the eight
+    ///   files that make up a built Lindera dictionary directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any component fails to deserialize or the
+    /// mode string is invalid.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_bytes(
+        mode_str: &str,
+        metadata: &[u8],
+        dict_da: &[u8],
+        dict_vals: &[u8],
+        dict_words_idx: &[u8],
+        dict_words: &[u8],
+        matrix_mtx: &[u8],
+        char_def: &[u8],
+        unk: &[u8],
+    ) -> Result<Self> {
+        let tokenizer = Arc::new(LinderaTokenizer::from_bytes(
+            mode_str,
+            metadata,
+            dict_da,
+            dict_vals,
+            dict_words_idx,
+            dict_words,
+            matrix_mtx,
+            char_def,
+            unk,
+        )?);
+        Ok(Self {
+            inner: Self::build_pipeline(tokenizer),
+        })
+    }
+
+    fn build_pipeline(tokenizer: Arc<LinderaTokenizer>) -> PipelineAnalyzer {
+        PipelineAnalyzer::new(tokenizer)
             .add_char_filter(Arc::new(UnicodeNormalizationCharFilter::new(
                 NormalizationForm::NFKC,
             )))
@@ -118,9 +172,7 @@ impl JapaneseAnalyzer {
             .add_filter(Arc::new(StopFilter::with_stop_words(
                 DEFAULT_JAPANESE_STOP_WORDS_SET.clone(),
             )))
-            .with_name("japanese".to_string());
-
-        Ok(Self { inner: analyzer })
+            .with_name("japanese".to_string())
     }
 }
 

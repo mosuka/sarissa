@@ -97,25 +97,37 @@ pub fn create_analyzer_by_name(name: &str) -> Result<Arc<dyn Analyzer>> {
 /// Resolution order:
 /// 1. If `spec` is [`AnalyzerSpec::Builtin`], construct the
 ///    parameterized built-in directly.
-/// 2. If `spec` is [`AnalyzerSpec::Named`], try the name as a
-///    parameter-less built-in via [`create_analyzer_by_name`].
-/// 3. On `AnalyzerNotFound`, fall back to a user-defined
-///    [`AnalyzerDefinition`] in `schema_analyzers`.
+/// 2. If `spec` is [`AnalyzerSpec::Named`]:
+///    1. Look up `runtime_analyzers` first (pre-constructed analyzers
+///       registered on the engine, e.g. from byte arrays in a WASM
+///       environment).
+///    2. Try the name as a parameter-less built-in via
+///       [`create_analyzer_by_name`].
+///    3. Fall back to a user-defined [`AnalyzerDefinition`] in
+///       `schema_analyzers`.
 ///
 /// # Arguments
 ///
 /// * `spec` - The analyzer reference from a text field option.
 /// * `schema_analyzers` - Custom analyzer definitions registered on the
-///   schema.
+///   schema (serialized form).
+/// * `runtime_analyzers` - Pre-constructed analyzers registered at
+///   runtime via [`EngineBuilder::register_runtime_analyzer`]. These
+///   take precedence over named built-ins, so a runtime registration
+///   under `"keyword"` would shadow the built-in. Pass an empty map
+///   when no runtime analyzers are needed.
 ///
 /// # Errors
 ///
-/// Returns an error if no resolution path applies (unknown name and no
-/// matching schema entry) or if dictionary loading fails for a built-in
-/// preset.
+/// Returns an error if no resolution path applies (unknown name with
+/// no runtime, built-in, or schema entry) or if dictionary loading
+/// fails for a built-in preset.
+///
+/// [`EngineBuilder::register_runtime_analyzer`]: crate::engine::EngineBuilder::register_runtime_analyzer
 pub fn create_analyzer_from_spec(
     spec: &AnalyzerSpec,
     schema_analyzers: &std::collections::HashMap<String, AnalyzerDefinition>,
+    runtime_analyzers: &std::collections::HashMap<String, Arc<dyn Analyzer>>,
 ) -> Result<Arc<dyn Analyzer>> {
     match spec {
         AnalyzerSpec::Builtin(BuiltinAnalyzerSpec::Japanese {
@@ -127,18 +139,23 @@ pub fn create_analyzer_from_spec(
             dict,
             user_dict.as_deref(),
         )?)),
-        AnalyzerSpec::Named(name) => match create_analyzer_by_name(name) {
-            Ok(analyzer) => Ok(analyzer),
-            Err(_) => {
-                let def = schema_analyzers.get(name).ok_or_else(|| {
-                    LaurusError::invalid_argument(format!(
-                        "Unknown analyzer '{name}': not a built-in and not defined in \
-                         schema.analyzers"
-                    ))
-                })?;
-                create_analyzer_from_definition(name, def)
+        AnalyzerSpec::Named(name) => {
+            if let Some(analyzer) = runtime_analyzers.get(name) {
+                return Ok(analyzer.clone());
             }
-        },
+            match create_analyzer_by_name(name) {
+                Ok(analyzer) => Ok(analyzer),
+                Err(_) => {
+                    let def = schema_analyzers.get(name).ok_or_else(|| {
+                        LaurusError::invalid_argument(format!(
+                            "Unknown analyzer '{name}': not registered at runtime, \
+                             not a built-in, and not defined in schema.analyzers"
+                        ))
+                    })?;
+                    create_analyzer_from_definition(name, def)
+                }
+            }
+        }
     }
 }
 
@@ -299,7 +316,8 @@ mod tests {
             dict: "embedded://ipadic".into(),
             user_dict: None,
         });
-        let analyzer = create_analyzer_from_spec(&spec, &Default::default()).unwrap();
+        let analyzer =
+            create_analyzer_from_spec(&spec, &Default::default(), &Default::default()).unwrap();
         assert_eq!(analyzer.name(), "japanese");
     }
 
@@ -315,15 +333,46 @@ mod tests {
                 token_filters: vec![],
             },
         );
-        let analyzer = create_analyzer_from_spec(&spec, &analyzers).unwrap();
+        let analyzer = create_analyzer_from_spec(&spec, &analyzers, &Default::default()).unwrap();
         assert_eq!(analyzer.name(), "my_custom");
     }
 
     #[test]
     fn test_create_named_from_spec_resolves_builtin() {
         let spec = AnalyzerSpec::Named("standard".into());
-        let analyzer = create_analyzer_from_spec(&spec, &Default::default()).unwrap();
+        let analyzer =
+            create_analyzer_from_spec(&spec, &Default::default(), &Default::default()).unwrap();
         assert_eq!(analyzer.name(), "standard");
+    }
+
+    #[test]
+    fn test_runtime_analyzer_takes_precedence() {
+        // Register a custom analyzer under a name that overlaps with a
+        // built-in to confirm runtime resolution beats built-in lookup.
+        let custom: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+        let mut runtime = std::collections::HashMap::new();
+        runtime.insert("standard".to_string(), custom.clone());
+
+        let spec = AnalyzerSpec::Named("standard".into());
+        let resolved = create_analyzer_from_spec(&spec, &Default::default(), &runtime).unwrap();
+
+        // The runtime registration (KeywordAnalyzer) wins over the
+        // built-in StandardAnalyzer.
+        assert_eq!(resolved.name(), "keyword");
+        assert!(Arc::ptr_eq(&resolved, &custom));
+    }
+
+    #[test]
+    fn test_runtime_analyzer_named_lookup() {
+        // A name not present anywhere except the runtime registry must
+        // resolve via the runtime registry.
+        let custom: Arc<dyn Analyzer> = Arc::new(KeywordAnalyzer::new());
+        let mut runtime = std::collections::HashMap::new();
+        runtime.insert("ja-ipadic".to_string(), custom.clone());
+
+        let spec = AnalyzerSpec::Named("ja-ipadic".into());
+        let resolved = create_analyzer_from_spec(&spec, &Default::default(), &runtime).unwrap();
+        assert!(Arc::ptr_eq(&resolved, &custom));
     }
 
     #[test]
