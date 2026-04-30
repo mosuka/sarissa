@@ -68,7 +68,11 @@ impl PhpSchema {
     /// * `stored` - Whether the original value is retrievable (default: true).
     /// * `indexed` - Whether the field is searchable (default: true).
     /// * `term_vectors` - Whether term position information is stored (default: false).
-    /// * `analyzer` - Named analyzer to use (optional).
+    /// * `analyzer` - Optional analyzer name. For parameter-less built-in
+    ///   analyzers (`"standard"`, `"english"`, `"keyword"`, `"simple"`,
+    ///   `"noop"`) pass the name directly. Parameterized presets such as
+    ///   the Japanese analyzer (which needs a Lindera dictionary path)
+    ///   should be registered via `addAnalyzer` and referenced by name.
     #[php(defaults(stored = true, indexed = true, term_vectors = false))]
     pub fn add_text_field(
         &self,
@@ -84,7 +88,7 @@ impl PhpSchema {
                 indexed,
                 stored,
                 term_vectors,
-                analyzer,
+                analyzer: analyzer.map(laurus::AnalyzerSpec::Named),
             }),
         );
     }

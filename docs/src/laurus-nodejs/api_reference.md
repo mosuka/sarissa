@@ -55,7 +55,7 @@ class Schema {
 
 | Method | Description |
 | :--- | :--- |
-| `addTextField(name, stored?, indexed?, termVectors?, analyzer?)` | Full-text field (inverted index, BM25). |
+| `addTextField(name, stored?, indexed?, termVectors?, analyzer?)` | Full-text field (inverted index, BM25). `analyzer` is the name of a parameter-less built-in (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`) or any custom name registered via `addAnalyzer`. For the parameterised Japanese preset (which requires a Lindera dictionary path), register a custom analyzer with a `lindera` tokenizer and reference it by name. |
 | `addIntegerField(name, stored?, indexed?, multiValued?)` | 64-bit integer field. Pass `multiValued: true` to accept arrays of integers (range queries match if any value satisfies the predicate). |
 | `addFloatField(name, stored?, indexed?, multiValued?)` | 64-bit float field. Pass `multiValued: true` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `addBooleanField(name, stored?, indexed?)` | Boolean field. |

@@ -71,7 +71,12 @@ impl WasmSchema {
     /// * `stored` - Whether the original value is retrievable (default `true`).
     /// * `indexed` - Whether the field is searchable (default `true`).
     /// * `term_vectors` - Whether term position information is stored (default `false`).
-    /// * `analyzer` - Optional named analyzer to use.
+    /// * `analyzer` - Optional analyzer name. Use parameter-less built-in
+    ///   names (`"standard"`, `"english"`, `"keyword"`, `"simple"`,
+    ///   `"noop"`) directly. For parameterized presets such as the
+    ///   Japanese analyzer (which needs a Lindera dictionary path),
+    ///   register a custom analyzer via `addAnalyzer` and reference it
+    ///   here by name.
     #[wasm_bindgen(js_name = "addTextField")]
     pub fn add_text_field(
         &mut self,
@@ -87,7 +92,7 @@ impl WasmSchema {
                 indexed: indexed.unwrap_or(true),
                 stored: stored.unwrap_or(true),
                 term_vectors: term_vectors.unwrap_or(false),
-                analyzer,
+                analyzer: analyzer.map(laurus::AnalyzerSpec::Named),
             }),
         );
     }

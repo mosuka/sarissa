@@ -160,7 +160,11 @@ Create an empty schema.
 
 #### `addTextField(name, stored?, indexed?, termVectors?, analyzer?)`
 
-Add a full-text field.
+Add a full-text field. `analyzer` is the name of a parameter-less
+built-in (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`)
+or a custom name registered via `addAnalyzer`. The Japanese preset
+requires a Lindera dictionary path, so register it as a custom
+analyzer with a `lindera` tokenizer and reference it here by name.
 
 #### `addIntegerField(name, stored?, indexed?, multiValued?)`
 

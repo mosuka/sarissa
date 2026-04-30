@@ -17,7 +17,11 @@
 //! use laurus::analysis::analyzer::analyzer::Analyzer;
 //! use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 //!
-//! let analyzer = JapaneseAnalyzer::new().unwrap();
+//! let analyzer = JapaneseAnalyzer::new(
+//!     "normal",
+//!     "/var/lib/lindera/ipadic",
+//!     None,
+//! ).unwrap();
 //! let tokens: Vec<_> = analyzer.analyze("日本語のテキスト").unwrap().collect();
 //!
 //! // Properly segmented Japanese tokens
@@ -47,7 +51,7 @@ use crate::error::Result;
 /// # Components
 ///
 /// - **Char filters**: UnicodeNormalizationCharFilter (NFKC) + JapaneseIterationMarkCharFilter
-/// - **Tokenizer**: LinderaTokenizer with IPADIC dictionary
+/// - **Tokenizer**: LinderaTokenizer (caller-provided dictionary path)
 /// - **Token filters**: LowercaseFilter + StopFilter (Japanese stop words — 127 common particles/auxiliaries)
 ///
 /// # Examples
@@ -56,7 +60,8 @@ use crate::error::Result;
 /// use laurus::analysis::analyzer::analyzer::Analyzer;
 /// use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
 ///
-/// let analyzer = JapaneseAnalyzer::new().unwrap();
+/// // In tests the embedded ipadic is available via the dev-dependency feature.
+/// let analyzer = JapaneseAnalyzer::new("normal", "embedded://ipadic", None).unwrap();
 /// let tokens: Vec<_> = analyzer.analyze("日本語の形態素解析").unwrap().collect();
 ///
 /// // Tokens are properly segmented
@@ -66,14 +71,25 @@ pub struct JapaneseAnalyzer {
     inner: PipelineAnalyzer,
 }
 impl JapaneseAnalyzer {
-    /// Create a new Japanese analyzer with default settings.
+    /// Create a new Japanese analyzer with the given Lindera configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode_str` - Lindera segmentation mode: `"normal"`, `"search"`, or
+    ///   `"decompose"`.
+    /// * `dict_uri` - Lindera dictionary URI. In production builds, supply
+    ///   a filesystem path to a Lindera dictionary directory (typically
+    ///   IPADIC). `embedded://*` URIs only resolve when the matching
+    ///   `embed-*` Lindera feature is enabled, which `laurus` does not
+    ///   enable by default.
+    /// * `user_dict_uri` - Optional user dictionary path.
     ///
     /// # Returns
     ///
     /// A new `JapaneseAnalyzer` instance configured with:
     /// - UnicodeNormalizationCharFilter (NFKC)
     /// - JapaneseIterationMarkCharFilter
-    /// - LinderaTokenizer (IPADIC dictionary)
+    /// - LinderaTokenizer (caller-provided dictionary)
     /// - LowercaseFilter
     /// - StopFilter with Japanese stop words
     ///
@@ -88,11 +104,11 @@ impl JapaneseAnalyzer {
     /// use laurus::analysis::analyzer::analyzer::Analyzer;
     /// use laurus::analysis::analyzer::language::japanese::JapaneseAnalyzer;
     ///
-    /// let analyzer = JapaneseAnalyzer::new().unwrap();
+    /// let analyzer = JapaneseAnalyzer::new("normal", "embedded://ipadic", None).unwrap();
     /// assert_eq!(analyzer.name(), "japanese");
     /// ```
-    pub fn new() -> Result<Self> {
-        let tokenizer = Arc::new(LinderaTokenizer::new("normal", "embedded://ipadic", None)?);
+    pub fn new(mode_str: &str, dict_uri: &str, user_dict_uri: Option<&str>) -> Result<Self> {
+        let tokenizer = Arc::new(LinderaTokenizer::new(mode_str, dict_uri, user_dict_uri)?);
         let analyzer = PipelineAnalyzer::new(tokenizer)
             .add_char_filter(Arc::new(UnicodeNormalizationCharFilter::new(
                 NormalizationForm::NFKC,
@@ -105,12 +121,6 @@ impl JapaneseAnalyzer {
             .with_name("japanese".to_string());
 
         Ok(Self { inner: analyzer })
-    }
-}
-
-impl Default for JapaneseAnalyzer {
-    fn default() -> Self {
-        Self::new().expect("Japanese analyzer should be creatable with default settings")
     }
 }
 
@@ -142,8 +152,8 @@ mod tests {
     use crate::analysis::token::Token;
 
     #[test]
-    fn test_english_analyzer() {
-        let analyzer = JapaneseAnalyzer::new().unwrap();
+    fn test_japanese_analyzer_segmentation() {
+        let analyzer = JapaneseAnalyzer::new("normal", "embedded://ipadic", None).unwrap();
 
         let text = "日本語の形態素解析を行うことができます。";
 
@@ -159,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_japanese_analyzer_name() {
-        let analyzer = JapaneseAnalyzer::new().unwrap();
+        let analyzer = JapaneseAnalyzer::new("normal", "embedded://ipadic", None).unwrap();
 
         assert_eq!(analyzer.name(), "japanese");
     }

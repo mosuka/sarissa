@@ -56,7 +56,12 @@ impl RbSchema {
     ///   - `stored:` (bool, default true): Whether the original value is retrievable.
     ///   - `indexed:` (bool, default true): Whether the field is searchable.
     ///   - `term_vectors:` (bool, default false): Whether term position information is stored.
-    ///   - `analyzer:` (String, optional): Named analyzer to use.
+    ///   - `analyzer:` (String, optional): Analyzer name. For
+    ///     parameter-less built-ins (`"standard"`, `"english"`,
+    ///     `"keyword"`, `"simple"`, `"noop"`) pass the name directly.
+    ///     For parameterized presets such as the Japanese analyzer
+    ///     (which needs a Lindera dictionary path), register a custom
+    ///     analyzer via `add_analyzer` and reference it by name.
     fn add_text_field(&self, args: &[Value]) -> Result<(), Error> {
         let args = scan_args::<(String,), (), (), (), RHash, ()>(args)?;
         let (name,) = args.required;
@@ -79,7 +84,7 @@ impl RbSchema {
         let stored = stored.unwrap_or(true);
         let indexed = indexed.unwrap_or(true);
         let term_vectors = term_vectors.unwrap_or(false);
-        let analyzer = analyzer.flatten();
+        let analyzer = analyzer.flatten().map(laurus::AnalyzerSpec::Named);
         self.inner.borrow_mut().fields.insert(
             name,
             FieldOption::Text(TextOption {

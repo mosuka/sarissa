@@ -3,13 +3,65 @@
 use std::str::FromStr;
 
 use laurus::{
-    BooleanOption, BytesOption, DateTimeOption, DistanceMetric, DynamicFieldPolicy,
-    EmbedderDefinition, FieldOption, FlatOption, FloatOption, Geo3dOption, GeoOption, HnswOption,
-    IntegerOption, IvfOption, Schema, TextOption,
+    AnalyzerSpec, BooleanOption, BuiltinAnalyzerSpec, BytesOption, DateTimeOption, DistanceMetric,
+    DynamicFieldPolicy, EmbedderDefinition, FieldOption, FlatOption, FloatOption, Geo3dOption,
+    GeoOption, HnswOption, IntegerOption, IvfOption, Schema, TextOption,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+
+/// Convert a Python analyzer reference into an [`AnalyzerSpec`].
+///
+/// Accepts either a `str` (resolved as [`AnalyzerSpec::Named`]) or a
+/// `dict` describing a parameterized built-in preset. The dict must
+/// include a `"language"` key naming the preset (currently only
+/// `"japanese"`) plus its required parameters (`"dict"` for Japanese,
+/// optionally `"mode"` and `"user_dict"`).
+fn analyzer_spec_from_py(py: Python<'_>, obj: Py<PyAny>) -> PyResult<AnalyzerSpec> {
+    if let Ok(name) = obj.extract::<String>(py) {
+        return Ok(AnalyzerSpec::Named(name));
+    }
+    let bound = obj.bind(py);
+    if let Ok(dict) = bound.cast::<PyDict>() {
+        let language = dict
+            .get_item("language")?
+            .ok_or_else(|| PyValueError::new_err("analyzer dict requires a 'language' key"))?
+            .extract::<String>()?;
+        match language.as_str() {
+            "japanese" => {
+                let dict_path = dict
+                    .get_item("dict")?
+                    .ok_or_else(|| {
+                        PyValueError::new_err("japanese analyzer requires a 'dict' path")
+                    })?
+                    .extract::<String>()?;
+                let mode = dict
+                    .get_item("mode")?
+                    .map(|v| v.extract::<String>())
+                    .transpose()?
+                    .unwrap_or_else(|| "normal".to_string());
+                let user_dict = dict
+                    .get_item("user_dict")?
+                    .map(|v| v.extract::<String>())
+                    .transpose()?;
+                return Ok(AnalyzerSpec::Builtin(BuiltinAnalyzerSpec::Japanese {
+                    mode,
+                    dict: dict_path,
+                    user_dict,
+                }));
+            }
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unsupported analyzer language: {other}"
+                )));
+            }
+        }
+    }
+    Err(PyValueError::new_err(
+        "analyzer must be a str or a dict (e.g. {'language': 'japanese', 'dict': '/path'})",
+    ))
+}
 
 /// Parse a distance metric string into [`DistanceMetric`].
 fn parse_distance(s: &str) -> PyResult<DistanceMetric> {
@@ -58,17 +110,26 @@ impl PySchema {
     ///     name: Field name.
     ///     stored: Whether the original value is retrievable (default True).
     ///     indexed: Whether the field is searchable (default True).
-    ///     term_vectors: Whether term position information is stored (default False).
-    ///     analyzer: Optional named analyzer to use.
+    ///     term_vectors: Whether term position information is stored
+    ///         (default False).
+    ///     analyzer: Either a string analyzer name (``"standard"``,
+    ///         ``"english"``, ``"keyword"``, ``"simple"``, ``"noop"``, or
+    ///         a custom name registered via ``add_analyzer``), or a dict
+    ///         configuring a parameterized built-in preset such as
+    ///         ``{"language": "japanese", "dict": "/var/lib/lindera/ipadic"}``.
     #[pyo3(signature = (name, *, stored=true, indexed=true, term_vectors=false, analyzer=None))]
     pub fn add_text_field(
         &mut self,
+        py: Python<'_>,
         name: &str,
         stored: bool,
         indexed: bool,
         term_vectors: bool,
-        analyzer: Option<String>,
-    ) {
+        analyzer: Option<Py<PyAny>>,
+    ) -> PyResult<()> {
+        let analyzer = analyzer
+            .map(|obj| analyzer_spec_from_py(py, obj))
+            .transpose()?;
         self.inner.fields.insert(
             name.to_string(),
             FieldOption::Text(TextOption {
@@ -78,6 +139,7 @@ impl PySchema {
                 analyzer,
             }),
         );
+        Ok(())
     }
 
     /// Add an integer (i64) field.

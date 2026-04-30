@@ -50,7 +50,7 @@ new \Laurus\Schema()
 
 | Method | Description |
 | :--- | :--- |
-| `addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void` | Full-text field (inverted index, BM25). |
+| `addTextField(string $name, bool $stored = true, bool $indexed = true, bool $termVectors = false, ?string $analyzer = null): void` | Full-text field (inverted index, BM25). `$analyzer` is the name of a parameter-less built-in (`"standard"`, `"english"`, `"keyword"`, `"simple"`, `"noop"`) or a custom name registered via `addAnalyzer`. The Japanese preset requires a Lindera dictionary path, so register it as a custom analyzer with a `lindera` tokenizer and reference it by name. |
 | `addIntegerField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void` | 64-bit integer field. Pass `$multiValued = true` to accept arrays of integers (range queries match if any value satisfies the predicate). |
 | `addFloatField(string $name, bool $stored = true, bool $indexed = true, bool $multiValued = false): void` | 64-bit float field. Pass `$multiValued = true` to accept arrays of floats (range queries match if any value satisfies the predicate). |
 | `addBooleanField(string $name, bool $stored = true, bool $indexed = true): void` | Boolean field. |

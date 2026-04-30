@@ -50,18 +50,21 @@ use crate::analysis::tokenizer::unicode_word::UnicodeWordTokenizer;
 use crate::analysis::tokenizer::whitespace::WhitespaceTokenizer;
 use crate::analysis::tokenizer::whole::WholeTokenizer;
 use crate::engine::schema::analyzer::{
-    AnalyzerDefinition, CharFilterConfig, TokenFilterConfig, TokenizerConfig,
+    AnalyzerDefinition, AnalyzerSpec, BuiltinAnalyzerSpec, CharFilterConfig, TokenFilterConfig,
+    TokenizerConfig,
 };
 use crate::error::{LaurusError, Result};
 
 /// Create an analyzer instance by its well-known name.
 ///
-/// Returns an `Arc<dyn Analyzer>` for the given name. Unknown names
-/// produce an error.
+/// Built-in analyzers that take no parameters are resolved by name.
+/// `"japanese"` is **not** included here because it requires a Lindera
+/// dictionary path; use [`create_analyzer_from_spec`] with
+/// [`BuiltinAnalyzerSpec::Japanese`] instead.
 ///
 /// # Arguments
 ///
-/// * `name` - The analyzer name (e.g. `"standard"`, `"japanese"`).
+/// * `name` - The analyzer name (e.g. `"standard"`).
 ///
 /// # Returns
 ///
@@ -75,7 +78,10 @@ pub fn create_analyzer_by_name(name: &str) -> Result<Arc<dyn Analyzer>> {
         "standard" => Ok(Arc::new(StandardAnalyzer::new()?)),
         "keyword" => Ok(Arc::new(KeywordAnalyzer::new())),
         "english" => Ok(Arc::new(EnglishAnalyzer::new()?)),
-        "japanese" => Ok(Arc::new(JapaneseAnalyzer::new()?)),
+        "japanese" => Err(LaurusError::invalid_argument(
+            "Analyzer 'japanese' requires a dictionary path. Specify it via \
+             { \"language\": \"japanese\", \"dict\": \"/path/to/ipadic\" } in the schema.",
+        )),
         "simple" => Ok(Arc::new(SimpleAnalyzer::new(Arc::new(
             RegexTokenizer::new()?,
         )))),
@@ -83,6 +89,56 @@ pub fn create_analyzer_by_name(name: &str) -> Result<Arc<dyn Analyzer>> {
         unknown => Err(LaurusError::invalid_argument(format!(
             "Unknown analyzer: {unknown}"
         ))),
+    }
+}
+
+/// Resolve an [`AnalyzerSpec`] from a schema into a concrete analyzer.
+///
+/// Resolution order:
+/// 1. If `spec` is [`AnalyzerSpec::Builtin`], construct the
+///    parameterized built-in directly.
+/// 2. If `spec` is [`AnalyzerSpec::Named`], try the name as a
+///    parameter-less built-in via [`create_analyzer_by_name`].
+/// 3. On `AnalyzerNotFound`, fall back to a user-defined
+///    [`AnalyzerDefinition`] in `schema_analyzers`.
+///
+/// # Arguments
+///
+/// * `spec` - The analyzer reference from a text field option.
+/// * `schema_analyzers` - Custom analyzer definitions registered on the
+///   schema.
+///
+/// # Errors
+///
+/// Returns an error if no resolution path applies (unknown name and no
+/// matching schema entry) or if dictionary loading fails for a built-in
+/// preset.
+pub fn create_analyzer_from_spec(
+    spec: &AnalyzerSpec,
+    schema_analyzers: &std::collections::HashMap<String, AnalyzerDefinition>,
+) -> Result<Arc<dyn Analyzer>> {
+    match spec {
+        AnalyzerSpec::Builtin(BuiltinAnalyzerSpec::Japanese {
+            mode,
+            dict,
+            user_dict,
+        }) => Ok(Arc::new(JapaneseAnalyzer::new(
+            mode,
+            dict,
+            user_dict.as_deref(),
+        )?)),
+        AnalyzerSpec::Named(name) => match create_analyzer_by_name(name) {
+            Ok(analyzer) => Ok(analyzer),
+            Err(_) => {
+                let def = schema_analyzers.get(name).ok_or_else(|| {
+                    LaurusError::invalid_argument(format!(
+                        "Unknown analyzer '{name}': not a built-in and not defined in \
+                         schema.analyzers"
+                    ))
+                })?;
+                create_analyzer_from_definition(name, def)
+            }
+        },
     }
 }
 
@@ -227,9 +283,47 @@ mod tests {
     }
 
     #[test]
-    fn test_create_japanese() {
-        let analyzer = create_analyzer_by_name("japanese").unwrap();
+    fn test_create_japanese_by_name_returns_error() {
+        // Japanese requires a dictionary path and must be resolved through
+        // create_analyzer_from_spec with a Japanese builtin spec.
+        let result = create_analyzer_by_name("japanese");
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("dictionary path"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_create_japanese_from_spec() {
+        let spec = AnalyzerSpec::Builtin(BuiltinAnalyzerSpec::Japanese {
+            mode: "normal".into(),
+            dict: "embedded://ipadic".into(),
+            user_dict: None,
+        });
+        let analyzer = create_analyzer_from_spec(&spec, &Default::default()).unwrap();
         assert_eq!(analyzer.name(), "japanese");
+    }
+
+    #[test]
+    fn test_create_named_from_spec_falls_back_to_schema_analyzers() {
+        let spec = AnalyzerSpec::Named("my_custom".into());
+        let mut analyzers = std::collections::HashMap::new();
+        analyzers.insert(
+            "my_custom".to_string(),
+            AnalyzerDefinition {
+                char_filters: vec![],
+                tokenizer: TokenizerConfig::Whitespace,
+                token_filters: vec![],
+            },
+        );
+        let analyzer = create_analyzer_from_spec(&spec, &analyzers).unwrap();
+        assert_eq!(analyzer.name(), "my_custom");
+    }
+
+    #[test]
+    fn test_create_named_from_spec_resolves_builtin() {
+        let spec = AnalyzerSpec::Named("standard".into());
+        let analyzer = create_analyzer_from_spec(&spec, &Default::default()).unwrap();
+        assert_eq!(analyzer.name(), "standard");
     }
 
     #[test]

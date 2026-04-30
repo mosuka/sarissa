@@ -50,7 +50,7 @@ Laurus::Schema.new
 
 | メソッド | 説明 |
 | :--- | :--- |
-| `add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)` | 全文フィールド（転置インデックス、BM25）。 |
+| `add_text_field(name, stored: true, indexed: true, term_vectors: false, analyzer: nil)` | 全文フィールド（転置インデックス、BM25）。`analyzer:` にはパラメータ不要の組込名（`"standard"` / `"english"` / `"keyword"` / `"simple"` / `"noop"`、または `add_analyzer` で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットは、`lindera` tokenizer を含むカスタム analyzer として登録し、名前で参照してください。 |
 | `add_integer_field(name, stored: true, indexed: true, multi_valued: false)` | 64 ビット整数フィールド。`multi_valued: true` で整数配列を受け付け（範囲クエリは "any match"）。 |
 | `add_float_field(name, stored: true, indexed: true, multi_valued: false)` | 64 ビット浮動小数点フィールド。`multi_valued: true` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `add_boolean_field(name, stored: true, indexed: true)` | ブールフィールド。 |

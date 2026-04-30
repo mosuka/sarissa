@@ -614,26 +614,18 @@ impl Engine {
         if option.is_lexical() {
             // Resolve the per-field analyzer if configured.
             let field_analyzer = if let schema::FieldOption::Text(ref text_opt) = option
-                && let Some(ref analyzer_name) = text_opt.analyzer
+                && let Some(ref analyzer_spec) = text_opt.analyzer
             {
                 let schema = self.schema.read();
-                let analyzer = match crate::analysis::analyzer::registry::create_analyzer_by_name(
-                    analyzer_name,
-                ) {
-                    Ok(a) => a,
-                    Err(_) => {
-                        let def = schema.analyzers.get(analyzer_name).ok_or_else(|| {
-                            crate::error::LaurusError::invalid_argument(format!(
-                                "Unknown analyzer '{analyzer_name}' for field '{name}': \
-                                     not a built-in and not defined in schema.analyzers"
-                            ))
-                        })?;
-                        crate::analysis::analyzer::registry::create_analyzer_from_definition(
-                            analyzer_name,
-                            def,
-                        )?
-                    }
-                };
+                let analyzer = crate::analysis::analyzer::registry::create_analyzer_from_spec(
+                    analyzer_spec,
+                    &schema.analyzers,
+                )
+                .map_err(|e| {
+                    crate::error::LaurusError::invalid_argument(format!(
+                        "Failed to resolve analyzer for field '{name}': {e}"
+                    ))
+                })?;
                 Some(analyzer)
             } else {
                 None
@@ -1020,29 +1012,22 @@ impl Engine {
             };
 
         // Register per-field analyzers declared in the schema.
-        // Resolution order: built-in name → custom definition in schema.analyzers.
+        // Resolution order: parameterized built-in → built-in name → custom
+        // definition in schema.analyzers.
         for (name, field_option) in &schema.fields {
             if let schema::FieldOption::Text(text_opt) = field_option
-                && let Some(analyzer_name) = &text_opt.analyzer
+                && let Some(spec) = &text_opt.analyzer
             {
                 let field_analyzer =
-                    match crate::analysis::analyzer::registry::create_analyzer_by_name(
-                        analyzer_name,
-                    ) {
-                        Ok(a) => a,
-                        Err(_) => {
-                            let def = schema.analyzers.get(analyzer_name).ok_or_else(|| {
-                                crate::error::LaurusError::invalid_argument(format!(
-                                    "Unknown analyzer '{analyzer_name}' for field '{name}': \
-                                 not a built-in and not defined in schema.analyzers"
-                                ))
-                            })?;
-                            crate::analysis::analyzer::registry::create_analyzer_from_definition(
-                                analyzer_name,
-                                def,
-                            )?
-                        }
-                    };
+                    crate::analysis::analyzer::registry::create_analyzer_from_spec(
+                        spec,
+                        &schema.analyzers,
+                    )
+                    .map_err(|e| {
+                        crate::error::LaurusError::invalid_argument(format!(
+                            "Failed to resolve analyzer for field '{name}': {e}"
+                        ))
+                    })?;
                 per_field_analyzer.add_analyzer(name, field_analyzer);
             }
         }

@@ -55,7 +55,7 @@ class Schema {
 
 | メソッド | 説明 |
 | :--- | :--- |
-| `addTextField(name, stored?, indexed?, termVectors?, analyzer?)` | 全文検索フィールド（転置インデックス、BM25）。 |
+| `addTextField(name, stored?, indexed?, termVectors?, analyzer?)` | 全文検索フィールド（転置インデックス、BM25）。`analyzer` にはパラメータ不要の組込名（`"standard"` / `"english"` / `"keyword"` / `"simple"` / `"noop"`、または `addAnalyzer` で登録したカスタム名）を指定します。Lindera 辞書パスが必要な Japanese プリセットを使う場合は、`lindera` tokenizer を含むカスタム analyzer を登録して、その名前を参照してください。 |
 | `addIntegerField(name, stored?, indexed?, multiValued?)` | 64 ビット整数フィールド。`multiValued: true` で整数配列を受け付け（範囲クエリは "any match"）。 |
 | `addFloatField(name, stored?, indexed?, multiValued?)` | 64 ビット浮動小数点フィールド。`multiValued: true` で浮動小数点配列を受け付け（範囲クエリは "any match"）。 |
 | `addBooleanField(name, stored?, indexed?)` | 真偽値フィールド。 |
