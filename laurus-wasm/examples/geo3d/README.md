@@ -32,9 +32,10 @@ python3 -m http.server 8080
    re-runs with the new search centre.
 3. Type into the search box (e.g. `JAL`, `Boeing`,
    `category:heavy`) or use the quick-filter chips
-   (`大型機` / `ヘリ` / `JAL` / `ANA` / `クリア`) to add a text
-   constraint. With the `ピン📌に 3D で近い 50 機に絞る` checkbox
-   on, the demo combines text and spatial:
+   (`Heavies` / `Helicopters` / `JAL flights` / `ANA flights` /
+   `Clear`) to add a text constraint. With the
+   `Limit to the 50 aircraft 3D-closest to the pin` checkbox on,
+   the demo combines text and spatial:
    `+(text) +position:geo3d_nearest(x, y, z, 50)`.
 4. Click a result row to fly the camera to that aircraft.
 5. Use **Refresh data** for a manual snapshot, or pick an interval
@@ -121,10 +122,10 @@ so the ~52 MB UniDic zip is downloaded only once across samples.
   rate-limited to one request every 5 seconds; auto-refresh
   defaults to off and the available cadences (10 / 30 / 60 s) are
   designed to keep the load on the upstream feed reasonable.
-- The default fetch is centred on Japan (`lat=36, lon=138, dist=250nm`).
-  Aircraft outside that radius are not included in the snapshot;
-  edit the `AIRPLANES_LIVE_URL` constant in `index.html` if you
-  want a different region.
+- The default fetch is centred on Japan (`lat=36, lon=138,
+  dist=1000nm`, a ~1850 km radius). Aircraft outside that radius
+  are not included in the snapshot; edit the `AIRPLANES_LIVE_URL`
+  constant in `index.html` if you want a different region.
 - The index is intentionally non-persistent: each page load wipes
   OPFS and rebuilds from a fresh airplanes.live snapshot. Use the
   basic / geo samples if you want to see OPFS persistence in

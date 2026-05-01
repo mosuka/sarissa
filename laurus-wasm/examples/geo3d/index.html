@@ -231,26 +231,27 @@
       <h2>Search</h2>
       <div class="search-box">
         <input type="text" id="query"
-               placeholder="例: JAL, Boeing, category:heavy" disabled>
+               placeholder="e.g. JAL, Boeing, category:heavy" disabled>
         <button id="search-btn" disabled>Search</button>
       </div>
       <div class="quick-filters" id="quick-filters">
-        <button type="button" data-q="category:heavy" disabled>大型機 (heavy)</button>
-        <button type="button" data-q="category:rotorcraft" disabled>ヘリ (rotorcraft)</button>
-        <button type="button" data-q="callsign:JAL*" disabled>JAL 便</button>
-        <button type="button" data-q="callsign:ANA*" disabled>ANA 便</button>
-        <button type="button" data-q="" disabled>クリア</button>
+        <button type="button" data-q="category:heavy" disabled>Heavies</button>
+        <button type="button" data-q="category:rotorcraft" disabled>Helicopters</button>
+        <button type="button" data-q="callsign:JAL*" disabled>JAL flights</button>
+        <button type="button" data-q="callsign:ANA*" disabled>ANA flights</button>
+        <button type="button" data-q="" disabled>Clear</button>
       </div>
       <div class="row">
         <label class="toggle">
           <input type="checkbox" id="limit-spatial" checked disabled>
-          ピン📌に 3D で近い 50 機に絞る
+          Limit to the 50 aircraft 3D-closest to the pin 📌
         </label>
       </div>
       <p class="dsl-hint">
-        オフにするとテキストにマッチした全機を返します。オンの場合は
-        ピンとの 3D ユークリッド距離（高度差込み）で上位 50 機に絞り、
-        テキスト条件と AND 結合します。
+        When off the demo returns every aircraft matching the text
+        query. When on it ranks aircraft by 3D Euclidean distance
+        from the pin (altitude included), keeps the top 50, and
+        AND-combines that with the text condition.
       </p>
       <ul class="results" id="results">
         <li class="empty">Loading aircraft data…</li>
@@ -259,11 +260,12 @@
 
     <!-- Developer detail (collapsed) -->
     <details class="dev-detail">
-      <summary>開発者向け詳細（DSL クエリと内部状態）</summary>
+      <summary>Developer detail (DSL query and internal state)</summary>
       <p class="dsl-hint">
-        このサンプルが <code>index.search()</code> に投げている DSL
-        文字列とピンの内部状態を表示します。CLI やユニットテストへ
-        コピーする際に便利です。
+        Live view of the DSL string the demo sends to
+        <code>index.search()</code> and the pin's internal state.
+        Handy when you want to copy the query into a CLI or unit
+        test.
       </p>
       <dl class="dev-grid">
         <dt>Pin (lat, lon)</dt>
@@ -310,10 +312,12 @@
     const POSITION_FIELD = 'position';
 
     /** airplanes.live readsb-format endpoint. lat / lon = centre,
-     *  dist = nautical miles (max 250). The default centres on
-     *  Japan; adjust this URL if you want a different region. */
+     *  dist = nautical miles. The default centres on Japan with a
+     *  1000 nm radius (~1850 km) so the snapshot covers the
+     *  surrounding airspace as well as domestic flights; adjust
+     *  this URL if you want a different region. */
     const AIRPLANES_LIVE_URL =
-      'https://api.airplanes.live/v2/point/36.0/138.0/250';
+      'https://api.airplanes.live/v2/point/36.0/138.0/1000';
 
     /** Soft cap on aircraft count for snappy UI. */
     const MAX_AIRCRAFT = 500;
@@ -842,7 +846,7 @@
               <li class="clickable" data-id="${escapeHtml(r.id)}">
                 <div class="meta">
                   <span class="score">${r.score.toFixed(3)}</span>
-                  <span class="extra">${escapeHtml(r.ac.aircraft_type || '?')} · ${escapeHtml(r.ac.category)} · 高度 ${altKm} · ピンから ${distKm}</span>
+                  <span class="extra">${escapeHtml(r.ac.aircraft_type || '?')} · ${escapeHtml(r.ac.category)} · alt ${altKm} · ${distKm} from pin</span>
                 </div>
                 <div class="title">${escapeHtml(r.ac.callsign)}</div>
                 <div class="body">${escapeHtml(r.ac.description || '')}${reg}</div>

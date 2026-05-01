@@ -30,11 +30,12 @@ python3 -m http.server 8080
 2. **地球をクリック**するとピンがその地点に移動し、検索が再実行
    されます。
 3. 検索ボックスにテキスト（例: `JAL`、`Boeing`、`category:heavy`）
-   を入れる、または Quick filter（`大型機` / `ヘリ` / `JAL 便` /
-   `ANA 便` / `クリア`）を押してテキスト条件を加えると、
-   `ピン📌に 3D で近い 50 機に絞る` チェックボックスが ON のとき
-   は `+(text) +position:geo3d_nearest(x, y, z, 50)` をテキスト
-   条件と AND 結合して投げます。
+   を入れる、または Quick filter（`Heavies` / `Helicopters` /
+   `JAL flights` / `ANA flights` / `Clear`）を押してテキスト条件を
+   加えると、`Limit to the 50 aircraft 3D-closest to the pin`
+   チェックボックスが ON のときは
+   `+(text) +position:geo3d_nearest(x, y, z, 50)` をテキスト条件と
+   AND 結合して投げます。
 4. 結果リストの行をクリックすると、その機体にカメラが flyTo します。
 5. **Refresh data** で手動更新、**Auto** セレクトで 10s / 30s / 60s
    の間隔を選ぶと自動更新を有効にできます（タブが非表示の間は
@@ -118,10 +119,10 @@ OPFS の辞書キー（`unidic`）は他サンプルと共有しているため�
   ボタンは 5 秒に 1 回まで、自動更新はデフォルト OFF で、選択肢
   （10 / 30 / 60 秒）も上流フィードの負荷を抑えるように設計して
   います。
-- デフォルトの取得は日本中心（`lat=36, lon=138, dist=250nm`）です。
-  この半径外の機体はスナップショットに含まれません。別の地域を
-  対象にしたい場合は `index.html` 内の `AIRPLANES_LIVE_URL`
-  定数を変更してください。
+- デフォルトの取得は日本中心（`lat=36, lon=138, dist=1000nm`、
+  半径約 1850 km）です。この半径外の機体はスナップショットに
+  含まれません。別の地域を対象にしたい場合は `index.html` 内の
+  `AIRPLANES_LIVE_URL` 定数を変更してください。
 - インデックスは意図的に非永続です。ページロードのたびに OPFS を
   クリアし、airplanes.live の最新スナップショットから作り直します。
   OPFS 永続化を確認したい場合は basic / geo サンプルを参照して
