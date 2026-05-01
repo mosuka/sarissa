@@ -122,10 +122,10 @@ so the ~52 MB UniDic zip is downloaded only once across samples.
   rate-limited to one request every 5 seconds; auto-refresh
   defaults to off and the available cadences (10 / 30 / 60 s) are
   designed to keep the load on the upstream feed reasonable.
-- The default fetch is centred on Japan (`lat=36, lon=138, dist=250nm`).
-  Aircraft outside that radius are not included in the snapshot;
-  edit the `AIRPLANES_LIVE_URL` constant in `index.html` if you
-  want a different region.
+- The default fetch is centred on Japan (`lat=36, lon=138,
+  dist=1000nm`, a ~1850 km radius). Aircraft outside that radius
+  are not included in the snapshot; edit the `AIRPLANES_LIVE_URL`
+  constant in `index.html` if you want a different region.
 - The index is intentionally non-persistent: each page load wipes
   OPFS and rebuilds from a fresh airplanes.live snapshot. Use the
   basic / geo samples if you want to see OPFS persistence in

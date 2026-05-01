@@ -312,10 +312,12 @@
     const POSITION_FIELD = 'position';
 
     /** airplanes.live readsb-format endpoint. lat / lon = centre,
-     *  dist = nautical miles (max 250). The default centres on
-     *  Japan; adjust this URL if you want a different region. */
+     *  dist = nautical miles. The default centres on Japan with a
+     *  1000 nm radius (~1850 km) so the snapshot covers the
+     *  surrounding airspace as well as domestic flights; adjust
+     *  this URL if you want a different region. */
     const AIRPLANES_LIVE_URL =
-      'https://api.airplanes.live/v2/point/36.0/138.0/250';
+      'https://api.airplanes.live/v2/point/36.0/138.0/1000';
 
     /** Soft cap on aircraft count for snappy UI. */
     const MAX_AIRCRAFT = 500;
