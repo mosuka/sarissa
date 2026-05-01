@@ -21,6 +21,10 @@
 
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 #![cfg_attr(feature = "cargo-clippy", allow(clippy::unreadable_literal))]
+// Vendored fork of clang-sys; suppress lints inherited from upstream so that
+// `cargo build --all-features` is warning-free in this workspace. Drop these
+// when the fork is rebased onto an upstream release that fixes them.
+#![allow(unexpected_cfgs, missing_abi)]
 
 pub mod support;
 

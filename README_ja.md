@@ -18,6 +18,18 @@ Lexical 検索、ベクトル検索、ハイブリッド検索をカバーする
 
 ライブラリとして組み込むことも、スタンドアロンのサーバーとしてデプロイすることも、Python / Node.js / Ruby から呼び出すことも、ブラウザで WASM として実行することも、AI ワークフローに検索機能を組み込むことも可能な、コンポーザブルな検索基盤です。
 
+## ライブデモ
+
+すべてのサンプルが WebAssembly でブラウザ上で完結する形で動作します。インストール不要で試せます:
+
+**[https://mosuka.github.io/laurus/demo/](https://mosuka.github.io/laurus/demo/)**
+
+| サンプル | 内容 |
+| --- | --- |
+| [basic](https://mosuka.github.io/laurus/demo/basic/) | 統一された Query DSL による日本語の全文検索・ベクトル検索・ハイブリッド検索 |
+| [geo](https://mosuka.github.io/laurus/demo/geo/) | Leaflet マップ上の東京 POI を、ビューポートのバウンディングボックス + テキスト + ベクトルで検索 |
+| [geo3d](https://mosuka.github.io/laurus/demo/geo3d/) | CesiumJS 3D 地球儀上の航空機をリアルタイム表示。`geo3d_bbox` / `geo3d_nearest`（高度を含む真の ECEF 3D）を活用 |
+
 ## ドキュメント
 
 包括的なドキュメントがオンラインで利用できます:

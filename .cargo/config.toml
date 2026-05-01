@@ -2,3 +2,19 @@
 # getrandom 0.3.x requires this cfg flag for WASM support.
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
+# Environment variables exported to cargo, build scripts, and rustc.
+#
+# Cargo [env] passes these into every subprocess it spawns, including
+# build scripts that run from ~/.cargo/registry/... where the project's
+# .python-version / .ruby-version files are NOT visible to pyenv / rbenv
+# shims. That is why pinning here is needed.
+#
+# `force = false` (the default) means a value supplied by the caller's
+# shell still wins — so CI can override e.g. RBENV_VERSION=3.3.0.
+#
+# IMPORTANT: keep these in sync with .python-version and .ruby-version.
+# (cargo [env] cannot read external files, so this is a manual mirror.)
+[env]
+PYENV_VERSION = "3.13.5"
+RBENV_VERSION = "4.0.2"
