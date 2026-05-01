@@ -1288,15 +1288,24 @@ impl InvertedIndexWriter {
 
     /// Delete a document by ID.
     ///
-    /// Removes the document from the buffered documents if it exists.
-    /// For committed documents, deletion is handled through the DeletionManager.
+    /// Removes the document from the buffered documents if it exists. The
+    /// in-memory inverted index and DocValues are rebuilt from the remaining
+    /// buffered docs so the deleted doc's postings and stored fields do not
+    /// leak into the next flushed segment. For documents that have already
+    /// been committed to disk, the deletion is recorded through the
+    /// `DeletionManager` (i.e. soft-deleted via the segment's deletion
+    /// bitmap).
+    ///
+    /// This mirrors the pattern used by [`Self::upsert_document`], which also
+    /// runs `remove_pending_document` + `mark_persisted_doc_deleted` before
+    /// indexing the new version. Deleting via `buffered_docs.retain` alone
+    /// (the previous behaviour) left the doc's postings in the in-memory
+    /// inverted index, so subsequent puts of the same external id within the
+    /// same uncommitted batch would accumulate ghost postings — see the
+    /// regression test `delete_document_clears_inverted_index_postings`.
     pub fn delete_document(&mut self, doc_id: u64) -> Result<()> {
-        // Remove from buffered documents if present
-        self.buffered_docs.retain(|(id, _)| *id != doc_id);
-
-        // Also mark as deleted in persisted segments
+        self.remove_pending_document(doc_id)?;
         self.mark_persisted_doc_deleted(doc_id)?;
-
         Ok(())
     }
 }

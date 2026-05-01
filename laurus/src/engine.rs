@@ -2085,4 +2085,294 @@ mod tests {
         let updated = engine.delete_field("embedding").await.unwrap();
         assert!(!updated.fields.contains_key("embedding"));
     }
+
+    /// Regression test for the InvertedIndexWriter `delete_document` bug
+    /// where the in-memory inverted index and DocValues were not rebuilt
+    /// after a buffered doc was retained out, leaving ghost postings that
+    /// survived into the next flushed segment.
+    ///
+    /// Symptom in callers: `put_document(id, doc1)` then
+    /// `put_document(id, doc2)` in the same uncommitted batch ended up
+    /// with two live docs sharing the same external `_id` after commit,
+    /// and `get_documents(id)` / `engine.search(`_id:id`)` returned both.
+    ///
+    /// Fix lives in `lexical/index/inverted/writer.rs::delete_document`:
+    /// it now calls `remove_pending_document` (which rebuilds the
+    /// in-memory inverted index and DocValues) instead of doing a bare
+    /// `buffered_docs.retain`.
+    #[tokio::test]
+    async fn test_put_document_replaces_within_uncommitted_batch() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::TextOption;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        let mut doc1 = crate::data::Document::new();
+        doc1.fields
+            .insert("title".into(), DataValue::Text("first".into()));
+        engine.put_document("X", doc1).await.unwrap();
+
+        // Second put for the same external id, BEFORE commit. The first
+        // doc must be fully replaced — not appended.
+        let mut doc2 = crate::data::Document::new();
+        doc2.fields
+            .insert("title".into(), DataValue::Text("second".into()));
+        engine.put_document("X", doc2).await.unwrap();
+
+        engine.commit().await.unwrap();
+
+        let docs = engine.get_documents("X").await.unwrap();
+        assert_eq!(
+            docs.len(),
+            1,
+            "exactly one doc should exist for id=X after two puts in the \
+             same uncommitted batch (got {} docs: {:?})",
+            docs.len(),
+            docs.iter()
+                .map(|d| d.fields.get("title").cloned())
+                .collect::<Vec<_>>(),
+        );
+
+        let title = docs[0]
+            .fields
+            .get("title")
+            .and_then(|v| v.as_text())
+            .map(String::from);
+        assert_eq!(
+            title.as_deref(),
+            Some("second"),
+            "the surviving doc must be the latest put"
+        );
+
+        let stats = engine.stats().unwrap();
+        assert_eq!(
+            stats.document_count, 1,
+            "engine.stats().document_count must agree with get_documents",
+        );
+    }
+
+    /// Regression test for the same bug under a heavier put-pattern that
+    /// mirrors the `laurus-wasm/examples/geo3d/` workload: put many docs,
+    /// many of them carrying the same external id, in a single
+    /// uncommitted batch.
+    ///
+    /// Before the fix, the engine reported `document_count` equal to the
+    /// raw put count (with duplicates) instead of the unique-id count.
+    #[tokio::test]
+    async fn test_put_document_dedupes_duplicate_ids_in_batch() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::TextOption;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        // 10 unique ids, each put 3 times in a row before commit.
+        for i in 0..10 {
+            for rev in 0..3 {
+                let mut doc = crate::data::Document::new();
+                doc.fields
+                    .insert("title".into(), DataValue::Text(format!("id{i}-rev{rev}")));
+                engine.put_document(&format!("id{i}"), doc).await.unwrap();
+            }
+        }
+
+        engine.commit().await.unwrap();
+
+        let stats = engine.stats().unwrap();
+        assert_eq!(
+            stats.document_count, 10,
+            "exactly 10 unique docs should be live; the 20 redundant puts \
+             must have been replaced, not accumulated"
+        );
+
+        // Each id should resolve to exactly one doc — the last put wins.
+        for i in 0..10 {
+            let docs = engine.get_documents(&format!("id{i}")).await.unwrap();
+            assert_eq!(docs.len(), 1, "id{i} should resolve to a single doc");
+            let title = docs[0]
+                .fields
+                .get("title")
+                .and_then(|v| v.as_text())
+                .map(String::from);
+            assert_eq!(
+                title.as_deref(),
+                Some(format!("id{i}-rev2").as_str()),
+                "id{i} should retain the last put's title"
+            );
+        }
+    }
+
+    /// Regression test for the geo3d demo's "departure + re-arrival"
+    /// pattern: put → commit → delete → commit → put-with-same-id →
+    /// commit. The post-commit search must return exactly one doc and
+    /// `engine.stats().document_count` must agree.
+    ///
+    /// This exercises the path where the previous version of the
+    /// document is in a *committed* segment (not the writer buffer)
+    /// when the next put runs `delete_documents` internally — which
+    /// is what happens when an aircraft drops out of an
+    /// `airplanes.live` snapshot and re-enters on a later refresh.
+    #[tokio::test]
+    async fn test_put_document_replaces_after_delete_across_commits() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::TextOption;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("title", FieldOption::Text(TextOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        // Round 1: put + commit so the doc lives in a flushed segment.
+        let mut doc1 = crate::data::Document::new();
+        doc1.fields
+            .insert("title".into(), DataValue::Text("first".into()));
+        engine.put_document("X", doc1).await.unwrap();
+        engine.commit().await.unwrap();
+
+        // Round 2: delete + commit so the previous version is
+        // soft-deleted in the segment.
+        engine.delete_documents("X").await.unwrap();
+        engine.commit().await.unwrap();
+        assert!(
+            engine.get_documents("X").await.unwrap().is_empty(),
+            "after delete + commit, get_documents must return empty"
+        );
+
+        // Round 3: re-arrival with the same external id. The new put
+        // must produce a single live doc; the soft-deleted segment
+        // version must not resurface.
+        let mut doc2 = crate::data::Document::new();
+        doc2.fields
+            .insert("title".into(), DataValue::Text("second".into()));
+        engine.put_document("X", doc2).await.unwrap();
+        engine.commit().await.unwrap();
+
+        let docs = engine.get_documents("X").await.unwrap();
+        assert_eq!(
+            docs.len(),
+            1,
+            "exactly one doc should exist for id=X after departure + re-arrival"
+        );
+        assert_eq!(
+            docs[0]
+                .fields
+                .get("title")
+                .and_then(|v| v.as_text())
+                .map(String::from)
+                .as_deref(),
+            Some("second"),
+            "the surviving doc must be the latest put"
+        );
+
+        let stats = engine.stats().unwrap();
+        assert_eq!(
+            stats.document_count, 1,
+            "engine.stats().document_count must agree with get_documents \
+             across the departure + re-arrival cycle"
+        );
+    }
+
+    /// Regression test for the geo3d-side stale-id bug: spatial queries
+    /// (BKD-backed: Geo / Geo3d) used to return soft-deleted docs
+    /// because the BKD tree itself does not consult the segment
+    /// deletion bitmap. The fix lives in the
+    /// `lexical/query/geo3d.rs::*::find_matches` helpers (and the 2D
+    /// counterparts in `lexical/query/geo.rs`), which now skip
+    /// `reader.is_deleted(doc_id)` hits.
+    ///
+    /// Steps:
+    ///   1. Put a doc with a geo3d position, commit.
+    ///   2. Run `geo3d_bbox(...)` over a region containing the point —
+    ///      should find 1 hit (sanity check).
+    ///   3. Delete the doc, commit. The BKD tree still contains the
+    ///      point until a merge, but the deletion bitmap is set.
+    ///   4. Run the same `geo3d_bbox(...)` query — must find 0 hits.
+    #[tokio::test]
+    async fn test_geo3d_query_filters_soft_deleted_docs() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::Geo3dOption;
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("position", FieldOption::Geo3d(Geo3dOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        // Tokyo Tower in ECEF (approx).
+        let mut doc = crate::data::Document::new();
+        doc.fields.insert(
+            "position".into(),
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(
+                -3955182.0, 3350553.0, 3700276.0,
+            )),
+        );
+        engine.put_document("FW52", doc).await.unwrap();
+        engine.commit().await.unwrap();
+
+        // Sanity check: a wide bbox around the point matches it.
+        let bbox_dsl = "position:geo3d_bbox(-3956000.0, 3349000.0, 3699000.0, \
+                       -3954000.0, 3352000.0, 3702000.0)";
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from(bbox_dsl))
+            .limit(10)
+            .build();
+        let before = engine.search(request).await.unwrap();
+        assert_eq!(before.len(), 1, "live doc should match the bbox");
+
+        // Delete + commit. The doc is soft-deleted in the segment but
+        // its BKD entry stays in place until merge.
+        engine.delete_documents("FW52").await.unwrap();
+        engine.commit().await.unwrap();
+
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from(bbox_dsl))
+            .limit(10)
+            .build();
+        let after = engine.search(request).await.unwrap();
+        assert_eq!(
+            after.len(),
+            0,
+            "soft-deleted doc must NOT be returned by geo3d_bbox \
+             (BKD entry survives in-tree until merge)",
+        );
+
+        // Same expectation for geo3d_nearest.
+        let nearest_dsl = "position:geo3d_nearest(-3955182.0, 3350553.0, 3700276.0, 5)";
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from(nearest_dsl))
+            .limit(10)
+            .build();
+        let after_nearest = engine.search(request).await.unwrap();
+        assert_eq!(
+            after_nearest.len(),
+            0,
+            "soft-deleted doc must NOT be returned by geo3d_nearest",
+        );
+
+        // And for geo3d_distance.
+        let distance_dsl = "position:geo3d_distance(-3955182.0, 3350553.0, 3700276.0, 100000.0)";
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from(distance_dsl))
+            .limit(10)
+            .build();
+        let after_distance = engine.search(request).await.unwrap();
+        assert_eq!(
+            after_distance.len(),
+            0,
+            "soft-deleted doc must NOT be returned by geo3d_distance",
+        );
+    }
 }
