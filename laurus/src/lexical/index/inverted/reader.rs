@@ -975,6 +975,127 @@ impl BKDTree for MultiSegmentBKDTree {
     }
 }
 
+/// Lock-free snapshot of every segment deletion bitmap that has any
+/// recorded deletions, captured at the time
+/// [`InvertedIndexReader::get_bkd_tree`] returns the wrapper. Lookups
+/// take no locks, fall through quickly for segments whose `(min, max)`
+/// doc-id window does not contain the queried id, and short-circuit
+/// to a no-op when no segment has deletions at all.
+#[derive(Debug, Clone)]
+struct DeletionSnapshot {
+    /// `(min_doc_id, max_doc_id, bitmap)` for each segment that has
+    /// any recorded deletion. Segments with no deletions are not
+    /// stored — they cannot contribute hits.
+    bitmaps: Vec<(u64, u64, Arc<DeletionBitmap>)>,
+}
+
+impl DeletionSnapshot {
+    /// `true` when no segment in the reader has any deletion. The BKD
+    /// wrapper checks this first and avoids wrapping the visitor at
+    /// all in the common (no-deletions) case.
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.bitmaps.is_empty()
+    }
+
+    /// Lock-free deletion check. Doc-ids outside any segment's
+    /// `(min, max)` window are dispatched in O(num_segments_with_deletions)
+    /// without touching the bitmap.
+    #[inline]
+    fn is_deleted(&self, doc_id: u64) -> bool {
+        for (min, max, bitmap) in &self.bitmaps {
+            if doc_id >= *min && doc_id <= *max && bitmap.is_deleted(doc_id) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// `BKDTree` decorator that drops doc-id hits whose underlying document
+/// has been soft-deleted.
+///
+/// Why this layer exists: a `BKDTree` is a primitive over flat point /
+/// doc-id buffers and does **not** know about per-segment deletion
+/// bitmaps. A `delete_documents(_id)` followed by `commit()` records
+/// the deletion in the segment's bitmap but the BKD entry survives in
+/// the tree until the next merge — so without this decorator a
+/// subsequent `range_search` / `intersect` would surface "ghost" hits
+/// for deleted docs (manifesting as stale ids in the geo / geo3d /
+/// numeric range query paths). Wrapping every tree returned by
+/// [`InvertedIndexReader::get_bkd_tree`] makes every BKD-backed query
+/// filter soft-deletes uniformly without per-query glue.
+///
+/// Performance: the snapshot is captured **once** when the wrapper is
+/// constructed, so per-hit checks are lock-free vector lookups. When
+/// no segment has any deletion, [`BKDTree::intersect`] forwards
+/// verbatim and pays no overhead at all.
+struct DeletionFilteringBKDTree {
+    inner: Arc<dyn BKDTree>,
+    snapshot: Arc<DeletionSnapshot>,
+}
+
+impl std::fmt::Debug for DeletionFilteringBKDTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeletionFilteringBKDTree")
+            .field("inner", &self.inner)
+            .field(
+                "snapshot_segments_with_deletions",
+                &self.snapshot.bitmaps.len(),
+            )
+            .finish()
+    }
+}
+
+impl BKDTree for DeletionFilteringBKDTree {
+    fn intersect(
+        &self,
+        visitor: &mut dyn crate::lexical::index::structures::visitor::IntersectVisitor,
+    ) -> Result<()> {
+        // Common case: no segment has any deletion. Skip wrapping
+        // entirely so the inner BKD tree gets the user's visitor
+        // verbatim and we pay zero overhead.
+        if self.snapshot.is_empty() {
+            return self.inner.intersect(visitor);
+        }
+        let mut wrapped = DeletionFilteringVisitor {
+            inner: visitor,
+            snapshot: &self.snapshot,
+        };
+        self.inner.intersect(&mut wrapped)
+    }
+}
+
+/// `IntersectVisitor` decorator that drops `visit` / `visit_inside`
+/// callbacks for doc-ids that the snapshot marks as deleted.
+struct DeletionFilteringVisitor<'a> {
+    inner: &'a mut dyn crate::lexical::index::structures::visitor::IntersectVisitor,
+    snapshot: &'a DeletionSnapshot,
+}
+
+impl crate::lexical::index::structures::visitor::IntersectVisitor for DeletionFilteringVisitor<'_> {
+    fn compare(
+        &self,
+        cell: &crate::lexical::index::structures::aabb::AABB,
+    ) -> crate::lexical::index::structures::visitor::CellRelation {
+        // Subtree pruning is purely a geometry decision — deletions do
+        // not change cell extents, so we forward verbatim.
+        self.inner.compare(cell)
+    }
+
+    fn visit_inside(&mut self, doc_id: u64) {
+        if !self.snapshot.is_deleted(doc_id) {
+            self.inner.visit_inside(doc_id);
+        }
+    }
+
+    fn visit(&mut self, doc_id: u64, point: &[f64]) {
+        if !self.snapshot.is_deleted(doc_id) {
+            self.inner.visit(doc_id, point);
+        }
+    }
+}
+
 /// Cache manager for efficient data access.
 #[derive(Debug)]
 pub struct CacheManager {
@@ -1429,10 +1550,35 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
         }
 
         if trees.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(Arc::new(MultiSegmentBKDTree { trees })))
+            return Ok(None);
         }
+
+        let multi: Arc<dyn BKDTree> = Arc::new(MultiSegmentBKDTree { trees });
+
+        // Capture a lock-free snapshot of every segment's deletion
+        // bitmap *once* here, so per-hit checks during the search
+        // never reach for a `RwLock`. Segments without any deletion
+        // are skipped, and if no segment has any deletion at all the
+        // wrapper's `intersect` short-circuits and forwards verbatim
+        // to the inner BKD tree (zero overhead in the common case).
+        let mut bitmaps = Vec::new();
+        for sr in &self.segment_readers {
+            let reader = sr.read().unwrap();
+            if !reader.info.has_deletions {
+                continue;
+            }
+            // Make sure the bitmap is loaded; the load is idempotent.
+            reader.load_deletion_bitmap()?;
+            if let Some(bitmap) = reader.deletion_bitmap.read().unwrap().clone() {
+                bitmaps.push((reader.info.min_doc_id, reader.info.max_doc_id, bitmap));
+            }
+        }
+        let snapshot = Arc::new(DeletionSnapshot { bitmaps });
+
+        Ok(Some(Arc::new(DeletionFilteringBKDTree {
+            inner: multi,
+            snapshot,
+        })))
     }
 }
 
