@@ -32,9 +32,10 @@ python3 -m http.server 8080
    re-runs with the new search centre.
 3. Type into the search box (e.g. `JAL`, `Boeing`,
    `category:heavy`) or use the quick-filter chips
-   (`大型機` / `ヘリ` / `JAL` / `ANA` / `クリア`) to add a text
-   constraint. With the `ピン📌に 3D で近い 50 機に絞る` checkbox
-   on, the demo combines text and spatial:
+   (`Heavies` / `Helicopters` / `JAL flights` / `ANA flights` /
+   `Clear`) to add a text constraint. With the
+   `Limit to the 50 aircraft 3D-closest to the pin` checkbox on,
+   the demo combines text and spatial:
    `+(text) +position:geo3d_nearest(x, y, z, 50)`.
 4. Click a result row to fly the camera to that aircraft.
 5. Use **Refresh data** for a manual snapshot, or pick an interval
