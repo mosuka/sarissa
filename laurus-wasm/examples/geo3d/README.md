@@ -29,23 +29,27 @@ python3 -m http.server 8080
    aircraft within 1000 nm of the pin from airplanes.live, and
    shows the 50 aircraft 3D-closest to the pin as orange markers
    with a vertical altitude line.
-2. **Click anywhere on the globe** to move the pin. The demo
-   re-fetches a fresh 1000 nm snapshot centred on the new pin and
-   re-runs the search. Click-induced fetches share the same
-   3-second rate limit as the manual Refresh button — rapid
-   clicks move the pin immediately but only re-fetch once per
-   window.
+2. **Click anywhere on the globe** to move the pin. The pin moves
+   immediately. The demo only re-fetches when the new pin is more
+   than **500 nautical miles** from the last fetched centre — for
+   closer clicks the previous 1000 nm snapshot still fully covers
+   the new pin's neighbourhood, so the existing in-memory index is
+   reused (no upstream call, instant search). Re-fetches that do
+   trigger share a 3-second rate limit with the manual Refresh
+   button.
 3. Type into the search box (e.g. `JAL`, `Boeing`,
    `category:heavy`) or use the quick-filter chips
    (`Heavies` / `Helicopters` / `JAL flights` / `ANA flights` /
-   `Clear`) to add a text constraint. With the
-   `Limit to the 50 aircraft 3D-closest to the pin` checkbox on,
-   the demo combines text and spatial:
-   `+(text) +position:geo3d_nearest(x, y, z, 50)`.
+   `Clear`) to filter by text. Pick how many results to display
+   in the **Show:** dropdown (10 / 25 / 50 (default) / 100 / 200).
+   Results are always sorted by 3D Euclidean distance from the
+   pin — the dropdown selects the top N closest matches.
 4. Click a result row to fly the camera to that aircraft.
 5. Use **Refresh data** for a manual snapshot, or pick an interval
-   in the **Auto** dropdown (10 s / 30 s / 60 s) for hands-off
-   updates. Auto-refresh pauses while the tab is hidden.
+   in the **Auto** dropdown (5 s / 10 s / 30 s / 60 s) for
+   hands-off updates. Auto-refresh pauses while the tab is hidden.
+   Manual / scheduled fetches always run regardless of the 500 nm
+   click threshold.
 6. The **↺ Reset view** button (top-right of the globe) flies the
    camera back to the default oblique view of Japan.
 
@@ -125,7 +129,7 @@ so the ~52 MB UniDic zip is downloaded only once across samples.
   but the upstream service is best-effort and may briefly return
   zero records or HTTP errors. The manual Refresh button is
   rate-limited to one request every 3 seconds; auto-refresh
-  defaults to off and the available cadences (10 / 30 / 60 s) are
+  defaults to off and the available cadences (5 / 10 / 30 / 60 s) are
   designed to keep the load on the upstream feed reasonable.
 - Each fetch is centred on the current pin position with a 1000 nm
   radius (~1850 km). The pin defaults to Tokyo on first load and

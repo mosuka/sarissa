@@ -233,6 +233,7 @@
           Auto:
           <select id="auto-refresh" disabled>
             <option value="0" selected>Off</option>
+            <option value="5000">every 5 s</option>
             <option value="10000">every 10 s</option>
             <option value="30000">every 30 s</option>
             <option value="60000">every 60 s</option>
@@ -363,6 +364,15 @@
      *  the globe re-centres both the pin and the snapshot. */
     const FETCH_RADIUS_NM = 1000;
 
+    /** Click-to-pin re-fetch threshold. A click that lands within this
+     *  many nautical miles of the last fetched centre reuses the
+     *  existing snapshot — the previous fetch's 1000 nm circle still
+     *  covers the new pin's neighbourhood, so no upstream call is
+     *  needed. Beyond this threshold the click triggers a fresh
+     *  re-centred fetch. Half of `FETCH_RADIUS_NM` keeps a 500 nm
+     *  buffer around the new pin even at the threshold. */
+    const FETCH_REFRESH_NM = 500;
+
     /** Build the airplanes.live readsb-format endpoint URL for a
      *  given centre. The pin defaults to Tokyo, so the initial
      *  snapshot covers Japan and the surrounding airspace within
@@ -382,6 +392,26 @@
     const FEET_TO_M = 0.3048;
     const WGS84_A = 6_378_137.0;
     const WGS84_E2 = 6.69437999014e-3;
+
+    /** Earth's mean radius in nautical miles, used by `greatCircleNm`
+     *  for the click-to-pin distance check (FETCH_REFRESH_NM). */
+    const EARTH_RADIUS_NM = 3440.065;
+
+    /**
+     * Great-circle (haversine) distance between two WGS84 lat/lon
+     * pairs, in nautical miles. Sufficient for the "is this click
+     * close enough to the last fetch centre to reuse the snapshot?"
+     * decision; not intended as a precision geodesic distance.
+     */
+    function greatCircleNm(lat1, lon1, lat2, lon2) {
+      const phi1 = (lat1 * Math.PI) / 180;
+      const phi2 = (lat2 * Math.PI) / 180;
+      const dPhi = ((lat2 - lat1) * Math.PI) / 180;
+      const dLambda = ((lon2 - lon1) * Math.PI) / 180;
+      const a = Math.sin(dPhi / 2) ** 2
+        + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) ** 2;
+      return 2 * EARTH_RADIUS_NM * Math.asin(Math.sqrt(a));
+    }
 
     /** Default pin at Tokyo (near the city centre), used until the
      *  user clicks somewhere else on the globe. */
@@ -497,6 +527,11 @@
      *  refreshing. */
     const ingestedIds = new Set();
     let refreshLockUntil = 0;
+    /** Pin position at the last successful airplanes.live fetch.
+     *  `null` until the first fetch completes — until then every
+     *  click triggers a fetch unconditionally. */
+    let lastFetchLat = null;
+    let lastFetchLon = null;
     /** Auto-refresh interval handle. Cleared when the user picks
      *  a different cadence (or "Off") from the select. */
     let autoRefreshTimer = null;
@@ -574,11 +609,16 @@
       // Click-to-pin: any left-click on the canvas casts a ray and
       // places the pin where it intersects the globe. Drags do NOT
       // fire LEFT_CLICK in Cesium, so this never collides with
-      // rotation / panning. Each click then triggers a refresh so
-      // the snapshot is re-centred on the new pin — `refreshData`
-      // applies the shared 3-second rate limit, so rapid clicks
-      // move the pin immediately but only re-fetch once per
-      // window.
+      // rotation / panning.
+      //
+      // Re-fetch policy: a click only triggers `refreshData()` when
+      // the new pin is more than `FETCH_REFRESH_NM` (500 nm) away
+      // from the last fetched centre. Inside that radius the prior
+      // 1000 nm snapshot still covers the new pin's neighbourhood,
+      // so the existing in-memory index is reused — instant search,
+      // no upstream call, no rate-limit pressure on airplanes.live.
+      // The pin still moves immediately (`setPin` always runs) so
+      // visual feedback is unaffected.
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
       handler.setInputAction((event) => {
         const ray = viewer.camera.getPickRay(event.position);
@@ -586,11 +626,27 @@
         const cart = viewer.scene.globe.pick(ray, viewer.scene);
         if (!cart) return;
         const carto = Cesium.Cartographic.fromCartesian(cart);
-        setPin(
-          Cesium.Math.toDegrees(carto.latitude),
-          Cesium.Math.toDegrees(carto.longitude),
-        );
-        refreshData();
+        const newLat = Cesium.Math.toDegrees(carto.latitude);
+        const newLon = Cesium.Math.toDegrees(carto.longitude);
+        setPin(newLat, newLon);
+        if (lastFetchLat == null || lastFetchLon == null) {
+          // First click before any fetch has completed — let
+          // refreshData decide what to do (it has its own guards).
+          refreshData();
+          return;
+        }
+        const dist = greatCircleNm(lastFetchLat, lastFetchLon, newLat, newLon);
+        if (dist > FETCH_REFRESH_NM) {
+          logger.log(
+            `Pin moved ${dist.toFixed(0)} nm from last fetch — re-centring.`,
+          );
+          refreshData();
+        } else {
+          logger.log(
+            `Pin within ${dist.toFixed(0)} nm of last fetch — `
+            + `reusing snapshot.`,
+          );
+        }
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     }
 
@@ -821,6 +877,11 @@
       );
       docCountEl.textContent = ingestedIds.size;
       lastFetchEl.textContent = new Date().toLocaleTimeString();
+      // Remember the pin position used for THIS fetch so the click
+      // handler can decide whether the next click is close enough to
+      // reuse this snapshot.
+      lastFetchLat = pinLat;
+      lastFetchLon = pinLon;
     }
 
     /** Draw a small dim dot for `id` at `ecef`. These dots cover
