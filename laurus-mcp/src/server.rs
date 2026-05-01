@@ -190,6 +190,8 @@ struct DeleteFieldParams {
 #[derive(Clone)]
 pub struct LaurusMcpServer {
     channel: Arc<RwLock<Option<Channel>>>,
+    // Consumed by the `#[tool_handler]` macro expansion; not visible to dead-code analysis.
+    #[allow(dead_code)]
     tool_router: ToolRouter<LaurusMcpServer>,
 }
 
