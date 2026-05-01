@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Laurus WASM — Geo3d Search Sample (Aircraft)</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/cesium@1.121.0/Build/Cesium/Widgets/widgets.css"
+        integrity="sha384-ghEeMdcWWzRv/BPeUcX835vcKDGrxvROXisl/Btpv3GeekBUXTSPVcFJpI1Tcrgp"
+        crossorigin="anonymous">
+  <link rel="stylesheet" href="../shared/theme.css">
+  <style>
+    .viewer-card {
+      padding: 0;
+      overflow: hidden;
+    }
+    #cesiumContainer {
+      width: 100%;
+      height: 480px;
+      position: relative;
+      background: var(--code-bg);
+    }
+    /* Tone down Cesium's default credit container */
+    .cesium-viewer-bottom {
+      font-size: 11px !important;
+    }
+    .cesium-credit-textContainer,
+    .cesium-credit-imageContainer,
+    .cesium-credit-expand-link {
+      color: var(--muted) !important;
+    }
+    .debug-grid {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      column-gap: 0.75rem;
+      row-gap: 0.4rem;
+      font-size: 0.85rem;
+      align-items: baseline;
+    }
+    .debug-grid dt {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .debug-grid dd {
+      margin: 0;
+    }
+    .debug-grid code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      word-break: break-all;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container container-wide">
+    <p class="subtitle"><a href="../">&larr; All samples</a></p>
+
+    <h1>Geo3d Search Sample (Aircraft)</h1>
+    <p class="subtitle">
+      Live aircraft positions plotted on a 3D globe (CesiumJS).
+      Demonstrates laurus' <code>geo3d</code> field type with ECEF
+      bounding-box and nearest-neighbour queries — true 3D, including
+      altitude.
+    </p>
+
+    <!-- Status -->
+    <div class="card">
+      <h2>Engine <span id="status" class="badge badge-loading">loading...</span></h2>
+      <div class="stats">
+        <div>Aircraft: <span id="doc-count">0</span></div>
+        <div>Source: <span id="source">api.airplanes.live</span></div>
+        <div>Last fetch: <span id="last-fetch">never</span></div>
+        <div>Storage: <span id="storage-mode">OPFS (rebuilt each load)</span></div>
+      </div>
+      <p class="dsl-hint">
+        First-visit downloads: UniDic dictionary (~52 MB, shared with
+        the other samples) and the CesiumJS bundle (~5 MB) from
+        unpkg with SRI hashes. Live aircraft data comes from the
+        community ADS-B feed at airplanes.live.
+      </p>
+    </div>
+
+    <!-- Viewer -->
+    <div class="card viewer-card">
+      <div id="cesiumContainer"></div>
+    </div>
+
+    <!-- Search -->
+    <div class="card">
+      <h2>Search</h2>
+      <p class="dsl-hint">
+        Text input is wrapped in the unified DSL. Examples:
+        <code>callsign:JAL*</code>, <code>aircraft_type:B38M</code>,
+        <code>description:Boeing</code>, <code>category:heavy</code>.
+        Toggle a 3D constraint below to combine the text with a
+        spatial query. The two constraints are mutually exclusive.
+      </p>
+      <div class="search-box">
+        <input type="text" id="query"
+               placeholder="例: JAL / Boeing / category:heavy" disabled>
+        <button id="search-btn" disabled>Search</button>
+      </div>
+      <div class="row">
+        <label class="toggle">
+          <input type="checkbox" id="restrict-bbox" disabled>
+          Filter by 3D bbox around camera (200 km cube)
+        </label>
+      </div>
+      <div class="row">
+        <label class="toggle">
+          <input type="checkbox" id="nearest-mode" disabled>
+          Nearest 20 aircraft to camera target
+        </label>
+      </div>
+      <p class="dsl-hint">
+        With "Filter by 3D bbox" on, the demo emits
+        <code>+(text) +position:geo3d_bbox(minX, minY, minZ, maxX, maxY, maxZ)</code>
+        derived from a 200 km AABB centred on the camera ECEF
+        position. With "Nearest" on, it emits
+        <code>position:geo3d_nearest(targetX, targetY, targetZ, 20)</code>
+        where the target is the screen-centre intersection with the
+        WGS84 ellipsoid.
+      </p>
+      <ul class="results" id="results">
+        <li class="empty">Loading aircraft data…</li>
+      </ul>
+    </div>
+
+    <!-- Debug -->
+    <div class="card">
+      <h2>Debug</h2>
+      <p class="dsl-hint">
+        Live view of the camera state and the DSL string the demo
+        sends to <code>index.search()</code>. Updates while you drag,
+        zoom, or rotate the globe.
+      </p>
+      <dl class="debug-grid">
+        <dt>Camera (lat, lon, h)</dt>
+        <dd><code id="dbg-camera">—</code></dd>
+        <dt>Camera ECEF</dt>
+        <dd><code id="dbg-ecef">—</code></dd>
+        <dt>Camera target ECEF</dt>
+        <dd><code id="dbg-target">—</code></dd>
+        <dt>3D bbox (min &rarr; max)</dt>
+        <dd><code id="dbg-bbox">—</code></dd>
+        <dt>Last DSL query</dt>
+        <dd><code id="dbg-query">—</code></dd>
+      </dl>
+    </div>
+
+    <!-- Maintenance -->
+    <div class="card">
+      <h2>Maintenance</h2>
+      <p class="dsl-hint">
+        Refresh re-fetches aircraft positions from airplanes.live
+        and rebuilds the index. Reset clears OPFS state including
+        the cached UniDic dictionary.
+      </p>
+      <div class="row">
+        <button id="refresh-btn" type="button" disabled>Refresh data</button>
+        <button id="reset-all-btn" class="secondary" type="button" disabled>Reset everything (index + dictionary)</button>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="card">
+      <h2>Log</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <!-- Cesium global script bootstrap. The base URL must be set
+       before Cesium.js is parsed so the library can locate its
+       worker and asset directory under the same unpkg version. -->
+  <script>
+    window.CESIUM_BASE_URL = 'https://unpkg.com/cesium@1.121.0/Build/Cesium/';
+  </script>
+  <script src="https://unpkg.com/cesium@1.121.0/Build/Cesium/Cesium.js"
+          integrity="sha384-q9nNk8suPYjCO59e/4iaSYbUEDnj0FxTd2QoWXfFeF0+L5FSerVuCAjKXM/EYiD9"
+          crossorigin="anonymous"></script>
+
+  <script type="module">
+    import init, { Index, Schema } from '../../pkg/laurus_wasm.js';
+    import { createLogger } from '../shared/log.js';
+    import {
+      ANALYZER_NAME,
+      buildJapaneseAnalyzer,
+      clearDictionary,
+      DICT_NAME,
+      ensureDictionary,
+    } from '../shared/dictionary.js';
+
+    /** OPFS directory holding the (volatile) flights index.
+     *  This sample wipes and recreates the directory on every load
+     *  so stale aircraft positions never leak across sessions. */
+    const INDEX_NAME = 'flights3d-demo-index';
+    const POSITION_FIELD = 'position';
+
+    /** airplanes.live readsb-format endpoint. lat/lon = centre,
+     *  dist = nautical miles (max 250). We query the Japan area by
+     *  default; pan / zoom in CesiumJS does NOT re-fetch — the user
+     *  must press "Refresh data" to get a new snapshot. */
+    const AIRPLANES_LIVE_URL =
+      'https://api.airplanes.live/v2/point/36.0/138.0/250';
+
+    /** Soft cap on document count for snappy UI. */
+    const MAX_AIRCRAFT = 500;
+
+    /** Half-width of the camera-centred AABB in ECEF metres
+     *  (= 200 km cube). Coarse but adequate for a demo of the
+     *  geo3d_bbox query. */
+    const BBOX_HALF_M = 200_000;
+
+    /** k for the nearest-neighbour query. */
+    const NEAREST_K = 20;
+
+    /** Search result limit. Far above MAX_AIRCRAFT so we always see
+     *  every match in the index. */
+    const SEARCH_LIMIT = 500;
+
+    /** Conversion from feet (airplanes.live altitudes) to metres. */
+    const FEET_TO_M = 0.3048;
+
+    /** WGS84 ellipsoid parameters. */
+    const WGS84_A = 6_378_137.0;
+    const WGS84_E2 = 6.69437999014e-3;
+
+    /**
+     * Convert a WGS84 geodetic position (lat, lon in degrees;
+     * altitude in metres above the ellipsoid) to ECEF Cartesian
+     * coordinates in metres, suitable for laurus' `geo3d` field.
+     *
+     * Uses the standard closed-form WGS84 forward formula. Matches
+     * the conventions in `laurus/src/util/ecef.rs` so docs indexed
+     * via this helper are interchangeable with docs produced by the
+     * Rust core.
+     */
+    function wgs84ToEcef(latDeg, lonDeg, hMeters) {
+      const lat = (latDeg * Math.PI) / 180;
+      const lon = (lonDeg * Math.PI) / 180;
+      const sinLat = Math.sin(lat);
+      const cosLat = Math.cos(lat);
+      const sinLon = Math.sin(lon);
+      const cosLon = Math.cos(lon);
+      const N = WGS84_A / Math.sqrt(1 - WGS84_E2 * sinLat * sinLat);
+      const x = (N + hMeters) * cosLat * cosLon;
+      const y = (N + hMeters) * cosLat * sinLon;
+      const z = (N * (1 - WGS84_E2) + hMeters) * sinLat;
+      return { x, y, z };
+    }
+
+    /**
+     * Map ADS-B emitter category codes to short human labels. These
+     * correspond to the DO-260 Appendix B encoding emitted by
+     * readsb-compatible feeds.
+     */
+    function categoryLabel(code) {
+      const map = {
+        A0: 'no info', A1: 'light',
+        A2: 'small', A3: 'large', A4: 'high-vortex',
+        A5: 'heavy', A6: 'high-perf', A7: 'rotorcraft',
+        B0: 'no info', B1: 'glider', B2: 'lighter-than-air',
+        B3: 'parachutist', B4: 'ultralight', B6: 'uav', B7: 'space',
+        C0: 'no info', C1: 'emergency-vehicle',
+        C2: 'service-vehicle', C3: 'fixed-obstacle',
+      };
+      return map[code] ?? (code || 'unknown');
+    }
+
+    const logger = createLogger('log');
+    const statusEl = document.getElementById('status');
+    const docCountEl = document.getElementById('doc-count');
+    const lastFetchEl = document.getElementById('last-fetch');
+    const resultsEl = document.getElementById('results');
+    const restrictEl = document.getElementById('restrict-bbox');
+    const nearestEl = document.getElementById('nearest-mode');
+    const refreshBtn = document.getElementById('refresh-btn');
+    const dbgCameraEl = document.getElementById('dbg-camera');
+    const dbgEcefEl = document.getElementById('dbg-ecef');
+    const dbgTargetEl = document.getElementById('dbg-target');
+    const dbgBboxEl = document.getElementById('dbg-bbox');
+    const dbgQueryEl = document.getElementById('dbg-query');
+
+    /** @type {import('../../pkg/laurus_wasm.js').Index | null} */
+    let index = null;
+    /** @type {Cesium.Viewer | null} */
+    let viewer = null;
+    /** Cesium entity per result id (callsign/hex). */
+    const entities = new Map();
+    /** Document ids currently in the index, used to clear before
+     *  refreshing. */
+    const ingestedIds = new Set();
+    let refreshLockUntil = 0;
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = String(str);
+      return div.innerHTML;
+    }
+
+    /**
+     * Build the CesiumJS viewer with no Cesium Ion access. We pin
+     * the OpenStreetMap raster tiles as the only imagery layer and
+     * fall back to the simple ellipsoid terrain so no Ion-backed
+     * fetch is ever issued (a missing token would otherwise raise a
+     * runtime warning).
+     */
+    function initViewer() {
+      Cesium.Ion.defaultAccessToken = '';
+
+      const osmProvider = new Cesium.UrlTemplateImageryProvider({
+        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        credit:
+          new Cesium.Credit(
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            true,
+          ),
+        maximumLevel: 19,
+      });
+
+      viewer = new Cesium.Viewer('cesiumContainer', {
+        baseLayer: new Cesium.ImageryLayer(osmProvider),
+        baseLayerPicker: false,
+        geocoder: false,
+        homeButton: false,
+        sceneModePicker: false,
+        navigationHelpButton: false,
+        animation: false,
+        timeline: false,
+        fullscreenButton: false,
+        infoBox: false,
+        selectionIndicator: false,
+        terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+      });
+
+      // Centre on Japan with an oblique camera angle so altitude is
+      // visible. ~1500 km altitude pulls back enough to see ~250 nm
+      // of aircraft around lat=36, lon=138.
+      viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(138.0, 32.0, 1_500_000),
+        orientation: {
+          heading: 0.0,
+          pitch: Cesium.Math.toRadians(-45.0),
+          roll: 0.0,
+        },
+      });
+
+      // The index is small enough that we can re-search on every
+      // settled camera move — but only when a 3D constraint is on,
+      // since otherwise the result set does not depend on the
+      // camera. `percentageChanged = 0.05` avoids firing on tiny
+      // jitters.
+      viewer.camera.percentageChanged = 0.05;
+      viewer.camera.changed.addEventListener(() => {
+        updateDebugDisplay();
+        if (index && (restrictEl.checked || nearestEl.checked)) {
+          doSearch();
+        }
+      });
+
+      updateDebugDisplay();
+    }
+
+    function getCameraGeodetic() {
+      const carto = Cesium.Cartographic.fromCartesian(
+        viewer.camera.positionWC,
+      );
+      return {
+        lat: Cesium.Math.toDegrees(carto.latitude),
+        lon: Cesium.Math.toDegrees(carto.longitude),
+        h: carto.height,
+      };
+    }
+
+    function getCameraEcef() {
+      const p = viewer.camera.positionWC;
+      return { x: p.x, y: p.y, z: p.z };
+    }
+
+    /**
+     * Build the 200 km half-width AABB centred on the camera ECEF
+     * position. This is a coarse axis-aligned approximation of the
+     * camera viewport — fine for demoing geo3d_bbox.
+     */
+    function getCameraBBox() {
+      const { x, y, z } = getCameraEcef();
+      return {
+        minX: x - BBOX_HALF_M,
+        minY: y - BBOX_HALF_M,
+        minZ: z - BBOX_HALF_M,
+        maxX: x + BBOX_HALF_M,
+        maxY: y + BBOX_HALF_M,
+        maxZ: z + BBOX_HALF_M,
+      };
+    }
+
+    /**
+     * The point on the WGS84 ellipsoid the camera is currently
+     * aiming at. Falls back to the camera position when the
+     * screen-centre ray does not intersect the globe (e.g. the user
+     * tilted up into the sky).
+     */
+    function getCameraTargetEcef() {
+      const ray = viewer.camera.getPickRay(
+        new Cesium.Cartesian2(
+          viewer.canvas.clientWidth / 2,
+          viewer.canvas.clientHeight / 2,
+        ),
+      );
+      const target = ray
+        ? viewer.scene.globe.pick(ray, viewer.scene)
+        : null;
+      const c = target ?? viewer.camera.positionWC;
+      return { x: c.x, y: c.y, z: c.z };
+    }
+
+    function updateDebugDisplay() {
+      if (!viewer) return;
+      const g = getCameraGeodetic();
+      dbgCameraEl.textContent =
+        `${g.lat.toFixed(4)}, ${g.lon.toFixed(4)}, ${g.h.toFixed(0)} m`;
+      const e = getCameraEcef();
+      dbgEcefEl.textContent =
+        `${e.x.toFixed(0)}, ${e.y.toFixed(0)}, ${e.z.toFixed(0)}`;
+      const t = getCameraTargetEcef();
+      dbgTargetEl.textContent =
+        `${t.x.toFixed(0)}, ${t.y.toFixed(0)}, ${t.z.toFixed(0)}`;
+      const b = getCameraBBox();
+      dbgBboxEl.textContent =
+        `(${b.minX.toFixed(0)}, ${b.minY.toFixed(0)}, ${b.minZ.toFixed(0)})`
+        + ` → (${b.maxX.toFixed(0)}, ${b.maxY.toFixed(0)}, ${b.maxZ.toFixed(0)})`;
+    }
+
+    /**
+     * Build the unified DSL query string. Free text portion is left
+     * untouched so users can write `callsign:JAL*` etc. The bbox
+     * and nearest toggles are mutually exclusive in the UI.
+     */
+    function buildQuery(rawText) {
+      const text = rawText.trim();
+      if (nearestEl.checked) {
+        const t = getCameraTargetEcef();
+        const inner = `${POSITION_FIELD}:geo3d_nearest(`
+          + `${t.x.toFixed(0)}, ${t.y.toFixed(0)}, ${t.z.toFixed(0)}, `
+          + `${NEAREST_K})`;
+        if (!text) return inner;
+        return `+(${text}) +${inner}`;
+      }
+      if (restrictEl.checked) {
+        const b = getCameraBBox();
+        const inner = `${POSITION_FIELD}:geo3d_bbox(`
+          + `${b.minX.toFixed(0)}, ${b.minY.toFixed(0)}, ${b.minZ.toFixed(0)}, `
+          + `${b.maxX.toFixed(0)}, ${b.maxY.toFixed(0)}, ${b.maxZ.toFixed(0)})`;
+        if (!text) return inner;
+        return `+(${text}) +${inner}`;
+      }
+      return text;
+    }
+
+    /**
+     * Pull the current aircraft snapshot from airplanes.live and
+     * filter it down to the ones with usable position + altitude.
+     * Throws on network or HTTP error.
+     */
+    async function fetchAircraft() {
+      logger.log(`Fetching aircraft from ${AIRPLANES_LIVE_URL}...`);
+      const t0 = performance.now();
+      const res = await fetch(AIRPLANES_LIVE_URL, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(`airplanes.live HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      const all = Array.isArray(json.ac) ? json.ac : [];
+      const usable = [];
+      for (const ac of all) {
+        if (typeof ac.lat !== 'number' || typeof ac.lon !== 'number') continue;
+        let altMeters = null;
+        if (typeof ac.alt_geom === 'number') {
+          altMeters = ac.alt_geom * FEET_TO_M;
+        } else if (typeof ac.alt_baro === 'number') {
+          altMeters = ac.alt_baro * FEET_TO_M;
+        } else if (ac.alt_baro === 'ground') {
+          altMeters = 0;
+        } else {
+          continue;
+        }
+        usable.push({ ...ac, altMeters });
+        if (usable.length >= MAX_AIRCRAFT) break;
+      }
+      const elapsed = (performance.now() - t0).toFixed(0);
+      logger.ok(
+        `Fetched ${all.length} record(s); using ${usable.length} `
+        + `with valid 3D position in ${elapsed} ms.`,
+      );
+      return usable;
+    }
+
+    /**
+     * Replace the entire index contents with the new snapshot. The
+     * sample is volatile-by-design so we delete every previously
+     * ingested id (tracked in `ingestedIds`) before putting the new
+     * batch and committing once.
+     */
+    async function ingestAircraft(records) {
+      if (ingestedIds.size > 0) {
+        logger.log(`Clearing ${ingestedIds.size} stale aircraft from the index...`);
+        for (const id of ingestedIds) {
+          await index.deleteDocuments(id);
+        }
+        ingestedIds.clear();
+      }
+
+      for (const ac of records) {
+        const id = (ac.flight ?? '').trim() || ac.hex;
+        if (!id) continue;
+        const ecef = wgs84ToEcef(ac.lat, ac.lon, ac.altMeters);
+        await index.putDocument(id, {
+          callsign: (ac.flight ?? '').trim(),
+          registration: ac.r ?? '',
+          aircraft_type: ac.t ?? '',
+          description: ac.desc ?? '',
+          category: categoryLabel(ac.category),
+          on_ground: ac.alt_baro === 'ground',
+          altitude_m: ac.altMeters,
+          [POSITION_FIELD]: ecef,
+        });
+        ingestedIds.add(id);
+      }
+      await index.commit();
+      docCountEl.textContent = ingestedIds.size;
+      lastFetchEl.textContent = new Date().toLocaleTimeString();
+    }
+
+    function clearAllEntities() {
+      for (const e of entities.values()) {
+        viewer.entities.remove(e);
+      }
+      entities.clear();
+    }
+
+    /**
+     * Reconcile Cesium entities with the current search hits.
+     * Entities for ids no longer in the result set are removed;
+     * missing ones are added. Keeps positions in sync with what the
+     * result list shows so the visual and textual views never
+     * disagree.
+     */
+    function syncEntitiesFromResults(results) {
+      const wanted = new Map(results.map((r) => [r.id, r]));
+      for (const [id, e] of [...entities]) {
+        if (!wanted.has(id)) {
+          viewer.entities.remove(e);
+          entities.delete(id);
+        }
+      }
+      for (const [id, r] of wanted) {
+        if (entities.has(id)) continue;
+        const doc = r.document ?? {};
+        const pos = doc.position;
+        if (!pos) continue;
+        const cart = new Cesium.Cartesian3(pos.x, pos.y, pos.z);
+        const e = viewer.entities.add({
+          id,
+          position: cart,
+          point: {
+            pixelSize: 9,
+            color: Cesium.Color.fromCssColorString('#7aa2f7'),
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 1,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          label: {
+            text: doc.callsign || id,
+            font: '12px monospace',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            pixelOffset: new Cesium.Cartesian2(0, -10),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            scale: 0.85,
+          },
+        });
+        entities.set(id, e);
+      }
+    }
+
+    async function doSearch() {
+      if (!index) return;
+      const text = document.getElementById('query').value;
+      const query = buildQuery(text);
+      dbgQueryEl.textContent = query || '(empty)';
+      if (!query) {
+        clearAllEntities();
+        resultsEl.innerHTML =
+          '<li class="empty">Enter text and/or toggle a 3D filter to search.</li>';
+        return;
+      }
+      try {
+        const t0 = performance.now();
+        const results = await index.search(query, SEARCH_LIMIT);
+        const elapsed = (performance.now() - t0).toFixed(1);
+        logger.log(`"${query}" -> ${results.length} hit(s) in ${elapsed} ms`);
+
+        syncEntitiesFromResults(results);
+
+        if (results.length === 0) {
+          resultsEl.innerHTML =
+            '<li class="empty">No matching aircraft.</li>';
+          return;
+        }
+
+        resultsEl.innerHTML = results
+          .map((r) => {
+            const doc = r.document ?? {};
+            const altKm = typeof doc.altitude_m === 'number'
+              ? `${(doc.altitude_m / 1000).toFixed(1)} km`
+              : 'unknown';
+            const meta = [
+              escapeHtml(doc.aircraft_type ?? ''),
+              escapeHtml(doc.category ?? ''),
+              `alt ${altKm}`,
+            ].filter(Boolean).join(' · ');
+            const reg = doc.registration
+              ? ` (reg ${escapeHtml(doc.registration)})`
+              : '';
+            return `
+              <li class="clickable" data-id="${escapeHtml(r.id)}">
+                <div class="meta">
+                  <span class="score">${r.score.toFixed(4)}</span>
+                  <span class="extra">${meta}</span>
+                </div>
+                <div class="title">${escapeHtml(doc.callsign || r.id)}</div>
+                <div class="body">${escapeHtml(doc.description || '')}${reg}</div>
+              </li>
+            `;
+          })
+          .join('');
+
+        for (const li of resultsEl.querySelectorAll('li.clickable')) {
+          li.addEventListener('click', () => {
+            for (const el of resultsEl.querySelectorAll('li.active')) {
+              el.classList.remove('active');
+            }
+            li.classList.add('active');
+            const e = entities.get(li.dataset.id);
+            if (e) viewer.flyTo(e, { duration: 1.0 });
+          });
+        }
+      } catch (e) {
+        logger.err(`Search error: ${e}`);
+        console.error(e);
+      }
+    }
+
+    async function refreshData() {
+      if (Date.now() < refreshLockUntil) return;
+      refreshLockUntil = Date.now() + 5_000;
+      refreshBtn.disabled = true;
+      try {
+        const records = await fetchAircraft();
+        if (records.length === 0) {
+          logger.err('airplanes.live returned 0 usable records.');
+        }
+        await ingestAircraft(records);
+        await doSearch();
+      } catch (e) {
+        logger.err(`Refresh failed: ${e}`);
+        console.error(e);
+      } finally {
+        setTimeout(() => { refreshBtn.disabled = false; }, 5_000);
+      }
+    }
+
+    async function deleteIndexDir() {
+      const root = await navigator.storage.getDirectory();
+      try {
+        await root.removeEntry(INDEX_NAME, { recursive: true });
+        logger.ok(`Removed OPFS index "${INDEX_NAME}".`);
+      } catch (e) {
+        if (e?.name !== 'NotFoundError') {
+          logger.err(`Failed to remove "${INDEX_NAME}": ${e}`);
+        }
+      }
+    }
+
+    async function resetAll() {
+      if (!confirm(
+        'Delete the geo3d index AND the cached UniDic dictionary, then reload? '
+        + 'The ~52 MB dictionary will re-download on next visit.',
+      )) {
+        return;
+      }
+      try {
+        await deleteIndexDir();
+        if (await clearDictionary()) {
+          logger.ok(`Removed OPFS dictionary "${DICT_NAME}".`);
+        }
+        logger.ok('Full reset complete. Reloading...');
+        setTimeout(() => location.reload(), 250);
+      } catch (e) {
+        logger.err(`Reset failed: ${e}`);
+        console.error(e);
+      }
+    }
+
+    async function boot() {
+      try {
+        initViewer();
+
+        logger.log('Initializing WASM module...');
+        const t0 = performance.now();
+        await init();
+        logger.ok(`WASM module loaded in ${((performance.now() - t0) / 1000).toFixed(1)}s.`);
+
+        await ensureDictionary({
+          logger,
+          setStatus: (text) => { statusEl.textContent = text; },
+        });
+
+        const analyzer = await buildJapaneseAnalyzer({ mode: 'normal' });
+        logger.ok('JapaneseAnalyzer built from OPFS-loaded UniDic.');
+
+        // Always start from a fresh OPFS state. The previous
+        // session's aircraft positions are useless to a Live demo.
+        await deleteIndexDir();
+
+        const schema = new Schema();
+        schema.addAnalyzer(ANALYZER_NAME, analyzer);
+        schema.addTextField('callsign', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('registration', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('aircraft_type', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('description', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addTextField('category', undefined, undefined, undefined, ANALYZER_NAME);
+        schema.addBooleanField('on_ground', undefined, undefined);
+        schema.addFloatField('altitude_m', undefined, undefined);
+        schema.addGeo3dField(POSITION_FIELD, true, true);
+        schema.setDefaultFields([
+          'callsign',
+          'registration',
+          'aircraft_type',
+          'description',
+          'category',
+        ]);
+        logger.log(
+          `Schema: callsign + registration + aircraft_type + description + category `
+          + `(text, analyzer="${ANALYZER_NAME}"), on_ground (bool), altitude_m (float), `
+          + `${POSITION_FIELD} (geo3d, indexed).`,
+        );
+
+        index = await Index.open(INDEX_NAME, schema);
+        logger.ok(`OPFS index "${INDEX_NAME}" opened (empty).`);
+
+        await refreshData();
+
+        statusEl.textContent = 'ready';
+        statusEl.className = 'badge badge-ready';
+
+        for (const el of document.querySelectorAll('input, button')) {
+          el.disabled = false;
+        }
+      } catch (e) {
+        logger.err(`Error: ${e}`);
+        statusEl.textContent = 'error';
+        statusEl.className = 'badge badge-error';
+        console.error(e);
+      }
+    }
+
+    document.getElementById('search-btn').addEventListener('click', doSearch);
+    document.getElementById('query').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doSearch();
+    });
+    refreshBtn.addEventListener('click', refreshData);
+    document.getElementById('reset-all-btn').addEventListener('click', resetAll);
+    restrictEl.addEventListener('change', () => {
+      if (restrictEl.checked) nearestEl.checked = false;
+      if (index) doSearch();
+    });
+    nearestEl.addEventListener('change', () => {
+      if (nearestEl.checked) restrictEl.checked = false;
+      if (index) doSearch();
+    });
+
+    boot();
+  </script>
+</body>
+</html>
