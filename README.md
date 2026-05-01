@@ -19,6 +19,18 @@ Built on a core library covering lexical search, vector search, and hybrid searc
 
 Whether embedded as a library, deployed as a standalone server, called from Python / Node.js / Ruby / PHP, run in the browser via WASM, or woven into AI workflows, Laurus is a composable search foundation.
 
+## Live Demo
+
+Try Laurus directly in your browser — every sample runs entirely client-side via WebAssembly:
+
+**[https://mosuka.github.io/laurus/demo/](https://mosuka.github.io/laurus/demo/)**
+
+| Sample | What it shows |
+| --- | --- |
+| [basic](https://mosuka.github.io/laurus/demo/basic/) | Japanese full-text, vector, and hybrid search with the unified query DSL |
+| [geo](https://mosuka.github.io/laurus/demo/geo/) | Tokyo points-of-interest on a Leaflet map with bounding-box + text + vector queries |
+| [geo3d](https://mosuka.github.io/laurus/demo/geo3d/) | Live aircraft on a CesiumJS 3D globe using `geo3d_bbox` / `geo3d_nearest` (true ECEF 3D, including altitude) |
+
 ## Documentation
 
 Comprehensive documentation is available online:
