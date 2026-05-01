@@ -12,6 +12,7 @@ the landing page, or jump straight to a specific sample.
 | --- | --- |
 | [`basic/`](./basic/) | Japanese full-text, vector, and hybrid search with the unified query DSL. Adds documents interactively. |
 | [`geo/`](./geo/) | Tokyo points-of-interest on a Leaflet map. Combines a bounding-box constraint (`location:geo_bbox(...)`) drawn from the current viewport with text and vector queries. |
+| [`geo3d/`](./geo3d/) | Live aircraft positions on a CesiumJS 3D globe. Demonstrates the `geo3d` field type with `geo3d_bbox(...)` and `geo3d_nearest(...)` queries — true ECEF 3D, including altitude. |
 
 The [`shared/`](./shared/) directory holds assets reused by every
 sample (theme stylesheet, logger, dictionary loader, embedder

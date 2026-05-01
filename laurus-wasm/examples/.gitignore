@@ -1,0 +1,5 @@
+# Local UniDic dictionary download.
+# The deploy workflow places the zip under docs/book/demo/dict; for local
+# development the samples expect it at examples/dict/lindera-unidic.zip.
+# The zip is binary and should never be tracked.
+dict/

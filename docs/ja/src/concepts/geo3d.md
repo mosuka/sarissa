@@ -268,6 +268,9 @@ MCP サーバーも同じ規約に従う。
 - [Query DSL](query_dsl.md) — geo3d DSL 文法の詳細。
 - [Lexical 検索](search/lexical_search.md) — Lexical クエリ全般の Rust
   API エントリポイント。
+- [`laurus-wasm/examples/geo3d/`](https://github.com/mosuka/laurus/tree/main/laurus-wasm/examples/geo3d) —
+  ブラウザ向けデモ。CesiumJS の 3D 地球儀上にリアルタイム航空機位置を
+  プロットし、`geo3d_bbox` と `geo3d_nearest` を実演します。
 
 [`AABB::min_distance_sq_to_point`]: https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs
 [`AABB::max_distance_sq_to_point`]: https://github.com/mosuka/laurus/blob/main/laurus/src/lexical/index/structures/aabb.rs
