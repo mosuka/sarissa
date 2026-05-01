@@ -311,13 +311,18 @@
     const INDEX_NAME = 'flights3d-demo-index';
     const POSITION_FIELD = 'position';
 
-    /** airplanes.live readsb-format endpoint. lat / lon = centre,
-     *  dist = nautical miles. The default centres on Japan with a
-     *  1000 nm radius (~1850 km) so the snapshot covers the
-     *  surrounding airspace as well as domestic flights; adjust
-     *  this URL if you want a different region. */
-    const AIRPLANES_LIVE_URL =
-      'https://api.airplanes.live/v2/point/36.0/138.0/1000';
+    /** Radius in nautical miles passed to airplanes.live. Each
+     *  fetch is centred on the current pin position, so clicking
+     *  the globe re-centres both the pin and the snapshot. */
+    const FETCH_RADIUS_NM = 1000;
+
+    /** Build the airplanes.live readsb-format endpoint URL for a
+     *  given centre. The pin defaults to Tokyo, so the initial
+     *  snapshot covers Japan and the surrounding airspace within
+     *  ~1850 km (`FETCH_RADIUS_NM`). */
+    function buildFetchUrl(latDeg, lonDeg) {
+      return `https://api.airplanes.live/v2/point/${latDeg.toFixed(4)}/${lonDeg.toFixed(4)}/${FETCH_RADIUS_NM}`;
+    }
 
     /** Soft cap on aircraft count for snappy UI. */
     const MAX_AIRCRAFT = 500;
@@ -518,7 +523,11 @@
       // Click-to-pin: any left-click on the canvas casts a ray and
       // places the pin where it intersects the globe. Drags do NOT
       // fire LEFT_CLICK in Cesium, so this never collides with
-      // rotation / panning.
+      // rotation / panning. Each click then triggers a refresh so
+      // the snapshot is re-centred on the new pin — `refreshData`
+      // applies the shared 5-second rate limit, so rapid clicks
+      // move the pin immediately but only re-fetch once per
+      // window.
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
       handler.setInputAction((event) => {
         const ray = viewer.camera.getPickRay(event.position);
@@ -530,6 +539,7 @@
           Cesium.Math.toDegrees(carto.latitude),
           Cesium.Math.toDegrees(carto.longitude),
         );
+        refreshData();
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     }
 
@@ -602,9 +612,10 @@
      * Throws on network or HTTP error.
      */
     async function fetchAircraft() {
-      logger.log(`Fetching aircraft from ${AIRPLANES_LIVE_URL}…`);
+      const url = buildFetchUrl(pinLat, pinLon);
+      logger.log(`Fetching aircraft from ${url}…`);
       const t0 = performance.now();
-      const res = await fetch(AIRPLANES_LIVE_URL, { cache: 'no-store' });
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) {
         throw new Error(`airplanes.live HTTP ${res.status}`);
       }
