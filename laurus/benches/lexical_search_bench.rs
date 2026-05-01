@@ -1,7 +1,40 @@
 //! End-to-end lexical search benchmarks.
 //!
-//! Measures full query execution time including matching, scoring, and collection
-//! for various query types: TermQuery, BooleanQuery, PhraseQuery, FuzzyQuery.
+//! Measures full query execution time including matching, scoring, and
+//! collection for various query types: `TermQuery`, `BooleanQuery`,
+//! `PhraseQuery`, `FuzzyQuery`, and the DSL parser.
+//!
+//! # Scope
+//!
+//! - End-to-end through `Engine::search`, including async runtime overhead.
+//! - Corpus sizes 100, 1 000, 5 000 documents over a fixed 8-topic
+//!   vocabulary. Larger corpora and Zipf-distributed vocabulary are tracked
+//!   in #422.
+//! - One-time correctness assert verifies the probe query returns at least
+//!   one hit before the timed loop runs.
+//!
+//! # Run
+//!
+//! ```sh
+//! cargo bench --bench lexical_search_bench
+//! ```
+//!
+//! Filter by group / case (substring match against the criterion id):
+//!
+//! ```sh
+//! cargo bench --bench lexical_search_bench -- term_query
+//! cargo bench --bench lexical_search_bench -- boolean_query/should_or
+//! ```
+//!
+//! Compile-only smoke check:
+//!
+//! ```sh
+//! cargo bench --bench lexical_search_bench --no-run
+//! ```
+//!
+//! See `benches/common.rs` for the suite-wide hygiene rules.
+
+mod common;
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -82,6 +115,21 @@ fn bench_term_query(c: &mut Criterion) {
     for &n in &[100, 1000, 5000] {
         let engine = rt.block_on(build_engine(n)).unwrap();
 
+        // One-time sanity check: the probe query must return at least one
+        // hit. If this fires, the corpus / query pair drifted out of sync.
+        let probe = rt.block_on(async {
+            let query = Box::new(TermQuery::new("body", "programming"));
+            let request = SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(query))
+                .limit(10)
+                .build();
+            engine.search(request).await.unwrap()
+        });
+        assert!(
+            !probe.is_empty(),
+            "term_query probe must return at least one hit at n={n}"
+        );
+
         group.bench_with_input(BenchmarkId::new("search", n), &n, |b, _| {
             b.to_async(&rt).iter(|| {
                 let engine = &engine;
@@ -102,6 +150,21 @@ fn bench_term_query(c: &mut Criterion) {
 fn bench_term_query_varying_limit(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let engine = rt.block_on(build_engine(5000)).unwrap();
+
+    // Sanity check: the largest limit must return more hits than the smallest.
+    let probe_small = rt.block_on(async {
+        let query = Box::new(TermQuery::new("body", "programming"));
+        let request = SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::Obj(query))
+            .limit(10)
+            .build();
+        engine.search(request).await.unwrap()
+    });
+    assert!(
+        !probe_small.is_empty(),
+        "term_query_limit probe must return at least one hit"
+    );
+
     let mut group = c.benchmark_group("lexical/term_query_limit");
 
     for &limit in &[10, 50, 100, 500] {
@@ -128,6 +191,22 @@ fn bench_boolean_query(c: &mut Criterion) {
 
     for &n in &[100, 1000, 5000] {
         let engine = rt.block_on(build_engine(n)).unwrap();
+
+        // Sanity check: the OR probe over three known terms must hit.
+        let probe = rt.block_on(async {
+            let mut bq = BooleanQuery::new();
+            bq.add_should(Box::new(TermQuery::new("body", "rust")));
+            bq.add_should(Box::new(TermQuery::new("body", "python")));
+            let request = SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(Box::new(bq)))
+                .limit(10)
+                .build();
+            engine.search(request).await.unwrap()
+        });
+        assert!(
+            !probe.is_empty(),
+            "boolean_query OR probe must return at least one hit at n={n}"
+        );
 
         // MUST + MUST (AND)
         group.bench_with_input(BenchmarkId::new("must_and", n), &n, |b, _| {
@@ -191,6 +270,23 @@ fn bench_phrase_query(c: &mut Criterion) {
     for &n in &[100, 1000, 5000] {
         let engine = rt.block_on(build_engine(n)).unwrap();
 
+        // Sanity check: the two-term phrase probe must hit at least once.
+        let probe = rt.block_on(async {
+            let query = Box::new(PhraseQuery::new(
+                "body",
+                vec!["search".into(), "engine".into()],
+            ));
+            let request = SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(query))
+                .limit(10)
+                .build();
+            engine.search(request).await.unwrap()
+        });
+        assert!(
+            !probe.is_empty(),
+            "phrase_query probe must return at least one hit at n={n}"
+        );
+
         group.bench_with_input(BenchmarkId::new("two_terms", n), &n, |b, _| {
             b.to_async(&rt).iter(|| {
                 let engine = &engine;
@@ -235,6 +331,20 @@ fn bench_fuzzy_query(c: &mut Criterion) {
     for &n in &[100, 1000, 5000] {
         let engine = rt.block_on(build_engine(n)).unwrap();
 
+        // Sanity check: the edit1 probe must match `programming`.
+        let probe = rt.block_on(async {
+            let query = Box::new(FuzzyQuery::new("body", "programing").max_edits(1));
+            let request = SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(query))
+                .limit(10)
+                .build();
+            engine.search(request).await.unwrap()
+        });
+        assert!(
+            !probe.is_empty(),
+            "fuzzy_query probe must return at least one hit at n={n}"
+        );
+
         group.bench_with_input(BenchmarkId::new("edit1", n), &n, |b, _| {
             b.to_async(&rt).iter(|| {
                 let engine = &engine;
@@ -269,6 +379,20 @@ fn bench_fuzzy_query(c: &mut Criterion) {
 fn bench_dsl_query(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let engine = rt.block_on(build_engine(5000)).unwrap();
+
+    // Sanity check: the simple_term DSL probe must hit.
+    let probe = rt.block_on(async {
+        let request = SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::Dsl("body:programming".to_string()))
+            .limit(10)
+            .build();
+        engine.search(request).await.unwrap()
+    });
+    assert!(
+        !probe.is_empty(),
+        "dsl_query probe must return at least one hit"
+    );
+
     let mut group = c.benchmark_group("lexical/dsl_query");
 
     group.bench_function("simple_term", |b| {
