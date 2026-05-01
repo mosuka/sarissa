@@ -30,6 +30,8 @@
 //! across iterations. Synthetic data is generated with an inline LCG so
 //! the benches stay deterministic without pulling in `rand`.
 
+mod common;
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use laurus::lexical::index::structures::aabb::AABB;
 use laurus::lexical::index::structures::bkd_tree::{BKDReader, BKDTree, BKDWriter};
@@ -39,16 +41,7 @@ use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use std::hint::black_box;
 use std::sync::Arc;
 
-/// Inline LCG (numerical recipes constants) so the bench stays deterministic
-/// without pulling in `rand` as a dev dep.
-fn lcg_next(state: &mut u64) -> f64 {
-    *state = state
-        .wrapping_mul(6_364_136_223_846_793_005)
-        .wrapping_add(1_442_695_040_888_963_407);
-    // Take the high 32 bits and rescale to [0, 1000).
-    let bits = (*state >> 32) as u32;
-    (bits as f64) * (1000.0 / (u32::MAX as f64))
-}
+use common::{DEFAULT_SEED, lcg_next};
 
 /// Build an in-memory BKD tree of `n` random points in `num_dims` dimensions
 /// with coordinates uniformly distributed in `[0, 1000)`. Returns the open
@@ -57,7 +50,7 @@ fn build_tree(num_dims: usize, n: usize) -> BKDReader {
     let storage: Arc<MemoryStorage> = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
     let mut points: Vec<f64> = Vec::with_capacity(n * num_dims);
     let mut doc_ids: Vec<u64> = Vec::with_capacity(n);
-    let mut rng_state: u64 = 0xDEAD_BEEF_CAFE_F00D;
+    let mut rng_state: u64 = DEFAULT_SEED;
     for i in 0..n {
         for _ in 0..num_dims {
             points.push(lcg_next(&mut rng_state));
@@ -196,7 +189,7 @@ fn bench_build(c: &mut Criterion) {
                 // build, not data generation.
                 let mut points: Vec<f64> = Vec::with_capacity(n * num_dims);
                 let mut doc_ids: Vec<u64> = Vec::with_capacity(n);
-                let mut rng_state: u64 = 0xDEAD_BEEF_CAFE_F00D;
+                let mut rng_state: u64 = DEFAULT_SEED;
                 for i in 0..n {
                     for _ in 0..num_dims {
                         points.push(lcg_next(&mut rng_state));

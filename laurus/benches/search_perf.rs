@@ -1,7 +1,38 @@
 //! Performance benchmarks for lexical search hot paths.
 //!
-//! Covers posting list traversal, BM25 scoring, SIMD batch scoring,
-//! and compact posting conversion.
+//! Covers posting list traversal, BM25 scoring, SIMD batch scoring, and
+//! compact posting conversion.
+//!
+//! # Scope
+//!
+//! - Microbench of `PostingIterator::skip_to`, `BM25Scorer::score`, the SIMD
+//!   batch scorers in `util::simd::numeric`, and `PostingList::to_compact`.
+//! - Note that `BM25Scorer` (`lexical::query::scorer`) is **distinct** from
+//!   `BM25ScoringFunction` (`lexical::search::scoring::bm25`) — the latter
+//!   is the audit target tracked in #402 and gets its own bench under #417.
+//!
+//! # Run
+//!
+//! ```sh
+//! cargo bench --bench search_perf
+//! ```
+//!
+//! Filter by group / case (substring match against the criterion id):
+//!
+//! ```sh
+//! cargo bench --bench search_perf -- skip_to
+//! cargo bench --bench search_perf -- batch_bm25
+//! ```
+//!
+//! Compile-only smoke check:
+//!
+//! ```sh
+//! cargo bench --bench search_perf --no-run
+//! ```
+//!
+//! See `benches/common.rs` for the suite-wide hygiene rules.
+
+mod common;
 
 use std::hint::black_box;
 
@@ -32,6 +63,14 @@ fn bench_posting_skip_to(c: &mut Criterion) {
         let list = make_posting_list(size);
         let postings = list.postings.clone();
 
+        // Sanity check: the list must contain the expected number of
+        // postings before we time skip_to.
+        assert_eq!(
+            postings.len(),
+            size,
+            "posting_list size mismatch at size={size}"
+        );
+
         // Pick targets spread across the list.
         let targets: Vec<u64> = (0..100).map(|i| (i * (size as u64) * 3) / 100).collect();
 
@@ -58,6 +97,13 @@ fn bench_bm25_scoring(c: &mut Criterion) {
         /* total_docs */ 10_000, /* boost */ 1.0,
     );
 
+    // Sanity check: the probe score must be finite and positive.
+    let probe = scorer.score(0, 3.0, Some(150.0));
+    assert!(
+        probe.is_finite() && probe > 0.0,
+        "BM25Scorer probe score must be finite and positive, got {probe}"
+    );
+
     c.bench_function("BM25Scorer/score", |b| {
         b.iter(|| {
             // Score 1000 documents in a tight loop.
@@ -80,6 +126,21 @@ fn bench_bm25_batch_scoring(c: &mut Criterion) {
         let norms: Vec<f32> = (0..size).map(|i| 0.8 + (i as f32 * 0.001)).collect();
         let idfs: Vec<f32> = (0..size).map(|i| 1.0 + (i as f32 * 0.01)).collect();
         let boosts: Vec<f32> = vec![1.0; size];
+
+        // Sanity check: probe both batch helpers once to verify they return
+        // a vector of the expected length with finite values.
+        let probe_tf = batch_bm25_tf(&tfs, 1.2, &norms);
+        let probe_final = batch_bm25_final_score(&tfs, &idfs, &boosts);
+        assert_eq!(probe_tf.len(), size, "batch_bm25_tf length mismatch");
+        assert_eq!(
+            probe_final.len(),
+            size,
+            "batch_bm25_final_score length mismatch"
+        );
+        assert!(
+            probe_tf.iter().all(|v| v.is_finite()) && probe_final.iter().all(|v| v.is_finite()),
+            "batch BM25 outputs must be finite at size={size}"
+        );
 
         group.bench_with_input(BenchmarkId::new("batch_bm25_tf", size), &size, |b, _| {
             b.iter(|| {
@@ -117,6 +178,14 @@ fn bench_compact_posting(c: &mut Criterion) {
 
     for &size in &[100usize, 1_000, 10_000] {
         let list = make_posting_list(size);
+
+        // Sanity check: to_compact must round-trip the size.
+        let probe = list.to_compact();
+        assert_eq!(
+            probe.len(),
+            size,
+            "to_compact length mismatch at size={size}"
+        );
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
