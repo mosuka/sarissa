@@ -32,7 +32,7 @@ python3 -m http.server 8080
 2. **Click anywhere on the globe** to move the pin. The demo
    re-fetches a fresh 1000 nm snapshot centred on the new pin and
    re-runs the search. Click-induced fetches share the same
-   5-second rate limit as the manual Refresh button — rapid
+   3-second rate limit as the manual Refresh button — rapid
    clicks move the pin immediately but only re-fetch once per
    window.
 3. Type into the search box (e.g. `JAL`, `Boeing`,
@@ -124,7 +124,7 @@ so the ~52 MB UniDic zip is downloaded only once across samples.
   (`Access-Control-Allow-Origin: *`) so browser fetches just work,
   but the upstream service is best-effort and may briefly return
   zero records or HTTP errors. The manual Refresh button is
-  rate-limited to one request every 5 seconds; auto-refresh
+  rate-limited to one request every 3 seconds; auto-refresh
   defaults to off and the available cadences (10 / 30 / 60 s) are
   designed to keep the load on the upstream feed reasonable.
 - Each fetch is centred on the current pin position with a 1000 nm

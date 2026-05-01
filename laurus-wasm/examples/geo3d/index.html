@@ -208,7 +208,7 @@
       <p class="dsl-hint">
         Auto-refresh pauses while the tab is hidden so airplanes.live
         is not hammered while you are not looking. The manual
-        Refresh button is rate-limited to one request every 5 seconds.
+        Refresh button is rate-limited to one request every 3 seconds.
       </p>
     </div>
 
@@ -242,16 +242,23 @@
         <button type="button" data-q="" disabled>Clear</button>
       </div>
       <div class="row">
-        <label class="toggle">
-          <input type="checkbox" id="limit-spatial" checked disabled>
-          Limit to the 50 aircraft 3D-closest to the pin 📌
+        <label class="auto-refresh-label">
+          Show:
+          <select id="result-limit" disabled>
+            <option value="10">10</option>
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+          aircraft, sorted by 3D distance from the pin 📌
         </label>
       </div>
       <p class="dsl-hint">
-        When off the demo returns every aircraft matching the text
-        query. When on it ranks aircraft by 3D Euclidean distance
-        from the pin (altitude included), keeps the top 50, and
-        AND-combines that with the text condition.
+        Results are always sorted by 3D Euclidean distance from the
+        pin (altitude included). Use the search box or quick
+        filters to narrow the matches by text — the closest matches
+        up to the selected count are shown.
       </p>
       <ul class="results" id="results">
         <li class="empty">Loading aircraft data…</li>
@@ -327,8 +334,6 @@
     /** Soft cap on aircraft count for snappy UI. */
     const MAX_AIRCRAFT = 500;
 
-    /** k for the nearest-neighbour query. */
-    const NEAREST_K = 50;
 
     /** Search result limit. Above MAX_AIRCRAFT so we always see
      *  every match in the index when the spatial constraint is off. */
@@ -413,7 +418,7 @@
     const docCountEl = document.getElementById('doc-count');
     const lastFetchEl = document.getElementById('last-fetch');
     const resultsEl = document.getElementById('results');
-    const limitEl = document.getElementById('limit-spatial');
+    const limitSelectEl = document.getElementById('result-limit');
     const refreshBtn = document.getElementById('refresh-btn');
     const dbgPinEl = document.getElementById('dbg-pin');
     const dbgPinEcefEl = document.getElementById('dbg-pin-ecef');
@@ -525,7 +530,7 @@
       // fire LEFT_CLICK in Cesium, so this never collides with
       // rotation / panning. Each click then triggers a refresh so
       // the snapshot is re-centred on the new pin — `refreshData`
-      // applies the shared 5-second rate limit, so rapid clicks
+      // applies the shared 3-second rate limit, so rapid clicks
       // move the pin immediately but only re-fetch once per
       // window.
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
@@ -587,23 +592,32 @@
         `${pinEcef.x.toFixed(0)}, ${pinEcef.y.toFixed(0)}, ${pinEcef.z.toFixed(0)}`;
     }
 
+    /** Read the currently selected result count from the dropdown. */
+    function currentLimit() {
+      return parseInt(limitSelectEl.value, 10);
+    }
+
     /**
-     * Build the unified DSL query string. The pin always exists, so
-     * with the spatial limit on we always have a `geo3d_nearest`
-     * clause. The free text portion is left untouched so users can
-     * write field-qualified queries like `callsign:JAL*` or
-     * `description:Boeing`.
+     * Build the unified DSL query string. The pin always exists.
+     *
+     * - If the user has not typed anything, ask laurus directly for
+     *   the top-N nearest aircraft via `geo3d_nearest` so we get the
+     *   distance-ordered set in a single round trip.
+     * - If the user has typed text, run the text query alone and let
+     *   `doSearch()` rank the matches by distance and keep the top N
+     *   in JavaScript. This lets text behave purely as a filter:
+     *   "the N closest aircraft that match the text", rather than
+     *   "the aircraft that are both in the top-N AND match" — the
+     *   latter would silently drop matches that ranked just outside
+     *   the spatial top-N.
      */
     function buildQuery(rawText) {
       const text = rawText.trim();
-      if (limitEl.checked) {
-        const inner = `${POSITION_FIELD}:geo3d_nearest(`
-          + `${pinEcef.x.toFixed(0)}, ${pinEcef.y.toFixed(0)}, ${pinEcef.z.toFixed(0)}, `
-          + `${NEAREST_K})`;
-        if (!text) return inner;
-        return `+(${text}) +${inner}`;
-      }
-      return text;
+      if (text) return text;
+      const n = currentLimit();
+      return `${POSITION_FIELD}:geo3d_nearest(`
+        + `${pinEcef.x.toFixed(0)}, ${pinEcef.y.toFixed(0)}, ${pinEcef.z.toFixed(0)}, `
+        + `${n})`;
     }
 
     /**
@@ -820,18 +834,16 @@
         const elapsed = (performance.now() - t0).toFixed(1);
         logger.log(`"${query}" -> ${results.length} hit(s) in ${elapsed} ms`);
 
-        const resultIds = new Set(results.map((r) => r.id));
-        applyHighlight(resultIds);
-
         if (results.length === 0) {
+          applyHighlight(new Set());
           resultsEl.innerHTML =
             '<li class="empty">No matching aircraft.</li>';
           return;
         }
 
-        // Order by 3D distance from the pin so the closest match is
-        // at the top of the list — matches the visual emphasis on
-        // the globe.
+        // Order by 3D distance from the pin and trim to the user's
+        // chosen limit. The same trimmed set drives both the result
+        // list and the globe highlights so the two views agree.
         const enriched = results
           .map((r) => {
             const ac = aircraftMap.get(r.id);
@@ -844,7 +856,10 @@
             };
           })
           .filter(Boolean)
-          .sort((a, b) => a.dist - b.dist);
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, currentLimit());
+
+        applyHighlight(new Set(enriched.map((r) => r.id)));
 
         resultsEl.innerHTML = enriched
           .map((r) => {
@@ -884,7 +899,7 @@
 
     async function refreshData() {
       if (Date.now() < refreshLockUntil) return;
-      refreshLockUntil = Date.now() + 5_000;
+      refreshLockUntil = Date.now() + 3_000;
       refreshBtn.disabled = true;
       try {
         const records = await fetchAircraft();
@@ -897,7 +912,7 @@
         logger.err(`Refresh failed: ${e}`);
         console.error(e);
       } finally {
-        setTimeout(() => { refreshBtn.disabled = false; }, 5_000);
+        setTimeout(() => { refreshBtn.disabled = false; }, 3_000);
       }
     }
 
@@ -1029,7 +1044,7 @@
     document.getElementById('reset-view-btn').addEventListener('click', () => {
       viewer.camera.flyTo({ ...buildDefaultView(), duration: 1.0 });
     });
-    limitEl.addEventListener('change', () => {
+    limitSelectEl.addEventListener('change', () => {
       if (index) doSearch();
     });
     for (const btn of document.querySelectorAll('#quick-filters button')) {
