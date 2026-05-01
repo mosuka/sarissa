@@ -10,6 +10,20 @@
         crossorigin="anonymous">
   <link rel="stylesheet" href="../shared/theme.css">
   <style>
+    .globe-results-row {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .globe-results-row > .card {
+      margin-bottom: 0;
+    }
+    @media (max-width: 900px) {
+      .globe-results-row {
+        grid-template-columns: 1fr;
+      }
+    }
     .viewer-card {
       padding: 0;
       overflow: hidden;
@@ -20,6 +34,27 @@
       height: 520px;
       position: relative;
       background: var(--code-bg);
+    }
+    .results-card {
+      display: flex;
+      flex-direction: column;
+      max-height: 520px;
+      padding: 1.25rem 1rem 1.25rem 1.25rem;
+    }
+    .results-card h2 {
+      margin-bottom: 0.5rem;
+    }
+    .results-card .results {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 0.5rem;
+      margin-right: -0.5rem;
+    }
+    .results-card .results li {
+      margin-bottom: 0.4rem;
+    }
+    .results-card .results li:last-child {
+      margin-bottom: 0;
     }
     .viewer-hint {
       position: absolute;
@@ -208,31 +243,17 @@
       <p class="dsl-hint">
         Auto-refresh pauses while the tab is hidden so airplanes.live
         is not hammered while you are not looking. The manual
-        Refresh button is rate-limited to one request every 5 seconds.
+        Refresh button is rate-limited to one request every 3 seconds.
       </p>
     </div>
 
-    <!-- Viewer -->
-    <div class="card viewer-card">
-      <div class="viewer-hint">
-        <strong>Left drag</strong> to rotate ·
-        <strong>right drag</strong> to tilt ·
-        <strong>scroll wheel</strong> to zoom ·
-        <strong>click</strong> the globe to move the search centre 📌.
-      </div>
-      <button class="viewer-reset-btn" id="reset-view-btn" type="button" disabled>
-        ↺ Reset view
-      </button>
-      <div id="cesiumContainer"></div>
-    </div>
-
-    <!-- Search -->
+    <!-- Search controls -->
     <div class="card">
       <h2>Search</h2>
       <div class="search-box">
         <input type="text" id="query"
                placeholder="e.g. JAL, Boeing, category:heavy" disabled>
-        <button id="search-btn" disabled>Search</button>
+        <button id="search-btn" type="button" disabled>Search</button>
       </div>
       <div class="quick-filters" id="quick-filters">
         <button type="button" data-q="category:heavy" disabled>Heavies</button>
@@ -242,20 +263,46 @@
         <button type="button" data-q="" disabled>Clear</button>
       </div>
       <div class="row">
-        <label class="toggle">
-          <input type="checkbox" id="limit-spatial" checked disabled>
-          Limit to the 50 aircraft 3D-closest to the pin 📌
+        <label class="auto-refresh-label">
+          Show:
+          <select id="result-limit" disabled>
+            <option value="10">10</option>
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+          aircraft, sorted by 3D distance from the pin 📌
         </label>
       </div>
       <p class="dsl-hint">
-        When off the demo returns every aircraft matching the text
-        query. When on it ranks aircraft by 3D Euclidean distance
-        from the pin (altitude included), keeps the top 50, and
-        AND-combines that with the text condition.
+        Results are always sorted by 3D Euclidean distance from the
+        pin (altitude included). Use the search box or quick
+        filters to narrow the matches by text — the closest matches
+        up to the selected count are shown.
       </p>
-      <ul class="results" id="results">
-        <li class="empty">Loading aircraft data…</li>
-      </ul>
+    </div>
+
+    <!-- Viewer + Results side-by-side -->
+    <div class="globe-results-row">
+      <div class="card viewer-card">
+        <div class="viewer-hint">
+          <strong>Left drag</strong> to rotate ·
+          <strong>right drag</strong> to tilt ·
+          <strong>scroll wheel</strong> to zoom ·
+          <strong>click</strong> the globe to move the search centre 📌.
+        </div>
+        <button class="viewer-reset-btn" id="reset-view-btn" type="button" disabled>
+          ↺ Reset view
+        </button>
+        <div id="cesiumContainer"></div>
+      </div>
+      <div class="card results-card">
+        <h2>Results</h2>
+        <ul class="results" id="results">
+          <li class="empty">Loading aircraft data…</li>
+        </ul>
+      </div>
     </div>
 
     <!-- Developer detail (collapsed) -->
@@ -311,19 +358,22 @@
     const INDEX_NAME = 'flights3d-demo-index';
     const POSITION_FIELD = 'position';
 
-    /** airplanes.live readsb-format endpoint. lat / lon = centre,
-     *  dist = nautical miles. The default centres on Japan with a
-     *  1000 nm radius (~1850 km) so the snapshot covers the
-     *  surrounding airspace as well as domestic flights; adjust
-     *  this URL if you want a different region. */
-    const AIRPLANES_LIVE_URL =
-      'https://api.airplanes.live/v2/point/36.0/138.0/1000';
+    /** Radius in nautical miles passed to airplanes.live. Each
+     *  fetch is centred on the current pin position, so clicking
+     *  the globe re-centres both the pin and the snapshot. */
+    const FETCH_RADIUS_NM = 1000;
+
+    /** Build the airplanes.live readsb-format endpoint URL for a
+     *  given centre. The pin defaults to Tokyo, so the initial
+     *  snapshot covers Japan and the surrounding airspace within
+     *  ~1850 km (`FETCH_RADIUS_NM`). */
+    function buildFetchUrl(latDeg, lonDeg) {
+      return `https://api.airplanes.live/v2/point/${latDeg.toFixed(4)}/${lonDeg.toFixed(4)}/${FETCH_RADIUS_NM}`;
+    }
 
     /** Soft cap on aircraft count for snappy UI. */
     const MAX_AIRCRAFT = 500;
 
-    /** k for the nearest-neighbour query. */
-    const NEAREST_K = 50;
 
     /** Search result limit. Above MAX_AIRCRAFT so we always see
      *  every match in the index when the spatial constraint is off. */
@@ -408,7 +458,7 @@
     const docCountEl = document.getElementById('doc-count');
     const lastFetchEl = document.getElementById('last-fetch');
     const resultsEl = document.getElementById('results');
-    const limitEl = document.getElementById('limit-spatial');
+    const limitSelectEl = document.getElementById('result-limit');
     const refreshBtn = document.getElementById('refresh-btn');
     const dbgPinEl = document.getElementById('dbg-pin');
     const dbgPinEcefEl = document.getElementById('dbg-pin-ecef');
@@ -419,9 +469,15 @@
     /** @type {Cesium.Viewer | null} */
     let viewer = null;
 
+    /** Background dot per aircraft id, present for every record in
+     *  the current snapshot. Drawn as a small dim dot so the user
+     *  sees the full snapshot in context — the search hits then
+     *  stand out as the prominent overlay. */
+    const bgEntities = new Map();
     /** Highlight entity per aircraft id, present only while in the
-     *  current result set. Drawn as a bright orange marker with a
-     *  vertical altitude line so the search hits stand out clearly. */
+     *  current result set. Drawn on top of the background dot with
+     *  a label and a vertical altitude line so the search hits
+     *  stand out clearly. */
     const fgEntities = new Map();
     /** Pin entity (search centre marker). */
     let pinEntity = null;
@@ -518,7 +574,11 @@
       // Click-to-pin: any left-click on the canvas casts a ray and
       // places the pin where it intersects the globe. Drags do NOT
       // fire LEFT_CLICK in Cesium, so this never collides with
-      // rotation / panning.
+      // rotation / panning. Each click then triggers a refresh so
+      // the snapshot is re-centred on the new pin — `refreshData`
+      // applies the shared 3-second rate limit, so rapid clicks
+      // move the pin immediately but only re-fetch once per
+      // window.
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
       handler.setInputAction((event) => {
         const ray = viewer.camera.getPickRay(event.position);
@@ -530,6 +590,7 @@
           Cesium.Math.toDegrees(carto.latitude),
           Cesium.Math.toDegrees(carto.longitude),
         );
+        refreshData();
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     }
 
@@ -577,23 +638,32 @@
         `${pinEcef.x.toFixed(0)}, ${pinEcef.y.toFixed(0)}, ${pinEcef.z.toFixed(0)}`;
     }
 
+    /** Read the currently selected result count from the dropdown. */
+    function currentLimit() {
+      return parseInt(limitSelectEl.value, 10);
+    }
+
     /**
-     * Build the unified DSL query string. The pin always exists, so
-     * with the spatial limit on we always have a `geo3d_nearest`
-     * clause. The free text portion is left untouched so users can
-     * write field-qualified queries like `callsign:JAL*` or
-     * `description:Boeing`.
+     * Build the unified DSL query string. The pin always exists.
+     *
+     * - If the user has not typed anything, ask laurus directly for
+     *   the top-N nearest aircraft via `geo3d_nearest` so we get the
+     *   distance-ordered set in a single round trip.
+     * - If the user has typed text, run the text query alone and let
+     *   `doSearch()` rank the matches by distance and keep the top N
+     *   in JavaScript. This lets text behave purely as a filter:
+     *   "the N closest aircraft that match the text", rather than
+     *   "the aircraft that are both in the top-N AND match" — the
+     *   latter would silently drop matches that ranked just outside
+     *   the spatial top-N.
      */
     function buildQuery(rawText) {
       const text = rawText.trim();
-      if (limitEl.checked) {
-        const inner = `${POSITION_FIELD}:geo3d_nearest(`
-          + `${pinEcef.x.toFixed(0)}, ${pinEcef.y.toFixed(0)}, ${pinEcef.z.toFixed(0)}, `
-          + `${NEAREST_K})`;
-        if (!text) return inner;
-        return `+(${text}) +${inner}`;
-      }
-      return text;
+      if (text) return text;
+      const n = currentLimit();
+      return `${POSITION_FIELD}:geo3d_nearest(`
+        + `${pinEcef.x.toFixed(0)}, ${pinEcef.y.toFixed(0)}, ${pinEcef.z.toFixed(0)}, `
+        + `${n})`;
     }
 
     /**
@@ -602,9 +672,10 @@
      * Throws on network or HTTP error.
      */
     async function fetchAircraft() {
-      logger.log(`Fetching aircraft from ${AIRPLANES_LIVE_URL}…`);
+      const url = buildFetchUrl(pinLat, pinLon);
+      logger.log(`Fetching aircraft from ${url}…`);
       const t0 = performance.now();
-      const res = await fetch(AIRPLANES_LIVE_URL, { cache: 'no-store' });
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) {
         throw new Error(`airplanes.live HTTP ${res.status}`);
       }
@@ -674,6 +745,11 @@
         await index.deleteDocuments(id);
         ingestedIds.delete(id);
         aircraftMap.delete(id);
+        const bg = bgEntities.get(id);
+        if (bg) {
+          viewer.entities.remove(bg);
+          bgEntities.delete(id);
+        }
         const fg = fgEntities.get(id);
         if (fg) {
           viewer.entities.remove(fg);
@@ -717,6 +793,15 @@
           ecef,
         });
 
+        // Maintain the always-on background dot: create on first
+        // sight, slide to the new position on subsequent refreshes.
+        const bg = bgEntities.get(id);
+        if (bg) {
+          bg.position = new Cesium.Cartesian3(ecef.x, ecef.y, ecef.z);
+        } else {
+          addBackgroundEntity(id, ecef);
+        }
+
         // If this aircraft is currently highlighted, slide its
         // marker and altitude line to the new position rather than
         // recreating the entity (avoids a flicker on auto-refresh).
@@ -738,10 +823,29 @@
       lastFetchEl.textContent = new Date().toLocaleTimeString();
     }
 
+    /** Draw a small dim dot for `id` at `ecef`. These dots cover
+     *  the entire snapshot so the user can see how many aircraft
+     *  are in range; the overlay highlight (`addHighlightEntity`)
+     *  layers on top for the search hits. */
+    function addBackgroundEntity(id, ecef) {
+      const e = viewer.entities.add({
+        id: `bg:${id}`,
+        position: new Cesium.Cartesian3(ecef.x, ecef.y, ecef.z),
+        point: {
+          pixelSize: 5,
+          color: Cesium.Color.fromCssColorString('#7aa2f7').withAlpha(0.55),
+          outlineColor: Cesium.Color.BLACK.withAlpha(0.4),
+          outlineWidth: 1,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+      bgEntities.set(id, e);
+    }
+
     /** Draw the prominent overlay marker for a result aircraft: a
-     *  bright orange dot, a callsign label, and a vertical line
-     *  from the aircraft straight down to the ellipsoid surface so
-     *  altitude is unambiguous. */
+     *  bright dot, a callsign label, and a vertical line from the
+     *  aircraft straight down to the ellipsoid surface so altitude
+     *  is unambiguous. */
     function addHighlightEntity(id, ac) {
       const top = new Cesium.Cartesian3(ac.ecef.x, ac.ecef.y, ac.ecef.z);
       const ground = Cesium.Cartesian3.fromDegrees(ac.lon, ac.lat, 0);
@@ -809,22 +913,24 @@
         const elapsed = (performance.now() - t0).toFixed(1);
         logger.log(`"${query}" -> ${results.length} hit(s) in ${elapsed} ms`);
 
-        const resultIds = new Set(results.map((r) => r.id));
-        applyHighlight(resultIds);
-
         if (results.length === 0) {
+          applyHighlight(new Set());
           resultsEl.innerHTML =
             '<li class="empty">No matching aircraft.</li>';
           return;
         }
 
-        // Order by 3D distance from the pin so the closest match is
-        // at the top of the list — matches the visual emphasis on
-        // the globe.
+        // Order by 3D distance from the pin and trim to the user's
+        // chosen limit. The same trimmed set drives both the result
+        // list and the globe highlights so the two views agree.
+        const stale = [];
         const enriched = results
           .map((r) => {
             const ac = aircraftMap.get(r.id);
-            if (!ac) return null;
+            if (!ac) {
+              stale.push(r.id);
+              return null;
+            }
             return {
               id: r.id,
               score: r.score,
@@ -833,7 +939,22 @@
             };
           })
           .filter(Boolean)
-          .sort((a, b) => a.dist - b.dist);
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, currentLimit());
+
+        applyHighlight(new Set(enriched.map((r) => r.id)));
+        logger.log(
+          `Showing ${enriched.length} highlighted on the globe `
+          + `(out of ${results.length} hits, requested ${currentLimit()}).`,
+        );
+        if (stale.length > 0) {
+          logger.err(
+            `Stale: ${stale.length} index entries not in aircraftMap. `
+            + `IDs: [${stale.slice(0, 5).map((s) => JSON.stringify(s)).join(', ')}`
+            + `${stale.length > 5 ? ', …' : ''}]. `
+            + `index=${ingestedIds.size}, aircraftMap=${aircraftMap.size}`,
+          );
+        }
 
         resultsEl.innerHTML = enriched
           .map((r) => {
@@ -873,7 +994,7 @@
 
     async function refreshData() {
       if (Date.now() < refreshLockUntil) return;
-      refreshLockUntil = Date.now() + 5_000;
+      refreshLockUntil = Date.now() + 3_000;
       refreshBtn.disabled = true;
       try {
         const records = await fetchAircraft();
@@ -886,7 +1007,7 @@
         logger.err(`Refresh failed: ${e}`);
         console.error(e);
       } finally {
-        setTimeout(() => { refreshBtn.disabled = false; }, 5_000);
+        setTimeout(() => { refreshBtn.disabled = false; }, 3_000);
       }
     }
 
@@ -1018,7 +1139,7 @@
     document.getElementById('reset-view-btn').addEventListener('click', () => {
       viewer.camera.flyTo({ ...buildDefaultView(), duration: 1.0 });
     });
-    limitEl.addEventListener('change', () => {
+    limitSelectEl.addEventListener('change', () => {
       if (index) doSearch();
     });
     for (const btn of document.querySelectorAll('#quick-filters button')) {

@@ -25,11 +25,16 @@ python3 -m http.server 8080
 
 ## How to use it
 
-1. The page loads and drops a yellow pin 📌 at Tokyo. The 50
-   aircraft 3D-closest to the pin appear immediately as orange
-   markers with a vertical altitude line.
-2. **Click anywhere on the globe** to move the pin. The result set
-   re-runs with the new search centre.
+1. The page loads and drops a yellow pin 📌 at Tokyo, fetches the
+   aircraft within 1000 nm of the pin from airplanes.live, and
+   shows the 50 aircraft 3D-closest to the pin as orange markers
+   with a vertical altitude line.
+2. **Click anywhere on the globe** to move the pin. The demo
+   re-fetches a fresh 1000 nm snapshot centred on the new pin and
+   re-runs the search. Click-induced fetches share the same
+   3-second rate limit as the manual Refresh button — rapid
+   clicks move the pin immediately but only re-fetch once per
+   window.
 3. Type into the search box (e.g. `JAL`, `Boeing`,
    `category:heavy`) or use the quick-filter chips
    (`Heavies` / `Helicopters` / `JAL flights` / `ANA flights` /
@@ -119,13 +124,14 @@ so the ~52 MB UniDic zip is downloaded only once across samples.
   (`Access-Control-Allow-Origin: *`) so browser fetches just work,
   but the upstream service is best-effort and may briefly return
   zero records or HTTP errors. The manual Refresh button is
-  rate-limited to one request every 5 seconds; auto-refresh
+  rate-limited to one request every 3 seconds; auto-refresh
   defaults to off and the available cadences (10 / 30 / 60 s) are
   designed to keep the load on the upstream feed reasonable.
-- The default fetch is centred on Japan (`lat=36, lon=138,
-  dist=1000nm`, a ~1850 km radius). Aircraft outside that radius
-  are not included in the snapshot; edit the `AIRPLANES_LIVE_URL`
-  constant in `index.html` if you want a different region.
+- Each fetch is centred on the current pin position with a 1000 nm
+  radius (~1850 km). The pin defaults to Tokyo on first load and
+  moves wherever you click; manual Refresh and Auto-refresh both
+  use the current pin position. Edit the `FETCH_RADIUS_NM` constant
+  in `index.html` if you want a different radius.
 - The index is intentionally non-persistent: each page load wipes
   OPFS and rebuilds from a fresh airplanes.live snapshot. Use the
   basic / geo samples if you want to see OPFS persistence in
