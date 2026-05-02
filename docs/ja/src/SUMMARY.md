@@ -108,5 +108,6 @@
 # 開発ガイド
 
 - [ビルドとテスト](development/build_and_test.md)
+- [ベンチマーク](development/benchmarking.md)
 - [Feature Flags](development/feature_flags.md)
 - [プロジェクト構成](development/project_structure.md)

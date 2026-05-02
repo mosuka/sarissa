@@ -174,9 +174,28 @@ build-laurus-wasm: ## Build laurus-wasm (wasm-pack, --target web)
 	cd laurus-wasm && wasm-pack build --target web --release
 
 # ── Benchmark ──────────────────────────────────────────────────────────────
+#
+# BENCH (optional) selects a single criterion bench by name, e.g.
+#   make bench BENCH=distance_bench
+# Without BENCH, every bench registered in laurus/Cargo.toml runs.
+#
+# bench-baseline saves the current run as a baseline named `main`. Run it on
+# the reference state (typically main).
+# bench-compare diffs the next run against that saved baseline. Run it on the
+# feature branch.
+#
+# Full workflow: docs/src/development/benchmarking.md.
+BENCH ?=
+BENCH_FLAG := $(if $(BENCH),--bench $(BENCH),)
 
-bench: ## Benchmark the project
-	cargo bench --bench bench
+bench: ## Run laurus benchmarks (BENCH=name selects one)
+	cargo bench -p laurus $(BENCH_FLAG)
+
+bench-baseline: ## Save the current results as the `main` baseline
+	cargo bench -p laurus $(BENCH_FLAG) -- --save-baseline main
+
+bench-compare: ## Compare against the `main` baseline saved earlier
+	cargo bench -p laurus $(BENCH_FLAG) -- --baseline main
 
 # ── Tag & Publish ──────────────────────────────────────────────────────────
 

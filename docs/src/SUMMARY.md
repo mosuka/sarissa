@@ -108,5 +108,6 @@
 # Development Guide
 
 - [Build & Test](development/build_and_test.md)
+- [Benchmarking](development/benchmarking.md)
 - [Feature Flags](development/feature_flags.md)
 - [Project Structure](development/project_structure.md)
