@@ -182,6 +182,10 @@ harness = false
 name = "highlight_bench"
 harness = false
 
+[[bench]]
+name = "facet_bench"
+harness = false
+
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 # Tests use `embedded://*` URIs to load lindera dictionaries. Cargo's feature
