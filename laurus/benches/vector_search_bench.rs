@@ -260,11 +260,18 @@ fn bench_ivf_search(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_hnsw_search_compare(c: &mut Criterion) {
-    let mut group = c.benchmark_group("HNSW Search");
+/// Benchmark the **fallback (linear-scan) path** of `HnswSearcher::search`.
+///
+/// `VectorIndexQuery::new` leaves `field_name` as `None`. The graph branch
+/// in `HnswSearcher::search` is gated on `Some(field_name)`, so a query
+/// without a field name short-circuits to the linear-scan fallback. This is
+/// the path #404 (drop the redundant `similarity()` + `distance()` pair)
+/// targets.
+fn bench_hnsw_fallback_search(c: &mut Criterion) {
+    let mut group = c.benchmark_group("HNSW Fallback Search");
     let dim = 128;
 
-    for &count in &[1000, 5000] {
+    for &count in &[1000, 5000, 50_000] {
         let vectors = generate_vectors(count, dim);
         let storage = create_storage();
         let config = HnswIndexConfig {
@@ -274,9 +281,12 @@ fn bench_hnsw_search_compare(c: &mut Criterion) {
             distance_metric: DistanceMetric::Cosine,
             ..Default::default()
         };
-        let mut index =
-            ManagedVectorIndex::new(VectorIndexTypeConfig::HNSW(config), storage, "hnsw_bench")
-                .unwrap();
+        let mut index = ManagedVectorIndex::new(
+            VectorIndexTypeConfig::HNSW(config),
+            storage,
+            "hnsw_fallback_bench",
+        )
+        .unwrap();
         index.add_vectors(vectors).unwrap();
         index.finalize().unwrap();
         index.write().unwrap();
@@ -286,17 +296,81 @@ fn bench_hnsw_search_compare(c: &mut Criterion) {
         let query = generate_query(dim);
 
         // Sanity check: the probe must return top-10 hits before timing.
+        // No field_name set → fallback (linear scan) path.
         let probe = searcher
             .search(&VectorIndexQuery::new(query.clone()).top_k(10))
             .unwrap();
         assert!(
             !probe.results.is_empty(),
-            "hnsw top-10 probe must return at least one hit at count={count}"
+            "hnsw fallback top-10 probe must return at least one hit at count={count}"
         );
 
+        group.throughput(Throughput::Elements(count as u64));
         group.bench_with_input(BenchmarkId::new("top10", count), &count, |b, _| {
             b.iter(|| {
                 let request = VectorIndexQuery::new(query.clone()).top_k(10);
+                searcher.search(&request).unwrap()
+            });
+        });
+    }
+    group.finish();
+}
+
+/// Benchmark the **graph-traversal path** of `HnswSearcher::search`.
+///
+/// Setting `field_name` enables the graph branch (provided the reader has a
+/// graph and is downcastable to `HnswIndexReader`). This is the path that
+/// scales with `ef_search` rather than corpus size; #406 (replace the
+/// `HashSet<u64>` visited set with a bitmap) and #405 (per-field
+/// `vector_ids` cache) target this path.
+fn bench_hnsw_graph_search(c: &mut Criterion) {
+    let mut group = c.benchmark_group("HNSW Graph Search");
+    let dim = 128;
+
+    for &count in &[1000, 5000, 50_000] {
+        let vectors = generate_vectors(count, dim);
+        let storage = create_storage();
+        let config = HnswIndexConfig {
+            dimension: dim,
+            m: 16,
+            ef_construction: 200,
+            distance_metric: DistanceMetric::Cosine,
+            ..Default::default()
+        };
+        let mut index = ManagedVectorIndex::new(
+            VectorIndexTypeConfig::HNSW(config),
+            storage,
+            "hnsw_graph_bench",
+        )
+        .unwrap();
+        index.add_vectors(vectors).unwrap();
+        index.finalize().unwrap();
+        index.write().unwrap();
+
+        let reader = index.reader().unwrap();
+        let searcher = HnswSearcher::new(reader).unwrap();
+        let query = generate_query(dim);
+
+        // Sanity check: with field_name set, the graph branch must engage
+        // and return at least one hit.
+        let probe = searcher
+            .search(
+                &VectorIndexQuery::new(query.clone())
+                    .top_k(10)
+                    .field_name("field".to_string()),
+            )
+            .unwrap();
+        assert!(
+            !probe.results.is_empty(),
+            "hnsw graph top-10 probe must return at least one hit at count={count}"
+        );
+
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_with_input(BenchmarkId::new("top10", count), &count, |b, _| {
+            b.iter(|| {
+                let request = VectorIndexQuery::new(query.clone())
+                    .top_k(10)
+                    .field_name("field".to_string());
                 searcher.search(&request).unwrap()
             });
         });
@@ -311,6 +385,7 @@ criterion_group!(
     bench_hnsw_construction,
     bench_flat_search,
     bench_ivf_search,
-    bench_hnsw_search_compare,
+    bench_hnsw_fallback_search,
+    bench_hnsw_graph_search,
 );
 criterion_main!(benches);
