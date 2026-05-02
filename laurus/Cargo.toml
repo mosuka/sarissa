@@ -139,10 +139,6 @@ name = "bench"
 harness = false
 
 [[bench]]
-name = "hnsw_benchmark"
-harness = false
-
-[[bench]]
 name = "distance_bench"
 harness = false
 
