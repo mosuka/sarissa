@@ -142,6 +142,35 @@ fn bench_ivf_construction(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_hnsw_construction(c: &mut Criterion) {
+    let mut group = c.benchmark_group("HNSW Construction");
+    group.sample_size(SAMPLE_SIZE_SLOW); // slow construction path
+    let dim = 128;
+
+    for &count in &[1000, 5000] {
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
+            let vectors = generate_vectors(count, dim);
+            b.iter(|| {
+                let storage = create_storage();
+                let config = HnswIndexConfig {
+                    dimension: dim,
+                    m: 16,
+                    ef_construction: 200,
+                    distance_metric: DistanceMetric::Cosine,
+                    ..Default::default()
+                };
+                let mut index =
+                    ManagedVectorIndex::new(VectorIndexTypeConfig::HNSW(config), storage, "bench")
+                        .unwrap();
+                index.add_vectors(vectors.clone()).unwrap();
+                index.finalize().unwrap();
+            });
+        });
+    }
+    group.finish();
+}
+
 // ---------------------------------------------------------------------------
 // Search benchmarks
 // ---------------------------------------------------------------------------
@@ -279,6 +308,7 @@ criterion_group!(
     benches,
     bench_flat_construction,
     bench_ivf_construction,
+    bench_hnsw_construction,
     bench_flat_search,
     bench_ivf_search,
     bench_hnsw_search_compare,
