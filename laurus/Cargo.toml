@@ -135,10 +135,6 @@ name = "multimodal_search"
 required-features = ["embeddings-multimodal"]
 
 [[bench]]
-name = "bench"
-harness = false
-
-[[bench]]
 name = "distance_bench"
 harness = false
 
@@ -156,6 +152,18 @@ harness = false
 
 [[bench]]
 name = "bkd_bench"
+harness = false
+
+[[bench]]
+name = "text_analysis_bench"
+harness = false
+
+[[bench]]
+name = "spell_correction_bench"
+harness = false
+
+[[bench]]
+name = "synonym_bench"
 harness = false
 
 [dev-dependencies]
