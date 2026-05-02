@@ -166,6 +166,14 @@ harness = false
 name = "synonym_bench"
 harness = false
 
+[[bench]]
+name = "bm25_scoring_bench"
+harness = false
+
+[[bench]]
+name = "cosine_similarity_bench"
+harness = false
+
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 # Tests use `embedded://*` URIs to load lindera dictionaries. Cargo's feature
