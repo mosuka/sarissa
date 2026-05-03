@@ -62,12 +62,11 @@ use std::sync::Arc;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tokio::runtime::Runtime;
 
-use common::{DEFAULT_SEED, SAMPLE_SIZE_SLOW, lcg_vec_unit};
+use common::{DEFAULT_SEED, SAMPLE_SIZE_SLOW, lcg_vec_unit, select_storage};
 
 use laurus::analysis::analyzer::analyzer::Analyzer;
 use laurus::analysis::analyzer::standard::StandardAnalyzer;
-use laurus::storage::memory::MemoryStorageConfig;
-use laurus::storage::{Storage, StorageConfig, StorageFactory};
+use laurus::storage::Storage;
 use laurus::vector::core::distance::DistanceMetric;
 use laurus::vector::core::field::HnswOption;
 use laurus::vector::core::vector::Vector;
@@ -94,8 +93,11 @@ fn generate_vectors(count: usize) -> Vec<(u64, String, Vector)> {
         .collect()
 }
 
+/// Bench-storage handle. Delegates to `common::select_storage()` so
+/// `LAURUS_BENCH_DISK=1` swaps the in-memory backend for a temp-dir
+/// `FileStorage` without changing call sites.
 fn create_storage() -> Arc<dyn Storage> {
-    StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default())).unwrap()
+    select_storage()
 }
 
 /// Default sweep sizes for the low-level (`add_vectors` / `finalize` /

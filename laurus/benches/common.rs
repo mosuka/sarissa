@@ -33,6 +33,12 @@
 
 #![allow(dead_code)]
 
+use std::sync::Arc;
+
+use laurus::storage::file::FileStorageConfig;
+use laurus::storage::memory::MemoryStorageConfig;
+use laurus::storage::{Storage, StorageConfig, StorageFactory};
+
 /// Default seed for deterministic LCG state. Used as the starting point in
 /// every bench so two runs of `cargo bench` produce identical inputs.
 pub const DEFAULT_SEED: u64 = 0xDEAD_BEEF_CAFE_F00D;
@@ -58,6 +64,40 @@ pub fn lcg_next(state: &mut u64) -> f64 {
         .wrapping_add(1_442_695_040_888_963_407);
     let bits = (*state >> 32) as u32;
     (bits as f64) * (1000.0 / (u32::MAX as f64))
+}
+
+/// Select the storage backend for a bench based on `LAURUS_BENCH_DISK`.
+///
+/// - **Default (env unset)**: returns an in-memory storage. This is what
+///   every bench used before #444 and is the right choice for
+///   microbenchmarks that want to remove I/O variance.
+/// - **`LAURUS_BENCH_DISK=1`**: returns a file-backed storage rooted in a
+///   freshly-created temp directory. Each call yields a distinct
+///   directory so concurrent benches do not collide.
+///
+/// The temp directory created in the disk-backed branch is intentionally
+/// **leaked** — `tempfile::TempDir::keep` keeps it on disk after the
+/// returned `Storage` is dropped. Bench runs accumulate a handful of
+/// directories under `$TMPDIR` and rely on OS-level `/tmp` cleanup
+/// (`systemd-tmpfiles`, reboots, etc.) rather than per-iteration cleanup.
+/// This is acceptable for benchmark runs and avoids the lifetime
+/// gymnastics of returning `(Storage, TempDir)` everywhere.
+///
+/// Disk numbers are sensitive to the host filesystem and OS page cache.
+/// They are useful for **comparing** in-tree changes (e.g. before / after
+/// a perf PR), not for absolute throughput claims. Document this caveat
+/// in any PR that posts numbers from `LAURUS_BENCH_DISK=1`.
+pub fn select_storage() -> Arc<dyn Storage> {
+    if std::env::var("LAURUS_BENCH_DISK").is_ok() {
+        let dir = tempfile::tempdir().expect("create temp dir for disk-backed bench storage");
+        let path = dir.keep();
+        let config = FileStorageConfig::new(path);
+        StorageFactory::create(StorageConfig::File(config))
+            .expect("instantiate file-backed storage for bench")
+    } else {
+        StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))
+            .expect("instantiate memory-backed storage for bench")
+    }
 }
 
 /// Inline LCG variant returning a deterministic `f32` in `[0, 1)`.

@@ -59,8 +59,7 @@ mod common;
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use laurus::storage::memory::MemoryStorageConfig;
-use laurus::storage::{Storage, StorageConfig, StorageFactory};
+use laurus::storage::Storage;
 use laurus::vector::core::distance::DistanceMetric;
 use laurus::vector::core::vector::Vector;
 use laurus::vector::index::ManagedVectorIndex;
@@ -71,7 +70,7 @@ use laurus::vector::{
     FlatVectorSearcher, HnswSearcher, IvfSearcher, VectorIndexQuery, VectorIndexSearcher,
 };
 
-use common::{DEFAULT_SEED, SAMPLE_SIZE_SLOW, lcg_vec_unit};
+use common::{DEFAULT_SEED, SAMPLE_SIZE_SLOW, lcg_vec_unit, select_storage};
 
 /// Build a deterministic `Vector` of length `dim`. The caller-supplied
 /// `state` advances per call, so successive vectors are different but the
@@ -131,8 +130,11 @@ fn generate_query(dim: usize) -> Vector {
     generate_vector(&mut state, dim)
 }
 
+/// Bench-storage handle. Delegates to `common::select_storage()` so
+/// `LAURUS_BENCH_DISK=1` swaps the in-memory backend for a temp-dir
+/// `FileStorage` without changing call sites.
 fn create_storage() -> Arc<dyn Storage> {
-    StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default())).unwrap()
+    select_storage()
 }
 
 /// Default search-corpus sizes for Flat and IVF benches.

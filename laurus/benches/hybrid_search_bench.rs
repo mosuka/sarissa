@@ -60,14 +60,13 @@ use std::sync::Arc;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use tokio::runtime::Runtime;
 
-use common::{DEFAULT_SEED, SAMPLE_SIZE_FAST, lcg_vec_unit};
+use common::{DEFAULT_SEED, SAMPLE_SIZE_FAST, lcg_vec_unit, select_storage};
 
 use laurus::analysis::analyzer::analyzer::Analyzer;
 use laurus::analysis::analyzer::standard::StandardAnalyzer;
 use laurus::lexical::core::field::IntegerOption;
 use laurus::lexical::{TermQuery, TextOption};
-use laurus::storage::memory::MemoryStorageConfig;
-use laurus::storage::{Storage, StorageConfig, StorageFactory};
+use laurus::storage::Storage;
 use laurus::vector::core::distance::DistanceMetric;
 use laurus::vector::core::field::HnswOption;
 use laurus::vector::core::vector::Vector;
@@ -132,8 +131,11 @@ fn build_body(i: usize) -> String {
     format!("Document {i} {COMMON_TERMS} {topic} {tail} should match relevant terms")
 }
 
+/// Bench-storage handle. Delegates to `common::select_storage()` so
+/// `LAURUS_BENCH_DISK=1` swaps the in-memory backend for a temp-dir
+/// `FileStorage` without changing call sites.
 fn memory_storage() -> Result<Arc<dyn Storage>> {
-    StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))
+    Ok(select_storage())
 }
 
 async fn build_hybrid_engine(n: usize) -> Result<Engine> {
