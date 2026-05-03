@@ -76,14 +76,13 @@ use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, BenchmarkId, Criterion, criterion_group, criterion_main};
 use tokio::runtime::Runtime;
 
-use common::{SAMPLE_SIZE_FAST, SAMPLE_SIZE_SLOW};
+use common::{SAMPLE_SIZE_FAST, SAMPLE_SIZE_SLOW, select_storage};
 
 use laurus::analysis::analyzer::analyzer::Analyzer;
 use laurus::analysis::analyzer::standard::StandardAnalyzer;
 use laurus::lexical::core::field::IntegerOption;
 use laurus::lexical::{BooleanQuery, FuzzyQuery, PhraseQuery, TermQuery, TextOption};
-use laurus::storage::memory::MemoryStorageConfig;
-use laurus::storage::{Storage, StorageConfig, StorageFactory};
+use laurus::storage::Storage;
 use laurus::{Document, Engine, LexicalSearchQuery, Result, Schema, SearchRequestBuilder};
 
 /// Words present in **every** document. Drives the high-document-frequency
@@ -224,9 +223,12 @@ fn build_body(i: usize) -> String {
     format!("Document {i} {COMMON_TERMS} {topic} {tail} should match relevant terms")
 }
 
-/// Create an in-memory storage backend.
+/// Bench-storage handle. Delegates to `common::select_storage()` so
+/// `LAURUS_BENCH_DISK=1` swaps the in-memory backend for a temp-dir
+/// `FileStorage` without changing call sites. The function still returns
+/// `Result` for compatibility with the existing async `build_engine`.
 fn memory_storage() -> Result<Arc<dyn Storage>> {
-    StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))
+    Ok(select_storage())
 }
 
 /// Build a pre-populated engine with `n` documents using the 3-tier

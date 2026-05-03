@@ -57,14 +57,13 @@ use std::sync::Arc;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tokio::runtime::Runtime;
 
-use common::SAMPLE_SIZE_SLOW;
+use common::{SAMPLE_SIZE_SLOW, select_storage};
 
 use laurus::analysis::analyzer::analyzer::Analyzer;
 use laurus::analysis::analyzer::standard::StandardAnalyzer;
 use laurus::lexical::TextOption;
 use laurus::lexical::core::field::IntegerOption;
-use laurus::storage::memory::MemoryStorageConfig;
-use laurus::storage::{Storage, StorageConfig, StorageFactory};
+use laurus::storage::Storage;
 use laurus::{Document, Engine, Result, Schema};
 
 const COMMON_TERMS: &str = "search engine system data query";
@@ -128,8 +127,11 @@ fn build_document(i: usize) -> Document {
         .build()
 }
 
+/// Bench-storage handle. Delegates to `common::select_storage()` so
+/// `LAURUS_BENCH_DISK=1` swaps the in-memory backend for a temp-dir
+/// `FileStorage` without changing call sites.
 fn memory_storage() -> Result<Arc<dyn Storage>> {
-    StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))
+    Ok(select_storage())
 }
 
 async fn build_populated_engine(n: usize) -> Result<Engine> {
