@@ -27,6 +27,24 @@ pub trait Collector: Send + Debug {
 
     /// Reset the collector for a new search.
     fn reset(&mut self);
+
+    /// The current "competitive" score floor — a candidate whose
+    /// upper-bound score is at or below this value cannot enter the
+    /// final result set, so the searcher is free to skip it.
+    ///
+    /// Top-K collectors override this to expose the K-th heap score
+    /// once the heap is full, enabling MaxScore / WAND-style early
+    /// termination (#403). The default returns `f32::NEG_INFINITY`,
+    /// which disables the optimisation for collectors that do not have
+    /// a meaningful upper-bound concept (count-only, all-docs, etc.).
+    ///
+    /// # Returns
+    ///
+    /// The score that an incoming candidate's upper bound must exceed
+    /// to be worth collecting.
+    fn min_competitive(&self) -> f32 {
+        f32::NEG_INFINITY
+    }
 }
 
 /// A collector that keeps the top N documents by score.
@@ -472,6 +490,29 @@ impl Collector for TopDocsCollector {
         self.current_min_score()
     }
 
+    fn min_competitive(&self) -> f32 {
+        // The MaxScore early-termination signal: once the heap is full
+        // the heap-min equals the K-th best score, and any future doc
+        // whose upper-bound score is ≤ this value cannot enter the
+        // top-K. While the heap has spare slots, return
+        // `NEG_INFINITY` so the searcher does not attempt to skip
+        // anything before the heap fills.
+        //
+        // Currently dead code in the default search path because
+        // `needs_more()` short-circuits the loop the moment the heap
+        // fills — fixing that without per-posting block-max metadata
+        // would walk every candidate and regress wall time on common
+        // OR workloads (the global `BM25Scorer::max_score()` upper
+        // bound is too loose at `k1 + 1`). The correctness fix +
+        // MaxScore activation lands together with the block-max index
+        // format in the next PR (#403 PR-B onward).
+        if self.hits.len() < self.max_docs {
+            f32::NEG_INFINITY
+        } else {
+            self.hits.peek().map(|d| d.score).unwrap_or(self.min_score)
+        }
+    }
+
     fn reset(&mut self) {
         self.hits.clear();
         self.total_hits = 0;
@@ -683,6 +724,33 @@ mod tests {
 
         // Check that low-score document was filtered out
         assert!(!results.iter().any(|hit| hit.score == 0.3));
+    }
+
+    #[test]
+    fn test_top_docs_collector_min_competitive() {
+        // Validates the #403 PR-A `min_competitive` signal:
+        //   - empty / partially full heap → `NEG_INFINITY` (no useful
+        //     bound; the searcher must keep collecting).
+        //   - full heap → heap-min, i.e. the K-th best score.
+        //   - replaces the worst when a higher score arrives → bound
+        //     advances upward.
+        let mut collector = TopDocsCollector::new(3);
+
+        assert_eq!(collector.min_competitive(), f32::NEG_INFINITY);
+
+        collector.collect(1, 0.5).unwrap();
+        assert_eq!(collector.min_competitive(), f32::NEG_INFINITY);
+
+        collector.collect(2, 0.8).unwrap();
+        assert_eq!(collector.min_competitive(), f32::NEG_INFINITY);
+
+        collector.collect(3, 0.3).unwrap();
+        // Heap full — bound is the K-th score (lowest of the three).
+        assert!((collector.min_competitive() - 0.3).abs() < 1e-6);
+
+        // A higher-scoring doc tightens the bound to the next-lowest.
+        collector.collect(4, 0.9).unwrap();
+        assert!((collector.min_competitive() - 0.5).abs() < 1e-6);
     }
 
     #[test]
