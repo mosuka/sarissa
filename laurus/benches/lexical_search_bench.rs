@@ -223,6 +223,47 @@ fn build_body(i: usize) -> String {
     format!("Document {i} {COMMON_TERMS} {topic} {tail} should match relevant terms")
 }
 
+/// Build a skewed-TF document body (#403 PR-C fixture).
+///
+/// 90 % of documents look like a normal `build_body` result (`COMMON_TERMS`
+/// once, plus topic / tail). The remaining 10 % — every 10th document —
+/// repeat `COMMON_TERMS` an extra **15 times**, mimicking long-form
+/// articles or product descriptions that mention common search terms
+/// repeatedly. Concretely:
+///
+/// - For `search`, `system`, `data`, etc., 90 % of postings have
+///   `tf = 1` (or `2` if the topic phrase contains the term).
+/// - The remaining 10 % have `tf ≈ 16-17`.
+///
+/// The resulting per-block max-impact varies sharply: blocks whose
+/// every doc has `tf = 1` have `block_max_factor ≈ 1.0`, while a
+/// block containing one heavy-hitter has `block_max_factor ≈ 2.1`.
+/// This is exactly the distribution Block-Max-WAND (#403 PR-C) is
+/// designed to skip — the existing uniform `build_body` corpus does
+/// not exercise that algorithm.
+fn build_body_skewed(i: usize) -> String {
+    let topic = TOPIC_PHRASES[i % TOPIC_PHRASES.len()];
+
+    let mut tail_words = Vec::with_capacity(LONG_TAIL_PER_DOC);
+    for k in 0..LONG_TAIL_PER_DOC {
+        let idx = (i.wrapping_mul(7) + k * 11) % LONG_TAIL.len();
+        tail_words.push(LONG_TAIL[idx]);
+    }
+    let tail = tail_words.join(" ");
+
+    if i.is_multiple_of(10) {
+        // Heavy hitter: repeat COMMON_TERMS 16x. The repetitions ride
+        // the same byte-deterministic path as the normal builder so
+        // two runs produce byte-identical input.
+        let common_repeated = std::iter::repeat_n(COMMON_TERMS, 16)
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("Document {i} {common_repeated} {topic} {tail} should match relevant terms")
+    } else {
+        format!("Document {i} {COMMON_TERMS} {topic} {tail} should match relevant terms")
+    }
+}
+
 /// Bench-storage handle. Delegates to `common::select_storage()` so
 /// `LAURUS_BENCH_DISK=1` swaps the in-memory backend for a temp-dir
 /// `FileStorage` without changing call sites. The function still returns
@@ -234,6 +275,20 @@ fn memory_storage() -> Result<Arc<dyn Storage>> {
 /// Build a pre-populated engine with `n` documents using the 3-tier
 /// vocabulary described above.
 async fn build_engine(n: usize) -> Result<Engine> {
+    build_engine_with(n, build_body).await
+}
+
+/// Build a pre-populated engine with `n` skewed-TF documents (#403
+/// PR-C fixture). Same schema as [`build_engine`]; the difference is
+/// purely in the body content (see [`build_body_skewed`]).
+async fn build_engine_skewed(n: usize) -> Result<Engine> {
+    build_engine_with(n, build_body_skewed).await
+}
+
+/// Shared engine-construction helper. Takes a body builder so the
+/// uniform and skewed-TF fixtures share the same schema, analyzer,
+/// and document-shape boilerplate.
+async fn build_engine_with(n: usize, body_fn: fn(usize) -> String) -> Result<Engine> {
     let storage = memory_storage()?;
     let analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::default());
 
@@ -251,7 +306,7 @@ async fn build_engine(n: usize) -> Result<Engine> {
         .await?;
 
     for i in 0..n {
-        let body = build_body(i);
+        let body = body_fn(i);
         let doc = Document::builder()
             .add_text("title", format!("Title for document {i}"))
             .add_text("body", &body)
@@ -493,6 +548,67 @@ fn bench_boolean_query(c: &mut Criterion) {
     group.finish();
 }
 
+/// Top-K OR benchmark over a **skewed-TF** corpus (#403 PR-C fixture).
+///
+/// The point of this scenario is to give Block-Max-WAND something to
+/// actually skip — see [`build_body_skewed`] for the corpus shape.
+/// Three high-frequency terms (`search`, `system`, `data`) appear in
+/// every document, but 10 % of documents repeat `COMMON_TERMS` 16x,
+/// so per-block max-impact varies sharply between blocks.
+///
+/// Sweep: corpus sizes `{1k, 10k, 100k}`. Unlike
+/// [`bench_boolean_query`] this scenario **always** includes 100k —
+/// `LAURUS_BENCH_LARGE` is not honoured here because the audit's
+/// 5x-on-100k acceptance criterion needs that case to be the default
+/// measurement target.
+fn bench_topk_or_skewed_tf(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("lexical/topk_or_skewed_tf");
+    let sizes: &[usize] = &[1_000, 10_000, 100_000];
+    // 100k case dominates wall time — pick the slow tier so the rest
+    // of the sweep gets the same sample size for direct comparison.
+    group.sample_size(SAMPLE_SIZE_SLOW);
+
+    for &n in sizes {
+        let engine = rt.block_on(build_engine_skewed(n)).unwrap();
+
+        // Sanity: high-freq OR must hit at least one heavy-hitter.
+        let probe = rt.block_on(async {
+            let mut bq = BooleanQuery::new();
+            bq.add_should(Box::new(TermQuery::new("body", "search")));
+            bq.add_should(Box::new(TermQuery::new("body", "system")));
+            bq.add_should(Box::new(TermQuery::new("body", "data")));
+            let request = SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(Box::new(bq)))
+                .limit(10)
+                .build();
+            engine.search(request).await.unwrap()
+        });
+        assert!(
+            !probe.is_empty(),
+            "skewed-TF OR probe must return at least one hit at n={n}"
+        );
+
+        group.bench_with_input(BenchmarkId::new("should_or_topk10", n), &n, |b, _| {
+            b.to_async(&rt).iter(|| {
+                let engine = &engine;
+                async move {
+                    let mut bq = BooleanQuery::new();
+                    bq.add_should(Box::new(TermQuery::new("body", "search")));
+                    bq.add_should(Box::new(TermQuery::new("body", "system")));
+                    bq.add_should(Box::new(TermQuery::new("body", "data")));
+                    let request = SearchRequestBuilder::new()
+                        .lexical_query(LexicalSearchQuery::Obj(Box::new(bq)))
+                        .limit(10)
+                        .build();
+                    black_box(engine.search(request).await.unwrap())
+                }
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_phrase_query(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("lexical/phrase_query");
@@ -683,6 +799,7 @@ criterion_group!(
     bench_term_query,
     bench_term_query_varying_limit,
     bench_boolean_query,
+    bench_topk_or_skewed_tf,
     bench_phrase_query,
     bench_fuzzy_query,
     bench_dsl_query,
