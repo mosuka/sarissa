@@ -26,6 +26,21 @@ pub struct ReaderTermInfo {
 
     /// Size of the posting list in bytes.
     pub posting_size: u64,
+
+    /// Tightened BM25 TF-component upper bound precomputed at index
+    /// time using the default BM25 parameters (`k1 = 1.2`, `b = 0.75`)
+    /// and the segment's average field length (#403 PR-B2).
+    ///
+    /// Concretely, this is the maximum of
+    /// `(tf · (k1 + 1)) / (tf + k1 · (1 - b + b · (L / avg_L)))` over
+    /// every posting `(tf, L)`. `BM25Scorer::block_max_score` uses it
+    /// to expose a tight per-term upper bound to the searcher loop's
+    /// MaxScore early-break.
+    ///
+    /// `0.0` is treated as "unset" (legacy v1 segments / aggregated
+    /// cross-segment views): scorers fall back to the loose
+    /// `k1 + 1` synthetic bound in that case.
+    pub max_score_factor: f32,
 }
 
 /// Statistics about a field in the index.

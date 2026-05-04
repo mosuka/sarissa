@@ -708,6 +708,20 @@ impl InvertedIndexWriter {
 
         let mut term_dict_builder = TermDictionaryBuilder::new();
 
+        // Compute per-field average length and a `doc_id → field_lengths`
+        // lookup once per flush. Both are needed to precompute the
+        // tightened BM25 TF-component upper bound stored as
+        // `TermInfo::max_score_factor` (#403 PR-B2). The factor uses
+        // the default BM25 parameters (`k1 = 1.2`, `b = 0.75`) — at
+        // search time, scorers fall back to the loose `k1 + 1` ceiling
+        // when the caller overrides `(k1, b)`.
+        let field_avg_lengths = self.compute_field_avg_lengths();
+        let field_lengths_by_doc: AHashMap<u64, &AHashMap<String, u32>> = self
+            .buffered_docs
+            .iter()
+            .map(|(doc_id, doc)| (*doc_id, &doc.field_lengths))
+            .collect();
+
         // Collect and sort terms for deterministic output
         let mut terms: Vec<_> = self.inverted_index.terms().collect();
         terms.sort();
@@ -722,12 +736,33 @@ impl InvertedIndexWriter {
                 let end_offset = posting_writer.position();
                 let length = end_offset - start_offset;
 
+                // The internal term key is `"<field>:<term>"`; split on
+                // the first `:` to recover the field name. Terms that
+                // somehow lack a field prefix get a `0.0` factor and
+                // the BM25 scorer will fall back to the loose bound.
+                let max_score_factor = match term.split_once(':') {
+                    Some((field_name, _)) => {
+                        let avg_len = field_avg_lengths
+                            .get(field_name)
+                            .copied()
+                            .unwrap_or(0.0_f32);
+                        Self::compute_term_max_score_factor(
+                            posting_list,
+                            field_name,
+                            avg_len,
+                            &field_lengths_by_doc,
+                        )
+                    }
+                    None => 0.0,
+                };
+
                 // Add to term dictionary
-                let term_info = TermInfo::new(
+                let term_info = TermInfo::with_max_score_factor(
                     start_offset,
                     length,
                     posting_list.doc_frequency,
                     posting_list.total_frequency,
+                    max_score_factor,
                 );
                 term_dict_builder.add_term(term.clone(), term_info);
             }
@@ -745,6 +780,77 @@ impl InvertedIndexWriter {
         dict_writer.close()?;
 
         Ok(())
+    }
+
+    /// Compute per-field average field length over the currently
+    /// buffered documents. Used by [`Self::write_inverted_index`] to
+    /// precompute the tightened BM25 TF-component bound that lands in
+    /// each term's `TermInfo::max_score_factor` (#403 PR-B2).
+    fn compute_field_avg_lengths(&self) -> AHashMap<String, f32> {
+        let mut totals: AHashMap<String, (u64, u64)> = AHashMap::new();
+        for (_doc_id, doc) in &self.buffered_docs {
+            for (field_name, &length) in &doc.field_lengths {
+                let entry = totals.entry(field_name.clone()).or_insert((0, 0));
+                entry.0 += 1; // doc count contributing to this field
+                entry.1 += length as u64; // total length for this field
+            }
+        }
+        totals
+            .into_iter()
+            .map(|(field, (count, total))| {
+                let avg = if count > 0 {
+                    total as f32 / count as f32
+                } else {
+                    0.0
+                };
+                (field, avg)
+            })
+            .collect()
+    }
+
+    /// Compute the per-term tightened BM25 TF-component upper bound
+    /// using the default `k1 = 1.2`, `b = 0.75` parameters and the
+    /// segment's average field length (#403 PR-B2).
+    ///
+    /// Returns the maximum of
+    /// `(tf · (k1 + 1)) / (tf + k1 · (1 - b + b · (L / avg_L)))`
+    /// taken over every posting in `posting_list`. `0.0` if the
+    /// posting list is empty or no doc lengths are resolvable.
+    fn compute_term_max_score_factor(
+        posting_list: &crate::lexical::index::inverted::core::posting::PostingList,
+        field_name: &str,
+        avg_field_length: f32,
+        field_lengths_by_doc: &AHashMap<u64, &AHashMap<String, u32>>,
+    ) -> f32 {
+        const K1: f32 = 1.2;
+        const B: f32 = 0.75;
+
+        let mut max_factor: f32 = 0.0;
+        for posting in &posting_list.postings {
+            let tf = posting.frequency as f32;
+            if tf == 0.0 {
+                continue;
+            }
+            let field_len = field_lengths_by_doc
+                .get(&posting.doc_id)
+                .and_then(|fls| fls.get(field_name))
+                .copied()
+                .unwrap_or(0) as f32;
+            let len_ratio = if avg_field_length > 0.0 {
+                field_len / avg_field_length
+            } else {
+                1.0
+            };
+            let denom = tf + K1 * (1.0 - B + B * len_ratio);
+            if denom == 0.0 {
+                continue;
+            }
+            let factor = (tf * (K1 + 1.0)) / denom;
+            if factor > max_factor {
+                max_factor = factor;
+            }
+        }
+        max_factor
     }
 
     /// Write stored documents to storage with type information preserved.

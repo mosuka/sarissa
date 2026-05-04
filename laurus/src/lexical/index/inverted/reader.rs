@@ -1386,12 +1386,19 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
                 total_freq: cached_info.total_frequency,
                 posting_offset: cached_info.posting_offset,
                 posting_size: cached_info.posting_length,
+                max_score_factor: cached_info.max_score_factor,
             }));
         }
 
         // Search across all segments
         let mut total_doc_freq = 0;
         let mut total_term_freq = 0;
+        // Aggregate across segments by taking the **max** of per-segment
+        // factors — each segment computed it against its own
+        // `avg_field_length`, but `max(seg_max)` is still a valid upper
+        // bound on any individual posting's TF-component contribution
+        // (#403 PR-B2).
+        let mut max_score_factor: f32 = 0.0;
         let mut found = false;
 
         for segment_reader in &self.segment_readers {
@@ -1399,6 +1406,7 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
             if let Some(term_info) = reader.term_info(field, term)? {
                 total_doc_freq += term_info.doc_frequency;
                 total_term_freq += term_info.total_frequency;
+                max_score_factor = max_score_factor.max(term_info.max_score_factor);
                 found = true;
             }
         }
@@ -1411,14 +1419,15 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
                 total_freq: total_term_freq,
                 posting_offset: 0, // Aggregated value, not meaningful for multi-segment
                 posting_size: 0,   // Aggregated value, not meaningful for multi-segment
+                max_score_factor,
             };
 
-            // Cache the result
             let term_info = TermInfo {
                 posting_offset: 0,
                 posting_length: 0,
                 doc_frequency: total_doc_freq,
                 total_frequency: total_term_freq,
+                max_score_factor,
             };
             self.cache_manager.cache_term_info(cache_key, term_info);
 

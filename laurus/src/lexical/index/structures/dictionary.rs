@@ -24,10 +24,30 @@ pub struct TermInfo {
     pub doc_frequency: u64,
     /// Total frequency across all documents.
     pub total_frequency: u64,
+    /// Tightest possible BM25 TF-component upper bound for this term,
+    /// precomputed at index time using the default BM25 parameters
+    /// (`k1 = 1.2`, `b = 0.75`) and the segment's average field length.
+    ///
+    /// Concretely, this is the maximum of
+    /// `(tf · (k1 + 1)) / (tf + k1 · (1 - b + b · (L / avg_L)))` taken
+    /// over every posting `(tf, L)` in the list. It feeds
+    /// [`BM25Scorer::block_max_score`] so the searcher loop's MaxScore
+    /// early-break (#403 PR-B1) can fire on a tight bound rather than
+    /// the synthetic `k1 + 1` ceiling.
+    ///
+    /// `0.0` is treated as "unset" (legacy v1 segments and freshly
+    /// constructed `TermInfo` values default to this); scorers fall
+    /// back to the loose `k1 + 1` bound in that case.
+    pub max_score_factor: f32,
 }
 
 impl TermInfo {
-    /// Create new term info.
+    /// Create new term info with `max_score_factor = 0.0` (loose bound).
+    ///
+    /// Use [`TermInfo::with_max_score_factor`] to build a value with the
+    /// tightened block-max bound from the index. Existing call sites
+    /// keep working — the searcher silently falls back to the synthetic
+    /// upper bound when the field is `0.0`.
     pub fn new(
         posting_offset: u64,
         posting_length: u64,
@@ -39,6 +59,26 @@ impl TermInfo {
             posting_length,
             doc_frequency,
             total_frequency,
+            max_score_factor: 0.0,
+        }
+    }
+
+    /// Create new term info with a precomputed tightened max-score
+    /// factor (#403 PR-B2). Pass `0.0` if the factor is not available
+    /// — scorers will fall back to the loose `k1 + 1` bound.
+    pub fn with_max_score_factor(
+        posting_offset: u64,
+        posting_length: u64,
+        doc_frequency: u64,
+        total_frequency: u64,
+        max_score_factor: f32,
+    ) -> Self {
+        TermInfo {
+            posting_offset,
+            posting_length,
+            doc_frequency,
+            total_frequency,
+            max_score_factor,
         }
     }
 }
@@ -149,6 +189,15 @@ impl SortedTermDictionary {
     }
 
     /// Read the dictionary from storage.
+    ///
+    /// Supports both **v1** (legacy) and **v2** (#403 PR-B2) layouts:
+    ///
+    /// - v1 entries store only the four `u64` fields. `max_score_factor`
+    ///   is filled with `0.0`, which the BM25 scorer treats as "fall
+    ///   back to the loose `k1 + 1` upper bound" — segments produced
+    ///   before this PR continue to load and search correctly.
+    /// - v2 entries append a single `f32` per term holding the
+    ///   precomputed tightened TF-component upper bound.
     pub fn read_from_storage<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
         // Read header
         let magic = reader.read_u32()?;
@@ -158,7 +207,7 @@ impl SortedTermDictionary {
         }
 
         let version = reader.read_u32()?;
-        if version != 1 {
+        if version != 1 && version != 2 {
             return Err(LaurusError::index(format!(
                 "Unsupported sorted dictionary version: {version}"
             )));
@@ -175,6 +224,11 @@ impl SortedTermDictionary {
             let posting_length = reader.read_u64()?;
             let doc_frequency = reader.read_u64()?;
             let total_frequency = reader.read_u64()?;
+            let max_score_factor = if version >= 2 {
+                reader.read_f32()?
+            } else {
+                0.0
+            };
 
             terms.push(term);
             term_infos.push(TermInfo {
@@ -182,6 +236,7 @@ impl SortedTermDictionary {
                 posting_length,
                 doc_frequency,
                 total_frequency,
+                max_score_factor,
             });
         }
 
@@ -257,13 +312,16 @@ impl HashTermDictionary {
         SortedTermDictionary::from_map(map)
     }
 
-    /// Write to storage.
+    /// Write to storage in **v2** layout (#403 PR-B2). Each entry
+    /// carries the precomputed `max_score_factor: f32` after the four
+    /// legacy `u64` fields. See [`SortedTermDictionary::write_to_storage`]
+    /// for the matching format on the sorted side.
     pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
         // Write magic number for hash dictionary
         writer.write_u32(0x48544443)?; // "HTDC"
 
         // Write version
-        writer.write_u32(1)?;
+        writer.write_u32(2)?;
 
         // Write number of terms
         writer.write_varint(self.terms.len() as u64)?;
@@ -277,12 +335,16 @@ impl HashTermDictionary {
             writer.write_u64(info.posting_length)?;
             writer.write_u64(info.doc_frequency)?;
             writer.write_u64(info.total_frequency)?;
+            writer.write_f32(info.max_score_factor)?;
         }
 
         Ok(())
     }
 
-    /// Read from storage.
+    /// Read from storage. Accepts both **v1** (legacy) and **v2**
+    /// (#403 PR-B2) layouts; v1 entries fill `max_score_factor` with
+    /// `0.0`, which the BM25 scorer treats as "fall back to the loose
+    /// `k1 + 1` upper bound" so older segments continue to load.
     pub fn read_from_storage<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
         // Read magic number
         let magic = reader.read_u32()?;
@@ -293,7 +355,7 @@ impl HashTermDictionary {
 
         // Read version
         let version = reader.read_u32()?;
-        if version != 1 {
+        if version != 1 && version != 2 {
             return Err(LaurusError::index(format!(
                 "Unsupported hash dictionary version: {version}"
             )));
@@ -307,11 +369,21 @@ impl HashTermDictionary {
 
         for _ in 0..term_count {
             let term = reader.read_string()?;
+            let posting_offset = reader.read_u64()?;
+            let posting_length = reader.read_u64()?;
+            let doc_frequency = reader.read_u64()?;
+            let total_frequency = reader.read_u64()?;
+            let max_score_factor = if version >= 2 {
+                reader.read_f32()?
+            } else {
+                0.0
+            };
             let info = TermInfo {
-                posting_offset: reader.read_u64()?,
-                posting_length: reader.read_u64()?,
-                doc_frequency: reader.read_u64()?,
-                total_frequency: reader.read_u64()?,
+                posting_offset,
+                posting_length,
+                doc_frequency,
+                total_frequency,
+                max_score_factor,
             };
 
             terms.insert(term, info);
@@ -468,13 +540,18 @@ pub struct DictionaryStats {
 }
 
 impl SortedTermDictionary {
-    /// Write to storage.
+    /// Write to storage in **v2** layout (#403 PR-B2).
+    ///
+    /// Each entry now carries an extra `f32 max_score_factor` after the
+    /// four legacy `u64` fields. v1 readers are no longer able to load
+    /// new segments — readers from this codebase accept both versions
+    /// (see [`SortedTermDictionary::read_from_storage`]).
     pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
         // Write magic number for sorted dictionary
         writer.write_u32(0x53544443)?; // "STDC"
 
         // Write version
-        writer.write_u32(1)?;
+        writer.write_u32(2)?;
 
         // Write number of terms
         writer.write_varint(self.terms.len() as u64)?;
@@ -488,6 +565,7 @@ impl SortedTermDictionary {
             writer.write_u64(info.posting_length)?;
             writer.write_u64(info.doc_frequency)?;
             writer.write_u64(info.total_frequency)?;
+            writer.write_f32(info.max_score_factor)?;
         }
 
         Ok(())

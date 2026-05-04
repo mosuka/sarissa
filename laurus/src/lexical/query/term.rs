@@ -75,13 +75,20 @@ impl Query for TermQuery {
 
         match (term_info, field_stats) {
             (Some(term_info), Some(field_stats)) => {
-                let scorer = BM25Scorer::new(
+                // Wire the index-side tightened TF-component upper
+                // bound (#403 PR-B2). `max_score_factor == 0.0` is
+                // treated by the scorer as "fall back to the loose
+                // `k1 + 1` bound" — handles legacy v1 dictionaries
+                // and aggregated cross-segment views where the factor
+                // is not available.
+                let scorer = BM25Scorer::with_max_score_factor(
                     term_info.doc_freq,
                     term_info.total_freq,
                     field_stats.doc_count,
                     field_stats.avg_length,
                     reader.doc_count(),
                     self.boost,
+                    term_info.max_score_factor,
                 );
                 Ok(Box::new(scorer))
             }
