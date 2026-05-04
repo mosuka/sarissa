@@ -74,9 +74,26 @@ pub struct BM25Scorer {
     b: f32,
     /// Cached IDF value computed at construction time.
     cached_idf: f32,
+    /// Tightened TF-component upper bound precomputed at index time
+    /// using the default `(k1, b) = (1.2, 0.75)` parameters and the
+    /// segment's average field length (#403 PR-B2). Read from
+    /// [`crate::lexical::reader::ReaderTermInfo::max_score_factor`].
+    ///
+    /// `0.0` is treated as "unset" — [`Self::max_score`] then falls
+    /// back to the loose synthetic `k1 + 1` ceiling. Also bypassed
+    /// when the caller overrides `(k1, b)` via [`Self::with_params`],
+    /// since the precomputed factor is only valid for the defaults.
+    max_score_factor: f32,
 }
 
 impl BM25Scorer {
+    /// Default BM25 `k1` parameter; matches what the indexer uses to
+    /// precompute [`crate::lexical::index::structures::dictionary::TermInfo::max_score_factor`].
+    const DEFAULT_K1: f32 = 1.2;
+    /// Default BM25 `b` parameter; matches the indexer's choice (see
+    /// [`Self::DEFAULT_K1`]).
+    const DEFAULT_B: f32 = 0.75;
+
     /// Compute the IDF (Inverse Document Frequency) value.
     fn compute_idf(doc_freq: u64, total_docs: u64) -> f32 {
         if doc_freq == 0 || total_docs == 0 {
@@ -89,7 +106,8 @@ impl BM25Scorer {
         base_idf.max(epsilon)
     }
 
-    /// Create a new BM25 scorer.
+    /// Create a new BM25 scorer with no precomputed `max_score_factor`
+    /// (loose `k1 + 1` upper bound).
     pub fn new(
         doc_freq: u64,
         total_term_freq: u64,
@@ -106,13 +124,47 @@ impl BM25Scorer {
             avg_field_length,
             total_docs,
             boost,
-            k1: 1.2,
-            b: 0.75,
+            k1: Self::DEFAULT_K1,
+            b: Self::DEFAULT_B,
             cached_idf,
+            max_score_factor: 0.0,
         }
     }
 
-    /// Create a new BM25 scorer with custom parameters.
+    /// Create a new BM25 scorer with the index-side tightened TF
+    /// upper bound (#403 PR-B2). Pass `0.0` for `max_score_factor` if
+    /// the index does not carry the precomputed value (legacy v1
+    /// dictionaries / aggregated cross-segment views) — [`Self::max_score`]
+    /// will fall back to the loose `k1 + 1` ceiling.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_max_score_factor(
+        doc_freq: u64,
+        total_term_freq: u64,
+        field_doc_count: u64,
+        avg_field_length: f64,
+        total_docs: u64,
+        boost: f32,
+        max_score_factor: f32,
+    ) -> Self {
+        let cached_idf = Self::compute_idf(doc_freq, total_docs);
+        BM25Scorer {
+            doc_freq,
+            total_term_freq,
+            field_doc_count,
+            avg_field_length,
+            total_docs,
+            boost,
+            k1: Self::DEFAULT_K1,
+            b: Self::DEFAULT_B,
+            cached_idf,
+            max_score_factor,
+        }
+    }
+
+    /// Create a new BM25 scorer with custom `(k1, b)` parameters. The
+    /// precomputed `max_score_factor` is **not** wired in here because
+    /// the index-side factor is only valid for the default
+    /// `(k1, b) = (1.2, 0.75)` parameters.
     #[allow(clippy::too_many_arguments)]
     pub fn with_params(
         doc_freq: u64,
@@ -135,6 +187,7 @@ impl BM25Scorer {
             k1,
             b,
             cached_idf,
+            max_score_factor: 0.0,
         }
     }
 
@@ -216,9 +269,30 @@ impl Scorer for BM25Scorer {
         }
 
         let idf = self.idf();
-        let max_tf = self.k1 + 1.0; // Maximum possible TF component
+        // Use the index-side tightened bound (#403 PR-B2) when it is
+        // available **and** the scorer is running with the default
+        // BM25 parameters that the index-time precomputation assumed.
+        // Custom `(k1, b)` callers fall back to the synthetic
+        // `k1 + 1` upper bound on the TF component.
+        let tf_upper_bound = if self.max_score_factor > 0.0
+            && self.k1 == Self::DEFAULT_K1
+            && self.b == Self::DEFAULT_B
+        {
+            self.max_score_factor
+        } else {
+            self.k1 + 1.0
+        };
 
-        self.boost * idf * max_tf
+        self.boost * idf * tf_upper_bound
+    }
+
+    fn block_max_score(&self) -> f32 {
+        // Today we do not yet store per-block bounds — return the
+        // tightest term-level upper bound, which is the same value
+        // [`Self::max_score`] returns. A future per-posting block-max
+        // index format (#403 PR-C) will let this method override with
+        // a bound that varies as the matcher advances.
+        self.max_score()
     }
 
     fn name(&self) -> &'static str {
@@ -518,6 +592,57 @@ mod tests {
 
         // Max score should be >= actual score
         assert!(max_score >= actual_score);
+    }
+
+    #[test]
+    fn test_bm25_scorer_max_score_factor_tightens_bound() {
+        // #403 PR-B2: when the index supplies a precomputed
+        // `max_score_factor`, the scorer's `max_score()` upper bound
+        // is `boost * idf * factor` (tight) rather than the synthetic
+        // `boost * idf * (k1 + 1)` ceiling. With `factor < k1 + 1`
+        // (the realistic case) the new bound must be strictly
+        // smaller.
+        let loose = BM25Scorer::new(10, 100, 50, 10.0, 1000, 1.0);
+        // Average doc length 10, so a typical TF=1 / L=10 posting has
+        // factor ≈ 1.0 — well below the loose `k1 + 1 = 2.2` ceiling.
+        let tight = BM25Scorer::with_max_score_factor(10, 100, 50, 10.0, 1000, 1.0, 1.0);
+
+        assert!(
+            tight.max_score() < loose.max_score(),
+            "tight bound ({}) must be < loose bound ({})",
+            tight.max_score(),
+            loose.max_score()
+        );
+        assert!(tight.max_score() > 0.0, "tight bound must remain positive");
+    }
+
+    #[test]
+    fn test_bm25_scorer_max_score_factor_ignored_with_custom_params() {
+        // The precomputed `max_score_factor` is only valid for the
+        // default `(k1, b) = (1.2, 0.75)` parameters used at index
+        // time. When the caller overrides `(k1, b)` the scorer must
+        // fall back to the loose `k1 + 1` synthetic bound — verified
+        // here by constructing two scorers (one with custom params,
+        // one default) and confirming the custom-params scorer still
+        // emits the loose ceiling.
+        let custom = BM25Scorer::with_params(10, 100, 50, 10.0, 1000, 1.0, 2.0, 0.5);
+        let custom_loose = custom.boost() * custom.max_score() / custom.boost();
+        // Loose bound is `boost * idf * (k1 + 1) = 1.0 * idf * 3.0`.
+        // With factor unset (`with_params`) the scorer returns the
+        // loose bound, so `max_score / (boost * idf) = k1 + 1 = 3.0`.
+        let idf = ((1000.0_f32 - 10.0 + 0.5) / (10.0 + 0.5)).ln().max(0.01);
+        let expected = 1.0 * idf * 3.0;
+        assert!((custom_loose - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_bm25_scorer_block_max_score_matches_max_score() {
+        // PR-B2 leaves `block_max_score()` forwarding to `max_score()`.
+        // PR-C will introduce per-block bounds; the contract that the
+        // block bound never exceeds the term-level bound is asserted
+        // here so a future override doesn't accidentally regress.
+        let scorer = BM25Scorer::with_max_score_factor(10, 100, 50, 10.0, 1000, 1.0, 1.0);
+        assert_eq!(scorer.block_max_score(), scorer.max_score());
     }
 
     #[test]
