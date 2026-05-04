@@ -587,6 +587,74 @@ fn bench_hnsw_multi_field_search(c: &mut Criterion) {
     group.finish();
 }
 
+/// Flat search filtered to a single field on a multi-field corpus.
+///
+/// The corpus is split 30 / 30 / 40 % across `field_a`, `field_b`,
+/// `field_c`. The query selects `field_a`, so only ~30 % of vectors are
+/// candidates. Today every search calls `vector_ids()` to materialise
+/// every `(id, field_name)` pair and filters by string equality —
+/// wasted work proportional to the non-target field count plus the
+/// `Vec<(u64, String)>` clone.
+///
+/// #405 (per-field `vector_ids` cache) targets this hot path: with the
+/// fix the searcher fetches a pre-built `Arc<[u64]>` for the target
+/// field at O(1) cost.
+fn bench_flat_multi_field_search(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Flat Multi-field Search");
+    let dim = 128;
+
+    for &count in &search_corpus_sizes() {
+        let vectors = generate_multi_field_vectors(count, dim);
+        let storage = create_storage();
+        let config = FlatIndexConfig {
+            dimension: dim,
+            distance_metric: DistanceMetric::Cosine,
+            ..Default::default()
+        };
+        let mut index = ManagedVectorIndex::new(
+            VectorIndexTypeConfig::Flat(config),
+            storage,
+            "flat_multi_field_bench",
+        )
+        .unwrap();
+        index.add_vectors(vectors).unwrap();
+        index.finalize().unwrap();
+
+        let reader = index.reader().unwrap();
+        let searcher = FlatVectorSearcher::new(reader).unwrap();
+        let query = generate_query(dim);
+
+        // Sanity: filtering to field_a (~30 % of corpus) must still hit.
+        let probe = searcher
+            .search(
+                &VectorIndexQuery::new(query.clone())
+                    .top_k(10)
+                    .field_name("field_a".to_string()),
+            )
+            .unwrap();
+        assert!(
+            !probe.results.is_empty(),
+            "flat multi-field probe must return at least one hit (field_a, count={count})"
+        );
+
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("field_a_30pct/{count}")),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let request = VectorIndexQuery::new(query.clone())
+                        .top_k(10)
+                        .field_name("field_a".to_string());
+                    searcher.search(&request).unwrap()
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_flat_construction,
@@ -598,5 +666,6 @@ criterion_group!(
     bench_hnsw_graph_search,
     bench_hnsw_ef_search_sweep,
     bench_hnsw_multi_field_search,
+    bench_flat_multi_field_search,
 );
 criterion_main!(benches);
