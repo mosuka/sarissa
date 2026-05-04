@@ -72,14 +72,14 @@ impl VectorIndexSearcher for HnswSearcher {
 
         for (doc_id, field_name) in vector_ids.iter() {
             if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name) {
-                let similarity = self
-                    .index_reader
-                    .distance_metric()
-                    .similarity(&request.query.data, &vector.data)?;
-                let distance = self
-                    .index_reader
-                    .distance_metric()
-                    .distance(&request.query.data, &vector.data)?;
+                // Compute distance once and derive similarity from it.
+                // Calling `similarity()` would internally invoke `distance()`
+                // a second time on the same vector pair (the SIMD body runs
+                // twice), so the fallback path doubled its compute cost.
+                // The graph-search path at L308 already uses this pattern.
+                let metric = self.index_reader.distance_metric();
+                let distance = metric.distance(&request.query.data, &vector.data)?;
+                let similarity = metric.distance_to_similarity(distance);
                 candidates.push((*doc_id, field_name.clone(), similarity, distance, vector));
             }
         }
