@@ -549,11 +549,68 @@ impl SimpleHighlighter {
         SimpleHighlighter { config }
     }
 
+    /// Pre-compile a slice of terms into reusable regex patterns.
+    ///
+    /// Each term becomes one case-insensitive word-boundary regex
+    /// (`(?i)\bTERM\b`). Compilation is the dominant per-call cost in
+    /// [`highlight_terms`](Self::highlight_terms): callers that highlight
+    /// the same term set against many texts (e.g. one query × N search
+    /// results) should compile once and feed the result to
+    /// [`highlight_terms_compiled`](Self::highlight_terms_compiled),
+    /// avoiding O(N × terms.len()) recompilations.
+    ///
+    /// Empty terms are skipped. Returned patterns preserve length-
+    /// descending order so replacement is "longest match first" — this
+    /// matches the implicit ordering of [`highlight_terms`].
+    pub fn compile_patterns(terms: &[&str]) -> Vec<Regex> {
+        let mut sorted_terms: Vec<&&str> = terms.iter().collect();
+        sorted_terms.sort_by_key(|term| std::cmp::Reverse(term.len()));
+
+        sorted_terms
+            .into_iter()
+            .filter(|term| !term.is_empty())
+            .filter_map(|term| {
+                let pattern = format!(r"(?i)\b{}\b", regex::escape(term));
+                Regex::new(&pattern).ok()
+            })
+            .collect()
+    }
+
+    /// Highlight `text` using a pre-compiled set of regex patterns.
+    ///
+    /// `patterns` should typically come from
+    /// [`compile_patterns`](Self::compile_patterns). The patterns are
+    /// applied in the order given; for length-descending input (the
+    /// `compile_patterns` default), the result matches
+    /// [`highlight_terms`].
+    pub fn highlight_terms_compiled(&self, text: &str, patterns: &[Regex]) -> String {
+        let mut result = text.to_string();
+        for regex in patterns {
+            result = regex
+                .replace_all(&result, |caps: &regex::Captures| {
+                    format!(
+                        "{}{}{}",
+                        self.config.opening_tag(),
+                        &caps[0],
+                        self.config.closing_tag()
+                    )
+                })
+                .to_string();
+        }
+        result
+    }
+
     /// Highlight specific terms in text.
+    ///
+    /// One-shot convenience entry point: compiles a regex per term inline
+    /// and replaces. When the same term set is reused across many
+    /// highlight calls (e.g. one query × N search results), prefer the
+    /// two-step [`compile_patterns`] / [`highlight_terms_compiled`] API
+    /// to avoid recompiling on every invocation.
     pub fn highlight_terms(&self, text: &str, terms: &[&str]) -> String {
         let mut result = text.to_string();
 
-        // Sort terms by length (longest first) to avoid partial replacements
+        // Sort terms by length (longest first) to avoid partial replacements.
         let mut sorted_terms: Vec<&str> = terms.to_vec();
         sorted_terms.sort_by_key(|term| std::cmp::Reverse(term.len()));
 
