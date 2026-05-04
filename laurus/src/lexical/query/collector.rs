@@ -483,7 +483,16 @@ impl Collector for TopDocsCollector {
     }
 
     fn needs_more(&self) -> bool {
-        self.hits.len() < self.max_docs
+        // Top-K collectors must see every candidate: a doc later in
+        // the iteration with a higher score still needs to displace
+        // the current heap-min. The previous
+        // `self.hits.len() < self.max_docs` short-circuit returned the
+        // first K matches by `doc_id` rather than the highest-scoring
+        // K (#459). Early termination is now driven by
+        // [`Collector::min_competitive`] + [`Scorer::max_score`] in
+        // the searcher loop, which only fires when no future doc can
+        // beat the current K-th score.
+        true
     }
 
     fn min_score(&self) -> f32 {
@@ -687,7 +696,12 @@ mod tests {
         collector.collect(3, 0.3).unwrap();
 
         assert_eq!(collector.total_hits(), 3);
-        assert!(!collector.needs_more());
+        // `needs_more` is `true` even when the heap is full, because a
+        // higher-scoring doc later in the iteration can still displace
+        // the current worst. Early termination is now driven by
+        // `min_competitive` + `Scorer::max_score()` in the searcher
+        // loop (see #459).
+        assert!(collector.needs_more());
 
         // Add a better document - should replace the worst
         collector.collect(4, 0.9).unwrap();
@@ -724,6 +738,32 @@ mod tests {
 
         // Check that low-score document was filtered out
         assert!(!results.iter().any(|hit| hit.score == 0.3));
+    }
+
+    #[test]
+    fn test_top_docs_collector_replaces_lower_after_full() {
+        // Verifies the correctness contract restored by the
+        // `needs_more = true` change (#459): a higher-scoring doc that
+        // arrives **after** the heap fills must displace the current
+        // heap-min, regardless of doc-id order. The pre-fix collector
+        // short-circuited the search loop the moment the heap filled
+        // and returned the first K matches by `doc_id`, dropping any
+        // higher-scoring doc that came later in the iteration.
+        let mut collector = TopDocsCollector::new(3);
+
+        collector.collect(1, 0.10).unwrap();
+        collector.collect(2, 0.20).unwrap();
+        collector.collect(3, 0.30).unwrap();
+        assert!(collector.needs_more());
+
+        collector.collect(4, 0.99).unwrap();
+
+        let results = collector.results();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].doc_id, 4);
+        assert!((results[0].score - 0.99).abs() < 1e-6);
+        // Lowest-scoring doc (1) should have been evicted.
+        assert!(results.iter().all(|hit| hit.doc_id != 1));
     }
 
     #[test]

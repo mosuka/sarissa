@@ -29,6 +29,24 @@ pub trait Scorer: Send + Debug {
     /// Get the maximum possible score.
     fn max_score(&self) -> f32;
 
+    /// Upper bound on the score of the **next-block** of postings.
+    ///
+    /// For scorers that do not yet expose per-block max-score metadata,
+    /// the default impl forwards to [`Scorer::max_score`], i.e. it
+    /// returns the global upper bound — correct but loose. A future
+    /// per-posting block-max index format (#403 PR-B2) will let scorers
+    /// override this with a tightened bound that varies as the matcher
+    /// advances, enabling Block-Max-WAND skips.
+    ///
+    /// # Returns
+    ///
+    /// An upper bound on any score the scorer can produce for documents
+    /// in the matcher's current block. The returned value is **at most**
+    /// [`Scorer::max_score`] but may be tighter.
+    fn block_max_score(&self) -> f32 {
+        self.max_score()
+    }
+
     /// Get the name of this scorer.
     fn name(&self) -> &'static str;
 }
