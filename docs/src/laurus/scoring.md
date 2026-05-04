@@ -53,6 +53,31 @@ The `ScoringRegistry` provides a central registry for scoring algorithms:
 // - "vector_space"  -> VectorSpaceScoringFunction
 ```
 
+### BM25Plan (precomputed query)
+
+When scoring many documents against the same query, `BM25Plan` materializes per-term IDF, length-normalization invariants, and `k1 + 1` once at query build time, then scores each document with a tight numeric loop. Two scoring methods are exposed:
+
+- `BM25Plan::score(&doc_stats)` — drop-in faster replacement for `BM25ScoringFunction::score`. Still looks up term frequencies via the existing `HashMap<String, u64>` on `DocumentStats`.
+- `BM25Plan::score_packed(&term_freqs, doc_length)` — accepts a packed `&[u64]` of term frequencies indexed by the position of each term in the original `query_terms`. Avoids the per-document string-keyed `HashMap` lookup entirely; use it when the caller can pre-pack frequencies once per document.
+
+```rust
+use laurus::lexical::search::scoring::bm25::{BM25Plan, ScoringConfig};
+
+let plan = BM25Plan::new(&query_terms, &collection_stats, &ScoringConfig::default());
+
+// Hash-map path (drop-in faster):
+let score = plan.score(&doc_stats);
+
+// Packed path (avoids per-doc hash lookup):
+let term_freqs: Vec<u64> = query_terms
+    .iter()
+    .map(|t| *doc_stats.term_frequencies.get(t).unwrap_or(&0))
+    .collect();
+let score = plan.score_packed(&term_freqs, doc_stats.doc_length);
+```
+
+`BM25ScoringFunction::score` is preserved for callers that score one document at a time.
+
 ### Field Boosts
 
 Field boosts multiply the score contribution from specific fields. This is useful when some fields are more important than others:
