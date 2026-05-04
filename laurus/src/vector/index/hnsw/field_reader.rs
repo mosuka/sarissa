@@ -80,29 +80,32 @@ impl HnswFieldReader {
         query: &Vector,
         allowed_ids: Option<&std::collections::HashSet<u64>>,
     ) -> Result<Vec<FieldHit>> {
-        // Get vector IDs for this field
-        let vector_ids = self.index_reader.vector_ids()?;
-        let filtered_ids: Vec<(u64, String)> = vector_ids
-            .into_iter()
-            .filter(|(id, f)| {
-                f == &self.field_name && allowed_ids.is_none_or(|allowed| allowed.contains(id))
-            })
-            .collect();
+        // Fetch the per-field doc-id slice from the reader's pre-built
+        // index (#405). The `allowed_ids` filter — when supplied by the
+        // caller — is applied against this already-narrowed slice rather
+        // than the full corpus.
+        let field_ids = self.index_reader.doc_ids_for_field(&self.field_name);
+        let filtered: Vec<u64> = match allowed_ids {
+            Some(allowed) => field_ids
+                .iter()
+                .copied()
+                .filter(|id| allowed.contains(id))
+                .collect(),
+            None => field_ids.iter().copied().collect(),
+        };
 
         // Linear scan: examine all filtered vectors (ef_search only applies to graph search)
-        let mut candidates: Vec<(u64, f32, f32)> = Vec::with_capacity(filtered_ids.len());
+        let mut candidates: Vec<(u64, f32, f32)> = Vec::with_capacity(filtered.len());
 
-        for (doc_id, field_name) in filtered_ids.iter() {
-            if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name) {
-                let similarity = self
-                    .index_reader
-                    .distance_metric()
-                    .similarity(&query.data, &vector.data)?;
-                let distance = self
-                    .index_reader
-                    .distance_metric()
-                    .distance(&query.data, &vector.data)?;
-                candidates.push((*doc_id, similarity, distance));
+        for &doc_id in &filtered {
+            if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, &self.field_name) {
+                // Compute distance once and derive similarity (mirrors
+                // the #404 pattern: `similarity()` would otherwise rerun
+                // the SIMD distance kernel internally).
+                let metric = self.index_reader.distance_metric();
+                let distance = metric.distance(&query.data, &vector.data)?;
+                let similarity = metric.distance_to_similarity(distance);
+                candidates.push((doc_id, similarity, distance));
             }
         }
 

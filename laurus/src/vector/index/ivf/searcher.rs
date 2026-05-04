@@ -175,12 +175,12 @@ impl VectorIndexSearcher for IvfSearcher {
     }
 
     fn count(&self, request: VectorIndexQuery) -> Result<u64> {
-        let vector_ids = self.index_reader.vector_ids()?;
-
+        // Field-filtered counts use the pre-built per-field index (#405);
+        // avoids allocating + linear-filtering the full `vector_ids`.
         if let Some(ref field_name) = request.field_name {
-            Ok(vector_ids.iter().filter(|(_, f)| f == field_name).count() as u64)
+            Ok(self.index_reader.doc_ids_for_field(field_name).len() as u64)
         } else {
-            Ok(vector_ids.len() as u64)
+            Ok(self.index_reader.vector_ids()?.len() as u64)
         }
     }
 }

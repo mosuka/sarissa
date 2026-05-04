@@ -15,6 +15,24 @@ use crate::maintenance::deletion::DeletionBitmap;
 /// Storage for vectors (in-memory or on-demand).
 use crate::vector::index::storage::VectorStorage;
 
+/// Build a `field_name → Arc<[u64]>` lookup from a flat `Vec<(u64, String)>`.
+///
+/// The grouping happens once at reader load so search-time
+/// `doc_ids_for_field` is a single HashMap lookup + Arc clone.
+fn build_vector_ids_by_field(vector_ids: &[(u64, String)]) -> HashMap<String, Arc<[u64]>> {
+    let mut by_field: HashMap<String, Vec<u64>> = HashMap::new();
+    for (doc_id, field_name) in vector_ids {
+        by_field
+            .entry(field_name.clone())
+            .or_default()
+            .push(*doc_id);
+    }
+    by_field
+        .into_iter()
+        .map(|(field, ids)| (field, Arc::<[u64]>::from(ids)))
+        .collect()
+}
+
 /// Reader for HNSW (Hierarchical Navigable Small World) vector indexes.
 #[derive(Debug)]
 pub struct HnswIndexReader {
@@ -38,6 +56,13 @@ pub struct HnswIndexReader {
     /// The pointer is valid for the lifetime of `self` because the backing
     /// `Arc<Vec<f32>>` is kept alive by `VectorStorage::Owned`.
     prefetch_index: HashMap<String, HashMap<u64, usize>>,
+
+    /// Pre-built per-field doc-id list (`field_name → Arc<[u64]>`).
+    ///
+    /// Built once at load time so `doc_ids_for_field` returns a refcount-
+    /// shared slice (no per-call allocation, no `Vec<(u64, String)>` clone,
+    /// no linear filter). #405 (per-field `vector_ids` cache).
+    vector_ids_by_field: HashMap<String, Arc<[u64]>>,
 }
 
 impl HnswIndexReader {
@@ -264,6 +289,11 @@ impl HnswIndexReader {
             HashMap::new()
         };
 
+        // Per-field doc-id lookup (#405). Built from `vector_ids` so it
+        // reflects the same set the search path used to filter at every
+        // call; finalised into `Arc<[u64]>` for cheap clone semantics.
+        let vector_ids_by_field = build_vector_ids_by_field(&vector_ids);
+
         Ok(Self {
             vectors,
             vector_ids,
@@ -274,6 +304,7 @@ impl HnswIndexReader {
             graph,
             deletion_bitmap: None,
             prefetch_index,
+            vector_ids_by_field,
         })
     }
 
@@ -353,6 +384,16 @@ impl VectorIndexReader for HnswIndexReader {
 
     fn vector_ids(&self) -> Result<Vec<(u64, String)>> {
         Ok(self.vector_ids.clone())
+    }
+
+    fn doc_ids_for_field(&self, field_name: &str) -> Arc<[u64]> {
+        // O(1) HashMap lookup + Arc clone (refcount bump). Compared to
+        // the default impl this avoids the per-call `Vec<(u64, String)>`
+        // clone of the full corpus and the linear filter scan. #405.
+        self.vector_ids_by_field
+            .get(field_name)
+            .cloned()
+            .unwrap_or_else(|| Vec::<u64>::new().into())
     }
 
     fn vector_count(&self) -> usize {
