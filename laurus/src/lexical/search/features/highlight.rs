@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
-use crate::analysis::token::Token;
 use crate::error::Result;
 use crate::lexical::query::Query;
 
@@ -289,20 +288,69 @@ impl Highlighter {
     ) -> Result<Vec<HighlightSpan>> {
         let mut spans = Vec::new();
 
-        // Tokenize the text
-        let tokens = self.analyzer.analyze(text)?;
-        let tokens: Vec<Token> = tokens.collect();
-
-        // Find matching tokens
-        for token in &tokens {
-            if terms.contains(&token.text.to_lowercase()) {
-                let score = self.calculate_term_score(&token.text, terms);
-                spans.push(HighlightSpan::new(
-                    token.start_offset..token.start_offset + token.text.len(),
-                    true,
-                    score,
-                ));
+        // Precompute the byte-length range of single-word terms so we can
+        // length-filter analyzer tokens before the (relatively expensive)
+        // string-keyed `HashSet` probe. Phrase terms (containing spaces)
+        // are handled by the regex pass below and excluded here.
+        //
+        // Empty range → no single-word terms; the per-token loop becomes a
+        // no-op and only the phrase pass runs.
+        let mut min_term_len = usize::MAX;
+        let mut max_term_len = 0usize;
+        for term in terms {
+            if term.contains(' ') {
+                continue;
             }
+            min_term_len = min_term_len.min(term.len());
+            max_term_len = max_term_len.max(term.len());
+        }
+
+        // Tokenize the text. The previous code collected the iterator into
+        // a `Vec<Token>` — we drop that collect since tokens are consumed
+        // exactly once below; the analyzer iterator streams a `Token` at a
+        // time.
+        let tokens = self.analyzer.analyze(text)?;
+
+        // Find matching tokens.
+        //
+        // `terms` arrives lowercased from `extract_query_terms`. Most
+        // analyzer pipelines (e.g. `StandardAnalyzer`) already lowercase
+        // tokens via `LowercaseFilter`, so the previous unconditional
+        // `to_lowercase()` allocated a `String` per token even though the
+        // token text was already in canonical form. For 1 MB / ~200k-token
+        // fields this allocation alone dominated the per-hit cost (#408).
+        //
+        // Try a direct `&str` lookup first. Only when the token contains
+        // an upper-case character does the lookup fall back to
+        // `to_lowercase()` — preserving case-insensitive matching for
+        // callers that plug in a custom analyzer without a lowercase
+        // filter. Tokens whose length is outside the term-length range
+        // can never match and are skipped before the hash probe.
+        if max_term_len > 0 {
+            for token in tokens {
+                let len = token.text.len();
+                if len < min_term_len || len > max_term_len {
+                    continue;
+                }
+                let matched = if has_uppercase(&token.text) {
+                    terms.contains(&token.text.to_lowercase())
+                } else {
+                    terms.contains(token.text.as_str())
+                };
+                if matched {
+                    let score = self.calculate_term_score(&token.text, terms);
+                    spans.push(HighlightSpan::new(
+                        token.start_offset..token.start_offset + token.text.len(),
+                        true,
+                        score,
+                    ));
+                }
+            }
+        } else {
+            // Drain the analyzer iterator to keep observable side-effects
+            // (e.g. character-position bookkeeping) consistent with the
+            // pre-#408 path that always collected first.
+            for _ in tokens {}
         }
 
         // Also find phrase matches (simple implementation)
@@ -682,6 +730,24 @@ impl SimpleHighlighter {
     }
 }
 
+/// Return `true` if `s` contains any upper-case character.
+///
+/// Fast path: ASCII-only strings are scanned byte by byte (`is_ascii`
+/// itself is byte-level and short-circuits on the first non-ASCII byte,
+/// after which the second scan does an ASCII upper-case check). Strings
+/// containing non-ASCII characters fall back to a Unicode-aware char
+/// iterator. Used by `Highlighter::find_highlight_spans` (#408) to avoid
+/// allocating a lower-cased `String` per analyzer token when the token
+/// is already in canonical (lower-cased) form.
+#[inline]
+fn has_uppercase(s: &str) -> bool {
+    if s.is_ascii() {
+        s.bytes().any(|b| b.is_ascii_uppercase())
+    } else {
+        s.chars().any(|c| c.is_uppercase())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -766,6 +832,39 @@ mod tests {
 
         // Note: This is a simplified test since term extraction is basic
         assert!(!terms.is_empty());
+    }
+
+    #[test]
+    fn test_has_uppercase() {
+        assert!(!has_uppercase("rust"));
+        assert!(!has_uppercase("123"));
+        assert!(!has_uppercase(""));
+        assert!(has_uppercase("Rust"));
+        assert!(has_uppercase("rusT"));
+        // Non-ASCII without case (Japanese) is treated as lowercase.
+        assert!(!has_uppercase("検索"));
+        // Non-ASCII upper-case (Greek capital alpha) takes the Unicode path.
+        assert!(has_uppercase("Α"));
+        assert!(!has_uppercase("α"));
+    }
+
+    #[test]
+    fn test_find_highlight_spans_case_insensitive() {
+        // Verifies that the #408 fast path (skip `to_lowercase()` when the
+        // token is already lowercase) preserves case-insensitive matching:
+        // an upper-cased token in the source text must still match a
+        // lower-cased term.
+        let highlighter = Highlighter::new(HighlightConfig::default());
+        let mut terms = HashSet::new();
+        terms.insert("rust".to_string());
+
+        let spans = highlighter
+            .find_highlight_spans("learning Rust today", &terms)
+            .unwrap();
+        assert!(
+            !spans.is_empty(),
+            "uppercase 'Rust' should still match lowercased term 'rust'"
+        );
     }
 
     #[test]
