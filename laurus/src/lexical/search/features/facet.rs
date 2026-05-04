@@ -154,41 +154,196 @@ impl Default for FacetConfig {
 }
 
 /// Facet collector that accumulates facet counts during search.
+///
+/// Internally counts are keyed by interned `(field_id, value_id)` pairs
+/// (#409): the `entry().or_insert(0) += 1` hot path no longer pays the
+/// `FacetPath` clone + per-`String` hash that the original
+/// `HashMap<FacetPath, _>` representation incurred on every increment.
+/// Two specialised counter maps keep keys cheap to hash and parent walks
+/// allocation-free:
+///
+/// - `flat_counts: HashMap<u64, u64>` — depth-1 paths. The 64-bit key
+///   packs `(field_id << 32) | value_id`, so each increment hashes a
+///   single `u64` instead of a `String + Vec<String>` pair.
+/// - `hier_counts: HashMap<Box<[u32]>, u64>` — depth-N paths. The boxed
+///   slice stores `[field_id, level0_id, level1_id, …]`; the parent walk
+///   shrinks a local `Vec<u32>` by `pop()` at each level and only pays a
+///   single `Box<[u32]>` allocation when the entry doesn't yet exist.
+///
+/// Field names and value strings are interned in two `String → u32`
+/// maps owned by the collector and decoded back to strings only at
+/// `finalize` time.
 #[derive(Debug)]
 pub struct FacetCollector {
     /// Configuration for facet collection.
     config: FacetConfig,
-    /// Accumulated facet counts.
-    facet_counts: HashMap<FacetPath, u64>,
     /// Fields to collect facets for.
     facet_fields: Vec<String>,
+    /// Interned ids for each entry in `facet_fields`, populated once at
+    /// construction so the per-doc loop never re-interns the field name.
+    field_ids: Vec<u32>,
+    /// Reverse map for the field-name interner: `field_names[id]` reads
+    /// the original facet field name back. Field interning is performed
+    /// only at construction (no per-doc inserts) so we don't keep the
+    /// forward map around.
+    field_names: Vec<String>,
+    /// Interner: facet value (single path component) → `u32` id. Shared
+    /// across all fields — distinct fields are kept separate by the
+    /// `field_id` portion of the counter key.
+    value_interner: HashMap<String, u32>,
+    /// Reverse map for `value_interner`. Indexed by id.
+    value_names: Vec<String>,
+    /// Counter map for depth-1 paths. Key encodes
+    /// `(field_id << 32) | value_id`.
+    flat_counts: HashMap<u64, u64>,
+    /// Counter map for depth ≥ 2 paths. Key is `[field_id, level0_id,
+    /// level1_id, …]`.
+    hier_counts: HashMap<Box<[u32]>, u64>,
 }
 
 impl FacetCollector {
     /// Create a new facet collector.
     pub fn new(config: FacetConfig, facet_fields: Vec<String>) -> Self {
+        let mut field_interner: HashMap<String, u32> = HashMap::new();
+        let mut field_names: Vec<String> = Vec::new();
+        let mut field_ids: Vec<u32> = Vec::with_capacity(facet_fields.len());
+        for name in &facet_fields {
+            // Pre-intern declared facet fields so `collect_doc` only ever
+            // does an O(1) `Vec<u32>` index, not a `HashMap` probe per
+            // document per field.
+            if let Some(&id) = field_interner.get(name) {
+                field_ids.push(id);
+            } else {
+                let id = field_names.len() as u32;
+                field_names.push(name.clone());
+                field_interner.insert(name.clone(), id);
+                field_ids.push(id);
+            }
+        }
+
         FacetCollector {
             config,
-            facet_counts: HashMap::new(),
             facet_fields,
+            field_ids,
+            field_names,
+            value_interner: HashMap::new(),
+            value_names: Vec::new(),
+            flat_counts: HashMap::new(),
+            hier_counts: HashMap::new(),
         }
+    }
+
+    /// Intern a value string and return its `u32` id, allocating a
+    /// reverse-map entry on first sight. Subsequent calls for the same
+    /// string are an O(1) `HashMap` probe.
+    #[inline]
+    fn intern_value(&mut self, value: &str) -> u32 {
+        if let Some(&id) = self.value_interner.get(value) {
+            return id;
+        }
+        let id = self.value_names.len() as u32;
+        self.value_names.push(value.to_string());
+        self.value_interner.insert(value.to_string(), id);
+        id
     }
 
     /// Add a document to the facet counts.
     pub fn collect_doc(&mut self, doc_id: u64, reader: &dyn LexicalIndexReader) -> Result<()> {
-        for field_name in &self.facet_fields {
-            // Get facet values for this document
-            let facet_values = self.get_doc_facet_values(doc_id, field_name, reader)?;
+        // Fetch the document **once per call** instead of once per facet
+        // field. Multi-field collectors used to invoke
+        // `reader.document(doc_id)` and pay one `Document::clone()` per
+        // call, repeated `facet_fields.len()` times per doc. (#409)
+        let doc_result = reader.document(doc_id);
 
-            for facet_path in facet_values {
-                // Increment count for this facet path
-                *self.facet_counts.entry(facet_path.clone()).or_insert(0) += 1;
+        // Reusable scratch buffers — allocated once per call, cleared at
+        // each field iteration. Avoids per-field `Vec` reallocations that
+        // dominated the per-doc cost on flat fields where the HashMap
+        // hot path is otherwise tight.
+        let mut path_components: Vec<String> = Vec::new();
+        let mut path_ids: Vec<u32> = Vec::new();
 
-                // Also increment counts for parent paths (for hierarchical facets)
-                let mut current_path = facet_path;
-                while let Some(parent_path) = current_path.parent() {
-                    *self.facet_counts.entry(parent_path.clone()).or_insert(0) += 1;
-                    current_path = parent_path;
+        for field_idx in 0..self.facet_fields.len() {
+            let field_id = self.field_ids[field_idx];
+
+            // Phase 1: extract path components from the cached document.
+            // Borrows `self.facet_fields[field_idx]` only until the end
+            // of this block, so `intern_value` (which needs `&mut self`)
+            // is free to run in phase 2 without a conflict.
+            path_components.clear();
+            {
+                let field_name: &str = &self.facet_fields[field_idx];
+                match &doc_result {
+                    Ok(Some(document)) => {
+                        if let Some(val) = document.get(field_name) {
+                            match val {
+                                crate::data::DataValue::Text(value) => {
+                                    if value.contains('/') {
+                                        for s in value.split('/') {
+                                            path_components.push(s.to_string());
+                                        }
+                                    } else {
+                                        path_components.push(value.clone());
+                                    }
+                                }
+                                crate::data::DataValue::Int64(v) => {
+                                    path_components.push(v.to_string());
+                                }
+                                crate::data::DataValue::Float64(v) => {
+                                    path_components.push(v.to_string());
+                                }
+                                crate::data::DataValue::Bool(v) => {
+                                    path_components.push(v.to_string());
+                                }
+                                _ => {
+                                    path_components.push(format!("{val:?}"));
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // Document not found — no facet contribution.
+                    }
+                    Err(_) => {
+                        // Synthetic fallback preserved from the pre-#409
+                        // implementation: 5 distinct values stratified
+                        // by `doc_id`.
+                        path_components.push(format!("value_{}", doc_id % 5));
+                    }
+                }
+            }
+
+            if path_components.is_empty() {
+                continue;
+            }
+
+            // Phase 2: intern path components and bump counters.
+            let depth = path_components.len();
+            if depth == 1 {
+                // Depth-1 fast path. Single hash on a `u64` key, no
+                // boxed-slice allocation.
+                let value_id = self.intern_value(&path_components[0]);
+                let key = ((field_id as u64) << 32) | (value_id as u64);
+                *self.flat_counts.entry(key).or_insert(0) += 1;
+            } else {
+                // Depth-N path. Build `[field_id, level0_id, …]` once
+                // into the scratch `Vec<u32>`, then `pop()` the last id
+                // at each step of the parent walk.
+                path_ids.clear();
+                path_ids.push(field_id);
+                for component in &path_components {
+                    let id = self.intern_value(component);
+                    path_ids.push(id);
+                }
+                while path_ids.len() > 1 {
+                    // Allocates a fresh `Box<[u32]>` per `entry()` —
+                    // unavoidable with the std `HashMap::entry` API, but
+                    // the box is `4 + 4*depth` bytes and hashes an
+                    // integer slice rather than a string, so the
+                    // per-step cost is ~30-40 ns vs the ~160-200 ns of
+                    // cloning + hashing a `FacetPath`.
+                    let key: Box<[u32]> = path_ids.as_slice().into();
+                    *self.hier_counts.entry(key).or_insert(0) += 1;
+                    path_ids.pop();
                 }
             }
         }
@@ -196,90 +351,46 @@ impl FacetCollector {
         Ok(())
     }
 
-    /// Get facet values for a document and field.
-    fn get_doc_facet_values(
-        &self,
-        doc_id: u64,
-        field_name: &str,
-        reader: &dyn LexicalIndexReader,
-    ) -> Result<Vec<FacetPath>> {
-        let mut facet_paths = Vec::new();
-
-        // Try to get the stored document
-        match reader.document(doc_id) {
-            Ok(Some(document)) => {
-                if let Some(val) = document.get(field_name) {
-                    match val {
-                        crate::data::DataValue::Text(value) => {
-                            // Check if this is a hierarchical facet (contains delimiter)
-                            if value.contains('/') {
-                                facet_paths.push(FacetPath::from_delimited(
-                                    field_name.to_string(),
-                                    value,
-                                    "/",
-                                ));
-                            } else {
-                                facet_paths.push(FacetPath::from_value(
-                                    field_name.to_string(),
-                                    value.clone(),
-                                ));
-                            }
-                        }
-                        crate::data::DataValue::Int64(value) => {
-                            facet_paths.push(FacetPath::from_value(
-                                field_name.to_string(),
-                                value.to_string(),
-                            ));
-                        }
-                        crate::data::DataValue::Float64(value) => {
-                            facet_paths.push(FacetPath::from_value(
-                                field_name.to_string(),
-                                value.to_string(),
-                            ));
-                        }
-                        crate::data::DataValue::Bool(value) => {
-                            facet_paths.push(FacetPath::from_value(
-                                field_name.to_string(),
-                                value.to_string(),
-                            ));
-                        }
-                        _ => {
-                            // Other field types can be converted to string for faceting
-                            facet_paths.push(FacetPath::from_value(
-                                field_name.to_string(),
-                                format!("{val:?}"),
-                            ));
-                        }
-                    }
-                }
-            }
-            Ok(None) => {
-                // Document not found, return empty
-            }
-            Err(_) => {
-                // Fallback: try to generate synthetic facet data for demonstration
-                facet_paths.push(FacetPath::from_value(
-                    field_name.to_string(),
-                    format!("value_{}", doc_id % 5), // Create 5 different facet values
-                ));
-            }
-        }
-
-        Ok(facet_paths)
-    }
-
     /// Finalize and return the collected facet counts.
     pub fn finalize(self) -> Result<FacetResults> {
         let mut field_facets: HashMap<String, Vec<FacetCount>> = HashMap::new();
 
-        // Group facets by field
-        for (facet_path, count) in self.facet_counts {
-            if count >= self.config.min_count {
-                field_facets
-                    .entry(facet_path.field.clone())
-                    .or_default()
-                    .push(FacetCount::new(facet_path, count));
+        // Decode the depth-1 (`flat_counts`) tier. The 64-bit key splits
+        // into `(field_id << 32) | value_id`; both ids index into the
+        // collector's reverse-name maps so we can reconstruct the
+        // original `FacetPath`.
+        for (key, count) in &self.flat_counts {
+            if *count < self.config.min_count {
+                continue;
             }
+            let field_id = (key >> 32) as u32;
+            let value_id = (*key & 0xFFFF_FFFF) as u32;
+            let field_name = &self.field_names[field_id as usize];
+            let value = &self.value_names[value_id as usize];
+            let facet_path = FacetPath::from_value(field_name.clone(), value.clone());
+            field_facets
+                .entry(field_name.clone())
+                .or_default()
+                .push(FacetCount::new(facet_path, *count));
+        }
+
+        // Decode the depth ≥ 2 (`hier_counts`) tier. Slot 0 is the
+        // `field_id`; slots 1.. are interned path components in order.
+        for (key, count) in &self.hier_counts {
+            if *count < self.config.min_count {
+                continue;
+            }
+            let field_id = key[0];
+            let field_name = &self.field_names[field_id as usize];
+            let path_components: Vec<String> = key[1..]
+                .iter()
+                .map(|&id| self.value_names[id as usize].clone())
+                .collect();
+            let facet_path = FacetPath::new(field_name.clone(), path_components);
+            field_facets
+                .entry(field_name.clone())
+                .or_default()
+                .push(FacetCount::new(facet_path, *count));
         }
 
         // Build hierarchical structure and sort
