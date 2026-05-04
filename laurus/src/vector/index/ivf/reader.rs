@@ -31,6 +31,25 @@ pub struct IvfIndexReader {
     /// `(doc_id, field_name)` pairs assigned to cluster `i`.
     cluster_to_vectors: Vec<Vec<(u64, String)>>,
     deletion_bitmap: Option<Arc<DeletionBitmap>>,
+    /// Pre-built per-field doc-id list (`field_name → Arc<[u64]>`). Built
+    /// once at load so `doc_ids_for_field` returns a refcount-shared
+    /// slice without re-cloning `vector_ids`. #405.
+    vector_ids_by_field: HashMap<String, Arc<[u64]>>,
+}
+
+/// Group `vector_ids` by field name into refcount-shared slices.
+fn build_vector_ids_by_field(vector_ids: &[(u64, String)]) -> HashMap<String, Arc<[u64]>> {
+    let mut by_field: HashMap<String, Vec<u64>> = HashMap::new();
+    for (doc_id, field_name) in vector_ids {
+        by_field
+            .entry(field_name.clone())
+            .or_default()
+            .push(*doc_id);
+    }
+    by_field
+        .into_iter()
+        .map(|(field, ids)| (field, Arc::<[u64]>::from(ids)))
+        .collect()
 }
 
 impl IvfIndexReader {
@@ -197,6 +216,7 @@ impl IvfIndexReader {
             }
         };
 
+        let vector_ids_by_field = build_vector_ids_by_field(&vector_ids);
         Ok(Self {
             vectors,
             vector_ids,
@@ -207,6 +227,7 @@ impl IvfIndexReader {
             centroids,
             cluster_to_vectors,
             deletion_bitmap: None,
+            vector_ids_by_field,
         })
     }
 
@@ -290,6 +311,16 @@ impl VectorIndexReader for IvfIndexReader {
 
     fn vector_ids(&self) -> Result<Vec<(u64, String)>> {
         Ok(self.vector_ids.clone())
+    }
+
+    fn doc_ids_for_field(&self, field_name: &str) -> Arc<[u64]> {
+        // O(1) HashMap lookup + Arc clone (refcount bump). Default impl
+        // would clone `vector_ids` (Vec<(u64, String)>) and filter
+        // linearly per call. #405.
+        self.vector_ids_by_field
+            .get(field_name)
+            .cloned()
+            .unwrap_or_else(|| Vec::<u64>::new().into())
     }
 
     fn vector_count(&self) -> usize {

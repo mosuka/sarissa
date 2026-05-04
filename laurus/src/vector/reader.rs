@@ -84,6 +84,28 @@ pub trait VectorIndexReader: Send + Sync + std::fmt::Debug {
     /// Get all vector IDs with their field names in the index.
     fn vector_ids(&self) -> Result<Vec<(u64, String)>>;
 
+    /// Doc IDs that belong to a specific field.
+    ///
+    /// Concrete readers should override with an O(1) lookup into a
+    /// pre-built per-field index. The default implementation falls back
+    /// to filtering [`vector_ids`](Self::vector_ids) every call, which
+    /// allocates a fresh `Vec<(u64, String)>` of size `total_vectors` —
+    /// the cost #405 (per-field `vector_ids` cache) targets.
+    ///
+    /// Returns an `Arc<[u64]>` so a cached implementation can hand back
+    /// a refcount bump rather than a fresh allocation. An empty
+    /// `Arc<[u64]>` is returned when the field has no vectors.
+    fn doc_ids_for_field(&self, field_name: &str) -> Arc<[u64]> {
+        self.vector_ids()
+            .map(|all| {
+                all.into_iter()
+                    .filter_map(|(id, f)| (f == field_name).then_some(id))
+                    .collect::<Vec<u64>>()
+                    .into()
+            })
+            .unwrap_or_else(|_| Vec::new().into())
+    }
+
     /// Get the total number of vectors.
     fn vector_count(&self) -> usize;
 
