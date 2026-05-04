@@ -11,8 +11,9 @@ use crate::vector::search::searcher::VectorIndexSearcher;
 use crate::vector::search::searcher::{
     VectorIndexQuery, VectorIndexQueryResult, VectorIndexQueryResults,
 };
+use bit_vec::BitVec;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap};
 
 /// HNSW vector searcher that performs approximate nearest neighbor search.
 #[derive(Debug)]
@@ -249,8 +250,15 @@ impl HnswSearcher {
             distance: dist,
         });
 
-        let mut visited = HashSet::new();
-        visited.insert(curr_obj);
+        // Visited set as a dense bitmap. doc_ids in laurus are assigned
+        // sequentially from 0, so the bitmap is sized to fit every node
+        // currently in the graph (`max_doc_id + 1` bits ≈ N / 8 bytes for
+        // N nodes). `BitVec::get` / `BitVec::set` are a single array
+        // index + bit op, materially cheaper than `HashSet<u64>`'s hash
+        // + bucket lookup that the audit (#406) flagged for ef_search
+        // graph traversals which examine hundreds-to-thousands of nodes.
+        let mut visited = BitVec::from_elem(graph.max_doc_id() as usize + 1, false);
+        visited.set(curr_obj as usize, true);
 
         while let Some(curr) = candidates.pop() {
             if let Some(furthest) = found.peek()
@@ -265,7 +273,7 @@ impl HnswSearcher {
                 // O(1) per neighbor (u64 HashMap lookup, no allocation).
                 if let Some(idx) = field_prefetch {
                     for &neighbor_id in neighbors {
-                        if !visited.contains(&neighbor_id) {
+                        if !visited.get(neighbor_id as usize).unwrap_or(false) {
                             Self::prefetch_neighbor(idx, neighbor_id, prefetch_n_bytes);
                         }
                     }
@@ -274,10 +282,11 @@ impl HnswSearcher {
                 // Pass 2: compute distances for unvisited neighbors (data loading
                 // overlaps with the prefetch hints issued above).
                 for &neighbor_id in neighbors {
-                    if visited.contains(&neighbor_id) {
+                    let nbr_idx = neighbor_id as usize;
+                    if visited.get(nbr_idx).unwrap_or(false) {
                         continue;
                     }
-                    visited.insert(neighbor_id);
+                    visited.set(nbr_idx, true);
 
                     let d = self.calc_dist(reader, query, neighbor_id, field_name)?;
                     let furthest_dist = found.peek().map(|c| c.distance).unwrap_or(f32::MAX);
