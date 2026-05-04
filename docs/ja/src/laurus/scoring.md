@@ -53,6 +53,31 @@ score = IDF * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len))
 // - "vector_space"  -> VectorSpaceScoringFunction
 ```
 
+### BM25Plan（事前計算済みクエリ）
+
+同じクエリに対して多数のドキュメントをスコアリングする場合、`BM25Plan` はクエリビルド時に単語ごとの IDF、フィールド長正規化の不変項、`k1 + 1` を一度だけ算出し、各ドキュメントを軽量な数値ループでスコアリングします。スコアリングメソッドは 2 つあります。
+
+- `BM25Plan::score(&doc_stats)` — `BM25ScoringFunction::score` のドロップイン高速版。`DocumentStats` の `HashMap<String, u64>` 経由で単語頻度を引きます。
+- `BM25Plan::score_packed(&term_freqs, doc_length)` — `query_terms` での位置でインデックスされた `&[u64]` をパック済み単語頻度として受け取ります。ドキュメントごとの文字列キー `HashMap` 引きを完全に回避できるため、呼び出し側でドキュメントごとに頻度を 1 度だけパックできる場合に使ってください。
+
+```rust
+use laurus::lexical::search::scoring::bm25::{BM25Plan, ScoringConfig};
+
+let plan = BM25Plan::new(&query_terms, &collection_stats, &ScoringConfig::default());
+
+// HashMap パス（ドロップイン高速版）:
+let score = plan.score(&doc_stats);
+
+// Packed パス（ドキュメントごとの HashMap 引きを回避）:
+let term_freqs: Vec<u64> = query_terms
+    .iter()
+    .map(|t| *doc_stats.term_frequencies.get(t).unwrap_or(&0))
+    .collect();
+let score = plan.score_packed(&term_freqs, doc_stats.doc_length);
+```
+
+`BM25ScoringFunction::score` は 1 ドキュメントずつスコアリングする呼び出し側のために維持されています。
+
 ### フィールドブースト
 
 フィールドブーストは、特定のフィールドからのスコア寄与に乗数を適用します。一部のフィールドが他よりも重要な場合に有用です。

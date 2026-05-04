@@ -180,6 +180,204 @@ impl ScoringFunction for BM25ScoringFunction {
     }
 }
 
+/// Per-term plan precomputed once at query build time (#402).
+///
+/// Holds the query term key and its IDF so that scoring N documents against
+/// the same query no longer recomputes IDF / `ln()` N times.
+#[derive(Debug, Clone)]
+struct TermPlan {
+    /// Query term, used as a key for `DocumentStats::term_frequencies` lookups.
+    term: String,
+    /// Cached IDF (`ln((N - df + 0.5) / (df + 0.5))`). `0.0` if the term has
+    /// non-positive IDF (df > N/2); such terms are still kept in positional
+    /// order so packed-frequency callers can index by query position.
+    idf: f32,
+}
+
+/// A prepared BM25 query.
+///
+/// Materializes per-term IDF, length-normalisation invariants, and
+/// configuration-derived constants at construction time, so that scoring N
+/// documents against the same query no longer recomputes them N times.
+///
+/// Two scoring methods are exposed:
+///
+/// - [`BM25Plan::score`] — accepts a [`DocumentStats`] and looks up term
+///   frequencies via the existing `HashMap<String, u64>`. Drop-in faster
+///   replacement for [`BM25ScoringFunction::score`] when scoring many
+///   documents.
+/// - [`BM25Plan::score_packed`] — accepts a packed `&[u64]` of term
+///   frequencies indexed by the position of each term in the original
+///   `query_terms` slice. Avoids the per-doc string-keyed `HashMap` lookup
+///   entirely; use it when the caller can pre-pack frequencies once per
+///   document.
+#[derive(Debug, Clone)]
+pub struct BM25Plan {
+    /// Per-term plan in the order given to [`BM25Plan::new`].
+    plan: Vec<TermPlan>,
+    /// `k1` parameter from `ScoringConfig`.
+    k1: f32,
+    /// `b` parameter from `ScoringConfig`.
+    b: f32,
+    /// Precomputed `k1 + 1` (numerator factor of the TF component).
+    k1_plus_1: f32,
+    /// Average document length from `CollectionStats`.
+    avg_doc_length: f32,
+}
+
+impl BM25Plan {
+    /// Build a plan from a query, collection stats, and scoring config.
+    ///
+    /// Per-term IDF is computed once here. Terms whose IDF would be
+    /// non-positive (i.e. `df` exceeds half the collection) are stored with
+    /// `idf = 0.0` so that they contribute nothing at score time but the
+    /// plan's term order still matches the input `query_terms` — this lets
+    /// callers of [`Self::score_packed`] index into the plan by query
+    /// position.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_terms` - Query terms (each entry corresponds to one
+    ///   `TermPlan` slot in the resulting plan).
+    /// * `collection_stats` - Collection statistics; only
+    ///   `total_docs`, `avg_doc_length`, and `document_frequencies` are
+    ///   read.
+    /// * `config` - Scoring configuration; only `k1` and `b` are read.
+    ///
+    /// # Returns
+    ///
+    /// A `BM25Plan` ready to score documents against this query.
+    pub fn new(
+        query_terms: &[String],
+        collection_stats: &CollectionStats,
+        config: &ScoringConfig,
+    ) -> Self {
+        let total_docs = collection_stats.total_docs as f32;
+        let plan = query_terms
+            .iter()
+            .map(|term| {
+                let df = *collection_stats
+                    .document_frequencies
+                    .get(term)
+                    .unwrap_or(&1) as f32;
+                let idf_ratio = (total_docs - df + 0.5) / (df + 0.5);
+                let idf = if idf_ratio > 0.0 { idf_ratio.ln() } else { 0.0 };
+                TermPlan {
+                    term: term.clone(),
+                    idf,
+                }
+            })
+            .collect();
+
+        Self {
+            plan,
+            k1: config.k1,
+            b: config.b,
+            k1_plus_1: config.k1 + 1.0,
+            avg_doc_length: collection_stats.avg_doc_length as f32,
+        }
+    }
+
+    /// Number of terms in the plan (matches the original `query_terms.len()`).
+    ///
+    /// # Returns
+    ///
+    /// Number of terms preserved in the plan.
+    pub fn term_count(&self) -> usize {
+        self.plan.len()
+    }
+
+    /// Score a document against this prepared query.
+    ///
+    /// Equivalent to [`BM25ScoringFunction::score`] but reuses precomputed
+    /// IDF and length-normalisation invariants. Looks up term frequencies
+    /// by string key in `doc_stats.term_frequencies`.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_stats` - Statistics for the document to score.
+    ///
+    /// # Returns
+    ///
+    /// BM25 relevance score for the document.
+    pub fn score(&self, doc_stats: &DocumentStats) -> f32 {
+        let len_factor = self.length_factor(doc_stats.doc_length);
+        let k1_norm = self.k1 * len_factor;
+
+        let mut total = 0.0_f32;
+        for tp in &self.plan {
+            if tp.idf == 0.0 {
+                continue;
+            }
+            let tf = *doc_stats.term_frequencies.get(&tp.term).unwrap_or(&0) as f32;
+            if tf == 0.0 {
+                continue;
+            }
+            let tf_component = (tf * self.k1_plus_1) / (tf + k1_norm);
+            total += tp.idf * tf_component;
+        }
+        total
+    }
+
+    /// Score a document using a packed term-frequency array.
+    ///
+    /// `term_freqs[i]` must be the term frequency for the i-th term in the
+    /// plan (same order as the `query_terms` passed to [`Self::new`]).
+    /// Avoids the per-doc `HashMap<String, u64>` lookup entirely; intended
+    /// for callers that can amortise frequency packing across many
+    /// scoring calls.
+    ///
+    /// # Arguments
+    ///
+    /// * `term_freqs` - Term frequencies in plan order. Must have the same
+    ///   length as the plan ([`Self::term_count`]).
+    /// * `doc_length` - Document length in tokens.
+    ///
+    /// # Returns
+    ///
+    /// BM25 relevance score for the document.
+    pub fn score_packed(&self, term_freqs: &[u64], doc_length: u64) -> f32 {
+        debug_assert_eq!(
+            term_freqs.len(),
+            self.plan.len(),
+            "term_freqs length must match plan term count"
+        );
+
+        let len_factor = self.length_factor(doc_length);
+        let k1_norm = self.k1 * len_factor;
+
+        let mut total = 0.0_f32;
+        for (tp, &tf_raw) in self.plan.iter().zip(term_freqs) {
+            if tp.idf == 0.0 {
+                continue;
+            }
+            let tf = tf_raw as f32;
+            if tf == 0.0 {
+                continue;
+            }
+            let tf_component = (tf * self.k1_plus_1) / (tf + k1_norm);
+            total += tp.idf * tf_component;
+        }
+        total
+    }
+
+    /// Length-normalisation factor `1 - b + b * (doc_len / avg_doc_len)`.
+    ///
+    /// Falls back to `1.0` when `avg_doc_length` is zero (avoids a
+    /// divide-by-zero and matches the behaviour of
+    /// [`BM25ScoringFunction::score`]).
+    #[inline]
+    fn length_factor(&self, doc_length: u64) -> f32 {
+        let doc_len = doc_length as f32;
+        let len_ratio = if self.avg_doc_length > 0.0 {
+            doc_len / self.avg_doc_length
+        } else {
+            1.0
+        };
+        1.0 - self.b + self.b * len_ratio
+    }
+}
+
 /// TF-IDF scoring function implementation.
 #[derive(Debug, Clone)]
 pub struct TfIdfScoringFunction;
@@ -727,5 +925,74 @@ mod tests {
 
         let score = scorer.score_document(&doc_stats).unwrap();
         assert!(score > 0.0);
+    }
+
+    #[test]
+    fn test_bm25_plan_matches_baseline() {
+        let scorer = BM25ScoringFunction;
+        let config = ScoringConfig::default();
+        let collection_stats = create_test_collection_stats();
+        let doc_stats = create_test_doc_stats();
+        let query_terms = vec!["test".to_string(), "query".to_string()];
+
+        let baseline = scorer
+            .score(&query_terms, &doc_stats, &collection_stats, &config)
+            .unwrap();
+        let plan = BM25Plan::new(&query_terms, &collection_stats, &config);
+        let prepared = plan.score(&doc_stats);
+
+        assert!(
+            (baseline - prepared).abs() < 1e-6,
+            "BM25Plan::score must match BM25ScoringFunction::score (baseline={baseline}, prepared={prepared})"
+        );
+    }
+
+    #[test]
+    fn test_bm25_plan_score_packed_matches_score() {
+        let config = ScoringConfig::default();
+        let collection_stats = create_test_collection_stats();
+        let doc_stats = create_test_doc_stats();
+        let query_terms = vec![
+            "test".to_string(),
+            "query".to_string(),
+            "missing".to_string(),
+        ];
+
+        let plan = BM25Plan::new(&query_terms, &collection_stats, &config);
+
+        // Pre-pack term frequencies in plan order — `missing` is not present
+        // in `doc_stats`, so its packed entry is 0.
+        let packed: Vec<u64> = query_terms
+            .iter()
+            .map(|t| *doc_stats.term_frequencies.get(t).unwrap_or(&0))
+            .collect();
+
+        let via_hashmap = plan.score(&doc_stats);
+        let via_packed = plan.score_packed(&packed, doc_stats.doc_length);
+
+        assert!(
+            (via_hashmap - via_packed).abs() < 1e-6,
+            "score_packed must match score (hashmap={via_hashmap}, packed={via_packed})"
+        );
+    }
+
+    #[test]
+    fn test_bm25_plan_term_count_preserves_order() {
+        // Terms with non-positive IDF are kept in plan order so that
+        // `score_packed` callers can index by query position.
+        let mut document_frequencies = HashMap::new();
+        document_frequencies.insert("rare".to_string(), 1);
+        document_frequencies.insert("common".to_string(), 900); // df > total_docs/2 → idf <= 0
+        let collection_stats = CollectionStats {
+            total_docs: 1000,
+            avg_doc_length: 100.0,
+            avg_field_lengths: HashMap::new(),
+            document_frequencies,
+            field_document_frequencies: HashMap::new(),
+        };
+        let query_terms = vec!["rare".to_string(), "common".to_string()];
+        let plan = BM25Plan::new(&query_terms, &collection_stats, &ScoringConfig::default());
+
+        assert_eq!(plan.term_count(), 2, "all query terms must be preserved");
     }
 }

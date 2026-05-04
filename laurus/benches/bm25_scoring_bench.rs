@@ -47,7 +47,7 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 use laurus::lexical::search::scoring::bm25::{
-    BM25ScoringFunction, CollectionStats, DocumentStats, ScoringConfig, ScoringFunction,
+    BM25Plan, BM25ScoringFunction, CollectionStats, DocumentStats, ScoringConfig, ScoringFunction,
 };
 
 use common::{DEFAULT_SEED, lcg_next_unit};
@@ -184,5 +184,119 @@ fn bench_bm25_score(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_bm25_score);
+/// Benchmark scoring with a precomputed [`BM25Plan`] (#402, hash-map path).
+///
+/// Builds the plan once per `(n_qterms, n_candidates)` outside the timed
+/// section. Inside `b.iter` we score every candidate document with
+/// [`BM25Plan::score`], which still looks up term frequencies via the
+/// `HashMap<String, u64>` on `DocumentStats` but reuses the cached IDF and
+/// length-normalisation invariants instead of recomputing them per call.
+fn bench_bm25_score_with_plan(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bm25_scoring/score_with_plan");
+
+    let config = ScoringConfig::default();
+    let vocab = build_vocab();
+    let collection = build_collection_stats(&vocab);
+
+    for &n_candidates in &[100usize, 10_000, 100_000] {
+        let docs = build_doc_stats(&vocab, n_candidates);
+
+        for &n_qterms in &[1usize, 5, 10] {
+            let mut state = DEFAULT_SEED.wrapping_add(n_qterms as u64);
+            let query = build_query(&vocab, n_qterms, &mut state);
+            let plan = BM25Plan::new(&query, &collection, &config);
+
+            // Sanity probe (matches `bench_bm25_score`).
+            let probe = plan.score(&docs[0]);
+            assert!(
+                probe.is_finite(),
+                "BM25Plan probe score must be finite, got {probe}"
+            );
+
+            group.throughput(Throughput::Elements(n_candidates as u64));
+            group.bench_with_input(
+                BenchmarkId::from_parameter(format!("qterms_{n_qterms}/{n_candidates}")),
+                &(),
+                |b, _| {
+                    b.iter(|| {
+                        for doc in &docs {
+                            let score = plan.score(black_box(doc));
+                            black_box(score);
+                        }
+                    });
+                },
+            );
+        }
+    }
+
+    group.finish();
+}
+
+/// Benchmark scoring with a precomputed [`BM25Plan`] over packed term
+/// frequencies (#402, packed path).
+///
+/// Builds the plan once and pre-packs each document's term frequencies
+/// into a `Vec<u64>` indexed by query position before timing — both costs
+/// are amortised for callers that score many documents against the same
+/// query. Inside `b.iter` we call [`BM25Plan::score_packed`], which avoids
+/// the per-doc string-keyed `HashMap` lookup entirely.
+fn bench_bm25_score_packed(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bm25_scoring/score_packed");
+
+    let config = ScoringConfig::default();
+    let vocab = build_vocab();
+    let collection = build_collection_stats(&vocab);
+
+    for &n_candidates in &[100usize, 10_000, 100_000] {
+        let docs = build_doc_stats(&vocab, n_candidates);
+
+        for &n_qterms in &[1usize, 5, 10] {
+            let mut state = DEFAULT_SEED.wrapping_add(n_qterms as u64);
+            let query = build_query(&vocab, n_qterms, &mut state);
+            let plan = BM25Plan::new(&query, &collection, &config);
+
+            // Pre-pack each document's term frequencies in plan order.
+            let packed: Vec<(Vec<u64>, u64)> = docs
+                .iter()
+                .map(|d| {
+                    let freqs: Vec<u64> = query
+                        .iter()
+                        .map(|t| *d.term_frequencies.get(t).unwrap_or(&0))
+                        .collect();
+                    (freqs, d.doc_length)
+                })
+                .collect();
+
+            // Sanity probe.
+            let probe = plan.score_packed(&packed[0].0, packed[0].1);
+            assert!(
+                probe.is_finite(),
+                "BM25Plan::score_packed probe must be finite, got {probe}"
+            );
+
+            group.throughput(Throughput::Elements(n_candidates as u64));
+            group.bench_with_input(
+                BenchmarkId::from_parameter(format!("qterms_{n_qterms}/{n_candidates}")),
+                &(),
+                |b, _| {
+                    b.iter(|| {
+                        for (freqs, doc_len) in &packed {
+                            let score = plan.score_packed(black_box(freqs), black_box(*doc_len));
+                            black_box(score);
+                        }
+                    });
+                },
+            );
+        }
+    }
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_bm25_score,
+    bench_bm25_score_with_plan,
+    bench_bm25_score_packed,
+);
 criterion_main!(benches);
