@@ -33,6 +33,12 @@ pub struct HnswGraph {
     pub m_max_0: usize, // Max neighbors for layer 0 (usually 2*M)
     pub ef_construction: usize,
     pub level_mult: f64,
+
+    /// Largest `doc_id` ever inserted into the graph. Cached so search-
+    /// time code can size a visited-set bitmap (`BitVec` of length
+    /// `max_doc_id + 1`) without rescanning the graph. Updated by
+    /// [`get_or_create_index`] when a new node is added.
+    max_doc_id: u64,
 }
 
 impl HnswGraph {
@@ -64,12 +70,16 @@ impl HnswGraph {
         let mut id_to_index = AHashMap::with_capacity(nodes_map.len());
         let mut index_to_id = Vec::with_capacity(nodes_map.len());
         let mut nodes = Vec::with_capacity(nodes_map.len());
+        let mut max_doc_id: u64 = 0;
 
         for (doc_id, layers) in nodes_map {
             let index = nodes.len();
             id_to_index.insert(doc_id, index);
             index_to_id.push(doc_id);
             nodes.push(layers);
+            if doc_id > max_doc_id {
+                max_doc_id = doc_id;
+            }
         }
 
         Self {
@@ -83,7 +93,17 @@ impl HnswGraph {
             m_max_0,
             ef_construction,
             level_mult,
+            max_doc_id,
         }
+    }
+
+    /// Largest `doc_id` currently stored in the graph.
+    ///
+    /// Returns `0` for an empty graph; callers should sanity-check
+    /// against [`node_count`](Self::node_count) before allocating.
+    /// Used by `HnswSearcher` to size the visited-set bitmap.
+    pub fn max_doc_id(&self) -> u64 {
+        self.max_doc_id
     }
 
     /// Get neighbors of a node at a specific level.
@@ -121,6 +141,9 @@ impl HnswGraph {
             self.id_to_index.insert(doc_id, index);
             self.index_to_id.push(doc_id);
             self.nodes.push(Vec::new());
+            if doc_id > self.max_doc_id {
+                self.max_doc_id = doc_id;
+            }
             index
         }
     }
