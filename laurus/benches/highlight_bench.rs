@@ -153,6 +153,54 @@ fn bench_simple_highlight_terms(c: &mut Criterion) {
     group.finish();
 }
 
+/// Same workload shape as `bench_simple_highlight_terms`, but with the
+/// regex patterns **pre-compiled outside the timed loop** via
+/// `SimpleHighlighter::compile_patterns`. This is the case for callers
+/// that reuse the same term set across many highlight calls (e.g. one
+/// query × N search results); the per-call cost drops to
+/// `replace_all` only.
+///
+/// Compare against `bench_simple_highlight_terms` at matching ids
+/// (`1KB/n_terms_5` etc.) to see the regex-compile cost the
+/// pre-compiled API avoids — this is the workload #407 reduces.
+fn bench_simple_highlight_terms_precompiled(c: &mut Criterion) {
+    let mut group = c.benchmark_group("highlight/simple_highlight_precompiled");
+
+    let highlighter = SimpleHighlighter::new(HighlightConfig::default());
+
+    for &(label, target_bytes) in &[("1KB", 1024usize), ("100KB", 100 * 1024)] {
+        let text = build_text(target_bytes);
+
+        for &n_terms in &[1usize, 5, 20] {
+            let terms = pick_terms(n_terms);
+            // Compile patterns ONCE, outside the timed loop.
+            let patterns = SimpleHighlighter::compile_patterns(&terms);
+
+            // Sanity check: the precompiled path must produce the same
+            // <mark>-bearing output shape.
+            let probe = highlighter.highlight_terms_compiled(&text, &patterns);
+            assert!(
+                probe.contains("<mark>"),
+                "simple_highlight_precompiled probe must contain at least one <mark> tag (size={label}, n_terms={n_terms})"
+            );
+
+            group.bench_with_input(
+                BenchmarkId::from_parameter(format!("{label}/n_terms_{n_terms}")),
+                &(),
+                |b, _| {
+                    b.iter(|| {
+                        let out = highlighter
+                            .highlight_terms_compiled(black_box(&text), black_box(&patterns));
+                        black_box(out);
+                    });
+                },
+            );
+        }
+    }
+
+    group.finish();
+}
+
 fn bench_full_highlight_retokenize(c: &mut Criterion) {
     let mut group = c.benchmark_group("highlight/retokenize");
 
@@ -223,6 +271,7 @@ fn bench_full_highlight_top_k(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_simple_highlight_terms,
+    bench_simple_highlight_terms_precompiled,
     bench_full_highlight_retokenize,
     bench_full_highlight_top_k,
 );
