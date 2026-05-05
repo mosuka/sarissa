@@ -69,6 +69,8 @@ impl Query for TermQuery {
     }
 
     fn scorer(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Scorer>> {
+        use std::sync::Arc;
+
         // Get term information for BM25 scoring
         let term_info = reader.term_info(&self.field, &self.term)?;
         let field_stats = reader.field_stats(&self.field)?;
@@ -76,12 +78,13 @@ impl Query for TermQuery {
         match (term_info, field_stats) {
             (Some(term_info), Some(field_stats)) => {
                 // Wire the index-side tightened TF-component upper
-                // bound (#403 PR-B2). `max_score_factor == 0.0` is
-                // treated by the scorer as "fall back to the loose
-                // `k1 + 1` bound" — handles legacy v1 dictionaries
-                // and aggregated cross-segment views where the factor
-                // is not available.
-                let scorer = BM25Scorer::with_max_score_factor(
+                // bound (#403 PR-B2) and the per-block max-impact
+                // metadata (#403 PR-C). Empty `block_max` and
+                // `max_score_factor == 0.0` cause the scorer to fall
+                // back to looser bounds, so legacy v1/v2 dictionaries
+                // and aggregated cross-segment views remain valid.
+                let block_max: Arc<[_]> = Arc::from(term_info.block_max.into_boxed_slice());
+                let scorer = BM25Scorer::with_block_max(
                     term_info.doc_freq,
                     term_info.total_freq,
                     field_stats.doc_count,
@@ -89,6 +92,7 @@ impl Query for TermQuery {
                     reader.doc_count(),
                     self.boost,
                     term_info.max_score_factor,
+                    block_max,
                 );
                 Ok(Box::new(scorer))
             }
