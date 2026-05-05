@@ -44,10 +44,13 @@ pub trait Scorer: Send + Debug {
     /// containing `doc_id` (#403 PR-C, Block-Max-WAND).
     ///
     /// Scorers that carry per-block metadata override this to return
-    /// `boost · idf · block_max_factor` for the block whose
-    /// `last_doc_id ≥ doc_id`. The default implementation forwards to
-    /// [`Scorer::max_score`] — correct but loose, identical to what
-    /// PR-B2's term-level bound would return.
+    /// `boost · idf · right_max_factor` for the block whose
+    /// `last_doc_id ≥ doc_id`, where `right_max_factor` is the
+    /// **right-cumulative** maximum across the suffix `[block, …, end]`
+    /// — guaranteeing the bound holds for every doc at-or-after the
+    /// block. The default implementation forwards to [`Scorer::max_score`]
+    /// — correct but loose, identical to what PR-B2's term-level
+    /// bound would return.
     ///
     /// Returns `0.0` when `doc_id` is past the last block in the
     /// posting list (no further docs can match), letting the searcher
@@ -60,6 +63,40 @@ pub trait Scorer: Send + Debug {
     ///   per-block table) and returns that block's bound.
     fn block_max_score_at(&self, _doc_id: u64) -> f32 {
         self.max_score()
+    }
+
+    /// Per-block upper bound on the score of any doc **inside the
+    /// current block** that contains `doc_id` (#403 PR-E, Block-Max
+    /// skip-ahead).
+    ///
+    /// In contrast to [`Self::block_max_score_at`] (which folds in the
+    /// right-cumulative max so the searcher loop's `break` is sound),
+    /// this returns only the **current block's** bound. The
+    /// non-cumulative form lets the searcher decide that *this* block
+    /// is non-competitive even though some *later* block may still be
+    /// competitive — and skip past the current block via
+    /// [`Self::next_block_boundary`] instead of breaking.
+    ///
+    /// Returns `0.0` past the last block. The default implementation
+    /// forwards to [`Self::max_score`] — correct but loose, so the
+    /// searcher's skip-ahead becomes a no-op for legacy scorers.
+    fn current_block_max_score(&self, _doc_id: u64) -> f32 {
+        self.max_score()
+    }
+
+    /// Smallest `doc_id` past the block containing `doc_id` — i.e.
+    /// `block.last_doc_id + 1` for the block returned by
+    /// [`Self::current_block_max_score`] (#403 PR-E). The searcher
+    /// uses this as the `skip_to` target when the current block is
+    /// non-competitive.
+    ///
+    /// Returns `None` when the scorer carries no per-block metadata
+    /// (legacy v1 / v2 segments, multi-segment aggregated views) — the
+    /// searcher then keeps the existing PR-C `break` semantics.
+    /// Returns `Some(u64::MAX)` when `doc_id` is past the last block —
+    /// the searcher should treat this as exhausted.
+    fn next_block_boundary(&self, _doc_id: u64) -> Option<u64> {
+        None
     }
 
     /// Get the name of this scorer.
@@ -384,6 +421,54 @@ impl Scorer for BM25Scorer {
         self.max_score()
     }
 
+    fn current_block_max_score(&self, doc_id: u64) -> f32 {
+        // No per-block metadata → fall back to the term-level bound;
+        // searcher's skip-ahead becomes a no-op (next_block_boundary
+        // returns None alongside).
+        if self.block_max.is_empty() {
+            return self.max_score();
+        }
+        if self.doc_freq == 0 || self.total_docs == 0 {
+            return 0.0;
+        }
+        if self.k1 != Self::DEFAULT_K1 || self.b != Self::DEFAULT_B {
+            return self.max_score();
+        }
+        let idx = self
+            .block_max
+            .partition_point(|block| block.last_doc_id < doc_id);
+        if idx >= self.block_max.len() {
+            return 0.0;
+        }
+        // Per-block factor only — no right-cumulative folding. A later
+        // block may carry a higher factor; that is what makes the
+        // searcher's skip-ahead path interesting (the cumulative bound
+        // exposed by [`Self::block_max_score_at`] still tells the
+        // searcher when the global suffix becomes uncompetitive and a
+        // hard `break` is sound).
+        let factor = self.block_max[idx].max_factor;
+        self.boost * self.idf() * factor
+    }
+
+    fn next_block_boundary(&self, doc_id: u64) -> Option<u64> {
+        if self.block_max.is_empty() {
+            return None;
+        }
+        // Mirror `current_block_max_score`'s short-circuits so the
+        // searcher only relies on the boundary when the per-block
+        // bound it just consulted was actually meaningful.
+        if self.k1 != Self::DEFAULT_K1 || self.b != Self::DEFAULT_B {
+            return None;
+        }
+        let idx = self
+            .block_max
+            .partition_point(|block| block.last_doc_id < doc_id);
+        if idx >= self.block_max.len() {
+            return Some(u64::MAX);
+        }
+        Some(self.block_max[idx].last_doc_id.saturating_add(1))
+    }
+
     fn block_max_score_at(&self, doc_id: u64) -> f32 {
         // No per-block metadata → fall back to the term-level bound.
         if self.block_max.is_empty() {
@@ -639,6 +724,42 @@ impl Scorer for BooleanScorer {
         total * self.boost
     }
 
+    fn current_block_max_score(&self, doc_id: u64) -> f32 {
+        // Sum of per-block (non-cumulative) bounds. Same correctness
+        // argument as [`Self::block_max_score_at`] but tighter — used
+        // by the searcher's skip-ahead path (#403 PR-E).
+        let mut total = 0.0_f32;
+        let clauses = self.clauses.borrow();
+        for (scorer, _) in clauses.iter() {
+            total += scorer.current_block_max_score(doc_id);
+        }
+        total * self.boost
+    }
+
+    fn next_block_boundary(&self, doc_id: u64) -> Option<u64> {
+        // Conservative skip target: the **min** boundary across
+        // clauses so the searcher does not jump past any clause's
+        // current block. If any clause carries no per-block info
+        // (returns `None`), the whole query falls back to the
+        // existing PR-C `break` semantics — a partial skip would let
+        // the searcher overshoot a clause that is still potentially
+        // competitive but lacks block metadata.
+        let clauses = self.clauses.borrow();
+        let mut min_boundary: Option<u64> = None;
+        for (scorer, _) in clauses.iter() {
+            match scorer.next_block_boundary(doc_id) {
+                None => return None,
+                Some(b) => {
+                    min_boundary = Some(match min_boundary {
+                        None => b,
+                        Some(m) => m.min(b),
+                    });
+                }
+            }
+        }
+        min_boundary
+    }
+
     fn name(&self) -> &'static str {
         "Boolean"
     }
@@ -771,6 +892,214 @@ mod tests {
         let idf = ((1000.0_f32 - 10.0 + 0.5) / (10.0 + 0.5)).ln().max(0.01);
         let expected = 1.0 * idf * 3.0;
         assert!((custom_loose - expected).abs() < 1e-4);
+    }
+
+    /// PR-E: `current_block_max_score` returns the **per-block** max
+    /// (without right-cumulative folding); `next_block_boundary`
+    /// reports `last_doc_id + 1` for that block.
+    #[test]
+    fn bm25_current_block_score_and_boundary_are_per_block() {
+        let blocks: Arc<[BlockMax]> = Arc::from(vec![
+            BlockMax {
+                last_doc_id: 99,
+                max_factor: 1.0,
+            },
+            BlockMax {
+                last_doc_id: 199,
+                max_factor: 3.0, // higher impact in a later block
+            },
+            BlockMax {
+                last_doc_id: 299,
+                max_factor: 2.0,
+            },
+        ]);
+        let scorer = BM25Scorer::with_block_max(10, 100, 50, 10.0, 1000, 1.0, 0.0, blocks);
+
+        // The cumulative bound at doc 0 sees the max factor from any
+        // suffix block (= 3.0 in block 1).
+        let cumulative_at_0 = scorer.block_max_score_at(0);
+
+        // The per-block bound at doc 0 only sees block 0 (= 1.0) and
+        // must therefore be strictly less than the cumulative bound.
+        let per_block_at_0 = scorer.current_block_max_score(0);
+        assert!(
+            per_block_at_0 < cumulative_at_0,
+            "per_block={per_block_at_0}, cumulative={cumulative_at_0}"
+        );
+
+        // Boundary for doc 0 lands at block 0's last_doc_id + 1 = 100.
+        assert_eq!(scorer.next_block_boundary(0), Some(100));
+
+        // Inside block 1: boundary lands at 200.
+        assert_eq!(scorer.next_block_boundary(150), Some(200));
+
+        // Past last block: signal exhaustion via u64::MAX.
+        assert_eq!(scorer.next_block_boundary(500), Some(u64::MAX));
+        assert_eq!(scorer.current_block_max_score(500), 0.0);
+    }
+
+    /// PR-E: legacy scorers without per-block metadata fall through to
+    /// the term-level bound and return `None` from
+    /// `next_block_boundary` so the searcher keeps the PR-C `break`
+    /// semantics.
+    #[test]
+    fn bm25_legacy_scorer_returns_none_boundary() {
+        let legacy = BM25Scorer::with_max_score_factor(10, 100, 50, 10.0, 1000, 1.0, 1.0);
+        assert_eq!(legacy.next_block_boundary(0), None);
+        assert_eq!(legacy.next_block_boundary(u64::MAX), None);
+        // current_block_max_score forwards to max_score for legacy.
+        assert_eq!(legacy.current_block_max_score(0), legacy.max_score());
+    }
+
+    /// PR-E: when caller overrides `(k1, b)` away from the defaults,
+    /// the precomputed per-block factor is no longer valid — both the
+    /// per-block bound and the boundary must short-circuit.
+    #[test]
+    fn bm25_non_default_params_shortcircuit_per_block() {
+        let blocks: Arc<[BlockMax]> = Arc::from(vec![BlockMax {
+            last_doc_id: 99,
+            max_factor: 1.0,
+        }]);
+        let mut scorer = BM25Scorer::with_block_max(10, 100, 50, 10.0, 1000, 1.0, 0.0, blocks);
+        scorer.set_k1(2.0); // override away from default
+
+        assert_eq!(scorer.next_block_boundary(0), None);
+        assert_eq!(scorer.current_block_max_score(0), scorer.max_score());
+    }
+
+    /// PR-E: BooleanScorer's per-block bound and boundary aggregate
+    /// across clauses — sum for the bound, `min` for the boundary
+    /// (conservative skip target).
+    #[test]
+    fn boolean_per_block_bound_sums_and_boundary_takes_min() {
+        use crate::lexical::query::TermQuery;
+
+        // Two clauses with different per-block layouts.
+        let blocks_a: Arc<[BlockMax]> = Arc::from(vec![BlockMax {
+            last_doc_id: 50,
+            max_factor: 1.5,
+        }]);
+        let scorer_a = BM25Scorer::with_block_max(5, 30, 20, 10.0, 500, 1.0, 0.0, blocks_a);
+        let blocks_b: Arc<[BlockMax]> = Arc::from(vec![BlockMax {
+            last_doc_id: 80,
+            max_factor: 2.0,
+        }]);
+        let scorer_b = BM25Scorer::with_block_max(8, 40, 25, 10.0, 500, 1.0, 0.0, blocks_b);
+
+        let combined_at_0 =
+            scorer_a.current_block_max_score(0) + scorer_b.current_block_max_score(0);
+
+        // Build a BooleanScorer over two TermQuery clauses and a
+        // dummy reader. We can't easily construct a real BooleanScorer
+        // without a reader, so this test exercises the aggregation
+        // logic by invoking the trait methods directly through a
+        // hand-rolled stand-in.
+        #[derive(Debug)]
+        struct PairScorer(BM25Scorer, BM25Scorer, f32);
+        impl Scorer for PairScorer {
+            fn score(&self, _: u64, _: f32, _: Option<f32>) -> f32 {
+                0.0
+            }
+            fn boost(&self) -> f32 {
+                self.2
+            }
+            fn set_boost(&mut self, b: f32) {
+                self.2 = b;
+            }
+            fn max_score(&self) -> f32 {
+                (self.0.max_score() + self.1.max_score()) * self.2
+            }
+            fn block_max_score_at(&self, doc_id: u64) -> f32 {
+                (self.0.block_max_score_at(doc_id) + self.1.block_max_score_at(doc_id)) * self.2
+            }
+            fn current_block_max_score(&self, doc_id: u64) -> f32 {
+                (self.0.current_block_max_score(doc_id) + self.1.current_block_max_score(doc_id))
+                    * self.2
+            }
+            fn next_block_boundary(&self, doc_id: u64) -> Option<u64> {
+                match (
+                    self.0.next_block_boundary(doc_id),
+                    self.1.next_block_boundary(doc_id),
+                ) {
+                    (Some(x), Some(y)) => Some(x.min(y)),
+                    _ => None,
+                }
+            }
+            fn name(&self) -> &'static str {
+                "PairTest"
+            }
+        }
+        let pair = PairScorer(scorer_a, scorer_b, 1.0);
+
+        assert!((pair.current_block_max_score(0) - combined_at_0).abs() < 1e-6);
+        // Min of clause boundaries: clause-a hits 51 first, clause-b
+        // hits 81. min = 51.
+        assert_eq!(pair.next_block_boundary(0), Some(51));
+        // After 51: clause-a is exhausted (returns u64::MAX), clause-b
+        // returns 81. min = 81.
+        assert_eq!(pair.next_block_boundary(51), Some(81));
+        // Avoid an unused-import warning when this test is the only
+        // user of `TermQuery`.
+        let _ = std::any::TypeId::of::<TermQuery>();
+    }
+
+    /// PR-E: when **any** clause carries no per-block info, the
+    /// BooleanScorer must fall back to `None` so the searcher keeps
+    /// the PR-C `break` semantics for the whole query.
+    #[test]
+    fn boolean_boundary_propagates_none_from_any_clause() {
+        #[derive(Debug)]
+        struct NoBlockScorer;
+        impl Scorer for NoBlockScorer {
+            fn score(&self, _: u64, _: f32, _: Option<f32>) -> f32 {
+                0.0
+            }
+            fn boost(&self) -> f32 {
+                1.0
+            }
+            fn set_boost(&mut self, _: f32) {}
+            fn max_score(&self) -> f32 {
+                10.0
+            }
+            // next_block_boundary defaults to None.
+            fn name(&self) -> &'static str {
+                "NoBlock"
+            }
+        }
+        let blocks: Arc<[BlockMax]> = Arc::from(vec![BlockMax {
+            last_doc_id: 50,
+            max_factor: 1.5,
+        }]);
+        let block_scorer = BM25Scorer::with_block_max(5, 30, 20, 10.0, 500, 1.0, 0.0, blocks);
+
+        #[derive(Debug)]
+        struct PairWithLegacy(NoBlockScorer, BM25Scorer);
+        impl Scorer for PairWithLegacy {
+            fn score(&self, _: u64, _: f32, _: Option<f32>) -> f32 {
+                0.0
+            }
+            fn boost(&self) -> f32 {
+                1.0
+            }
+            fn set_boost(&mut self, _: f32) {}
+            fn max_score(&self) -> f32 {
+                self.0.max_score() + self.1.max_score()
+            }
+            fn next_block_boundary(&self, doc_id: u64) -> Option<u64> {
+                match (
+                    self.0.next_block_boundary(doc_id),
+                    self.1.next_block_boundary(doc_id),
+                ) {
+                    (Some(x), Some(y)) => Some(x.min(y)),
+                    _ => None,
+                }
+            }
+            fn name(&self) -> &'static str {
+                "PairWithLegacy"
+            }
+        }
+        let pair = PairWithLegacy(NoBlockScorer, block_scorer);
+        assert_eq!(pair.next_block_boundary(0), None);
     }
 
     #[test]
