@@ -103,6 +103,34 @@ impl InvertedIndexSearcher {
                 break;
             }
 
+            // Block-Max skip-ahead pre-check (#403 PR-E). Before paying
+            // the score / field-length cost on this doc, see whether
+            // the block containing it is even competitive. The current
+            // block's bound (`current_block_max_score`) is non-cumulative
+            // — when it falls below the K-th score, jumping past the
+            // block via `next_block_boundary` is sound (the global
+            // `block_max_score_at` cumulative bound, queried right
+            // below, still controls the hard `break`).
+            let min_comp = collector.min_competitive();
+            if scorer.current_block_max_score(doc_id) <= min_comp {
+                if scorer.block_max_score_at(doc_id) <= min_comp {
+                    // Cumulative suffix bound already non-competitive
+                    // → no later block can produce a top-K hit.
+                    break;
+                }
+                if let Some(target) = scorer.next_block_boundary(doc_id) {
+                    if target == u64::MAX || target <= doc_id {
+                        break;
+                    }
+                    if !matcher.skip_to(target)? || matcher.is_exhausted() {
+                        break;
+                    }
+                    continue;
+                }
+                // No per-block info → fall through to existing PR-C
+                // break path after scoring this doc.
+            }
+
             // Calculate score for this document
             let term_freq = matcher.term_freq() as f32;
 
@@ -128,15 +156,12 @@ impl InvertedIndexSearcher {
             // Collect the result
             collector.collect(doc_id, score)?;
 
-            // Block-Max early-break (#403 PR-C). After every collect
+            // Cumulative early-break (#403 PR-C). After every collect
             // the collector's `min_competitive()` may have tightened;
-            // ask the scorer for the **per-block** upper bound at the
-            // matcher's current position rather than the looser term-
-            // level `max_score()` we used in PR-B1. As soon as the
-            // block-level bound is no longer competitive, the rest of
-            // this block (and, since `block_max_score_at` returns
-            // `0.0` past the last block, the rest of the posting list)
-            // cannot enter the top-K and the walk is provably done.
+            // ask the scorer for the right-cumulative upper bound at
+            // the matcher's current position. As soon as that bound
+            // drops below the K-th score, no later doc in the posting
+            // list can enter the top-K and the walk is provably done.
             if scorer.block_max_score_at(doc_id) <= collector.min_competitive() {
                 break;
             }
