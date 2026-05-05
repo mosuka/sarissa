@@ -45,6 +45,20 @@ pub trait Collector: Send + Debug {
     fn min_competitive(&self) -> f32 {
         f32::NEG_INFINITY
     }
+
+    /// Whether this collector benefits from the Block-Max-WAND fast
+    /// path (#475 PR-F) — i.e. whether [`Self::min_competitive`] will
+    /// eventually return a meaningful (finite) value that the BMW
+    /// pivot loop can use to skip non-competitive blocks.
+    ///
+    /// Top-K-style collectors override this to `true`. Collectors
+    /// without a heap-based competitive floor (`CountCollector`,
+    /// `AllDocsCollector`) keep the default `false` so the searcher
+    /// stays on the existing matcher-driven path, where BMW would add
+    /// overhead without delivering any pruning benefit.
+    fn bmw_capable(&self) -> bool {
+        false
+    }
 }
 
 /// A collector that keeps the top N documents by score.
@@ -520,6 +534,10 @@ impl Collector for TopDocsCollector {
         } else {
             self.hits.peek().map(|d| d.score).unwrap_or(self.min_score)
         }
+    }
+
+    fn bmw_capable(&self) -> bool {
+        true
     }
 
     fn reset(&mut self) {
