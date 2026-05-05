@@ -60,6 +60,38 @@ impl SpellCorrectedSearchResults {
     }
 }
 
+/// Strategy controlling when [`SpellCorrectedSearchEngine`] invokes the
+/// expensive [`SpellingCorrector::correct`] edit-distance scan (#411).
+///
+/// The corrector walks the term dictionary on every call; for queries
+/// that already return plenty of hits the work is wasted. The default
+/// `OnLowResults { threshold: 10 }` skips the corrector entirely for
+/// healthy queries and runs it only when the original search returns
+/// fewer than 10 hits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SpellCorrectStrategy {
+    /// Always invoke the corrector. Byte-identical to pre-#411 behaviour.
+    Always,
+    /// Invoke the corrector only when the original search returned
+    /// fewer than `threshold` hits. The default strategy.
+    OnLowResults { threshold: u64 },
+    /// Never invoke the corrector. The "no spell correction" path,
+    /// useful for benchmarking and for users who prefer the
+    /// engine-level `enabled = false` toggle's semantics without
+    /// paying the wrapper construction cost.
+    Never,
+}
+
+impl Default for SpellCorrectStrategy {
+    fn default() -> Self {
+        // Skip the corrector for any query that already returns at
+        // least 10 hits — the typo-free common case in production
+        // workloads.
+        SpellCorrectStrategy::OnLowResults { threshold: 10 }
+    }
+}
+
 /// Configuration for spell-corrected search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpellCorrectedSearchConfig {
@@ -73,6 +105,10 @@ pub struct SpellCorrectedSearchConfig {
     pub show_did_you_mean: bool,
     /// Minimum number of results before suggesting corrections.
     pub min_results_for_suggestions: usize,
+    /// Gating strategy for [`SpellingCorrector::correct`] (#411).
+    /// Defaults to `OnLowResults { threshold: 10 }`.
+    #[serde(default)]
+    pub strategy: SpellCorrectStrategy,
 }
 
 impl Default for SpellCorrectedSearchConfig {
@@ -83,6 +119,7 @@ impl Default for SpellCorrectedSearchConfig {
             retry_with_correction: true,
             show_did_you_mean: true,
             min_results_for_suggestions: 2,
+            strategy: SpellCorrectStrategy::default(),
         }
     }
 }
@@ -164,13 +201,21 @@ impl SpellCorrectedSearchEngine {
             return Ok(SpellCorrectedSearchResults::new(results, correction));
         }
 
-        // Get spelling correction for the query
-        let correction = self.corrector.correct(query_str);
-
-        // Try original query first
+        // Run the original query **first** so the strategy gate
+        // below can decide whether the corrector is even worth
+        // invoking (#411). The corrector walks the term dictionary on
+        // every call, which is wasted work whenever the original
+        // query already returns enough hits.
         let parser = LexicalQueryParser::new(analyzer).with_default_field(default_field);
         let query = parser.parse(query_str)?;
         let original_results = self.engine.search(LexicalSearchRequest::new(query))?;
+
+        let should_correct = self.should_invoke_corrector(original_results.total_hits);
+        let correction = if should_correct {
+            self.corrector.correct(query_str)
+        } else {
+            CorrectionResult::new(query_str.to_string())
+        };
 
         // Decide whether to use correction
         let should_use_correction = self.should_use_correction(&original_results, &correction);
@@ -185,8 +230,10 @@ impl SpellCorrectedSearchEngine {
             (original_results, false)
         };
 
-        // Generate "Did you mean?" suggestion if appropriate
-        let did_you_mean = if self.config.show_did_you_mean && !used_correction {
+        // Generate "Did you mean?" suggestion if appropriate, but only
+        // when we actually ran the corrector — otherwise the engine
+        // never produced suggestions to surface.
+        let did_you_mean = if should_correct && self.config.show_did_you_mean && !used_correction {
             self.did_you_mean.suggest(query_str)
         } else {
             None
@@ -219,13 +266,19 @@ impl SpellCorrectedSearchEngine {
             return Ok(SpellCorrectedSearchResults::new(results, correction));
         }
 
-        // Get spelling correction for the query
-        let correction = self.corrector.correct(query_str);
-
-        // Try original query first
+        // Run the original query first; gate the corrector on the
+        // result count (see `search_with_correction` for the full
+        // rationale, #411).
         let parser = LexicalQueryParser::new(analyzer);
         let query = parser.parse_field(field, query_str)?;
         let original_results = self.engine.search(LexicalSearchRequest::new(query))?;
+
+        let should_correct = self.should_invoke_corrector(original_results.total_hits);
+        let correction = if should_correct {
+            self.corrector.correct(query_str)
+        } else {
+            CorrectionResult::new(query_str.to_string())
+        };
 
         // Decide whether to use correction
         let should_use_correction = self.should_use_correction(&original_results, &correction);
@@ -240,8 +293,8 @@ impl SpellCorrectedSearchEngine {
             (original_results, false)
         };
 
-        // Generate "Did you mean?" suggestion if appropriate
-        let did_you_mean = if self.config.show_did_you_mean && !used_correction {
+        // Generate "Did you mean?" suggestion if appropriate.
+        let did_you_mean = if should_correct && self.config.show_did_you_mean && !used_correction {
             self.did_you_mean.suggest(query_str)
         } else {
             None
@@ -252,6 +305,17 @@ impl SpellCorrectedSearchEngine {
         spell_results.did_you_mean = did_you_mean;
 
         Ok(spell_results)
+    }
+
+    /// Decide whether to invoke the (expensive) spelling corrector
+    /// based on the configured [`SpellCorrectStrategy`] and the
+    /// original query's hit count (#411).
+    fn should_invoke_corrector(&self, original_total_hits: u64) -> bool {
+        match self.config.strategy {
+            SpellCorrectStrategy::Always => true,
+            SpellCorrectStrategy::Never => false,
+            SpellCorrectStrategy::OnLowResults { threshold } => original_total_hits < threshold,
+        }
     }
 
     /// Check if a word is correctly spelled.
@@ -402,6 +466,47 @@ mod tests {
     use crate::storage::file::{FileStorage, FileStorageConfig};
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    /// `should_invoke_corrector` must honour each [`SpellCorrectStrategy`]
+    /// (#411). Validated without spinning up a real engine — the
+    /// helper depends only on `self.config.strategy` and the input
+    /// `total_hits` value, so we synthesise a wrapper directly.
+    #[test]
+    fn strategy_gates_corrector_invocation() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = LexicalIndexConfig::default();
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let engine = LexicalStore::new(storage, config).unwrap();
+
+        let mut wrapper = SpellCorrectedSearchEngine::new(engine);
+
+        wrapper.config.strategy = SpellCorrectStrategy::Always;
+        assert!(wrapper.should_invoke_corrector(0));
+        assert!(wrapper.should_invoke_corrector(1_000_000));
+
+        wrapper.config.strategy = SpellCorrectStrategy::Never;
+        assert!(!wrapper.should_invoke_corrector(0));
+        assert!(!wrapper.should_invoke_corrector(1_000_000));
+
+        wrapper.config.strategy = SpellCorrectStrategy::OnLowResults { threshold: 10 };
+        assert!(wrapper.should_invoke_corrector(0)); // below threshold
+        assert!(wrapper.should_invoke_corrector(9));
+        assert!(!wrapper.should_invoke_corrector(10)); // at threshold (exclusive)
+        assert!(!wrapper.should_invoke_corrector(50));
+    }
+
+    #[test]
+    fn default_strategy_is_on_low_results_threshold_10() {
+        // Documents the chosen default for the audit's
+        // "default strategy decided in the PR review" criterion.
+        let cfg = SpellCorrectedSearchConfig::default();
+        assert_eq!(
+            cfg.strategy,
+            SpellCorrectStrategy::OnLowResults { threshold: 10 }
+        );
+    }
 
     #[allow(dead_code)]
     #[test]
