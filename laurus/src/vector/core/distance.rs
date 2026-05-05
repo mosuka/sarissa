@@ -42,6 +42,25 @@ pub enum DistanceMetric {
     Angular,
 }
 
+/// Cached query-side state used by [`DistanceMetric::distance_with_prepared`]
+/// to skip the per-candidate `||query||²` accumulation (#414).
+///
+/// Constructed via [`DistanceMetric::prepare_query`] once per search;
+/// borrows the query slice for the lifetime of the prepared value.
+/// Only `Cosine` and `Angular` actually consume the cached norm — the
+/// other metrics receive a placeholder `norm_sq = 0.0` and forward
+/// calls to the regular [`DistanceMetric::distance`] path.
+#[derive(Debug, Clone, Copy)]
+pub struct PreparedQuery<'a> {
+    /// Query vector data (borrowed for the lifetime of the prepared
+    /// value).
+    pub data: &'a [f32],
+    /// `||query||²`, precomputed at preparation time. `0.0` when the
+    /// metric (`Euclidean` / `Manhattan` / `DotProduct`) does not use
+    /// the query norm.
+    pub norm_sq: f32,
+}
+
 impl DistanceMetric {
     /// Calculate the distance between two vectors using this metric.
     ///
@@ -137,6 +156,42 @@ impl DistanceMetric {
         (dot_product, norm_a_sq, norm_b_sq)
     }
 
+    /// Calculate dot product and the squared norm of `b` only — skipping
+    /// the `||a||²` accumulation that [`Self::simd_dot_and_norms`] does
+    /// alongside (#414). The query-side norm is constant within one
+    /// search and is precomputed at [`Self::prepare_query`] time, so
+    /// every candidate scan can pay 2 multiply-add chains per
+    /// 8-element chunk instead of 3.
+    fn simd_dot_and_norm_b(a: &[f32], b: &[f32]) -> (f32, f32) {
+        use wide::f32x8;
+
+        let mut dot_sum = f32x8::ZERO;
+        let mut norm_b_sum = f32x8::ZERO;
+
+        let chunks_a = a.chunks_exact(8);
+        let chunks_b = b.chunks_exact(8);
+        let rem_a = chunks_a.remainder();
+        let rem_b = chunks_b.remainder();
+
+        for (ca, cb) in chunks_a.zip(chunks_b) {
+            let va = f32x8::from(ca);
+            let vb = f32x8::from(cb);
+            dot_sum += va * vb;
+            norm_b_sum += vb * vb;
+        }
+
+        let mut dot_product: f32 = dot_sum.reduce_add();
+        let mut norm_b_sq: f32 = norm_b_sum.reduce_add();
+
+        // Tail
+        for (x, y) in rem_a.iter().zip(rem_b.iter()) {
+            dot_product += x * y;
+            norm_b_sq += y * y;
+        }
+
+        (dot_product, norm_b_sq)
+    }
+
     /// Calculate dot product using SIMD.
     fn simd_dot_product(&self, a: &[f32], b: &[f32]) -> f32 {
         use wide::f32x8;
@@ -201,6 +256,95 @@ impl DistanceMetric {
             dist += (x - y).abs();
         }
         dist
+    }
+
+    /// Build a query-side `PreparedQuery` that caches the squared norm
+    /// of `query` so subsequent [`Self::distance_with_prepared`] calls
+    /// can skip the redundant per-candidate `||query||²` accumulation
+    /// (#414).
+    ///
+    /// Only `Cosine` and `Angular` consume the cached norm; the other
+    /// metrics carry it as `0.0` and recompute everything from
+    /// `prepared.data` on each call. The cost saved over a top-K query
+    /// scales with `candidates × dimension`.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The query vector. The returned `PreparedQuery`
+    ///   borrows it for the lifetime of the prepared value.
+    pub fn prepare_query<'a>(&self, query: &'a [f32]) -> PreparedQuery<'a> {
+        let norm_sq = match self {
+            DistanceMetric::Cosine | DistanceMetric::Angular => {
+                use wide::f32x8;
+                let mut sum = f32x8::ZERO;
+                let chunks = query.chunks_exact(8);
+                let rem = chunks.remainder();
+                for c in chunks {
+                    let v = f32x8::from(c);
+                    sum += v * v;
+                }
+                let mut s: f32 = sum.reduce_add();
+                for x in rem {
+                    s += x * x;
+                }
+                s
+            }
+            _ => 0.0,
+        };
+        PreparedQuery {
+            data: query,
+            norm_sq,
+        }
+    }
+
+    /// Distance from a `PreparedQuery` to a candidate vector. Uses the
+    /// cached `||query||²` (when meaningful for the metric) and
+    /// only recomputes the `b`-side and dot-product accumulators on
+    /// each call.
+    ///
+    /// For `Cosine` and `Angular` this saves one `||a||²` accumulation
+    /// per candidate; for `Euclidean`, `Manhattan`, and `DotProduct`
+    /// the result is identical to [`Self::distance`] — there is no
+    /// usable per-query cache for those metrics, so the prepared API
+    /// just forwards to the existing implementation.
+    pub fn distance_with_prepared(&self, prepared: &PreparedQuery<'_>, b: &[f32]) -> Result<f32> {
+        if prepared.data.len() != b.len() {
+            return Err(LaurusError::InvalidOperation(
+                "Vector dimensions must match for distance calculation".to_string(),
+            ));
+        }
+
+        let result = match self {
+            DistanceMetric::Cosine => {
+                let (dot_product, norm_b_sq) = Self::simd_dot_and_norm_b(prepared.data, b);
+                let norm_a = prepared.norm_sq.sqrt();
+                let norm_b = norm_b_sq.sqrt();
+
+                if norm_a == 0.0 || norm_b == 0.0 {
+                    1.0
+                } else {
+                    let cosine = (dot_product / (norm_a * norm_b)).clamp(-1.0, 1.0);
+                    1.0 - cosine
+                }
+            }
+            DistanceMetric::Angular => {
+                let (dot_product, norm_b_sq) = Self::simd_dot_and_norm_b(prepared.data, b);
+                let norm_a = prepared.norm_sq.sqrt();
+                let norm_b = norm_b_sq.sqrt();
+
+                if norm_a == 0.0 || norm_b == 0.0 {
+                    std::f32::consts::PI
+                } else {
+                    let cosine = (dot_product / (norm_a * norm_b)).clamp(-1.0, 1.0);
+                    cosine.acos()
+                }
+            }
+            DistanceMetric::Euclidean | DistanceMetric::Manhattan | DistanceMetric::DotProduct => {
+                self.distance(prepared.data, b)?
+            }
+        };
+
+        Ok(result)
     }
 
     /// Calculate similarity (0-1, higher is more similar) between two vectors.
@@ -325,6 +469,59 @@ impl DistanceMetric {
                 .iter()
                 .map(|v| self.similarity(query, v))
                 .collect::<Result<Vec<_>>>()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `distance_with_prepared` must agree with `distance` for every
+    /// metric (#414). Cosine / Angular use the cached query norm;
+    /// Euclidean / Manhattan / DotProduct fall back to the unprepared
+    /// path internally — the result must still match.
+    #[test]
+    fn distance_with_prepared_matches_distance() {
+        let a: Vec<f32> = (0..768).map(|i| (i as f32) * 0.01 + 1.0).collect();
+        let b: Vec<f32> = (0..768).map(|i| (i as f32) * 0.02 - 0.5).collect();
+
+        for metric in [
+            DistanceMetric::Cosine,
+            DistanceMetric::Euclidean,
+            DistanceMetric::Manhattan,
+            DistanceMetric::DotProduct,
+            DistanceMetric::Angular,
+        ] {
+            let direct = metric.distance(&a, &b).unwrap();
+            let prepared = metric.prepare_query(&a);
+            let via_prep = metric.distance_with_prepared(&prepared, &b).unwrap();
+            assert!(
+                (direct - via_prep).abs() < 1e-5,
+                "{metric:?}: direct={direct}, prepared={via_prep}"
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_query_norm_only_set_for_cosine_and_angular() {
+        let v: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+        let expected_norm_sq: f32 = 1.0 + 4.0 + 9.0 + 16.0;
+
+        for metric in [DistanceMetric::Cosine, DistanceMetric::Angular] {
+            let p = metric.prepare_query(&v);
+            assert!((p.norm_sq - expected_norm_sq).abs() < 1e-6);
+        }
+        for metric in [
+            DistanceMetric::Euclidean,
+            DistanceMetric::Manhattan,
+            DistanceMetric::DotProduct,
+        ] {
+            let p = metric.prepare_query(&v);
+            assert_eq!(
+                p.norm_sq, 0.0,
+                "{metric:?}: norm_sq must be left at 0.0 (placeholder)"
+            );
         }
     }
 }

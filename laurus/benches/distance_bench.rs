@@ -127,5 +127,101 @@ fn bench_distances(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_distances);
+/// Cosine batch with the query side prepared once per search (#414).
+///
+/// Mirrors the `dim_768/cosine` case in [`bench_distances`] but
+/// scales `n_targets` to **10 000** to match the audit's acceptance
+/// criterion ("1 query × 10k candidates, dim=768, ≥ 1.4× speedup").
+/// The bench measures two paths back-to-back so the comparison is
+/// direct rather than via two `cargo bench` runs:
+///
+/// - `unprepared`: the existing
+///   [`DistanceMetric::distance`] called per candidate, recomputing
+///   `||query||²` every time.
+/// - `prepared`:
+///   [`DistanceMetric::prepare_query`] once outside `b.iter`, then
+///   [`DistanceMetric::distance_with_prepared`] per candidate.
+fn bench_cosine_batch_prepared(c: &mut Criterion) {
+    let mut group = c.benchmark_group("distance_metrics_cosine_batch");
+    const N: usize = 10_000;
+    const DIM: usize = 768;
+
+    let vectors = generate_test_vectors(N + 1, DIM);
+    let query = vectors[0].clone();
+    let targets: Vec<Vec<f32>> = vectors.into_iter().skip(1).collect();
+    let metric = DistanceMetric::Cosine;
+
+    group.throughput(Throughput::Elements(N as u64));
+
+    group.bench_function("unprepared/dim_768/n_10000", |b| {
+        b.iter(|| {
+            for target in &targets {
+                let _ = black_box(
+                    metric
+                        .distance(black_box(&query), black_box(target))
+                        .unwrap(),
+                );
+            }
+        });
+    });
+
+    group.bench_function("prepared/dim_768/n_10000", |b| {
+        b.iter(|| {
+            let prepared = metric.prepare_query(black_box(&query));
+            for target in &targets {
+                let _ = black_box(
+                    metric
+                        .distance_with_prepared(&prepared, black_box(target))
+                        .unwrap(),
+                );
+            }
+        });
+    });
+
+    // Also sweep smaller dims where cosine is compute-bound rather than
+    // memory-bound, so the prepared optimisation's algorithmic win is
+    // visible without being washed out by L2/L3 cache misses on the
+    // candidate vectors.
+    for &dim in &[64usize, 128, 384] {
+        let vectors = generate_test_vectors(N + 1, dim);
+        let query = vectors[0].clone();
+        let targets: Vec<Vec<f32>> = vectors.into_iter().skip(1).collect();
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("unprepared/dim_{dim}/n_{N}")),
+            &(query.clone(), targets.clone()),
+            |b, (query, targets)| {
+                b.iter(|| {
+                    for target in targets {
+                        let _ = black_box(
+                            metric
+                                .distance(black_box(query), black_box(target))
+                                .unwrap(),
+                        );
+                    }
+                })
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("prepared/dim_{dim}/n_{N}")),
+            &(query.clone(), targets.clone()),
+            |b, (query, targets)| {
+                b.iter(|| {
+                    let prepared = metric.prepare_query(black_box(query));
+                    for target in targets {
+                        let _ = black_box(
+                            metric
+                                .distance_with_prepared(&prepared, black_box(target))
+                                .unwrap(),
+                        );
+                    }
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_distances, bench_cosine_batch_prepared);
 criterion_main!(benches);
