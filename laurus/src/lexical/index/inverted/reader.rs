@@ -1391,16 +1391,36 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
             }));
         }
 
-        // Search across all segments
+        // Search across all segments. Aggregate by taking the **max**
+        // of per-segment factors — each segment computed
+        // `max_score_factor` against its own `avg_field_length`, but
+        // `max(seg_max)` remains a valid upper bound on any
+        // individual posting's TF-component contribution (#403 PR-B2).
+        //
+        // Block-max metadata is concatenated across segments
+        // (#403 PR-D). The inverted writer assigns segments
+        // monotonically-increasing doc-id ranges, so segment-order
+        // concatenation preserves the `last_doc_id` ordering that
+        // [`BM25Scorer::block_max_score_at`]'s binary search relies
+        // on.
+        //
+        // Per-block `max_factor` was computed against each segment's
+        // local `avg_field_length`. The cross-segment BM25 scorer
+        // uses the global average; the per-block factor is therefore
+        // approximate. For corpora whose segments have similar
+        // average field lengths (the common case — segments are
+        // sized in docs, not field-length bytes) the divergence is
+        // small and the factor remains a usable bound. For corpora
+        // with widely-varying segment averages a future PR will need
+        // to either re-index or store enough per-block raw data
+        // (max-tf + min-field-length) to re-anchor the factor at
+        // query time.
         let mut total_doc_freq = 0;
         let mut total_term_freq = 0;
-        // Aggregate across segments by taking the **max** of per-segment
-        // factors — each segment computed it against its own
-        // `avg_field_length`, but `max(seg_max)` is still a valid upper
-        // bound on any individual posting's TF-component contribution
-        // (#403 PR-B2).
         let mut max_score_factor: f32 = 0.0;
-        let mut found = false;
+        let mut matched_count = 0_usize;
+        let mut combined_block_max: Vec<crate::lexical::index::structures::dictionary::BlockMax> =
+            Vec::new();
 
         for segment_reader in &self.segment_readers {
             let reader = segment_reader.read().unwrap();
@@ -1408,9 +1428,35 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
                 total_doc_freq += term_info.doc_frequency;
                 total_term_freq += term_info.total_frequency;
                 max_score_factor = max_score_factor.max(term_info.max_score_factor);
-                found = true;
+                matched_count += 1;
+                combined_block_max.extend(term_info.block_max.iter().copied());
             }
         }
+
+        let found = matched_count > 0;
+        // Pass per-block metadata through for the single-segment case
+        // only. With more than one matching segment, two costs offset
+        // the bound's tightness:
+        //
+        // 1. The binary search inside `BM25Scorer::block_max_score_at`
+        //    walks `O(log Σ blocks)` instead of `O(log blocks_in_one_segment)`,
+        //    and on uniform corpora the per-block factor degenerates
+        //    to the term-level `max_score_factor` anyway — leaving
+        //    only the search overhead.
+        // 2. Per-block factors were computed against per-segment
+        //    `avg_field_length`. For corpora whose segments diverge
+        //    in average length, the segment-local factor can drop
+        //    below the cross-segment-anchored BM25 contribution and
+        //    the searcher's break would fire too early.
+        //
+        // Falling back to the term-level `max_score_factor` in the
+        // multi-segment case sidesteps both issues. Cross-segment
+        // block-max passthrough is tracked as a follow-up.
+        let aggregated_block_max = if matched_count == 1 {
+            combined_block_max
+        } else {
+            Vec::new()
+        };
 
         if found {
             let reader_info = crate::lexical::reader::ReaderTermInfo {
@@ -1421,12 +1467,7 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
                 posting_offset: 0, // Aggregated value, not meaningful for multi-segment
                 posting_size: 0,   // Aggregated value, not meaningful for multi-segment
                 max_score_factor,
-                // Aggregated cross-segment view does not carry per-block
-                // metadata: each segment's blocks are anchored to its own
-                // local `avg_field_length`, and concatenating them across
-                // segments would require re-indexing. Scorers fall back
-                // to the term-level `max_score_factor`.
-                block_max: Vec::new(),
+                block_max: aggregated_block_max.clone(),
             };
 
             let term_info = TermInfo {
@@ -1435,12 +1476,7 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
                 doc_frequency: total_doc_freq,
                 total_frequency: total_term_freq,
                 max_score_factor,
-                // Aggregated cross-segment view does not carry per-block
-                // metadata: each segment's blocks are anchored to its own
-                // local `avg_field_length`, and concatenating them across
-                // segments would require re-indexing. Scorers fall back
-                // to the term-level `max_score_factor`.
-                block_max: Vec::new(),
+                block_max: aggregated_block_max,
             };
             self.cache_manager.cache_term_info(cache_key, term_info);
 
