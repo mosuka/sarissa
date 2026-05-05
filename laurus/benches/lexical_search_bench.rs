@@ -289,6 +289,28 @@ async fn build_engine_skewed(n: usize) -> Result<Engine> {
 /// uniform and skewed-TF fixtures share the same schema, analyzer,
 /// and document-shape boilerplate.
 async fn build_engine_with(n: usize, body_fn: fn(usize) -> String) -> Result<Engine> {
+    build_engine_with_segments(n, body_fn, 1).await
+}
+
+/// Build an engine with `n` documents distributed across
+/// `segment_count` segments by issuing one `commit()` per chunk.
+/// `segment_count = 1` matches the historical single-segment fixture
+/// (one final commit). Higher values let benches expose the
+/// multi-segment cross-segment view path (#476) where the inverted
+/// reader currently falls back to the term-level `max_score_factor`
+/// for `block_max_score_at`.
+///
+/// The auto-merge interval is 60s and each commit happens back-to-back
+/// during construction, so for the duration of a single bench setup
+/// the segments persist as written. Callers that need stronger
+/// guarantees against background merging must inspect the lexical
+/// stats after construction.
+async fn build_engine_with_segments(
+    n: usize,
+    body_fn: fn(usize) -> String,
+    segment_count: usize,
+) -> Result<Engine> {
+    assert!(segment_count >= 1, "segment_count must be ≥ 1");
     let storage = memory_storage()?;
     let analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::default());
 
@@ -305,6 +327,8 @@ async fn build_engine_with(n: usize, body_fn: fn(usize) -> String) -> Result<Eng
         .build()
         .await?;
 
+    let chunk_size = n.div_ceil(segment_count);
+    let mut next_commit = chunk_size;
     for i in 0..n {
         let body = body_fn(i);
         let doc = Document::builder()
@@ -315,6 +339,14 @@ async fn build_engine_with(n: usize, body_fn: fn(usize) -> String) -> Result<Eng
             .build();
 
         engine.add_document(&i.to_string(), doc).await?;
+
+        // Per-chunk commit so each chunk lands as its own segment
+        // (auto-merge runs on a 60s interval and does not fire during
+        // back-to-back commits in this build loop).
+        if i + 1 == next_commit && i + 1 < n {
+            engine.commit().await?;
+            next_commit += chunk_size;
+        }
     }
 
     engine.commit().await?;
@@ -609,6 +641,66 @@ fn bench_topk_or_skewed_tf(c: &mut Criterion) {
     group.finish();
 }
 
+/// Multi-segment baseline for #476. Same skewed-TF corpus and
+/// should-OR query as [`bench_topk_or_skewed_tf`], but the corpus is
+/// split across N commits so the index ends up with N segments
+/// (subject to background merge). Compares 1 / 4 / 8 segment
+/// constructions side-by-side to expose the cross-segment
+/// `block_max_score_at` fallback overhead — the gap PR-G's
+/// follow-up work would need to close for the audit-target 100k
+/// speedup to transfer to multi-segment deployments.
+fn bench_topk_or_multi_segment(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("lexical/topk_or_multi_segment");
+    let sizes: &[usize] = &[10_000, 100_000];
+    let segment_counts: &[usize] = &[1, 4, 8];
+    group.sample_size(SAMPLE_SIZE_SLOW);
+
+    for &n in sizes {
+        for &seg_count in segment_counts {
+            let engine = rt
+                .block_on(build_engine_with_segments(n, build_body_skewed, seg_count))
+                .unwrap();
+
+            // Sanity probe: high-freq OR must hit at least one heavy-hitter.
+            let probe = rt.block_on(async {
+                let mut bq = BooleanQuery::new();
+                bq.add_should(Box::new(TermQuery::new("body", "search")));
+                bq.add_should(Box::new(TermQuery::new("body", "system")));
+                bq.add_should(Box::new(TermQuery::new("body", "data")));
+                let request = SearchRequestBuilder::new()
+                    .lexical_query(LexicalSearchQuery::Obj(Box::new(bq)))
+                    .limit(10)
+                    .build();
+                engine.search(request).await.unwrap()
+            });
+            assert!(
+                !probe.is_empty(),
+                "multi-seg probe must hit ≥1 doc at n={n} seg={seg_count}"
+            );
+
+            let id = format!("n={n}/segments={seg_count}");
+            group.bench_with_input(BenchmarkId::from_parameter(id), &n, |b, _| {
+                b.to_async(&rt).iter(|| {
+                    let engine = &engine;
+                    async move {
+                        let mut bq = BooleanQuery::new();
+                        bq.add_should(Box::new(TermQuery::new("body", "search")));
+                        bq.add_should(Box::new(TermQuery::new("body", "system")));
+                        bq.add_should(Box::new(TermQuery::new("body", "data")));
+                        let request = SearchRequestBuilder::new()
+                            .lexical_query(LexicalSearchQuery::Obj(Box::new(bq)))
+                            .limit(10)
+                            .build();
+                        black_box(engine.search(request).await.unwrap())
+                    }
+                });
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_phrase_query(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("lexical/phrase_query");
@@ -800,6 +892,7 @@ criterion_group!(
     bench_term_query_varying_limit,
     bench_boolean_query,
     bench_topk_or_skewed_tf,
+    bench_topk_or_multi_segment,
     bench_phrase_query,
     bench_fuzzy_query,
     bench_dsl_query,
