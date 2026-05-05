@@ -32,6 +32,7 @@ use crate::storage::Storage;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::storage::file::{FileStorage, FileStorageConfig};
 
+pub(crate) mod bmw;
 pub mod core;
 pub mod maintenance;
 pub mod reader;
