@@ -1,8 +1,10 @@
 //! Scoring implementations for ranking search results.
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use crate::error::Result;
+use crate::lexical::index::structures::dictionary::BlockMax;
 use crate::lexical::query::Query;
 use crate::lexical::query::matcher::Matcher;
 use crate::util::simd;
@@ -33,17 +35,30 @@ pub trait Scorer: Send + Debug {
     ///
     /// For scorers that do not yet expose per-block max-score metadata,
     /// the default impl forwards to [`Scorer::max_score`], i.e. it
-    /// returns the global upper bound — correct but loose. A future
-    /// per-posting block-max index format (#403 PR-B2) will let scorers
-    /// override this with a tightened bound that varies as the matcher
-    /// advances, enabling Block-Max-WAND skips.
-    ///
-    /// # Returns
-    ///
-    /// An upper bound on any score the scorer can produce for documents
-    /// in the matcher's current block. The returned value is **at most**
-    /// [`Scorer::max_score`] but may be tighter.
+    /// returns the global upper bound — correct but loose.
     fn block_max_score(&self) -> f32 {
+        self.max_score()
+    }
+
+    /// Tightened per-block upper bound on the score for the block
+    /// containing `doc_id` (#403 PR-C, Block-Max-WAND).
+    ///
+    /// Scorers that carry per-block metadata override this to return
+    /// `boost · idf · block_max_factor` for the block whose
+    /// `last_doc_id ≥ doc_id`. The default implementation forwards to
+    /// [`Scorer::max_score`] — correct but loose, identical to what
+    /// PR-B2's term-level bound would return.
+    ///
+    /// Returns `0.0` when `doc_id` is past the last block in the
+    /// posting list (no further docs can match), letting the searcher
+    /// loop short-circuit.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` — current matcher position. The scorer locates the
+    ///   block containing this doc id (binary search over its
+    ///   per-block table) and returns that block's bound.
+    fn block_max_score_at(&self, _doc_id: u64) -> f32 {
         self.max_score()
     }
 
@@ -84,6 +99,21 @@ pub struct BM25Scorer {
     /// when the caller overrides `(k1, b)` via [`Self::with_params`],
     /// since the precomputed factor is only valid for the defaults.
     max_score_factor: f32,
+    /// Per-block (`BLOCK_SIZE = 128`) max-impact metadata used by
+    /// Block-Max-WAND (#403 PR-C). Each entry holds `(last_doc_id,
+    /// max_factor)`; entries are sorted by `last_doc_id`.
+    /// [`Self::block_max_score_at`] binary-searches this slice to
+    /// return a tighter bound than the term-level
+    /// [`Self::max_score_factor`]. Empty when not available — the
+    /// scorer then falls back to the term-level bound.
+    block_max: Arc<[BlockMax]>,
+    /// Right-cumulative max-factor: `right_max[i] = max(block_max[j].max_factor
+    /// for j in i..)`. Pre-computed once at scorer construction so
+    /// [`Self::block_max_score_at`] can return a valid upper bound on the
+    /// score of **every doc at or after** the block containing the query
+    /// doc id — required for the searcher loop's global early-break to
+    /// be correctness-preserving.
+    right_max: Arc<[f32]>,
 }
 
 impl BM25Scorer {
@@ -128,6 +158,8 @@ impl BM25Scorer {
             b: Self::DEFAULT_B,
             cached_idf,
             max_score_factor: 0.0,
+            block_max: Arc::from([] as [BlockMax; 0]),
+            right_max: Arc::from([] as [f32; 0]),
         }
     }
 
@@ -158,6 +190,63 @@ impl BM25Scorer {
             b: Self::DEFAULT_B,
             cached_idf,
             max_score_factor,
+            block_max: Arc::from([] as [BlockMax; 0]),
+            right_max: Arc::from([] as [f32; 0]),
+        }
+    }
+
+    /// Compute the right-cumulative max-factor table from a sorted
+    /// `block_max` slice. `out[i] = max(block_max[j].max_factor for j
+    /// in i..)`. The result is monotonically non-increasing, which is
+    /// what the searcher loop's global early-break requires
+    /// (#403 PR-C): `block_max_score_at(doc_id)` returns a valid
+    /// upper bound on the score of every doc at or after the block
+    /// containing `doc_id`, not just the immediate block.
+    fn compute_right_max(blocks: &[BlockMax]) -> Vec<f32> {
+        let n = blocks.len();
+        let mut out = vec![0.0_f32; n];
+        if n == 0 {
+            return out;
+        }
+        out[n - 1] = blocks[n - 1].max_factor;
+        for i in (0..n - 1).rev() {
+            out[i] = blocks[i].max_factor.max(out[i + 1]);
+        }
+        out
+    }
+
+    /// Create a new BM25 scorer with the per-block max-impact metadata
+    /// (#403 PR-C). `block_max` carries `(last_doc_id, max_factor)`
+    /// entries sorted by `last_doc_id`; pass an empty slice to fall
+    /// back to the term-level [`Self::max_score_factor`] (which itself
+    /// falls back to `k1 + 1` when zero).
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_block_max(
+        doc_freq: u64,
+        total_term_freq: u64,
+        field_doc_count: u64,
+        avg_field_length: f64,
+        total_docs: u64,
+        boost: f32,
+        max_score_factor: f32,
+        block_max: Arc<[BlockMax]>,
+    ) -> Self {
+        let cached_idf = Self::compute_idf(doc_freq, total_docs);
+        let right_max: Arc<[f32]> =
+            Arc::from(Self::compute_right_max(&block_max).into_boxed_slice());
+        BM25Scorer {
+            doc_freq,
+            total_term_freq,
+            field_doc_count,
+            avg_field_length,
+            total_docs,
+            boost,
+            k1: Self::DEFAULT_K1,
+            b: Self::DEFAULT_B,
+            cached_idf,
+            max_score_factor,
+            block_max,
+            right_max,
         }
     }
 
@@ -188,6 +277,8 @@ impl BM25Scorer {
             b,
             cached_idf,
             max_score_factor: 0.0,
+            block_max: Arc::from([] as [BlockMax; 0]),
+            right_max: Arc::from([] as [f32; 0]),
         }
     }
 
@@ -287,12 +378,44 @@ impl Scorer for BM25Scorer {
     }
 
     fn block_max_score(&self) -> f32 {
-        // Today we do not yet store per-block bounds — return the
-        // tightest term-level upper bound, which is the same value
-        // [`Self::max_score`] returns. A future per-posting block-max
-        // index format (#403 PR-C) will let this method override with
-        // a bound that varies as the matcher advances.
+        // Without a doc id we cannot pick a specific block; report the
+        // term-level bound (same as `max_score()`). Use
+        // [`Self::block_max_score_at`] for the per-block bound.
         self.max_score()
+    }
+
+    fn block_max_score_at(&self, doc_id: u64) -> f32 {
+        // No per-block metadata → fall back to the term-level bound.
+        if self.block_max.is_empty() {
+            return self.max_score();
+        }
+        if self.doc_freq == 0 || self.total_docs == 0 {
+            return 0.0;
+        }
+        // Skip the per-block bound when the caller is using non-default
+        // BM25 parameters — the precomputed factor is only valid for
+        // `(k1, b) = (1.2, 0.75)`.
+        if self.k1 != Self::DEFAULT_K1 || self.b != Self::DEFAULT_B {
+            return self.max_score();
+        }
+
+        // Binary search for the first block whose `last_doc_id >= doc_id`.
+        let idx = self
+            .block_max
+            .partition_point(|block| block.last_doc_id < doc_id);
+        if idx >= self.block_max.len() {
+            // Past the last block — no remaining doc in this term's
+            // posting list can contribute.
+            return 0.0;
+        }
+        // Use the right-cumulative max so the returned bound holds for
+        // every doc at or after the block containing `doc_id`. The
+        // searcher loop's `if bound <= min_competitive { break }`
+        // would be unsound with the per-block factor alone — a later
+        // block could carry a higher factor and yield a higher-scoring
+        // doc.
+        let factor = self.right_max[idx];
+        self.boost * self.idf() * factor
     }
 
     fn name(&self) -> &'static str {
@@ -499,6 +622,21 @@ impl Scorer for BooleanScorer {
             total_max += scorer.max_score();
         }
         total_max * self.boost
+    }
+
+    fn block_max_score_at(&self, doc_id: u64) -> f32 {
+        // For an OR-style boolean any sub-clause might contribute, so
+        // the upper bound at `doc_id` is the sum of each sub-scorer's
+        // per-block bound at the same doc id (#403 PR-C). Because
+        // each sub-scorer's bound is itself ≤ its own `max_score()`,
+        // the sum is also ≤ `BooleanScorer::max_score()` and therefore
+        // a tighter, valid upper bound.
+        let mut total = 0.0_f32;
+        let clauses = self.clauses.borrow();
+        for (scorer, _) in clauses.iter() {
+            total += scorer.block_max_score_at(doc_id);
+        }
+        total * self.boost
     }
 
     fn name(&self) -> &'static str {

@@ -1387,6 +1387,7 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
                 posting_offset: cached_info.posting_offset,
                 posting_size: cached_info.posting_length,
                 max_score_factor: cached_info.max_score_factor,
+                block_max: cached_info.block_max.clone(),
             }));
         }
 
@@ -1420,6 +1421,12 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
                 posting_offset: 0, // Aggregated value, not meaningful for multi-segment
                 posting_size: 0,   // Aggregated value, not meaningful for multi-segment
                 max_score_factor,
+                // Aggregated cross-segment view does not carry per-block
+                // metadata: each segment's blocks are anchored to its own
+                // local `avg_field_length`, and concatenating them across
+                // segments would require re-indexing. Scorers fall back
+                // to the term-level `max_score_factor`.
+                block_max: Vec::new(),
             };
 
             let term_info = TermInfo {
@@ -1428,6 +1435,12 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
                 doc_frequency: total_doc_freq,
                 total_frequency: total_term_freq,
                 max_score_factor,
+                // Aggregated cross-segment view does not carry per-block
+                // metadata: each segment's blocks are anchored to its own
+                // local `avg_field_length`, and concatenating them across
+                // segments would require re-indexing. Scorers fall back
+                // to the term-level `max_score_factor`.
+                block_max: Vec::new(),
             };
             self.cache_manager.cache_term_info(cache_key, term_info);
 

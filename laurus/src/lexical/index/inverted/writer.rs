@@ -740,29 +740,40 @@ impl InvertedIndexWriter {
                 // the first `:` to recover the field name. Terms that
                 // somehow lack a field prefix get a `0.0` factor and
                 // the BM25 scorer will fall back to the loose bound.
-                let max_score_factor = match term.split_once(':') {
+                let (max_score_factor, block_max) = match term.split_once(':') {
                     Some((field_name, _)) => {
                         let avg_len = field_avg_lengths
                             .get(field_name)
                             .copied()
                             .unwrap_or(0.0_f32);
-                        Self::compute_term_max_score_factor(
+                        let term_factor = Self::compute_term_max_score_factor(
                             posting_list,
                             field_name,
                             avg_len,
                             &field_lengths_by_doc,
-                        )
+                        );
+                        // Compute per-block max-impact metadata for
+                        // Block-Max-WAND (#403 PR-C). A term with no
+                        // postings naturally produces no blocks.
+                        let blocks = Self::compute_term_block_max(
+                            posting_list,
+                            field_name,
+                            avg_len,
+                            &field_lengths_by_doc,
+                        );
+                        (term_factor, blocks)
                     }
-                    None => 0.0,
+                    None => (0.0_f32, Vec::new()),
                 };
 
                 // Add to term dictionary
-                let term_info = TermInfo::with_max_score_factor(
+                let term_info = TermInfo::with_block_max(
                     start_offset,
                     length,
                     posting_list.doc_frequency,
                     posting_list.total_frequency,
                     max_score_factor,
+                    block_max,
                 );
                 term_dict_builder.add_term(term.clone(), term_info);
             }
@@ -851,6 +862,68 @@ impl InvertedIndexWriter {
             }
         }
         max_factor
+    }
+
+    /// Compute the per-block max-impact metadata used by Block-Max-WAND
+    /// (#403 PR-C). Walks the posting list in
+    /// [`BLOCK_SIZE`](crate::lexical::index::structures::dictionary::BLOCK_SIZE)-wide
+    /// chunks and records `(last_doc_id, max_factor)` for each block.
+    ///
+    /// `max_factor` is computed with the same formula as
+    /// [`Self::compute_term_max_score_factor`] but restricted to the
+    /// block's postings; the per-term factor is the max over all per-
+    /// block factors.
+    fn compute_term_block_max(
+        posting_list: &crate::lexical::index::inverted::core::posting::PostingList,
+        field_name: &str,
+        avg_field_length: f32,
+        field_lengths_by_doc: &AHashMap<u64, &AHashMap<String, u32>>,
+    ) -> Vec<crate::lexical::index::structures::dictionary::BlockMax> {
+        use crate::lexical::index::structures::dictionary::{BLOCK_SIZE, BlockMax};
+
+        const K1: f32 = 1.2;
+        const B: f32 = 0.75;
+
+        if posting_list.postings.is_empty() {
+            return Vec::new();
+        }
+
+        let mut blocks = Vec::with_capacity(posting_list.postings.len().div_ceil(BLOCK_SIZE));
+        for chunk in posting_list.postings.chunks(BLOCK_SIZE) {
+            let mut block_max: f32 = 0.0;
+            for posting in chunk {
+                let tf = posting.frequency as f32;
+                if tf == 0.0 {
+                    continue;
+                }
+                let field_len = field_lengths_by_doc
+                    .get(&posting.doc_id)
+                    .and_then(|fls| fls.get(field_name))
+                    .copied()
+                    .unwrap_or(0) as f32;
+                let len_ratio = if avg_field_length > 0.0 {
+                    field_len / avg_field_length
+                } else {
+                    1.0
+                };
+                let denom = tf + K1 * (1.0 - B + B * len_ratio);
+                if denom == 0.0 {
+                    continue;
+                }
+                let factor = (tf * (K1 + 1.0)) / denom;
+                if factor > block_max {
+                    block_max = factor;
+                }
+            }
+            // `chunks` always yields at least one element (we early-
+            // returned on empty above), so unwrap is safe.
+            let last_doc_id = chunk.last().unwrap().doc_id;
+            blocks.push(BlockMax {
+                last_doc_id,
+                max_factor: block_max,
+            });
+        }
+        blocks
     }
 
     /// Write stored documents to storage with type information preserved.

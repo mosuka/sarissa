@@ -95,17 +95,6 @@ impl InvertedIndexSearcher {
         // Create a scorer for the query
         let scorer = query.scorer(self.reader.as_ref())?;
 
-        // Cache the query-wide score upper bound for the global
-        // MaxScore early-termination check. Constant for the lifetime
-        // of the search; combined with the collector's
-        // `min_competitive()` it lets the loop break the moment no
-        // remaining doc can possibly enter the top-K (#403 PR-B1).
-        // Today this rarely fires under typical BM25 distributions
-        // because `Scorer::max_score()` returns a loose `boost · idf
-        // · (k1 + 1)` upper bound; a tightened per-block bound lands
-        // in PR-B2 with the index-format change.
-        let max_score = scorer.max_score();
-
         // Iterate through matching documents
         while !matcher.is_exhausted() {
             let doc_id = matcher.doc_id();
@@ -139,12 +128,16 @@ impl InvertedIndexSearcher {
             // Collect the result
             collector.collect(doc_id, score)?;
 
-            // Global MaxScore early-break (#403 PR-B1). After every
-            // collect the collector's `min_competitive()` may have
-            // tightened — once it reaches `max_score` the upper bound
-            // on any remaining doc's score is no longer competitive
-            // and the walk is provably complete.
-            if max_score <= collector.min_competitive() {
+            // Block-Max early-break (#403 PR-C). After every collect
+            // the collector's `min_competitive()` may have tightened;
+            // ask the scorer for the **per-block** upper bound at the
+            // matcher's current position rather than the looser term-
+            // level `max_score()` we used in PR-B1. As soon as the
+            // block-level bound is no longer competitive, the rest of
+            // this block (and, since `block_max_score_at` returns
+            // `0.0` past the last block, the rest of the posting list)
+            // cannot enter the top-K and the walk is provably done.
+            if scorer.block_max_score_at(doc_id) <= collector.min_competitive() {
                 break;
             }
 

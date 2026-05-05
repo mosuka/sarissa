@@ -4,6 +4,7 @@ use crate::error::Result;
 use crate::lexical::core::document::Document;
 use crate::lexical::core::field::FieldValue;
 use crate::lexical::index::structures::bkd_tree::BKDTree;
+use crate::lexical::index::structures::dictionary::BlockMax;
 use std::sync::Arc;
 
 /// Information about a term in the index.
@@ -41,6 +42,12 @@ pub struct ReaderTermInfo {
     /// cross-segment views): scorers fall back to the loose
     /// `k1 + 1` synthetic bound in that case.
     pub max_score_factor: f32,
+
+    /// Per-block (`BLOCK_SIZE = 128`-wide) max-impact metadata used by
+    /// Block-Max-WAND (#403 PR-C). Empty if not available (legacy v2
+    /// dictionaries or aggregated cross-segment views) — scorers
+    /// then fall back to the term-level [`Self::max_score_factor`].
+    pub block_max: Vec<BlockMax>,
 }
 
 /// Statistics about a field in the index.
