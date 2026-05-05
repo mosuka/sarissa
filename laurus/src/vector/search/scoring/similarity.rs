@@ -6,6 +6,22 @@ use crate::error::Result;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
 
+/// Pre-computed query side of a weighted cosine similarity, allowing
+/// per-candidate calls to skip the redundant `weighted_a` and
+/// `||weighted_a||²` work (#414).
+///
+/// Build it once per search via
+/// [`AdvancedSimilarityMetric::prepare_weighted_cosine`] and call
+/// [`AdvancedSimilarityMetric::weighted_cosine_with_prepared`] for
+/// each candidate vector.
+#[derive(Debug, Clone)]
+pub struct PreparedWeightedCosine {
+    /// `query[i] * weights[i]` precomputed once per search.
+    pub weighted_query: Vec<f32>,
+    /// `Σ weighted_query[i]²`, the squared norm of `weighted_query`.
+    pub norm_sq: f32,
+}
+
 /// Advanced similarity metrics beyond basic distance functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AdvancedSimilarityMetric {
@@ -108,6 +124,104 @@ impl AdvancedSimilarityMetric {
             Ok(0.0)
         } else {
             Ok(dot_product / (norm_a.sqrt() * norm_b.sqrt()))
+        }
+    }
+
+    /// Pre-compute the query side of a weighted cosine similarity (#414).
+    ///
+    /// Returns `weighted_query[i] = query[i] * weights[i]` and its
+    /// squared norm. Pair with
+    /// [`Self::weighted_cosine_with_prepared`] to avoid the per-
+    /// candidate `weighted_a` and `||weighted_a||²` recomputation that
+    /// [`Self::weighted_cosine_similarity`] does on every call.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The query vector.
+    /// * `weights` - Optional per-dimension weights; `None` falls back
+    ///   to a uniform `1.0` vector matching the existing
+    ///   [`Self::weighted_cosine_similarity`] semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `weights` is `Some` but its length does
+    /// not match `query.len()`.
+    pub fn prepare_weighted_cosine(
+        query: &[f32],
+        weights: Option<&[f32]>,
+    ) -> Result<PreparedWeightedCosine> {
+        if let Some(w) = weights
+            && w.len() != query.len()
+        {
+            return Err(crate::error::LaurusError::InvalidOperation(
+                "Weight vector dimension mismatch".to_string(),
+            ));
+        }
+
+        let mut weighted_query = Vec::with_capacity(query.len());
+        let mut norm_sq = 0.0_f32;
+        for i in 0..query.len() {
+            let w = weights.map_or(1.0, |ws| ws[i]);
+            let wq = query[i] * w;
+            weighted_query.push(wq);
+            norm_sq += wq * wq;
+        }
+        Ok(PreparedWeightedCosine {
+            weighted_query,
+            norm_sq,
+        })
+    }
+
+    /// Weighted cosine similarity that consumes the prepared query
+    /// side from [`Self::prepare_weighted_cosine`] and the same
+    /// per-dimension `weights` vector (#414). Only `b`-side
+    /// per-dimension weighted values, the dot product, and the
+    /// candidate norm are computed per call.
+    ///
+    /// # Arguments
+    ///
+    /// * `prepared` - Output of [`Self::prepare_weighted_cosine`].
+    /// * `b` - Candidate vector.
+    /// * `weights` - The same `weights` slice that produced
+    ///   `prepared`. The function is unchecked against accidental
+    ///   weight-mismatch — callers are expected to reuse the value
+    ///   they passed to `prepare_weighted_cosine`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `b.len() != prepared.weighted_query.len()`
+    /// or `weights.is_some()` and `weights.unwrap().len() != b.len()`.
+    pub fn weighted_cosine_with_prepared(
+        prepared: &PreparedWeightedCosine,
+        b: &[f32],
+        weights: Option<&[f32]>,
+    ) -> Result<f32> {
+        if b.len() != prepared.weighted_query.len() {
+            return Err(crate::error::LaurusError::InvalidOperation(
+                "Vector dimensions must match".to_string(),
+            ));
+        }
+        if let Some(w) = weights
+            && w.len() != b.len()
+        {
+            return Err(crate::error::LaurusError::InvalidOperation(
+                "Weight vector dimension mismatch".to_string(),
+            ));
+        }
+
+        let mut dot_product = 0.0_f32;
+        let mut norm_b = 0.0_f32;
+        for i in 0..b.len() {
+            let w = weights.map_or(1.0, |ws| ws[i]);
+            let weighted_b = b[i] * w;
+            dot_product += prepared.weighted_query[i] * weighted_b;
+            norm_b += weighted_b * weighted_b;
+        }
+
+        if prepared.norm_sq == 0.0 || norm_b == 0.0 {
+            Ok(0.0)
+        } else {
+            Ok(dot_product / (prepared.norm_sq.sqrt() * norm_b.sqrt()))
         }
     }
 
@@ -331,5 +445,34 @@ impl SimilarityAggregator {
 impl Default for SimilarityAggregator {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `weighted_cosine_with_prepared` must produce the same value as
+    /// the in-place `weighted_cosine_similarity` (#414). Tested with
+    /// both an explicit weight vector and the implicit uniform-1.0
+    /// weights path.
+    #[test]
+    fn weighted_cosine_prepared_matches_inline() {
+        let metric = AdvancedSimilarityMetric::WeightedCosine;
+        let a: Vec<f32> = (0..256).map(|i| (i as f32) * 0.013 + 0.7).collect();
+        let b: Vec<f32> = (0..256).map(|i| (i as f32) * 0.021 - 0.4).collect();
+        let weights: Vec<f32> = (0..256).map(|i| 1.0 + (i as f32) * 0.002).collect();
+
+        for w in [None, Some(weights.as_slice())] {
+            let direct = metric.weighted_cosine_similarity(&a, &b, w).unwrap();
+            let prepared = AdvancedSimilarityMetric::prepare_weighted_cosine(&a, w).unwrap();
+            let via_prep =
+                AdvancedSimilarityMetric::weighted_cosine_with_prepared(&prepared, &b, w).unwrap();
+            assert!(
+                (direct - via_prep).abs() < 1e-5,
+                "weights={:?}: direct={direct}, prepared={via_prep}",
+                w.map(|s| s.len())
+            );
+        }
     }
 }

@@ -125,14 +125,17 @@ impl VectorIndexSearcher for IvfSearcher {
         let vector_ids =
             self.probe_clusters(&request.query, n_probe, request.field_name.as_deref())?;
 
-        // Calculate distances for vectors in the probed clusters
+        // Calculate distances for vectors in the probed clusters.
+        // Cache the query-side norm once per search (#414); for Cosine /
+        // Angular this skips the per-candidate `||query||²` accumulation.
         let metric = self.index_reader.distance_metric();
+        let prepared_query = metric.prepare_query(&request.query.data);
         let mut candidates: Vec<(u64, String, f32, f32, Vector)> =
             Vec::with_capacity(vector_ids.len());
 
         for (doc_id, field_name) in &vector_ids {
             if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name) {
-                let distance = metric.distance(&request.query.data, &vector.data)?;
+                let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
                 let similarity = metric.distance_to_similarity(distance);
                 candidates.push((*doc_id, field_name.clone(), similarity, distance, vector));
             }

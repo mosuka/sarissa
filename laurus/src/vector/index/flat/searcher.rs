@@ -28,6 +28,11 @@ impl VectorIndexSearcher for FlatVectorSearcher {
         let start = Timer::now();
         let mut results = VectorIndexQueryResults::new();
         let metric = self.index_reader.distance_metric();
+        // Cache the query-side norm once per search (#414): for Cosine /
+        // Angular this skips one `||query||²` accumulation per
+        // candidate; for the other metrics the prepared variant
+        // forwards to `distance` and the cached value is unused.
+        let prepared_query = metric.prepare_query(&request.query.data);
 
         if let Some(ref field_name) = request.field_name {
             // Field-filtered path: fetch the per-field doc-id slice from the
@@ -42,7 +47,7 @@ impl VectorIndexSearcher for FlatVectorSearcher {
             let mut candidates: Vec<(u64, f32, f32, Vector)> = Vec::with_capacity(ids.len());
             for &doc_id in ids.iter() {
                 if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, field_name) {
-                    let distance = metric.distance(&request.query.data, &vector.data)?;
+                    let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
                     let similarity = metric.distance_to_similarity(distance);
                     candidates.push((doc_id, similarity, distance, vector));
                 }
@@ -84,7 +89,7 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                 Vec::with_capacity(candidates_list.len());
             for (doc_id, field_name) in candidates_list {
                 if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, &field_name) {
-                    let distance = metric.distance(&request.query.data, &vector.data)?;
+                    let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
                     let similarity = metric.distance_to_similarity(distance);
                     candidates.push((doc_id, field_name, similarity, distance, vector));
                 }
