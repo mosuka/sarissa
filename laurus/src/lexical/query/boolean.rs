@@ -1,5 +1,7 @@
 //! Boolean query implementation for combining multiple queries.
 
+use std::sync::Arc;
+
 use crate::error::Result;
 use crate::lexical::query::Query;
 use crate::lexical::query::matcher::{
@@ -24,27 +26,28 @@ pub enum Occur {
 }
 
 /// A clause in a boolean query.
-#[derive(Debug)]
+///
+/// `query` is stored as `Arc<dyn Query>` so cloning a clause — and by
+/// extension cloning a [`BooleanQuery`] — is a refcount bump rather
+/// than a deep `clone_box()` of the entire subtree (#413). External
+/// constructors continue to accept `Box<dyn Query>` for backwards
+/// compatibility; the box is converted into an `Arc` once at clause
+/// construction.
+#[derive(Debug, Clone)]
 pub struct BooleanClause {
     /// The query for this clause.
-    pub query: Box<dyn Query>,
+    pub query: Arc<dyn Query>,
     /// The occurrence requirement.
     pub occur: Occur,
-}
-
-impl Clone for BooleanClause {
-    fn clone(&self) -> Self {
-        BooleanClause {
-            query: self.query.clone_box(),
-            occur: self.occur,
-        }
-    }
 }
 
 impl BooleanClause {
     /// Create a new boolean clause.
     pub fn new(query: Box<dyn Query>, occur: Occur) -> Self {
-        BooleanClause { query, occur }
+        BooleanClause {
+            query: Arc::<dyn Query>::from(query),
+            occur,
+        }
     }
 
     /// Create a MUST clause.
@@ -155,15 +158,12 @@ impl Default for BooleanQuery {
 
 impl Clone for BooleanQuery {
     fn clone(&self) -> Self {
+        // Cloning is now a refcount bump per clause: `BooleanClause`
+        // derives `Clone` and `clause.query` is `Arc<dyn Query>` so
+        // there is no deep `clone_box()` walk through the subtree
+        // anymore (#413).
         BooleanQuery {
-            clauses: self
-                .clauses
-                .iter()
-                .map(|c| BooleanClause {
-                    query: c.query.clone_box(),
-                    occur: c.occur,
-                })
-                .collect(),
+            clauses: self.clauses.clone(),
             boost: self.boost,
             minimum_should_match: self.minimum_should_match,
         }
@@ -442,9 +442,21 @@ impl Query for BooleanQuery {
             self.set_boost(self.boost() * b);
         }
 
-        // Recursively apply to all clauses
+        // Recursively apply to all clauses. Sub-queries are stored as
+        // `Arc<dyn Query>` (#413) so the tree is shared by default;
+        // when a sub-query has other holders we deep-copy it via
+        // `clone_box`, mutate the owned copy, and swap the `Arc`.
+        // `apply_field_boosts` is invoked at request preparation
+        // time, not in the per-doc hot path, so the conditional
+        // clone is acceptable.
         for clause in &mut self.clauses {
-            clause.query.apply_field_boosts(boosts);
+            if let Some(q) = Arc::get_mut(&mut clause.query) {
+                q.apply_field_boosts(boosts);
+            } else {
+                let mut owned = clause.query.clone_box();
+                owned.apply_field_boosts(boosts);
+                clause.query = Arc::<dyn Query>::from(owned);
+            }
         }
     }
 }
