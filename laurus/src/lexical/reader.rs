@@ -119,6 +119,49 @@ pub trait LexicalIndexReader: Send + Sync + std::fmt::Debug {
     /// `Ok(None)` if the document ID is not found or has no stored fields.
     fn document(&self, doc_id: u64) -> Result<Option<Document>>;
 
+    /// Fetch a **subset** of a document's stored fields by name (#410).
+    ///
+    /// For wide schemas where a search request only retrieves a few of
+    /// many stored fields, the default `document()` path clones the
+    /// entire `HashMap<String, DataValue>` (including bytes / vector
+    /// payloads of every other field) before the result-processor
+    /// drops the unrequested ones. This method returns only the
+    /// requested fields, so callers avoid that wasted clone.
+    ///
+    /// The default implementation forwards to `document()` and filters
+    /// — concrete readers should override it with a path that clones
+    /// each requested field individually out of the on-disk / cached
+    /// document map.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` - Document id to fetch.
+    /// * `field_names` - Field names to retrieve.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(None)` if the document does not exist; `Ok(Some(map))`
+    /// where `map` contains only the requested fields that actually
+    /// exist on the document.
+    fn document_fields(
+        &self,
+        doc_id: u64,
+        field_names: &[&str],
+    ) -> Result<Option<std::collections::HashMap<String, crate::data::DataValue>>> {
+        match self.document(doc_id)? {
+            Some(doc) => {
+                let mut out = std::collections::HashMap::with_capacity(field_names.len());
+                for name in field_names {
+                    if let Some(value) = doc.fields.get(*name) {
+                        out.insert((*name).to_string(), value.clone());
+                    }
+                }
+                Ok(Some(out))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Get term information for a specific field and term.
     ///
     /// Returns a [`ReaderTermInfo`] containing the document frequency, total

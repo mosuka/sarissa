@@ -793,6 +793,43 @@ impl SegmentReader {
         }
     }
 
+    /// Fetch a subset of a document's stored fields without cloning
+    /// the rest of the [`Document`] map (#410).
+    ///
+    /// Wide-schema search requests typically retrieve only a handful
+    /// of stored fields; the default
+    /// [`document()`](Self::document) path clones every field's
+    /// `DataValue` — including byte arrays / vector payloads — before
+    /// the caller filters them. This method clones only the requested
+    /// fields out of the cached in-memory map.
+    pub fn document_fields(
+        &self,
+        doc_id: u64,
+        field_names: &[&str],
+    ) -> Result<Option<std::collections::HashMap<String, crate::data::DataValue>>> {
+        if !self.loaded.load(Ordering::Acquire) {
+            self.load_stored_documents()?;
+        }
+
+        if self.is_deleted(doc_id)? {
+            return Ok(None);
+        }
+
+        let docs = self.stored_documents.read().unwrap();
+        if let Some(ref documents) = *docs
+            && let Some(doc) = documents.get(&doc_id)
+        {
+            let mut out = std::collections::HashMap::with_capacity(field_names.len());
+            for &name in field_names {
+                if let Some(value) = doc.fields.get(name) {
+                    out.insert(name.to_string(), value.clone());
+                }
+            }
+            return Ok(Some(out));
+        }
+        Ok(None)
+    }
+
     /// Get term information for a field and term.
     pub fn term_info(&self, field: &str, term: &str) -> Result<Option<TermInfo>> {
         // Lazy load term dictionary if not loaded
@@ -1351,6 +1388,27 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
             let reader = segment_reader.read().unwrap();
             if let Ok(Some(doc)) = reader.document(doc_id) {
                 return Ok(Some(doc));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn document_fields(
+        &self,
+        doc_id: u64,
+        field_names: &[&str],
+    ) -> Result<Option<std::collections::HashMap<String, crate::data::DataValue>>> {
+        self.check_closed()?;
+
+        // Search across all segments — first hit wins, matching
+        // `document()`'s behaviour. The per-segment override clones
+        // only the requested fields, so wide schemas avoid the
+        // whole-document clone (#410).
+        for segment_reader in &self.segment_readers {
+            let reader = segment_reader.read().unwrap();
+            if let Ok(Some(fields)) = reader.document_fields(doc_id, field_names) {
+                return Ok(Some(fields));
             }
         }
 

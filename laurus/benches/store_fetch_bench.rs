@@ -123,6 +123,28 @@ impl LexicalIndexReader for MockStoreReader {
         Ok(self.documents.get(doc_id as usize).cloned())
     }
 
+    /// Override the default trait impl so the bench measures the
+    /// real-reader behaviour: only the requested fields are cloned out
+    /// of the cached `Document`, not the whole map (#410). Without
+    /// this override the default falls through to `document()` and
+    /// post-filters, defeating the comparison.
+    fn document_fields(
+        &self,
+        doc_id: u64,
+        field_names: &[&str],
+    ) -> LaurusResult<Option<HashMap<String, DataValue>>> {
+        if let Some(doc) = self.documents.get(doc_id as usize) {
+            let mut out = HashMap::with_capacity(field_names.len());
+            for &name in field_names {
+                if let Some(value) = doc.fields.get(name) {
+                    out.insert(name.to_string(), value.clone());
+                }
+            }
+            return Ok(Some(out));
+        }
+        Ok(None)
+    }
+
     fn term_info(&self, _field: &str, _term: &str) -> LaurusResult<Option<ReaderTermInfo>> {
         Ok(None)
     }
@@ -171,6 +193,24 @@ fn fetch_and_filter(
             if selected.contains(name.as_str()) {
                 out.insert(name.clone(), data_value_to_string(value));
             }
+        }
+    }
+    out
+}
+
+/// `fetch_and_filter`'s subset-aware counterpart (#410). Calls
+/// [`LexicalIndexReader::document_fields`] so the reader clones only
+/// the requested field values out of the cached `Document`. Returns
+/// the same shape as `fetch_and_filter` for direct comparison.
+fn fetch_subset(
+    reader: &dyn LexicalIndexReader,
+    doc_id: u64,
+    selected: &[&str],
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if let Ok(Some(fields)) = reader.document_fields(doc_id, selected) {
+        for (name, value) in fields {
+            out.insert(name, data_value_to_string(&value));
         }
     }
     out
@@ -339,9 +379,74 @@ fn bench_field_size_variance(c: &mut Criterion) {
     group.finish();
 }
 
+/// Side-by-side comparison of `fetch_and_filter` (full document clone +
+/// post-filter) and `fetch_subset` (per-field clone via
+/// [`LexicalIndexReader::document_fields`]) at the wide-schema +
+/// narrow-selection workload that #410 targets. Two bench cases per
+/// `n_selected` value so the criterion id makes the comparison
+/// obvious from the output.
+fn bench_wide_narrow_subset(c: &mut Criterion) {
+    let mut group = c.benchmark_group("store_fetch/wide_narrow_subset");
+
+    const N_FIELDS: usize = 50;
+    const VALUE_BYTES: usize = 50;
+
+    let reader = MockStoreReader::new(build_documents(N_DOCS, N_FIELDS, VALUE_BYTES));
+    let all_field_names: Vec<String> = (0..N_FIELDS).map(|f| format!("field_{f}")).collect();
+
+    for &n_selected in &[1usize, 5, 50] {
+        let selected_owned: Vec<&str> = all_field_names
+            .iter()
+            .take(n_selected)
+            .map(String::as_str)
+            .collect();
+        let selected_set: HashSet<&str> = selected_owned.iter().copied().collect();
+
+        // Full-doc-clone + filter (pre-#410 path).
+        group.throughput(Throughput::Elements(TOP_K));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("full_clone/selected_{n_selected}")),
+            &(),
+            |b, _| {
+                b.iter(|| {
+                    for doc_id in 0..TOP_K {
+                        let result = fetch_and_filter(
+                            black_box(&reader),
+                            black_box(doc_id),
+                            black_box(&selected_set),
+                        );
+                        black_box(result);
+                    }
+                });
+            },
+        );
+
+        // Per-field clone via `document_fields` (#410 path).
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("subset/selected_{n_selected}")),
+            &(),
+            |b, _| {
+                b.iter(|| {
+                    for doc_id in 0..TOP_K {
+                        let result = fetch_subset(
+                            black_box(&reader),
+                            black_box(doc_id),
+                            black_box(&selected_owned),
+                        );
+                        black_box(result);
+                    }
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_wide_narrow,
+    bench_wide_narrow_subset,
     bench_narrow_baseline,
     bench_field_size_variance,
 );
