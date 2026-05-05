@@ -1419,9 +1419,8 @@ impl crate::lexical::reader::LexicalIndexReader for InvertedIndexReader {
         let mut total_term_freq = 0;
         let mut max_score_factor: f32 = 0.0;
         let mut matched_count = 0_usize;
-        let mut combined_block_max: Vec<
-            crate::lexical::index::structures::dictionary::BlockMax,
-        > = Vec::new();
+        let mut combined_block_max: Vec<crate::lexical::index::structures::dictionary::BlockMax> =
+            Vec::new();
 
         for segment_reader in &self.segment_readers {
             let reader = segment_reader.read().unwrap();
