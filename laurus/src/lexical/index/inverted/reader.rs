@@ -1734,10 +1734,23 @@ impl TermDictionaryAccess for InvertedIndexReader {
 /// This iterator maintains a priority queue of active iterators, always
 /// processing the one with the smallest document ID first. This ensures
 /// that document IDs are returned in ascending order across all segments.
+///
+/// Two storage strategies are chosen at construction time (#412):
+///
+/// - **Linear scan** for small segment counts (≤ [`LINEAR_THRESHOLD`]).
+///   Sub-iterators sit in a `Vec` and the current minimum is found
+///   with an `O(n)` scan at each `advance`. For typical multi-segment
+///   reads (`n` between 2 and 8) this beats the heap by 1.5–2× — the
+///   constant factor of a heap pop / push (vtable indirection,
+///   reordering writes) outweighs the algorithmic `O(log n)` benefit
+///   when `n` is small.
+/// - **Heap** for larger segment counts (`> LINEAR_THRESHOLD`). The
+///   pre-#412 implementation, kept verbatim for big merges where the
+///   heap's algorithmic edge dominates.
 #[derive(Debug)]
 pub struct MergedPostingIterator {
-    /// Min-heap of iterators, ordered by their current document ID.
-    heap: std::collections::BinaryHeap<IteratorWrapper>,
+    /// Storage strategy chosen at construction time based on segment count.
+    inner: MergeImpl,
 
     /// The current document ID of the merged stream.
     current_doc: u64,
@@ -1746,6 +1759,27 @@ pub struct MergedPostingIterator {
     /// Matches the same protocol as InvertedIndexPostingIterator:
     /// first next() positions at the first document without advancing.
     started: bool,
+}
+
+/// Segment-count threshold above which the merger switches from the
+/// linear-scan path to the heap path (#412). Picked at 8 to match
+/// Lucene's `MultiBits` heuristic — empirically the crossover sits
+/// between 4 and 8 on the `posting_merge_bench` scenarios.
+const LINEAR_THRESHOLD: usize = 8;
+
+/// Storage strategy used by [`MergedPostingIterator`] (#412).
+#[derive(Debug)]
+enum MergeImpl {
+    /// Small-`n` path: linear scan over a `Vec<IteratorWrapper>`.
+    /// `min_idx` is the index of the wrapper currently at the
+    /// minimum doc id; `advance` advances `wrappers[min_idx]` and
+    /// re-finds the minimum.
+    Linear {
+        wrappers: Vec<IteratorWrapper>,
+        min_idx: usize,
+    },
+    /// Large-`n` path: standard min-heap.
+    Heap(std::collections::BinaryHeap<IteratorWrapper>),
 }
 
 /// Wrapper for PostingIterator to make it orderable for BinaryHeap.
@@ -1776,6 +1810,24 @@ impl Ord for IteratorWrapper {
     }
 }
 
+/// Linear scan for the index of the minimum-`current_doc` wrapper.
+///
+/// Caller must ensure `wrappers` is non-empty; the search starts at
+/// index 0 and updates the running minimum on every step. Used by
+/// the `Linear` storage strategy of `MergedPostingIterator`.
+#[inline]
+fn find_min_idx(wrappers: &[IteratorWrapper]) -> usize {
+    let mut min_idx = 0;
+    let mut min_doc = wrappers[0].current_doc;
+    for (i, w) in wrappers.iter().enumerate().skip(1) {
+        if w.current_doc < min_doc {
+            min_doc = w.current_doc;
+            min_idx = i;
+        }
+    }
+    min_idx
+}
+
 impl MergedPostingIterator {
     /// Create a new merged iterator from a list of iterators.
     ///
@@ -1784,50 +1836,114 @@ impl MergedPostingIterator {
     /// once before reading `doc_id()`, matching the `InvertedIndexPostingIterator`
     /// protocol (via the `started` flag).
     pub fn new(iterators: Vec<Box<dyn crate::lexical::reader::PostingIterator>>) -> Result<Self> {
-        let mut heap = std::collections::BinaryHeap::new();
+        let mut wrappers = Vec::with_capacity(iterators.len());
 
         for mut iter in iterators {
-            // Initialize each iterator to the first document
             if iter.next()? {
                 let doc_id = iter.doc_id();
-                heap.push(IteratorWrapper {
+                wrappers.push(IteratorWrapper {
                     iter,
                     current_doc: doc_id,
                 });
             }
         }
 
-        let current_doc = if let Some(wrapper) = heap.peek() {
-            wrapper.current_doc
+        let inner = if wrappers.len() <= LINEAR_THRESHOLD {
+            let min_idx = if wrappers.is_empty() {
+                0
+            } else {
+                find_min_idx(&wrappers)
+            };
+            MergeImpl::Linear { wrappers, min_idx }
         } else {
-            u64::MAX
+            let mut heap = std::collections::BinaryHeap::with_capacity(wrappers.len());
+            for w in wrappers {
+                heap.push(w);
+            }
+            MergeImpl::Heap(heap)
+        };
+
+        let current_doc = match &inner {
+            MergeImpl::Linear { wrappers, min_idx } => {
+                if wrappers.is_empty() {
+                    u64::MAX
+                } else {
+                    wrappers[*min_idx].current_doc
+                }
+            }
+            MergeImpl::Heap(heap) => heap.peek().map_or(u64::MAX, |w| w.current_doc),
         };
 
         Ok(MergedPostingIterator {
-            heap,
+            inner,
             current_doc,
             started: false,
         })
     }
 
-    /// Internal advance: pop the current top, advance it, push back.
-    /// Used by both `next()` (after the started check) and `skip_to()`.
+    /// Internal advance: move the current minimum's underlying
+    /// iterator forward, then re-locate the minimum across the
+    /// remaining iterators. Used by both `next()` (after the started
+    /// check) and `skip_to()`.
     fn advance(&mut self) -> Result<bool> {
-        if let Some(mut wrapper) = self.heap.pop() {
-            if wrapper.iter.next()? {
-                wrapper.current_doc = wrapper.iter.doc_id();
-                self.heap.push(wrapper);
+        match &mut self.inner {
+            MergeImpl::Linear { wrappers, min_idx } => {
+                if wrappers.is_empty() {
+                    self.current_doc = u64::MAX;
+                    return Ok(false);
+                }
+                let idx = *min_idx;
+                if wrappers[idx].iter.next()? {
+                    wrappers[idx].current_doc = wrappers[idx].iter.doc_id();
+                } else {
+                    // Iterator exhausted — drop it from the active set
+                    // via swap_remove (O(1)) since order is restored
+                    // by the next `find_min_idx` scan anyway.
+                    wrappers.swap_remove(idx);
+                }
+                if wrappers.is_empty() {
+                    self.current_doc = u64::MAX;
+                    Ok(false)
+                } else {
+                    *min_idx = find_min_idx(wrappers);
+                    self.current_doc = wrappers[*min_idx].current_doc;
+                    Ok(true)
+                }
             }
-            if let Some(new_top) = self.heap.peek() {
-                self.current_doc = new_top.current_doc;
-                Ok(true)
-            } else {
-                self.current_doc = u64::MAX;
-                Ok(false)
+            MergeImpl::Heap(heap) => {
+                if let Some(mut wrapper) = heap.pop() {
+                    if wrapper.iter.next()? {
+                        wrapper.current_doc = wrapper.iter.doc_id();
+                        heap.push(wrapper);
+                    }
+                    if let Some(new_top) = heap.peek() {
+                        self.current_doc = new_top.current_doc;
+                        Ok(true)
+                    } else {
+                        self.current_doc = u64::MAX;
+                        Ok(false)
+                    }
+                } else {
+                    self.current_doc = u64::MAX;
+                    Ok(false)
+                }
             }
-        } else {
-            self.current_doc = u64::MAX;
-            Ok(false)
+        }
+    }
+
+    /// Reference to the wrapper currently at the merged stream's
+    /// minimum, used by `term_freq()` and `positions()` to delegate
+    /// to the active sub-iterator.
+    fn current_wrapper(&self) -> Option<&IteratorWrapper> {
+        match &self.inner {
+            MergeImpl::Linear { wrappers, min_idx } => {
+                if wrappers.is_empty() {
+                    None
+                } else {
+                    Some(&wrappers[*min_idx])
+                }
+            }
+            MergeImpl::Heap(heap) => heap.peek(),
         }
     }
 }
@@ -1838,28 +1954,24 @@ impl crate::lexical::reader::PostingIterator for MergedPostingIterator {
     }
 
     fn term_freq(&self) -> u64 {
-        // Return term freq of the current best iterator
-        if let Some(wrapper) = self.heap.peek() {
-            wrapper.iter.term_freq()
-        } else {
-            0
-        }
+        self.current_wrapper().map_or(0, |w| w.iter.term_freq())
     }
 
     fn positions(&self) -> Result<Vec<u64>> {
-        if let Some(wrapper) = self.heap.peek() {
-            wrapper.iter.positions()
-        } else {
-            Ok(Vec::new())
-        }
+        self.current_wrapper()
+            .map_or(Ok(Vec::new()), |w| w.iter.positions())
     }
 
     fn next(&mut self) -> Result<bool> {
         if !self.started {
             // First call: just mark as started without advancing.
-            // The heap is already positioned at the first document from new().
+            // The merger is already positioned at the first document from new().
             self.started = true;
-            return Ok(!self.heap.is_empty());
+            let exhausted = match &self.inner {
+                MergeImpl::Linear { wrappers, .. } => wrappers.is_empty(),
+                MergeImpl::Heap(heap) => heap.is_empty(),
+            };
+            return Ok(!exhausted);
         }
 
         self.advance()
@@ -1883,7 +1995,10 @@ impl crate::lexical::reader::PostingIterator for MergedPostingIterator {
     }
 
     fn cost(&self) -> u64 {
-        self.heap.iter().map(|w| w.iter.cost()).sum()
+        match &self.inner {
+            MergeImpl::Linear { wrappers, .. } => wrappers.iter().map(|w| w.iter.cost()).sum(),
+            MergeImpl::Heap(heap) => heap.iter().map(|w| w.iter.cost()).sum(),
+        }
     }
 }
 
