@@ -381,12 +381,31 @@ impl ResultProcessor {
     fn retrieve_document_fields(&self, doc_id: u64) -> Result<HashMap<String, String>> {
         let mut fields = HashMap::new();
 
-        if let Some(document) = self.reader.document(doc_id)? {
-            for (field_name, data_value) in &document.fields {
-                // Check if field should be retrieved
-                if self.should_retrieve_field(field_name) {
-                    let value_str = self.field_value_to_string(data_value);
-                    fields.insert(field_name.clone(), value_str);
+        // Wildcard or empty selection still wants the whole document;
+        // narrow selections route through `document_fields` so the
+        // reader clones only the requested fields (#410).
+        let wildcard = self.config.fields_to_retrieve.iter().any(|f| f == "*");
+
+        if wildcard || self.config.fields_to_retrieve.is_empty() {
+            if let Some(document) = self.reader.document(doc_id)? {
+                for (field_name, data_value) in &document.fields {
+                    if self.should_retrieve_field(field_name) {
+                        let value_str = self.field_value_to_string(data_value);
+                        fields.insert(field_name.clone(), value_str);
+                    }
+                }
+            }
+        } else {
+            let names: Vec<&str> = self
+                .config
+                .fields_to_retrieve
+                .iter()
+                .map(String::as_str)
+                .collect();
+            if let Some(subset) = self.reader.document_fields(doc_id, &names)? {
+                for (field_name, data_value) in subset {
+                    let value_str = self.field_value_to_string(&data_value);
+                    fields.insert(field_name, value_str);
                 }
             }
         }
