@@ -13,6 +13,8 @@ use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::query::LexicalSearchResults;
+#[cfg(test)]
+use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::{LexicalSearchRequest, LexicalSearcher};
 use crate::lexical::store::config::LexicalIndexConfig;
 use crate::lexical::writer::LexicalIndexWriter;
@@ -322,6 +324,18 @@ impl LexicalStore {
     pub fn refresh(&self) -> Result<()> {
         *self.searcher_cache.write() = None;
         Ok(())
+    }
+
+    /// Borrow the underlying [`LexicalIndexReader`] (#476 Phase 1).
+    ///
+    /// Exposed for crate-internal tests that need to drive the
+    /// inverted searcher directly with a custom collector — e.g. to
+    /// bypass the per-segment fanout and exercise the legacy
+    /// matcher-driven path against the same multi-segment store.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn reader_for_tests(&self) -> Result<Arc<dyn LexicalIndexReader>> {
+        self.index.reader()
     }
 
     /// Get index statistics.
