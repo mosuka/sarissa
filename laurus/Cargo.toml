@@ -167,14 +167,6 @@ name = "synonym_bench"
 harness = false
 
 [[bench]]
-name = "bm25_scoring_bench"
-harness = false
-
-[[bench]]
-name = "cosine_similarity_bench"
-harness = false
-
-[[bench]]
 name = "posting_merge_bench"
 harness = false
 

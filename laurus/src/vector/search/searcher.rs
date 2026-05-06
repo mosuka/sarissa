@@ -88,8 +88,6 @@ pub struct VectorIndexQueryParams {
     pub include_vectors: bool,
     /// Search timeout in milliseconds.
     pub timeout_ms: Option<u64>,
-    /// Reranking configuration.
-    pub reranking: Option<crate::vector::search::scoring::ranking::RankingConfig>,
 }
 
 impl Default for VectorIndexQueryParams {
@@ -100,7 +98,6 @@ impl Default for VectorIndexQueryParams {
             include_scores: true,
             include_vectors: false,
             timeout_ms: None,
-            reranking: None,
         }
     }
 }
