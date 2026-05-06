@@ -866,6 +866,9 @@ impl Matcher for GeoMatcher {
     fn is_exhausted(&self) -> bool {
         self.current_index >= self.matches.len()
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Scorer for geographical queries.
@@ -912,6 +915,10 @@ impl Scorer for GeoScorer {
 
     fn name(&self) -> &'static str {
         "GeoScorer"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

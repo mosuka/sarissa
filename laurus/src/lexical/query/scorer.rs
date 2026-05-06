@@ -6,11 +6,104 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::lexical::index::structures::dictionary::BlockMax;
 use crate::lexical::query::Query;
-use crate::lexical::query::matcher::Matcher;
 use crate::util::simd;
 
 /// Type alias for boolean scorer clauses.
-type BooleanScorerClauses = std::cell::RefCell<Vec<(Box<dyn Scorer>, Box<dyn Matcher>)>>;
+type BooleanScorerClauses =
+    std::cell::RefCell<Vec<(LeafScorer, crate::lexical::query::matcher::LeafMatcher)>>;
+
+/// Concrete-type dispatch enum for the production scorer hot path
+/// (#466). The `BooleanScorer` and `BlockMaxOrExecutor` inner loops
+/// match on this enum so the `BM25Scorer` / `ConstantScorer` arms
+/// inline their scoring math instead of paying a per-doc vtable
+/// lookup. `Other` keeps a trait-object escape hatch for nested
+/// `BooleanScorer` and any future custom scorer.
+#[derive(Debug)]
+pub enum LeafScorer {
+    /// `BM25Scorer` — production hot-path leaf scorer. Boxed so the
+    /// enum stays narrow (16 bytes), keeping `BooleanScorer` /
+    /// `BlockMaxOrExecutor` clause vectors cache-friendly.
+    BM25(Box<BM25Scorer>),
+    /// `ConstantScorer` — filter / `MustNot` paths.
+    Constant(Box<ConstantScorer>),
+    /// Trait-object fallback for nested `BooleanScorer` and
+    /// any custom `Scorer` impl.
+    Other(Box<dyn Scorer>),
+}
+
+impl LeafScorer {
+    /// Specialise a `Box<dyn Scorer>` into a concrete enum variant
+    /// when the scorer is one of the production hot-path types.
+    /// Falls back to [`LeafScorer::Other`] otherwise — that arm is
+    /// still trait-object dispatched.
+    pub fn from_box(b: Box<dyn Scorer>) -> Self {
+        use std::any::TypeId;
+        let tid = b.as_any().type_id();
+        if tid == TypeId::of::<BM25Scorer>() {
+            // SAFETY: TypeId equality guarantees the trait object's
+            // concrete type. Convert via raw pointer cast — Box's
+            // representation is identical for a `dyn Scorer` made of
+            // a single concrete type and a `Box<BM25Scorer>`.
+            let raw: *mut dyn Scorer = Box::into_raw(b);
+            let s: Box<BM25Scorer> = unsafe { Box::from_raw(raw as *mut BM25Scorer) };
+            LeafScorer::BM25(s)
+        } else if tid == TypeId::of::<ConstantScorer>() {
+            let raw: *mut dyn Scorer = Box::into_raw(b);
+            let s: Box<ConstantScorer> = unsafe { Box::from_raw(raw as *mut ConstantScorer) };
+            LeafScorer::Constant(s)
+        } else {
+            LeafScorer::Other(b)
+        }
+    }
+
+    /// Per-doc score. Matches the [`Scorer::score`] signature.
+    /// Each arm dispatches to a concrete impl which the optimiser
+    /// can inline.
+    #[inline(always)]
+    pub fn score(&self, doc_id: u64, term_freq: f32, field_length: Option<f32>) -> f32 {
+        match self {
+            LeafScorer::BM25(s) => s.score(doc_id, term_freq, field_length),
+            LeafScorer::Constant(s) => s.score(doc_id, term_freq, field_length),
+            LeafScorer::Other(s) => s.score(doc_id, term_freq, field_length),
+        }
+    }
+
+    #[inline(always)]
+    pub fn max_score(&self) -> f32 {
+        match self {
+            LeafScorer::BM25(s) => s.max_score(),
+            LeafScorer::Constant(s) => s.max_score(),
+            LeafScorer::Other(s) => s.max_score(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn block_max_score_at(&self, doc_id: u64) -> f32 {
+        match self {
+            LeafScorer::BM25(s) => s.block_max_score_at(doc_id),
+            LeafScorer::Constant(s) => s.block_max_score_at(doc_id),
+            LeafScorer::Other(s) => s.block_max_score_at(doc_id),
+        }
+    }
+
+    #[inline(always)]
+    pub fn current_block_max_score(&self, doc_id: u64) -> f32 {
+        match self {
+            LeafScorer::BM25(s) => s.current_block_max_score(doc_id),
+            LeafScorer::Constant(s) => s.current_block_max_score(doc_id),
+            LeafScorer::Other(s) => s.current_block_max_score(doc_id),
+        }
+    }
+
+    #[inline(always)]
+    pub fn next_block_boundary(&self, doc_id: u64) -> Option<u64> {
+        match self {
+            LeafScorer::BM25(s) => s.next_block_boundary(doc_id),
+            LeafScorer::Constant(s) => s.next_block_boundary(doc_id),
+            LeafScorer::Other(s) => s.next_block_boundary(doc_id),
+        }
+    }
+}
 
 /// Trait for document scorers.
 pub trait Scorer: Send + Debug {
@@ -101,6 +194,14 @@ pub trait Scorer: Send + Debug {
 
     /// Get the name of this scorer.
     fn name(&self) -> &'static str;
+
+    /// Erased self-reference for runtime downcasting (#466).
+    /// Used by [`LeafScorer::from_box`] to specialise production
+    /// hot-path scorer types out of a `Box<dyn Scorer>` so the
+    /// boolean / BMW inner loops can match-dispatch into a
+    /// concrete `BM25Scorer` / `ConstantScorer` without the
+    /// per-doc vtable lookup.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// BM25 scorer implementation.
@@ -506,6 +607,10 @@ impl Scorer for BM25Scorer {
     fn name(&self) -> &'static str {
         "BM25"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl BM25Scorer {
@@ -636,6 +741,10 @@ impl Scorer for ConstantScorer {
     fn name(&self) -> &'static str {
         "Constant"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// A scorer that combines multiple scorers by summing their scores.
@@ -653,16 +762,22 @@ pub struct BooleanScorer {
 unsafe impl Send for BooleanScorer {}
 
 impl BooleanScorer {
-    /// Create a new boolean scorer.
+    /// Create a new boolean scorer. The clauses are specialised into
+    /// [`LeafScorer`] / [`crate::lexical::query::matcher::LeafMatcher`]
+    /// variants so the per-doc inner loop can match-dispatch into
+    /// the production hot-path types (#466).
     pub fn new(
         reader: &dyn crate::lexical::reader::LexicalIndexReader,
         queries: Vec<Box<dyn Query>>,
     ) -> Result<Self> {
-        let mut clauses = Vec::new();
+        let mut clauses = Vec::with_capacity(queries.len());
         for query in queries {
             let matcher = query.matcher(reader)?;
             let scorer = query.scorer(reader)?;
-            clauses.push((scorer, matcher));
+            clauses.push((
+                LeafScorer::from_box(scorer),
+                crate::lexical::query::matcher::LeafMatcher::from_box(matcher),
+            ));
         }
         Ok(BooleanScorer {
             clauses: std::cell::RefCell::new(clauses),
@@ -762,6 +877,10 @@ impl Scorer for BooleanScorer {
 
     fn name(&self) -> &'static str {
         "Boolean"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -1028,6 +1147,9 @@ mod tests {
             fn name(&self) -> &'static str {
                 "PairTest"
             }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
         }
         let pair = PairScorer(scorer_a, scorer_b, 1.0);
 
@@ -1065,6 +1187,9 @@ mod tests {
             fn name(&self) -> &'static str {
                 "NoBlock"
             }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
         }
         let blocks: Arc<[BlockMax]> = Arc::from(vec![BlockMax {
             last_doc_id: 50,
@@ -1096,6 +1221,9 @@ mod tests {
             }
             fn name(&self) -> &'static str {
                 "PairWithLegacy"
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
             }
         }
         let pair = PairWithLegacy(NoBlockScorer, block_scorer);

@@ -230,6 +230,9 @@ impl Matcher for PhraseMatcher {
     fn cost(&self) -> u64 {
         self.matches.len() as u64
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// A scorer specialized for phrase queries.
@@ -371,6 +374,9 @@ impl Scorer for PhraseScorer {
 
     fn name(&self) -> &'static str {
         "PhraseScorer"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

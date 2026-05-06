@@ -237,6 +237,9 @@ impl Matcher for RangeMatcher {
     fn is_exhausted(&self) -> bool {
         self.exhausted
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Specialized numeric range query for optimal performance.
@@ -579,6 +582,10 @@ impl Scorer for RangeScorer {
     fn name(&self) -> &'static str {
         "RangeScorer"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl Query for NumericRangeQuery {
@@ -784,6 +791,9 @@ impl Matcher for NumericRangeMatcher {
     fn is_exhausted(&self) -> bool {
         self.exhausted
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// A specialized matcher for numeric range queries that filters documents.
@@ -888,6 +898,9 @@ impl Matcher for NumericRangeFilterMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.all_matcher.is_exhausted()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -1151,6 +1164,9 @@ impl Matcher for DateTimeRangeMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.exhausted
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

@@ -28,6 +28,15 @@ pub trait Matcher: Send + Debug {
     fn term_freq(&self) -> u64 {
         1 // Default implementation for matchers that don't track term frequency
     }
+
+    /// Erased self-reference for runtime downcasting (#466).
+    /// Used by [`super::scorer::LeafScorer::from_box`] / `LeafMatcher`
+    /// dispatch helpers to specialise production hot-path matcher
+    /// types (`PostingMatcher`, `AllMatcher`, `EmptyMatcher`) so
+    /// `BooleanScorer` / `BlockMaxOrExecutor` inner loops can match-
+    /// dispatch into the concrete matcher without the per-doc vtable
+    /// lookup.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// A matcher that matches no documents.
@@ -68,6 +77,9 @@ impl Matcher for EmptyMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.exhausted
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -122,6 +134,9 @@ impl Matcher for AllMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.current_doc >= self.max_doc
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -210,6 +225,9 @@ impl Matcher for PostingMatcher {
         } else {
             self.posting_iter.term_freq()
         }
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -398,6 +416,9 @@ impl Matcher for DisjunctionMatcher {
     fn is_exhausted(&self) -> bool {
         self.exhausted
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// A matcher that implements conjunction (AND) of multiple matchers.
@@ -537,6 +558,9 @@ impl Matcher for ConjunctionMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.exhausted
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -679,6 +703,9 @@ impl Matcher for ConjunctionNotMatcher {
     fn is_exhausted(&self) -> bool {
         self.exhausted
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// A matcher that matches all documents except those matched by the negative matcher.
@@ -782,6 +809,9 @@ impl Matcher for NotMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.exhausted || self.current_doc >= self.max_doc
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -1280,5 +1310,106 @@ impl Matcher for PreComputedMatcher {
 
     fn is_exhausted(&self) -> bool {
         self.exhausted
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Concrete-type dispatch enum for the production matcher hot path
+/// (#466). Used by `BooleanScorer` and `BlockMaxOrExecutor` so that
+/// the per-doc `skip_to` / `next` / `term_freq` calls in the inner
+/// loop dispatch by `match` (BM25-friendly inlining) instead of
+/// through a vtable.
+#[derive(Debug)]
+pub enum LeafMatcher {
+    /// `PostingMatcher` — production hot-path leaf matcher. Boxed
+    /// so the enum stays narrow and `Vec<(LeafScorer, LeafMatcher)>`
+    /// remains cache-friendly inside the BMW pivot loop.
+    Posting(Box<PostingMatcher>),
+    /// `EmptyMatcher` — empty-result clause.
+    Empty(Box<EmptyMatcher>),
+    /// `AllMatcher` — match-all (filter) clause.
+    All(Box<AllMatcher>),
+    /// Trait-object fallback for compound matchers (`DisjunctionMatcher`,
+    /// `ConjunctionMatcher`, etc.) and any custom `Matcher` impl.
+    Other(Box<dyn Matcher>),
+}
+
+impl LeafMatcher {
+    /// Specialise a `Box<dyn Matcher>` into a concrete enum variant
+    /// when the matcher is one of the production hot-path types.
+    /// Falls back to [`LeafMatcher::Other`] otherwise.
+    pub fn from_box(b: Box<dyn Matcher>) -> Self {
+        use std::any::TypeId;
+        let tid = b.as_any().type_id();
+        if tid == TypeId::of::<PostingMatcher>() {
+            // SAFETY: TypeId equality guarantees the trait object's
+            // concrete type. Convert via raw pointer cast.
+            let raw: *mut dyn Matcher = Box::into_raw(b);
+            let m: Box<PostingMatcher> = unsafe { Box::from_raw(raw as *mut PostingMatcher) };
+            LeafMatcher::Posting(m)
+        } else if tid == TypeId::of::<EmptyMatcher>() {
+            let raw: *mut dyn Matcher = Box::into_raw(b);
+            let m: Box<EmptyMatcher> = unsafe { Box::from_raw(raw as *mut EmptyMatcher) };
+            LeafMatcher::Empty(m)
+        } else if tid == TypeId::of::<AllMatcher>() {
+            let raw: *mut dyn Matcher = Box::into_raw(b);
+            let m: Box<AllMatcher> = unsafe { Box::from_raw(raw as *mut AllMatcher) };
+            LeafMatcher::All(m)
+        } else {
+            LeafMatcher::Other(b)
+        }
+    }
+
+    #[inline(always)]
+    pub fn doc_id(&self) -> u64 {
+        match self {
+            LeafMatcher::Posting(m) => m.doc_id(),
+            LeafMatcher::Empty(m) => m.doc_id(),
+            LeafMatcher::All(m) => m.doc_id(),
+            LeafMatcher::Other(m) => m.doc_id(),
+        }
+    }
+
+    #[inline(always)]
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Result<bool> {
+        match self {
+            LeafMatcher::Posting(m) => m.next(),
+            LeafMatcher::Empty(m) => m.next(),
+            LeafMatcher::All(m) => m.next(),
+            LeafMatcher::Other(m) => m.next(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn skip_to(&mut self, target: u64) -> Result<bool> {
+        match self {
+            LeafMatcher::Posting(m) => m.skip_to(target),
+            LeafMatcher::Empty(m) => m.skip_to(target),
+            LeafMatcher::All(m) => m.skip_to(target),
+            LeafMatcher::Other(m) => m.skip_to(target),
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_exhausted(&self) -> bool {
+        match self {
+            LeafMatcher::Posting(m) => m.is_exhausted(),
+            LeafMatcher::Empty(m) => m.is_exhausted(),
+            LeafMatcher::All(m) => m.is_exhausted(),
+            LeafMatcher::Other(m) => m.is_exhausted(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn term_freq(&self) -> u64 {
+        match self {
+            LeafMatcher::Posting(m) => m.term_freq(),
+            LeafMatcher::Empty(m) => m.term_freq(),
+            LeafMatcher::All(m) => m.term_freq(),
+            LeafMatcher::Other(m) => m.term_freq(),
+        }
     }
 }
