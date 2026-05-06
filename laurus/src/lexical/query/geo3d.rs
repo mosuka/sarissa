@@ -307,6 +307,9 @@ impl Matcher for Geo3dMatcher {
     fn is_exhausted(&self) -> bool {
         self.cursor >= self.matches.len()
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Scorer for [`Geo3dDistanceQuery`]. Looks up the precomputed score
@@ -348,6 +351,10 @@ impl Scorer for Geo3dScorer {
 
     fn name(&self) -> &'static str {
         "Geo3dScorer"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

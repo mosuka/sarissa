@@ -20,8 +20,6 @@ use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::query::Query;
 use crate::lexical::query::boolean::{BooleanQuery, Occur};
 use crate::lexical::query::collector::Collector;
-use crate::lexical::query::matcher::Matcher;
-use crate::lexical::query::scorer::Scorer;
 use crate::lexical::query::term::TermQuery;
 use crate::lexical::reader::LexicalIndexReader;
 
@@ -29,13 +27,19 @@ use crate::lexical::reader::LexicalIndexReader;
 /// and matcher. The scorer is constructed once at executor-start
 /// time so the pivot loop can pull per-block bounds without
 /// re-resolving the term.
+///
+/// The `scorer` / `matcher` fields are concrete-type enums (#466)
+/// so the per-doc inner loop dispatches to BM25 / PostingMatcher
+/// arms via `match` instead of paying a vtable lookup.
 struct BmwClause {
-    /// The per-clause BM25 (or other) scorer. Must expose a
-    /// finite-block bound — checked at construction time.
-    scorer: Box<dyn Scorer>,
-    /// The per-clause matcher. Walks its posting list independently
-    /// of the other clauses' matchers.
-    matcher: Box<dyn Matcher>,
+    /// The per-clause scorer (specialised for BM25 / Constant in the
+    /// production hot path). Must expose a finite-block bound —
+    /// checked at construction time.
+    scorer: crate::lexical::query::scorer::LeafScorer,
+    /// The per-clause matcher (specialised for PostingMatcher in the
+    /// production hot path). Walks its posting list independently of
+    /// the other clauses' matchers.
+    matcher: crate::lexical::query::matcher::LeafMatcher,
     /// Field name extracted from the clause's underlying
     /// [`TermQuery`], used to look up per-doc field length at
     /// scoring time. `None` when the clause is not a [`TermQuery`]
@@ -70,8 +74,8 @@ impl<'r> BlockMaxOrExecutor<'r> {
             let matcher = clause.query.matcher(reader)?;
             let field_name = field_name_of(clause.query.as_ref());
             clauses.push(BmwClause {
-                scorer,
-                matcher,
+                scorer: crate::lexical::query::scorer::LeafScorer::from_box(scorer),
+                matcher: crate::lexical::query::matcher::LeafMatcher::from_box(matcher),
                 field_name,
             });
         }

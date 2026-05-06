@@ -611,6 +611,9 @@ impl Matcher for SpanMatcher {
     fn cost(&self) -> u64 {
         self.matches.len() as u64
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// A scorer for span queries.
@@ -674,6 +677,10 @@ impl Scorer for SpanScorer {
 
     fn name(&self) -> &'static str {
         "SpanScorer"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
