@@ -1308,6 +1308,19 @@ impl InvertedIndexReader {
         &self.config.analyzer
     }
 
+    /// Number of segments backing this reader (#476 Phase 1).
+    pub fn segment_count(&self) -> usize {
+        self.segment_readers.len()
+    }
+
+    /// Borrow the per-segment readers (#476 Phase 1). Used by the
+    /// inverted searcher's per-segment fanout path to run a query
+    /// against each segment independently so PR-F's BMW pivot loop
+    /// can fire on each segment's local `block_max` table.
+    pub fn segment_readers(&self) -> &[Arc<RwLock<SegmentReader>>] {
+        &self.segment_readers
+    }
+
     /// Check if the reader is closed.
     fn check_closed(&self) -> Result<()> {
         if self.closed.load(Ordering::Acquire) {

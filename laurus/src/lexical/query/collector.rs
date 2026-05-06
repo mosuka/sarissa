@@ -59,6 +59,15 @@ pub trait Collector: Send + Debug {
     fn bmw_capable(&self) -> bool {
         false
     }
+
+    /// Hint: the number of top hits the collector wants (#476 Phase 1).
+    /// The per-segment fanout uses this to size each segment's local
+    /// [`TopDocsCollector`] so cross-segment merge has enough headroom
+    /// without wasting work. Returns `None` for collectors without a
+    /// meaningful top-K (e.g. [`CountCollector`]).
+    fn requested_top_k(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// A collector that keeps the top N documents by score.
@@ -538,6 +547,10 @@ impl Collector for TopDocsCollector {
 
     fn bmw_capable(&self) -> bool {
         true
+    }
+
+    fn requested_top_k(&self) -> Option<usize> {
+        Some(self.max_docs)
     }
 
     fn reset(&mut self) {

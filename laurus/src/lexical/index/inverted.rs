@@ -35,6 +35,7 @@ use crate::storage::file::{FileStorage, FileStorageConfig};
 pub(crate) mod bmw;
 pub mod core;
 pub mod maintenance;
+pub(crate) mod per_segment_view;
 pub mod reader;
 pub mod searcher;
 pub mod segment;

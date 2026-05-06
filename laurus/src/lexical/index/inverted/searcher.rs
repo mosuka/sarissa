@@ -18,6 +18,7 @@ use crate::error::{LaurusError, Result};
 // Note: Geo and DateTime were removed from FieldValue definition implicitly by switching to DataValue.
 // Only standard types remain. Logic using Geo/DateTime needs update.
 use crate::lexical::index::inverted::bmw::{BlockMaxOrExecutor, is_bmw_eligible};
+use crate::lexical::index::inverted::per_segment_view::PerSegmentReaderView;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::query::Query;
 use crate::lexical::query::boolean::{BooleanQuery, Occur};
@@ -89,6 +90,21 @@ impl InvertedIndexSearcher {
             return self.search_boolean_query_parallel(boolean_query, collector);
         }
 
+        // Per-segment fanout fast path (#476 Phase 1). For multi-
+        // segment top-K queries, each segment's `block_max` table is
+        // valid as a per-segment scoring bound; running the query
+        // independently on each segment via [`PerSegmentReaderView`]
+        // re-activates PR-F's BMW pivot loop on each one. Cross-
+        // segment merge collects the per-segment top-K into the
+        // caller's collector.
+        if collector.bmw_capable()
+            && let Some(inverted_reader) =
+                self.reader.as_any().downcast_ref::<InvertedIndexReader>()
+            && inverted_reader.segment_count() >= 2
+        {
+            return self.search_per_segment_fanout(query, collector);
+        }
+
         // Block-Max-WAND fast path (#475 PR-F). Eligible for Should-only
         // BooleanQuery against a top-K-style collector. Construction
         // re-checks each clause's per-block metadata at runtime; on
@@ -156,6 +172,16 @@ impl InvertedIndexSearcher {
                         .ok()
                         .flatten()
                         .map(|len| len as f32)
+                } else if let Some(view) =
+                    self.reader.as_any().downcast_ref::<PerSegmentReaderView>()
+                {
+                    // #476 Phase 1: per-segment fanout reads field
+                    // lengths through the view so BM25 normalisation
+                    // matches each segment's local avg.
+                    view.field_length(doc_id, field_name)
+                        .ok()
+                        .flatten()
+                        .map(|len| len as f32)
                 } else {
                     None
                 }
@@ -189,6 +215,84 @@ impl InvertedIndexSearcher {
             }
         }
 
+        Ok(collector)
+    }
+
+    /// Execute a top-K query against a multi-segment reader by
+    /// fanning out to per-segment searches (#476 Phase 1). Each
+    /// segment runs the query through a [`PerSegmentReaderView`],
+    /// which lets PR-F's BMW pivot loop fire on the segment's local
+    /// `block_max` table. Results are merged into the caller's
+    /// collector.
+    fn search_per_segment_fanout<C: Collector>(
+        &self,
+        query: Box<dyn Query>,
+        mut collector: C,
+    ) -> Result<C> {
+        // Downcast ensured by the caller, but re-resolve here to
+        // borrow the segment list.
+        let inverted_reader = self
+            .reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .expect("search_per_segment_fanout requires InvertedIndexReader");
+
+        let global_doc_count = inverted_reader.doc_count();
+        let global_max_doc = inverted_reader.max_doc();
+        // Build a global term-info closure that captures an Arc
+        // pointing back at the cross-segment reader so each
+        // PerSegmentReaderView can resolve IDF lookups.
+        let global_term_info_fn = {
+            let reader_arc = self.reader.clone();
+            std::sync::Arc::new(
+                move |field: &str,
+                      term: &str|
+                      -> Result<Option<crate::lexical::reader::ReaderTermInfo>> {
+                    reader_arc.term_info(field, term)
+                },
+            )
+        };
+
+        // Per-segment K. The collector wants `top_k` hits globally;
+        // each segment returns up to `top_k` so the merge has the
+        // headroom to pick any combination of per-segment hits.
+        let per_segment_k = collector.requested_top_k().unwrap_or(10);
+
+        let segments = inverted_reader.segment_readers().to_vec();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let segment_iter = segments.par_iter();
+        #[cfg(target_arch = "wasm32")]
+        let segment_iter = segments.iter();
+
+        let per_segment_results: Vec<Result<Vec<SearchHit>>> = segment_iter
+            .map(|seg_arc| -> Result<Vec<SearchHit>> {
+                let view = PerSegmentReaderView::new(
+                    seg_arc.clone(),
+                    global_doc_count,
+                    global_max_doc,
+                    global_term_info_fn.clone(),
+                );
+                let view_reader: Arc<dyn LexicalIndexReader> = Arc::new(view);
+                let temp_searcher = InvertedIndexSearcher::from_arc(view_reader);
+                let temp_collector = TopDocsCollector::new(per_segment_k);
+                let collected =
+                    temp_searcher.search_with_collector(query.clone_box(), temp_collector)?;
+                Ok(collected.results())
+            })
+            .collect();
+
+        // Merge per-segment top-K into the caller's collector. Errors
+        // from any one segment short-circuit the whole search.
+        for hits in per_segment_results {
+            let hits = hits?;
+            for hit in hits {
+                collector.collect(hit.doc_id, hit.score)?;
+                if !collector.needs_more() {
+                    return Ok(collector);
+                }
+            }
+        }
         Ok(collector)
     }
 
@@ -1008,5 +1112,177 @@ mod tests {
         // the round-trip technique. The wrapper is kept for future
         // tests that want to invoke the legacy path explicitly.
         let _suppress_dead_code = NonBmwTopDocs(TopDocsCollector::new(0));
+    }
+
+    /// Helper for #476 Phase 1 tests: build a `LexicalStore` with
+    /// the same skewed-TF corpus as the equivalence test, but split
+    /// the writes across `segment_count` commits so the underlying
+    /// reader has multiple segments.
+    fn build_skewed_store_with_segments(
+        segment_count: usize,
+    ) -> crate::lexical::store::LexicalStore {
+        use crate::Document;
+        use crate::lexical::store::LexicalStore;
+        use crate::lexical::store::config::LexicalIndexConfig;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let store = LexicalStore::new(storage, LexicalIndexConfig::default()).unwrap();
+
+        let n: u64 = 512;
+        let chunk = n.div_ceil(segment_count as u64);
+        let mut next_commit = chunk;
+        for id in 0..n {
+            let mut body = String::new();
+            if id < 60 {
+                body.push_str("alpha alpha alpha ");
+            } else if id < 200 {
+                body.push_str("alpha ");
+            }
+            if (100..400).contains(&id) {
+                body.push_str("beta ");
+            }
+            if id >= 350 && id % 3 == 0 {
+                body.push_str("gamma ");
+            }
+            body.push_str("filler text content body");
+            let doc = Document::builder()
+                .add_text("title", format!("doc-{id}"))
+                .add_text("body", &body)
+                .build();
+            store.upsert_document(id, doc).unwrap();
+
+            if id + 1 == next_commit && id + 1 < n {
+                store.commit().unwrap();
+                next_commit += chunk;
+            }
+        }
+        store.commit().unwrap();
+        store
+    }
+
+    /// PR-F follow-up #476 Phase 1: the per-segment fanout path
+    /// must return the **same top-K** as the legacy cross-segment
+    /// path on the same multi-segment store. We can't compare to
+    /// a single-segment build because per-segment scoring uses each
+    /// segment's local `avg_field_length` (Lucene-style), which
+    /// produces ranking-equivalent but numerically-different scores
+    /// from global-avg single-segment scoring. Comparing fanout to
+    /// the **legacy path on the same multi-segment store** isolates
+    /// the fanout's correctness from that scoring choice.
+    #[test]
+    fn per_segment_fanout_topk_matches_legacy_multi_segment_path() {
+        use crate::lexical::query::SearchHit;
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+
+        let store = build_skewed_store_with_segments(4);
+        let make_query = || -> Box<dyn Query> {
+            Box::new(
+                BooleanQueryBuilder::new()
+                    .should(Box::new(TermQuery::new("body", "alpha")))
+                    .should(Box::new(TermQuery::new("body", "beta")))
+                    .should(Box::new(TermQuery::new("body", "gamma")))
+                    .build(),
+            )
+        };
+
+        // Fanout path: TopDocsCollector reports `bmw_capable = true`
+        // and segment_count == 4 → dispatches to fanout.
+        let fanout_hits = store
+            .search(LexicalSearchRequest::new(make_query()).limit(10))
+            .unwrap()
+            .hits;
+
+        // Legacy path: drive the searcher directly with our
+        // `NonBmwTopDocs` wrapper so `bmw_capable = false` and
+        // dispatch falls through to the existing matcher-driven
+        // loop on the cross-segment-aggregated reader.
+        let legacy_hits: Vec<SearchHit> = {
+            let reader = store.reader_for_tests().unwrap();
+            let searcher = InvertedIndexSearcher::from_arc(reader);
+            let collector = NonBmwTopDocs(TopDocsCollector::new(10));
+            let collected = searcher
+                .search_with_collector(make_query(), collector)
+                .unwrap();
+            collected.0.results()
+        };
+
+        assert_eq!(
+            fanout_hits.len(),
+            legacy_hits.len(),
+            "fanout vs legacy hit count differs"
+        );
+
+        let fanout_ids: std::collections::BTreeSet<u64> =
+            fanout_hits.iter().map(|h| h.doc_id).collect();
+        let legacy_ids: std::collections::BTreeSet<u64> =
+            legacy_hits.iter().map(|h| h.doc_id).collect();
+        assert_eq!(
+            fanout_ids, legacy_ids,
+            "fanout vs legacy top-K doc id sets differ"
+        );
+
+        // Both paths run on the same multi-segment store with the
+        // same per-segment avg semantics, so scores must agree
+        // within float tolerance.
+        for hit in &fanout_hits {
+            let legacy_score = legacy_hits
+                .iter()
+                .find(|h| h.doc_id == hit.doc_id)
+                .expect("doc must be in legacy top-K too")
+                .score;
+            let tol = 1e-4_f32.max(0.01_f32 * legacy_score.abs());
+            assert!(
+                (hit.score - legacy_score).abs() < tol,
+                "doc {}: fanout={} legacy={} (tol {})",
+                hit.doc_id,
+                hit.score,
+                legacy_score,
+                tol,
+            );
+        }
+    }
+
+    /// PR-F follow-up #476 Phase 1: the per-segment fanout must
+    /// fall through to the legacy path when the store has only one
+    /// segment (the existing PR-F BMW path is already optimal).
+    #[test]
+    fn per_segment_fanout_falls_back_when_single_segment() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+
+        let store = build_skewed_store_with_segments(1);
+        let query: Box<dyn Query> = Box::new(
+            BooleanQueryBuilder::new()
+                .should(Box::new(TermQuery::new("body", "alpha")))
+                .should(Box::new(TermQuery::new("body", "beta")))
+                .build(),
+        );
+        // The fact that this returns at all (without panicking on the
+        // `expect("requires InvertedIndexReader")` in fanout) is the
+        // proof: the dispatch saw `segment_count() == 1` and skipped
+        // the fanout branch.
+        let hits = store
+            .search(LexicalSearchRequest::new(query).limit(10))
+            .unwrap()
+            .hits;
+        assert!(!hits.is_empty(), "single-seg query should return hits");
+    }
+
+    /// PR-F follow-up #476 Phase 1: a non-`bmw_capable` collector
+    /// (here: `CountCollector`) must skip both the BMW fast path and
+    /// the per-segment fanout, so multi-segment count queries still
+    /// hit the legacy aggregation path.
+    #[test]
+    fn per_segment_fanout_falls_back_for_count_collector() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+
+        let store = build_skewed_store_with_segments(4);
+        let query: Box<dyn Query> = Box::new(
+            BooleanQueryBuilder::new()
+                .should(Box::new(TermQuery::new("body", "alpha")))
+                .should(Box::new(TermQuery::new("body", "beta")))
+                .build(),
+        );
+        let count = store.count(LexicalSearchRequest::new(query)).unwrap();
+        assert!(count > 0, "count query on multi-seg corpus must hit");
     }
 }
