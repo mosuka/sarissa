@@ -62,10 +62,32 @@ Each entry in a posting list contains:
 
 | Field | Description |
 | :--- | :--- |
-| Document ID | Internal `u64` identifier |
+| Document ID | Internal `u64` identifier (per-segment value must fit in `u32`) |
 | Term Frequency | How many times the term appears in this document |
 | Positions (optional) | Where in the document the term appears (needed for phrase queries) |
 | Weight | Score weight for this posting |
+
+### On-Disk Posting Layout
+
+Posting lists are stored in a **structure-of-arrays** layout with each field
+written as its own contiguous section. Document IDs and term frequencies are
+encoded in fixed-size **128-int blocks** using bit-packing (Frame-of-Reference
+plus sorted-delta for doc IDs), with any partial trailing block falling back
+to varint. This matches the on-disk format used by Tantivy and Lucene 9 and
+yields fast SIMD-accelerated decoding through the
+[`bitpacking`](https://crates.io/crates/bitpacking) crate.
+
+```text
+[term, total_frequency, doc_frequency, posting_count N, any_positions]
+[Section 1: doc_ids       — N/128 bit-packed blocks + varint tail]
+[Section 2: frequencies   — N/128 bit-packed blocks + varint tail]
+[Section 3: weights       — N raw f32 values]
+[Section 4: positions     — per-posting flag + varint deltas (only if any)]
+```
+
+Per-segment doc IDs must fit in `u32`. Encoding a value beyond `u32::MAX`
+fails fast with a clear error to prevent silent corruption of the
+bit-packed segment.
 
 ## Numeric and Date Fields
 
