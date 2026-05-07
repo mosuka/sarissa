@@ -15,7 +15,7 @@ use crate::analysis::token::Token;
 use crate::error::{LaurusError, Result};
 use crate::lexical::core::document::Document;
 use crate::lexical::core::field::FieldValue;
-use crate::lexical::index::inverted::core::posting::{Posting, PostingList};
+use crate::lexical::index::inverted::core::posting::{DecodedPostingList, Posting, PostingList};
 use crate::lexical::index::inverted::core::terms::{
     InvertedIndexTerms, MergedInvertedIndexTerms, TermDictionaryAccess, Terms,
 };
@@ -88,6 +88,16 @@ impl Default for InvertedIndexReaderConfig {
 /// # Purpose
 /// Used when executing queries against the actual index.
 ///
+/// # Storage layout
+///
+/// Internally backed by **structure-of-arrays** parallel slices
+/// (`doc_ids: Vec<u32>`, `frequencies: Vec<u32>`, optional positions
+/// sidecar). This avoids the AoS `Vec<Posting>` reassembly that
+/// `PostingList::decode` previously paid: 4 bytes per doc-id instead of a
+/// 40-byte `Posting` struct, and `next()` advances a single integer cursor
+/// over a dense `&[u32]` slice. Per-segment doc-ids fit in `u32` by the same
+/// invariant the encoder enforces.
+///
 /// # Implemented Traits
 /// - `reader::PostingIterator` trait
 ///
@@ -108,21 +118,32 @@ impl Default for InvertedIndexReaderConfig {
 /// - `InvertedIndexPostingIterator`: Advanced iterator for index queries
 #[derive(Debug)]
 pub struct InvertedIndexPostingIterator {
-    /// The posting data.
-    postings: Vec<crate::lexical::index::inverted::core::posting::Posting>,
+    /// Doc IDs, sorted ascending. Parallel to `frequencies`.
+    doc_ids: Vec<u32>,
 
-    /// Current position in the posting list.
+    /// Term frequencies. Parallel to `doc_ids`.
+    frequencies: Vec<u32>,
+
+    /// Optional per-posting positions sidecar. `None` when no posting carries
+    /// positions; otherwise `vec[i]` holds the positions for doc `i`.
+    positions: Option<Vec<Option<Vec<u32>>>>,
+
+    /// Current position in the parallel arrays.
     position: usize,
 
-    /// Block cache for efficient access.
+    /// Block cache for efficient skip-to.
     block_cache: Option<Vec<PostingBlock>>,
 
     /// Current block being processed.
     current_block: usize,
 
-    /// Whether next() has been called at least once.
+    /// Whether `next()` has been called at least once.
     started: bool,
 }
+
+/// Parallel-array form returned by [`InvertedIndexPostingIterator::soa_from_aos`].
+/// Tuple is `(doc_ids, frequencies, optional positions sidecar)`.
+type SoaArrays = (Vec<u32>, Vec<u32>, Option<Vec<Option<Vec<u32>>>>);
 
 /// A block of postings for efficient processing.
 #[derive(Debug, Clone)]
@@ -141,10 +162,15 @@ pub struct PostingBlock {
 }
 
 impl InvertedIndexPostingIterator {
-    /// Create a new advanced posting iterator.
+    /// Create a new advanced posting iterator from an AoS [`Vec<Posting>`].
+    /// Performs an AoS→SoA conversion eagerly; prefer
+    /// [`Self::from_decoded_soa`] in the query hot path to skip this copy.
     pub fn new(postings: Vec<Posting>) -> Self {
+        let (doc_ids, frequencies, positions) = Self::soa_from_aos(&postings);
         InvertedIndexPostingIterator {
-            postings,
+            doc_ids,
+            frequencies,
+            positions,
             position: 0,
             block_cache: None,
             current_block: 0,
@@ -152,11 +178,16 @@ impl InvertedIndexPostingIterator {
         }
     }
 
-    /// Create posting iterator with block optimization.
+    /// Create a posting iterator from AoS postings with block optimization.
+    /// Performs an AoS→SoA conversion eagerly; prefer
+    /// [`Self::from_decoded_soa_with_blocks`] in the query hot path.
     pub fn with_blocks(postings: Vec<Posting>, block_size: usize) -> Self {
-        let blocks = Self::create_blocks(&postings, block_size);
+        let (doc_ids, frequencies, positions) = Self::soa_from_aos(&postings);
+        let blocks = Self::create_blocks(&doc_ids, block_size);
         InvertedIndexPostingIterator {
-            postings,
+            doc_ids,
+            frequencies,
+            positions,
             position: 0,
             block_cache: Some(blocks),
             current_block: 0,
@@ -164,31 +195,88 @@ impl InvertedIndexPostingIterator {
         }
     }
 
-    /// Create posting blocks for efficient skip-to operations.
-    fn create_blocks(postings: &[Posting], block_size: usize) -> Vec<PostingBlock> {
+    /// Construct an iterator directly from a SoA-decoded posting list,
+    /// without paying an AoS reassembly. This is the fast path used by
+    /// [`SegmentReader::postings`] / `term_postings` after
+    /// [`PostingList::decode_soa`].
+    ///
+    /// # Arguments
+    ///
+    /// * `decoded` - SoA-decoded posting data.
+    pub fn from_decoded_soa(decoded: DecodedPostingList) -> Self {
+        InvertedIndexPostingIterator {
+            doc_ids: decoded.doc_ids,
+            frequencies: decoded.frequencies,
+            positions: decoded.positions,
+            position: 0,
+            block_cache: None,
+            current_block: 0,
+            started: false,
+        }
+    }
+
+    /// Like [`Self::from_decoded_soa`], but also pre-builds the skip-block
+    /// cache used by [`Self::skip_to`].
+    ///
+    /// # Arguments
+    ///
+    /// * `decoded` - SoA-decoded posting data.
+    /// * `block_size` - Number of postings per skip block.
+    pub fn from_decoded_soa_with_blocks(decoded: DecodedPostingList, block_size: usize) -> Self {
+        let blocks = Self::create_blocks(&decoded.doc_ids, block_size);
+        InvertedIndexPostingIterator {
+            doc_ids: decoded.doc_ids,
+            frequencies: decoded.frequencies,
+            positions: decoded.positions,
+            position: 0,
+            block_cache: Some(blocks),
+            current_block: 0,
+            started: false,
+        }
+    }
+
+    /// Convert AoS postings to parallel SoA arrays; the positions sidecar is
+    /// allocated only when at least one posting carries position data.
+    fn soa_from_aos(postings: &[Posting]) -> SoaArrays {
+        let n = postings.len();
+        let mut doc_ids = Vec::with_capacity(n);
+        let mut frequencies = Vec::with_capacity(n);
+        let any_positions = postings.iter().any(|p| p.positions.is_some());
+        let mut positions: Option<Vec<Option<Vec<u32>>>> = if any_positions {
+            Some(Vec::with_capacity(n))
+        } else {
+            None
+        };
+        for p in postings {
+            doc_ids.push(p.doc_id as u32);
+            frequencies.push(p.frequency);
+            if let Some(out) = positions.as_mut() {
+                out.push(p.positions.clone());
+            }
+        }
+        (doc_ids, frequencies, positions)
+    }
+
+    /// Build skip-block index over the doc_id slice.
+    fn create_blocks(doc_ids: &[u32], block_size: usize) -> Vec<PostingBlock> {
         let mut blocks = Vec::new();
         let mut start = 0;
 
-        while start < postings.len() {
-            let end = (start + block_size).min(postings.len());
-            let block_postings = &postings[start..end];
-
-            if !block_postings.is_empty() {
-                blocks.push(PostingBlock {
-                    min_doc_id: block_postings[0].doc_id,
-                    max_doc_id: block_postings[block_postings.len() - 1].doc_id,
-                    start_position: start,
-                    count: end - start,
-                });
-            }
-
+        while start < doc_ids.len() {
+            let end = (start + block_size).min(doc_ids.len());
+            blocks.push(PostingBlock {
+                min_doc_id: doc_ids[start] as u64,
+                max_doc_id: doc_ids[end - 1] as u64,
+                start_position: start,
+                count: end - start,
+            });
             start = end;
         }
 
         blocks
     }
 
-    /// Find the block containing the target document ID.
+    /// Find the block containing (or first ahead of) the target document ID.
     fn find_block(&self, target: u64) -> Option<usize> {
         if let Some(blocks) = &self.block_cache {
             for (i, block) in blocks.iter().enumerate() {
@@ -216,37 +304,36 @@ impl InvertedIndexPostingIterator {
 
 impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
     fn doc_id(&self) -> u64 {
-        if self.position < self.postings.len() {
-            self.postings[self.position].doc_id
+        if self.position < self.doc_ids.len() {
+            self.doc_ids[self.position] as u64
         } else {
             u64::MAX // Convention for exhausted iterator
         }
     }
 
     fn term_freq(&self) -> u64 {
-        if self.position < self.postings.len() {
-            self.postings[self.position].frequency as u64
+        if self.position < self.frequencies.len() {
+            self.frequencies[self.position] as u64
         } else {
             0
         }
     }
 
     fn positions(&self) -> Result<Vec<u64>> {
-        if self.position < self.postings.len() {
-            Ok(self.postings[self.position]
-                .positions
-                .as_ref()
-                .unwrap_or(&Vec::new())
-                .iter()
-                .map(|&p| p as u64)
-                .collect())
-        } else {
-            Ok(Vec::new())
+        if self.position >= self.doc_ids.len() {
+            return Ok(Vec::new());
+        }
+        match &self.positions {
+            Some(per_doc) => match &per_doc[self.position] {
+                Some(p) => Ok(p.iter().map(|&v| v as u64).collect()),
+                None => Ok(Vec::new()),
+            },
+            None => Ok(Vec::new()),
         }
     }
 
     fn next(&mut self) -> Result<bool> {
-        if self.postings.is_empty() {
+        if self.doc_ids.is_empty() {
             return Ok(false);
         }
 
@@ -257,7 +344,7 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
         } else {
             // Move to next document
             self.position += 1;
-            Ok(self.position < self.postings.len())
+            Ok(self.position < self.doc_ids.len())
         }
     }
 
@@ -275,8 +362,8 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
         }
 
         // Linear search within the current range
-        while self.position < self.postings.len() {
-            if self.postings[self.position].doc_id >= target_doc_id {
+        while self.position < self.doc_ids.len() {
+            if self.doc_ids[self.position] as u64 >= target_doc_id {
                 return Ok(true);
             }
             self.position += 1;
@@ -285,7 +372,7 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
     }
 
     fn cost(&self) -> u64 {
-        self.postings.len() as u64
+        self.doc_ids.len() as u64
     }
 }
 
@@ -605,6 +692,55 @@ impl SegmentReader {
         }
     }
 
+    /// Drop deleted entries from a SoA-decoded posting list in lockstep
+    /// across the parallel arrays (`doc_ids`, `frequencies`, optional
+    /// positions). Returns the same list unchanged when the segment has no
+    /// deletions, avoiding any allocation in the common case.
+    fn filter_deleted_soa(&self, decoded: DecodedPostingList) -> Result<DecodedPostingList> {
+        // Fast path: nothing to filter.
+        if !self.info.has_deletions {
+            return Ok(decoded);
+        }
+        // Materialise the bitmap once (load on demand) so the inner loop is a
+        // pure index lookup.
+        if self.deletion_bitmap.read().unwrap().is_none() {
+            self.load_deletion_bitmap()?;
+        }
+        let bitmap_lock = self.deletion_bitmap.read().unwrap();
+        let bitmap = match bitmap_lock.as_ref() {
+            Some(b) => b,
+            None => return Ok(decoded),
+        };
+
+        let n = decoded.doc_ids.len();
+        let mut doc_ids = Vec::with_capacity(n);
+        let mut frequencies = Vec::with_capacity(n);
+        let mut positions: Option<Vec<Option<Vec<u32>>>> =
+            decoded.positions.as_ref().map(|_| Vec::with_capacity(n));
+
+        for i in 0..n {
+            let did = decoded.doc_ids[i] as u64;
+            if bitmap.is_deleted(did) {
+                continue;
+            }
+            doc_ids.push(decoded.doc_ids[i]);
+            frequencies.push(decoded.frequencies[i]);
+            if let (Some(out), Some(src)) = (positions.as_mut(), decoded.positions.as_ref()) {
+                out.push(src[i].clone());
+            }
+        }
+
+        Ok(DecodedPostingList {
+            term: decoded.term,
+            doc_ids,
+            frequencies,
+            weights: Vec::new(), // weights are not consumed by the iterator API
+            positions,
+            total_frequency: decoded.total_frequency,
+            doc_frequency: decoded.doc_frequency,
+        })
+    }
+
     /// Get a DocValues field value for a document.
     fn get_doc_value(&self, field: &str, doc_id: u64) -> Result<Option<FieldValue>> {
         // Ensure DocValues are loaded (lazy loading)
@@ -864,22 +1000,18 @@ impl SegmentReader {
                 reader.seek(std::io::SeekFrom::Start(term_info.posting_offset))?;
             }
 
-            // Decode the posting list
-            let posting_list = PostingList::decode(&mut reader)?;
-
-            let mut filtered = Vec::new();
-            for posting in posting_list.postings.into_iter() {
-                if !self.is_deleted(posting.doc_id)? {
-                    filtered.push(posting);
-                }
-            }
+            // Decode the posting list in SoA-native form to skip the
+            // intermediate `Vec<Posting>` reassembly and keep the iterator
+            // backed by parallel `Vec<u32>` slices.
+            let decoded = PostingList::decode_soa(&mut reader)?;
+            let filtered = self.filter_deleted_soa(decoded)?;
 
             if filtered.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(Box::new(InvertedIndexPostingIterator::with_blocks(
-                    filtered, 64,
-                ))))
+                Ok(Some(Box::new(
+                    InvertedIndexPostingIterator::from_decoded_soa_with_blocks(filtered, 64),
+                )))
             }
         } else {
             Ok(None)
