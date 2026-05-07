@@ -23,6 +23,7 @@ aho-corasick = "1.1.4"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bit-vec = "0.9.1"
+bitpacking = "0.9.3"
 bytecheck = "0.8.2"
 byteorder = "1.5.0"
 chrono = { workspace = true }
