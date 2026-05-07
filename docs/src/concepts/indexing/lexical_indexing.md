@@ -89,6 +89,12 @@ Per-segment doc IDs must fit in `u32`. Encoding a value beyond `u32::MAX`
 fails fast with a clear error to prevent silent corruption of the
 bit-packed segment.
 
+The decoder exposes a SoA-native fast path (`PostingList::decode_soa`) that
+produces parallel `Vec<u32>` slices for `doc_id` and `frequency` directly
+from disk without the intermediate `Vec<Posting>` reassembly. The query
+iterator stores those slices, so `next()` advances a single `u32` cursor
+over a dense slice instead of striding across a 40-byte `Posting` struct.
+
 ## Numeric and Date Fields
 
 Integer, float, and datetime fields are indexed using a **[BKD tree](../bkd_tree.md)** — a space-partitioning data structure optimized for range queries:

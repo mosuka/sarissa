@@ -233,6 +233,121 @@ pub struct PostingList {
     pub doc_frequency: u64,
 }
 
+/// SoA-native decoded posting data, produced directly by
+/// [`PostingList::decode_soa`] without an intermediate `Vec<Posting>`
+/// reassembly.
+///
+/// Designed for the query hot path: the iterator can be backed by parallel
+/// arrays and serve `doc_id` / `term_freq` / `weight` from sequential `u32` /
+/// `f32` slices instead of striding over a 40-byte `Posting` struct.
+///
+/// Doc IDs are kept as `u32` because per-segment doc-id space is bounded to
+/// `u32::MAX` (Lucene / Tantivy convention) — see [`PostingList::encode`] for
+/// the matching invariant on the writer side.
+#[derive(Debug, Clone)]
+pub struct DecodedPostingList {
+    /// The term this posting list represents.
+    pub term: String,
+    /// Doc IDs, sorted ascending. Parallel to `frequencies` / `weights`.
+    pub doc_ids: Vec<u32>,
+    /// Term frequencies. Parallel to `doc_ids` / `weights`.
+    pub frequencies: Vec<u32>,
+    /// Per-document weights. Parallel to `doc_ids` / `frequencies`.
+    pub weights: Vec<f32>,
+    /// Optional per-posting positions sidecar. `None` when **no** posting in
+    /// this list carries position data (the common case for boolean / BM25
+    /// queries that don't need phrases). When `Some(v)`, `v[i]` is the
+    /// positions for posting `i`: `Some(Vec<u32>)` if positions are present,
+    /// `None` otherwise.
+    pub positions: Option<Vec<Option<Vec<u32>>>>,
+    /// Total term frequency across all documents.
+    pub total_frequency: u64,
+    /// Document frequency (number of documents containing this term).
+    pub doc_frequency: u64,
+}
+
+impl DecodedPostingList {
+    /// Number of postings in this list.
+    pub fn len(&self) -> usize {
+        self.doc_ids.len()
+    }
+
+    /// Returns `true` if there are no postings.
+    pub fn is_empty(&self) -> bool {
+        self.doc_ids.is_empty()
+    }
+
+    /// Build a SoA decoded view from an AoS [`PostingList`]. Used by callers
+    /// that already hold an in-memory `Vec<Posting>` and want the SoA-native
+    /// iterator path.
+    ///
+    /// # Arguments
+    ///
+    /// * `list` - The AoS posting list to convert.
+    pub fn from_posting_list(list: &PostingList) -> Self {
+        let n = list.postings.len();
+        let mut doc_ids = Vec::with_capacity(n);
+        let mut frequencies = Vec::with_capacity(n);
+        let mut weights = Vec::with_capacity(n);
+        let any_positions = list.postings.iter().any(|p| p.positions.is_some());
+        let mut positions: Option<Vec<Option<Vec<u32>>>> = if any_positions {
+            Some(Vec::with_capacity(n))
+        } else {
+            None
+        };
+
+        for posting in &list.postings {
+            doc_ids.push(posting.doc_id as u32);
+            frequencies.push(posting.frequency);
+            weights.push(posting.weight);
+            if let Some(out) = positions.as_mut() {
+                out.push(posting.positions.clone());
+            }
+        }
+
+        DecodedPostingList {
+            term: list.term.clone(),
+            doc_ids,
+            frequencies,
+            weights,
+            positions,
+            total_frequency: list.total_frequency,
+            doc_frequency: list.doc_frequency,
+        }
+    }
+
+    /// Reassemble an AoS [`PostingList`] from this SoA view. Useful for tests
+    /// and back-compat code paths that still expect `Vec<Posting>`.
+    pub fn into_posting_list(self) -> PostingList {
+        let n = self.doc_ids.len();
+        let positions_iter: Box<dyn Iterator<Item = Option<Vec<u32>>>> = match self.positions {
+            Some(v) => Box::new(v.into_iter()),
+            None => Box::new(std::iter::repeat_with(|| None).take(n)),
+        };
+
+        let postings: Vec<Posting> = self
+            .doc_ids
+            .into_iter()
+            .zip(self.frequencies)
+            .zip(self.weights)
+            .zip(positions_iter)
+            .map(|(((did, freq), w), pos)| Posting {
+                doc_id: did as u64,
+                frequency: freq,
+                positions: pos,
+                weight: w,
+            })
+            .collect();
+
+        PostingList {
+            term: self.term,
+            postings,
+            total_frequency: self.total_frequency,
+            doc_frequency: self.doc_frequency,
+        }
+    }
+}
+
 impl PostingList {
     /// Create a new empty posting list.
     pub fn new(term: String) -> Self {
@@ -481,16 +596,21 @@ impl PostingList {
         Ok(())
     }
 
-    /// Decode a posting list previously written by [`Self::encode`].
+    /// Decode a posting list previously written by [`Self::encode`] in
+    /// SoA-native form, **without** an intermediate `Vec<Posting>`
+    /// reassembly.
     ///
-    /// Reads the SoA-laid sections (doc_ids, frequencies, weights, optional
-    /// positions) and rebuilds the AoS [`Vec<Posting>`].
+    /// This is the fast path for the query hot loop: callers can store the
+    /// returned [`DecodedPostingList`] in their iterator directly and serve
+    /// `doc_id` / `term_freq` / `weight` from the parallel `u32` / `f32`
+    /// slices, avoiding both the malloc and the AoS struct stride that the
+    /// `Vec<Posting>` form pays.
     ///
     /// # Arguments
     ///
     /// * `reader` - The structured input reader positioned at a posting-list
     ///   header.
-    pub fn decode<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
+    pub fn decode_soa<R: StorageInput>(reader: &mut StructReader<R>) -> Result<DecodedPostingList> {
         let term = reader.read_string()?;
         let total_frequency = reader.read_varint()?;
         let doc_frequency = reader.read_varint()?;
@@ -498,9 +618,16 @@ impl PostingList {
         let any_positions = reader.read_u8()? != 0;
 
         if n == 0 {
-            return Ok(PostingList {
+            return Ok(DecodedPostingList {
                 term,
-                postings: Vec::new(),
+                doc_ids: Vec::new(),
+                frequencies: Vec::new(),
+                weights: Vec::new(),
+                positions: if any_positions {
+                    Some(Vec::new())
+                } else {
+                    None
+                },
                 total_frequency,
                 doc_frequency,
             });
@@ -553,50 +680,55 @@ impl PostingList {
             weights.push(reader.read_f32()?);
         }
 
-        // Section 4: positions.
-        let positions_per_posting: Vec<Option<Vec<u32>>> = if any_positions {
-            let mut out = Vec::with_capacity(n);
+        // Section 4: positions (only materialised when at least one posting
+        // carries them; absent otherwise to keep the SoA path zero-allocation
+        // for the common BM25 / boolean case).
+        let positions = if any_positions {
+            let mut out: Vec<Option<Vec<u32>>> = Vec::with_capacity(n);
             for _ in 0..n {
                 let has = reader.read_u8()? != 0;
                 if has {
                     let count = reader.read_varint()? as usize;
-                    let mut positions = Vec::with_capacity(count);
+                    let mut p = Vec::with_capacity(count);
                     let mut prev_pos = 0u32;
                     for _ in 0..count {
                         let delta = reader.read_varint()? as u32;
                         let pos = prev_pos + delta;
-                        positions.push(pos);
+                        p.push(pos);
                         prev_pos = pos;
                     }
-                    out.push(Some(positions));
+                    out.push(Some(p));
                 } else {
                     out.push(None);
                 }
             }
-            out
+            Some(out)
         } else {
-            (0..n).map(|_| None).collect()
+            None
         };
 
-        let postings: Vec<Posting> = doc_ids
-            .into_iter()
-            .zip(frequencies)
-            .zip(weights)
-            .zip(positions_per_posting)
-            .map(|(((did, freq), w), pos)| Posting {
-                doc_id: did as u64,
-                frequency: freq,
-                positions: pos,
-                weight: w,
-            })
-            .collect();
-
-        Ok(PostingList {
+        Ok(DecodedPostingList {
             term,
-            postings,
+            doc_ids,
+            frequencies,
+            weights,
+            positions,
             total_frequency,
             doc_frequency,
         })
+    }
+
+    /// Decode a posting list previously written by [`Self::encode`] into the
+    /// AoS [`Vec<Posting>`] form. Thin wrapper over [`Self::decode_soa`] kept
+    /// for callers that need positions per `Posting` or want a back-compat
+    /// view.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The structured input reader positioned at a posting-list
+    ///   header.
+    pub fn decode<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
+        Ok(Self::decode_soa(reader)?.into_posting_list())
     }
 }
 
@@ -1316,6 +1448,102 @@ mod tests {
 
         assert_eq!(decoded.postings.len(), original.postings.len());
         for (orig, dec) in original.postings.iter().zip(decoded.postings.iter()) {
+            assert_eq!(orig, dec);
+        }
+    }
+
+    /// `decode_soa` must produce the same data as the AoS `decode` path
+    /// across full-block / tail / mixed-positions sizes. This protects the
+    /// fast SoA path against drift from the back-compat AoS path.
+    #[test]
+    fn test_decode_soa_matches_decode_aos() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        for &(n, with_pos) in &[
+            (0usize, false),
+            (1, false),
+            (1, true),
+            (127, false),
+            (128, true),
+            (129, false),
+            (256, true),
+            (1000, false),
+        ] {
+            let mut original = PostingList::new(format!("term_n{n}_p{with_pos}"));
+            for i in 0..n {
+                let did = (i as u64) * 3 + 1;
+                let freq = ((i % 7) + 1) as u32;
+                let weight = 0.25 + (i % 4) as f32 * 0.5;
+                let p = if with_pos {
+                    let mut positions = Vec::with_capacity(freq as usize);
+                    let mut p = (i % 11) as u32;
+                    for _ in 0..freq {
+                        positions.push(p);
+                        p += 2;
+                    }
+                    Posting::with_positions(did, positions).with_weight(weight)
+                } else {
+                    Posting::with_frequency(did, freq).with_weight(weight)
+                };
+                original.add_posting(p);
+            }
+
+            let path = format!("soa_match_n{n}_p{with_pos}.bin");
+            {
+                let output = storage.create_output(&path).unwrap();
+                let mut writer = StructWriter::new(output);
+                original.encode(&mut writer).unwrap();
+                writer.close().unwrap();
+            }
+
+            // Decode through both paths and compare.
+            let aos_decoded = {
+                let input = storage.open_input(&path).unwrap();
+                let mut reader = StructReader::new(input).unwrap();
+                PostingList::decode(&mut reader).unwrap()
+            };
+            let soa_decoded = {
+                let input = storage.open_input(&path).unwrap();
+                let mut reader = StructReader::new(input).unwrap();
+                PostingList::decode_soa(&mut reader).unwrap()
+            };
+
+            assert_eq!(aos_decoded.term, soa_decoded.term);
+            assert_eq!(aos_decoded.total_frequency, soa_decoded.total_frequency);
+            assert_eq!(aos_decoded.doc_frequency, soa_decoded.doc_frequency);
+            assert_eq!(aos_decoded.postings.len(), soa_decoded.len());
+            for (i, p) in aos_decoded.postings.iter().enumerate() {
+                assert_eq!(p.doc_id as u32, soa_decoded.doc_ids[i], "doc_id at {i}");
+                assert_eq!(p.frequency, soa_decoded.frequencies[i], "freq at {i}");
+                assert_eq!(p.weight, soa_decoded.weights[i], "weight at {i}");
+                let soa_pos = soa_decoded.positions.as_ref().and_then(|v| v[i].clone());
+                assert_eq!(p.positions, soa_pos, "positions at {i}");
+            }
+        }
+    }
+
+    /// `DecodedPostingList::from_posting_list` followed by
+    /// `into_posting_list` must round-trip every field on both
+    /// positions-present and positions-absent shapes.
+    #[test]
+    fn test_decoded_posting_list_aos_soa_roundtrip() {
+        let mut list = PostingList::new("term".to_string());
+        for i in 0..200u64 {
+            let mut p = Posting::with_frequency(i * 2 + 7, ((i % 5) + 1) as u32)
+                .with_weight(0.5 + (i % 3) as f32);
+            if i % 4 == 0 {
+                p.add_position((i % 13) as u32);
+                p.add_position(((i % 13) + 4) as u32);
+            }
+            list.add_posting(p);
+        }
+
+        let soa = DecodedPostingList::from_posting_list(&list);
+        assert_eq!(soa.len(), list.postings.len());
+        let rebuilt = soa.into_posting_list();
+        assert_eq!(rebuilt.term, list.term);
+        assert_eq!(rebuilt.total_frequency, list.total_frequency);
+        assert_eq!(rebuilt.doc_frequency, list.doc_frequency);
+        for (orig, dec) in list.postings.iter().zip(rebuilt.postings.iter()) {
             assert_eq!(orig, dec);
         }
     }
