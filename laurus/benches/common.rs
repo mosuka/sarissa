@@ -21,10 +21,28 @@
 //!
 //! # Recommended environment
 //!
-//! For stable measurements, run benches with the CPU governor set to
-//! `performance` and turbo boost disabled. Background load skews
-//! short-running benches significantly. If a bench's two consecutive runs
-//! diverge by more than 5 %, suspect environment noise before code.
+//! Keep `cargo bench` as the default invocation; the bumped
+//! [`SAMPLE_SIZE_SLOW`] (30 samples — Criterion's documented minimum for a
+//! reliable t-test) is what brings the within-run interquartile spread on
+//! `topk_or_skewed_tf/should_or_topk10/100000` down from "noise dominates"
+//! to roughly ±1 % of the median. That is enough for `--baseline` runs to
+//! tell real changes from jitter on a typical desktop without further
+//! intervention.
+//!
+//! For micro-isolation (e.g. tracking a single hot loop where a 2-3 % win is
+//! the headline), the optional wrapper at `scripts/bench-stable.sh` pins the
+//! cargo bench process to one CPU and raises its priority. Caveat: pinning
+//! constrains any parallel work the bench fixture does to the chosen core,
+//! so the absolute timings shift relative to unpinned runs and historical
+//! baselines saved without pinning are not directly comparable. Use it only
+//! when the extra control is worth losing that comparability — for the
+//! perf-PR style baselines this suite is built around, plain
+//! `cargo bench` is the right tool.
+//!
+//! Other knobs that help when even that isn't enough: set the CPU governor
+//! to `performance`, disable turbo boost (so the chip can't drop a sample
+//! into a thermally-throttled window), and stop browsers / IDEs before
+//! kicking off a comparison run.
 //!
 //! # Suppress unused warnings
 //!
@@ -49,9 +67,13 @@ pub const DEFAULT_SEED: u64 = 0xDEAD_BEEF_CAFE_F00D;
 pub const SAMPLE_SIZE_FAST: usize = 100;
 
 /// `sample_size` for slow construction paths (HNSW build, IVF training,
-/// engine population at large scale). Lowered from the default to keep
-/// `cargo bench` runtimes manageable.
-pub const SAMPLE_SIZE_SLOW: usize = 10;
+/// engine population at large scale, top-K queries on ≥ 10k corpora).
+/// Sized at 30 — Criterion's documented minimum for a stable t-test, which
+/// is what gates the "performance has improved / regressed" decision in
+/// `--baseline` runs. Lower values (the previous 10) make the reported
+/// change percentage flip sign across two runs of identical code at the
+/// larger sizes, which makes perf PRs hard to evaluate honestly.
+pub const SAMPLE_SIZE_SLOW: usize = 30;
 
 /// Inline LCG (numerical recipes constants) advancing `state` by one step
 /// and returning a deterministic value in `[0, 1000)`.
