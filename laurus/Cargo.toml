@@ -215,3 +215,10 @@ lindera = { version = "3.0.7", features = [
     "embed-cc-cedict",
 ] }
 tokio-test = "0.4.5"
+
+# Used by the cold-cache bench harness in `laurus/benches/common.rs` to
+# call `posix_fadvise(POSIX_FADV_DONTNEED)` on Linux. Already a
+# transitive runtime dep through other crates, so listing it explicitly
+# here adds no compile cost.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"

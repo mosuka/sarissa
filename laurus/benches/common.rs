@@ -140,3 +140,108 @@ pub fn lcg_next_unit(state: &mut u64) -> f32 {
 pub fn lcg_vec_unit(state: &mut u64, dim: usize) -> Vec<f32> {
     (0..dim).map(|_| lcg_next_unit(state)).collect()
 }
+
+// ============================================================================
+// Cold-cache bench harness
+// ============================================================================
+//
+// Cold-cache benches simulate "first access from disk" by evicting the
+// OS page cache for an index file before each measured iteration.
+// Without eviction, the kernel keeps the file warm in the page cache
+// after construction (or after the previous sample), so any read into
+// the same byte range hits RAM and the measurement collapses to a
+// memcpy benchmark.
+//
+// On Linux, `posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED)` is the
+// canonical knob for this — it requests that the kernel drop the
+// file's clean pages from the page cache. It is non-destructive
+// (dirty pages stay), needs no root, and is precisely scoped to the
+// file being benchmarked.
+//
+// Other operating systems do not expose an equivalent at this level
+// (macOS' `F_NOCACHE` applies to a fd's future I/O rather than evicting
+// existing pages; Windows has no public API for it). On those hosts
+// the helpers below are best-effort no-ops and the cold-cache numbers
+// will silently conflate with warm-cache state — call this out
+// explicitly in any PR that posts numbers measured off Linux.
+
+/// Evict the OS page cache for a single file. Best-effort: real eviction
+/// on Linux via `posix_fadvise(POSIX_FADV_DONTNEED)`; no-op on other
+/// hosts.
+///
+/// # Arguments
+///
+/// * `path` - Absolute or relative path of the file to evict.
+///
+/// # Errors
+///
+/// Returns the underlying `std::io::Error` if the file cannot be
+/// opened or the syscall fails.
+pub fn evict_file_cache<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<()> {
+    evict_file_cache_impl(path.as_ref())
+}
+
+#[cfg(target_os = "linux")]
+fn evict_file_cache_impl(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    let file = std::fs::File::open(path)?;
+    // SAFETY: `posix_fadvise` is FFI-safe. The fd is alive for the
+    // duration of the call (held by `file`); offset 0 + len 0 is the
+    // documented "to end of file" form; `POSIX_FADV_DONTNEED` is a
+    // valid advice constant. The return value is the errno (0 on
+    // success), not a pointer, so there is nothing to dereference.
+    let r = unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+    if r != 0 {
+        return Err(std::io::Error::from_raw_os_error(r));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn evict_file_cache_impl(_path: &std::path::Path) -> std::io::Result<()> {
+    // Best-effort no-op. See module-level note above.
+    Ok(())
+}
+
+/// Evict the OS page cache for every regular file under `dir`,
+/// recursively. Used by cold-cache benches that touch a whole
+/// segment directory (`*.dict`, `*.post`, `*.docs`, etc. are all
+/// flushed in one call).
+///
+/// # Arguments
+///
+/// * `dir` - Directory to walk recursively.
+///
+/// # Errors
+///
+/// Returns on the first error from either `read_dir` or
+/// [`evict_file_cache`]. Partial eviction may have already happened
+/// when the error is returned; for cold-cache bench correctness, treat
+/// any error from this helper as "unable to guarantee cold cache" and
+/// abort the bench.
+pub fn evict_directory_cache<P: AsRef<std::path::Path>>(dir: P) -> std::io::Result<()> {
+    fn walk(dir: &std::path::Path) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                walk(&path)?;
+            } else if file_type.is_file() {
+                evict_file_cache(&path)?;
+            }
+        }
+        Ok(())
+    }
+    walk(dir.as_ref())
+}
+
+/// Returns `true` if the host supports real page-cache eviction via
+/// the helpers above. Cold-cache benches should consult this and emit
+/// a one-line warning when running on a host where eviction is a
+/// no-op, so PR readers don't trust the resulting numbers as
+/// "cold-cache" silently.
+pub const fn cold_cache_eviction_supported() -> bool {
+    cfg!(target_os = "linux")
+}
