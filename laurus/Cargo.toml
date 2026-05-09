@@ -148,6 +148,10 @@ name = "lexical_search_bench"
 harness = false
 
 [[bench]]
+name = "dict_lookup_bench"
+harness = false
+
+[[bench]]
 name = "vector_search_bench"
 harness = false
 
