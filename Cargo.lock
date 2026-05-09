@@ -2582,6 +2582,7 @@ dependencies = [
  "hf-hub",
  "image",
  "lazy_static",
+ "libc",
  "lindera",
  "lindera-dictionary",
  "log",
