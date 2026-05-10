@@ -459,7 +459,7 @@ impl MergeEngine {
                 builder.add_term(term.clone(), term_info);
             }
 
-            let dictionary = builder.build_sorted();
+            let dictionary = builder.build()?;
             dictionary.write_to_storage(&mut writer)?;
             writer.close()?;
             file_paths.push(dict_file);

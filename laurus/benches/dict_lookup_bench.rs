@@ -1,14 +1,17 @@
 //! Criterion benchmarks for the lexical term dictionary.
 //!
-//! Exercises [`HybridTermDictionary`] at scales (10k / 100k / 1M unique
-//! terms) that the rest of the bench suite does not reach. Required as
-//! the prerequisite for evaluating the Lucene `BlockTreeTermsWriter`-style
-//! port tracked in #487 (and, more broadly, the Tier 2 dict item in
-//! umbrella #463): the existing `lexical/fuzzy_query` fixture caps at
-//! 5000 terms, which is well below the corpus size where any
-//! BlockTreeTerms-style indirection (FST over per-block heads + flat
-//! front-coded term bytes inside each block) starts to win against the
-//! current parallel-array `(Vec<String>, Vec<TermInfo>)` representation.
+//! Exercises the active term dictionary implementation at scales
+//! (10k / 100k / 1M unique terms) that the rest of the bench suite
+//! does not reach.
+//!
+//! Issue #487 ports the dictionary from a parallel-array
+//! `(Vec<String>, Vec<TermInfo>)` representation
+//! (`HybridTermDictionary`, removed in Phase 9) to a Lucene
+//! `BlockTreeTermsWriter`-style block + FST structure
+//! ([`BlockTermDictionary`]). This bench is the
+//! before-and-after measurement: same probes, same term corpus,
+//! comparing the new dictionary against the `pre-fst-port`
+//! criterion baseline saved on `main`.
 //!
 //! # Scope
 //!
@@ -67,7 +70,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use common::{DEFAULT_SEED, SAMPLE_SIZE_SLOW};
 
 use laurus::lexical::index::structures::dictionary::{
-    HybridTermDictionary, TermDictionaryBuilder, TermInfo,
+    BlockTermDictionary, TermDictionaryBuilder, TermInfo,
 };
 
 /// Corpus sizes the dict bench sweeps. Chosen to bracket the crossover
@@ -77,7 +80,9 @@ use laurus::lexical::index::structures::dictionary::{
 /// - `10_000` — small corpus, baseline win for a flat sorted Vec.
 /// - `100_000` — typical mid-sized index; expected crossover region.
 /// - `1_000_000` — Lucene's documented sweet spot for FST + block-tree.
-const CORPUS_SIZES: &[usize] = &[10_000, 100_000, 1_000_000];
+/// - `10_000_000` — production-target scale (10M+ terms / segment) for
+///   #487 evaluation. Adds ~1 minute per group to the run time.
+const CORPUS_SIZES: &[usize] = &[10_000, 100_000, 1_000_000, 10_000_000];
 
 /// Number of probe terms drawn for the `get_*` and prefix microbenches.
 /// Picked at 100 so each `b.iter` body amortises the criterion harness
@@ -115,7 +120,7 @@ fn lcg_term(state: &mut u64, min_len: usize, max_len: usize) -> String {
 /// terms (each guaranteed to be present in the dictionary). Probes are
 /// spaced at roughly even ordinals so the lookup pattern doesn't
 /// concentrate on a single hash bucket / FST branch.
-fn build_dict_with_hit_probes(n: usize, probe_count: usize) -> (HybridTermDictionary, Vec<String>) {
+fn build_dict_with_hit_probes(n: usize, probe_count: usize) -> (BlockTermDictionary, Vec<String>) {
     assert!(n >= probe_count, "n must be at least probe_count");
 
     // Generate `n` unique terms via BTreeSet (dedupes the LCG output).
@@ -134,7 +139,7 @@ fn build_dict_with_hit_probes(n: usize, probe_count: usize) -> (HybridTermDictio
     for (i, term) in terms.iter().enumerate() {
         builder.add_term(term.clone(), TermInfo::new(i as u64 * 16, 64, 1, 1));
     }
-    let dict = builder.build_hybrid();
+    let dict = builder.build().expect("build BlockTermDictionary");
 
     // Probe sampling: spread evenly across the dictionary by ordinal so
     // every probe lands at a different position in the sorted layout.

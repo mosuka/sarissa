@@ -52,7 +52,7 @@ graph LR
 
 | コンポーネント | 説明 |
 | :--- | :--- |
-| **Term Dictionary** | インデックス内のすべてのユニークなタームのソート済みリスト。高速なプレフィックス検索をサポート |
+| **Term Dictionary** | インデックス内のユニークなタームのソート済み辞書。**ディスク形式**は Lucene `BlockTreeTermsWriter` 互換のブロックツリー（FST + 128 ターム単位の front-coded ブロック + bit-packed `TermInfo`）でファイルサイズを最小化。**メモリ形式**は load 時に構築する `AHashMap` インデックス + parallel-array 形式のクエリ層で、`get` / `iter` / `find_prefix` を parallel-array 同等のレイテンシで提供。完全一致検索、順序イテレーション、プレフィックススキャンに対応 |
 | **Posting Lists** | 各タームに対する、ドキュメント ID とメタデータ（ターム頻度、位置情報）のリスト |
 | **Doc Values** | 数値フィールドや日付フィールドでのソート/フィルター操作のためのカラム指向ストレージ |
 
@@ -66,6 +66,49 @@ Posting List の各エントリには以下の情報が含まれます。
 | Term Frequency | そのドキュメント内でタームが出現する回数 |
 | Positions（オプション） | ドキュメント内でタームが出現する位置（フレーズクエリに必要） |
 | Weight | このポスティングのスコアウェイト |
+
+### Term Dictionary の 2 層構造
+
+ディクショナリは **ディスク** と **メモリ** で別の表現を持ち、
+それぞれの最適化目標を分離しています。
+
+- **ディスク層** — `.dict` ファイルは Lucene `BlockTreeTermsWriter`
+  風のブロックツリーレイアウト（マジック `LTDD`、スキーマ v1）。
+  100k ユニーク 5-10 バイトタームのコーパスで `.dict` は ~12.5
+  バイト/ターム と、旧 parallel-array 形式比 **約 70% 削減**
+- **メモリ層** — build / load 時に `AHashMap<term, ordinal>` 索引、
+  ordinal indexed の `Vec<String>`、単一コピーの `Arc<[TermInfo]>`
+  を構築。`get` / `iter` / `find_prefix` / `find_range` はすべて
+  この in-memory 構造のみを参照するので、per-query レイテンシは
+  旧 parallel-array 実装と同等（ FST traversal や block 内線形
+  スキャンのコストを払わない）
+
+ディスク形式のスクラッチ (FST + BlockSection bytes) は
+[`BlockTermDictionary::write_to_storage`] でセグメントマージ時に
+再エンコードせず再シリアライズするためにのみ保持しています。
+
+```text
+[Header                ]  マジック "LTDD" + バージョン
+[FstSection            ]  各ブロック末尾タームを key、ブロックの開始
+                          バイトオフセットを value とする fst::Map<u64>
+[BlockSection          ]  128 ターム単位のブロックを連結。各ブロックは
+                          front-coded タームバイト列、bit-packed の
+                          固定長 TermInfo ブロック、可変長の per-term
+                          Block-Max-WAND メタデータ配列を含む
+[Footer                ]  全タームカウント + ブロックカウント
+```
+
+- 検索: FST を 1 回辿って (`O(|term|)`) target を含むブロックを特定
+  し、そのブロック内（≤ 128 件）を front-coded で線形スキャン
+- イテレーション: FST を経由せず BlockSection を順次走査。各ブロック
+  の front-coding バッファを再利用するため、per-step コストは
+  front-coding decode（≈ 5–10 ns）のみ
+- プレフィックススキャン: FST で先頭ブロックを特定し、prefix が一致
+  しなくなるまで順次ブロックを走査
+
+flat per-term FST と比較して block-head FST は 1〜2 桁小さく、
+front-coded タームバイト列と bit-packed `TermInfo` の組み合わせで
+production 規模ではディスクサイズが 50〜80 % 削減されます。
 
 ## 数値フィールドと日付フィールド
 
@@ -121,7 +164,7 @@ graph TB
 
 | ファイル拡張子 | 内容 |
 | :--- | :--- |
-| `.dict` | Term Dictionary（ソート済みターム + メタデータオフセット） |
+| `.dict` | Term Dictionary。v1 `LTDD` ブロックツリーレイアウト（FST + 128 ターム単位の front-coded ブロック + bit-packed `TermInfo`）。セグメント open 時に `AHashMap` バックの in-memory クエリ層へ展開 |
 | `.post` | Posting Lists（ドキュメント ID、ターム頻度、位置情報） |
 | `.bkd` | 数値・日付・`Geo`（2D）・`Geo3d`（3D ECEF）フィールドの [BKD ツリー](../bkd_tree.md) データ |
 | `.docs` | 格納されたフィールド値（元のドキュメント内容） |

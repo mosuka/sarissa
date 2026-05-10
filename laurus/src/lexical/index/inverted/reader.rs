@@ -21,7 +21,7 @@ use crate::lexical::index::inverted::core::terms::{
 };
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::structures::bkd_tree::{BKDReader, BKDTree};
-use crate::lexical::index::structures::dictionary::HybridTermDictionary;
+use crate::lexical::index::structures::dictionary::BlockTermDictionary;
 use crate::lexical::index::structures::dictionary::TermInfo;
 use crate::lexical::index::structures::doc_values::DocValuesReader;
 use crate::lexical::reader::FieldStats;
@@ -386,7 +386,7 @@ pub struct SegmentReader {
     storage: Arc<dyn Storage>,
 
     /// Term dictionary for efficient term lookup.
-    term_dictionary: RwLock<Option<Arc<HybridTermDictionary>>>,
+    term_dictionary: RwLock<Option<Arc<BlockTermDictionary>>>,
 
     /// Cached stored documents.
     stored_documents: RwLock<Option<BTreeMap<u64, Document>>>,
@@ -491,7 +491,7 @@ impl SegmentReader {
 
         if let Ok(input) = self.storage.open_input(&dict_file) {
             let mut reader = StructReader::new(input)?;
-            let dictionary = HybridTermDictionary::read_from_storage(&mut reader).map_err(|e| {
+            let dictionary = BlockTermDictionary::read_from_storage(&mut reader).map_err(|e| {
                 LaurusError::index(format!(
                     "Failed to read term dictionary from {dict_file}: {e}"
                 ))
