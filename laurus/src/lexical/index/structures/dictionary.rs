@@ -1,17 +1,46 @@
 //! Term dictionary data structures for mapping terms to posting list metadata.
 //!
-//! This module provides multiple term dictionary implementations—sorted, hash-based,
-//! and hybrid—for efficiently mapping terms to their [`TermInfo`] (posting list
-//! offset, length, document frequency, and total frequency). A [`TermDictionaryBuilder`]
-//! is also provided for constructing any of the dictionary variants.
+//! This module provides [`BlockTermDictionary`] — a Lucene
+//! `BlockTreeTermsWriter`-style dictionary that maps each term to its
+//! [`TermInfo`] (posting list offset, length, document frequency, total
+//! frequency, and Block-Max-WAND metadata). The dictionary is built
+//! through [`TermDictionaryBuilder`] from an in-memory `BTreeMap`.
+//!
+//! See Issue [#487](https://github.com/mosuka/laurus/issues/487) for
+//! the design rationale and the migration path away from the legacy
+//! parallel-array / `AHashMap` representation that this module replaced.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use ahash::AHashMap;
+use fst::Map as FstMap;
 
 use crate::error::{LaurusError, Result};
 use crate::storage::structured::{StructReader, StructWriter};
 use crate::storage::{StorageInput, StorageOutput};
+
+// Sub-modules backing the new Lucene BlockTreeTerms-style
+// implementation (Issue #487). These will gradually take over as the
+// legacy `Hybrid` / `Sorted` / `Hash` dictionaries are decommissioned
+// in Phase 9.
+mod block_max_data;
+mod block_reader;
+mod builder;
+mod front_coding;
+mod term_info_block;
+
+/// Magic number for the v1 BlockTermDictionary on-disk format ("LTDD"
+/// = Laurus Term Dictionary, block-tree). Issue #487.
+const MAGIC_LTDD: u32 = 0x4C544444;
+/// Legacy magic for the removed sorted-array dictionary ("STDC").
+/// Reading a file with this magic now yields an explicit "rebuild
+/// required" error.
+const LEGACY_MAGIC_STDC: u32 = 0x53544443;
+/// Legacy magic for the removed hash-table dictionary ("HTDC").
+/// Reading a file with this magic now yields an explicit "rebuild
+/// required" error.
+const LEGACY_MAGIC_HTDC: u32 = 0x48544443;
 
 /// One block's max-impact metadata for Block-Max-WAND (#403 PR-C).
 ///
@@ -125,432 +154,297 @@ impl TermInfo {
     }
 }
 
-/// A sorted array-based term dictionary for prefix queries and ordered iteration.
-#[derive(Debug, Clone)]
-pub struct SortedTermDictionary {
-    /// Sorted terms.
-    terms: Vec<String>,
-    /// Term info for each term (parallel array).
-    term_infos: Vec<TermInfo>,
+/// Lucene `BlockTreeTermsWriter`-style block term dictionary
+/// (Issue [#487](https://github.com/mosuka/laurus/issues/487)).
+///
+/// Replaces the legacy parallel-array / `AHashMap`-backed dictionary
+/// triad (removed in #487 Phase 9) with a two-layer structure designed
+/// for production scale (10M-100M+ terms / segment):
+///
+/// - an [`fst::Map`] keyed by each block's **last** term, valued by the
+///   block's start offset within the BlockSection — typically 1-2
+///   orders of magnitude smaller than a flat per-term FST
+/// - a flat BlockSection holding 128-term blocks, each with
+///   front-coded term bytes, a bit-packed
+///   [`term_info_block::FixedTermInfoBlock`], and a
+///   [`block_max_data::BlockMaxData`] for variable-length per-term
+///   block_max arrays
+///
+/// Lookup: `fst.range().ge(target).into_stream().next()` identifies the
+/// block containing `target`; an in-block linear scan over the
+/// front-coded term bytes finds the exact match.
+///
+/// `iter()` walks the BlockSection sequentially without consulting the
+/// FST, so per-step cost is the front-coding decode (≈ 5–10 ns) rather
+/// than FST DFA traversal.
+///
+/// # Two-layer storage
+///
+/// The dictionary keeps **two equivalent representations** of the same
+/// data, optimised for different access patterns:
+///
+/// 1. **Disk-format scratch** (`fst` + `block_section`) — the compact
+///    FST + 128-term BlockSection layout written to `.dict`. Kept in
+///    memory so [`Self::write_to_storage`] can re-emit the segment
+///    without re-encoding from scratch.
+/// 2. **In-memory query layer** (`map` + `sorted_terms` + `term_infos`)
+///    — populated at build / load time so that `get` / `iter` /
+///    `find_prefix` operate at parallel-array / `AHashMap` speed
+///    rather than paying the in-block linear scan that the
+///    disk-format alone would require.
+///
+/// Both representations share a single source of truth: the
+/// `term_infos` array is `Arc<[TermInfo]>` (single copy across `map`'s
+/// ordinal index and any reader), and `sorted_terms` parallels it in
+/// ascending term order.
+#[derive(Clone, Debug)]
+pub struct BlockTermDictionary {
+    // ----- Disk-format scratch -----
+    /// FST: each block's last term bytes → block start offset within
+    /// `block_section`.
+    fst: Arc<FstMap<Vec<u8>>>,
+    /// Concatenated block bytes (one entry per block). Shared via
+    /// `Arc` so that cloning a `BlockTermDictionary` does not copy
+    /// the term data.
+    block_section: Arc<[u8]>,
+
+    // ----- In-memory query layer -----
+    /// `term -> ordinal (0..total_term_count)` index for `O(1)` `get`.
+    map: AHashMap<String, u32>,
+    /// `ordinal -> term`, in ascending term order. Used by `iter`,
+    /// `find_prefix`, and `find_range`.
+    sorted_terms: Vec<String>,
+    /// `ordinal -> TermInfo`. Single copy shared via `Arc`.
+    term_infos: Arc<[TermInfo]>,
+
+    /// Total number of terms across all blocks.
+    total_term_count: u64,
+    /// Number of blocks in `block_section`.
+    block_count: u32,
 }
 
-impl SortedTermDictionary {
-    /// Create a new empty sorted term dictionary.
-    pub fn new() -> Self {
-        SortedTermDictionary {
-            terms: Vec::new(),
-            term_infos: Vec::new(),
-        }
-    }
-
-    /// Create from a map of terms to term info.
-    pub fn from_map(map: BTreeMap<String, TermInfo>) -> Self {
-        let mut terms = Vec::with_capacity(map.len());
-        let mut term_infos = Vec::with_capacity(map.len());
-
-        for (term, info) in map.into_iter() {
-            terms.push(term);
-            term_infos.push(info);
-        }
-
-        SortedTermDictionary { terms, term_infos }
-    }
-
-    /// Look up a term and return its info.
+impl BlockTermDictionary {
+    /// Look up a term and return a borrowed [`TermInfo`] reference.
+    ///
+    /// Uses the in-memory `AHashMap` index for `O(1)` lookup. The
+    /// disk-format fields (`fst`, `block_section`) are not consulted —
+    /// they exist only so the dictionary can be re-serialised via
+    /// [`Self::write_to_storage`].
+    ///
+    /// Returns `None` if `term` is not present in the dictionary.
+    /// Callers that need an owned `TermInfo` should call `.cloned()`.
     pub fn get(&self, term: &str) -> Option<&TermInfo> {
-        match self
-            .terms
-            .binary_search_by(|probe| probe.as_str().cmp(term))
-        {
-            Ok(index) => Some(&self.term_infos[index]),
-            Err(_) => None,
-        }
+        let ordinal = *self.map.get(term)? as usize;
+        Some(&self.term_infos[ordinal])
     }
 
-    /// Find terms with the given prefix.
-    pub fn find_prefix(&self, prefix: &str) -> Vec<(&str, &TermInfo)> {
-        let start_pos = match self
-            .terms
-            .binary_search_by(|probe| probe.as_str().cmp(prefix))
-        {
-            Ok(pos) => pos,
-            Err(pos) => pos,
-        };
-
-        let mut results = Vec::new();
-        for i in start_pos..self.terms.len() {
-            if self.terms[i].starts_with(prefix) {
-                results.push((self.terms[i].as_str(), &self.term_infos[i]));
-            } else {
-                break;
-            }
-        }
-
-        results
-    }
-
-    /// Find terms in a range.
-    pub fn find_range(&self, start: &str, end: &str) -> Vec<(&str, &TermInfo)> {
-        let start_pos = match self
-            .terms
-            .binary_search_by(|probe| probe.as_str().cmp(start))
-        {
-            Ok(pos) => pos,
-            Err(pos) => pos,
-        };
-
-        let end_pos = match self.terms.binary_search_by(|probe| probe.as_str().cmp(end)) {
-            Ok(pos) => pos, // end is exclusive, so don't include it
-            Err(pos) => pos,
-        };
-
-        let mut results = Vec::new();
-        for i in start_pos..end_pos.min(self.terms.len()) {
-            results.push((self.terms[i].as_str(), &self.term_infos[i]));
-        }
-
-        results
-    }
-
-    /// Get the number of terms.
-    pub fn len(&self) -> usize {
-        self.terms.len()
-    }
-
-    /// Check if empty.
-    pub fn is_empty(&self) -> bool {
-        self.terms.is_empty()
-    }
-
-    /// Get an iterator over all terms.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &TermInfo)> {
-        self.terms
+    /// Iterate `(term, term_info)` borrowed pairs in ascending term
+    /// order. Yields references — no per-term `String` / `TermInfo`
+    /// clones — so iteration cost matches the legacy parallel-array
+    /// representation.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &TermInfo)> + '_ {
+        self.sorted_terms
             .iter()
             .zip(self.term_infos.iter())
             .map(|(term, info)| (term.as_str(), info))
     }
 
+    /// Collect borrowed `(term, term_info)` pairs whose term begins
+    /// with `prefix`, in ascending term order.
+    ///
+    /// Implemented eagerly via binary search over `sorted_terms`. The
+    /// FST is not consulted on this path.
+    pub fn find_prefix(&self, prefix: &str) -> Vec<(&str, &TermInfo)> {
+        // Binary-search for the first ordinal whose term ≥ prefix.
+        let start = self
+            .sorted_terms
+            .binary_search_by(|probe| probe.as_str().cmp(prefix))
+            .unwrap_or_else(|insert_at| insert_at);
+
+        let mut result = Vec::new();
+        for i in start..self.sorted_terms.len() {
+            let term = &self.sorted_terms[i];
+            if term.starts_with(prefix) {
+                result.push((term.as_str(), &self.term_infos[i]));
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
+    /// Collect borrowed `(term, term_info)` pairs in the half-open
+    /// range `[start, end)`, in ascending term order.
+    ///
+    /// Implemented eagerly via binary search over `sorted_terms`.
+    pub fn find_range(&self, start: &str, end: &str) -> Vec<(&str, &TermInfo)> {
+        if start >= end {
+            return Vec::new();
+        }
+
+        let start_idx = self
+            .sorted_terms
+            .binary_search_by(|probe| probe.as_str().cmp(start))
+            .unwrap_or_else(|insert_at| insert_at);
+        let end_idx = self
+            .sorted_terms
+            .binary_search_by(|probe| probe.as_str().cmp(end))
+            .unwrap_or_else(|insert_at| insert_at);
+
+        let mut result = Vec::with_capacity(end_idx.saturating_sub(start_idx));
+        for i in start_idx..end_idx.min(self.sorted_terms.len()) {
+            result.push((self.sorted_terms[i].as_str(), &self.term_infos[i]));
+        }
+        result
+    }
+
+    /// Total number of terms in the dictionary.
+    pub fn len(&self) -> u64 {
+        self.total_term_count
+    }
+
+    /// Returns `true` if the dictionary contains no terms.
+    pub fn is_empty(&self) -> bool {
+        self.total_term_count == 0
+    }
+
+    /// Number of blocks in the dictionary's BlockSection.
+    pub fn block_count(&self) -> u32 {
+        self.block_count
+    }
+
     /// Read the dictionary from storage.
     ///
-    /// Supports both **v1** (legacy) and **v2** (#403 PR-B2) layouts:
+    /// Format (v1 `LTDD` layout):
     ///
-    /// - v1 entries store only the four `u64` fields. `max_score_factor`
-    ///   is filled with `0.0`, which the BM25 scorer treats as "fall
-    ///   back to the loose `k1 + 1` upper bound" — segments produced
-    ///   before this PR continue to load and search correctly.
-    /// - v2 entries append a single `f32` per term holding the
-    ///   precomputed tightened TF-component upper bound.
+    /// ```text
+    /// [magic:              u32 = 0x4C544444 "LTDD"]
+    /// [version:            u32 = 1]
+    /// [fst_bytes_len:      u32]
+    /// [fst_bytes:          u8 × fst_bytes_len]
+    /// [block_section_len:  u32]
+    /// [block_section:      u8 × block_section_len]
+    /// [total_term_count:   u64]
+    /// [block_count:        u32]
+    /// [reserved:           u32 = 0]
+    /// ```
+    ///
+    /// Rejects legacy `STDC` (sorted) / `HTDC` (hash) magic numbers
+    /// with an explicit error — pre-release semantics apply.
     pub fn read_from_storage<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
-        // Read header
         let magic = reader.read_u32()?;
-        if magic != 0x53544443 {
-            // "STDC"
-            return Err(LaurusError::index("Invalid sorted dictionary magic number"));
+        match magic {
+            MAGIC_LTDD => {} // proceed
+            LEGACY_MAGIC_STDC | LEGACY_MAGIC_HTDC => {
+                return Err(LaurusError::index(
+                    "Unsupported legacy term dictionary format. Rebuild required.",
+                ));
+            }
+            _ => {
+                return Err(LaurusError::index(format!(
+                    "Invalid term dictionary magic: 0x{magic:08X}"
+                )));
+            }
         }
 
         let version = reader.read_u32()?;
-        if version != 1 && version != 2 && version != 3 {
+        if version != 1 {
             return Err(LaurusError::index(format!(
-                "Unsupported sorted dictionary version: {version}"
+                "Unsupported BlockTermDictionary version: {version}"
             )));
         }
 
-        let term_count = reader.read_varint()? as usize;
-        let mut terms = Vec::with_capacity(term_count);
-        let mut term_infos = Vec::with_capacity(term_count);
+        let fst_bytes_len = reader.read_u32()? as usize;
+        let fst_bytes = reader.read_raw(fst_bytes_len)?;
+        let fst = FstMap::new(fst_bytes)
+            .map_err(|e| LaurusError::index(format!("FST parse error: {e}")))?;
 
-        // Read terms and term infos
-        for _ in 0..term_count {
-            let term = reader.read_string()?;
-            let posting_offset = reader.read_u64()?;
-            let posting_length = reader.read_u64()?;
-            let doc_frequency = reader.read_u64()?;
-            let total_frequency = reader.read_u64()?;
-            let max_score_factor = if version >= 2 {
-                reader.read_f32()?
-            } else {
-                0.0
-            };
-            // v3: per-block (last_doc_id, max_factor) array. v1/v2
-            // entries decode with an empty `block_max`, which scorers
-            // treat as "fall back to the term-level
-            // `max_score_factor`" (#403 PR-C).
-            let block_max = if version >= 3 {
-                let block_count = reader.read_varint()? as usize;
-                let mut blocks = Vec::with_capacity(block_count);
-                for _ in 0..block_count {
-                    let last_doc_id = reader.read_u64()?;
-                    let mf = reader.read_f32()?;
-                    blocks.push(BlockMax {
-                        last_doc_id,
-                        max_factor: mf,
-                    });
-                }
-                blocks
-            } else {
-                Vec::new()
-            };
+        let block_section_len = reader.read_u32()? as usize;
+        let block_section_vec = reader.read_raw(block_section_len)?;
 
-            terms.push(term);
-            term_infos.push(TermInfo {
-                posting_offset,
-                posting_length,
-                doc_frequency,
-                total_frequency,
-                max_score_factor,
-                block_max,
-            });
-        }
+        let total_term_count = reader.read_u64()?;
+        let block_count = reader.read_u32()?;
+        let _reserved = reader.read_u32()?;
 
-        Ok(SortedTermDictionary { terms, term_infos })
-    }
-}
+        let block_section: Arc<[u8]> = Arc::from(block_section_vec.into_boxed_slice());
 
-impl Default for SortedTermDictionary {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+        // Populate the in-memory query layer by streaming the
+        // BlockSection once. After this point, all hot-path queries go
+        // through the in-memory structures; the FST + block_section
+        // remain only for `write_to_storage`.
+        let (map, sorted_terms, term_infos) =
+            populate_in_memory_layer(&block_section, block_count, total_term_count);
 
-/// A hash-based term dictionary for fast random access.
-#[derive(Debug, Clone)]
-pub struct HashTermDictionary {
-    /// Hash map from terms to term info.
-    terms: AHashMap<String, TermInfo>,
-}
-
-impl HashTermDictionary {
-    /// Create a new empty hash term dictionary.
-    pub fn new() -> Self {
-        HashTermDictionary {
-            terms: AHashMap::new(),
-        }
+        Ok(BlockTermDictionary {
+            fst: Arc::new(fst),
+            block_section,
+            map,
+            sorted_terms,
+            term_infos,
+            total_term_count,
+            block_count,
+        })
     }
 
-    /// Create with initial capacity.
-    pub fn with_capacity(capacity: usize) -> Self {
-        HashTermDictionary {
-            terms: AHashMap::with_capacity(capacity),
-        }
-    }
-
-    /// Insert a term with its info.
-    pub fn insert(&mut self, term: String, info: TermInfo) {
-        self.terms.insert(term, info);
-    }
-
-    /// Look up a term and return its info.
-    pub fn get(&self, term: &str) -> Option<&TermInfo> {
-        self.terms.get(term)
-    }
-
-    /// Check if a term exists.
-    pub fn contains(&self, term: &str) -> bool {
-        self.terms.contains_key(term)
-    }
-
-    /// Get the number of terms.
-    pub fn len(&self) -> usize {
-        self.terms.len()
-    }
-
-    /// Check if empty.
-    pub fn is_empty(&self) -> bool {
-        self.terms.is_empty()
-    }
-
-    /// Get an iterator over all terms.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &TermInfo)> {
-        self.terms.iter().map(|(term, info)| (term.as_str(), info))
-    }
-
-    /// Convert to a sorted dictionary.
-    pub fn to_sorted(&self) -> SortedTermDictionary {
-        let map: BTreeMap<String, TermInfo> = self
-            .terms
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        SortedTermDictionary::from_map(map)
-    }
-
-    /// Write to storage in **v3** layout (#403 PR-C). Each entry now
-    /// carries the v2 `max_score_factor: f32` plus a length-prefixed
-    /// per-block `(last_doc_id: u64, max_factor: f32)` array used by
-    /// Block-Max-WAND. See [`SortedTermDictionary::write_to_storage`]
-    /// for the matching format on the sorted side.
+    /// Write the dictionary to storage in the v1 `LTDD` layout.
+    /// See [`Self::read_from_storage`] for the byte layout.
     pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
-        // Write magic number for hash dictionary
-        writer.write_u32(0x48544443)?; // "HTDC"
+        writer.write_u32(MAGIC_LTDD)?;
+        writer.write_u32(1)?; // version
 
-        // Write version
-        writer.write_u32(3)?;
+        let fst_bytes = self.fst.as_fst().as_inner();
+        writer.write_u32(
+            u32::try_from(fst_bytes.len())
+                .map_err(|_| LaurusError::index("FST bytes length exceeds u32::MAX"))?,
+        )?;
+        writer.write_raw(fst_bytes)?;
 
-        // Write number of terms
-        writer.write_varint(self.terms.len() as u64)?;
+        writer.write_u32(
+            u32::try_from(self.block_section.len())
+                .map_err(|_| LaurusError::index("BlockSection length exceeds u32::MAX"))?,
+        )?;
+        writer.write_raw(&self.block_section)?;
 
-        // Write terms and their info
-        for (term, info) in &self.terms {
-            writer.write_string(term)?;
-
-            // Write TermInfo
-            writer.write_u64(info.posting_offset)?;
-            writer.write_u64(info.posting_length)?;
-            writer.write_u64(info.doc_frequency)?;
-            writer.write_u64(info.total_frequency)?;
-            writer.write_f32(info.max_score_factor)?;
-            writer.write_varint(info.block_max.len() as u64)?;
-            for block in &info.block_max {
-                writer.write_u64(block.last_doc_id)?;
-                writer.write_f32(block.max_factor)?;
-            }
-        }
+        writer.write_u64(self.total_term_count)?;
+        writer.write_u32(self.block_count)?;
+        writer.write_u32(0)?; // reserved
 
         Ok(())
     }
 
-    /// Read from storage. Accepts **v1** (legacy), **v2** (#403 PR-B2)
-    /// and **v3** (#403 PR-C) layouts. Older entries fill the missing
-    /// fields with their "unset" defaults — `max_score_factor = 0.0`
-    /// and an empty `block_max` — which scorers treat as "fall back
-    /// to the looser bound" so older segments continue to load.
-    pub fn read_from_storage<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
-        // Read magic number
-        let magic = reader.read_u32()?;
-        if magic != 0x48544443 {
-            // "HTDC"
-            return Err(LaurusError::index("Invalid hash dictionary magic number"));
+    /// Get aggregate statistics about the dictionary.
+    ///
+    /// Walks the dictionary once to compute term-length statistics and
+    /// frequency totals. `memory_size` reports the encoded size of the
+    /// FST plus the BlockSection in bytes.
+    pub fn stats(&self) -> DictionaryStats {
+        let term_count = self.total_term_count as usize;
+
+        let mut total_term_length = 0usize;
+        let mut total_doc_frequency = 0u64;
+        let mut total_term_frequency = 0u64;
+
+        for (term, info) in self.iter() {
+            total_term_length += term.len();
+            total_doc_frequency += info.doc_frequency;
+            total_term_frequency += info.total_frequency;
         }
 
-        // Read version
-        let version = reader.read_u32()?;
-        if version != 1 && version != 2 && version != 3 {
-            return Err(LaurusError::index(format!(
-                "Unsupported hash dictionary version: {version}"
-            )));
+        let avg_term_length = if term_count > 0 {
+            total_term_length as f64 / term_count as f64
+        } else {
+            0.0
+        };
+
+        let memory_size = self.fst.as_fst().as_inner().len() + self.block_section.len();
+
+        DictionaryStats {
+            term_count,
+            memory_size,
+            avg_term_length,
+            total_doc_frequency,
+            total_term_frequency,
         }
-
-        // Read number of terms
-        let term_count = reader.read_varint()? as usize;
-
-        // Read terms and their info
-        let mut terms = AHashMap::with_capacity(term_count);
-
-        for _ in 0..term_count {
-            let term = reader.read_string()?;
-            let posting_offset = reader.read_u64()?;
-            let posting_length = reader.read_u64()?;
-            let doc_frequency = reader.read_u64()?;
-            let total_frequency = reader.read_u64()?;
-            let max_score_factor = if version >= 2 {
-                reader.read_f32()?
-            } else {
-                0.0
-            };
-            let block_max = if version >= 3 {
-                let block_count = reader.read_varint()? as usize;
-                let mut blocks = Vec::with_capacity(block_count);
-                for _ in 0..block_count {
-                    let last_doc_id = reader.read_u64()?;
-                    let mf = reader.read_f32()?;
-                    blocks.push(BlockMax {
-                        last_doc_id,
-                        max_factor: mf,
-                    });
-                }
-                blocks
-            } else {
-                Vec::new()
-            };
-            let info = TermInfo {
-                posting_offset,
-                posting_length,
-                doc_frequency,
-                total_frequency,
-                max_score_factor,
-                block_max,
-            };
-
-            terms.insert(term, info);
-        }
-
-        Ok(HashTermDictionary { terms })
-    }
-}
-
-impl Default for HashTermDictionary {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// A hybrid term dictionary that provides both fast access and prefix queries.
-#[derive(Debug, Clone)]
-pub struct HybridTermDictionary {
-    /// Hash dictionary for fast random access.
-    hash_dict: HashTermDictionary,
-    /// Sorted dictionary for prefix and range queries.
-    sorted_dict: SortedTermDictionary,
-}
-
-impl HybridTermDictionary {
-    /// Create a new hybrid dictionary from a hash dictionary.
-    pub fn from_hash(hash_dict: HashTermDictionary) -> Self {
-        let sorted_dict = hash_dict.to_sorted();
-        HybridTermDictionary {
-            hash_dict,
-            sorted_dict,
-        }
-    }
-
-    /// Read hybrid term dictionary from storage.
-    pub fn read_from_storage<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
-        let sorted_dict = SortedTermDictionary::read_from_storage(reader)?;
-        let mut hash_dict = HashTermDictionary::with_capacity(sorted_dict.len());
-
-        for (term, info) in sorted_dict.iter() {
-            hash_dict.insert(term.to_string(), info.clone());
-        }
-
-        Ok(HybridTermDictionary {
-            hash_dict,
-            sorted_dict,
-        })
-    }
-
-    /// Look up a term (uses hash dictionary for speed).
-    pub fn get(&self, term: &str) -> Option<&TermInfo> {
-        self.hash_dict.get(term)
-    }
-
-    /// Find terms with the given prefix (uses sorted dictionary).
-    pub fn find_prefix(&self, prefix: &str) -> Vec<(&str, &TermInfo)> {
-        self.sorted_dict.find_prefix(prefix)
-    }
-
-    /// Find terms in a range (uses sorted dictionary).
-    pub fn find_range(&self, start: &str, end: &str) -> Vec<(&str, &TermInfo)> {
-        self.sorted_dict.find_range(start, end)
-    }
-
-    /// Get the number of terms.
-    pub fn len(&self) -> usize {
-        self.hash_dict.len()
-    }
-
-    /// Check if empty.
-    pub fn is_empty(&self) -> bool {
-        self.hash_dict.is_empty()
-    }
-
-    /// Get an iterator over all terms (ordered).
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &TermInfo)> {
-        self.sorted_dict.iter()
-    }
-
-    /// Write the dictionary to storage.
-    pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
-        self.sorted_dict.write_to_storage(writer)
     }
 }
 
@@ -572,24 +466,110 @@ impl TermDictionaryBuilder {
         self.terms.insert(term, info);
     }
 
-    /// Build a sorted term dictionary.
-    pub fn build_sorted(self) -> SortedTermDictionary {
-        SortedTermDictionary::from_map(self.terms)
-    }
+    /// Build a [`BlockTermDictionary`] (Lucene BlockTreeTerms-style,
+    /// Issue [#487](https://github.com/mosuka/laurus/issues/487)).
+    ///
+    /// Splits the sorted term map into 128-term blocks, encodes each
+    /// block via [`builder::encode_block_into`], and indexes the
+    /// blocks' last terms in an FST keyed by block byte offset.
+    ///
+    /// Returns an empty dictionary (no FST keys, empty BlockSection)
+    /// for an empty builder.
+    pub fn build(self) -> Result<BlockTermDictionary> {
+        let total_term_count = self.terms.len() as u64;
 
-    /// Build a hash term dictionary.
-    pub fn build_hash(self) -> HashTermDictionary {
-        let mut hash_dict = HashTermDictionary::with_capacity(self.terms.len());
-        for (term, info) in self.terms {
-            hash_dict.insert(term, info);
+        if self.terms.is_empty() {
+            // Build an empty FST so callers can still call `get` /
+            // `iter` without special-casing.
+            let fst_builder = fst::MapBuilder::memory();
+            let bytes = fst_builder
+                .into_inner()
+                .map_err(|e| LaurusError::index(format!("FST finish error: {e}")))?;
+            let fst = FstMap::new(bytes)
+                .map_err(|e| LaurusError::index(format!("FST construct error: {e}")))?;
+            return Ok(BlockTermDictionary {
+                fst: Arc::new(fst),
+                block_section: Arc::from(Vec::<u8>::new().into_boxed_slice()),
+                map: AHashMap::new(),
+                sorted_terms: Vec::new(),
+                term_infos: Arc::from(Vec::<TermInfo>::new().into_boxed_slice()),
+                total_term_count: 0,
+                block_count: 0,
+            });
         }
-        hash_dict
-    }
 
-    /// Build a hybrid term dictionary.
-    pub fn build_hybrid(self) -> HybridTermDictionary {
-        let hash_dict = self.build_hash();
-        HybridTermDictionary::from_hash(hash_dict)
+        // BTreeMap iteration is already ascending key order.
+        let entries: Vec<(String, TermInfo)> = self.terms.into_iter().collect();
+
+        let mut block_section: Vec<u8> = Vec::new();
+        let mut fst_builder = fst::MapBuilder::memory();
+        let mut block_count: u32 = 0;
+
+        // While we encode the disk-format scratch we also populate the
+        // in-memory query layer in lock-step. This avoids walking the
+        // BlockSection again post-build to materialise the AHashMap +
+        // sorted_terms + term_infos arrays.
+        let mut map = AHashMap::with_capacity(entries.len());
+        let mut sorted_terms: Vec<String> = Vec::with_capacity(entries.len());
+        let mut term_infos: Vec<TermInfo> = Vec::with_capacity(entries.len());
+        let mut next_ordinal: u32 = 0;
+
+        for chunk in entries.chunks(term_info_block::BLOCK_TERM_COUNT) {
+            let block_offset = block_section.len() as u64;
+
+            let term_byte_refs: Vec<&[u8]> = chunk.iter().map(|(t, _)| t.as_bytes()).collect();
+            let fixed_infos: Vec<term_info_block::FixedTermInfo> = chunk
+                .iter()
+                .map(|(_, info)| term_info_block::FixedTermInfo {
+                    posting_offset: info.posting_offset,
+                    posting_length: info.posting_length,
+                    doc_frequency: info.doc_frequency,
+                    total_frequency: info.total_frequency,
+                    max_score_factor: info.max_score_factor,
+                })
+                .collect();
+            let block_max_per_term: Vec<Vec<BlockMax>> = chunk
+                .iter()
+                .map(|(_, info)| info.block_max.clone())
+                .collect();
+
+            builder::encode_block_into(
+                &mut block_section,
+                &term_byte_refs,
+                &fixed_infos,
+                &block_max_per_term,
+            );
+
+            // Mirror the chunk into the in-memory layer.
+            for (term, info) in chunk {
+                map.insert(term.clone(), next_ordinal);
+                sorted_terms.push(term.clone());
+                term_infos.push(info.clone());
+                next_ordinal += 1;
+            }
+
+            let last_term = chunk.last().expect("chunk non-empty").0.as_bytes();
+            fst_builder
+                .insert(last_term, block_offset)
+                .map_err(|e| LaurusError::index(format!("FST insert error: {e}")))?;
+            block_count += 1;
+        }
+
+        let fst_bytes = fst_builder
+            .into_inner()
+            .map_err(|e| LaurusError::index(format!("FST finish error: {e}")))?;
+        let fst = FstMap::new(fst_bytes)
+            .map_err(|e| LaurusError::index(format!("FST construct error: {e}")))?;
+
+        Ok(BlockTermDictionary {
+            fst: Arc::new(fst),
+            block_section: Arc::from(block_section.into_boxed_slice()),
+            map,
+            sorted_terms,
+            term_infos: Arc::from(term_infos.into_boxed_slice()),
+            total_term_count,
+            block_count,
+        })
     }
 
     /// Get the current number of terms.
@@ -609,6 +589,33 @@ impl Default for TermDictionaryBuilder {
     }
 }
 
+/// Stream the BlockSection bytes once, building the in-memory query
+/// layer (`map`, `sorted_terms`, `term_infos`) for a freshly-loaded
+/// [`BlockTermDictionary`].
+///
+/// Used by [`BlockTermDictionary::read_from_storage`] only. Build-time
+/// population happens inline in [`TermDictionaryBuilder::build`] to
+/// avoid a redundant BlockSection walk.
+fn populate_in_memory_layer(
+    block_section: &[u8],
+    block_count: u32,
+    total_term_count: u64,
+) -> (AHashMap<String, u32>, Vec<String>, Arc<[TermInfo]>) {
+    let cap = total_term_count as usize;
+    let mut map = AHashMap::with_capacity(cap);
+    let mut sorted_terms: Vec<String> = Vec::with_capacity(cap);
+    let mut term_infos: Vec<TermInfo> = Vec::with_capacity(cap);
+
+    let iter = block_reader::BlockSectionIter::new(block_section, block_count);
+    for (ordinal, (term, info)) in iter.enumerate() {
+        map.insert(term.clone(), ordinal as u32);
+        sorted_terms.push(term);
+        term_infos.push(info);
+    }
+
+    (map, sorted_terms, Arc::from(term_infos.into_boxed_slice()))
+}
+
 /// Dictionary statistics.
 #[derive(Debug, Clone)]
 pub struct DictionaryStats {
@@ -622,103 +629,6 @@ pub struct DictionaryStats {
     pub total_doc_frequency: u64,
     /// Total term frequency.
     pub total_term_frequency: u64,
-}
-
-impl SortedTermDictionary {
-    /// Write to storage in **v3** layout (#403 PR-C).
-    ///
-    /// Each entry carries the v2 `max_score_factor: f32` plus a
-    /// length-prefixed per-block `(last_doc_id: u64, max_factor: f32)`
-    /// array used by Block-Max-WAND. v1/v2 readers are no longer able
-    /// to load new segments; readers from this codebase accept v1, v2
-    /// and v3 (see [`SortedTermDictionary::read_from_storage`]).
-    pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
-        // Write magic number for sorted dictionary
-        writer.write_u32(0x53544443)?; // "STDC"
-
-        // Write version
-        writer.write_u32(3)?;
-
-        // Write number of terms
-        writer.write_varint(self.terms.len() as u64)?;
-
-        // Write terms and their info
-        for (term, info) in self.terms.iter().zip(self.term_infos.iter()) {
-            writer.write_string(term)?;
-
-            // Write TermInfo
-            writer.write_u64(info.posting_offset)?;
-            writer.write_u64(info.posting_length)?;
-            writer.write_u64(info.doc_frequency)?;
-            writer.write_u64(info.total_frequency)?;
-            writer.write_f32(info.max_score_factor)?;
-            writer.write_varint(info.block_max.len() as u64)?;
-            for block in &info.block_max {
-                writer.write_u64(block.last_doc_id)?;
-                writer.write_f32(block.max_factor)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Get statistics about the dictionary.
-    pub fn stats(&self) -> DictionaryStats {
-        let term_count = self.terms.len();
-        let total_term_length: usize = self.terms.iter().map(|t| t.len()).sum();
-        let avg_term_length = if term_count > 0 {
-            total_term_length as f64 / term_count as f64
-        } else {
-            0.0
-        };
-
-        let total_doc_frequency = self.term_infos.iter().map(|info| info.doc_frequency).sum();
-        let total_term_frequency = self
-            .term_infos
-            .iter()
-            .map(|info| info.total_frequency)
-            .sum();
-
-        // Estimate memory size
-        let memory_size =
-            total_term_length + (self.term_infos.len() * std::mem::size_of::<TermInfo>());
-
-        DictionaryStats {
-            term_count,
-            memory_size,
-            avg_term_length,
-            total_doc_frequency,
-            total_term_frequency,
-        }
-    }
-}
-
-impl HashTermDictionary {
-    /// Get statistics about the dictionary.
-    pub fn stats(&self) -> DictionaryStats {
-        let term_count = self.terms.len();
-        let total_term_length: usize = self.terms.keys().map(|t| t.len()).sum();
-        let avg_term_length = if term_count > 0 {
-            total_term_length as f64 / term_count as f64
-        } else {
-            0.0
-        };
-
-        let total_doc_frequency = self.terms.values().map(|info| info.doc_frequency).sum();
-        let total_term_frequency = self.terms.values().map(|info| info.total_frequency).sum();
-
-        // Estimate memory size (includes hash map overhead)
-        let memory_size =
-            total_term_length + (self.terms.len() * (std::mem::size_of::<TermInfo>() + 64));
-
-        DictionaryStats {
-            term_count,
-            memory_size,
-            avg_term_length,
-            total_doc_frequency,
-            total_term_frequency,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -735,104 +645,224 @@ mod tests {
     }
 
     #[test]
-    fn test_sorted_term_dictionary() {
+    fn test_dictionary_builder_basic() {
         let mut builder = TermDictionaryBuilder::new();
-        builder.add_term("apple".to_string(), create_test_term_info(0));
-        builder.add_term("banana".to_string(), create_test_term_info(100));
-        builder.add_term("cherry".to_string(), create_test_term_info(200));
-        builder.add_term("apricot".to_string(), create_test_term_info(300));
+        assert!(builder.is_empty());
 
-        let dict = builder.build_sorted();
+        builder.add_term("test".to_string(), create_test_term_info(0));
+        assert_eq!(builder.len(), 1);
 
-        // Test exact lookup
-        assert!(dict.get("apple").is_some());
-        assert!(dict.get("banana").is_some());
-        assert!(dict.get("nonexistent").is_none());
-
-        // Test prefix search
-        let ap_results = dict.find_prefix("ap");
-        assert_eq!(ap_results.len(), 2);
-        assert!(ap_results.iter().any(|(term, _)| *term == "apple"));
-        assert!(ap_results.iter().any(|(term, _)| *term == "apricot"));
-
-        // Test range search
-        let range_results = dict.find_range("apple", "cherry");
-        assert_eq!(range_results.len(), 3); // apple, apricot, banana
+        let dict = builder.build().unwrap();
+        assert_eq!(dict.len(), 1);
+        assert!(dict.get("test").is_some());
     }
 
-    #[test]
-    fn test_hash_term_dictionary() {
-        let mut dict = HashTermDictionary::new();
-        dict.insert("apple".to_string(), create_test_term_info(0));
-        dict.insert("banana".to_string(), create_test_term_info(100));
-        dict.insert("cherry".to_string(), create_test_term_info(200));
+    // ----- BlockTermDictionary tests (#487 PR1) -----
 
-        assert!(dict.contains("apple"));
-        assert!(dict.contains("banana"));
-        assert!(!dict.contains("nonexistent"));
-
-        assert_eq!(dict.len(), 3);
-        assert!(!dict.is_empty());
-
-        let info = dict.get("apple").unwrap();
-        assert_eq!(info.posting_offset, 0);
-    }
-
-    #[test]
-    fn test_hybrid_term_dictionary() {
-        let mut hash_dict = HashTermDictionary::new();
-        hash_dict.insert("apple".to_string(), create_test_term_info(0));
-        hash_dict.insert("banana".to_string(), create_test_term_info(100));
-        hash_dict.insert("apricot".to_string(), create_test_term_info(200));
-
-        let hybrid_dict = HybridTermDictionary::from_hash(hash_dict);
-
-        // Test hash-based lookup
-        assert!(hybrid_dict.get("apple").is_some());
-        assert!(hybrid_dict.get("nonexistent").is_none());
-
-        // Test prefix search
-        let ap_results = hybrid_dict.find_prefix("ap");
-        assert_eq!(ap_results.len(), 2);
-    }
-
-    #[test]
-    fn test_dictionary_serialization() {
-        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
-
-        let mut builder = TermDictionaryBuilder::new();
-        builder.add_term("apple".to_string(), create_test_term_info(0));
-        builder.add_term("banana".to_string(), create_test_term_info(100));
-        builder.add_term("cherry".to_string(), create_test_term_info(200));
-
-        let original_dict = builder.build_sorted();
-
-        // Write to storage
-        {
-            let output = storage.create_output("test_dict.bin").unwrap();
-            let mut writer = StructWriter::new(output);
-            original_dict.write_to_storage(&mut writer).unwrap();
-            writer.close().unwrap();
-        }
-
-        // Read from storage
-        {
-            let input = storage.open_input("test_dict.bin").unwrap();
-            let mut reader = StructReader::new(input).unwrap();
-            let loaded_dict = SortedTermDictionary::read_from_storage(&mut reader).unwrap();
-
-            assert_eq!(loaded_dict.len(), original_dict.len());
-
-            for term in ["apple", "banana", "cherry"] {
-                let orig_info = original_dict.get(term).unwrap();
-                let loaded_info = loaded_dict.get(term).unwrap();
-                assert_eq!(orig_info, loaded_info);
-            }
+    fn make_test_term_info_with_block_max(offset: u64, block_max: Vec<BlockMax>) -> TermInfo {
+        TermInfo {
+            posting_offset: offset,
+            posting_length: 100,
+            doc_frequency: 5,
+            total_frequency: 20,
+            max_score_factor: 1.0,
+            block_max,
         }
     }
 
     #[test]
-    fn test_dictionary_stats() {
+    fn block_dict_empty_builder_yields_empty_dict() {
+        let builder = TermDictionaryBuilder::new();
+        let dict = builder.build().unwrap();
+        assert!(dict.is_empty());
+        assert_eq!(dict.len(), 0);
+        assert_eq!(dict.block_count(), 0);
+        assert!(dict.get("anything").is_none());
+        assert_eq!(dict.iter().count(), 0);
+    }
+
+    #[test]
+    fn block_dict_single_term_round_trip() {
+        let mut builder = TermDictionaryBuilder::new();
+        builder.add_term("hello".to_string(), create_test_term_info(42));
+        let dict = builder.build().unwrap();
+        assert_eq!(dict.len(), 1);
+        assert_eq!(dict.block_count(), 1);
+
+        let info = dict.get("hello").unwrap();
+        assert_eq!(info.posting_offset, 42);
+        assert!(dict.get("missing").is_none());
+    }
+
+    #[test]
+    fn block_dict_get_within_single_block() {
+        let mut builder = TermDictionaryBuilder::new();
+        for (i, term) in ["apple", "banana", "cherry", "date"].iter().enumerate() {
+            builder.add_term(term.to_string(), create_test_term_info(i as u64 * 100));
+        }
+        let dict = builder.build().unwrap();
+        assert_eq!(dict.len(), 4);
+        assert_eq!(dict.block_count(), 1);
+
+        for (i, term) in ["apple", "banana", "cherry", "date"].iter().enumerate() {
+            assert_eq!(dict.get(term).unwrap().posting_offset, i as u64 * 100);
+        }
+        assert!(dict.get("aardvark").is_none());
+        assert!(dict.get("blueberry").is_none());
+        assert!(dict.get("zulu").is_none());
+    }
+
+    #[test]
+    fn block_dict_iter_yields_in_sorted_order() {
+        let mut builder = TermDictionaryBuilder::new();
+        for term in ["zulu", "alpha", "mike", "bravo"] {
+            builder.add_term(term.to_string(), create_test_term_info(0));
+        }
+        let dict = builder.build().unwrap();
+        let collected: Vec<String> = dict.iter().map(|(t, _)| t.to_string()).collect();
+        assert_eq!(collected, vec!["alpha", "bravo", "mike", "zulu"]);
+    }
+
+    #[test]
+    fn block_dict_multi_block_get_hit_and_miss() {
+        // 300 terms → 3 blocks of 128/128/44 (BLOCK_TERM_COUNT = 128).
+        let mut builder = TermDictionaryBuilder::new();
+        for i in 0..300 {
+            builder.add_term(format!("term{i:04}"), create_test_term_info(i as u64));
+        }
+        let dict = builder.build().unwrap();
+        assert_eq!(dict.len(), 300);
+        assert_eq!(dict.block_count(), 3);
+
+        // Hits across all blocks.
+        for i in [0, 1, 100, 127, 128, 129, 200, 299] {
+            let key = format!("term{i:04}");
+            assert_eq!(
+                dict.get(&key).unwrap().posting_offset,
+                i as u64,
+                "miss on hit probe {key}"
+            );
+        }
+
+        // Misses (after, between, before existing keys).
+        assert!(dict.get("term0300").is_none());
+        assert!(dict.get("term9999").is_none());
+        assert!(dict.get("aaa").is_none());
+        assert!(dict.get("zzz").is_none());
+    }
+
+    #[test]
+    fn block_dict_iter_walks_multi_block() {
+        let mut builder = TermDictionaryBuilder::new();
+        for i in 0..200 {
+            builder.add_term(format!("term{i:04}"), create_test_term_info(i as u64));
+        }
+        let dict = builder.build().unwrap();
+        let collected: Vec<(String, u64)> = dict
+            .iter()
+            .map(|(t, info)| (t.to_string(), info.posting_offset))
+            .collect();
+        assert_eq!(collected.len(), 200);
+        for (i, (term, offset)) in collected.iter().enumerate() {
+            assert_eq!(term, &format!("term{i:04}"));
+            assert_eq!(*offset, i as u64);
+        }
+    }
+
+    #[test]
+    fn block_dict_find_prefix_within_block() {
+        let mut builder = TermDictionaryBuilder::new();
+        for term in ["alpha", "apple", "apricot", "axis", "banana"] {
+            builder.add_term(term.to_string(), create_test_term_info(0));
+        }
+        let dict = builder.build().unwrap();
+
+        let ap = dict.find_prefix("ap");
+        let ap_terms: Vec<&str> = ap.iter().map(|(t, _)| *t).collect();
+        assert_eq!(ap_terms, vec!["apple", "apricot"]);
+
+        // Empty prefix → all terms.
+        let all = dict.find_prefix("");
+        assert_eq!(all.len(), 5);
+
+        // No matches.
+        let zzz = dict.find_prefix("zzz");
+        assert!(zzz.is_empty());
+    }
+
+    #[test]
+    fn block_dict_find_prefix_across_block_boundary() {
+        // Force a prefix to span the block boundary at 128.
+        let mut builder = TermDictionaryBuilder::new();
+        for i in 0..200 {
+            builder.add_term(format!("term{i:04}"), create_test_term_info(i as u64));
+        }
+        let dict = builder.build().unwrap();
+        // "term01" matches term0100..term0199 → 100 entries spanning
+        // both blocks (128-term boundary at "term0127"/"term0128").
+        let matches = dict.find_prefix("term01");
+        assert_eq!(matches.len(), 100);
+        assert_eq!(matches[0].0, "term0100");
+        assert_eq!(matches[99].0, "term0199");
+    }
+
+    #[test]
+    fn block_dict_find_range_basic() {
+        let mut builder = TermDictionaryBuilder::new();
+        for term in ["apple", "banana", "cherry", "date", "fig"] {
+            builder.add_term(term.to_string(), create_test_term_info(0));
+        }
+        let dict = builder.build().unwrap();
+        let r = dict.find_range("banana", "fig");
+        let r_terms: Vec<&str> = r.iter().map(|(t, _)| *t).collect();
+        assert_eq!(r_terms, vec!["banana", "cherry", "date"]);
+
+        // Empty range when start >= end.
+        assert!(dict.find_range("date", "banana").is_empty());
+        assert!(dict.find_range("date", "date").is_empty());
+    }
+
+    #[test]
+    fn block_dict_term_info_with_block_max_round_trip() {
+        let mut builder = TermDictionaryBuilder::new();
+        let bm = vec![
+            BlockMax {
+                last_doc_id: 5,
+                max_factor: 0.5,
+            },
+            BlockMax {
+                last_doc_id: 10,
+                max_factor: 1.5,
+            },
+        ];
+        builder.add_term(
+            "hello".to_string(),
+            make_test_term_info_with_block_max(99, bm.clone()),
+        );
+        let dict = builder.build().unwrap();
+        let info = dict.get("hello").unwrap();
+        assert_eq!(info.posting_offset, 99);
+        assert_eq!(info.block_max.len(), 2);
+        assert_eq!(info.block_max[0].last_doc_id, 5);
+        assert_eq!(info.block_max[1].last_doc_id, 10);
+    }
+
+    #[test]
+    fn block_dict_clone_shares_storage() {
+        let mut builder = TermDictionaryBuilder::new();
+        for i in 0..50 {
+            builder.add_term(format!("term{i:03}"), create_test_term_info(i as u64));
+        }
+        let dict = builder.build().unwrap();
+        let dict2 = dict.clone();
+        assert_eq!(dict.len(), dict2.len());
+        assert_eq!(dict.get("term025").unwrap(), dict2.get("term025").unwrap());
+        // Arc strong count should be > 1 because of clone.
+        assert!(Arc::strong_count(&dict.fst) >= 2);
+    }
+
+    #[test]
+    fn block_dict_stats() {
         let mut builder = TermDictionaryBuilder::new();
         builder.add_term("short".to_string(), TermInfo::new(0, 50, 1, 1));
         builder.add_term("longer_term".to_string(), TermInfo::new(50, 100, 5, 10));
@@ -841,7 +871,7 @@ mod tests {
             TermInfo::new(150, 200, 3, 8),
         );
 
-        let dict = builder.build_sorted();
+        let dict = builder.build().unwrap();
         let stats = dict.stats();
 
         assert_eq!(stats.term_count, 3);
@@ -852,24 +882,162 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_dictionary() {
-        let dict = SortedTermDictionary::new();
-        assert!(dict.is_empty());
-        assert_eq!(dict.len(), 0);
-        assert!(dict.get("anything").is_none());
-        assert!(dict.find_prefix("any").is_empty());
+    fn block_dict_round_trip_via_storage() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        let mut builder = TermDictionaryBuilder::new();
+        for i in 0..200u64 {
+            // 200 terms exercises 2 blocks (BLOCK_TERM_COUNT = 128 +
+            // partial second block).
+            let mut info = create_test_term_info(i * 16);
+            // Sprinkle non-trivial block_max on every 5th term to
+            // exercise the variable-length BlockMaxData encoding.
+            if i.is_multiple_of(5) {
+                info.block_max = vec![BlockMax {
+                    last_doc_id: i,
+                    max_factor: 1.0 + (i as f32) * 0.01,
+                }];
+            }
+            builder.add_term(format!("term{i:04}"), info);
+        }
+        let original_dict = builder.build().unwrap();
+
+        // Write
+        {
+            let output = storage.create_output("test_block_dict.bin").unwrap();
+            let mut writer = StructWriter::new(output);
+            original_dict.write_to_storage(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+
+        // Read
+        let loaded_dict = {
+            let input = storage.open_input("test_block_dict.bin").unwrap();
+            let mut reader = StructReader::new(input).unwrap();
+            BlockTermDictionary::read_from_storage(&mut reader).unwrap()
+        };
+
+        assert_eq!(loaded_dict.len(), original_dict.len());
+        assert_eq!(loaded_dict.block_count(), original_dict.block_count());
+
+        // All-term spot check.
+        for i in 0..200 {
+            let key = format!("term{i:04}");
+            let orig = original_dict.get(&key).unwrap();
+            let loaded = loaded_dict.get(&key).unwrap();
+            assert_eq!(orig, loaded, "mismatch for {key}");
+        }
+        // iter order
+        let orig_iter: Vec<_> = original_dict.iter().collect();
+        let loaded_iter: Vec<_> = loaded_dict.iter().collect();
+        assert_eq!(orig_iter.len(), loaded_iter.len());
+        for (a, b) in orig_iter.iter().zip(loaded_iter.iter()) {
+            assert_eq!(a, b);
+        }
     }
 
     #[test]
-    fn test_dictionary_builder() {
+    fn block_dict_read_rejects_legacy_stdc_magic() {
+        // Synthesise a file starting with the legacy `STDC` magic.
+        // Real legacy writers no longer exist (#487 Phase 9); we emit
+        // just the magic so `read_from_storage` short-circuits before
+        // trying to decode any payload.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        {
+            let output = storage.create_output("legacy_stdc.bin").unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(LEGACY_MAGIC_STDC).unwrap();
+            writer.write_u32(3).unwrap(); // dummy version
+            writer.close().unwrap();
+        }
+
+        let input = storage.open_input("legacy_stdc.bin").unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let err = BlockTermDictionary::read_from_storage(&mut reader);
+        assert!(err.is_err());
+        let msg = format!("{}", err.unwrap_err());
+        assert!(
+            msg.contains("Unsupported legacy term dictionary format"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn block_dict_read_rejects_legacy_htdc_magic() {
+        // Same idea as `..._stdc_magic`: emit only the legacy magic.
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        {
+            let output = storage.create_output("legacy_htdc.bin").unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(LEGACY_MAGIC_HTDC).unwrap();
+            writer.write_u32(3).unwrap();
+            writer.close().unwrap();
+        }
+
+        let input = storage.open_input("legacy_htdc.bin").unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let err = BlockTermDictionary::read_from_storage(&mut reader);
+        assert!(err.is_err());
+        let msg = format!("{}", err.unwrap_err());
+        assert!(
+            msg.contains("Unsupported legacy term dictionary format"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn block_dict_read_rejects_unknown_magic() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        {
+            let output = storage.create_output("garbage.bin").unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(0xDEADBEEF).unwrap(); // bogus magic
+            writer.write_u32(0).unwrap();
+            writer.close().unwrap();
+        }
+        let input = storage.open_input("garbage.bin").unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let err = BlockTermDictionary::read_from_storage(&mut reader);
+        let msg = format!("{}", err.unwrap_err());
+        assert!(msg.contains("Invalid term dictionary magic"));
+    }
+
+    #[test]
+    fn block_dict_round_trip_empty() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let original_dict = TermDictionaryBuilder::new().build().unwrap();
+        {
+            let output = storage.create_output("empty.bin").unwrap();
+            let mut writer = StructWriter::new(output);
+            original_dict.write_to_storage(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+        let input = storage.open_input("empty.bin").unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let loaded = BlockTermDictionary::read_from_storage(&mut reader).unwrap();
+        assert!(loaded.is_empty());
+        assert_eq!(loaded.block_count(), 0);
+    }
+
+    #[test]
+    fn block_dict_exact_block_boundary_term_count() {
+        // Exactly 128 terms → 1 block, fully filled.
         let mut builder = TermDictionaryBuilder::new();
-        assert!(builder.is_empty());
+        for i in 0..128 {
+            builder.add_term(format!("term{i:03}"), create_test_term_info(i as u64));
+        }
+        let dict = builder.build().unwrap();
+        assert_eq!(dict.len(), 128);
+        assert_eq!(dict.block_count(), 1);
 
-        builder.add_term("test".to_string(), create_test_term_info(0));
-        assert_eq!(builder.len(), 1);
-
-        let sorted = builder.build_sorted();
-        assert_eq!(sorted.len(), 1);
-        assert!(sorted.get("test").is_some());
+        // 129 terms → 2 blocks (128 + 1).
+        let mut builder2 = TermDictionaryBuilder::new();
+        for i in 0..129 {
+            builder2.add_term(format!("term{i:03}"), create_test_term_info(i as u64));
+        }
+        let dict2 = builder2.build().unwrap();
+        assert_eq!(dict2.len(), 129);
+        assert_eq!(dict2.block_count(), 2);
+        assert_eq!(dict2.get("term128").unwrap().posting_offset, 128);
     }
 }

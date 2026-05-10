@@ -52,7 +52,7 @@ graph LR
 
 | Component | Description |
 | :--- | :--- |
-| **Term Dictionary** | Sorted list of all unique terms in the index; supports fast prefix lookup |
+| **Term Dictionary** | Sorted dictionary of unique terms in the index. Disk format is a Lucene `BlockTreeTermsWriter`-style block-tree (FST over per-block representative terms + front-coded term bytes inside each 128-term block + bit-packed `TermInfo`); in-memory is an `AHashMap`-indexed parallel-array query layer populated at load time. Disk format minimises file size, in-memory layer keeps `get` / `iter` / prefix-scan at parallel-array speed. Supports exact lookup, ordered iteration, and prefix scans. |
 | **Posting Lists** | For each term, a list of document IDs and metadata (term frequency, positions) |
 | **Doc Values** | Column-oriented storage for sort/filter operations on numeric and date fields |
 
@@ -94,6 +94,53 @@ produces parallel `Vec<u32>` slices for `doc_id` and `frequency` directly
 from disk without the intermediate `Vec<Posting>` reassembly. The query
 iterator stores those slices, so `next()` advances a single `u32` cursor
 over a dense slice instead of striding across a 40-byte `Posting` struct.
+
+### Term Dictionary Storage Layers
+
+The dictionary uses a **two-layer** representation that decouples
+on-disk compactness from in-memory query speed:
+
+- **Disk layer** — the `.dict` file uses a Lucene
+  `BlockTreeTermsWriter`-style block-tree layout (magic `LTDD`,
+  schema v1). This produces a compact file: at 100k unique 5-10 byte
+  terms a `.dict` is ~12.5 bytes / term, roughly **70 % smaller** than
+  the prior parallel-array on-disk format.
+- **In-memory query layer** — at build / load time the dictionary
+  populates an `AHashMap<term, ordinal>` index, an
+  ordinal-indexed sorted `Vec<String>`, and a single-copy
+  `Arc<[TermInfo]>`. `get` / `iter` / `find_prefix` / `find_range`
+  operate exclusively on these structures, so per-query cost matches
+  the prior parallel-array implementation (no per-call FST traversal
+  or in-block linear scan).
+
+The disk-format scratch (FST + BlockSection bytes) is retained only so
+[`BlockTermDictionary::write_to_storage`] can re-serialise the
+dictionary on segment merge without re-encoding from scratch.
+
+```text
+[Header                ]  magic "LTDD" + version
+[FstSection            ]  fst::Map<u64> keyed by each block's last term,
+                          valued by that block's start byte offset
+[BlockSection          ]  concatenated 128-term blocks, each containing
+                          front-coded term bytes, a bit-packed
+                          fixed-size TermInfo block, and a
+                          variable-length per-term Block-Max-WAND
+                          metadata array
+[Footer                ]  total term count + block count
+```
+
+Lookup walks the FST once (`O(|term|)`) to identify the block whose
+last term is `≥ target`, then performs a linear front-coded scan
+inside the block (≤ 128 entries). Iteration walks the BlockSection
+sequentially without consulting the FST, decoding each block's
+front-coded prefix once and reusing the buffer across terms. Prefix
+scans combine the two: FST seek to the first matching block, then
+sequential block walk until the prefix no longer matches.
+
+Compared to a flat per-term FST the block-head FST is one to two
+orders of magnitude smaller, and the front-coded block bytes plus
+bit-packed `TermInfo` typically cut the on-disk size by 50-80 % at
+production scale.
 
 ## Numeric and Date Fields
 
@@ -150,7 +197,7 @@ graph TB
 
 | File Extension | Contents |
 | :--- | :--- |
-| `.dict` | Term dictionary (sorted terms + metadata offsets) |
+| `.dict` | Term dictionary in the v1 `LTDD` block-tree layout (FST over per-block representative terms + 128-term blocks of front-coded term bytes + bit-packed `TermInfo`). Loaded into an `AHashMap`-backed in-memory query layer at segment open. |
 | `.post` | Posting lists (document IDs, term frequencies, positions) |
 | `.bkd` | [BKD tree](../bkd_tree.md) data for numeric, date, `Geo` (2D), and `Geo3d` (3D ECEF) fields |
 | `.docs` | Stored field values (the original document content) |

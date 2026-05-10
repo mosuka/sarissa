@@ -786,7 +786,7 @@ impl InvertedIndexWriter {
         let dict_output = self.storage.create_output(&dict_file)?;
         let mut dict_writer = StructWriter::new(dict_output);
 
-        let term_dict = term_dict_builder.build_hybrid();
+        let term_dict = term_dict_builder.build()?;
         term_dict.write_to_storage(&mut dict_writer)?;
         dict_writer.close()?;
 

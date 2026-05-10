@@ -197,7 +197,7 @@ impl TermsEnum for Box<dyn TermsEnum> {
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::lexical::index::structures::dictionary::{HybridTermDictionary, TermInfo};
+use crate::lexical::index::structures::dictionary::{BlockTermDictionary, TermInfo};
 
 /// Iterator over terms in a term dictionary.
 pub struct InvertedIndexTermsEnum {
@@ -214,7 +214,7 @@ impl InvertedIndexTermsEnum {
     ///
     /// This extracts all terms for the specified field from the term dictionary.
     /// Terms are stored in the format "field:term", so we filter by prefix.
-    pub fn new(field: &str, dict: &Arc<HybridTermDictionary>) -> Self {
+    pub fn new(field: &str, dict: &Arc<BlockTermDictionary>) -> Self {
         let field_prefix = format!("{}:", field);
         let mut terms = Vec::new();
 
@@ -226,7 +226,7 @@ impl InvertedIndexTermsEnum {
             }
         }
 
-        // Terms are already sorted since HybridTermDictionary.iter() uses SortedTermDictionary
+        // Terms are already sorted since BlockTermDictionary.iter() uses SortedTermDictionary
         InvertedIndexTermsEnum {
             terms,
             position: 0,
@@ -322,7 +322,7 @@ impl TermsEnum for InvertedIndexTermsEnum {
 /// Implementation of Terms trait for a specific field.
 pub struct InvertedIndexTerms {
     field: String,
-    dict: Arc<HybridTermDictionary>,
+    dict: Arc<BlockTermDictionary>,
     // Cached statistics
     size: Option<u64>,
     sum_doc_freq: Option<u64>,
@@ -331,7 +331,7 @@ pub struct InvertedIndexTerms {
 
 impl InvertedIndexTerms {
     /// Create a new Terms instance for a field.
-    pub fn new(field: &str, dict: Arc<HybridTermDictionary>) -> Self {
+    pub fn new(field: &str, dict: Arc<BlockTermDictionary>) -> Self {
         let field_prefix = format!("{}:", field);
 
         // Calculate statistics by iterating through matching terms
@@ -397,7 +397,7 @@ pub struct MergedInvertedIndexTerms {
 
 impl MergedInvertedIndexTerms {
     /// Create merged terms for `field` from multiple dictionaries.
-    pub fn new(field: &str, dicts: &[Arc<HybridTermDictionary>]) -> Self {
+    pub fn new(field: &str, dicts: &[Arc<BlockTermDictionary>]) -> Self {
         let field_prefix = format!("{}:", field);
         let mut map: BTreeMap<String, (u64, u64)> = BTreeMap::new();
 
