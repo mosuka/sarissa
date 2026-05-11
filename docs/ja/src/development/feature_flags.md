@@ -19,7 +19,7 @@
 
 ```toml
 [dependencies]
-laurus = { version = "0.1.0", features = ["embeddings-candle"] }
+laurus = { version = "0.9", features = ["embeddings-candle"] }
 ```
 
 ### `embeddings-openai`
@@ -28,7 +28,7 @@ laurus = { version = "0.1.0", features = ["embeddings-candle"] }
 
 ```toml
 [dependencies]
-laurus = { version = "0.1.0", features = ["embeddings-openai"] }
+laurus = { version = "0.9", features = ["embeddings-openai"] }
 ```
 
 ### `embeddings-multimodal`
@@ -37,7 +37,7 @@ laurus = { version = "0.1.0", features = ["embeddings-openai"] }
 
 ```toml
 [dependencies]
-laurus = { version = "0.1.0", features = ["embeddings-multimodal"] }
+laurus = { version = "0.9", features = ["embeddings-multimodal"] }
 ```
 
 ### `embeddings-all`
@@ -46,7 +46,7 @@ laurus = { version = "0.1.0", features = ["embeddings-multimodal"] }
 
 ```toml
 [dependencies]
-laurus = { version = "0.1.0", features = ["embeddings-all"] }
+laurus = { version = "0.9", features = ["embeddings-all"] }
 ```
 
 ## Feature Flag がバイナリサイズに与える影響

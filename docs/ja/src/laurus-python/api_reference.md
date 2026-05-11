@@ -399,4 +399,5 @@ Python の値は自動的に Laurus の `DataValue` 型に変換されます：
 | `bytes` | `Bytes` | |
 | `list[float]` | `Vector` | 要素は `f32` に変換 |
 | `(lat, lon)` タプル | `Geo` | 2 つの `float` 値 |
+| `(x, y, z)` タプル | `Geo3d` | 3 つの `float` 値（ECEF 直交座標系、メートル単位） |
 | `datetime.datetime` | `DateTime` | `isoformat()` 経由で変換 |

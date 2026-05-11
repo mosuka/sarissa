@@ -48,16 +48,20 @@ Defines document structure.
 | Method | Description |
 | :--- | :--- |
 | `.add_text_field(name, TextOption)` | Add a full-text field |
-| `.add_integer_field(name, IntegerOption)` | Add an integer field |
-| `.add_float_field(name, FloatOption)` | Add a float field |
+| `.add_integer_field(name, IntegerOption)` | Add an integer field (set `IntegerOption::multi_valued = true` for arrays) |
+| `.add_float_field(name, FloatOption)` | Add a float field (set `FloatOption::multi_valued = true` for arrays) |
 | `.add_boolean_field(name, BooleanOption)` | Add a boolean field |
 | `.add_datetime_field(name, DateTimeOption)` | Add a datetime field |
-| `.add_geo_field(name, GeoOption)` | Add a geographic field |
+| `.add_geo_field(name, GeoOption)` | Add a 2D geographic (lat/lon) field |
+| `.add_geo3d_field(name, Geo3dOption)` | Add a 3D ECEF Cartesian point field (x, y, z in metres) |
 | `.add_bytes_field(name, BytesOption)` | Add a binary field |
 | `.add_hnsw_field(name, HnswOption)` | Add an HNSW vector field |
 | `.add_flat_field(name, FlatOption)` | Add a Flat vector field |
 | `.add_ivf_field(name, IvfOption)` | Add an IVF vector field |
 | `.add_default_field(name)` | Set a default search field |
+| `.add_analyzer(name, AnalyzerDefinition)` | Register a custom analyzer pipeline |
+| `.add_embedder(name, EmbedderDefinition)` | Register an embedder definition |
+| `.dynamic_field_policy(DynamicFieldPolicy)` | Set the policy for undeclared fields (`Strict` / `Dynamic` / `Ignore`) |
 | `.build()` | Build the `Schema` |
 
 ## Document
@@ -75,13 +79,17 @@ A collection of named field values.
 
 | Method | Description |
 | :--- | :--- |
+| `.add_field(name, DataValue)` | Add an arbitrary `DataValue` |
 | `.add_text(name, value)` | Add a text field |
-| `.add_integer(name, value)` | Add an integer field |
-| `.add_float(name, value)` | Add a float field |
+| `.add_integer(name, value)` | Add a single integer field |
+| `.add_float(name, value)` | Add a single float field |
 | `.add_boolean(name, value)` | Add a boolean field |
 | `.add_datetime(name, value)` | Add a datetime field |
 | `.add_vector(name, vec)` | Add a pre-computed vector |
-| `.add_geo(name, lat, lon)` | Add a geographic point |
+| `.add_geo(name, lat, lon)` | Add a 2D geographic point |
+| `.add_geo_ecef(name, x, y, z)` | Add a 3D ECEF Cartesian point (metres) |
+| `.add_int64_array(name, values)` | Add a multi-valued integer field |
+| `.add_float64_array(name, values)` | Add a multi-valued float field |
 | `.add_bytes(name, data)` | Add binary data |
 | `.build()` | Build the `Document` |
 
@@ -147,7 +155,11 @@ A collection of named field values.
 | `FuzzyQuery::new(field, term)` | Fuzzy match (default max_edits=2) | `FuzzyQuery::new("body", "programing").max_edits(1)` |
 | `WildcardQuery::new(field, pattern)` | Wildcard | `WildcardQuery::new("file", "*.pdf")` |
 | `NumericRangeQuery::new(...)` | Numeric range | See [Lexical Search](../concepts/search.md) |
-| `GeoQuery::within_radius(...)` | Geo radius | See [Lexical Search](../concepts/search.md) |
+| `GeoDistanceQuery::within_radius(...)` | 2D geo radius | See [Lexical Search](../concepts/search.md) |
+| `GeoBoundingBoxQuery::within_bounding_box(...)` | 2D geo bounding box | See [Lexical Search](../concepts/search.md) |
+| `Geo3dDistanceQuery::within_sphere(...)` | 3D ECEF sphere | See [3D Geographic Search](../concepts/geo3d.md) |
+| `Geo3dBoundingBoxQuery::within_box(...)` | 3D ECEF axis-aligned box | See [3D Geographic Search](../concepts/geo3d.md) |
+| `Geo3dNearestQuery::k_nearest(...)` | 3D ECEF k-NN | See [3D Geographic Search](../concepts/geo3d.md) |
 | `SpanNearQuery::new(...)` | Proximity | See [Lexical Search](../concepts/search.md) |
 | `PrefixQuery::new(field, prefix)` | Prefix match | `PrefixQuery::new("body", "pro")` |
 | `RegexpQuery::new(field, pattern)?` | Regex match | `RegexpQuery::new("body", "^pro.*ing$")?` |
@@ -156,9 +168,9 @@ A collection of named field values.
 
 | Parser | Description |
 | :--- | :--- |
-| `QueryParser::new(analyzer)` | Parse lexical DSL queries |
+| `LexicalQueryParser::new(analyzer)` | Parse lexical DSL queries |
 | `VectorQueryParser::new(embedder)` | Parse vector DSL queries |
-| `UnifiedQueryParser::new(lexical, vector)` | Parse hybrid DSL queries |
+| `UnifiedQueryParser::new(lexical, vector)` | Parse hybrid DSL queries that mix lexical and vector clauses |
 
 ## Analyzers
 
@@ -200,6 +212,9 @@ A collection of named field values.
 | `DataValue::Float64(f64)` | `f64` |
 | `DataValue::Text(String)` | `String` |
 | `DataValue::Bytes(Vec<u8>, Option<String>)` | `(data, mime_type)` |
-| `DataValue::Vector(Vector)` | `Vector` |
+| `DataValue::Vector(Vec<f32>)` | Pre-computed vector |
 | `DataValue::DateTime(DateTime<Utc>)` | `chrono::DateTime<Utc>` |
-| `DataValue::Geo(f64, f64)` | `(latitude, longitude)` |
+| `DataValue::Geo(GeoPoint)` | `(latitude, longitude)` (WGS84) |
+| `DataValue::GeoEcef(GeoEcefPoint)` | `(x, y, z)` ECEF Cartesian (metres) |
+| `DataValue::Int64Array(Vec<i64>)` | Multi-valued integers (requires `multi_valued` field option) |
+| `DataValue::Float64Array(Vec<f64>)` | Multi-valued floats (requires `multi_valued` field option) |

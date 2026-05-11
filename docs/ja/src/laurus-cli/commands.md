@@ -450,3 +450,31 @@ laurus serve [OPTIONS]
 - [はじめに](../laurus-server/getting_started.md) — 起動オプションと gRPC 接続例
 - [設定](../laurus-server/configuration.md) — TOML 設定ファイル、環境変数、優先順位
 - [ハンズオンチュートリアル](../laurus-server/tutorial.md) — ステップバイステップの操作ガイド
+
+---
+
+## `mcp`
+
+[Model Context Protocol](https://modelcontextprotocol.io/)（MCP）サーバーを stdio 上で起動します。MCP サーバーを介して、Claude Code や Claude Desktop のような AI アシスタントが標準化されたツール群（`create_index`、`add_document`、`search` など）で稼働中の laurus-server を操作できます。
+
+```bash
+laurus mcp [--endpoint <URL>]
+```
+
+**引数:**
+
+| フラグ | 環境変数 | 必須 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `--endpoint <URL>` | `LAURUS_ENDPOINT` | いいえ | 稼働中の laurus-server の gRPC エンドポイント（例: `http://localhost:50051`）。省略すると未接続で起動し、クライアントから後で `connect` MCP ツールを呼び出して接続できます。 |
+
+**使用例:**
+
+```bash
+# ローカルの laurus-server に事前接続して MCP サーバーを起動
+laurus mcp --endpoint http://localhost:50051
+
+# 未接続で起動し、クライアントが最初に `connect` を呼ぶ運用
+laurus mcp
+```
+
+MCP サーバーが公開する全ツールの一覧、および Claude Code や Claude Desktop と連携する設定方法については [laurus-mcp のドキュメント](../laurus-mcp.md)を参照してください。

@@ -39,7 +39,7 @@ port = 50051
 http_port = 8080  # オプション: HTTP ゲートウェイを有効化
 
 [index]
-data_dir = "./laurus_index"
+data_dir = "./laurus_data"
 ```
 
 ログの詳細度は設定ファイルではなく、`RUST_LOG` 環境変数で制御します（デフォルト: `info`）。
@@ -58,7 +58,7 @@ data_dir = "./laurus_index"
 
 | フィールド | 型 | デフォルト | 説明 |
 | :--- | :--- | :--- | :--- |
-| `data_dir` | String | `"./laurus_index"` | インデックスデータディレクトリのパス |
+| `data_dir` | String | `"./laurus_data"` | インデックスデータディレクトリのパス |
 
 ## 環境変数
 

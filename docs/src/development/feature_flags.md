@@ -19,7 +19,7 @@ Enables `CandleBertEmbedder` for running BERT models locally on the CPU. Models 
 
 ```toml
 [dependencies]
-laurus = { version = "0.1.0", features = ["embeddings-candle"] }
+laurus = { version = "0.9", features = ["embeddings-candle"] }
 ```
 
 ### `embeddings-openai`
@@ -28,7 +28,7 @@ Enables `OpenAIEmbedder` for calling the OpenAI Embeddings API. Requires an `OPE
 
 ```toml
 [dependencies]
-laurus = { version = "0.1.0", features = ["embeddings-openai"] }
+laurus = { version = "0.9", features = ["embeddings-openai"] }
 ```
 
 ### `embeddings-multimodal`
@@ -37,7 +37,7 @@ Enables `CandleClipEmbedder` for CLIP-based text and image embeddings. Implies `
 
 ```toml
 [dependencies]
-laurus = { version = "0.1.0", features = ["embeddings-multimodal"] }
+laurus = { version = "0.9", features = ["embeddings-multimodal"] }
 ```
 
 ### `embeddings-all`
@@ -46,7 +46,7 @@ Convenience flag that enables all embedding features.
 
 ```toml
 [dependencies]
-laurus = { version = "0.1.0", features = ["embeddings-all"] }
+laurus = { version = "0.9", features = ["embeddings-all"] }
 ```
 
 ## Feature Flag Impact on Binary Size

@@ -15,8 +15,9 @@ Lexical 検索、ベクトル検索、ハイブリッド検索をカバーする
 - **Node.js バインディング** — サーバーサイド JavaScript アプリケーション向けネイティブ Node.js アドオン
 - **WebAssembly** — wasm-bindgen によるブラウザおよびエッジランタイムサポート
 - **Ruby バインディング** — Rails や Ruby アプリケーション向けネイティブ Ruby gem
+- **PHP バインディング** — Web アプリケーションや CLI ツール向けネイティブ PHP 拡張
 
-ライブラリとして組み込むことも、スタンドアロンのサーバーとしてデプロイすることも、Python / Node.js / Ruby から呼び出すことも、ブラウザで WASM として実行することも、AI ワークフローに検索機能を組み込むことも可能な、コンポーザブルな検索基盤です。
+ライブラリとして組み込むことも、スタンドアロンのサーバーとしてデプロイすることも、Python / Node.js / Ruby / PHP から呼び出すことも、ブラウザで WASM として実行することも、AI ワークフローに検索機能を組み込むことも可能な、コンポーザブルな検索基盤です。
 
 ## ライブデモ
 
@@ -60,6 +61,7 @@ Lexical 検索、ベクトル検索、ハイブリッド検索をカバーする
   - [laurus-nodejs](https://mosuka.github.io/laurus/ja/laurus-nodejs.html) — Node.js バインディング（npm パッケージ）
   - [laurus-wasm](https://mosuka.github.io/laurus/ja/laurus-wasm.html) — WebAssembly バインディング（npm パッケージ）
   - [laurus-ruby](https://mosuka.github.io/laurus/ja/laurus-ruby.html) — Ruby バインディング（RubyGems パッケージ）
+  - [laurus-php](https://mosuka.github.io/laurus/ja/laurus-php.html) — PHP バインディング（PHP 拡張）
 - **開発**
   - [ビルドとテスト](https://mosuka.github.io/laurus/ja/development/build_and_test.html)
   - [フィーチャーフラグ](https://mosuka.github.io/laurus/ja/development/feature_flags.html)
@@ -71,16 +73,18 @@ Lexical 検索、ベクトル検索、ハイブリッド検索をカバーする
 - **Pure Rust 実装**: ゼロコスト抽象化によるメモリ安全かつ高速なパフォーマンス。
 - **ハイブリッド検索**: BM25 Lexical 検索と HNSW ベクトル検索を設定可能なフュージョン戦略でシームレスに統合。
 - **マルチモーダル対応**: CLIP エンベディングによるテキストから画像、画像から画像への検索をネイティブサポート。
-- **豊富な Query DSL**: Term、Phrase、Boolean、Fuzzy、Wildcard、Range、Geographic、Span クエリに対応。
+- **豊富な Query DSL**: Term、Phrase、Boolean、Fuzzy、Wildcard、Range、2D / 3D Geographic（球、バウンディングボックス、k-NN）、Span クエリに対応。
 - **柔軟な解析**: トークン化、正規化、ステミングの設定可能なパイプライン（[Lindera](https://github.com/lindera/lindera) による CJK サポートを含む）。
 - **プラガブルストレージ**: インメモリ、ファイルシステム、メモリマップドストレージバックエンドのインターフェース。
+- **動的スキーマ**: オプションのスキーマオンライト — 未宣言フィールドは値から型を推論し、`Strict` / `Dynamic` / `Ignore` ポリシーで細やかに制御可能。
+- **多値数値フィールド**: Integer / Float フィールドは 1 ドキュメントあたり複数値を保持でき、Range クエリは「いずれかの値が条件を満たす」ドキュメントにマッチする（Lucene 互換の "any match" 意味論）。
 - **スコアリングとランキング**: BM25 スコアリングとハイブリッド結果向けのカスタマイズ可能なフュージョン戦略。
 - **ファセットとハイライト**: ファセットナビゲーションと検索結果ハイライトの組み込みサポート。
 - **スペル修正**: スペルミスのあるクエリ用語の修正候補を提案。
 
 ## ワークスペース構成
 
-Laurus は 8 つのクレートで構成された Cargo ワークスペースです:
+Laurus は 9 つのクレートで構成された Cargo ワークスペースです:
 
 | クレート | 説明 |
 | --- | --- |
@@ -92,6 +96,7 @@ Laurus は 8 つのクレートで構成された Cargo ワークスペースで
 | [`laurus-nodejs`](laurus-nodejs/) | NAPI-RS で構築した Node.js バインディング（npm パッケージ） |
 | [`laurus-wasm`](laurus-wasm/) | wasm-bindgen で構築した WebAssembly バインディング（npm パッケージ） |
 | [`laurus-ruby`](laurus-ruby/) | magnus と rb-sys で構築した Ruby バインディング（RubyGems パッケージ） |
+| [`laurus-php`](laurus-php/) | ext-php-rs で構築した PHP バインディング（PHP 拡張） |
 
 ## フィーチャーフラグ
 
@@ -183,6 +188,7 @@ async fn main() -> laurus::Result<()> {
 | [lexical_search](laurus/examples/lexical_search.rs) | 全クエリタイプ（Term、Phrase、Boolean、Fuzzy、Wildcard、Range、Geo、Span） | — |
 | [vector_search](laurus/examples/vector_search.rs) | エンベディングによるセマンティック類似度検索 | — |
 | [hybrid_search](laurus/examples/hybrid_search.rs) | フュージョンによる Lexical 検索とベクトル検索の統合 | — |
+| [geo3d_search](laurus/examples/geo3d_search.rs) | 3D ECEF 地理空間検索（球、バウンディングボックス、k-NN） | — |
 | [synonym_graph_filter](laurus/examples/synonym_graph_filter.rs) | 解析パイプラインでの同義語展開 | — |
 | [search_with_candle](laurus/examples/search_with_candle.rs) | Candle によるローカル BERT エンベディング | `embeddings-candle` |
 | [search_with_openai](laurus/examples/search_with_openai.rs) | OpenAI によるクラウドベースエンベディング | `embeddings-openai` |

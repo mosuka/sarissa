@@ -20,6 +20,7 @@ cargo doc --open
 | `engine.search(request).await?` | 検索リクエストの実行 |
 | `engine.commit().await?` | 保留中のすべての変更をストレージにフラッシュ |
 | `engine.add_field(name, field_option).await?` | 稼働中のエンジンにフィールドを動的に追加 |
+| `engine.delete_field(name).await?` | 稼働中のエンジンからフィールドを動的に削除 |
 | `engine.schema()` | 現在のスキーマへの参照を取得 |
 | `engine.stats()?` | インデックス統計の取得 |
 
@@ -47,16 +48,20 @@ cargo doc --open
 | メソッド | 説明 |
 | :--- | :--- |
 | `.add_text_field(name, TextOption)` | 全文検索フィールドを追加 |
-| `.add_integer_field(name, IntegerOption)` | 整数フィールドを追加 |
-| `.add_float_field(name, FloatOption)` | 浮動小数点フィールドを追加 |
+| `.add_integer_field(name, IntegerOption)` | 整数フィールドを追加（`IntegerOption::multi_valued = true` で多値配列対応） |
+| `.add_float_field(name, FloatOption)` | 浮動小数点フィールドを追加（`FloatOption::multi_valued = true` で多値配列対応） |
 | `.add_boolean_field(name, BooleanOption)` | 真偽値フィールドを追加 |
 | `.add_datetime_field(name, DateTimeOption)` | 日時フィールドを追加 |
-| `.add_geo_field(name, GeoOption)` | 地理フィールドを追加 |
+| `.add_geo_field(name, GeoOption)` | 2D 地理（緯度/経度）フィールドを追加 |
+| `.add_geo3d_field(name, Geo3dOption)` | 3D ECEF 直交座標系の点フィールド（x, y, z メートル単位）を追加 |
 | `.add_bytes_field(name, BytesOption)` | バイナリフィールドを追加 |
 | `.add_hnsw_field(name, HnswOption)` | HNSWベクトルフィールドを追加 |
 | `.add_flat_field(name, FlatOption)` | Flatベクトルフィールドを追加 |
 | `.add_ivf_field(name, IvfOption)` | IVFベクトルフィールドを追加 |
 | `.add_default_field(name)` | デフォルト検索フィールドを設定 |
+| `.add_analyzer(name, AnalyzerDefinition)` | カスタム Analyzer パイプラインを登録 |
+| `.add_embedder(name, EmbedderDefinition)` | Embedder 定義を登録 |
+| `.dynamic_field_policy(DynamicFieldPolicy)` | 未宣言フィールドのポリシー（`Strict` / `Dynamic` / `Ignore`）を設定 |
 | `.build()` | `Schema` を構築 |
 
 ## Document
@@ -74,13 +79,17 @@ cargo doc --open
 
 | メソッド | 説明 |
 | :--- | :--- |
+| `.add_field(name, DataValue)` | 任意の `DataValue` を追加 |
 | `.add_text(name, value)` | テキストフィールドを追加 |
-| `.add_integer(name, value)` | 整数フィールドを追加 |
-| `.add_float(name, value)` | 浮動小数点フィールドを追加 |
+| `.add_integer(name, value)` | 単一値の整数フィールドを追加 |
+| `.add_float(name, value)` | 単一値の浮動小数点フィールドを追加 |
 | `.add_boolean(name, value)` | 真偽値フィールドを追加 |
 | `.add_datetime(name, value)` | 日時フィールドを追加 |
 | `.add_vector(name, vec)` | 事前計算済みベクトルを追加 |
-| `.add_geo(name, lat, lon)` | 地理ポイントを追加 |
+| `.add_geo(name, lat, lon)` | 2D 地理ポイントを追加 |
+| `.add_geo_ecef(name, x, y, z)` | 3D ECEF 直交座標系の点（メートル単位）を追加 |
+| `.add_int64_array(name, values)` | 多値整数フィールドを追加 |
+| `.add_float64_array(name, values)` | 多値浮動小数点フィールドを追加 |
 | `.add_bytes(name, data)` | バイナリデータを追加 |
 | `.build()` | `Document` を構築 |
 
@@ -146,7 +155,11 @@ cargo doc --open
 | `FuzzyQuery::new(field, term)` | あいまい一致（デフォルト max_edits=2） | `FuzzyQuery::new("body", "programing").max_edits(1)` |
 | `WildcardQuery::new(field, pattern)` | ワイルドカード | `WildcardQuery::new("file", "*.pdf")` |
 | `NumericRangeQuery::new(...)` | 数値範囲 | [Lexical Search](../concepts/search.md) を参照 |
-| `GeoQuery::within_radius(...)` | 地理半径 | [Lexical Search](../concepts/search.md) を参照 |
+| `GeoDistanceQuery::within_radius(...)` | 2D 地理半径 | [Lexical Search](../concepts/search.md) を参照 |
+| `GeoBoundingBoxQuery::within_bounding_box(...)` | 2D 地理バウンディングボックス | [Lexical Search](../concepts/search.md) を参照 |
+| `Geo3dDistanceQuery::within_sphere(...)` | 3D ECEF 球 | [3D 地理検索](../concepts/geo3d.md) を参照 |
+| `Geo3dBoundingBoxQuery::within_box(...)` | 3D ECEF 軸並行バウンディングボックス | [3D 地理検索](../concepts/geo3d.md) を参照 |
+| `Geo3dNearestQuery::k_nearest(...)` | 3D ECEF k-NN | [3D 地理検索](../concepts/geo3d.md) を参照 |
 | `SpanNearQuery::new(...)` | 近接 | [Lexical Search](../concepts/search.md) を参照 |
 | `PrefixQuery::new(field, prefix)` | 前方一致 | `PrefixQuery::new("body", "pro")` |
 | `RegexpQuery::new(field, pattern)?` | 正規表現一致 | `RegexpQuery::new("body", "^pro.*ing$")?` |
@@ -155,9 +168,9 @@ cargo doc --open
 
 | パーサー | 説明 |
 | :--- | :--- |
-| `QueryParser::new(analyzer)` | Lexical DSLクエリをパース |
-| `VectorQueryParser::new(embedder)` | Vector DSLクエリをパース |
-| `UnifiedQueryParser::new(lexical, vector)` | ハイブリッドDSLクエリをパース |
+| `LexicalQueryParser::new(analyzer)` | Lexical DSL クエリをパース |
+| `VectorQueryParser::new(embedder)` | Vector DSL クエリをパース |
+| `UnifiedQueryParser::new(lexical, vector)` | Lexical / Vector 両方を含むハイブリッド DSL クエリをパース |
 
 ## Analyzer
 
@@ -199,6 +212,9 @@ cargo doc --open
 | `DataValue::Float64(f64)` | `f64` |
 | `DataValue::Text(String)` | `String` |
 | `DataValue::Bytes(Vec<u8>, Option<String>)` | `(data, mime_type)` |
-| `DataValue::Vector(Vec<f32>)` | `Vec<f32>` |
+| `DataValue::Vector(Vec<f32>)` | 事前計算済みベクトル |
 | `DataValue::DateTime(DateTime<Utc>)` | `chrono::DateTime<Utc>` |
-| `DataValue::Geo(f64, f64)` | `(latitude, longitude)` |
+| `DataValue::Geo(GeoPoint)` | `(latitude, longitude)`（WGS84） |
+| `DataValue::GeoEcef(GeoEcefPoint)` | `(x, y, z)` ECEF 直交座標系（メートル単位） |
+| `DataValue::Int64Array(Vec<i64>)` | 多値整数（`multi_valued` フィールドオプションが必要） |
+| `DataValue::Float64Array(Vec<f64>)` | 多値浮動小数点数（`multi_valued` フィールドオプションが必要） |

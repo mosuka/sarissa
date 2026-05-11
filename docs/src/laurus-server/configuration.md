@@ -39,7 +39,7 @@ port = 50051
 http_port = 8080  # Optional: enables HTTP Gateway
 
 [index]
-data_dir = "./laurus_index"
+data_dir = "./laurus_data"
 ```
 
 Log verbosity is controlled by the `RUST_LOG` environment variable (default: `info`), not through the config file.
@@ -58,7 +58,7 @@ Log verbosity is controlled by the `RUST_LOG` environment variable (default: `in
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `data_dir` | String | `"./laurus_index"` | Path to the index data directory |
+| `data_dir` | String | `"./laurus_data"` | Path to the index data directory |
 
 ## Environment Variables
 

@@ -157,12 +157,24 @@ Each `VectorFieldStats` contains `vector_count` and `dimension`.
 
 Add a new field to the running index at runtime.
 
+```protobuf
+rpc AddField(AddFieldRequest) returns (AddFieldResponse);
+```
+
+**Request fields:**
+
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `name` | `string` | The field name |
 | `field_option` | `FieldOption` | The field configuration |
 
-**Response:** Returns the updated `Schema`.
+**Response fields:**
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `schema` | `Schema` | The updated schema after the field has been added |
+
+**HTTP gateway:** `POST /v1/schema/fields`
 
 ### `DeleteField`
 
@@ -236,13 +248,15 @@ Each `Value` is a `oneof` with these types:
 | :--- | :--- | :--- |
 | Null | `null_value` | Null value |
 | Boolean | `bool_value` | Boolean value |
-| Integer | `int64_value` | 64-bit integer |
+| Integer | `int64_value` | 64-bit signed integer |
 | Float | `float64_value` | 64-bit floating point |
 | Text | `text_value` | UTF-8 string |
 | Bytes | `bytes_value` | Raw bytes |
 | Vector | `vector_value` | `VectorValue` (list of floats) |
 | DateTime | `datetime_value` | Unix microseconds (UTC) |
 | Geo | `geo_value` | `GeoPoint` (latitude, longitude) |
+| Int64Array | `int64_array_value` | `Int64ArrayValue` (multi-valued integers; requires `IntegerOption.multi_valued = true`) |
+| Float64Array | `float64_array_value` | `Float64ArrayValue` (multi-valued floats; requires `FloatOption.multi_valued = true`) |
 | Geo3d | `geo3d_value` | `Geo3dPoint` (x, y, z meters; ECEF Cartesian) |
 
 **Geo3dPoint:**
