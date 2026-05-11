@@ -167,7 +167,7 @@ rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
 | :--- | :--- | :--- |
 | `schema` | `Schema` | インデックスのスキーマ |
 
-### AddField
+### `AddField`
 
 稼働中のインデックスにフィールドを動的に追加します。
 
@@ -175,12 +175,20 @@ rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
 rpc AddField(AddFieldRequest) returns (AddFieldResponse);
 ```
 
+**リクエストフィールド:**
+
 | フィールド | 型 | 説明 |
 | :--- | :--- | :--- |
 | `name` | `string` | フィールド名 |
 | `field_option` | `FieldOption` | フィールド設定 |
 
-**レスポンス:** 更新後の `Schema` を返します。
+**レスポンスフィールド:**
+
+| フィールド | 型 | 説明 |
+| :--- | :--- | :--- |
+| `schema` | `Schema` | フィールド追加後の更新済みスキーマ |
+
+**HTTP ゲートウェイ:** `POST /v1/schema/fields`
 
 ### DeleteField
 
@@ -239,13 +247,15 @@ message Document {
 | :--- | :--- | :--- |
 | Null | `null_value` | Null 値 |
 | Boolean | `bool_value` | ブール値 |
-| Integer | `int64_value` | 64 ビット整数 |
+| Integer | `int64_value` | 64 ビット符号付き整数 |
 | Float | `float64_value` | 64 ビット浮動小数点数 |
 | Text | `text_value` | UTF-8 文字列 |
 | Bytes | `bytes_value` | バイト列 |
 | Vector | `vector_value` | `VectorValue`（浮動小数点数のリスト） |
 | DateTime | `datetime_value` | Unix マイクロ秒（UTC） |
 | Geo | `geo_value` | `GeoPoint`（緯度、経度） |
+| Int64Array | `int64_array_value` | `Int64ArrayValue`（多値整数。`IntegerOption.multi_valued = true` を要求） |
+| Float64Array | `float64_array_value` | `Float64ArrayValue`（多値浮動小数点数。`FloatOption.multi_valued = true` を要求） |
 | Geo3d | `geo3d_value` | `Geo3dPoint`（x, y, z メートル単位、ECEF 直交座標系） |
 
 **Geo3dPoint:**
