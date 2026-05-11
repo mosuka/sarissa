@@ -26,13 +26,14 @@ python3 -m http.server 8080
 ## How to use it
 
 1. The page loads and drops a yellow pin 📌 at Tokyo, fetches the
-   aircraft within 1000 nm of the pin from airplanes.live, and
+   aircraft within 250 nm of the pin from airplanes.live (the
+   upstream `/v2/point` endpoint caps the radius at 250 nm), and
    shows the 50 aircraft 3D-closest to the pin as orange markers
    with a vertical altitude line.
 2. **Click anywhere on the globe** to move the pin. The pin moves
    immediately. The demo only re-fetches when the new pin is more
-   than **500 nautical miles** from the last fetched centre — for
-   closer clicks the previous 1000 nm snapshot still fully covers
+   than **125 nautical miles** from the last fetched centre — for
+   closer clicks the previous 250 nm snapshot still fully covers
    the new pin's neighbourhood, so the existing in-memory index is
    reused (no upstream call, instant search). Re-fetches that do
    trigger share a 3-second rate limit with the manual Refresh
@@ -48,7 +49,7 @@ python3 -m http.server 8080
 5. Use **Refresh data** for a manual snapshot, or pick an interval
    in the **Auto** dropdown (5 s / 10 s / 30 s / 60 s) for
    hands-off updates. Auto-refresh pauses while the tab is hidden.
-   Manual / scheduled fetches always run regardless of the 500 nm
+   Manual / scheduled fetches always run regardless of the 125 nm
    click threshold.
 6. The **↺ Reset view** button (top-right of the globe) flies the
    camera back to the default oblique view of Japan.
@@ -131,11 +132,14 @@ so the ~52 MB UniDic zip is downloaded only once across samples.
   rate-limited to one request every 3 seconds; auto-refresh
   defaults to off and the available cadences (5 / 10 / 30 / 60 s) are
   designed to keep the load on the upstream feed reasonable.
-- Each fetch is centred on the current pin position with a 1000 nm
-  radius (~1850 km). The pin defaults to Tokyo on first load and
-  moves wherever you click; manual Refresh and Auto-refresh both
-  use the current pin position. Edit the `FETCH_RADIUS_NM` constant
-  in `index.html` if you want a different radius.
+- Each fetch is centred on the current pin position with a 250 nm
+  radius (~463 km), the maximum the upstream `/v2/point` endpoint
+  accepts — larger values return HTTP 403 with no CORS headers,
+  which surfaces in the browser as a misleading "Failed to fetch"
+  CORS error. The pin defaults to Tokyo on first load and moves
+  wherever you click; manual Refresh and Auto-refresh both use the
+  current pin position. Edit the `FETCH_RADIUS_NM` constant in
+  `index.html` if you want a smaller radius.
 - The index is intentionally non-persistent: each page load wipes
   OPFS and rebuilds from a fresh airplanes.live snapshot. Use the
   basic / geo samples if you want to see OPFS persistence in
