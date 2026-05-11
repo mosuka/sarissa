@@ -17,7 +17,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-clap = { workspace = true }
+# clap = { workspace = true }
+clap = { version = "4.6.1", features = ["derive", "env"] }
 dialoguer = { workspace = true }
 laurus = { workspace = true, features = ["native"] }
 laurus-mcp = { workspace = true }

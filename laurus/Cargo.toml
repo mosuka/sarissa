@@ -45,11 +45,11 @@ rkyv = { version = "0.8.16", features = ["std"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { version = "1.52.1", features = ["sync", "macros"] }
+tokio = { version = "1.52.3", features = ["sync", "macros"] }
 unicode-normalization = "0.1.25"
 unicode-segmentation = "1.13.2"
 uuid = { version = "1.23.1", features = ["v4", "js"] }
-wide = "1.3.0"
+wide = "1.4.0"
 
 # Native-only dependencies (file I/O, threading, mmap)
 crossbeam-channel = { version = "0.5.15", optional = true }
@@ -221,4 +221,4 @@ tokio-test = "0.4.5"
 # transitive runtime dep through other crates, so listing it explicitly
 # here adds no compile cost.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-libc = "0.2"
+libc = "0.2.186"
