@@ -1,5 +1,7 @@
 # Installation
 
+`laurus-php` is a PHP extension written in Rust. It is not published to PECL and Composer is not used as the installation channel — the `composer.json` in the repository only declares dev-time test dependencies (PHPUnit). Build the shared library from source with Cargo, drop it next to your PHP installation's other extensions, and enable it via `php.ini`.
+
 ## From source
 
 Building from source requires a Rust toolchain (1.85 or later) and PHP 8.1 or later with development headers.

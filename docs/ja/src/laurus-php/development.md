@@ -50,9 +50,11 @@ print_r(\$index->stats());
 ## テスト
 
 テストは [PHPUnit](https://phpunit.de/) を使用しており、`tests/` ディレクトリにあります。
+Composer は開発時の PHP 依存（PHPUnit）の取得のみに使用し、
+ランタイム拡張本体は Cargo で直接ビルド・ロードします。
 
 ```bash
-# テスト依存関係をインストール
+# テスト依存関係をインストール（PHPUnit のみ）
 composer install
 
 # 全テスト実行
