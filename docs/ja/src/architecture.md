@@ -4,15 +4,19 @@
 
 ## プロジェクト構成
 
-Laurus は Cargo workspace として 5 つのクレートで構成されています。
+Laurus は Cargo workspace として 9 つのクレート（コアライブラリ 1、自製バイナリ 3、言語バインディング 5）で構成されています。
 
 ```mermaid
 graph TB
-    CLI["laurus-cli\n(Binary Crate)\nCLI + REPL"]
-    SRV["laurus-server\n(Library + Binary)\ngRPC Server + HTTP Gateway"]
-    MCP["laurus-mcp\n(Library + Binary)\nMCP Server"]
-    PY["laurus-python\n(cdylib)\nPython Bindings"]
-    LIB["laurus\n(Library Crate)\nCore Search Engine"]
+    CLI["laurus-cli\n(Binary)\nCLI + REPL + serve + mcp"]
+    SRV["laurus-server\n(Library + Binary)\ngRPC + HTTP Gateway"]
+    MCP["laurus-mcp\n(Binary)\nMCP stdio server"]
+    PY["laurus-python\n(cdylib)\nPyO3 / Maturin"]
+    NJS["laurus-nodejs\n(cdylib)\nNAPI-RS"]
+    WASM["laurus-wasm\n(WebAssembly)\nwasm-bindgen"]
+    RB["laurus-ruby\n(cdylib)\nmagnus + rb-sys"]
+    PHP["laurus-php\n(PHP extension)\next-php-rs"]
+    LIB["laurus\n(Library)\nコア検索エンジン"]
 
     CLI --> LIB
     CLI --> SRV
@@ -21,6 +25,10 @@ graph TB
     MCP --> SRV
     MCP --> LIB
     PY --> LIB
+    NJS --> LIB
+    WASM --> LIB
+    RB --> LIB
+    PHP --> LIB
 ```
 
 | クレート | 種類 | 説明 |
@@ -28,8 +36,12 @@ graph TB
 | **laurus** | Library | コア検索エンジン -- Lexical 検索、Vector 検索、ハイブリッド検索 |
 | **laurus-cli** | Binary | インデックス管理と検索のためのコマンドラインインターフェース |
 | **laurus-server** | Library + Binary | オプションの HTTP/JSON ゲートウェイ付き gRPC サーバー |
-| **laurus-mcp** | Library + Binary | MCP（Model Context Protocol）サーバー |
-| **laurus-python** | cdylib | PyO3 による Python バインディング |
+| **laurus-mcp** | Binary | laurus-server へプロキシする MCP（Model Context Protocol）stdio サーバー |
+| **laurus-python** | cdylib | PyO3 / Maturin による Python バインディング |
+| **laurus-nodejs** | cdylib | NAPI-RS による Node.js バインディング |
+| **laurus-wasm** | WebAssembly | wasm-bindgen によるブラウザ・エッジバインディング |
+| **laurus-ruby** | cdylib | magnus / rb-sys による Ruby バインディング |
+| **laurus-php** | PHP 拡張 | ext-php-rs による PHP バインディング（ワークスペースからは除外） |
 
 各クレートの詳細については以下を参照してください。
 
@@ -38,6 +50,10 @@ graph TB
 - [サーバー概要](laurus-server.md)
 - [MCP サーバー概要](laurus-mcp.md)
 - [Python バインディング概要](laurus-python.md)
+- [Node.js バインディング概要](laurus-nodejs.md)
+- [WASM バインディング概要](laurus-wasm.md)
+- [Ruby バインディング概要](laurus-ruby.md)
+- [PHP バインディング概要](laurus-php.md)
 
 ## 全体概要
 

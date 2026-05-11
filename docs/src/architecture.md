@@ -28,8 +28,12 @@ graph TB
 | **laurus** | Library | Core search engine -- lexical, vector, and hybrid search |
 | **laurus-cli** | Binary | Command-line interface for index management and search |
 | **laurus-server** | Library + Binary | gRPC server with optional HTTP/JSON gateway |
-| **laurus-mcp** | Library + Binary | MCP (Model Context Protocol) server |
-| **laurus-python** | cdylib | Python bindings via PyO3 |
+| **laurus-mcp** | Binary | MCP (Model Context Protocol) stdio server that proxies to laurus-server |
+| **laurus-python** | cdylib | Python bindings via PyO3 / Maturin |
+| **laurus-nodejs** | cdylib | Node.js bindings via NAPI-RS |
+| **laurus-wasm** | WebAssembly | Browser / edge bindings via wasm-bindgen |
+| **laurus-ruby** | cdylib | Ruby bindings via magnus / rb-sys |
+| **laurus-php** | PHP extension | PHP bindings via ext-php-rs (excluded from the workspace) |
 
 For details on each crate, see:
 
@@ -38,6 +42,10 @@ For details on each crate, see:
 - [Server Overview](laurus-server.md)
 - [MCP Server Overview](laurus-mcp.md)
 - [Python Bindings Overview](laurus-python.md)
+- [Node.js Bindings Overview](laurus-nodejs.md)
+- [WASM Bindings Overview](laurus-wasm.md)
+- [Ruby Bindings Overview](laurus-ruby.md)
+- [PHP Bindings Overview](laurus-php.md)
 
 ## High-Level Overview
 
