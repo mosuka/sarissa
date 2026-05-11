@@ -97,6 +97,17 @@ perf PR の推奨フロー：
   taskset -c 2 cargo bench -p laurus --bench distance_bench
   ```
 
+  あるいは同梱のラッパー `scripts/bench-stable.sh` を使えば、`taskset` による
+  単一コアへのピン留めと `nice` によるスケジューリング優先度引き上げを 1 行で実行できます：
+
+  ```bash
+  ./scripts/bench-stable.sh --bench distance_bench
+  ./scripts/bench-stable.sh --bench distance_bench -- --baseline main
+  ```
+
+  ラッパーは Linux 限定です。CPU governor や turbo 状態には触りません（root が必要なため）。
+  さらに精度が必要なら別途設定してください。
+
 - **再実行**: 2 回実行して比較する。チューニング済みマシンで ~5 % 以下の差はノイズ。共有ワークステーションでは ~5 % を超える差もノイズの可能性がある。1 回の実行結果を過大解釈しない。
 
 環境を安定化できない場合は、不安定な数値を権威ある数値として提示せず、PR で明示的に断ること（例:「共有ノート PC で測定、~10 % のノイズを想定」）。
