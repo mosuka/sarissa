@@ -37,6 +37,7 @@ use std::sync::{Arc, RwLock};
 use crate::error::Result;
 use crate::lexical::core::document::Document;
 use crate::lexical::index::inverted::reader::SegmentReader;
+use crate::lexical::index::structures::bkd_tree::BKDTree;
 use crate::lexical::reader::{FieldStats, LexicalIndexReader, PostingIterator, ReaderTermInfo};
 
 /// Cross-segment term-info lookup function. Returns the **global**
@@ -180,6 +181,22 @@ impl LexicalIndexReader for PerSegmentReaderView {
         // would otherwise under-bound).
         let seg = self.segment.read().unwrap();
         seg.field_stats(field)
+    }
+
+    fn get_bkd_tree(&self, field: &str) -> Result<Option<Arc<dyn BKDTree>>> {
+        // Override the trait default (which returns `Ok(None)`) so that
+        // BKD-backed queries (geo / geo3d / numeric range) still find
+        // hits when the per-segment fanout (#480) routes the query
+        // through this view. Without this override the fanout path
+        // silently returns 0 hits for every BKD-backed query as soon
+        // as the index accumulates two or more segments.
+        //
+        // Wraps the segment's raw BKD tree in this segment's deletion
+        // filter so soft-deleted docs within the segment do not
+        // resurface (#400 invariant — must hold per-segment in the
+        // fanout path as well).
+        let seg = self.segment.read().unwrap();
+        seg.get_filtered_bkd_tree(field)
     }
 
     fn close(&mut self) -> Result<()> {
