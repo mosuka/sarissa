@@ -72,3 +72,4 @@ for r in results:
 - [インストール](laurus-python/installation.md) -- パッケージのインストール方法
 - [クイックスタート](laurus-python/quickstart.md) -- サンプルによるハンズオン入門
 - [API リファレンス](laurus-python/api_reference.md) -- クラスとメソッドの完全リファレンス
+- [開発](laurus-python/development.md) -- ソースからのビルド、テスト、プロジェクト構成

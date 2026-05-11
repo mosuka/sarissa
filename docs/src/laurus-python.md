@@ -69,3 +69,4 @@ for r in results:
 - [Installation](laurus-python/installation.md) -- How to install the package
 - [Quick Start](laurus-python/quickstart.md) -- Hands-on introduction with examples
 - [API Reference](laurus-python/api_reference.md) -- Complete class and method reference
+- [Development](laurus-python/development.md) -- Building from source, testing, and project layout
