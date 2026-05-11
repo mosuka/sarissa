@@ -1122,6 +1122,55 @@ impl SegmentReader {
 
         Ok(None)
     }
+
+    /// Return this segment's BKD tree wrapped in a deletion filter that
+    /// drops hits whose doc-id is recorded in the segment's deletion
+    /// bitmap.
+    ///
+    /// Used by the per-segment fanout path
+    /// ([`super::per_segment_view::PerSegmentReaderView`]) where the
+    /// caller only sees one segment at a time, so the cross-segment
+    /// snapshot built by [`InvertedIndexReader::get_bkd_tree`] is not
+    /// applicable. Without per-segment filtering here, the fanout
+    /// path would either drop every BKD hit (when the wrapper falls
+    /// back to the trait default returning `None`) or resurrect
+    /// soft-deleted hits — re-introducing the #400 ghost-hit
+    /// regression on top of the #480 fanout-path failure.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - The field name whose per-segment BKD tree to return.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(None)` if this segment has no BKD entries for `field`,
+    /// `Ok(Some(...))` otherwise. The returned tree is wrapped in
+    /// [`DeletionFilteringBKDTree`] only when the segment carries
+    /// recorded deletions; otherwise the raw tree is returned with
+    /// zero overhead.
+    pub(crate) fn get_filtered_bkd_tree(&self, field: &str) -> Result<Option<Arc<dyn BKDTree>>> {
+        let Some(tree) = self.get_bkd_tree(field)? else {
+            return Ok(None);
+        };
+        if !self.info.has_deletions {
+            return Ok(Some(tree));
+        }
+        // Ensure the bitmap is loaded; the load is idempotent and
+        // tolerates the "metadata says deletions but file is missing"
+        // case by leaving the bitmap unset, in which case we forward
+        // the raw tree.
+        self.load_deletion_bitmap()?;
+        let Some(bitmap) = self.deletion_bitmap.read().unwrap().clone() else {
+            return Ok(Some(tree));
+        };
+        let snapshot = Arc::new(DeletionSnapshot {
+            bitmaps: vec![(self.info.min_doc_id, self.info.max_doc_id, bitmap)],
+        });
+        Ok(Some(Arc::new(DeletionFilteringBKDTree {
+            inner: tree,
+            snapshot,
+        })))
+    }
 }
 
 #[derive(Debug)]

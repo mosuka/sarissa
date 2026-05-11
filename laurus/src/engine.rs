@@ -2375,4 +2375,226 @@ mod tests {
             "soft-deleted doc must NOT be returned by geo3d_distance",
         );
     }
+
+    /// Regression test for #480 (`e7c206ad`): the per-segment fanout
+    /// path in [`InvertedIndexSearcher::search_with_collector_parallel`]
+    /// wraps each segment in a [`PerSegmentReaderView`] that did not
+    /// override `get_bkd_tree`, so the trait default (`Ok(None)`)
+    /// silently disabled every BKD-backed query (geo / geo3d / numeric
+    /// range) once an index accumulated two or more segments. Reported
+    /// in production via the `laurus-wasm/examples/geo3d` demo, where
+    /// the second auto-refresh commit added a second segment and every
+    /// subsequent `geo3d_nearest` returned 0 hits.
+    ///
+    /// Steps:
+    ///   1. Put one doc, commit — segment 0.
+    ///   2. Put another doc, commit — segment 1. Reader now has
+    ///      `segment_count() == 2`, the fanout condition triggers.
+    ///   3. Run `geo3d_distance(...)` over a sphere covering both
+    ///      points — must find 2 hits, NOT 0.
+    #[tokio::test]
+    async fn test_geo3d_distance_multi_segment_returns_hits() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::Geo3dOption;
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("position", FieldOption::Geo3d(Geo3dOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        // Two distinct ECEF points roughly 50 km apart near Tokyo.
+        let mut doc_a = crate::data::Document::new();
+        doc_a.fields.insert(
+            "position".into(),
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(
+                -3955182.0, 3350553.0, 3700276.0,
+            )),
+        );
+        engine.put_document("A", doc_a).await.unwrap();
+        engine.commit().await.unwrap();
+
+        let mut doc_b = crate::data::Document::new();
+        doc_b.fields.insert(
+            "position".into(),
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(
+                -3960000.0, 3350000.0, 3700000.0,
+            )),
+        );
+        engine.put_document("B", doc_b).await.unwrap();
+        engine.commit().await.unwrap();
+
+        // 100 km sphere covers both points. With the bug, fanout makes
+        // this return 0 because PerSegmentReaderView.get_bkd_tree falls
+        // through to the trait default `Ok(None)`.
+        let dsl = "position:geo3d_distance(-3957000.0, 3350000.0, 3700000.0, 100000.0)";
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from(dsl))
+            .limit(10)
+            .build();
+        let hits = engine.search(request).await.unwrap();
+        assert_eq!(
+            hits.len(),
+            2,
+            "geo3d_distance must find both docs across two segments; \
+             got {} (bug: per-segment fanout drops BKD-backed queries)",
+            hits.len()
+        );
+    }
+
+    /// Regression test for #480: same as
+    /// [`test_geo3d_distance_multi_segment_returns_hits`] but for
+    /// `geo3d_nearest`, which is the query path the demo exercises.
+    #[tokio::test]
+    async fn test_geo3d_nearest_multi_segment_returns_hits() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::Geo3dOption;
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("position", FieldOption::Geo3d(Geo3dOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        let mut doc_a = crate::data::Document::new();
+        doc_a.fields.insert(
+            "position".into(),
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(
+                -3955182.0, 3350553.0, 3700276.0,
+            )),
+        );
+        engine.put_document("A", doc_a).await.unwrap();
+        engine.commit().await.unwrap();
+
+        let mut doc_b = crate::data::Document::new();
+        doc_b.fields.insert(
+            "position".into(),
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(
+                -3960000.0, 3350000.0, 3700000.0,
+            )),
+        );
+        engine.put_document("B", doc_b).await.unwrap();
+        engine.commit().await.unwrap();
+
+        let dsl = "position:geo3d_nearest(-3957000.0, 3350000.0, 3700000.0, 5)";
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from(dsl))
+            .limit(10)
+            .build();
+        let hits = engine.search(request).await.unwrap();
+        assert_eq!(
+            hits.len(),
+            2,
+            "geo3d_nearest must find both docs across two segments; \
+             got {} (bug: per-segment fanout returns no BKD tree)",
+            hits.len()
+        );
+    }
+
+    /// Regression test for #480 on numeric range queries. Same
+    /// underlying cause — BKD-backed query through the fanout view.
+    #[tokio::test]
+    async fn test_numeric_range_multi_segment_returns_hits() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::IntegerOption;
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("score", FieldOption::Integer(IntegerOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        let mut doc_a = crate::data::Document::new();
+        doc_a.fields.insert("score".into(), DataValue::Int64(10));
+        engine.put_document("A", doc_a).await.unwrap();
+        engine.commit().await.unwrap();
+
+        let mut doc_b = crate::data::Document::new();
+        doc_b.fields.insert("score".into(), DataValue::Int64(20));
+        engine.put_document("B", doc_b).await.unwrap();
+        engine.commit().await.unwrap();
+
+        let dsl = "score:[5 TO 25]";
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from(dsl))
+            .limit(10)
+            .build();
+        let hits = engine.search(request).await.unwrap();
+        assert_eq!(
+            hits.len(),
+            2,
+            "numeric range query must find both docs across two \
+             segments; got {} (bug: per-segment fanout drops BKD tree)",
+            hits.len()
+        );
+    }
+
+    /// Combined regression test: per-segment fanout must restore BKD
+    /// query hits (#480 fix) AND continue to filter out soft-deleted
+    /// hits within each segment (#400 fix). Without per-segment
+    /// deletion filtering in `PerSegmentReaderView::get_bkd_tree`,
+    /// the #480 fix would re-introduce the #400 ghost-hit regression.
+    #[tokio::test]
+    async fn test_geo3d_distance_multi_segment_filters_deleted() {
+        use crate::data::DataValue;
+        use crate::engine::schema::FieldOption;
+        use crate::lexical::core::field::Geo3dOption;
+        use crate::lexical::search::searcher::LexicalSearchQuery;
+
+        let storage: Arc<dyn Storage> = Arc::new(MemoryStorage::new(Default::default()));
+        let schema = Schema::builder()
+            .add_field("position", FieldOption::Geo3d(Geo3dOption::default()))
+            .build();
+        let engine = Engine::new(storage, schema).await.unwrap();
+
+        // Segment 0: two docs near Tokyo.
+        for id in &["A", "B"] {
+            let mut doc = crate::data::Document::new();
+            doc.fields.insert(
+                "position".into(),
+                DataValue::GeoEcef(crate::data::GeoEcefPoint::new(
+                    -3955182.0, 3350553.0, 3700276.0,
+                )),
+            );
+            engine.put_document(id, doc).await.unwrap();
+        }
+        engine.commit().await.unwrap();
+
+        // Soft-delete A in segment 0 and commit so segment 0 carries
+        // a deletion bitmap when the fanout view consults it.
+        engine.delete_documents("A").await.unwrap();
+        engine.commit().await.unwrap();
+
+        // Segment 1: one new doc.
+        let mut doc_c = crate::data::Document::new();
+        doc_c.fields.insert(
+            "position".into(),
+            DataValue::GeoEcef(crate::data::GeoEcefPoint::new(
+                -3960000.0, 3350000.0, 3700000.0,
+            )),
+        );
+        engine.put_document("C", doc_c).await.unwrap();
+        engine.commit().await.unwrap();
+
+        let dsl = "position:geo3d_distance(-3957000.0, 3350000.0, 3700000.0, 100000.0)";
+        let request = crate::engine::search::SearchRequestBuilder::new()
+            .lexical_query(LexicalSearchQuery::from(dsl))
+            .limit(10)
+            .build();
+        let hits = engine.search(request).await.unwrap();
+        assert_eq!(
+            hits.len(),
+            2,
+            "must return live docs B and C across two segments; \
+             got {} (regression: either #480 fanout BKD or #400 \
+             per-segment deletion filter)",
+            hits.len()
+        );
+    }
 }
