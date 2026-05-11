@@ -7,7 +7,7 @@ suite.
 ## Prerequisites
 
 - **Rust** 1.85 or later with Cargo
-- **Node.js** 18 or later with npm
+- **Node.js** 24.15 or later with npm (matches the `engines.node` requirement in `package.json`)
 - Repository cloned locally
 
 ```bash

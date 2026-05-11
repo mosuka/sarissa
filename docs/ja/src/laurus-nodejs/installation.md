@@ -9,7 +9,7 @@ npm install laurus-nodejs
 ## ソースから
 
 ソースからビルドするには Rust ツールチェーン（1.85 以降）と
-Node.js 18 以上が必要です。
+Node.js 24.15 以上が必要です。
 
 ```bash
 # リポジトリをクローン
@@ -37,5 +37,5 @@ console.log(index.stats());
 
 ## 要件
 
-- Node.js 18 以上
+- Node.js 24.15 以上（`package.json` の `engines.node` と一致）
 - コンパイル済みネイティブアドオン以外のランタイム依存なし
