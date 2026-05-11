@@ -454,3 +454,31 @@ For startup options, configuration, and usage examples, see the [laurus-server d
 - [Getting Started](../laurus-server/getting_started.md) — startup options and gRPC connection examples
 - [Configuration](../laurus-server/configuration.md) — TOML config file, environment variables, and priority rules
 - [Hands-on Tutorial](../laurus-server/tutorial.md) — step-by-step walkthrough
+
+---
+
+## `mcp`
+
+Start the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server on stdio. The MCP server lets AI assistants such as Claude Code or Claude Desktop drive a running laurus-server through a standard set of tools (`create_index`, `add_document`, `search`, etc.).
+
+```bash
+laurus mcp [--endpoint <URL>]
+```
+
+**Arguments:**
+
+| Flag | Environment Variable | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `--endpoint <URL>` | `LAURUS_ENDPOINT` | No | gRPC endpoint of a running laurus-server (e.g. `http://localhost:50051`). If omitted, the server starts without a connection; clients can call the `connect` MCP tool later to attach. |
+
+**Examples:**
+
+```bash
+# Start the MCP server pre-connected to a local laurus-server
+laurus mcp --endpoint http://localhost:50051
+
+# Start the MCP server without a connection; clients call `connect` first
+laurus mcp
+```
+
+For the full list of MCP tools exposed by this server and how to wire it into Claude Code or Claude Desktop, see the [laurus-mcp documentation](../laurus-mcp.md).
