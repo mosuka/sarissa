@@ -126,6 +126,33 @@ Then ask Claude to connect:
 
 Claude will call `connect(endpoint: "http://localhost:50051")` before using other tools.
 
+## Environment Variables
+
+The `--endpoint` flag can be omitted and supplied through `LAURUS_ENDPOINT` instead — useful when the endpoint is fixed per machine and you do not want to hard-code it into every MCP client config:
+
+```bash
+export LAURUS_ENDPOINT=http://localhost:50051
+claude mcp add laurus -- laurus mcp
+```
+
+Or inside the client config:
+
+```json
+{
+  "mcpServers": {
+    "laurus": {
+      "command": "laurus",
+      "args": ["mcp"],
+      "env": {
+        "LAURUS_ENDPOINT": "http://localhost:50051"
+      }
+    }
+  }
+}
+```
+
+When both are present, the explicit `--endpoint` flag wins (standard clap behaviour for `#[arg(long, env = "...")]`).
+
 ## Removing the MCP Server
 
 To remove the registered MCP server from Claude Code:
