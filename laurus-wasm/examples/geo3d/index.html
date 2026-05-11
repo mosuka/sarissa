@@ -361,22 +361,26 @@
 
     /** Radius in nautical miles passed to airplanes.live. Each
      *  fetch is centred on the current pin position, so clicking
-     *  the globe re-centres both the pin and the snapshot. */
-    const FETCH_RADIUS_NM = 1000;
+     *  the globe re-centres both the pin and the snapshot. The
+     *  `/v2/point/{lat}/{lon}/{radius}` endpoint caps the radius at
+     *  250 nm — larger values are rejected with HTTP 403 (which
+     *  surfaces as a CORS error in the browser because the error
+     *  response carries no `Access-Control-Allow-Origin` header). */
+    const FETCH_RADIUS_NM = 250;
 
     /** Click-to-pin re-fetch threshold. A click that lands within this
      *  many nautical miles of the last fetched centre reuses the
-     *  existing snapshot — the previous fetch's 1000 nm circle still
+     *  existing snapshot — the previous fetch's 250 nm circle still
      *  covers the new pin's neighbourhood, so no upstream call is
      *  needed. Beyond this threshold the click triggers a fresh
-     *  re-centred fetch. Half of `FETCH_RADIUS_NM` keeps a 500 nm
+     *  re-centred fetch. Half of `FETCH_RADIUS_NM` keeps a 125 nm
      *  buffer around the new pin even at the threshold. */
-    const FETCH_REFRESH_NM = 500;
+    const FETCH_REFRESH_NM = 125;
 
     /** Build the airplanes.live readsb-format endpoint URL for a
      *  given centre. The pin defaults to Tokyo, so the initial
-     *  snapshot covers Japan and the surrounding airspace within
-     *  ~1850 km (`FETCH_RADIUS_NM`). */
+     *  snapshot covers the Kanto region and surrounding airspace
+     *  within ~463 km (`FETCH_RADIUS_NM`). */
     function buildFetchUrl(latDeg, lonDeg) {
       return `https://api.airplanes.live/v2/point/${latDeg.toFixed(4)}/${lonDeg.toFixed(4)}/${FETCH_RADIUS_NM}`;
     }
@@ -612,9 +616,9 @@
       // rotation / panning.
       //
       // Re-fetch policy: a click only triggers `refreshData()` when
-      // the new pin is more than `FETCH_REFRESH_NM` (500 nm) away
+      // the new pin is more than `FETCH_REFRESH_NM` (125 nm) away
       // from the last fetched centre. Inside that radius the prior
-      // 1000 nm snapshot still covers the new pin's neighbourhood,
+      // 250 nm snapshot still covers the new pin's neighbourhood,
       // so the existing in-memory index is reused — instant search,
       // no upstream call, no rate-limit pressure on airplanes.live.
       // The pin still moves immediately (`setPin` always runs) so
