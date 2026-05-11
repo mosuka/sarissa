@@ -76,6 +76,56 @@ This excludes native-only dependencies (tokio/full, rayon,
 memmap2, etc.) and uses `#[cfg(target_arch = "wasm32")]`
 fallbacks for parallelism.
 
+### Japanese Morphological Analysis
+
+Browser WASM has no filesystem, so the standard `{ "language": "japanese", "dict": "/path/to/ipadic" }` analyzer preset cannot be used. `laurus-wasm` exposes `JapaneseAnalyzer.fromBytes(...)` (defined in [`src/analysis.rs`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/src/analysis.rs)) so that a Lindera IPADIC dictionary archive can be fetched into OPFS at runtime, read back as the eight raw byte arrays Lindera needs, and handed to the analyzer:
+
+```javascript
+import { JapaneseAnalyzer, Schema } from "laurus-wasm";
+import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
+
+await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
+const f = await loadDictionaryFiles("ipadic");
+const ja = JapaneseAnalyzer.fromBytes(
+  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
+  f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
+);
+
+const schema = new Schema();
+schema.addAnalyzer("ja-ipadic", ja);
+schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
+```
+
+The OPFS helpers (`downloadDictionary`, `loadDictionaryFiles`, `hasDictionary`, `listDictionaries`, `removeDictionary`) live in [`js/opfs.js`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/js/opfs.js) and are re-exported as the `laurus-wasm/opfs` subpath in `package.json`. See [API Reference → JapaneseAnalyzer](api_reference.md#japaneseanalyzer) for the argument table.
+
+### Callback Embedder
+
+In addition to the `"precomputed"` embedder (vectors supplied directly by the caller), `laurus-wasm` accepts a `"callback"` embedder where the JS side provides an `async embed: (text) => Promise<number[]>` function. The engine invokes this callback during document ingestion and `searchVectorText()` queries, which lets you wire in any in-browser embedding library (Transformers.js, ONNX Runtime Web, etc.) without rebuilding the WASM module:
+
+```javascript
+import { pipeline } from "@xenova/transformers";
+
+const embedder = await pipeline(
+  "feature-extraction",
+  "Xenova/all-MiniLM-L6-v2",
+);
+
+schema.addEmbedder("minilm", {
+  type: "callback",
+  embed: async (text) => {
+    const output = await embedder(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
+
+schema.addHnswField(
+  "embedding", 384, "cosine",
+  undefined, undefined, "minilm",
+);
+```
+
+The wasm-bindgen glue holds the JS callback via a `Closure`, so it stays alive for the lifetime of the index. There is no `Send + Sync` requirement on the callback because it only runs on the main thread.
+
 ## Testing
 
 ```bash
