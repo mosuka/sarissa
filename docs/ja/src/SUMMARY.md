@@ -72,6 +72,7 @@
   - [インストール](laurus-python/installation.md)
   - [クイックスタート](laurus-python/quickstart.md)
   - [API リファレンス](laurus-python/api_reference.md)
+  - [開発](laurus-python/development.md)
 
 # laurus-nodejs
 

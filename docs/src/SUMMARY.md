@@ -72,6 +72,7 @@
   - [Installation](laurus-python/installation.md)
   - [Quick Start](laurus-python/quickstart.md)
   - [API Reference](laurus-python/api_reference.md)
+  - [Development](laurus-python/development.md)
 
 # laurus-nodejs
 
