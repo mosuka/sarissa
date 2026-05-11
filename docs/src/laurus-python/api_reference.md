@@ -404,4 +404,5 @@ Python values are automatically converted to Laurus `DataValue` types:
 | `bytes` | `Bytes` | |
 | `list[float]` | `Vector` | Elements coerced to `f32` |
 | `(lat, lon)` tuple | `Geo` | Two `float` values |
+| `(x, y, z)` tuple | `Geo3d` | Three `float` values (ECEF Cartesian, metres) |
 | `datetime.datetime` | `DateTime` | Converted via `isoformat()` |
