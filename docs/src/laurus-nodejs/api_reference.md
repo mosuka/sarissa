@@ -34,10 +34,19 @@ class Index {
 | `searchVector(field, vector, limit?, offset?)` | Search with a pre-computed vector. |
 | `searchVectorText(field, text, limit?, offset?)` | Search with text (auto-embedded). |
 | `searchWithRequest(request)` | Search with a `SearchRequest`. |
-| `stats()` | Return index statistics. |
+| `stats()` | Return index statistics (`documentCount`, `vectorFields`). |
 
 All document methods and search methods are async
 and return Promises. `stats()` is synchronous.
+
+`stats()` returns an object shaped like:
+
+```typescript
+interface IndexStats {
+  documentCount: number;
+  vectorFields: Record<string, { count: number; dimension: number }>;
+}
+```
 
 ---
 
