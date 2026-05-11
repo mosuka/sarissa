@@ -147,9 +147,16 @@ None.
 ```json
 {
   "document_count": 42,
-  "vector_fields": ["embedding"]
+  "vector_fields": {
+    "embedding": {
+      "vector_count": 42,
+      "dimension": 384
+    }
+  }
 }
 ```
+
+`vector_fields` is a map keyed by field name; each entry reports the number of indexed vectors and the field's configured dimension.
 
 ---
 

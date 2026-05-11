@@ -91,9 +91,16 @@ schema_json: {"fields": {"title": {"Text": {}}, "body": {"Text": {}}}}
 ```json
 {
   "document_count": 42,
-  "vector_fields": ["embedding"]
+  "vector_fields": {
+    "embedding": {
+      "vector_count": 42,
+      "dimension": 384
+    }
+  }
 }
 ```
+
+`vector_fields` はフィールド名をキーとするマップで、各エントリにはインデックス済みベクトル数とフィールドに設定された次元数が含まれます。
 
 ---
 
