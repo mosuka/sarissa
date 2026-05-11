@@ -32,13 +32,13 @@ laurus serve --config config.toml
 | POST | `/v1/index` | `IndexService/CreateIndex` | 新しいインデックスを作成 |
 | GET | `/v1/index` | `IndexService/GetIndex` | インデックスの統計情報を取得 |
 | GET | `/v1/schema` | `IndexService/GetSchema` | インデックスのスキーマを取得 |
-| PUT | `/v1/documents/:id` | `DocumentService/PutDocument` | ドキュメントの Upsert |
-| POST | `/v1/documents/:id` | `DocumentService/AddDocument` | ドキュメントの追加（チャンク） |
-| GET | `/v1/documents/:id` | `DocumentService/GetDocuments` | ID でドキュメントを取得 |
-| DELETE | `/v1/documents/:id` | `DocumentService/DeleteDocuments` | ID でドキュメントを削除 |
+| POST | `/v1/schema/fields` | `IndexService/AddField` | フィールドを動的に追加 |
+| DELETE | `/v1/schema/fields/{name}` | `IndexService/DeleteField` | スキーマからフィールドを削除 |
+| PUT | `/v1/documents/{id}` | `DocumentService/PutDocument` | ドキュメントの Upsert |
+| POST | `/v1/documents/{id}` | `DocumentService/AddDocument` | ドキュメントの追加（チャンク） |
+| GET | `/v1/documents/{id}` | `DocumentService/GetDocuments` | ID でドキュメントを取得 |
+| DELETE | `/v1/documents/{id}` | `DocumentService/DeleteDocuments` | ID でドキュメントを削除 |
 | POST | `/v1/commit` | `DocumentService/Commit` | 保留中の変更をコミット |
-| POST | `/v1/schema/fields` | `IndexService/AddField` | フィールドの追加 |
-| DELETE | `/v1/schema/fields/:name` | `IndexService/DeleteField` | フィールドの削除 |
 | POST | `/v1/search` | `SearchService/Search` | 検索（単発） |
 | POST | `/v1/search/stream` | `SearchService/SearchStream` | 検索（Server-Sent Events） |
 
@@ -80,6 +80,31 @@ curl http://localhost:8080/v1/index
 ```bash
 curl http://localhost:8080/v1/schema
 ```
+
+### フィールドの動的追加
+
+稼働中のインデックスにフィールドを追加します。リクエストボディは `POST /v1/index` と同じ `FieldOption` JSON 形式を使います:
+
+```bash
+curl -X POST http://localhost:8080/v1/schema/fields \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "category",
+    "field_option": {"text": {"indexed": true, "stored": true}}
+  }'
+```
+
+レスポンスでは更新後のスキーマが返されます。
+
+### フィールドの削除
+
+スキーマからフィールドを削除します。フィールド名はパスで指定します:
+
+```bash
+curl -X DELETE http://localhost:8080/v1/schema/fields/category
+```
+
+既にインデックスされたデータはストレージに残りますが、アクセスできなくなります。フィールド固有のアナライザとエンベッダーは解除されます。
 
 ### ドキュメントの Upsert（PUT）
 
@@ -186,8 +211,8 @@ data: {"id":"doc2","score":0.4210,"document":{...}}
 
 ## JSON フィールド値の型推論
 
-ドキュメント投入リクエスト（`PUT /v1/documents/:id` または
-`POST /v1/documents/:id`）のボディに含まれる `document.fields` の各値は、
+ドキュメント投入リクエスト（`PUT /v1/documents/{id}` または
+`POST /v1/documents/{id}`）のボディに含まれる `document.fields` の各値は、
 スキーマレス取り込みと同じ推論ルールでエンジンの
 [`DataValue`](../concepts/schema_and_fields.md) に変換されます。これにより
 HTTP 経路と gRPC 経路で挙動が一致します。

@@ -32,10 +32,12 @@ If `http_port` is not set, only the gRPC server starts.
 | POST | `/v1/index` | `IndexService/CreateIndex` | Create a new index |
 | GET | `/v1/index` | `IndexService/GetIndex` | Get index statistics |
 | GET | `/v1/schema` | `IndexService/GetSchema` | Get the index schema |
-| PUT | `/v1/documents/:id` | `DocumentService/PutDocument` | Upsert a document |
-| POST | `/v1/documents/:id` | `DocumentService/AddDocument` | Add a document (chunk) |
-| GET | `/v1/documents/:id` | `DocumentService/GetDocuments` | Get documents by ID |
-| DELETE | `/v1/documents/:id` | `DocumentService/DeleteDocuments` | Delete documents by ID |
+| POST | `/v1/schema/fields` | `IndexService/AddField` | Dynamically add a field |
+| DELETE | `/v1/schema/fields/{name}` | `IndexService/DeleteField` | Remove a field from the schema |
+| PUT | `/v1/documents/{id}` | `DocumentService/PutDocument` | Upsert a document |
+| POST | `/v1/documents/{id}` | `DocumentService/AddDocument` | Add a document (chunk) |
+| GET | `/v1/documents/{id}` | `DocumentService/GetDocuments` | Get documents by ID |
+| DELETE | `/v1/documents/{id}` | `DocumentService/DeleteDocuments` | Delete documents by ID |
 | POST | `/v1/commit` | `DocumentService/Commit` | Commit pending changes |
 | POST | `/v1/search` | `SearchService/Search` | Search (unary) |
 | POST | `/v1/search/stream` | `SearchService/SearchStream` | Search (Server-Sent Events) |
@@ -82,6 +84,31 @@ curl http://localhost:8080/v1/index
 ```bash
 curl http://localhost:8080/v1/schema
 ```
+
+### Add a Field (Dynamic Schema)
+
+Adds a new field to the running index. The request body uses the same `FieldOption` JSON shape as `POST /v1/index`:
+
+```bash
+curl -X POST http://localhost:8080/v1/schema/fields \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "category",
+    "field_option": {"text": {"indexed": true, "stored": true}}
+  }'
+```
+
+The response returns the updated schema.
+
+### Delete a Field
+
+Removes a field from the schema. The field name is supplied in the path:
+
+```bash
+curl -X DELETE http://localhost:8080/v1/schema/fields/category
+```
+
+Existing indexed data for the field remains in storage but becomes inaccessible. Per-field analyzers and embedders are unregistered.
 
 ### Upsert a Document (PUT)
 
@@ -188,8 +215,8 @@ data: {"id":"doc2","score":0.4210,"document":{...}}
 
 ## JSON Field Value Inference
 
-When the gateway accepts a document body (`PUT /v1/documents/:id` or
-`POST /v1/documents/:id`), each value inside `document.fields` is converted
+When the gateway accepts a document body (`PUT /v1/documents/{id}` or
+`POST /v1/documents/{id}`), each value inside `document.fields` is converted
 to the engine's [`DataValue`](../concepts/schema_and_fields.md) type using
 the same inference rules as schema-less ingestion. This keeps the HTTP and
 gRPC paths in sync.
