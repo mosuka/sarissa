@@ -143,14 +143,14 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             m: o.m as u32,
             ef_construction: o.ef_construction as u32,
             base_weight: o.base_weight,
-            quantizer: o.quantizer.map(|q| quantization_to_proto(&q)),
+            quantizer: Some(quantization_to_proto(&o.quantizer)),
             embedder: o.embedder.clone().unwrap_or_default(),
         })),
         FieldOption::Flat(o) => Some(Opt::Flat(v1::FlatOption {
             dimension: o.dimension as u32,
             distance: distance_to_proto(&o.distance) as i32,
             base_weight: o.base_weight,
-            quantizer: o.quantizer.map(|q| quantization_to_proto(&q)),
+            quantizer: Some(quantization_to_proto(&o.quantizer)),
             embedder: o.embedder.clone().unwrap_or_default(),
         })),
         FieldOption::Ivf(o) => Some(Opt::Ivf(v1::IvfOption {
@@ -159,7 +159,7 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             n_clusters: o.n_clusters as u32,
             n_probe: o.n_probe as u32,
             base_weight: o.base_weight,
-            quantizer: o.quantizer.map(|q| quantization_to_proto(&q)),
+            quantizer: Some(quantization_to_proto(&o.quantizer)),
             embedder: o.embedder.clone().unwrap_or_default(),
         })),
     };
@@ -215,7 +215,11 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
             m: o.m as usize,
             ef_construction: o.ef_construction as usize,
             base_weight: o.base_weight,
-            quantizer: o.quantizer.as_ref().map(quantization_from_proto),
+            quantizer: o
+                .quantizer
+                .as_ref()
+                .map(quantization_from_proto)
+                .unwrap_or_default(),
             embedder: if o.embedder.is_empty() {
                 None
             } else {
@@ -226,7 +230,11 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
             dimension: o.dimension as usize,
             distance: distance_from_proto(o.distance),
             base_weight: o.base_weight,
-            quantizer: o.quantizer.as_ref().map(quantization_from_proto),
+            quantizer: o
+                .quantizer
+                .as_ref()
+                .map(quantization_from_proto)
+                .unwrap_or_default(),
             embedder: if o.embedder.is_empty() {
                 None
             } else {
@@ -239,7 +247,11 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
             n_clusters: o.n_clusters as usize,
             n_probe: o.n_probe as usize,
             base_weight: o.base_weight,
-            quantizer: o.quantizer.as_ref().map(quantization_from_proto),
+            quantizer: o
+                .quantizer
+                .as_ref()
+                .map(quantization_from_proto)
+                .unwrap_or_default(),
             embedder: if o.embedder.is_empty() {
                 None
             } else {
