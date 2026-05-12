@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
             dimension: 3,
             distance: DistanceMetric::Cosine,
             base_weight: 1.0,
-            quantizer: None,
+            quantizer: Default::default(),
             embedder: None,
         })),
         lexical: None,
