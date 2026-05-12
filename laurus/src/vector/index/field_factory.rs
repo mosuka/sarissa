@@ -51,6 +51,7 @@ impl VectorFieldFactory {
                 let flat = FlatIndexConfig {
                     dimension: opt.dimension,
                     distance_metric: opt.distance,
+                    rerank_storage: opt.rerank_storage,
                     embedder: embedder.clone(),
                     ..FlatIndexConfig::default()
                 };
@@ -67,6 +68,7 @@ impl VectorFieldFactory {
                     distance_metric: opt.distance,
                     m: opt.m,
                     ef_construction: opt.ef_construction,
+                    rerank_storage: opt.rerank_storage,
                     embedder: embedder.clone(),
                     ..HnswIndexConfig::default()
                 };
@@ -83,6 +85,7 @@ impl VectorFieldFactory {
                     distance_metric: opt.distance,
                     n_clusters: opt.n_clusters,
                     n_probe: opt.n_probe,
+                    rerank_storage: opt.rerank_storage,
                     embedder: embedder.clone(),
                     ..IvfIndexConfig::default()
                 };
