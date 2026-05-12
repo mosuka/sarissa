@@ -12,6 +12,8 @@ use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::quantized_io::quantized_record_payload_size;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
+use crate::vector::index::rerank_sidecar::read_sidecar;
+use crate::vector::index::rerank_storage::RerankStoragePool;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
 
@@ -67,6 +69,16 @@ pub struct HnswIndexReader {
     /// shared slice (no per-call allocation, no `Vec<(u64, String)>` clone,
     /// no linear filter). #405 (per-field `vector_ids` cache).
     vector_ids_by_field: HashMap<String, Arc<[u64]>>,
+
+    /// Optional Stage 2 rerank storage pool (Issue #481).
+    ///
+    /// `Some(_)` only when (a) the LRS1 sidecar exists alongside the
+    /// main `.hnsw` file and (b) the storage loading mode is Eager.
+    /// Lazy mode silently skips the sidecar so the on-disk read pattern
+    /// stays small; Stage 1 segments without a sidecar always yield
+    /// `None`. The HNSW searcher reads this to decide whether to
+    /// activate the two-stage rerank flow.
+    pub rerank_storage: Option<Arc<RerankStoragePool>>,
 }
 
 impl HnswIndexReader {
@@ -349,6 +361,49 @@ impl HnswIndexReader {
         // call; finalised into `Arc<[u64]>` for cheap clone semantics.
         let vector_ids_by_field = build_vector_ids_by_field(&vector_ids);
 
+        // Stage 2 rerank sidecar (Issue #481). Loaded eagerly into a
+        // RerankStoragePool when (a) a `<file_name>.f32` sidecar exists
+        // and (b) we are in Eager loading mode. Lazy mode skips the
+        // sidecar to honor its memory-savings promise — Stage 2 segments
+        // opened in Lazy mode silently degrade to Stage 1 (no rerank).
+        // The pool's vector positions are paired with `vector_ids` (the
+        // same order as the LVS1 segment), giving an identity mapping.
+        let rerank_storage = match storage.loading_mode() {
+            crate::storage::LoadingMode::Eager => {
+                let sidecar_name = format!("{}.f32", file_name);
+                if storage.file_exists(&sidecar_name) {
+                    let mut sidecar_in = storage.open_input(&sidecar_name)?;
+                    let (header, payload) = read_sidecar(&mut sidecar_in)?;
+                    if header.dim as usize != dimension {
+                        return Err(LaurusError::InvalidOperation(format!(
+                            "rerank sidecar dim mismatch: LVS1 segment uses {dimension}, \
+                             sidecar uses {}",
+                            header.dim
+                        )));
+                    }
+                    if header.vector_count as usize != vector_ids.len() {
+                        return Err(LaurusError::InvalidOperation(format!(
+                            "rerank sidecar vector_count mismatch: LVS1 segment has {} vectors, \
+                             sidecar has {}",
+                            vector_ids.len(),
+                            header.vector_count
+                        )));
+                    }
+                    let pool = RerankStoragePool::from_sidecar_payload(
+                        header.storage_kind,
+                        dimension,
+                        header.vector_count as usize,
+                        payload,
+                        &vector_ids,
+                    );
+                    Some(Arc::new(pool))
+                } else {
+                    None
+                }
+            }
+            crate::storage::LoadingMode::Lazy => None,
+        };
+
         Ok(Self {
             vectors,
             vector_ids,
@@ -360,6 +415,7 @@ impl HnswIndexReader {
             deletion_bitmap: None,
             prefetch_index,
             vector_ids_by_field,
+            rerank_storage,
         })
     }
 
@@ -407,6 +463,16 @@ impl HnswIndexReader {
     /// Step 6).
     pub fn vectors(&self) -> &crate::vector::index::storage::VectorStorage {
         &self.vectors
+    }
+
+    /// Borrow the optional Stage 2 rerank storage pool.
+    ///
+    /// Returns `Some(_)` only when this reader was loaded against a
+    /// segment whose LRS1 sidecar was present and the storage loading
+    /// mode allowed eager sidecar load. The HNSW searcher consults
+    /// this to decide whether the two-stage rerank flow is available.
+    pub fn rerank_storage(&self) -> Option<&Arc<RerankStoragePool>> {
+        self.rerank_storage.as_ref()
     }
 }
 

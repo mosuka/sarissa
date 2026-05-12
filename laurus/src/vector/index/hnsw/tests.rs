@@ -8,6 +8,7 @@ use crate::vector::core::vector::Vector;
 use crate::vector::index::VectorIndex;
 use crate::vector::index::config::HnswIndexConfig;
 use crate::vector::index::hnsw::HnswIndex;
+use crate::vector::index::hnsw::reader::HnswIndexReader;
 use crate::vector::index::hnsw::writer::HnswIndexWriter;
 use crate::vector::index::rerank_sidecar::read_sidecar;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
@@ -174,6 +175,93 @@ fn writer_emits_sidecar_with_matching_header_when_rerank_storage_is_f32() -> Res
     assert!((first_x - 0.1).abs() < f32::EPSILON);
     assert!((first_y - 0.2).abs() < f32::EPSILON);
     assert!((first_z - 0.3).abs() < f32::EPSILON);
+    Ok(())
+}
+
+#[test]
+fn reader_loads_rerank_storage_when_sidecar_present() -> Result<()> {
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let dim = 3;
+    let config = HnswIndexConfig {
+        dimension: dim,
+        m: 4,
+        ef_construction: 16,
+        distance_metric: DistanceMetric::Cosine,
+        normalize_vectors: false,
+        rerank_storage: Some(RerankStorageKind::F32),
+        ..Default::default()
+    };
+    let originals = vec![
+        (1u64, "f".to_string(), Vector::new(vec![0.1, 0.2, 0.3])),
+        (2u64, "f".to_string(), Vector::new(vec![-1.0, 0.5, 0.25])),
+    ];
+    let mut writer = HnswIndexWriter::with_storage(
+        config,
+        VectorIndexWriterConfig::default(),
+        "stage2_reader",
+        Arc::clone(&storage),
+    )?;
+    writer.add_vectors(originals.clone())?;
+    writer.finalize()?;
+    writer.write()?;
+
+    let reader = HnswIndexReader::load(
+        Arc::clone(&storage),
+        "stage2_reader",
+        DistanceMetric::Cosine,
+    )?;
+    let pool = reader
+        .rerank_storage()
+        .expect("rerank_storage must be Some when sidecar exists in Eager mode");
+    assert_eq!(pool.dim, dim);
+    assert_eq!(pool.vector_count, originals.len());
+    assert_eq!(pool.kind, RerankStorageKind::F32);
+    let v0 = pool
+        .get_f32_slice(1, "f")
+        .expect("doc 1 must be present in rerank pool");
+    assert_eq!(v0, &[0.1, 0.2, 0.3]);
+    let v1 = pool
+        .get_f32_slice(2, "f")
+        .expect("doc 2 must be present in rerank pool");
+    assert_eq!(v1, &[-1.0, 0.5, 0.25]);
+    Ok(())
+}
+
+#[test]
+fn reader_rerank_storage_is_none_for_stage1_segment() -> Result<()> {
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let dim = 3;
+    let config = HnswIndexConfig {
+        dimension: dim,
+        m: 4,
+        ef_construction: 16,
+        distance_metric: DistanceMetric::Cosine,
+        normalize_vectors: false,
+        rerank_storage: None,
+        ..Default::default()
+    };
+    let mut writer = HnswIndexWriter::with_storage(
+        config,
+        VectorIndexWriterConfig::default(),
+        "stage1_reader",
+        Arc::clone(&storage),
+    )?;
+    writer.add_vectors(vec![
+        (1u64, "f".to_string(), Vector::new(vec![1.0, 0.0, 0.0])),
+        (2u64, "f".to_string(), Vector::new(vec![0.0, 1.0, 0.0])),
+    ])?;
+    writer.finalize()?;
+    writer.write()?;
+
+    let reader = HnswIndexReader::load(
+        Arc::clone(&storage),
+        "stage1_reader",
+        DistanceMetric::Cosine,
+    )?;
+    assert!(
+        reader.rerank_storage().is_none(),
+        "Stage 1 segment (no sidecar) must yield rerank_storage = None"
+    );
     Ok(())
 }
 
