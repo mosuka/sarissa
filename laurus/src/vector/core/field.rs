@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization;
+use crate::vector::core::rerank::RerankStorageKind;
 
 fn default_dimension() -> usize {
     128
@@ -102,6 +103,20 @@ pub struct FlatOption {
     /// `Option::None` "no quantization" path no longer exists).
     #[serde(default)]
     pub quantizer: quantization::QuantizationMethod,
+    /// Two-stage rerank storage backend (Issue #481 Stage 2).
+    ///
+    /// When `Some(RerankStorageKind::F32)`, an `*.{ext}.f32` sidecar
+    /// is written alongside the int8 segment so the searcher can
+    /// re-score the top `top_k * rerank_factor` candidates with the
+    /// original f32 vectors. Costs ~4x extra disk and memory per
+    /// vector but recovers Stage 1 recall close to the f32 baseline.
+    ///
+    /// `None` (the default) leaves the field on the Stage 1 int8-only
+    /// path; queries that set `rerank_factor` against such a field
+    /// silently fall back to Stage 1 ranking (the original
+    /// information was discarded at index time).
+    #[serde(default)]
+    pub rerank_storage: Option<RerankStorageKind>,
     /// Embedder name for this vector field.
     /// When set, the engine automatically embeds input using the named embedder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -115,6 +130,7 @@ impl Default for FlatOption {
             distance: default_distance_metric(),
             base_weight: default_weight(),
             quantizer: quantization::QuantizationMethod::Scalar8Bit,
+            rerank_storage: None,
             embedder: None,
         }
     }
@@ -147,6 +163,20 @@ pub struct HnswOption {
     /// `Option::None` "no quantization" path no longer exists).
     #[serde(default)]
     pub quantizer: quantization::QuantizationMethod,
+    /// Two-stage rerank storage backend (Issue #481 Stage 2).
+    ///
+    /// When `Some(RerankStorageKind::F32)`, an `*.{ext}.f32` sidecar
+    /// is written alongside the int8 segment so the searcher can
+    /// re-score the top `top_k * rerank_factor` candidates with the
+    /// original f32 vectors. Costs ~4x extra disk and memory per
+    /// vector but recovers Stage 1 recall close to the f32 baseline.
+    ///
+    /// `None` (the default) leaves the field on the Stage 1 int8-only
+    /// path; queries that set `rerank_factor` against such a field
+    /// silently fall back to Stage 1 ranking (the original
+    /// information was discarded at index time).
+    #[serde(default)]
+    pub rerank_storage: Option<RerankStorageKind>,
     /// Embedder name for this vector field.
     /// When set, the engine automatically embeds input using the named embedder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,6 +192,7 @@ impl Default for HnswOption {
             ef_construction: default_getting_ef_construction(),
             base_weight: default_weight(),
             quantizer: quantization::QuantizationMethod::Scalar8Bit,
+            rerank_storage: None,
             embedder: None,
         }
     }
@@ -192,6 +223,20 @@ pub struct IvfOption {
     /// `Option::None` "no quantization" path no longer exists).
     #[serde(default)]
     pub quantizer: quantization::QuantizationMethod,
+    /// Two-stage rerank storage backend (Issue #481 Stage 2).
+    ///
+    /// When `Some(RerankStorageKind::F32)`, an `*.{ext}.f32` sidecar
+    /// is written alongside the int8 segment so the searcher can
+    /// re-score the top `top_k * rerank_factor` candidates with the
+    /// original f32 vectors. Costs ~4x extra disk and memory per
+    /// vector but recovers Stage 1 recall close to the f32 baseline.
+    ///
+    /// `None` (the default) leaves the field on the Stage 1 int8-only
+    /// path; queries that set `rerank_factor` against such a field
+    /// silently fall back to Stage 1 ranking (the original
+    /// information was discarded at index time).
+    #[serde(default)]
+    pub rerank_storage: Option<RerankStorageKind>,
     /// Embedder name for this vector field.
     /// When set, the engine automatically embeds input using the named embedder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -207,6 +252,7 @@ impl Default for IvfOption {
             n_probe: default_getting_n_probe(),
             base_weight: default_weight(),
             quantizer: quantization::QuantizationMethod::Scalar8Bit,
+            rerank_storage: None,
             embedder: None,
         }
     }
@@ -271,6 +317,17 @@ impl FlatOption {
         self.quantizer = quantizer;
         self
     }
+
+    /// Enable two-stage rerank (Issue #481 Stage 2) for this field.
+    ///
+    /// Storing rerank data writes a sidecar file at index time so the
+    /// searcher can re-score the top `top_k * rerank_factor`
+    /// candidates against the original full-precision vectors. Pass
+    /// `None` (or omit) to stay on the Stage 1 int8-only path.
+    pub fn rerank_storage(mut self, kind: RerankStorageKind) -> Self {
+        self.rerank_storage = Some(kind);
+        self
+    }
 }
 
 // Builder pattern for HnswOption
@@ -311,6 +368,17 @@ impl HnswOption {
         self.quantizer = quantizer;
         self
     }
+
+    /// Enable two-stage rerank (Issue #481 Stage 2) for this field.
+    ///
+    /// Storing rerank data writes a sidecar file at index time so the
+    /// searcher can re-score the top `top_k * rerank_factor`
+    /// candidates against the original full-precision vectors. Pass
+    /// `None` (or omit) to stay on the Stage 1 int8-only path.
+    pub fn rerank_storage(mut self, kind: RerankStorageKind) -> Self {
+        self.rerank_storage = Some(kind);
+        self
+    }
 }
 
 // Builder pattern for IvfOption
@@ -349,6 +417,17 @@ impl IvfOption {
 
     pub fn quantizer(mut self, quantizer: quantization::QuantizationMethod) -> Self {
         self.quantizer = quantizer;
+        self
+    }
+
+    /// Enable two-stage rerank (Issue #481 Stage 2) for this field.
+    ///
+    /// Storing rerank data writes a sidecar file at index time so the
+    /// searcher can re-score the top `top_k * rerank_factor`
+    /// candidates against the original full-precision vectors. Pass
+    /// `None` (or omit) to stay on the Stage 1 int8-only path.
+    pub fn rerank_storage(mut self, kind: RerankStorageKind) -> Self {
+        self.rerank_storage = Some(kind);
         self
     }
 }

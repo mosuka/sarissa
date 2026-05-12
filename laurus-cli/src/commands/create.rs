@@ -377,6 +377,7 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
         ef_construction,
         base_weight: 1.0,
         quantizer: Default::default(),
+        rerank_storage: None,
         embedder: None,
     }))
 }
@@ -391,6 +392,7 @@ fn prompt_flat_option() -> Result<FieldOption> {
         distance,
         base_weight: 1.0,
         quantizer: Default::default(),
+        rerank_storage: None,
         embedder: None,
     }))
 }
@@ -409,6 +411,7 @@ fn prompt_ivf_option() -> Result<FieldOption> {
         n_probe,
         base_weight: 1.0,
         quantizer: Default::default(),
+        rerank_storage: None,
         embedder: None,
     }))
 }

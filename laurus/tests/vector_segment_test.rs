@@ -57,6 +57,7 @@ async fn test_vector_segment_integration() {
                 ef_construction: 200,
                 base_weight: 1.0,
                 quantizer: Default::default(),
+                rerank_storage: None,
                 embedder: None,
             })),
             lexical: None,
