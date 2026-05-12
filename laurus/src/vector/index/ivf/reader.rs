@@ -210,6 +210,10 @@ impl IvfIndexReader {
                         storage: storage.clone(),
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
+                        // IVF is still on the legacy f32 layout; Step 7
+                        // of #481 Stage 1 will migrate it to the
+                        // quantized format and populate `Some(params)`.
+                        quant_params: None,
                     },
                     vector_ids,
                 )

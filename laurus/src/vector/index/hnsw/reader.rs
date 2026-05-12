@@ -7,7 +7,11 @@ use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::vector::Vector;
+use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::hnsw::graph::HnswGraph;
+use crate::vector::index::hnsw::quantized_io::{
+    quantized_record_payload_size, read_dequantized_vector,
+};
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
 
@@ -185,6 +189,11 @@ impl HnswIndexReader {
                 }
             };
 
+        // Read the Issue #481 Stage 1 vector segment header (LVS1).
+        // Pre-Stage-1 segments are rejected with IncompatibleFormat.
+        let header = VectorSegmentHeader::read_from(&mut input)?;
+        let QuantHeader::Scalar8Bit(params) = header.quant;
+
         let (vectors, vector_ids, graph) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
                 // Read vectors with field names
@@ -206,13 +215,11 @@ impl HnswIndexReader {
                         LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                     })?;
 
-                    // Read vector data
-                    let mut values = vec![0.0f32; dimension];
-                    for value in &mut values {
-                        let mut value_buf = [0u8; 4];
-                        input.read_exact(&mut value_buf)?;
-                        *value = f32::from_le_bytes(value_buf);
-                    }
+                    // Read quantized vector and dequantize. Step 6 of
+                    // #481 Stage 1 will switch to int8-native storage
+                    // here; Step 5 keeps the in-memory form as f32 so
+                    // the searcher remains unchanged.
+                    let values = read_dequantized_vector(&mut input, dimension, &params)?;
 
                     vector_ids.push((doc_id, field_name.clone()));
                     vectors.insert((doc_id, field_name), Vector::new(values));
@@ -224,12 +231,19 @@ impl HnswIndexReader {
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
 
-                let start_pos = 8 + 4 + 4 + 4; // num_vectors(u64) + dimension(u32) + m(u32) + ef(u32)
-
-                // Seek to start of vectors
+                // Seek to start of per-vector entries: HNSW preamble
+                // (count u64 + dim u32 + m u32 + ef u32 = 20 bytes)
+                // followed by VectorSegmentHeader (Stage-1, 24 bytes
+                // for Scalar8Bit) = 44 bytes.
+                let start_pos =
+                    20u64 + VectorSegmentHeader::scalar_8bit(params).serialized_size() as u64;
                 input
-                    .seek(std::io::SeekFrom::Start(start_pos as u64))
+                    .seek(std::io::SeekFrom::Start(start_pos))
                     .map_err(LaurusError::Io)?;
+
+                // Per-vector record size on disk: dim int8 + 8 bytes
+                // meta (sum_q + norm_q).
+                let quant_payload_size = quantized_record_payload_size(dimension) as i64;
 
                 for _ in 0..num_vectors {
                     let start_offset = input.stream_position().map_err(LaurusError::Io)?;
@@ -249,14 +263,15 @@ impl HnswIndexReader {
                         LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                     })?;
 
-                    // Record offset for on-demand loading
-                    // We record offset where the entry starts (doc_id)
+                    // Record offset for on-demand loading. The offset
+                    // points to the entry start (doc_id), matching the
+                    // contract VectorStorage::get expects.
                     offsets.insert((doc_id, field_name.clone()), start_offset);
                     vector_ids.push((doc_id, field_name.clone()));
 
-                    // Skip vector data (dimension * 4 bytes)
+                    // Skip int8 payload + per-vector meta.
                     input
-                        .seek(std::io::SeekFrom::Current((dimension * 4) as i64))
+                        .seek(std::io::SeekFrom::Current(quant_payload_size))
                         .map_err(LaurusError::Io)?;
                 }
                 let graph = read_graph(&mut input)?;
@@ -266,6 +281,7 @@ impl HnswIndexReader {
                         storage: storage.clone(),
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
+                        quant_params: Some(params),
                     },
                     vector_ids,
                     graph,
