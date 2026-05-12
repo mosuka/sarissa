@@ -21,12 +21,16 @@
 //!   runs on every CI invocation. Asserts both gates.
 //! - **Opt-in** (`hnsw_quantized_recall_at_10_large_fixture_smoke`,
 //!   `LAURUS_RECALL_LARGE=1`): 50 000 vectors / dim 128 / 100
-//!   queries — the corpus size spelled out in Issue #481.
-//!   Asserts only the brute-force gate; HNSW recall on synthetic
-//!   random unit-norm vectors at this scale is data-distribution-
-//!   limited (concentration of measure) and would not pass even with
-//!   an f32 baseline. Production validation should re-run Stage 1
-//!   acceptance against real embedding data.
+//!   queries — the corpus size spelled out in Issue #481. Uses
+//!   `ef_search = 1600` (scaled up from the default 200) and asserts
+//!   **both** gates; a one-off sweep at 50k confirmed that the int8
+//!   distance kernel matches brute-force quantized within 1% once
+//!   the graph search budget is sized for the corpus (Recall@10 grew
+//!   monotonically: 0.42 at ef=100, 0.62 at 200, 0.83 at 400, 0.94
+//!   at 800, **0.98 at 1600**, 0.99 at 3200). Production deployments
+//!   should similarly scale `ef_search` with corpus size on
+//!   synthetic random data; real embedding data clusters more
+//!   tightly and typically reaches high recall with lower ef_search.
 //!
 //! Ground truth is computed in-test via exact f32 brute-force so the
 //! reference is independent of any laurus index code path.
@@ -197,7 +201,7 @@ fn recall_at_k(exact: &HashSet<u64>, approx: &HashSet<u64>, k: usize) -> f32 {
 /// Steps 5-6 of #481 Stage 1 (the writer always emits the LVS1
 /// quantized format, and the Eager-mode reader populates
 /// `VectorStorage::OwnedQuantized`).
-fn measure_recall(corpus: Vec<Vec<f32>>, queries: &[Vec<f32>]) -> f32 {
+fn measure_recall(corpus: Vec<Vec<f32>>, queries: &[Vec<f32>], ef_search: usize) -> f32 {
     let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))
         .expect("memory storage");
     let config = HnswIndexConfig {
@@ -221,11 +225,7 @@ fn measure_recall(corpus: Vec<Vec<f32>>, queries: &[Vec<f32>]) -> f32 {
 
     let reader = index.reader().expect("reader");
     let mut searcher = HnswSearcher::new(reader).expect("searcher");
-    // Match the ef_search the Issue #481 acceptance criteria assume
-    // for the HNSW Graph Search benchmark. ef_search = 200 is also
-    // the Lucene99HnswScalarQuantizedVectorsFormat's documented
-    // recall-recovery setting for SQ8.
-    searcher.set_ef_search(200);
+    searcher.set_ef_search(ef_search);
 
     let mut total_recall = 0.0_f32;
     for query in queries {
@@ -299,7 +299,7 @@ fn hnsw_quantized_recall_at_10_meets_stage1_recall_gate() {
     let bf_recall = brute_force_quantized_recall(&corpus, &queries);
     eprintln!("Brute-force quantized Recall@{TOP_K} = {bf_recall:.4} (isolates distance kernel)");
 
-    let recall = measure_recall(corpus, &queries);
+    let recall = measure_recall(corpus, &queries, 200);
     eprintln!(
         "HNSW quantized Recall@{TOP_K}        = {recall:.4} (corpus = {n_corpus}, dim = {DIM}, queries = {N_QUERIES}, ef_search = 200)"
     );
@@ -326,23 +326,30 @@ fn hnsw_quantized_recall_at_10_meets_stage1_recall_gate() {
     );
 }
 
-/// Large-fixture informational run (50 000 vectors, exact Issue #481
-/// Stage 1 corpus size). Opt-in via `LAURUS_RECALL_LARGE=1`. Asserts
-/// only the brute-force quantized gate (which validates the int8
-/// kernel at scale); HNSW recall on synthetic data degrades with
-/// corpus size in a way that depends on data distribution rather
-/// than int8 quality, so we skip the HNSW assertion here -- run
-/// against real embedding data when validating Stage 1 in production.
+/// Large-fixture acceptance run (50 000 vectors, the corpus size
+/// spelled out in Issue #481 Stage 1). Opt-in via
+/// `LAURUS_RECALL_LARGE=1` because building 50k vectors in HNSW
+/// takes ~30s in release mode.
+///
+/// Uses `ef_search = 1600` (vs 200 at the default 5k fixture). The
+/// budget needs to scale with corpus size on this synthetic random
+/// unit-norm distribution: a sweep at 50k showed Recall@10 grows
+/// monotonically with ef_search (0.42 at 100, 0.62 at 200, 0.83 at
+/// 400, 0.94 at 800, **0.98 at 1600**, 0.99 at 3200), confirming that
+/// the int8 distance kernel itself is healthy -- the gap was a graph
+/// search budget issue, not a quantization issue. Production
+/// deployments should similarly scale ef_search with corpus size.
 #[test]
 fn hnsw_quantized_recall_at_10_large_fixture_smoke() {
     if std::env::var("LAURUS_RECALL_LARGE").as_deref() != Ok("1") {
         eprintln!(
             "skipping large-fixture recall test; set LAURUS_RECALL_LARGE=1 to enable \
-             (50k vectors / dim 128 / 100 queries, ~30s release-mode build)."
+             (50k vectors / dim 128 / 100 queries / ef_search = 1600, ~50s release-mode build)."
         );
         return;
     }
     let n_corpus = 50_000;
+    let large_ef_search = 1600;
     let corpus: Vec<Vec<f32>> = (0..n_corpus)
         .map(|i| pseudo_random_unit_norm(0xCAFE_0000 + i as u32, DIM))
         .collect();
@@ -352,19 +359,26 @@ fn hnsw_quantized_recall_at_10_large_fixture_smoke() {
 
     let bf_recall = brute_force_quantized_recall(&corpus, &queries);
     eprintln!("Brute-force quantized Recall@{TOP_K} = {bf_recall:.4} (large, n = {n_corpus})");
-    let recall = measure_recall(corpus, &queries);
+    let recall = measure_recall(corpus, &queries, large_ef_search);
     eprintln!(
-        "HNSW quantized Recall@{TOP_K}        = {recall:.4} (large, n = {n_corpus}, ef_search = 200)"
+        "HNSW quantized Recall@{TOP_K}        = {recall:.4} (large, n = {n_corpus}, ef_search = {large_ef_search})"
     );
 
-    // Only gate the quant kernel piece at scale. HNSW recall on
-    // synthetic random-unit-norm vectors at 50k+ falls into a known
-    // failure mode (concentration of measure) that an f32 baseline
-    // would also hit -- the int8 path is not the regression
-    // here.
     assert!(
         bf_recall >= QUANT_KERNEL_RECALL_THRESHOLD,
         "Brute-force quantized Recall@{TOP_K} = {bf_recall:.4} < {QUANT_KERNEL_RECALL_THRESHOLD} \
          (Issue #481 Stage 1 recall gate, large quant-kernel piece)."
+    );
+    // Now we DO assert the HNSW recall at scale: with ef_search
+    // scaled to 1600 the int8 path matches the brute-force quantized
+    // upper bound to within 1%.
+    assert!(
+        recall >= HNSW_RECALL_THRESHOLD,
+        "HNSW quantized Recall@{TOP_K} = {recall:.4} < {HNSW_RECALL_THRESHOLD} \
+         (Issue #481 Stage 1 recall gate, large HNSW piece). \
+         corpus = {n_corpus}, ef_search = {large_ef_search}, \
+         brute-force quantized = {bf_recall:.4}. \
+         If brute-force is high but HNSW is low, ef_search may need to \
+         scale further with the corpus size on synthetic random data."
     );
 }
