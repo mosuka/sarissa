@@ -74,20 +74,17 @@ fn test_hnsw_integration() -> Result<()> {
     assert_eq!(results.results.len(), 1);
     assert_eq!(results.results[0].doc_id, 1);
 
-    // Stage 2 rerank API is reserved but not yet implemented (Issue #481):
-    // requesting rerank_factor must surface NotImplemented up-front so
-    // callers can plan migration without surprises.
+    // Stage 2 (Issue #481): rerank_factor against a Stage 1 segment
+    // (no sidecar) must silently degrade to Stage 1 ranking — there
+    // is no f32 information to recover, so returning an error would
+    // be a worse experience than just returning the int8 ranking.
     let rerank_request = VectorIndexQuery::new(Vector::new(vec![0.9, 0.1, 0.0]))
         .top_k(1)
         .field_name("test".to_string())
         .rerank_factor(2);
-    let err = searcher
-        .search(&rerank_request)
-        .expect_err("rerank_factor should return NotImplemented");
-    assert!(
-        matches!(err, crate::error::LaurusError::NotImplemented(_)),
-        "expected NotImplemented, got {err:?}"
-    );
+    let degraded = searcher.search(&rerank_request)?;
+    assert_eq!(degraded.results.len(), 1);
+    assert_eq!(degraded.results[0].doc_id, 1);
 
     Ok(())
 }
@@ -262,6 +259,112 @@ fn reader_rerank_storage_is_none_for_stage1_segment() -> Result<()> {
         reader.rerank_storage().is_none(),
         "Stage 1 segment (no sidecar) must yield rerank_storage = None"
     );
+    Ok(())
+}
+
+#[test]
+fn searcher_returns_exact_f32_distance_when_rerank_storage_is_loaded() -> Result<()> {
+    use crate::vector::index::hnsw::searcher::HnswSearcher;
+    use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let dim = 4;
+    let config = HnswIndexConfig {
+        dimension: dim,
+        m: 4,
+        ef_construction: 32,
+        distance_metric: DistanceMetric::Euclidean,
+        normalize_vectors: false,
+        rerank_storage: Some(RerankStorageKind::F32),
+        ..Default::default()
+    };
+    let originals = vec![
+        (
+            1u64,
+            "f".to_string(),
+            Vector::new(vec![0.123_456, 0.234_567, 0.345_678, 0.456_789]),
+        ),
+        (
+            2u64,
+            "f".to_string(),
+            Vector::new(vec![0.987_654, 0.876_543, 0.765_432, 0.654_321]),
+        ),
+        (
+            3u64,
+            "f".to_string(),
+            Vector::new(vec![-0.111_111, -0.222_222, -0.333_333, -0.444_444]),
+        ),
+    ];
+
+    let index = HnswIndex::create(Arc::clone(&storage), "rerank_search", config)?;
+    let mut writer = index.writer()?;
+    writer.build(originals.clone())?;
+    writer.finalize()?;
+    writer.commit()?;
+
+    let reader = index.reader()?;
+    let mut searcher = HnswSearcher::new(reader)?;
+    searcher.set_ef_search(50);
+
+    // Query equal to doc 1's vector -> exact f32 distance must be 0.
+    let request = VectorIndexQuery::new(Vector::new(vec![
+        0.123_456, 0.234_567, 0.345_678, 0.456_789,
+    ]))
+    .top_k(1)
+    .field_name("f".to_string())
+    .rerank_factor(3);
+    let results = searcher.search(&request)?;
+
+    assert_eq!(results.results.len(), 1);
+    assert_eq!(results.results[0].doc_id, 1, "doc 1 must be top match");
+    // Stage 1 (int8) returns a small but non-zero approximation for
+    // the self-distance because of quantization noise. Stage 2 with
+    // rerank rescores against the original f32 vectors and must
+    // recover the exact zero.
+    assert_eq!(
+        results.results[0].distance, 0.0,
+        "rerank must restore the exact f32 self-distance, got {}",
+        results.results[0].distance
+    );
+    Ok(())
+}
+
+#[test]
+fn searcher_silently_falls_back_to_stage1_when_rerank_storage_absent() -> Result<()> {
+    use crate::vector::index::hnsw::searcher::HnswSearcher;
+    use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let dim = 3;
+    let config = HnswIndexConfig {
+        dimension: dim,
+        m: 4,
+        ef_construction: 16,
+        distance_metric: DistanceMetric::Cosine,
+        rerank_storage: None,
+        ..Default::default()
+    };
+    let index = HnswIndex::create(Arc::clone(&storage), "stage1_with_rerank_request", config)?;
+    let mut writer = index.writer()?;
+    writer.build(vec![
+        (1u64, "f".to_string(), Vector::new(vec![1.0, 0.0, 0.0])),
+        (2u64, "f".to_string(), Vector::new(vec![0.0, 1.0, 0.0])),
+    ])?;
+    writer.finalize()?;
+    writer.commit()?;
+
+    let reader = index.reader()?;
+    let searcher = HnswSearcher::new(reader)?;
+
+    // Stage 1 segment + rerank_factor request must succeed (no
+    // NotImplemented) and return the int8 ranking.
+    let request = VectorIndexQuery::new(Vector::new(vec![1.0, 0.0, 0.0]))
+        .top_k(1)
+        .field_name("f".to_string())
+        .rerank_factor(5);
+    let results = searcher.search(&request)?;
+    assert_eq!(results.results.len(), 1);
+    assert_eq!(results.results[0].doc_id, 1);
     Ok(())
 }
 

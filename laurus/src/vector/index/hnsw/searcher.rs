@@ -86,14 +86,12 @@ impl VectorIndexSearcher for HnswSearcher {
     fn search(&self, request: &VectorIndexQuery) -> Result<VectorIndexQueryResults> {
         use crate::util::time::Timer;
 
-        // Issue #481 Stage 2 (rerank) -- API surface only in Stage 1.
-        if request.params.rerank_factor.is_some() {
-            return Err(crate::error::LaurusError::NotImplemented(
-                "Two-stage rerank (Issue #481 Stage 2) is not yet implemented. \
-                 Pass rerank_factor = None for the Stage 1 quantized search."
-                    .to_string(),
-            ));
-        }
+        // Stage 2 (Issue #481): rerank_factor is honored on the HNSW
+        // graph path when the reader has a rerank storage pool loaded
+        // (`reader.rerank_storage().is_some()`). Otherwise the value
+        // is silently ignored: there is no f32 information to recover
+        // for Stage 1 segments or for the brute-force fallback below
+        // (which already runs against the dequantized f32 vectors).
 
         let start = Timer::now();
 
@@ -431,10 +429,43 @@ impl HnswSearcher {
             }
         }
 
-        // Convert found heaps to results.
+        // Stage 2 (Issue #481): if the query asks for rerank
+        // (`rerank_factor`) and the reader has the LRS1 sidecar loaded
+        // (`reader.rerank_storage()`), widen the int8 candidate set to
+        // `top_k * rerank_factor`, recompute distances against the
+        // original f32 vectors, and use the new distances for the
+        // ranking that the existing convert-to-results pipeline below
+        // operates on. When either prerequisite is missing we silently
+        // fall through to Stage 1 ranking — Stage 1 segments cannot
+        // recover the f32 information that was discarded at index
+        // time, so there's nothing better to do.
+        let candidates_for_results: Vec<ResultCandidate> =
+            match (request.params.rerank_factor, reader.rerank_storage()) {
+                (Some(factor), Some(pool)) => {
+                    let widened = request.params.top_k.saturating_mul(factor);
+                    let int8_sorted: Vec<ResultCandidate> = found.into_sorted_vec();
+                    let metric = reader.distance_metric();
+                    let prepared_query = metric.prepare_query(&query.data);
+                    let field_idx = pool.field_position_index(field_name);
+                    let mut rescored: Vec<ResultCandidate> = Vec::with_capacity(widened);
+                    for c in int8_sorted.into_iter().take(widened) {
+                        let pos = match field_idx.as_ref().and_then(|idx| idx.get(&c.id).copied()) {
+                            Some(p) => p,
+                            None => continue,
+                        };
+                        let f32_slice = pool.f32_slice_at(pos);
+                        let distance = metric.distance_with_prepared(&prepared_query, f32_slice)?;
+                        rescored.push(ResultCandidate { id: c.id, distance });
+                    }
+                    rescored
+                }
+                _ => found.into_iter().collect(),
+            };
+
+        // Convert candidate set to results.
         let field_name_owned = field_name.to_string();
         let mut final_results = Vec::new();
-        for c in found {
+        for c in candidates_for_results {
             // Convert cached distance to similarity without re-reading vectors.
             let similarity = reader.distance_metric().distance_to_similarity(c.distance);
 
