@@ -1,12 +1,12 @@
 # Scoring & Ranking
 
-Laurus provides multiple scoring algorithms for lexical search and uses distance-based similarity for vector search. This page covers all scoring mechanisms and how they interact in hybrid search.
+Laurus uses BM25 for lexical search, distance-based similarity for vector search, and a configurable fusion algorithm to combine the two for hybrid search. This page describes each scoring path and how to influence it from the public API.
 
 ## Lexical Scoring
 
 ### BM25 (Default)
 
-BM25 is the default scoring function for lexical search. It balances term frequency with document length normalization:
+BM25 is the lexical scoring function. It balances term frequency with document length normalization:
 
 ```text
 score = IDF * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len)))
@@ -14,131 +14,96 @@ score = IDF * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len))
 
 Where:
 
-- **tf** -- term frequency in the document
-- **IDF** -- inverse document frequency (rarity of the term across all documents)
-- **k1** -- term frequency saturation parameter
-- **b** -- document length normalization factor
-- **doc_len / avg_doc_len** -- ratio of document length to average document length
+- **tf** — term frequency in the document.
+- **IDF** — inverse document frequency (rarity of the term across all documents).
+- **k1** — term-frequency saturation parameter. Laurus uses **1.2**.
+- **b** — document-length normalization factor. Laurus uses **0.75**.
+- **doc_len / avg_doc_len** — ratio of document length to average document length.
 
-### ScoringConfig
-
-`ScoringConfig` controls BM25 and other scoring parameters:
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `k1` | `f32` | 1.2 | Term frequency saturation. Higher values give more weight to term frequency. |
-| `b` | `f32` | 0.75 | Field length normalization. 0.0 = no normalization, 1.0 = full normalization. |
-| `tf_idf_boost` | `f32` | 1.0 | Global TF-IDF boost factor |
-| `enable_field_norm` | `bool` | true | Enable field length normalization |
-| `field_boosts` | `HashMap<String, f32>` | empty | Per-field score multipliers |
-| `enable_coord` | `bool` | true | Enable query coordination factor (matched_terms / total_query_terms) |
-
-### Alternative Scoring Functions
-
-| Function | Description |
-| :--- | :--- |
-| `BM25ScoringFunction` | BM25 with configurable k1 and b (default) |
-| `TfIdfScoringFunction` | Log-normalized TF-IDF with field length normalization |
-| `VectorSpaceScoringFunction` | Cosine similarity over document term vector space |
-| `CustomScoringFunction` | User-provided closure for custom scoring logic |
-
-### ScoringRegistry
-
-The `ScoringRegistry` provides a central registry for scoring algorithms:
-
-```rust
-// Pre-registered algorithms:
-// - "bm25"          -> BM25ScoringFunction
-// - "tf_idf"        -> TfIdfScoringFunction
-// - "vector_space"  -> VectorSpaceScoringFunction
-```
-
-### BM25Plan (precomputed query)
-
-When scoring many documents against the same query, `BM25Plan` materializes per-term IDF, length-normalization invariants, and `k1 + 1` once at query build time, then scores each document with a tight numeric loop. Two scoring methods are exposed:
-
-- `BM25Plan::score(&doc_stats)` — drop-in faster replacement for `BM25ScoringFunction::score`. Still looks up term frequencies via the existing `HashMap<String, u64>` on `DocumentStats`.
-- `BM25Plan::score_packed(&term_freqs, doc_length)` — accepts a packed `&[u64]` of term frequencies indexed by the position of each term in the original `query_terms`. Avoids the per-document string-keyed `HashMap` lookup entirely; use it when the caller can pre-pack frequencies once per document.
-
-```rust
-use laurus::lexical::search::scoring::bm25::{BM25Plan, ScoringConfig};
-
-let plan = BM25Plan::new(&query_terms, &collection_stats, &ScoringConfig::default());
-
-// Hash-map path (drop-in faster):
-let score = plan.score(&doc_stats);
-
-// Packed path (avoids per-doc hash lookup):
-let term_freqs: Vec<u64> = query_terms
-    .iter()
-    .map(|t| *doc_stats.term_frequencies.get(t).unwrap_or(&0))
-    .collect();
-let score = plan.score_packed(&term_freqs, doc_stats.doc_length);
-```
-
-`BM25ScoringFunction::score` is preserved for callers that score one document at a time.
+The `(k1, b)` parameters are fixed at the implementation defaults today. The values match Lucene / Elasticsearch defaults, so BM25 scores from Laurus are directly comparable to those engines for tuning intuition.
 
 ### Field Boosts
 
-Field boosts multiply the score contribution from specific fields. This is useful when some fields are more important than others:
+Per-field score multipliers are configured on the search request, not in a separate scoring struct:
 
 ```rust
-use std::collections::HashMap;
+use laurus::SearchRequestBuilder;
 
-let mut field_boosts = HashMap::new();
-field_boosts.insert("title".to_string(), 2.0);  // title matches score 2x
-field_boosts.insert("body".to_string(), 1.0);   // body matches score 1x
+let request = SearchRequestBuilder::new()
+    .query_dsl("rust programming")
+    .add_field_boost("title", 2.0) // title matches score 2x
+    .add_field_boost("body", 1.0)  // body matches score 1x (the default)
+    .limit(10)
+    .build();
 ```
 
-### Coordination Factor
+The boost is multiplied into the BM25 score contribution of matches in that field. A boost of `1.0` is a no-op; boosts apply only to fields named in the query (or in the schema's default-search fields).
 
-When `enable_coord` is true, the `AdvancedScorer` applies a coordination factor:
-
-```text
-coord = matched_query_terms / total_query_terms
-```
-
-This rewards documents that match more query terms. For example, if the query has 3 terms and a document matches 2 of them, the coordination factor is 2/3 = 0.667.
+Over gRPC and HTTP, the same setting is exposed as `SearchRequest.field_boosts` (`map<string, float>`). See [gRPC API → SearchRequest](../laurus-server/grpc_api.md#searchrequest-fields).
 
 ## Vector Scoring
 
-Vector search ranks results by distance-based similarity:
+Vector search ranks results by distance-based similarity. The distance metric is configured per field on the vector index (HNSW / Flat / IVF):
 
-```text
-similarity = 1 / (1 + distance)
-```
-
-The distance is computed using the configured distance metric:
-
-| Metric | Description | Best For |
+| Metric | Description | Best for |
 | :--- | :--- | :--- |
-| `Cosine` | 1 - cosine similarity | Text embeddings (most common) |
-| `Euclidean` | L2 distance | Spatial data |
-| `Manhattan` | L1 distance | Feature vectors |
-| `DotProduct` | Negated dot product | Pre-normalized vectors |
+| `Cosine` | 1 − cosine similarity (default) | Normalised text embeddings |
+| `Euclidean` | L2 distance | Spatial / pre-normalised data |
+| `Manhattan` | L1 distance | Sparse feature vectors |
+| `DotProduct` | Negated dot product | Pre-normalised vectors where higher = better |
 | `Angular` | Angular distance | Directional similarity |
 
-## Hybrid Search Score Normalization
+Distances are converted to similarity scores so that "higher is better" holds across both lexical and vector results, which is what the fusion algorithms below assume.
 
-When lexical and vector results are combined, their scores must be made comparable.
+## Hybrid Search Fusion
+
+When a search request contains both lexical and vector clauses, the two result lists need to be merged. Laurus exposes two fusion algorithms via [`FusionAlgorithm`](api_reference.md#fusionalgorithm).
 
 ### RRF (Reciprocal Rank Fusion)
 
-RRF avoids score normalization entirely by using ranks instead of raw scores:
+RRF avoids score normalisation entirely by combining **ranks** instead of raw scores:
 
 ```text
-rrf_score = sum(1 / (k + rank))
+rrf_score(doc) = Σ 1 / (k + rank_i(doc))
 ```
 
-The `k` parameter (default: 60) controls smoothing. Higher values give less weight to top-ranked results.
+The sum runs over each result list the document appears in. The `k` parameter (default **60.0**) smooths the distribution — higher `k` flattens the contribution of top-ranked results.
+
+```rust
+use laurus::{FusionAlgorithm, SearchRequestBuilder};
+
+let request = SearchRequestBuilder::new()
+    .query_dsl("title:rust ~\"systems programming\"")
+    .fusion_algorithm(FusionAlgorithm::Rrf { k: 60.0 })
+    .build();
+```
 
 ### WeightedSum
 
-WeightedSum normalizes scores from each search type independently using min-max normalization, then combines them:
+`WeightedSum` first min-max normalises each list of scores independently, then takes a weighted linear combination:
 
 ```text
-norm_score = (score - min_score) / (max_score - min_score)
-final_score = (norm_lexical * lexical_weight) + (norm_vector * vector_weight)
+norm(score)  = (score - min) / (max - min)
+final(doc)   = lexical_weight * norm(lexical_score(doc))
+             + vector_weight  * norm(vector_score(doc))
 ```
 
-Both weights are clamped to [0.0, 1.0].
+```rust
+use laurus::{FusionAlgorithm, SearchRequestBuilder};
+
+let request = SearchRequestBuilder::new()
+    .query_dsl("title:rust ~\"systems programming\"")
+    .fusion_algorithm(FusionAlgorithm::WeightedSum {
+        lexical_weight: 0.6,
+        vector_weight: 0.4,
+    })
+    .build();
+```
+
+Both weights are clamped to `[0.0, 1.0]`. Use RRF when you do not have a calibrated reason to pick specific weights — it is parameter-light and robust to scale differences between lists.
+
+## See Also
+
+- [API Reference → `FusionAlgorithm`](api_reference.md#fusionalgorithm) — variant signatures
+- [Hybrid Search](../concepts/search/hybrid_search.md) — when to pick which fusion algorithm
+- [Vector Search](../concepts/search/vector_search.md) — distance metric trade-offs

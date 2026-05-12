@@ -16,6 +16,7 @@ graph TB
     LIB --> storage["storage\nMemory, File, Mmap\nColumnStorage"]
     LIB --> store["store\nDocumentLog (WAL)"]
     LIB --> spelling["spelling\nSpelling Correction\nSuggestion Engine"]
+    LIB --> util["util\n共通ヘルパとマクロ"]
     LIB --> data["data\nDataValue, Document"]
     LIB --> error["error\nLaurusError, Result"]
 ```

@@ -22,7 +22,7 @@ cargo build --release
 ## テスト
 
 ```bash
-# すべてのテストを実行
+# すべてのワークスペーステストを実行（デフォルト Feature）
 cargo test
 
 # 名前を指定して特定のテストを実行
@@ -32,7 +32,28 @@ cargo test <test_name>
 cargo test -p laurus
 cargo test -p laurus-cli
 cargo test -p laurus-server
+cargo test -p laurus-mcp
 ```
+
+### 言語バインディングのテスト
+
+各言語バインディングは固有のツールチェーン（Python virtualenv、Node.js
+npm、Ruby Bundler、PHP Composer、`wasm32-unknown-unknown` ターゲット）を持ちます。
+Makefile はこれらをラップし、各ターゲットがツールチェーンを準備したうえで
+テストを実行します。
+
+```bash
+make test-laurus-python   # cargo test -p laurus-python + Maturin 経由の pytest
+make test-laurus-nodejs   # npm run build:debug + npm test
+make test-laurus-wasm     # cargo build -p laurus-wasm --target wasm32-unknown-unknown
+make test-laurus-ruby     # cargo test -p laurus-ruby + Ruby minitest
+make test-laurus-php      # cargo build -p laurus-php --release + PHPUnit
+```
+
+`laurus-php` は `laurus-ruby` との `links = "clang"` 競合のため Cargo ワークスペースから
+除外されており、上記の Makefile ターゲット経由でスタンドアロンクレートとしてビルド・テストします。
+対応する `format-laurus-*` / `lint-laurus-*` / `build-laurus-*` のバリアントを含む全ターゲットは
+[`Makefile`](../../../Makefile) を参照してください。
 
 ## Lint
 

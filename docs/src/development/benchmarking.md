@@ -97,6 +97,18 @@ Microbenchmarks at the µs / ns scale are sensitive to system noise. For meaning
   taskset -c 2 cargo bench -p laurus --bench distance_bench
   ```
 
+  Or use the bundled wrapper that pins the bench process to one core via
+  `taskset` and raises scheduling priority via `nice` in one step:
+
+  ```bash
+  ./scripts/bench-stable.sh --bench distance_bench
+  ./scripts/bench-stable.sh --bench distance_bench -- --baseline main
+  ```
+
+  The wrapper is Linux-only. It does not touch the CPU governor or
+  turbo state (those need root); set those up separately if you need
+  the extra precision.
+
 - **Repeat**: re-run twice and compare. Differences below ~5 % on a tuned machine are noise; differences above that on a shared workstation may also be noise. Do not over-interpret a single run.
 
 If you cannot stabilise the environment, say so explicitly in the PR (e.g. "measured on a shared laptop, expect ~10 % noise") rather than presenting unstable numbers as authoritative.

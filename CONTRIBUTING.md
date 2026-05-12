@@ -47,9 +47,20 @@ cargo build         # Debug build
 ### Running Tests
 
 ```bash
-make test                     # Run all tests (default features)
+make test                     # Run all workspace tests (default features)
 cargo test --workspace        # Same as above
 cargo test --all-features     # Run tests with all features enabled
+```
+
+For language bindings, use the dedicated targets, which set up the language
+toolchain (venv, npm, bundler, composer) before running tests:
+
+```bash
+make test-laurus-python   # Rust unit tests + Python pytest (via Maturin)
+make test-laurus-nodejs   # Build + npm test
+make test-laurus-wasm     # wasm32-unknown-unknown build check
+make test-laurus-ruby     # Rust unit tests + Ruby minitest
+make test-laurus-php      # Build + PHPUnit
 ```
 
 ### Formatting
@@ -77,9 +88,14 @@ CI runs clippy with `--all-features` to check all code paths.
 ### Benchmarks
 
 ```bash
-make bench            # Run benchmarks
-cargo bench --bench bench  # Same as above
+make bench                                # Run all benchmarks
+cargo bench -p laurus                     # Same as above
+cargo bench -p laurus --bench distance_bench  # Run a single benchmark
 ```
+
+For more on benchmark methodology, baseline/compare workflow, and the
+`scripts/bench-stable.sh` wrapper (CPU pinning on Linux), see
+[Benchmarking](docs/src/development/benchmarking.md).
 
 ### Documentation
 
@@ -188,8 +204,11 @@ Pull requests automatically run:
 2. **Clippy** — `cargo clippy --all-targets --all-features -- -D warnings`
 3. **Test** — `cargo test` on multiple platforms:
    - Linux (x86_64, aarch64)
-   - macOS (x86_64, aarch64)
-   - Windows (x86_64, aarch64)
+   - Windows (x86_64)
+
+   Language binding test jobs (`test-laurus-python`, `test-laurus-nodejs`,
+   `test-laurus-wasm`, `test-laurus-ruby`, `test-laurus-php`) run when their
+   respective crate or shared sources change.
 
 All checks must pass before a PR can be merged.
 

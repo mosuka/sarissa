@@ -124,6 +124,33 @@ claude mcp add laurus -- laurus mcp
 
 Claude は他のツールを使用する前に `connect` を呼び出します。
 
+## 環境変数
+
+`--endpoint` フラグを省略し、代わりに `LAURUS_ENDPOINT` を渡すこともできます。エンドポイントがマシンごとに固定で、各 MCP クライアントの設定にハードコードしたくない場合に便利です：
+
+```bash
+export LAURUS_ENDPOINT=http://localhost:50051
+claude mcp add laurus -- laurus mcp
+```
+
+クライアント設定内で指定する場合：
+
+```json
+{
+  "mcpServers": {
+    "laurus": {
+      "command": "laurus",
+      "args": ["mcp"],
+      "env": {
+        "LAURUS_ENDPOINT": "http://localhost:50051"
+      }
+    }
+  }
+}
+```
+
+両方が指定された場合は、明示的な `--endpoint` フラグが優先されます（clap の `#[arg(long, env = "...")]` の標準動作）。
+
 ## MCP サーバーの削除
 
 Claude Code から登録済みの MCP サーバーを削除するには：

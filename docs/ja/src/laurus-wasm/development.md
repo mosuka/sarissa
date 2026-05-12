@@ -76,6 +76,56 @@ laurus = { workspace = true, default-features = false }
 除外され、`#[cfg(target_arch = "wasm32")]` フォールバックで並列処理が
 逐次処理に切り替わります。
 
+### 日本語形態素解析
+
+ブラウザ WASM にはファイルシステムが無いため、`{ "language": "japanese", "dict": "/path/to/ipadic" }` の標準アナライザープリセットは利用できません。`laurus-wasm` は [`src/analysis.rs`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/src/analysis.rs) で `JapaneseAnalyzer.fromBytes(...)` を公開しており、Lindera IPADIC 辞書アーカイブを実行時に OPFS へ取得し、Lindera が必要とする 8 つの生バイト配列を読み出してアナライザーに渡せます：
+
+```javascript
+import { JapaneseAnalyzer, Schema } from "laurus-wasm";
+import { downloadDictionary, loadDictionaryFiles } from "laurus-wasm/opfs";
+
+await downloadDictionary("./dict/lindera-ipadic.zip", "ipadic");
+const f = await loadDictionaryFiles("ipadic");
+const ja = JapaneseAnalyzer.fromBytes(
+  f.metadata, f.dictDa, f.dictVals, f.dictWordsIdx,
+  f.dictWords, f.matrixMtx, f.charDef, f.unk, "normal",
+);
+
+const schema = new Schema();
+schema.addAnalyzer("ja-ipadic", ja);
+schema.addTextField("body", undefined, undefined, undefined, "ja-ipadic");
+```
+
+OPFS ヘルパー（`downloadDictionary` / `loadDictionaryFiles` / `hasDictionary` / `listDictionaries` / `removeDictionary`）は [`js/opfs.js`](https://github.com/mosuka/laurus/blob/main/laurus-wasm/js/opfs.js) にあり、`package.json` で `laurus-wasm/opfs` サブパスとして再公開されています。引数表は [API リファレンス → JapaneseAnalyzer](api_reference.md#japaneseanalyzer) を参照してください。
+
+### コールバック Embedder
+
+事前計算済みベクトルを受け取る `"precomputed"` Embedder に加えて、`laurus-wasm` は JS 側から `async embed: (text) => Promise<number[]>` を渡せる `"callback"` Embedder をサポートします。エンジンはドキュメント投入時と `searchVectorText()` クエリ時にこのコールバックを呼び出すため、WASM モジュールを再ビルドすることなく任意のブラウザ向け埋め込みライブラリ（Transformers.js、ONNX Runtime Web 等）を統合できます：
+
+```javascript
+import { pipeline } from "@xenova/transformers";
+
+const embedder = await pipeline(
+  "feature-extraction",
+  "Xenova/all-MiniLM-L6-v2",
+);
+
+schema.addEmbedder("minilm", {
+  type: "callback",
+  embed: async (text) => {
+    const output = await embedder(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data);
+  },
+});
+
+schema.addHnswField(
+  "embedding", 384, "cosine",
+  undefined, undefined, "minilm",
+);
+```
+
+wasm-bindgen のグルーコードが JS コールバックを `Closure` で保持するため、インデックスの寿命中ずっと有効です。コールバックは常にメインスレッドで実行されるため、`Send + Sync` 制約は付きません。
+
 ## テスト
 
 ```bash

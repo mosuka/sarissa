@@ -84,6 +84,15 @@ bundle exec rake clean
 rm -rf vendor/bundle
 ```
 
+## Makefile reference
+
+| Target | Description |
+| :--- | :--- |
+| `make build-laurus-ruby` | Bundler install + `bundle exec rake compile` (release gem) |
+| `make test-laurus-ruby` | Rust unit tests + Ruby minitest |
+| `make lint-laurus-ruby` | Clippy with `-D warnings` |
+| `make format-laurus-ruby` | `cargo fmt -p laurus-ruby` |
+
 ## Project layout
 
 ```text

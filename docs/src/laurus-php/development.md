@@ -53,10 +53,11 @@ print_r(\$index->stats());
 ## Testing
 
 Tests use [PHPUnit](https://phpunit.de/) and are located in
-`tests/`.
+`tests/`. Composer is used only for these dev-time PHP dependencies —
+the runtime extension itself is built and loaded directly by Cargo.
 
 ```bash
-# Install test dependencies
+# Install test dependencies (PHPUnit only)
 composer install
 
 # Run all tests

@@ -1,144 +1,109 @@
 # スコアリングとランキング
 
-Laurusは、Lexical検索に複数のスコアリングアルゴリズムを提供し、Vector検索には距離ベースの類似度を使用します。このページでは、すべてのスコアリングメカニズムとハイブリッド検索における相互作用について説明します。
+Laurus は Lexical 検索に BM25、Vector 検索に距離ベースの類似度、そしてハイブリッド検索ではこの 2 つを統合する設定可能なフュージョンアルゴリズムを使用します。本ページでは各スコアリング経路と、公開 API から介入する方法を説明します。
 
-## Lexicalスコアリング
+## Lexical スコアリング
 
 ### BM25（デフォルト）
 
-BM25はLexical検索のデフォルトスコアリング関数です。単語頻度とドキュメント長の正規化をバランスさせます。
+BM25 は Lexical 検索のスコアリング関数です。単語頻度（term frequency）とドキュメント長正規化のバランスを取ります。
 
 ```text
 score = IDF * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len)))
 ```
 
-各パラメータの意味:
+各パラメータ:
 
-- **tf** -- ドキュメント内の単語頻度（Term Frequency）
-- **IDF** -- 逆文書頻度（Inverse Document Frequency）。全ドキュメントにおける単語の希少性
-- **k1** -- 単語頻度の飽和パラメータ
-- **b** -- ドキュメント長の正規化係数
-- **doc_len / avg_doc_len** -- ドキュメント長と平均ドキュメント長の比率
+- **tf** — ドキュメント内の単語頻度。
+- **IDF** — 逆文書頻度（全ドキュメントに対する単語の希少度）。
+- **k1** — 単語頻度の飽和パラメータ。Laurus は **1.2** を使用。
+- **b** — ドキュメント長正規化の係数。Laurus は **0.75** を使用。
+- **doc_len / avg_doc_len** — ドキュメント長と平均ドキュメント長の比率。
 
-### ScoringConfig
-
-`ScoringConfig` はBM25およびその他のスコアリングパラメータを制御します。
-
-| パラメータ | 型 | デフォルト | 説明 |
-| :--- | :--- | :--- | :--- |
-| `k1` | `f32` | 1.2 | 単語頻度の飽和。値が大きいほど単語頻度の重みが増します。 |
-| `b` | `f32` | 0.75 | フィールド長の正規化。0.0 = 正規化なし、1.0 = 完全な正規化。 |
-| `tf_idf_boost` | `f32` | 1.0 | TF-IDFのグローバルブースト係数 |
-| `enable_field_norm` | `bool` | true | フィールド長の正規化を有効にする |
-| `field_boosts` | `HashMap<String, f32>` | empty | フィールドごとのスコア乗数 |
-| `enable_coord` | `bool` | true | クエリ調整係数（matched_terms / total_query_terms）を有効にする |
-
-### 代替スコアリング関数
-
-| 関数 | 説明 |
-| :--- | :--- |
-| `BM25ScoringFunction` | 設定可能なk1とbを持つBM25（デフォルト） |
-| `TfIdfScoringFunction` | フィールド長正規化付きの対数正規化TF-IDF |
-| `VectorSpaceScoringFunction` | ドキュメントの単語ベクトル空間におけるコサイン類似度 |
-| `CustomScoringFunction` | カスタムスコアリングロジック用のユーザー定義クロージャ |
-
-### ScoringRegistry
-
-`ScoringRegistry` はスコアリングアルゴリズムの中央レジストリを提供します。
-
-```rust
-// 事前登録済みアルゴリズム:
-// - "bm25"          -> BM25ScoringFunction
-// - "tf_idf"        -> TfIdfScoringFunction
-// - "vector_space"  -> VectorSpaceScoringFunction
-```
-
-### BM25Plan（事前計算済みクエリ）
-
-同じクエリに対して多数のドキュメントをスコアリングする場合、`BM25Plan` はクエリビルド時に単語ごとの IDF、フィールド長正規化の不変項、`k1 + 1` を一度だけ算出し、各ドキュメントを軽量な数値ループでスコアリングします。スコアリングメソッドは 2 つあります。
-
-- `BM25Plan::score(&doc_stats)` — `BM25ScoringFunction::score` のドロップイン高速版。`DocumentStats` の `HashMap<String, u64>` 経由で単語頻度を引きます。
-- `BM25Plan::score_packed(&term_freqs, doc_length)` — `query_terms` での位置でインデックスされた `&[u64]` をパック済み単語頻度として受け取ります。ドキュメントごとの文字列キー `HashMap` 引きを完全に回避できるため、呼び出し側でドキュメントごとに頻度を 1 度だけパックできる場合に使ってください。
-
-```rust
-use laurus::lexical::search::scoring::bm25::{BM25Plan, ScoringConfig};
-
-let plan = BM25Plan::new(&query_terms, &collection_stats, &ScoringConfig::default());
-
-// HashMap パス（ドロップイン高速版）:
-let score = plan.score(&doc_stats);
-
-// Packed パス（ドキュメントごとの HashMap 引きを回避）:
-let term_freqs: Vec<u64> = query_terms
-    .iter()
-    .map(|t| *doc_stats.term_frequencies.get(t).unwrap_or(&0))
-    .collect();
-let score = plan.score_packed(&term_freqs, doc_stats.doc_length);
-```
-
-`BM25ScoringFunction::score` は 1 ドキュメントずつスコアリングする呼び出し側のために維持されています。
+`(k1, b)` の値は現在実装デフォルトに固定です。Lucene / Elasticsearch のデフォルトと同じため、BM25 スコアはチューニングの直感に関してそれらのエンジンと直接比較できます。
 
 ### フィールドブースト
 
-フィールドブーストは、特定のフィールドからのスコア寄与に乗数を適用します。一部のフィールドが他よりも重要な場合に有用です。
+フィールドごとのスコア乗数は専用のスコアリング構造体ではなく、検索リクエスト上で設定します。
 
 ```rust
-use std::collections::HashMap;
+use laurus::SearchRequestBuilder;
 
-let mut field_boosts = HashMap::new();
-field_boosts.insert("title".to_string(), 2.0);  // titleのマッチはスコア2倍
-field_boosts.insert("body".to_string(), 1.0);   // bodyのマッチはスコア1倍
+let request = SearchRequestBuilder::new()
+    .query_dsl("rust programming")
+    .add_field_boost("title", 2.0) // title のマッチはスコア 2 倍
+    .add_field_boost("body", 1.0)  // body のマッチはスコア 1 倍（デフォルト）
+    .limit(10)
+    .build();
 ```
 
-### 調整係数（Coordination Factor）
+ブーストはそのフィールドにマッチした BM25 スコア寄与に乗算されます。`1.0` は無効化と同じです。クエリで指定されたフィールド（またはスキーマの既定検索フィールド）にのみ適用されます。
 
-`enable_coord` が true の場合、`AdvancedScorer` は調整係数を適用します。
+gRPC / HTTP 経由では同じ設定が `SearchRequest.field_boosts`（`map<string, float>`）として公開されます。[gRPC API → SearchRequest](../laurus-server/grpc_api.md#searchrequest-fields) を参照してください。
 
-```text
-coord = matched_query_terms / total_query_terms
-```
+## Vector スコアリング
 
-これはより多くのクエリ単語にマッチするドキュメントに報酬を与えます。例えば、クエリが3つの単語を含み、ドキュメントがそのうち2つにマッチする場合、調整係数は 2/3 = 0.667 になります。
+Vector 検索は距離ベースの類似度で結果をランク付けします。距離メトリックはベクトルインデックス（HNSW / Flat / IVF）のフィールドごとに設定します。
 
-## Vectorスコアリング
-
-Vector検索は距離ベースの類似度で結果をランク付けします。
-
-```text
-similarity = 1 / (1 + distance)
-```
-
-距離は設定された距離メトリクスを使用して計算されます。
-
-| メトリクス | 説明 | 最適な用途 |
+| メトリック | 説明 | 適した用途 |
 | :--- | :--- | :--- |
-| `Cosine` | 1 - コサイン類似度 | テキストEmbedding（最も一般的） |
-| `Euclidean` | L2距離 | 空間データ |
-| `Manhattan` | L1距離 | 特徴ベクトル |
-| `DotProduct` | 符号反転した内積 | 事前正規化されたベクトル |
+| `Cosine` | 1 − コサイン類似度（デフォルト） | 正規化済みテキスト埋め込み |
+| `Euclidean` | L2 距離 | 空間データ・事前正規化済みデータ |
+| `Manhattan` | L1 距離 | 疎な特徴ベクトル |
+| `DotProduct` | 符号反転した内積 | 高いほど良い事前正規化済みベクトル |
 | `Angular` | 角度距離 | 方向の類似度 |
 
-## ハイブリッド検索のスコア正規化
+距離は類似度スコア（「高いほど良い」）に変換され、Lexical 結果と Vector 結果のいずれにおいてもこの規約が保たれます。下記のフュージョンアルゴリズムはこの前提に依存します。
 
-LexicalとVectorの結果を結合する場合、スコアを比較可能にする必要があります。
+## ハイブリッド検索フュージョン
+
+検索リクエストが Lexical 句と Vector 句の両方を持つ場合、2 つの結果リストをマージする必要があります。Laurus は [`FusionAlgorithm`](api_reference.md#fusionalgorithm) で 2 種類のフュージョンアルゴリズムを公開しています。
 
 ### RRF（Reciprocal Rank Fusion）
 
-RRFは生のスコアの代わりにランクを使用することで、スコア正規化を完全に回避します。
+RRF は生のスコアではなく**ランク**を統合することでスコア正規化を完全に回避します。
 
 ```text
-rrf_score = sum(1 / (k + rank))
+rrf_score(doc) = Σ 1 / (k + rank_i(doc))
 ```
 
-`k` パラメータ（デフォルト: 60）はスムージングを制御します。値が大きいほど上位ランクの結果の重みが小さくなります。
+合計はドキュメントが含まれる各結果リストにわたって取ります。`k` パラメータ（デフォルト **60.0**）は分布を平滑化します — 値が大きいほど上位ランクの結果の貢献が薄まります。
+
+```rust
+use laurus::{FusionAlgorithm, SearchRequestBuilder};
+
+let request = SearchRequestBuilder::new()
+    .query_dsl("title:rust ~\"systems programming\"")
+    .fusion_algorithm(FusionAlgorithm::Rrf { k: 60.0 })
+    .build();
+```
 
 ### WeightedSum
 
-WeightedSumは、各検索タイプのスコアをmin-max正規化で独立に正規化した後、結合します。
+`WeightedSum` は各リストのスコアを個別に min-max 正規化したうえで、重み付き線形結合を取ります。
 
 ```text
-norm_score = (score - min_score) / (max_score - min_score)
-final_score = (norm_lexical * lexical_weight) + (norm_vector * vector_weight)
+norm(score)  = (score - min) / (max - min)
+final(doc)   = lexical_weight * norm(lexical_score(doc))
+             + vector_weight  * norm(vector_score(doc))
 ```
 
-両方の重みは [0.0, 1.0] にクランプされます。
+```rust
+use laurus::{FusionAlgorithm, SearchRequestBuilder};
+
+let request = SearchRequestBuilder::new()
+    .query_dsl("title:rust ~\"systems programming\"")
+    .fusion_algorithm(FusionAlgorithm::WeightedSum {
+        lexical_weight: 0.6,
+        vector_weight: 0.4,
+    })
+    .build();
+```
+
+両方の重みは `[0.0, 1.0]` にクランプされます。特定の重みを設定する理由がない場合は RRF を選んでください — パラメータが少なく、リスト間のスケール差にも頑健です。
+
+## 関連項目
+
+- [API リファレンス → `FusionAlgorithm`](api_reference.md#fusionalgorithm) — バリアントのシグネチャ
+- [ハイブリッド検索](../concepts/search/hybrid_search.md) — どのフュージョンを選ぶかの目安
+- [Vector 検索](../concepts/search/vector_search.md) — 距離メトリックのトレードオフ
