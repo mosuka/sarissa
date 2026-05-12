@@ -8,4 +8,5 @@ pub mod distance;
 pub mod distance_quantized;
 pub mod field;
 pub mod quantization;
+pub mod rerank;
 pub mod vector;

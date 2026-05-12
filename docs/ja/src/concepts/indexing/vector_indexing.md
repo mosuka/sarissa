@@ -242,19 +242,103 @@ let opt = HnswOption {
 - segment ファイルは `LVS1` magic + 16 byte header で始まり、reader
   はロード時にフォーマットを判定。
 
-### Two-stage rerank（Issue #481 Stage 2 — 予約）
+### Two-stage rerank（Issue #481 Stage 2）
 
-`VectorIndexQueryParams.rerank_factor: Option<usize>` および gRPC /
-JSON gateway 側の `VectorParams.rerank_factor` は次の 2 段階 rerank
-フロー用に予約されています:
+Stage 1 ではベクトルを int8 のみで保持します。グラフ検索は完全に int8
+距離に対して行われ、高速ですがわずかな量子化誤差が入ります。Stage 2
+ではフィールド単位で **任意の** f32 sidecar を追加し、上位候補を元の
+完全精度ベクトルで再スコアできるようにします:
 
-1. 量子化された HNSW 検索が `top_k * rerank_factor` 候補を返す。
-2. それらを完全な f32 ベクトルで再スコアし、最終 `top_k` を返す。
+1. HNSW int8 グラフ検索が量子化コサイン距離で最大 `ef_search` 件の
+   候補を返す。
+2. 上位 `top_k * rerank_factor` 件を [LRS1
+   sidecar](#lrs1-rerank-sidecar)（`*.hnsw.f32`）から読み込んだ f32
+   ベクトルで再スコアする。
+3. 新しいランキングを `top_k` に切り詰めて返す。
 
-現在 `rerank_factor` を設定すると `LaurusError::NotImplemented` /
-`tonic::Status::Unimplemented` が返ります。Stage 2 の実装が入った際に
-proto / バインディングのスキーマ変更を伴わずにオプトインできるよう、
-API surface を予約してあります。
+Stage 2 はフィールド単位で
+[`HnswOption.rerank_storage`](../../laurus-cli/schema_format.md#rerank-storage)
+で opt-in します:
+
+```rust
+use laurus::vector::HnswOption;
+use laurus::vector::core::rerank::RerankStorageKind;
+
+let opt = HnswOption {
+    rerank_storage: Some(RerankStorageKind::F32),
+    ..HnswOption::default()
+};
+```
+
+クエリ側は `VectorIndexQuery::rerank_factor`（low-level）、
+`SearchRequestBuilder::vector_rerank_factor`（engine）、
+gRPC / JSON の `VectorParams.rerank_factor` のいずれかで rerank
+factor を渡します。
+
+`rerank_storage` が無効なフィールドでは `rerank_factor` を指定しても
+silent に Stage 1 int8 ランキングへフォールバックします — Stage 1
+セグメントから f32 情報を復元することはできません。
+
+#### LRS1 rerank sidecar
+
+sidecar は `rerank_storage` が有効なときに LVS1 セグメントの隣に
+書かれる別ファイルです:
+
+```text
+offset  size  field
+------  ----  -------------------------------------------
+     0     4  magic         ASCII "LRS1"
+     4     2  version       u16 LE  (current = 1)
+     6     2  storage_kind  u16 LE  (1 = F32; 0 reserved; 2.. future)
+     8     8  reserved      zero-padded
+    16     4  dim           u32 LE
+    20     4  vector_count  u32 LE
+    24     -  payload       vector_count * dim * bytes_per_element
+```
+
+ベクトルは LVS1 セグメントと同じ `(doc_id, field_name)` 順で書かれる
+ので、(sidecar position) → (LVS1 position) のマッピングは恒等関数に
+なります。HNSW reader は storage の loading mode が Eager のとき初期化
+時に sidecar を `RerankStoragePool` にロードします。Lazy mode では
+memory savings の前提を尊重するため sidecar 読み込みをスキップします
+（Lazy mode で開いた Stage 2 セグメントは silent に Stage 1 へ
+degrade します）。
+
+#### recall と速度の trade-off
+
+`rerank_factor` は per-query rerank コスト（`top_k * rerank_factor`
+回の exact distance 計算 — dim 128 で数 µs）と引き換えに Recall@10 の
+向上を得る lever です。実際の効果はコーパスとグラフ検索 budget
+（`ef_search`）に依存します:
+
+- 実際の clustered な embedding（text-embedding-3、BERT など）は
+  低い `ef_search` で `Recall@10 ≥ 0.99` に到達し、rerank は微小な
+  latency 増で順位を磨きます。
+- 合成 random unit-norm（HNSW 復元の最悪ケース）では int8 グラフが
+  真の top-10 候補を十分に visit するために高い `ef_search` が必要で、
+  rerank は visit 済み候補を並び替えられても visit していないものは
+  取り戻せません。
+
+recall acceptance は rerank kernel と HNSW フルパイプラインを独立に
+落とせるよう、CI gate を 2 段に分けています:
+
+- `stage2_brute_force_rerank_recall_at_10_meets_kernel_gate` は
+  `Recall@10 ≥ 0.99` を assert します。HNSW グラフを完全にバイパス
+  し（brute-force int8 で corpus 全体を採点 → `top_k * rerank_factor`
+  に絞る → f32 で再スコア）miss すれば rerank kernel の regression
+  と切り分けられます。
+- `hnsw_quantized_recall_at_10_with_rerank_meets_stage2_recall_gate`
+  は `Recall@10 ≥ 0.98` を assert します。HNSW build の
+  non-determinism（f32 HNSW baseline でも同様に出るノイズ）を
+  含むため、合成 adversarial 分布での run-to-run 観測幅に合わせて
+  しきい値を緩めています。実 embedding の clustered 分布や
+  強めの HNSW config（m=32, ef_construction=500）はこのパス
+  でも ≥ 0.99 に到達します（下の diagnostic sweep を参照）。
+
+companion の `stage2_recall_sweep_diagnostic`（`LAURUS_STAGE2_SWEEP=1`
+で opt-in）は `(ef_search, rerank_factor)` を 3 種の corpus / query
+分布 × 2 種の HNSW config で sweep するので、production deployment
+は実際の embedding 分布で budget を calibrate できます。
 
 ## セグメントファイル
 

@@ -220,6 +220,7 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
                 .as_ref()
                 .map(quantization_from_proto)
                 .unwrap_or_default(),
+            rerank_storage: None,
             embedder: if o.embedder.is_empty() {
                 None
             } else {
@@ -235,6 +236,7 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
                 .as_ref()
                 .map(quantization_from_proto)
                 .unwrap_or_default(),
+            rerank_storage: None,
             embedder: if o.embedder.is_empty() {
                 None
             } else {
@@ -252,6 +254,7 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
                 .as_ref()
                 .map(quantization_from_proto)
                 .unwrap_or_default(),
+            rerank_storage: None,
             embedder: if o.embedder.is_empty() {
                 None
             } else {

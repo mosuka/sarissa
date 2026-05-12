@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
+use crate::vector::core::rerank::RerankStorageKind;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::HnswIndexConfig;
 use crate::vector::index::field::LegacyVectorFieldWriter;
@@ -12,6 +13,7 @@ use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::quantized_io::{
     quantize_segment, read_dequantized_vector, write_quantized_record,
 };
+use crate::vector::index::rerank_sidecar::{read_sidecar, write_sidecar};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 use parking_lot::RwLock;
 use rand::RngExt;
@@ -330,9 +332,57 @@ impl HnswIndexWriter {
 
             // Read quantized payload (dim int8 + sum_q + norm_q) and
             // dequantize back to f32 using the segment-level params.
+            // The dequantized values are a lossy approximation of the
+            // originals; if a Stage 2 sidecar is present we'll
+            // overwrite them below with the lossless f32 payload.
             let values = read_dequantized_vector(&mut input, dimension, &params)?;
 
             vectors.push((doc_id, field_name, Vector::new(values)));
+        }
+
+        // Stage 2 (Issue #481): if the LRS1 sidecar exists alongside
+        // the main `.hnsw` file, prefer its lossless f32 payload over
+        // the dequantized int8 values. This keeps the in-memory writer
+        // state byte-exact across load -> add -> write cycles, so a
+        // re-emitted sidecar does not slowly bleed precision through
+        // repeated dequant -> requantize round-trips.
+        let sidecar_name = format!("{}.f32", file_name);
+        if storage.file_exists(&sidecar_name) {
+            let mut sidecar_in = storage.open_input(&sidecar_name)?;
+            let (header, payload) = read_sidecar(&mut sidecar_in)?;
+            if header.dim as usize != dimension {
+                return Err(LaurusError::InvalidOperation(format!(
+                    "rerank sidecar dim mismatch: LVS1 segment uses {dimension}, sidecar uses {}",
+                    header.dim
+                )));
+            }
+            if header.vector_count as usize != vectors.len() {
+                return Err(LaurusError::InvalidOperation(format!(
+                    "rerank sidecar vector_count mismatch: LVS1 segment has {} vectors, \
+                     sidecar has {}",
+                    vectors.len(),
+                    header.vector_count
+                )));
+            }
+            match header.storage_kind {
+                RerankStorageKind::F32 => {
+                    let bytes_per_vec = dimension * 4;
+                    for (i, (_, _, vec)) in vectors.iter_mut().enumerate() {
+                        let start = i * bytes_per_vec;
+                        let mut data = Vec::with_capacity(dimension);
+                        for j in 0..dimension {
+                            let lo = start + j * 4;
+                            data.push(f32::from_le_bytes([
+                                payload[lo],
+                                payload[lo + 1],
+                                payload[lo + 2],
+                                payload[lo + 3],
+                            ]));
+                        }
+                        *vec = Vector::new(data);
+                    }
+                }
+            }
         }
 
         // Rebuild doc_id_map
@@ -1200,6 +1250,32 @@ impl VectorIndexWriter for HnswIndexWriter {
         }
 
         output.flush()?;
+        drop(output);
+
+        // Stage 2 (Issue #481): emit the optional LRS1 rerank sidecar
+        // alongside the main int8 segment. The sidecar's payload order
+        // matches `sorted_vectors` (the same doc_id ordering used for
+        // the LVS1 records above), which keeps a (sidecar position) ->
+        // (LVS1 position) mapping at the identity. Sidecar is written
+        // only when explicitly enabled per field; absence keeps Stage 1
+        // (int8-only) behavior intact.
+        if let Some(rerank_kind) = self.index_config.rerank_storage {
+            let sidecar_name = format!("{}.f32", file_name);
+            let mut sidecar_out = storage.create_output(&sidecar_name)?;
+            let mut payload: Vec<f32> =
+                Vec::with_capacity(sorted_vectors.len() * self.index_config.dimension);
+            for (_, _, v) in &sorted_vectors {
+                payload.extend_from_slice(&v.data);
+            }
+            write_sidecar(
+                &mut sidecar_out,
+                rerank_kind,
+                self.index_config.dimension as u32,
+                &payload,
+            )?;
+            sidecar_out.flush()?;
+        }
+
         Ok(())
     }
 

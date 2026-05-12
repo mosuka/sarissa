@@ -872,6 +872,7 @@ impl Engine {
                 overfetch: 2.0,
                 min_score: opts.min_score,
                 allowed_ids: None,
+                rerank_factor: opts.rerank_factor,
             },
         }
     }

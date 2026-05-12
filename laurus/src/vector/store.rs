@@ -447,8 +447,11 @@ impl VectorStore {
         // Fast path: single query vector, skip HashMap aggregation.
         if query_vectors.len() == 1 {
             let qv = &query_vectors[0];
-            let index_request = VectorIndexQuery::new(qv.vector.clone())
+            let mut index_request = VectorIndexQuery::new(qv.vector.clone())
                 .top_k(request.params.limit.saturating_mul(2));
+            if let Some(factor) = request.params.rerank_factor {
+                index_request = index_request.rerank_factor(factor);
+            }
             let results = searcher.search(&index_request)?;
 
             let mut hits: Vec<VectorHit> = results
@@ -499,8 +502,11 @@ impl VectorStore {
 
         // Process each query vector
         for qv in query_vectors {
-            let index_request = VectorIndexQuery::new(qv.vector.clone())
+            let mut index_request = VectorIndexQuery::new(qv.vector.clone())
                 .top_k(request.params.limit.saturating_mul(2)); // Overfetch for better results
+            if let Some(factor) = request.params.rerank_factor {
+                index_request = index_request.rerank_factor(factor);
+            }
 
             let results = searcher.search(&index_request)?;
 

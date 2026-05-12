@@ -131,6 +131,16 @@ pub struct VectorSearchOptions {
     /// Minimum score threshold. Results below this score are discarded.
     /// Defaults to `0.0` (no threshold).
     pub min_score: f32,
+
+    /// Optional Stage 2 rerank factor (Issue #481).
+    ///
+    /// When `Some(factor)`, the underlying vector index searcher widens
+    /// the int8 candidate fetch to `top_k * factor` and rescores the
+    /// candidates against the original full-precision vectors via the
+    /// LRS1 sidecar. Honored only on HNSW fields whose schema enabled
+    /// `rerank_storage`; other configurations silently ignore the value.
+    /// `None` keeps Stage 1 behavior (int8-only).
+    pub rerank_factor: Option<usize>,
 }
 
 impl Default for VectorSearchOptions {
@@ -138,6 +148,7 @@ impl Default for VectorSearchOptions {
         Self {
             score_mode: VectorScoreMode::WeightedSum,
             min_score: 0.0,
+            rerank_factor: None,
         }
     }
 }
@@ -395,6 +406,15 @@ impl SearchRequestBuilder {
     /// Set the minimum score threshold for vector search.
     pub fn vector_min_score(mut self, min_score: f32) -> Self {
         self.vector_options.min_score = min_score;
+        self
+    }
+
+    /// Set the Stage 2 rerank factor (Issue #481) for vector search.
+    ///
+    /// Honored by HNSW fields whose schema enabled `rerank_storage`.
+    /// Other vector configurations silently ignore the value.
+    pub fn vector_rerank_factor(mut self, factor: usize) -> Self {
+        self.vector_options.rerank_factor = Some(factor);
         self
     }
 

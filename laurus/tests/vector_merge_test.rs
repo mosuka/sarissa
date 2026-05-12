@@ -31,6 +31,7 @@ async fn test_segmented_field_manual_merge() -> Result<(), Box<dyn std::error::E
             ef_construction: 200, // Standard default
             base_weight: 1.0,
             quantizer: Default::default(),
+            rerank_storage: None,
             embedder: None,
         })),
         lexical: None,

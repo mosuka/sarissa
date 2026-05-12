@@ -7,6 +7,7 @@ use crate::embedding::embedder::{EmbedInput, EmbedInputType, Embedder};
 use crate::error::Result;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::quantization;
+use crate::vector::core::rerank::RerankStorageKind;
 use crate::vector::core::vector::Vector;
 
 /// Vector normalization methods.
@@ -303,6 +304,18 @@ pub struct FlatIndexConfig {
     /// Quantization method.
     pub quantization_method: quantization::QuantizationMethod,
 
+    /// Optional Stage 2 rerank sidecar storage (Issue #481).
+    ///
+    /// When `Some(_)`, the writer emits an extra LRS1 sidecar file
+    /// alongside the main int8 segment so the searcher can do a wide
+    /// candidate fetch over int8 and rescore against the original
+    /// full-precision vectors. `None` keeps Stage 1 behavior
+    /// (int8-only). Stage 2 sidecar is currently consumed only by
+    /// the HNSW searcher; Flat / IVF accept the field for schema
+    /// symmetry but do not yet emit or consume the sidecar.
+    #[serde(default)]
+    pub rerank_storage: Option<RerankStorageKind>,
+
     /// Merge factor for segment merging.
     ///
     /// Controls how many segments are merged at once. Higher values reduce
@@ -369,6 +382,7 @@ impl Default for FlatIndexConfig {
             write_buffer_size: 1024 * 1024, // 1MB
             use_quantization: false,
             quantization_method: quantization::QuantizationMethod::Scalar8Bit,
+            rerank_storage: None,
             merge_factor: 10,
             max_segments: 100,
             embedder: default_embedder(),
@@ -387,6 +401,7 @@ impl std::fmt::Debug for FlatIndexConfig {
             .field("write_buffer_size", &self.write_buffer_size)
             .field("use_quantization", &self.use_quantization)
             .field("quantization_method", &self.quantization_method)
+            .field("rerank_storage", &self.rerank_storage)
             .field("merge_factor", &self.merge_factor)
             .field("max_segments", &self.max_segments)
             .field("embedder", &self.embedder.name())
@@ -435,6 +450,16 @@ pub struct HnswIndexConfig {
     /// Quantization method.
     pub quantization_method: quantization::QuantizationMethod,
 
+    /// Optional Stage 2 rerank sidecar storage (Issue #481).
+    ///
+    /// When `Some(_)`, the writer emits an extra LRS1 sidecar file
+    /// (`<path>.hnsw.f32`) alongside the main int8 segment so the
+    /// HNSW searcher can do a wide candidate fetch over int8 and
+    /// rescore against the original full-precision vectors. `None`
+    /// keeps Stage 1 behavior (int8-only).
+    #[serde(default)]
+    pub rerank_storage: Option<RerankStorageKind>,
+
     /// Merge factor for segment merging.
     pub merge_factor: u32,
 
@@ -465,6 +490,7 @@ impl Default for HnswIndexConfig {
             write_buffer_size: 1024 * 1024, // 1MB
             use_quantization: false,
             quantization_method: quantization::QuantizationMethod::Scalar8Bit,
+            rerank_storage: None,
             merge_factor: 10,
             max_segments: 100,
             embedder: default_embedder(),
@@ -485,6 +511,7 @@ impl std::fmt::Debug for HnswIndexConfig {
             .field("write_buffer_size", &self.write_buffer_size)
             .field("use_quantization", &self.use_quantization)
             .field("quantization_method", &self.quantization_method)
+            .field("rerank_storage", &self.rerank_storage)
             .field("merge_factor", &self.merge_factor)
             .field("max_segments", &self.max_segments)
             .field("embedder", &self.embedder.name())
@@ -534,6 +561,14 @@ pub struct IvfIndexConfig {
     /// Quantization method.
     pub quantization_method: quantization::QuantizationMethod,
 
+    /// Optional Stage 2 rerank sidecar storage (Issue #481).
+    ///
+    /// IVF accepts the field for schema symmetry with the HNSW
+    /// configuration but does not currently emit or consume the
+    /// sidecar — Stage 2 lands HNSW only. See [`HnswIndexConfig::rerank_storage`].
+    #[serde(default)]
+    pub rerank_storage: Option<RerankStorageKind>,
+
     /// Merge factor for segment merging.
     pub merge_factor: u32,
 
@@ -564,6 +599,7 @@ impl Default for IvfIndexConfig {
             write_buffer_size: 1024 * 1024, // 1MB
             use_quantization: false,
             quantization_method: quantization::QuantizationMethod::Scalar8Bit,
+            rerank_storage: None,
             merge_factor: 10,
             max_segments: 100,
             embedder: default_embedder(),
@@ -584,6 +620,7 @@ impl std::fmt::Debug for IvfIndexConfig {
             .field("write_buffer_size", &self.write_buffer_size)
             .field("use_quantization", &self.use_quantization)
             .field("quantization_method", &self.quantization_method)
+            .field("rerank_storage", &self.rerank_storage)
             .field("merge_factor", &self.merge_factor)
             .field("max_segments", &self.max_segments)
             .field("embedder", &self.embedder.name())
