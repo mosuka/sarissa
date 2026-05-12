@@ -5,6 +5,7 @@
 //! distance metrics, and quantization methods.
 
 pub mod distance;
+pub mod distance_quantized;
 pub mod field;
 pub mod quantization;
 pub mod vector;
