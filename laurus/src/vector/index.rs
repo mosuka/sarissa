@@ -11,6 +11,7 @@ pub mod factory;
 pub mod field;
 pub mod field_factory;
 pub mod flat;
+pub mod format;
 pub mod hnsw;
 pub mod io;
 pub mod ivf;

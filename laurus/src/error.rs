@@ -87,6 +87,13 @@ pub enum LaurusError {
     #[error("Not implemented: {0}")]
     NotImplemented(String),
 
+    /// Incompatible on-disk format (wrong magic bytes, unsupported
+    /// version, or unsupported quantization kind). Most commonly this
+    /// is raised when a vector segment from before Issue #481 Stage 1
+    /// (pre-quantization, no header) is opened against the new reader.
+    #[error("Incompatible format: {0}")]
+    IncompatibleFormat(String),
+
     /// JSON serialization/deserialization errors
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
