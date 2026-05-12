@@ -444,6 +444,13 @@ impl VectorIndexReader for IvfIndexReader {
                     }
                 }
             }
+            VectorStorage::OwnedQuantized(_) => {
+                // IVF does not produce OwnedQuantized in Step 5; this
+                // arm becomes meaningful once Step 7 of #481 Stage 1
+                // migrates the IVF reader to the quantized format.
+                warnings
+                    .push("OwnedQuantized: Deep vector validation not yet implemented".to_string());
+            }
             VectorStorage::OnDemand { offsets, .. } => {
                 for (id, field) in &self.vector_ids {
                     if !offsets.contains_key(&(*id, field.clone())) {

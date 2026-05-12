@@ -16,6 +16,7 @@ pub mod hnsw;
 pub mod io;
 pub mod ivf;
 pub mod quantized_segment;
+pub mod quantized_storage;
 pub mod segmented_field;
 pub mod storage;
 pub mod wal;

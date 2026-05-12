@@ -278,6 +278,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
     fn stats(&self) -> VectorStats {
         let _memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
+            VectorStorage::OwnedQuantized(pool) => pool.data.len(),
             VectorStorage::OnDemand { offsets, .. } => {
                 // Estimate memory for offsets map + ID list
                 offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
@@ -296,6 +297,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
             VectorStorage::Owned(vectors) => {
                 vectors.contains_key(&(doc_id, field_name.to_string()))
             }
+            VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
             VectorStorage::OnDemand { offsets, .. } => {
                 offsets.contains_key(&(doc_id, field_name.to_string()))
             }
@@ -398,6 +400,13 @@ impl VectorIndexReader for FlatVectorIndexReader {
                         ));
                     }
                 }
+            }
+            VectorStorage::OwnedQuantized(_) => {
+                // Flat does not produce OwnedQuantized in Step 5; this
+                // arm becomes meaningful once Step 7 of #481 Stage 1
+                // migrates the Flat reader to the quantized format.
+                warnings
+                    .push("OwnedQuantized: Deep vector validation not yet implemented".to_string());
             }
             VectorStorage::OnDemand { offsets, .. } => {
                 for (id, field) in &self.vector_ids {

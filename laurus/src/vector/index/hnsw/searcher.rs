@@ -3,9 +3,12 @@
 use std::sync::Arc;
 
 use crate::error::Result;
+use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::distance_quantized::{QuantizedQuery, distance_quantized};
 use crate::vector::core::vector::Vector;
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::hnsw::reader::HnswIndexReader;
+use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorIndexSearcher;
 use crate::vector::search::searcher::{
@@ -14,6 +17,46 @@ use crate::vector::search::searcher::{
 use bit_vec::BitVec;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
+
+/// Per-search state for the int8 hot path (Issue #481 Stage 1, Step 6).
+///
+/// Built once at the start of `search_graph` when the reader is
+/// [`crate::vector::index::storage::VectorStorage::OwnedQuantized`].
+/// Threaded through `calc_dist` so each per-candidate call is one
+/// O(1) `field_idx.get` plus a [`distance_quantized`] invocation —
+/// no per-call allocation, no `String` clone.
+struct QuantizedSearchCtx {
+    /// Quantized query (int8 + cached norm + offset/scale), prepared
+    /// once per search via [`QuantizedQuery::prepare`].
+    prepared: QuantizedQuery,
+    /// The reader's in-memory int8 storage. Cloned `Arc` so the pool
+    /// stays alive even if the reader is dropped mid-search (it isn't,
+    /// but the borrow checker needs the lifetime extension).
+    pool: Arc<QuantizedVectorPool>,
+    /// Per-field doc_id -> vector position in `pool.data`. None when
+    /// the searched field is absent from this segment (impossible for
+    /// the HNSW graph search path, but kept for type symmetry).
+    field_idx: Arc<HashMap<u64, u32>>,
+    /// Distance metric, cached so the hot loop skips the
+    /// `reader.distance_metric()` indirection.
+    metric: DistanceMetric,
+}
+
+impl QuantizedSearchCtx {
+    /// Compute distance from the prepared query to the candidate at
+    /// `doc_id`. Returns `f32::MAX` if the candidate is missing, which
+    /// is what HNSW's calc_dist expects for absent neighbours.
+    #[inline]
+    fn distance(&self, doc_id: u64) -> f32 {
+        match self.field_idx.get(&doc_id) {
+            Some(&pos) => {
+                let (int8, meta) = self.pool.record_at(pos);
+                distance_quantized(self.metric, &self.prepared, int8, meta)
+            }
+            None => f32::MAX,
+        }
+    }
+}
 
 /// HNSW vector searcher that performs approximate nearest neighbor search.
 #[derive(Debug)]
@@ -236,10 +279,33 @@ impl HnswSearcher {
         let query = &request.query;
         let ef_search = self.ef_search;
 
+        // Issue #481 Stage 1, Step 6: when the reader holds the
+        // OwnedQuantized in-memory pool, prepare the int8 hot path
+        // here so the per-candidate calc_dist call collapses into one
+        // O(1) doc_id lookup + distance_quantized (int8 SIMD).
+        let quant_ctx: Option<QuantizedSearchCtx> =
+            reader.vectors().quantized_pool().and_then(|pool| {
+                pool.field_position_index(field_name).map(|field_idx| {
+                    let prepared = QuantizedQuery::prepare(&query.data, &pool.params);
+                    QuantizedSearchCtx {
+                        prepared,
+                        pool: pool.clone(),
+                        field_idx,
+                        metric: reader.distance_metric(),
+                    }
+                })
+            });
+
         // Retrieve the per-field prefetch index once per search call (O(1), no allocation).
         // `None` for on-demand (disk-backed) storage; the prefetch loop is skipped entirely.
         let field_prefetch = reader.field_prefetch_index(field_name);
-        let prefetch_n_bytes = reader.dimension() * std::mem::size_of::<f32>();
+        // Prefetch payload size: int8 record (dim + 8 bytes meta) for
+        // the quantized hot path; legacy f32 size otherwise.
+        let prefetch_n_bytes = if quant_ctx.is_some() {
+            QuantizedVectorPool::record_size(reader.dimension())
+        } else {
+            reader.dimension() * std::mem::size_of::<f32>()
+        };
 
         // 1. Start from entry point at max_level
         let mut curr_obj = entry_point;
@@ -248,7 +314,7 @@ impl HnswSearcher {
         // Since HNSW here is single-graph for mixed IDs (potentially), we must hope entry point is valid for calc_dist with this field?
         // Ref discussion: assuming HnswIndex is single-field.
 
-        let mut dist = self.calc_dist(reader, query, curr_obj, field_name)?;
+        let mut dist = self.calc_dist(reader, query, quant_ctx.as_ref(), curr_obj, field_name)?;
 
         // 2. Greedy descent
         for lc in (1..=graph.max_level).rev() {
@@ -266,7 +332,13 @@ impl HnswSearcher {
                     }
                     // Pass 2: compute distances (data is being fetched in the background).
                     for &neighbor_id in neighbors {
-                        let d = self.calc_dist(reader, query, neighbor_id, field_name)?;
+                        let d = self.calc_dist(
+                            reader,
+                            query,
+                            quant_ctx.as_ref(),
+                            neighbor_id,
+                            field_name,
+                        )?;
                         if d < dist {
                             dist = d;
                             curr_obj = neighbor_id;
@@ -328,7 +400,8 @@ impl HnswSearcher {
                     }
                     visited.set(nbr_idx, true);
 
-                    let d = self.calc_dist(reader, query, neighbor_id, field_name)?;
+                    let d =
+                        self.calc_dist(reader, query, quant_ctx.as_ref(), neighbor_id, field_name)?;
                     let furthest_dist = found.peek().map(|c| c.distance).unwrap_or(f32::MAX);
 
                     if d < furthest_dist || found.len() < ef_search {
@@ -400,11 +473,17 @@ impl HnswSearcher {
         &self,
         reader: &HnswIndexReader,
         query: &Vector,
+        quant_ctx: Option<&QuantizedSearchCtx>,
         doc_id: u64,
         field_name: &str,
     ) -> Result<f32> {
-        // Optimization: HnswIndexReader *could* support getting raw bytes or avoiding clone,
-        // but get_vector returns Option<Vector>.
+        // Issue #481 Stage 1, Step 6: prefer the int8 hot path when
+        // the reader exposes a QuantizedVectorPool. The fallback
+        // remains f32 for backward compatibility (OnDemand mode and
+        // legacy f32 Owned).
+        if let Some(ctx) = quant_ctx {
+            return Ok(ctx.distance(doc_id));
+        }
         if let Some(target) = reader.get_vector(doc_id, field_name)? {
             reader.distance_metric().distance(&query.data, &target.data)
         } else {

@@ -6,6 +6,7 @@ use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::quantization::{QuantizedVectorMeta, ScalarQuantParams};
 use crate::vector::core::vector::Vector;
+use crate::vector::index::quantized_storage::QuantizedVectorPool;
 
 /// Storage for vectors (in-memory or on-demand from disk).
 ///
@@ -19,8 +20,16 @@ use crate::vector::core::vector::Vector;
 ///   `Mutex`-based serialization and allows fully concurrent reads.
 #[derive(Debug, Clone)]
 pub enum VectorStorage {
-    /// All vectors are loaded into memory.
+    /// All vectors are loaded into memory as f32 (legacy path used by
+    /// Flat / IVF until Step 7 of Issue #481 Stage 1).
     Owned(Arc<HashMap<(u64, String), Vector>>),
+    /// All vectors are loaded into memory as int8 + per-vector meta
+    /// (Issue #481 Stage 1, Step 6). Used by HNSW Eager mode; the
+    /// search hot loop accesses the inner [`QuantizedVectorPool`]
+    /// directly via [`Self::quantized_pool`] instead of going through
+    /// [`Self::get`], which dequantizes lazily for the legacy
+    /// [`crate::vector::reader::VectorIndexReader::get_vector`] API.
+    OwnedQuantized(Arc<QuantizedVectorPool>),
     /// Vectors are read from disk on demand.
     ///
     /// Each [`get`](Self::get) call opens a fresh [`StorageInput`](crate::storage::StorageInput)
@@ -48,10 +57,22 @@ pub enum VectorStorage {
 }
 
 impl VectorStorage {
+    /// If this storage is the in-memory quantized variant, return the
+    /// underlying [`QuantizedVectorPool`] so the search hot loop can
+    /// pull `(int8 slice, meta)` directly without going through the
+    /// dequantizing [`Self::get`] path.
+    pub fn quantized_pool(&self) -> Option<&Arc<QuantizedVectorPool>> {
+        match self {
+            VectorStorage::OwnedQuantized(pool) => Some(pool),
+            _ => None,
+        }
+    }
+
     /// Returns all keys stored in this vector storage.
     pub fn keys(&self) -> Vec<(u64, String)> {
         match self {
             VectorStorage::Owned(map) => map.keys().cloned().collect(),
+            VectorStorage::OwnedQuantized(pool) => pool.keys(),
             VectorStorage::OnDemand { offsets, .. } => offsets.keys().cloned().collect(),
         }
     }
@@ -60,6 +81,7 @@ impl VectorStorage {
     pub fn len(&self) -> usize {
         match self {
             VectorStorage::Owned(map) => map.len(),
+            VectorStorage::OwnedQuantized(pool) => pool.vector_count,
             VectorStorage::OnDemand { offsets, .. } => offsets.len(),
         }
     }
@@ -77,6 +99,7 @@ impl VectorStorage {
     pub fn contains_key(&self, key: &(u64, String)) -> bool {
         match self {
             VectorStorage::Owned(map) => map.contains_key(key),
+            VectorStorage::OwnedQuantized(pool) => pool.contains(key.0, &key.1),
             VectorStorage::OnDemand { offsets, .. } => offsets.contains_key(key),
         }
     }
@@ -103,6 +126,7 @@ impl VectorStorage {
     pub fn get(&self, key: &(u64, String), dimension: usize) -> Result<Option<Vector>> {
         match self {
             VectorStorage::Owned(map) => Ok(map.get(key).cloned()),
+            VectorStorage::OwnedQuantized(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
             VectorStorage::OnDemand {
                 storage,
                 file_name,
