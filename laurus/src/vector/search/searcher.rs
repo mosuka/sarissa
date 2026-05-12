@@ -296,6 +296,14 @@ pub struct VectorSearchParams {
     /// List of allowed document IDs (for internal use by Engine filtering).
     #[serde(skip)]
     pub allowed_ids: Option<Vec<u64>>,
+    /// Optional Stage 2 rerank factor (Issue #481).
+    ///
+    /// When `Some(factor)`, the HNSW searcher widens the int8 candidate
+    /// fetch to `top_k * factor` and rescores against the LRS1 sidecar's
+    /// f32 vectors. Honored only on HNSW fields with `rerank_storage`
+    /// configured at index time; otherwise silently ignored.
+    #[serde(default)]
+    pub rerank_factor: Option<usize>,
 }
 
 impl Default for VectorSearchParams {
@@ -307,6 +315,7 @@ impl Default for VectorSearchParams {
             overfetch: default_overfetch(),
             min_score: 0.0,
             allowed_ids: None,
+            rerank_factor: None,
         }
     }
 }

@@ -858,8 +858,10 @@ fn json_to_vector_params(json: &Value) -> Option<v1::VectorParams> {
         overfetch: obj.get("overfetch").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
         min_score: obj.get("min_score").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
         // Issue #481 Stage 2 (rerank). Optional in proto so older
-        // gateway clients can omit the field; the engine returns
-        // NotImplemented if set, until Stage 2 lands.
+        // gateway clients can omit the field; the engine forwards it
+        // to the HNSW searcher, which honors it when the queried
+        // field has rerank_storage enabled and otherwise silently
+        // falls back to Stage 1 ranking.
         rerank_factor: obj
             .get("rerank_factor")
             .and_then(|v| v.as_u64())

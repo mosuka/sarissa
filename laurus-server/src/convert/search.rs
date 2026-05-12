@@ -89,17 +89,6 @@ pub fn from_proto(proto: &v1::SearchRequest) -> Result<laurus::SearchRequest, to
 
         // Apply vector params
         if let Some(vp) = &proto.vector_params {
-            // Issue #481 Stage 2 (rerank) is wire-reserved but not
-            // yet implemented in the engine. Reject with a clear
-            // gRPC Unimplemented status rather than silently dropping
-            // the requested rerank_factor on the floor.
-            if vp.rerank_factor.is_some() {
-                return Err(tonic::Status::unimplemented(
-                    "Two-stage rerank (Issue #481 Stage 2, vector_params.rerank_factor) \
-                     is not yet implemented. Omit the field for the Stage 1 \
-                     quantized search.",
-                ));
-            }
             let score_mode = match v1::VectorScoreMode::try_from(vp.score_mode) {
                 Ok(v1::VectorScoreMode::MaxSim) => VectorScoreMode::MaxSim,
                 Ok(v1::VectorScoreMode::LateInteraction) => VectorScoreMode::LateInteraction,
@@ -108,6 +97,17 @@ pub fn from_proto(proto: &v1::SearchRequest) -> Result<laurus::SearchRequest, to
             builder = builder.vector_score_mode(score_mode);
             if vp.min_score > 0.0 {
                 builder = builder.vector_min_score(vp.min_score);
+            }
+            // Issue #481 Stage 2: forward rerank_factor to the engine
+            // (which forwards it to the HNSW searcher). Per-field
+            // capability checks happen later: HNSW fields with
+            // rerank_storage configured honor the value; everything
+            // else silently ignores it. A zero value disables rerank
+            // (defensive: matches `None` semantics).
+            if let Some(factor) = vp.rerank_factor
+                && factor > 0
+            {
+                builder = builder.vector_rerank_factor(factor as usize);
             }
         }
     }
