@@ -10,7 +10,7 @@ use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::hnsw::graph::HnswGraph;
-use crate::vector::index::hnsw::quantized_io::quantized_record_payload_size;
+use crate::vector::index::quantized_io::quantized_record_payload_size;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};

@@ -3,7 +3,6 @@
 pub mod field_reader;
 pub mod graph;
 pub mod maintenance;
-pub mod quantized_io;
 pub mod reader;
 pub mod searcher;
 pub mod segment;

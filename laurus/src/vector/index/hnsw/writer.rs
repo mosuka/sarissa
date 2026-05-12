@@ -9,7 +9,7 @@ use crate::vector::index::HnswIndexConfig;
 use crate::vector::index::field::LegacyVectorFieldWriter;
 use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::hnsw::graph::HnswGraph;
-use crate::vector::index::hnsw::quantized_io::{
+use crate::vector::index::quantized_io::{
     quantize_segment, read_dequantized_vector, write_quantized_record,
 };
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};

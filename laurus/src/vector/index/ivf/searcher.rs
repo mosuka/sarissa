@@ -130,10 +130,42 @@ impl VectorIndexSearcher for IvfSearcher {
         // Angular this skips the per-candidate `||query||²` accumulation.
         let metric = self.index_reader.distance_metric();
         let prepared_query = metric.prepare_query(&request.query.data);
+
+        // Issue #481 Stage 1, Step 7: try the int8 hot path when the
+        // reader holds an OwnedQuantized pool. Build per-search
+        // QuantizedQuery once before the candidate loop.
+        let ivf_reader = self
+            .index_reader
+            .as_any()
+            .downcast_ref::<crate::vector::index::ivf::reader::IvfIndexReader>();
+        let quant_pool = ivf_reader.and_then(|r| r.vectors().quantized_pool().cloned());
+        let prepared_quantized = quant_pool.as_ref().map(|pool| {
+            crate::vector::core::distance_quantized::QuantizedQuery::prepare(
+                &request.query.data,
+                &pool.params,
+            )
+        });
+
         let mut candidates: Vec<(u64, String, f32, f32, Vector)> =
             Vec::with_capacity(vector_ids.len());
 
         for (doc_id, field_name) in &vector_ids {
+            if let (Some(pool), Some(prepared)) = (&quant_pool, &prepared_quantized)
+                && let Some((int8, meta)) = pool.get_record(*doc_id, field_name)
+            {
+                let distance = crate::vector::core::distance_quantized::distance_quantized(
+                    metric, prepared, int8, meta,
+                );
+                let similarity = metric.distance_to_similarity(distance);
+                let vector = if request.params.include_vectors {
+                    pool.dequantize_to_vector(*doc_id, field_name)
+                        .unwrap_or_else(|| Vector::new(Vec::new()))
+                } else {
+                    Vector::new(Vec::new())
+                };
+                candidates.push((*doc_id, field_name.clone(), similarity, distance, vector));
+                continue;
+            }
             if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name) {
                 let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
                 let similarity = metric.distance_to_similarity(distance);

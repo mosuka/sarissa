@@ -7,9 +7,14 @@ use rayon::prelude::*;
 
 use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
+use crate::vector::core::quantization::ScalarQuantParams;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::IvfIndexConfig;
 use crate::vector::index::field::LegacyVectorFieldWriter;
+use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
+use crate::vector::index::quantized_io::{
+    quantize_segment, read_dequantized_vector, write_quantized_record,
+};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 use serde::{Deserialize, Serialize};
 
@@ -142,7 +147,13 @@ impl IvfIndexWriter {
             centroids.push(Vector::new(values));
         }
 
-        // Read inverted lists
+        // Read the Issue #481 Stage 1 vector segment header (LVS1).
+        // Pre-Stage-1 segments are rejected with IncompatibleFormat.
+        let header = VectorSegmentHeader::read_from(&mut input)?;
+        let QuantHeader::Scalar8Bit(params) = header.quant;
+
+        // Read inverted lists, dequantizing each record back to f32
+        // for the in-memory writer state.
         let mut inverted_lists = vec![Vec::new(); n_clusters];
         for list in &mut inverted_lists {
             let mut list_size_buf = [0u8; 4];
@@ -165,13 +176,8 @@ impl IvfIndexWriter {
                     LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                 })?;
 
-                // Read vector data
-                let mut values = vec![0.0f32; dimension];
-                for value in &mut values {
-                    let mut value_buf = [0u8; 4];
-                    input.read_exact(&mut value_buf)?;
-                    *value = f32::from_le_bytes(value_buf);
-                }
+                // Read quantized payload + dequantize.
+                let values = read_dequantized_vector(&mut input, dimension, &params)?;
 
                 list.push((doc_id, field_name, Vector::new(values)));
             }
@@ -965,17 +971,44 @@ impl VectorIndexWriter for IvfIndexWriter {
         output.write_all(&(self.index_config.n_clusters as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.n_probe as u32).to_le_bytes())?;
 
-        // Write centroids
+        // Write centroids (kept as f32 - they're cluster centers used
+        // for partition assignment at search time, not part of the
+        // segment vector data the LVS1 header describes).
         for centroid in &self.centroids {
             for value in centroid.data.iter() {
                 output.write_all(&value.to_le_bytes())?;
             }
         }
 
-        // Write inverted lists
+        // Issue #481 Stage 1, Step 7: train per-segment SQ params on
+        // ALL vectors across ALL inverted lists (segment-wide single
+        // (offset, scale) pair) and emit the LVS1 header before the
+        // inverted-list data.
+        let all_vectors: Vec<Vector> = self
+            .inverted_lists
+            .iter()
+            .flat_map(|list| list.iter().map(|(_, _, v)| v.clone()))
+            .collect();
+        let (params, records) = if all_vectors.is_empty() {
+            (
+                ScalarQuantParams {
+                    offset: 0.0,
+                    scale: 1.0,
+                },
+                Vec::new(),
+            )
+        } else {
+            quantize_segment(&all_vectors, self.index_config.dimension)?
+        };
+        VectorSegmentHeader::scalar_8bit(params).write_to(&mut output)?;
+
+        // Write inverted lists with quantized records. The records
+        // were produced in flatten order, so we step through them in
+        // the same order while emitting each list.
+        let mut record_iter = records.into_iter();
         for list in &self.inverted_lists {
             output.write_all(&(list.len() as u32).to_le_bytes())?;
-            for (doc_id, field_name, vector) in list {
+            for (doc_id, field_name, _) in list {
                 output.write_all(&doc_id.to_le_bytes())?;
 
                 // Write field name length and field name
@@ -983,10 +1016,11 @@ impl VectorIndexWriter for IvfIndexWriter {
                 output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
                 output.write_all(field_name_bytes)?;
 
-                // Write vector data
-                for value in vector.data.iter() {
-                    output.write_all(&value.to_le_bytes())?;
-                }
+                // Write quantized payload (dim int8 + sum_q + norm_q).
+                let (int8, meta) = record_iter
+                    .next()
+                    .expect("records vector length matches the sum of inverted_lists lengths");
+                write_quantized_record(&mut output, &int8, meta)?;
             }
         }
 
