@@ -1,10 +1,9 @@
-//! Quantized vector search recall acceptance test
-//! (Issue #481 Stage 1 recall gate).
+//! Quantized vector search recall acceptance tests for Issue #481
+//! Stage 1 and Stage 2.
 //!
-//! Issue #481 Stage 1 acceptance asks for "recall ≥ 0.95 vs the
-//! f32 baseline" on the quantized HNSW search path. Since Stage 1
-//! removes the f32 search path entirely, that condition is split
-//! into two CI gates:
+//! Stage 1 acceptance asks for "recall ≥ 0.95 vs the f32 baseline"
+//! on the quantized HNSW search path. Since Stage 1 removed the f32
+//! search path entirely, that condition is split into two CI gates:
 //!
 //! 1. **Brute-force quantized vs exact f32**: gates the int8
 //!    distance kernel directly. Threshold 0.95 (matches the issue
@@ -13,6 +12,14 @@
 //! 2. **HNSW + int8 vs exact f32**: gates the end-to-end search.
 //!    Looser threshold (0.85) because HNSW itself adds graph
 //!    approximation noise that an f32 baseline would also contribute.
+//!
+//! Stage 2 adds a tighter gate driven by the LRS1 rerank sidecar:
+//!
+//! 3. **HNSW + int8 + f32 rerank vs exact f32**: gates the
+//!    Stage 2 two-stage rerank flow end-to-end. Threshold 0.99
+//!    (matches the issue wording). The graph search still returns
+//!    int8 candidates; the rerank rescores them with the original
+//!    f32 vectors to recover the recall the int8 ranking gave up.
 //!
 //! # Fixture sizes
 //!
@@ -43,6 +50,7 @@ use laurus::storage::memory::MemoryStorageConfig;
 use laurus::vector::core::distance::DistanceMetric;
 use laurus::vector::core::distance_quantized::{QuantizedQuery, distance_quantized};
 use laurus::vector::core::quantization::{QuantizedVectorMeta, ScalarQuantParams};
+use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::vector::core::vector::Vector;
 use laurus::vector::index::VectorIndex;
 use laurus::vector::index::config::HnswIndexConfig;
@@ -64,6 +72,14 @@ use laurus::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
 ///   absence of an f32 path.
 const QUANT_KERNEL_RECALL_THRESHOLD: f32 = 0.95;
 const HNSW_RECALL_THRESHOLD: f32 = 0.85;
+
+/// Issue #481 Stage 2 acceptance: with the f32 sidecar enabled and
+/// `rerank_factor` set on each query, the HNSW search must recover
+/// recall to **≥ 0.99** even at a low ef_search budget. The recall
+/// gate is intentionally tighter than Stage 1's HNSW gate (0.85)
+/// because rerank rescues the candidates the int8 graph search
+/// approximated.
+const STAGE2_RECALL_THRESHOLD: f32 = 0.99;
 
 /// Vector dimension used by both default and opt-in fixtures.
 const DIM: usize = 128;
@@ -242,6 +258,60 @@ fn measure_recall(corpus: Vec<Vec<f32>>, queries: &[Vec<f32>], ef_search: usize)
     total_recall / queries.len() as f32
 }
 
+/// Stage 2 variant of [`measure_recall`]: builds the index with
+/// `rerank_storage = Some(F32)` so the writer emits the LRS1 sidecar
+/// and the reader loads it into a `RerankStoragePool`. Each query is
+/// dispatched with `rerank_factor` set so the searcher widens the
+/// int8 candidate fetch and rescores against the original f32
+/// vectors. Returns avg Recall@K vs ground truth.
+fn measure_recall_with_rerank(
+    corpus: Vec<Vec<f32>>,
+    queries: &[Vec<f32>],
+    ef_search: usize,
+    rerank_factor: usize,
+) -> f32 {
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))
+        .expect("memory storage");
+    let config = HnswIndexConfig {
+        dimension: DIM,
+        m: 16,
+        ef_construction: 200,
+        distance_metric: DistanceMetric::Cosine,
+        rerank_storage: Some(RerankStorageKind::F32),
+        ..Default::default()
+    };
+    let index = HnswIndex::create(storage, "stage2_recall_index", config).expect("create index");
+    let mut writer = index.writer().expect("writer");
+
+    let docs: Vec<(u64, String, Vector)> = corpus
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (i as u64, "embedding".to_string(), Vector::new(v.clone())))
+        .collect();
+    writer.build(docs).expect("build");
+    writer.finalize().expect("finalize");
+    writer.commit().expect("commit");
+
+    let reader = index.reader().expect("reader");
+    let mut searcher = HnswSearcher::new(reader).expect("searcher");
+    searcher.set_ef_search(ef_search);
+
+    let mut total_recall = 0.0_f32;
+    for query in queries {
+        let exact = exact_top_k(&corpus, query, TOP_K);
+
+        let request = VectorIndexQuery::new(Vector::new(query.clone()))
+            .top_k(TOP_K)
+            .field_name("embedding".to_string())
+            .rerank_factor(rerank_factor);
+        let results = searcher.search(&request).expect("search");
+        let approx: HashSet<u64> = results.results.iter().map(|r| r.doc_id).collect();
+
+        total_recall += recall_at_k(&exact, &approx, TOP_K);
+    }
+    total_recall / queries.len() as f32
+}
+
 /// Diagnostic helper: brute-force `distance_quantized` over the
 /// whole corpus and report Recall@K. Isolates the quantized distance
 /// kernel from HNSW graph behaviour.
@@ -380,5 +450,128 @@ fn hnsw_quantized_recall_at_10_large_fixture_smoke() {
          brute-force quantized = {bf_recall:.4}. \
          If brute-force is high but HNSW is low, ef_search may need to \
          scale further with the corpus size on synthetic random data."
+    );
+}
+
+/// Diagnostic helper: sweep rerank configurations to find the
+/// minimum (ef_search, rerank_factor) pair that meets the Stage 2
+/// recall gate at the default 5k corpus. Opt-in via
+/// `LAURUS_STAGE2_SWEEP=1`; not invoked by default CI.
+#[test]
+fn stage2_recall_sweep_diagnostic() {
+    if std::env::var("LAURUS_STAGE2_SWEEP").as_deref() != Ok("1") {
+        eprintln!("skipping Stage 2 sweep; set LAURUS_STAGE2_SWEEP=1 to enable.");
+        return;
+    }
+    let n_corpus = 5_000;
+    let corpus: Vec<Vec<f32>> = (0..n_corpus)
+        .map(|i| pseudo_random_unit_norm(0xCAFE_0000 + i as u32, DIM))
+        .collect();
+    let queries: Vec<Vec<f32>> = (0..N_QUERIES)
+        .map(|i| pseudo_random_unit_norm(0xBEEF_0000 + i as u32, DIM))
+        .collect();
+    let mut report = String::from("ef_search, rerank_factor -> Recall@10\n");
+    for &ef_search in &[100usize, 150, 200, 300, 400] {
+        for &rerank_factor in &[5usize, 10, 20] {
+            let recall =
+                measure_recall_with_rerank(corpus.clone(), &queries, ef_search, rerank_factor);
+            let line = format!("{ef_search:>5}, {rerank_factor:>3} -> {recall:.4}\n");
+            eprint!("{line}");
+            report.push_str(&line);
+        }
+    }
+    let _ = std::fs::write("/tmp/stage2_recall_sweep.txt", report);
+}
+
+/// Stage 2 recall gate (default size). Always runs.
+///
+/// With the LRS1 sidecar enabled and `rerank_factor = 5`, the HNSW
+/// search must reach Recall@10 ≥ 0.99.
+///
+/// The configuration below (`ef_search = 400`, `rerank_factor = 5`)
+/// was picked from a sweep (run with `LAURUS_STAGE2_SWEEP=1`, see
+/// [`stage2_recall_sweep_diagnostic`]) as the smallest budget that
+/// reliably hits the 0.99 gate on this synthetic random unit-norm
+/// corpus. The original implementation plan's optimistic target of
+/// `ef_search = 100 + rerank → 0.99` did not hold on adversarial
+/// random data because the int8 graph at ef=100 only visits ~88% of
+/// the true top-10 — rerank can re-order the visited set but cannot
+/// retrieve candidates the graph never reached. Real embedding data
+/// (text-embedding-3, BERT, etc.) clusters far more tightly and is
+/// expected to clear the gate at lower ef_search; the
+/// `LAURUS_STAGE2_SWEEP=1` diagnostic captures the trade-off for
+/// future tuning.
+#[test]
+fn hnsw_quantized_recall_at_10_with_rerank_meets_stage2_recall_gate() {
+    let n_corpus = 5_000;
+    let ef_search = 400;
+    let rerank_factor = 5;
+
+    let corpus: Vec<Vec<f32>> = (0..n_corpus)
+        .map(|i| pseudo_random_unit_norm(0xCAFE_0000 + i as u32, DIM))
+        .collect();
+    let queries: Vec<Vec<f32>> = (0..N_QUERIES)
+        .map(|i| pseudo_random_unit_norm(0xBEEF_0000 + i as u32, DIM))
+        .collect();
+
+    let recall = measure_recall_with_rerank(corpus, &queries, ef_search, rerank_factor);
+    eprintln!(
+        "HNSW Stage 2 (rerank) Recall@{TOP_K} = {recall:.4} \
+         (corpus = {n_corpus}, dim = {DIM}, queries = {N_QUERIES}, \
+         ef_search = {ef_search}, rerank_factor = {rerank_factor})"
+    );
+
+    assert!(
+        recall >= STAGE2_RECALL_THRESHOLD,
+        "HNSW Stage 2 (rerank) Recall@{TOP_K} = {recall:.4} < {STAGE2_RECALL_THRESHOLD} \
+         (Issue #481 Stage 2 recall gate). corpus = {n_corpus}, ef_search = {ef_search}, \
+         rerank_factor = {rerank_factor}. Possible causes: \
+         (1) rerank rescore did not pick up the LRS1 sidecar \
+         (HnswIndexReader.rerank_storage None?), \
+         (2) rerank candidate widening is wrong \
+         (top_k * rerank_factor not honored in HnswSearcher::search_graph), \
+         (3) f32 distance kernel selected by the rerank flow does not \
+         match DistanceMetric::Cosine for this segment."
+    );
+}
+
+/// Stage 2 large-fixture recall gate (50 000 vectors). Opt-in via
+/// `LAURUS_RECALL_LARGE=1`. Uses a larger ef_search (3200) to match
+/// the corpus-scaled budget Stage 1's large fixture already needed
+/// for the int8 graph to visit the right neighborhood; rerank then
+/// rescues the final ranking to ≥ 0.99. Stage 1's large fixture
+/// monotonic sweep was `ef=400 -> 0.83, ef=1600 -> 0.98`; for Stage
+/// 2's tighter 0.99 gate we add headroom.
+#[test]
+fn hnsw_quantized_recall_at_10_with_rerank_large_fixture_smoke() {
+    if std::env::var("LAURUS_RECALL_LARGE").as_deref() != Ok("1") {
+        eprintln!(
+            "skipping Stage 2 large-fixture recall test; set LAURUS_RECALL_LARGE=1 to enable \
+             (50k vectors / dim 128 / 100 queries / ef_search = 3200 / rerank_factor = 5)."
+        );
+        return;
+    }
+    let n_corpus = 50_000;
+    let ef_search = 3200;
+    let rerank_factor = 5;
+
+    let corpus: Vec<Vec<f32>> = (0..n_corpus)
+        .map(|i| pseudo_random_unit_norm(0xCAFE_0000 + i as u32, DIM))
+        .collect();
+    let queries: Vec<Vec<f32>> = (0..N_QUERIES)
+        .map(|i| pseudo_random_unit_norm(0xBEEF_0000 + i as u32, DIM))
+        .collect();
+
+    let recall = measure_recall_with_rerank(corpus, &queries, ef_search, rerank_factor);
+    eprintln!(
+        "HNSW Stage 2 (rerank, large) Recall@{TOP_K} = {recall:.4} \
+         (corpus = {n_corpus}, ef_search = {ef_search}, rerank_factor = {rerank_factor})"
+    );
+
+    assert!(
+        recall >= STAGE2_RECALL_THRESHOLD,
+        "HNSW Stage 2 (rerank, large) Recall@{TOP_K} = {recall:.4} < {STAGE2_RECALL_THRESHOLD} \
+         (Issue #481 Stage 2 recall gate, large fixture). \
+         corpus = {n_corpus}, ef_search = {ef_search}, rerank_factor = {rerank_factor}."
     );
 }
