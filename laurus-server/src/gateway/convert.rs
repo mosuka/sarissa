@@ -857,6 +857,13 @@ fn json_to_vector_params(json: &Value) -> Option<v1::VectorParams> {
             .unwrap_or(v1::VectorScoreMode::WeightedSum as i32),
         overfetch: obj.get("overfetch").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
         min_score: obj.get("min_score").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+        // Issue #481 Stage 2 (rerank). Optional in proto so older
+        // gateway clients can omit the field; the engine returns
+        // NotImplemented if set, until Stage 2 lands.
+        rerank_factor: obj
+            .get("rerank_factor")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
     })
 }
 

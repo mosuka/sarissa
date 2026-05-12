@@ -89,6 +89,17 @@ pub fn from_proto(proto: &v1::SearchRequest) -> Result<laurus::SearchRequest, to
 
         // Apply vector params
         if let Some(vp) = &proto.vector_params {
+            // Issue #481 Stage 2 (rerank) is wire-reserved but not
+            // yet implemented in the engine. Reject with a clear
+            // gRPC Unimplemented status rather than silently dropping
+            // the requested rerank_factor on the floor.
+            if vp.rerank_factor.is_some() {
+                return Err(tonic::Status::unimplemented(
+                    "Two-stage rerank (Issue #481 Stage 2, vector_params.rerank_factor) \
+                     is not yet implemented. Omit the field for the Stage 1 \
+                     quantized search.",
+                ));
+            }
             let score_mode = match v1::VectorScoreMode::try_from(vp.score_mode) {
                 Ok(v1::VectorScoreMode::MaxSim) => VectorScoreMode::MaxSim,
                 Ok(v1::VectorScoreMode::LateInteraction) => VectorScoreMode::LateInteraction,
