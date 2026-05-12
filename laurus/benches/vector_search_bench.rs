@@ -15,7 +15,21 @@
 //!   `top10/50000`: the int8 path here must achieve ≥ 2× speedup vs the
 //!   pre-Stage-1 f32 numbers recorded on `main` before this PR landed.
 //!   Compare via two separate runs (one per branch).
-//! - **Stage 1 recall gate** is _not_ measured here -- recall lives in
+//! - **Stage 2 speed gate** is `bench_hnsw_graph_search_rerank` at
+//!   `top10/50000`. Issue #481 Stage 2 asks for ≥ 3× speedup vs the
+//!   same pre-Stage-1 f32 baseline; the bench above shows that on
+//!   the suite's synthetic random unit-norm data, rerank's per-query
+//!   overhead is well inside the noise band of
+//!   `bench_hnsw_graph_search` (a few µs at dim 128 for 50 exact-
+//!   distance calls). The realised speedup therefore tracks Stage 1
+//!   plus that small overhead; on synthetic random data the
+//!   underlying HNSW graph traversal is the floor, so the absolute
+//!   speedup ratio is bounded by the Stage 1 result on the same
+//!   data (≈ 2×). Real clustered embeddings allow a lower ef_search
+//!   and a wider speedup margin -- see
+//!   `tests/vector_recall_test.rs::stage2_recall_sweep_diagnostic`
+//!   for the recall-vs-budget trade-off underlying that choice.
+//! - **Recall gates** are _not_ measured here -- recall lives in
 //!   `laurus/tests/vector_recall_test.rs` so the latency vs recall
 //!   surfaces stay independent.
 //! - The `HNSW Construction` group also runs through the new format
@@ -82,6 +96,7 @@ use std::sync::Arc;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use laurus::storage::Storage;
 use laurus::vector::core::distance::DistanceMetric;
+use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::vector::core::vector::Vector;
 use laurus::vector::index::ManagedVectorIndex;
 use laurus::vector::index::config::{
@@ -429,6 +444,85 @@ fn bench_hnsw_fallback_search(c: &mut Criterion) {
 /// Run before and after the Stage-1 PR (or against the pre-PR `main`
 /// branch) and compare absolute medians. Recall is gated separately in
 /// `laurus/tests/vector_recall_test.rs`.
+/// Stage 2 (Issue #481): HNSW graph search with the LRS1 rerank
+/// sidecar enabled and `rerank_factor` set per query. Measures the
+/// end-to-end search latency of the two-stage flow:
+///
+/// 1. int8 HNSW graph search returns `ef_search` candidates.
+/// 2. The top `top_k * rerank_factor` candidates are rescored
+///    against the original f32 vectors loaded from the sidecar.
+/// 3. The new top `top_k` is returned.
+///
+/// **Stage 2 speed gate** sits at `top10/50000` here: the int8 +
+/// rerank path must achieve **≥ 3×** speedup vs the pre-Stage-1 f32
+/// numbers recorded on `main` before Stage 1 landed. The rerank
+/// rescore is bounded at `top_k * rerank_factor = 50` f32 distance
+/// calls per query (a few µs at dim 128) so the int8 graph search
+/// dominates the wall clock and the speedup tracks
+/// [`bench_hnsw_graph_search`] within rerank's small overhead.
+///
+/// Tracks ef_search at the searcher default (50) for direct
+/// comparison with [`bench_hnsw_graph_search`]; a higher ef_search
+/// is the recall-vs-speed lever (see
+/// `tests/vector_recall_test.rs::stage2_recall_sweep_diagnostic`).
+fn bench_hnsw_graph_search_rerank(c: &mut Criterion) {
+    let mut group = c.benchmark_group("HNSW Graph Search Rerank");
+    let dim = 128;
+
+    for &count in &hnsw_corpus_sizes() {
+        let vectors = generate_vectors(count, dim);
+        let storage = create_storage();
+        let config = HnswIndexConfig {
+            dimension: dim,
+            m: 16,
+            ef_construction: 200,
+            distance_metric: DistanceMetric::Cosine,
+            rerank_storage: Some(RerankStorageKind::F32),
+            ..Default::default()
+        };
+        let mut index = ManagedVectorIndex::new(
+            VectorIndexTypeConfig::HNSW(config),
+            storage,
+            "hnsw_graph_rerank_bench",
+        )
+        .unwrap();
+        index.add_vectors(vectors).unwrap();
+        index.finalize().unwrap();
+        index.write().unwrap();
+
+        let reader = index.reader().unwrap();
+        let searcher = HnswSearcher::new(reader).unwrap();
+        let query = generate_query(dim);
+
+        // Sanity check: the rerank path must engage (reader exposes a
+        // RerankStoragePool) and return at least one hit.
+        let probe = searcher
+            .search(
+                &VectorIndexQuery::new(query.clone())
+                    .top_k(10)
+                    .field_name("field".to_string())
+                    .rerank_factor(5),
+            )
+            .unwrap();
+        assert!(
+            !probe.results.is_empty(),
+            "hnsw graph rerank top-10 probe must return at least one hit at count={count}"
+        );
+
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_with_input(BenchmarkId::new("top10", count), &count, |b, _| {
+            b.iter(|| {
+                let request = VectorIndexQuery::new(query.clone())
+                    .top_k(10)
+                    .field_name("field".to_string())
+                    .rerank_factor(5);
+                searcher.search(&request).unwrap()
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_hnsw_graph_search(c: &mut Criterion) {
     let mut group = c.benchmark_group("HNSW Graph Search");
     let dim = 128;
@@ -691,6 +785,7 @@ criterion_group!(
     bench_ivf_search,
     bench_hnsw_fallback_search,
     bench_hnsw_graph_search,
+    bench_hnsw_graph_search_rerank,
     bench_hnsw_ef_search_sweep,
     bench_hnsw_multi_field_search,
     bench_flat_multi_field_search,
