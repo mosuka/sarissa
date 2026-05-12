@@ -80,7 +80,19 @@ impl QuantizedQuery {
     pub fn prepare(query: &[f32], params: &ScalarQuantParams) -> Self {
         let q_data = params.quantize_slice(query);
         let sum_q: u32 = q_data.iter().map(|&x| x as u32).sum();
-        let norm_query = query.iter().map(|x| x * x).sum::<f32>().sqrt();
+        // Compute the norm of the *dequantized* query so it lives in
+        // the same basis as `cand_meta.norm_q` (which is the norm of
+        // the dequantized candidate). Using `||query_f32||` here
+        // would mix bases and bias the cosine ranking — verified via
+        // the AC-2 recall test (Issue #481 Stage 1).
+        let norm_query = q_data
+            .iter()
+            .map(|&q| {
+                let dq = params.dequantize_value(q);
+                dq * dq
+            })
+            .sum::<f32>()
+            .sqrt();
         Self {
             q_data,
             sum_q,
@@ -527,16 +539,31 @@ mod tests {
 
     #[test]
     fn cosine_handles_zero_norm_query() {
+        // The cosine path must short-circuit to the max distance
+        // (1.0) when the prepared query has zero norm in the
+        // dequantized basis. Use offset = 0 / scale = 1 so the f32
+        // zero query also dequantizes to exactly zero -- this is the
+        // only configuration in which the `denom == 0.0` guard is
+        // exercised in production (a query with truly empty signal).
         let dim = 16;
-        let a_f32 = pseudo_random_f32(61, dim, -1.0, 1.0);
-        let zero_query: Vec<f32> = vec![0.0; dim];
-        let params = ScalarQuantParams::train(&[Vector::new(a_f32.clone())]).unwrap();
-        let q_a = params.quantize_slice(&a_f32);
-        let meta_a = QuantizedVectorMeta::from_quantized(&q_a, &params);
+        let params = ScalarQuantParams {
+            offset: 0.0,
+            scale: 1.0,
+        };
+        let a: Vec<u8> = (0..dim as u8).collect();
+        let meta_a = QuantizedVectorMeta::from_quantized(&a, &params);
+        let zero_query = vec![0.0_f32; dim];
         let prepared = QuantizedQuery::prepare(&zero_query, &params);
 
-        let dist = distance_quantized(DistanceMetric::Cosine, &prepared, &q_a, meta_a);
-        assert_eq!(dist, 1.0, "zero query should yield max cosine distance");
+        // The zero query rounds to all-zero ints in this basis, so
+        // norm_query is exactly 0.0 and the early-return path fires.
+        assert_eq!(prepared.norm_query, 0.0);
+
+        let dist = distance_quantized(DistanceMetric::Cosine, &prepared, &a, meta_a);
+        assert_eq!(
+            dist, 1.0,
+            "zero-norm query should yield max cosine distance, got {dist}"
+        );
     }
 
     #[test]
