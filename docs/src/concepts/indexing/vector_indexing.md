@@ -198,38 +198,62 @@ let metric = DistanceMetric::Angular;      // Angular distance
 
 ## Quantization
 
-Quantization reduces memory usage by compressing vectors at the cost of some accuracy:
+Vectors are stored on disk as **8-bit scalar-quantized integers**
+(Issue #481 Stage 1). Compared to the previous 32-bit float storage
+this is **~4x smaller** with negligible recall loss in practice
+(Recall@10 remains ≥ 0.95 against the f32 ground truth — see the
+recall test at `laurus/tests/vector_recall_test.rs`).
 
 | Method | Enum Variant | Description | Memory Reduction |
 | :--- | :--- | :--- | :--- |
-| **Scalar 8-bit** | `Scalar8Bit` | Scalar quantization to 8-bit integers | ~4x |
-| **Product Quantization** | `ProductQuantization { subvector_count }` | Splits vectors into sub-vectors and quantizes each | ~16-64x |
+| **Scalar 8-bit** *(default)* | `Scalar8Bit` | Per-segment global affine quantization to `u8` | ~4x |
+| **Product Quantization** *(reserved)* | `ProductQuantization { subvector_count }` | Stage 3 of #481 — currently `NotImplemented` | ~16-64x |
 
 ```rust
 use laurus::vector::HnswOption;
 use laurus::vector::core::quantization::QuantizationMethod;
 
+// `quantizer` defaults to `Scalar8Bit`; the explicit form below is
+// equivalent to `HnswOption { dimension: 384, ..Default::default() }`.
 let opt = HnswOption {
     dimension: 384,
-    quantizer: Some(QuantizationMethod::Scalar8Bit),
+    quantizer: QuantizationMethod::Scalar8Bit,
     ..Default::default()
 };
 ```
 
-### VectorQuantizer
+> **Breaking change (Issue #481 Stage 1):** the `quantizer` field is no
+> longer `Option<QuantizationMethod>`; quantization is mandatory and
+> defaults to `Scalar8Bit`. There is no longer an unquantized (f32)
+> on-disk format. Existing pre-Stage-1 vector indexes are intentionally
+> not readable by this version — rebuild the index from source data.
 
-The `VectorQuantizer` manages the quantization lifecycle:
+### How Scalar8Bit works
 
-| Method | Description |
-| :--- | :--- |
-| `new(method, dimension)` | Create an untrained quantizer |
-| `train(vectors)` | Train on representative vectors (computes per-dimension min/max for Scalar8Bit) |
-| `quantize(vector)` | Compress a vector using the trained parameters |
-| `dequantize(quantized)` | Decompress a quantized vector back to full precision |
+- Each segment trains a single **global** `(offset, scale)` pair from
+  its f32 vectors at flush time (`offset = min`, `scale = (max - min) / 255`).
+- Each `f32` element is encoded as `u8 = clamp(round((v - offset) / scale), 0, 255)`.
+- Per-vector metadata (`sum_q: u32`, `norm_q: f32`) is precomputed and
+  persisted alongside the int8 payload so the cosine search hot loop
+  collapses to one int8 SIMD multiply-accumulate plus three scalar
+  corrections — no per-element dequantization at search time.
+- Segment files start with the `LVS1` magic + a 16-byte header so the
+  reader can detect the format at load time.
 
-For `Scalar8Bit`, training computes the min and max value for each dimension. Each component is then mapped to the [0, 255] range. Dequantization reverses this mapping with some precision loss.
+### Two-stage rerank (Issue #481 Stage 2 — reserved)
 
-> **Note:** `ProductQuantization` is defined in the API but is currently unimplemented. Using it will return an error.
+`VectorIndexQueryParams.rerank_factor: Option<usize>` and the gRPC /
+JSON gateway counterpart `VectorParams.rerank_factor` are reserved for
+the upcoming two-stage rerank flow:
+
+1. The quantized HNSW search returns `top_k * rerank_factor` candidates.
+2. Those candidates are re-scored with the full f32 vectors before the
+   final `top_k` is returned.
+
+Setting `rerank_factor` today returns `LaurusError::NotImplemented` /
+`tonic::Status::Unimplemented`. The API surface is reserved so existing
+callers can opt in once Stage 2 lands without a further proto / binding
+schema bump.
 
 ## Segment Files
 

@@ -113,13 +113,15 @@ The `embedder` field in vector options specifies the name of an embedder defined
 
 **Distance metrics:** `COSINE`, `EUCLIDEAN`, `MANHATTAN`, `DOT_PRODUCT`, `ANGULAR`
 
-**Quantization methods:** `NONE`, `SCALAR_8BIT`, `PRODUCT_QUANTIZATION`
+**Quantization methods:** `SCALAR_8BIT` (default), `PRODUCT_QUANTIZATION` (reserved for Issue #481 Stage 3, currently `Unimplemented`).
+
+`NONE` (no quantization) was removed in Issue #481 Stage 1. The proto enum value `0` (`QUANTIZATION_METHOD_NONE`) is kept as a wire-compat reservation; if the server receives it, it falls back to `SCALAR_8BIT` via `Default::default()`.
 
 **QuantizationConfig structure:**
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `method` | `QuantizationMethod` | Quantization method (`QUANTIZATION_METHOD_NONE`, `QUANTIZATION_METHOD_SCALAR_8BIT`, or `QUANTIZATION_METHOD_PRODUCT_QUANTIZATION`) |
+| `method` | `QuantizationMethod` | Quantization method (`QUANTIZATION_METHOD_SCALAR_8BIT` or `QUANTIZATION_METHOD_PRODUCT_QUANTIZATION`). The reserved value `0` (`NONE`) is silently coerced to `SCALAR_8BIT`. |
 | `subvector_count` | `uint32` | Number of subvectors (only used when `method` is `PRODUCT_QUANTIZATION`; must evenly divide `dimension`) |
 
 **Example:**

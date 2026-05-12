@@ -182,7 +182,7 @@ base_weight = 1.0
 | `m` | `integer` | `16` | Max bi-directional connections per node. Higher = better recall, more memory |
 | `ef_construction` | `integer` | `200` | Search width during index construction. Higher = better quality, slower build |
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
-| `quantizer` | `object` | *none* | Optional quantization method (see [Quantization](#quantization)) |
+| `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
 
 **Tuning guidelines:**
 
@@ -206,7 +206,7 @@ base_weight = 1.0
 | `dimension` | `integer` | `128` | Vector dimensionality |
 | `distance` | `string` | `"Cosine"` | Distance metric (see [Distance Metrics](#distance-metrics)) |
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
-| `quantizer` | `object` | *none* | Optional quantization method (see [Quantization](#quantization)) |
+| `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
 
 #### Ivf
 
@@ -228,7 +228,7 @@ base_weight = 1.0
 | `n_clusters` | `integer` | `100` | Number of clusters. More clusters = finer partitioning |
 | `n_probe` | `integer` | `1` | Number of clusters to search at query time. Higher = better recall, slower |
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
-| `quantizer` | `object` | *none* | Optional quantization method (see [Quantization](#quantization)) |
+| `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
 
 > **Note:** Unlike Hnsw and Flat, the `dimension` field in Ivf is **required** and has no default value.
 
@@ -253,33 +253,30 @@ For most embedding models (BERT, Sentence Transformers, OpenAI, etc.), `"Cosine"
 
 ## Quantization
 
-Vector fields optionally support quantization to reduce memory usage at the cost of some accuracy. Specify the `quantizer` option as a TOML table.
+Vector fields are stored on disk as **8-bit scalar-quantized integers**
+(Issue #481 Stage 1). Quantization is mandatory; the previous "no
+quantization" mode no longer exists. The `quantizer` option defaults to
+`Scalar8Bit` and can be omitted from TOML.
 
-### None (default)
+### Scalar 8-bit (default)
 
-No quantization — full precision 32-bit floats.
-
-```toml
-[fields.embedding.Hnsw]
-dimension = 384
-distance = "Cosine"
-# quantizer is omitted (no quantization)
-```
-
-### Scalar 8-bit
-
-Compresses each float32 component to uint8 (~4x memory reduction).
+Per-segment global affine quantization to `u8`. Compresses each `f32`
+component to a single byte (~4x memory reduction) with negligible
+recall loss in practice.
 
 ```toml
 [fields.embedding.Hnsw]
 dimension = 384
 distance = "Cosine"
-quantizer = "Scalar8Bit"
+# quantizer = "Scalar8Bit"  # implicit default; can be omitted
 ```
 
-### Product Quantization
+### Product Quantization (reserved)
 
-Splits the vector into subvectors and quantizes each independently.
+Reserved for Issue #481 Stage 3. Currently the writer / searcher
+return `NotImplemented` if selected; the variant is kept here so
+schemas can pre-declare without further TOML changes once Stage 3
+lands.
 
 ```toml
 [fields.embedding.Hnsw]
@@ -293,6 +290,11 @@ subvector_count = 48
 | Option | Type | Description |
 | :--- | :--- | :--- |
 | `subvector_count` | `integer` | Number of subvectors. Must evenly divide `dimension`. |
+
+> **Breaking change (Issue #481 Stage 1):** schemas that explicitly
+> set `quantizer` to a "none" value are no longer valid. Existing
+> vector indexes built with a pre-Stage-1 laurus build cannot be
+> read; rebuild from source data after upgrading.
 
 ## Complete Examples
 
