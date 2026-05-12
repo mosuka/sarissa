@@ -183,6 +183,7 @@ base_weight = 1.0
 | `ef_construction` | `integer` | `200` | インデックス構築時の探索幅。大きいほど品質が向上するが構築が遅くなる |
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
 | `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
+| `rerank_storage` | `string` | *（省略）* | Stage 2 rerank sidecar（[Rerank Storage](#rerank-storage)）。`"F32"` でフィールド単位の f32 sidecar を有効化し、検索時に int8 候補を元のベクトルで再スコアできるようにする。省略すると Stage 1 int8-only の挙動を維持。 |
 
 **チューニングガイドライン:**
 
@@ -207,6 +208,7 @@ base_weight = 1.0
 | `distance` | `string` | `"Cosine"` | 距離メトリクス（[距離メトリクス](#距離メトリクス)を参照） |
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
 | `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
+| `rerank_storage` | `string` | *（省略）* | [Rerank Storage](#rerank-storage) 用に予約。現状 sidecar を書き出すのは HNSW writer のみで、Flat / IVF はスキーマの対称性のためにフィールドを受け付けるが sidecar の書き出し・読み込みは行わない。 |
 
 #### Ivf
 
@@ -229,6 +231,7 @@ base_weight = 1.0
 | `n_probe` | `integer` | `1` | クエリ時に検索するクラスタ数。大きいほど再現率が向上するが遅くなる |
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
 | `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
+| `rerank_storage` | `string` | *（省略）* | [Rerank Storage](#rerank-storage) 用に予約。現状 sidecar を書き出すのは HNSW writer のみで、Flat / IVF はスキーマの対称性のためにフィールドを受け付けるが sidecar の書き出し・読み込みは行わない。 |
 
 > **注意:** Hnsw および Flat とは異なり、Ivf の `dimension` フィールドは**必須**であり、デフォルト値はありません。
 
@@ -294,6 +297,36 @@ subvector_count = 48
 > 設定するスキーマはもはや有効ではありません。Stage 1 より前の
 > laurus でビルドした既存 vector index は読み取れないため、アップ
 > グレード後にソースデータから再構築してください。
+
+## Rerank Storage
+
+任意の Stage 2 sidecar（Issue #481）。元の完全精度ベクトルを int8
+セグメントの隣に保持し、HNSW searcher が int8 で広めに候補を取得
+（高速）してから上位 `top_k * rerank_factor` 件を完全な f32 値で
+再スコア（高精度）できるようにします。
+
+sidecar はフィールド単位で `rerank_storage` で設定します:
+
+```toml
+[fields.embedding.Hnsw]
+dimension = 384
+distance = "Cosine"
+rerank_storage = "F32"  # opt-in。省略すると Stage 1 int8-only の挙動を維持
+```
+
+| 値 | ディスク追加コスト | 説明 |
+| :--- | :--- | :--- |
+| `"F32"` | +4 bytes/dim/vector | IEEE-754 単精度 sidecar（Lucene 99 / FAISS 互換）。 |
+
+省略した場合 sidecar は書かれず、フィールドは Stage 1 int8-only
+の検索パスを維持します。`rerank_storage` を持たないフィールドに
+対して `rerank_factor` を渡したクエリは silent に Stage 1
+ランキングへフォールバックします — Stage 1 セグメントから index
+作成時に捨てられた f32 情報を復元することはできません。
+
+> **スコープ:** Stage 2 は HNSW のみで実装しています。Flat / IVF は
+> スキーマの対称性のためにフィールドを受け付けますが、現状 sidecar
+> の書き出し・読み込みは行いません。
 
 ## 完全な例
 

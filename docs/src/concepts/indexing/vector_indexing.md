@@ -240,20 +240,88 @@ let opt = HnswOption {
 - Segment files start with the `LVS1` magic + a 16-byte header so the
   reader can detect the format at load time.
 
-### Two-stage rerank (Issue #481 Stage 2 — reserved)
+### Two-stage rerank (Issue #481 Stage 2)
 
-`VectorIndexQueryParams.rerank_factor: Option<usize>` and the gRPC /
-JSON gateway counterpart `VectorParams.rerank_factor` are reserved for
-the upcoming two-stage rerank flow:
+Stage 1 stores vectors as int8 only. The graph search runs entirely
+against int8 distances, which is fast but introduces a small
+quantization error. Stage 2 adds an **optional** per-field f32
+sidecar so the searcher can rescore the top candidates against the
+original full-precision vectors:
 
-1. The quantized HNSW search returns `top_k * rerank_factor` candidates.
-2. Those candidates are re-scored with the full f32 vectors before the
-   final `top_k` is returned.
+1. The HNSW int8 graph search returns up to `ef_search` candidates
+   ranked by quantized cosine distance.
+2. The top `top_k * rerank_factor` candidates are rescored against
+   the f32 vectors loaded from the
+   [LRS1 sidecar](#lrs1-rerank-sidecar) (`*.hnsw.f32`).
+3. The new ranking is truncated to `top_k` and returned.
 
-Setting `rerank_factor` today returns `LaurusError::NotImplemented` /
-`tonic::Status::Unimplemented`. The API surface is reserved so existing
-callers can opt in once Stage 2 lands without a further proto / binding
-schema bump.
+Stage 2 is opt-in per field via
+[`HnswOption.rerank_storage`](../../laurus-cli/schema_format.md#rerank-storage):
+
+```rust
+use laurus::vector::HnswOption;
+use laurus::vector::core::rerank::RerankStorageKind;
+
+let opt = HnswOption {
+    rerank_storage: Some(RerankStorageKind::F32),
+    ..HnswOption::default()
+};
+```
+
+Queries pass the rerank factor through `VectorIndexQuery::rerank_factor`
+(low-level), `SearchRequestBuilder::vector_rerank_factor` (engine), or
+the gRPC / JSON `VectorParams.rerank_factor` field.
+
+Fields without `rerank_storage` enabled silently fall back to the
+Stage 1 int8 ranking even when `rerank_factor` is set — there is no
+f32 information to recover from a Stage 1 segment.
+
+#### LRS1 rerank sidecar
+
+The sidecar is a separate file written next to the LVS1 segment when
+`rerank_storage` is enabled:
+
+```text
+offset  size  field
+------  ----  -------------------------------------------
+     0     4  magic         ASCII "LRS1"
+     4     2  version       u16 LE  (current = 1)
+     6     2  storage_kind  u16 LE  (1 = F32; 0 reserved; 2.. future)
+     8     8  reserved      zero-padded
+    16     4  dim           u32 LE
+    20     4  vector_count  u32 LE
+    24     -  payload       vector_count * dim * bytes_per_element
+```
+
+Vectors are written in the same `(doc_id, field_name)` order as the
+matching LVS1 segment, so a (sidecar position) → (LVS1 position)
+mapping is the identity. The HNSW reader loads the sidecar into a
+`RerankStoragePool` at init time when the storage loading mode is
+Eager; Lazy mode skips the sidecar to honor its memory-savings
+promise (Stage 2 segments opened in Lazy mode silently degrade to
+Stage 1).
+
+#### Recall vs speed trade-off
+
+`rerank_factor` lets you exchange a small per-query rerank cost
+(~`top_k * rerank_factor` exact-distance calls — a few µs at dim
+128) for higher Recall@10. The gain depends on the corpus and the
+graph search budget (`ef_search`):
+
+- Real clustered embedding data (text-embedding-3, BERT, etc.)
+  reaches `Recall@10 ≥ 0.99` at low `ef_search`; rerank polishes
+  the ranking with negligible latency overhead.
+- Synthetic random unit-norm data (the worst case for HNSW recall
+  recovery) needs a higher `ef_search` for the int8 graph to visit
+  enough true top-10 candidates; rerank then re-orders the visited
+  set but cannot retrieve candidates the graph never reached.
+
+The recall acceptance test
+(`tests/vector_recall_test.rs::hnsw_quantized_recall_at_10_with_rerank_meets_stage2_recall_gate`)
+asserts `Recall@10 ≥ 0.99` at the corpus-tuned configuration; the
+companion `stage2_recall_sweep_diagnostic` (opt-in via
+`LAURUS_STAGE2_SWEEP=1`) sweeps `(ef_search, rerank_factor)` to
+help calibrate production deployments.
 
 ## Segment Files
 
