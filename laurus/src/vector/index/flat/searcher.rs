@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use crate::error::Result;
+use crate::vector::core::distance_quantized::{QuantizedQuery, distance_quantized};
 use crate::vector::core::vector::Vector;
+use crate::vector::index::flat::reader::FlatVectorIndexReader;
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorIndexSearcher;
 use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexQueryResults};
@@ -25,6 +27,15 @@ impl VectorIndexSearcher for FlatVectorSearcher {
     fn search(&self, request: &VectorIndexQuery) -> Result<VectorIndexQueryResults> {
         use crate::util::time::Timer;
 
+        // Issue #481 Stage 2 (rerank) -- API surface only in Stage 1.
+        if request.params.rerank_factor.is_some() {
+            return Err(crate::error::LaurusError::NotImplemented(
+                "Two-stage rerank (Issue #481 Stage 2) is not yet implemented. \
+                 Pass rerank_factor = None for the Stage 1 quantized search."
+                    .to_string(),
+            ));
+        }
+
         let start = Timer::now();
         let mut results = VectorIndexQueryResults::new();
         let metric = self.index_reader.distance_metric();
@@ -33,6 +44,16 @@ impl VectorIndexSearcher for FlatVectorSearcher {
         // candidate; for the other metrics the prepared variant
         // forwards to `distance` and the cached value is unused.
         let prepared_query = metric.prepare_query(&request.query.data);
+
+        // Issue #481 Stage 1, Step 7: try the int8 hot path for the
+        // field-filtered case if the reader holds an OwnedQuantized
+        // pool. Build per-search QuantizedQuery + per-field position
+        // index once before the candidate loop.
+        let flat_reader = self
+            .index_reader
+            .as_any()
+            .downcast_ref::<FlatVectorIndexReader>();
+        let quant_pool = flat_reader.and_then(|r| r.vectors().quantized_pool().cloned());
 
         if let Some(ref field_name) = request.field_name {
             // Field-filtered path: fetch the per-field doc-id slice from the
@@ -45,7 +66,34 @@ impl VectorIndexSearcher for FlatVectorSearcher {
             results.candidates_examined = ids.len();
 
             let mut candidates: Vec<(u64, f32, f32, Vector)> = Vec::with_capacity(ids.len());
+
+            // Step-7 hot path: prepare quantized query once and look
+            // up per-field doc_id -> position once per search.
+            let quant_ctx = quant_pool.as_ref().and_then(|pool| {
+                pool.field_position_index(field_name).map(|idx| {
+                    let prepared = QuantizedQuery::prepare(&request.query.data, &pool.params);
+                    (prepared, pool.clone(), idx)
+                })
+            });
+
             for &doc_id in ids.iter() {
+                if let Some((prepared, pool, idx)) = &quant_ctx
+                    && let Some(&pos) = idx.get(&doc_id)
+                {
+                    let (int8, meta) = pool.record_at(pos);
+                    let distance = distance_quantized(metric, prepared, int8, meta);
+                    let similarity = metric.distance_to_similarity(distance);
+                    // include_vectors path still needs the f32 vector;
+                    // dequantize lazily only when requested.
+                    let vector = if request.params.include_vectors {
+                        pool.dequantize_to_vector(doc_id, field_name)
+                            .unwrap_or_else(|| Vector::new(Vec::new()))
+                    } else {
+                        Vector::new(Vec::new())
+                    };
+                    candidates.push((doc_id, similarity, distance, vector));
+                    continue;
+                }
                 if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, field_name) {
                     let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
                     let similarity = metric.distance_to_similarity(distance);

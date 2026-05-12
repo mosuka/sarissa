@@ -7,7 +7,11 @@ use crate::storage::Storage;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::HnswIndexConfig;
 use crate::vector::index::field::LegacyVectorFieldWriter;
+use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::hnsw::graph::HnswGraph;
+use crate::vector::index::quantized_io::{
+    quantize_segment, read_dequantized_vector, write_quantized_record,
+};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 use parking_lot::RwLock;
 use rand::RngExt;
@@ -298,7 +302,15 @@ impl HnswIndexWriter {
             )));
         }
 
-        // Read vectors
+        // Read the Issue #481 Stage 1 vector segment header
+        // (LVS1 magic + version + Scalar8Bit params). Pre-Stage-1
+        // segments are rejected with IncompatibleFormat by the reader.
+        let header = VectorSegmentHeader::read_from(&mut input)?;
+        let QuantHeader::Scalar8Bit(params) = header.quant;
+
+        // Read quantized vectors and dequantize back to f32 for the
+        // in-memory writer state. Step 6 will switch the in-memory
+        // representation to int8 + meta directly.
         let mut vectors = Vec::with_capacity(num_vectors);
         for _ in 0..num_vectors {
             let mut doc_id_buf = [0u8; 8];
@@ -316,13 +328,9 @@ impl HnswIndexWriter {
                 LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
             })?;
 
-            // Read vector data
-            let mut values = vec![0.0f32; dimension];
-            for value in &mut values {
-                let mut value_buf = [0u8; 4];
-                input.read_exact(&mut value_buf)?;
-                *value = f32::from_le_bytes(value_buf);
-            }
+            // Read quantized payload (dim int8 + sum_q + norm_q) and
+            // dequantize back to f32 using the segment-level params.
+            let values = read_dequantized_vector(&mut input, dimension, &params)?;
 
             vectors.push((doc_id, field_name, Vector::new(values)));
         }
@@ -1103,19 +1111,43 @@ impl VectorIndexWriter for HnswIndexWriter {
         output.write_all(&(self.index_config.m as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.ef_construction as u32).to_le_bytes())?;
 
-        // Write vectors
-        // Note: In a real implementation, we would write the graph structure here
-        // For now, we just write the vectors like FlatIndexWriter but with HNSW metadata
+        // Write vectors using the Issue #481 Stage 1 quantized format.
+        // The HNSW-specific 28-byte preamble above (count / dim / m / ef)
+        // stays unchanged so the graph parameters are still readable
+        // first; the vector payload is quantized to int8 with a per-
+        // segment global affine, prefixed by VectorSegmentHeader (LVS1).
 
-        // Write vector count (again? metadata above has it) - sticking to Flat format + HNSW params
-
-        // Write vectors with field names and metadata
-        // Write vectors with field names and metadata
-        // We need to iterate in some order. Sorted by doc_id is best.
+        // Sort by doc_id for deterministic serialization.
         let mut sorted_vectors: Vec<_> = self.vectors.iter().collect();
         sorted_vectors.sort_by_key(|(doc_id, _, _)| *doc_id);
 
-        for (doc_id, field_name, vector) in sorted_vectors {
+        // Train segment-level params on the f32 vectors and quantize
+        // each one. The records are returned in the same order as the
+        // input slice so we can pair them back with (doc_id, field).
+        // Empty segments fall back to neutral params (0.0, 1.0) since
+        // there is nothing to train on; the LVS1 header is still
+        // emitted so readers can dispatch on quant_kind uniformly.
+        let f32_vectors: Vec<Vector> = sorted_vectors
+            .iter()
+            .map(|(_, _, v)| (*v).clone())
+            .collect();
+        let (params, records) = if f32_vectors.is_empty() {
+            (
+                crate::vector::core::quantization::ScalarQuantParams {
+                    offset: 0.0,
+                    scale: 1.0,
+                },
+                Vec::new(),
+            )
+        } else {
+            quantize_segment(&f32_vectors, self.index_config.dimension)?
+        };
+
+        // Vector segment header (LVS1 magic + version + Scalar8Bit
+        // params) precedes the per-vector records.
+        VectorSegmentHeader::scalar_8bit(params).write_to(&mut output)?;
+
+        for ((doc_id, field_name, _), (int8, meta)) in sorted_vectors.iter().zip(records.iter()) {
             output.write_all(&doc_id.to_le_bytes())?;
 
             // Write field name length and field name
@@ -1123,10 +1155,8 @@ impl VectorIndexWriter for HnswIndexWriter {
             output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
             output.write_all(field_name_bytes)?;
 
-            // Write vector data
-            for value in vector.data.iter() {
-                output.write_all(&value.to_le_bytes())?;
-            }
+            // Write quantized payload (dim int8 bytes + sum_q + norm_q).
+            write_quantized_record(&mut output, int8, *meta)?;
         }
 
         // Write Graph Data

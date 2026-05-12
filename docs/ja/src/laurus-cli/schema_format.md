@@ -182,7 +182,7 @@ base_weight = 1.0
 | `m` | `integer` | `16` | ノードあたりの最大双方向接続数。大きいほど再現率が向上するがメモリ使用量が増加 |
 | `ef_construction` | `integer` | `200` | インデックス構築時の探索幅。大きいほど品質が向上するが構築が遅くなる |
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
-| `quantizer` | `object` | *なし* | オプションの量子化方式（[量子化](#量子化)を参照） |
+| `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
 
 **チューニングガイドライン:**
 
@@ -206,7 +206,7 @@ base_weight = 1.0
 | `dimension` | `integer` | `128` | ベクトルの次元数 |
 | `distance` | `string` | `"Cosine"` | 距離メトリクス（[距離メトリクス](#距離メトリクス)を参照） |
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
-| `quantizer` | `object` | *なし* | オプションの量子化方式（[量子化](#量子化)を参照） |
+| `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
 
 #### Ivf
 
@@ -228,7 +228,7 @@ base_weight = 1.0
 | `n_clusters` | `integer` | `100` | クラスタ数。多いほど細かい分割が可能 |
 | `n_probe` | `integer` | `1` | クエリ時に検索するクラスタ数。大きいほど再現率が向上するが遅くなる |
 | `base_weight` | `float` | `1.0` | ハイブリッド検索のスコア融合における重み |
-| `quantizer` | `object` | *なし* | オプションの量子化方式（[量子化](#量子化)を参照） |
+| `quantizer` | `object` | `"Scalar8Bit"` | 量子化方式（[量子化](#量子化)を参照）。必須。デフォルトは Issue #481 Stage 1 で導入された int8 形式を保つ。 |
 
 > **注意:** Hnsw および Flat とは異なり、Ivf の `dimension` フィールドは**必須**であり、デフォルト値はありません。
 
@@ -253,33 +253,29 @@ Vector フィールドの `distance` オプションは以下の値を受け付�
 
 ## 量子化
 
-Vector フィールドはオプションで量子化（Quantization）をサポートしており、精度を若干犠牲にしてメモリ使用量を削減できます。`quantizer` オプションを TOML テーブルとして指定します。
+Vector フィールドはディスク上で **8 ビットスカラー量子化された整数**
+として保存されます（Issue #481 Stage 1）。量子化は必須となり、以前
+の「量子化なし」モードは廃止されました。`quantizer` オプションは
+`Scalar8Bit` がデフォルトで、TOML から省略可能です。
 
-### なし（デフォルト）
+### Scalar 8-bit（デフォルト）
 
-量子化なし — 32ビット浮動小数点のフル精度。
-
-```toml
-[fields.embedding.Hnsw]
-dimension = 384
-distance = "Cosine"
-# quantizer を省略（量子化なし）
-```
-
-### Scalar 8-bit
-
-各 float32 コンポーネントを uint8 に圧縮します（約4倍のメモリ削減）。
+per-segment global affine による `u8` 量子化。各 `f32` コンポーネント
+を 1 バイトに圧縮（約 4 倍のメモリ削減）し、recall 損失は実用上ほぼ
+無視できる範囲。
 
 ```toml
 [fields.embedding.Hnsw]
 dimension = 384
 distance = "Cosine"
-quantizer = "Scalar8Bit"
+# quantizer = "Scalar8Bit"  # デフォルトのため省略可
 ```
 
-### Product Quantization
+### Product Quantization（予約）
 
-ベクトルをサブベクトルに分割し、それぞれを独立に量子化します。
+Issue #481 Stage 3 で実装予定。現状 writer / searcher が選択時に
+`NotImplemented` を返します。Stage 3 着地後に追加の TOML 変更なしで
+オプトインできるよう、変種は予約してあります。
 
 ```toml
 [fields.embedding.Hnsw]
@@ -293,6 +289,11 @@ subvector_count = 48
 | オプション | 型 | 説明 |
 | :--- | :--- | :--- |
 | `subvector_count` | `integer` | サブベクトルの数。`dimension` を均等に割り切れる必要があります。 |
+
+> **破壊的変更（Issue #481 Stage 1）:** `quantizer` を「なし」に
+> 設定するスキーマはもはや有効ではありません。Stage 1 より前の
+> laurus でビルドした既存 vector index は読み取れないため、アップ
+> グレード後にソースデータから再構築してください。
 
 ## 完全な例
 

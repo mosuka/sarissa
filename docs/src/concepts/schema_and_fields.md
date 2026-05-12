@@ -101,13 +101,16 @@ Vector fields are indexed using vector indexes for approximate nearest neighbor 
 use laurus::vector::HnswOption;
 use laurus::vector::core::distance::DistanceMetric;
 
+use laurus::vector::core::quantization::QuantizationMethod;
+
 let opt = HnswOption {
-    dimension: 384,                          // vector dimensions
-    distance: DistanceMetric::Cosine,        // distance metric
-    m: 16,                                   // max connections per layer
-    ef_construction: 200,                    // construction search width
-    base_weight: 1.0,                        // default scoring weight
-    quantizer: None,                         // optional quantization
+    dimension: 384,                                  // vector dimensions
+    distance: DistanceMetric::Cosine,                // distance metric
+    m: 16,                                           // max connections per layer
+    ef_construction: 200,                            // construction search width
+    base_weight: 1.0,                                // default scoring weight
+    quantizer: QuantizationMethod::Scalar8Bit,       // mandatory; default Scalar8Bit
+    embedder: None,                                  // optional named embedder
 };
 ```
 

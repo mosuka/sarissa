@@ -376,7 +376,7 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
         m,
         ef_construction,
         base_weight: 1.0,
-        quantizer: None,
+        quantizer: Default::default(),
         embedder: None,
     }))
 }
@@ -390,7 +390,7 @@ fn prompt_flat_option() -> Result<FieldOption> {
         dimension,
         distance,
         base_weight: 1.0,
-        quantizer: None,
+        quantizer: Default::default(),
         embedder: None,
     }))
 }
@@ -408,7 +408,7 @@ fn prompt_ivf_option() -> Result<FieldOption> {
         n_clusters,
         n_probe,
         base_weight: 1.0,
-        quantizer: None,
+        quantizer: Default::default(),
         embedder: None,
     }))
 }

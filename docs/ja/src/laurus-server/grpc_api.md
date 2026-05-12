@@ -113,13 +113,15 @@ message AnalyzerDefinition {
 
 **距離メトリクス:** `COSINE`, `EUCLIDEAN`, `MANHATTAN`, `DOT_PRODUCT`, `ANGULAR`
 
-**量子化手法:** `NONE`, `SCALAR_8BIT`, `PRODUCT_QUANTIZATION`
+**量子化手法:** `SCALAR_8BIT`（デフォルト）, `PRODUCT_QUANTIZATION`（Issue #481 Stage 3 で予約、現状 `Unimplemented`）
+
+`NONE`（量子化なし）は Issue #481 Stage 1 で廃止されました。proto enum 値 0（`QUANTIZATION_METHOD_NONE`）は wire 互換のため予約されていますが、サーバ側で受信すると `Default::default()`（`SCALAR_8BIT`）にフォールバックします。
 
 **QuantizationConfig 構造:**
 
 | フィールド | 型 | 説明 |
 | :--- | :--- | :--- |
-| `method` | `QuantizationMethod` | 量子化手法（`QUANTIZATION_METHOD_NONE`, `QUANTIZATION_METHOD_SCALAR_8BIT`, または `QUANTIZATION_METHOD_PRODUCT_QUANTIZATION`） |
+| `method` | `QuantizationMethod` | 量子化手法（`QUANTIZATION_METHOD_SCALAR_8BIT` または `QUANTIZATION_METHOD_PRODUCT_QUANTIZATION`）。0（`NONE`）は予約、サーバ側で `SCALAR_8BIT` にフォールバック。 |
 | `subvector_count` | `uint32` | サブベクトルの数（`method` が `PRODUCT_QUANTIZATION` の場合のみ使用。`dimension` を均等に割り切れる値を指定）。 |
 
 **例:**

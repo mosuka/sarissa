@@ -3,6 +3,27 @@
 //! Compares construction and search performance across all three index types
 //! using the same dataset and query parameters.
 //!
+//! # Quantization status (Issue #481 Stage 1)
+//!
+//! After Stage 1, **every** vector index group in this file goes through
+//! the int8 scalar-quantized hot path: writers emit the `LVS1` segment
+//! format, readers populate `VectorStorage::OwnedQuantized`, and the
+//! search loop dispatches to `distance_quantized`. There is no longer an
+//! f32-only path to compare against in-tree.
+//!
+//! - **Stage 1 speed gate** is `bench_hnsw_graph_search` at
+//!   `top10/50000`: the int8 path here must achieve ≥ 2× speedup vs the
+//!   pre-Stage-1 f32 numbers recorded on `main` before this PR landed.
+//!   Compare via two separate runs (one per branch).
+//! - **Stage 1 recall gate** is _not_ measured here -- recall lives in
+//!   `laurus/tests/vector_recall_test.rs` so the latency vs recall
+//!   surfaces stay independent.
+//! - The `HNSW Construction` group also runs through the new format
+//!   (writer trains + serializes int8 at flush). Construction bench
+//!   numbers should stay within the noise band of the f32 baseline
+//!   since graph build still computes f32 distances; only the
+//!   final `commit()` call now does the per-segment SQ training.
+//!
 //! # Scope
 //!
 //! - End-to-end through `FlatVectorSearcher`, `IvfSearcher`, `HnswSearcher`.
@@ -402,6 +423,12 @@ fn bench_hnsw_fallback_search(c: &mut Criterion) {
 /// scales with `ef_search` rather than corpus size; #406 (replace the
 /// `HashSet<u64>` visited set with a bitmap) and #405 (per-field
 /// `vector_ids` cache) target this path.
+///
+/// **Issue #481 Stage 1 speed gate**: the `top10/50000` case here is the
+/// designated benchmark for the "≥ 2× speedup vs f32 baseline" condition.
+/// Run before and after the Stage-1 PR (or against the pre-PR `main`
+/// branch) and compare absolute medians. Recall is gated separately in
+/// `laurus/tests/vector_recall_test.rs`.
 fn bench_hnsw_graph_search(c: &mut Criterion) {
     let mut group = c.benchmark_group("HNSW Graph Search");
     let dim = 128;

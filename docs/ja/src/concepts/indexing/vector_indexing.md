@@ -198,38 +198,63 @@ let metric = DistanceMetric::Angular;      // Angular distance
 
 ## 量子化（Quantization）
 
-量子化は、精度をある程度犠牲にしてベクトルを圧縮し、メモリ使用量を削減します。
+ベクトルはディスク上で **8 ビットスカラー量子化された整数** として保存
+されます（Issue #481 Stage 1）。以前の 32 ビット浮動小数点形式と比較
+して **約 4 倍小さく**、recall 損失は実用上ほぼ無視できる範囲（f32
+ground truth に対して Recall@10 ≥ 0.95 — recall テスト
+`laurus/tests/vector_recall_test.rs` 参照）です。
 
 | 方式 | Enum バリアント | 説明 | メモリ削減率 |
 | :--- | :--- | :--- | :--- |
-| **スカラー 8 ビット** | `Scalar8Bit` | 8 ビット整数へのスカラー量子化 | 約 4 倍 |
-| **プロダクト量子化** | `ProductQuantization { subvector_count }` | ベクトルをサブベクトルに分割して各々を量子化 | 約 16-64 倍 |
+| **スカラー 8 ビット** *(デフォルト)* | `Scalar8Bit` | per-segment global affine による `u8` 量子化 | 約 4 倍 |
+| **プロダクト量子化** *(予約)* | `ProductQuantization { subvector_count }` | Issue #481 Stage 3 — 現状 `NotImplemented` | 約 16-64 倍 |
 
 ```rust
 use laurus::vector::HnswOption;
 use laurus::vector::core::quantization::QuantizationMethod;
 
+// `quantizer` は `Scalar8Bit` がデフォルト。下記は
+// `HnswOption { dimension: 384, ..Default::default() }` と等価。
 let opt = HnswOption {
     dimension: 384,
-    quantizer: Some(QuantizationMethod::Scalar8Bit),
+    quantizer: QuantizationMethod::Scalar8Bit,
     ..Default::default()
 };
 ```
 
-### VectorQuantizer
+> **破壊的変更（Issue #481 Stage 1）:** `quantizer` フィールドはもはや
+> `Option<QuantizationMethod>` ではなく必須となり、デフォルトは
+> `Scalar8Bit` です。f32 のままディスクに保存する形式は廃止されまし
+> た。Stage 1 より前に作成した既存 vector index は意図的に読み取り
+> 不可能で、ソースデータからの再構築が必要です。
 
-`VectorQuantizer` は量子化のライフサイクルを管理します。
+### Scalar8Bit のしくみ
 
-| メソッド | 説明 |
-| :--- | :--- |
-| `new(method, dimension)` | 未トレーニングの量子化器を作成 |
-| `train(vectors)` | 代表的なベクトルでトレーニング（Scalar8Bit の場合、次元ごとの最小/最大値を計算） |
-| `quantize(vector)` | トレーニング済みパラメータを使用してベクトルを圧縮 |
-| `dequantize(quantized)` | 量子化されたベクトルをフル精度に復元 |
+- 各 segment は flush 時に f32 ベクトル群から **global** な
+  `(offset, scale)` ペア 1 組をトレーニング
+  （`offset = min`, `scale = (max - min) / 255`）。
+- 各 `f32` 要素は `u8 = clamp(round((v - offset) / scale), 0, 255)`
+  でエンコード。
+- 各ベクトル単位のメタデータ（`sum_q: u32`, `norm_q: f32`）を
+  事前計算して int8 ペイロードと併置するため、cosine 検索の hot loop
+  は int8 SIMD multiply-accumulate 1 回 + scalar 補正 3 回に縮約され、
+  検索時の per-element dequantize は不要。
+- segment ファイルは `LVS1` magic + 16 byte header で始まり、reader
+  はロード時にフォーマットを判定。
 
-`Scalar8Bit` の場合、トレーニングで各次元の最小値と最大値が計算されます。各成分は [0, 255] の範囲にマッピングされます。逆量子化ではこのマッピングが逆変換されますが、多少の精度損失が生じます。
+### Two-stage rerank（Issue #481 Stage 2 — 予約）
 
-> **注意:** `ProductQuantization` は API 上定義されていますが、現在未実装です。使用するとエラーが返されます。
+`VectorIndexQueryParams.rerank_factor: Option<usize>` および gRPC /
+JSON gateway 側の `VectorParams.rerank_factor` は次の 2 段階 rerank
+フロー用に予約されています:
+
+1. 量子化された HNSW 検索が `top_k * rerank_factor` 候補を返す。
+2. それらを完全な f32 ベクトルで再スコアし、最終 `top_k` を返す。
+
+現在 `rerank_factor` を設定すると `LaurusError::NotImplemented` /
+`tonic::Status::Unimplemented` が返ります。Stage 2 の実装が入った際に
+proto / バインディングのスキーマ変更を伴わずにオプトインできるよう、
+API surface を予約してあります。
 
 ## セグメントファイル
 

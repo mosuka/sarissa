@@ -96,9 +96,12 @@ pub struct FlatOption {
     /// Base weight applied to similarity scores from this field. Defaults to `1.0`.
     #[serde(default = "default_weight")]
     pub base_weight: f32,
-    /// Optional quantization method to reduce memory usage at the cost of some precision.
+    /// Quantization method used for the on-disk vector format.
+    /// Defaults to [`quantization::QuantizationMethod::Scalar8Bit`]
+    /// (Issue #481 Stage 1: int8 SQ is mandatory; the previous
+    /// `Option::None` "no quantization" path no longer exists).
     #[serde(default)]
-    pub quantizer: Option<quantization::QuantizationMethod>,
+    pub quantizer: quantization::QuantizationMethod,
     /// Embedder name for this vector field.
     /// When set, the engine automatically embeds input using the named embedder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -111,7 +114,7 @@ impl Default for FlatOption {
             dimension: 128,
             distance: default_distance_metric(),
             base_weight: default_weight(),
-            quantizer: None,
+            quantizer: quantization::QuantizationMethod::Scalar8Bit,
             embedder: None,
         }
     }
@@ -138,9 +141,12 @@ pub struct HnswOption {
     /// Base weight applied to similarity scores from this field. Defaults to `1.0`.
     #[serde(default = "default_weight")]
     pub base_weight: f32,
-    /// Optional quantization method to reduce memory usage at the cost of some precision.
+    /// Quantization method used for the on-disk vector format.
+    /// Defaults to [`quantization::QuantizationMethod::Scalar8Bit`]
+    /// (Issue #481 Stage 1: int8 SQ is mandatory; the previous
+    /// `Option::None` "no quantization" path no longer exists).
     #[serde(default)]
-    pub quantizer: Option<quantization::QuantizationMethod>,
+    pub quantizer: quantization::QuantizationMethod,
     /// Embedder name for this vector field.
     /// When set, the engine automatically embeds input using the named embedder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,7 +161,7 @@ impl Default for HnswOption {
             m: default_getting_m(),
             ef_construction: default_getting_ef_construction(),
             base_weight: default_weight(),
-            quantizer: None,
+            quantizer: quantization::QuantizationMethod::Scalar8Bit,
             embedder: None,
         }
     }
@@ -180,9 +186,12 @@ pub struct IvfOption {
     /// Base weight applied to similarity scores from this field. Defaults to `1.0`.
     #[serde(default = "default_weight")]
     pub base_weight: f32,
-    /// Optional quantization method to reduce memory usage at the cost of some precision.
+    /// Quantization method used for the on-disk vector format.
+    /// Defaults to [`quantization::QuantizationMethod::Scalar8Bit`]
+    /// (Issue #481 Stage 1: int8 SQ is mandatory; the previous
+    /// `Option::None` "no quantization" path no longer exists).
     #[serde(default)]
-    pub quantizer: Option<quantization::QuantizationMethod>,
+    pub quantizer: quantization::QuantizationMethod,
     /// Embedder name for this vector field.
     /// When set, the engine automatically embeds input using the named embedder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -197,7 +206,7 @@ impl Default for IvfOption {
             n_clusters: default_getting_n_clusters(),
             n_probe: default_getting_n_probe(),
             base_weight: default_weight(),
-            quantizer: None,
+            quantizer: quantization::QuantizationMethod::Scalar8Bit,
             embedder: None,
         }
     }
@@ -259,7 +268,7 @@ impl FlatOption {
     }
 
     pub fn quantizer(mut self, quantizer: quantization::QuantizationMethod) -> Self {
-        self.quantizer = Some(quantizer);
+        self.quantizer = quantizer;
         self
     }
 }
@@ -299,7 +308,7 @@ impl HnswOption {
     }
 
     pub fn quantizer(mut self, quantizer: quantization::QuantizationMethod) -> Self {
-        self.quantizer = Some(quantizer);
+        self.quantizer = quantizer;
         self
     }
 }
@@ -339,7 +348,7 @@ impl IvfOption {
     }
 
     pub fn quantizer(mut self, quantizer: quantization::QuantizationMethod) -> Self {
-        self.quantizer = Some(quantizer);
+        self.quantizer = quantizer;
         self
     }
 }

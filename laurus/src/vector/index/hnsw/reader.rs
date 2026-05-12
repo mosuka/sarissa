@@ -6,8 +6,12 @@ use std::sync::Arc;
 use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
+use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::hnsw::graph::HnswGraph;
+use crate::vector::index::quantized_io::quantized_record_payload_size;
+use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
 
@@ -185,11 +189,22 @@ impl HnswIndexReader {
                 }
             };
 
+        // Read the Issue #481 Stage 1 vector segment header (LVS1).
+        // Pre-Stage-1 segments are rejected with IncompatibleFormat.
+        let header = VectorSegmentHeader::read_from(&mut input)?;
+        let QuantHeader::Scalar8Bit(params) = header.quant;
+
         let (vectors, vector_ids, graph) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
-                // Read vectors with field names
-                let mut vectors = HashMap::with_capacity(num_vectors);
+                // Step 6 of #481 Stage 1: load vectors as int8 + meta
+                // directly into a QuantizedVectorPool so the search
+                // hot loop can use distance_quantized without per-call
+                // dequantization. The legacy
+                // VectorIndexReader::get_vector API still works via
+                // VectorStorage::Owned-Quantized's dequantize-on-get.
                 let mut vector_ids = Vec::with_capacity(num_vectors);
+                let mut records: Vec<(u64, String, Vec<u8>, QuantizedVectorMeta)> =
+                    Vec::with_capacity(num_vectors);
 
                 for _ in 0..num_vectors {
                     let mut doc_id_buf = [0u8; 8];
@@ -206,30 +221,48 @@ impl HnswIndexReader {
                         LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                     })?;
 
-                    // Read vector data
-                    let mut values = vec![0.0f32; dimension];
-                    for value in &mut values {
-                        let mut value_buf = [0u8; 4];
-                        input.read_exact(&mut value_buf)?;
-                        *value = f32::from_le_bytes(value_buf);
-                    }
+                    // Read int8 payload + meta directly (no
+                    // dequantization). Step 6 keeps everything in int8
+                    // form for the cache-friendly hot path.
+                    let mut int8 = vec![0u8; dimension];
+                    input.read_exact(&mut int8)?;
+                    let mut sum_q_buf = [0u8; 4];
+                    let mut norm_q_buf = [0u8; 4];
+                    input.read_exact(&mut sum_q_buf)?;
+                    input.read_exact(&mut norm_q_buf)?;
+                    let meta = QuantizedVectorMeta {
+                        sum_q: u32::from_le_bytes(sum_q_buf),
+                        norm_q: f32::from_le_bytes(norm_q_buf),
+                    };
 
                     vector_ids.push((doc_id, field_name.clone()));
-                    vectors.insert((doc_id, field_name), Vector::new(values));
+                    records.push((doc_id, field_name, int8, meta));
                 }
                 let graph = read_graph(&mut input)?;
-                (VectorStorage::Owned(Arc::new(vectors)), vector_ids, graph)
+                let pool = QuantizedVectorPool::build(params, dimension, records);
+                (
+                    VectorStorage::OwnedQuantized(Arc::new(pool)),
+                    vector_ids,
+                    graph,
+                )
             }
             crate::storage::LoadingMode::Lazy => {
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
 
-                let start_pos = 8 + 4 + 4 + 4; // num_vectors(u64) + dimension(u32) + m(u32) + ef(u32)
-
-                // Seek to start of vectors
+                // Seek to start of per-vector entries: HNSW preamble
+                // (count u64 + dim u32 + m u32 + ef u32 = 20 bytes)
+                // followed by VectorSegmentHeader (Stage-1, 24 bytes
+                // for Scalar8Bit) = 44 bytes.
+                let start_pos =
+                    20u64 + VectorSegmentHeader::scalar_8bit(params).serialized_size() as u64;
                 input
-                    .seek(std::io::SeekFrom::Start(start_pos as u64))
+                    .seek(std::io::SeekFrom::Start(start_pos))
                     .map_err(LaurusError::Io)?;
+
+                // Per-vector record size on disk: dim int8 + 8 bytes
+                // meta (sum_q + norm_q).
+                let quant_payload_size = quantized_record_payload_size(dimension) as i64;
 
                 for _ in 0..num_vectors {
                     let start_offset = input.stream_position().map_err(LaurusError::Io)?;
@@ -249,14 +282,15 @@ impl HnswIndexReader {
                         LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                     })?;
 
-                    // Record offset for on-demand loading
-                    // We record offset where the entry starts (doc_id)
+                    // Record offset for on-demand loading. The offset
+                    // points to the entry start (doc_id), matching the
+                    // contract VectorStorage::get expects.
                     offsets.insert((doc_id, field_name.clone()), start_offset);
                     vector_ids.push((doc_id, field_name.clone()));
 
-                    // Skip vector data (dimension * 4 bytes)
+                    // Skip int8 payload + per-vector meta.
                     input
-                        .seek(std::io::SeekFrom::Current((dimension * 4) as i64))
+                        .seek(std::io::SeekFrom::Current(quant_payload_size))
                         .map_err(LaurusError::Io)?;
                 }
                 let graph = read_graph(&mut input)?;
@@ -266,6 +300,7 @@ impl HnswIndexReader {
                         storage: storage.clone(),
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
+                        quant_params: Some(params),
                     },
                     vector_ids,
                     graph,
@@ -273,20 +308,40 @@ impl HnswIndexReader {
             }
         };
 
-        // Build zero-allocation prefetch lookup for the Owned (in-memory) variant.
-        // For each field, maps doc_id to the base address of the Vec<f32> data so that
-        // HnswSearcher can issue prefetch hints without any per-call String allocation.
-        // Empty for OnDemand storage where CPU cache hints are not applicable.
-        let prefetch_index = if let VectorStorage::Owned(ref map) = vectors {
-            let mut idx: HashMap<String, HashMap<u64, usize>> = HashMap::new();
-            for ((doc_id, field_name), vector) in map.iter() {
-                idx.entry(field_name.clone())
-                    .or_default()
-                    .insert(*doc_id, vector.data.as_ptr() as usize);
+        // Build zero-allocation prefetch lookup. For OwnedQuantized
+        // (Step 6+), the address points to the int8 record start
+        // inside the contiguous AoS buffer; the int8 payload + 8 bytes
+        // of meta will be prefetched per neighbour. For Owned (legacy
+        // f32, kept for symmetry), the address points to the Vec<f32>
+        // data. Empty for OnDemand where CPU cache hints don't apply.
+        let prefetch_index: HashMap<String, HashMap<u64, usize>> = match &vectors {
+            VectorStorage::Owned(map) => {
+                let mut idx: HashMap<String, HashMap<u64, usize>> = HashMap::new();
+                for ((doc_id, field_name), vector) in map.iter() {
+                    idx.entry(field_name.clone())
+                        .or_default()
+                        .insert(*doc_id, vector.data.as_ptr() as usize);
+                }
+                idx
             }
-            idx
-        } else {
-            HashMap::new()
+            VectorStorage::OwnedQuantized(pool) => {
+                let mut idx: HashMap<String, HashMap<u64, usize>> = HashMap::new();
+                let record_size = QuantizedVectorPool::record_size(pool.dim);
+                let base = pool.data.as_ptr();
+                for (field_name, doc_map) in pool.field_index.iter() {
+                    let entry = idx.entry(field_name.clone()).or_default();
+                    for (&doc_id, &pos) in doc_map.iter() {
+                        // SAFETY: pool is held alive by self.vectors
+                        // (Arc) for the lifetime of self; pos is in
+                        // bounds because it was populated from data.len()
+                        // / record_size at build time.
+                        let addr = unsafe { base.add(pos as usize * record_size) } as usize;
+                        entry.insert(doc_id, addr);
+                    }
+                }
+                idx
+            }
+            VectorStorage::OnDemand { .. } => HashMap::new(),
         };
 
         // Per-field doc-id lookup (#405). Built from `vector_ids` so it
@@ -341,6 +396,17 @@ impl HnswIndexReader {
     /// * `field_name` - The name of the vector field.
     pub(crate) fn field_prefetch_index(&self, field_name: &str) -> Option<&HashMap<u64, usize>> {
         self.prefetch_index.get(field_name)
+    }
+
+    /// Borrow the underlying
+    /// [`crate::vector::index::storage::VectorStorage`].
+    ///
+    /// Intended for the HNSW searcher to detect the
+    /// [`crate::vector::index::storage::VectorStorage::OwnedQuantized`]
+    /// variant and switch to the int8 hot path (Issue #481 Stage 1
+    /// Step 6).
+    pub fn vectors(&self) -> &crate::vector::index::storage::VectorStorage {
+        &self.vectors
     }
 }
 
@@ -411,6 +477,7 @@ impl VectorIndexReader for HnswIndexReader {
     fn stats(&self) -> VectorStats {
         let memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
+            VectorStorage::OwnedQuantized(pool) => pool.data.len(),
             VectorStorage::OnDemand { offsets, .. } => {
                 // Estimate memory for offsets map + ID list
                 offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
@@ -430,6 +497,7 @@ impl VectorIndexReader for HnswIndexReader {
             VectorStorage::Owned(vectors) => {
                 vectors.contains_key(&(doc_id, field_name.to_string()))
             }
+            VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
             VectorStorage::OnDemand { offsets, .. } => {
                 offsets.contains_key(&(doc_id, field_name.to_string()))
             }
@@ -532,6 +600,21 @@ impl VectorIndexReader for HnswIndexReader {
                         ));
                     }
                 }
+            }
+            VectorStorage::OwnedQuantized(pool) => {
+                for (id, field) in &self.vector_ids {
+                    if !pool.contains(*id, field) {
+                        errors.push(format!(
+                            "Vector {}:{} found in keys but missing in quantized pool",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push(
+                    "OwnedQuantized mode: dimension / NaN checks skipped (int8 storage \
+                     guarantees finite values within [offset, offset + 255*scale])"
+                        .to_string(),
+                );
             }
             VectorStorage::OnDemand { offsets, .. } => {
                 for (id, field) in &self.vector_ids {

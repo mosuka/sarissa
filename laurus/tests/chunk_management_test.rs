@@ -15,7 +15,7 @@ async fn build_test_engine() -> Result<Engine> {
         dimension: 3,
         distance: DistanceMetric::Cosine,
         base_weight: 1.0,
-        quantizer: None,
+        quantizer: Default::default(),
         embedder: None,
     });
 

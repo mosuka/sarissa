@@ -6,7 +6,11 @@ use std::sync::Arc;
 use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
+use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
+use crate::vector::index::quantized_io::quantized_record_payload_size;
+use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
 
@@ -89,11 +93,18 @@ impl FlatVectorIndexReader {
         input.read_exact(&mut dimension_buf)?;
         let dimension = u32::from_le_bytes(dimension_buf) as usize;
 
+        // Read the Issue #481 Stage 1 vector segment header (LVS1).
+        // Pre-Stage-1 segments are rejected with IncompatibleFormat.
+        let header = VectorSegmentHeader::read_from(&mut input)?;
+        let QuantHeader::Scalar8Bit(params) = header.quant;
+
         let (vectors, vector_ids) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
-                // Read vectors with field names
-                let mut vectors = HashMap::with_capacity(num_vectors);
+                // Step 7 of #481 Stage 1: load vectors as int8 + meta
+                // directly into a QuantizedVectorPool.
                 let mut vector_ids = Vec::with_capacity(num_vectors);
+                let mut records: Vec<(u64, String, Vec<u8>, QuantizedVectorMeta)> =
+                    Vec::with_capacity(num_vectors);
 
                 for _ in 0..num_vectors {
                     let mut doc_id_buf = [0u8; 8];
@@ -110,26 +121,39 @@ impl FlatVectorIndexReader {
                     let field_name = String::from_utf8(field_name_buf).map_err(|e| {
                         LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                     })?;
-                    // Read vector data
-                    let mut values = vec![0.0f32; dimension];
-                    for value in &mut values {
-                        let mut value_buf = [0u8; 4];
-                        input.read_exact(&mut value_buf)?;
-                        *value = f32::from_le_bytes(value_buf);
-                    }
+
+                    // Read int8 + meta directly (no dequantize).
+                    let mut int8 = vec![0u8; dimension];
+                    input.read_exact(&mut int8)?;
+                    let mut sum_q_buf = [0u8; 4];
+                    let mut norm_q_buf = [0u8; 4];
+                    input.read_exact(&mut sum_q_buf)?;
+                    input.read_exact(&mut norm_q_buf)?;
+                    let meta = QuantizedVectorMeta {
+                        sum_q: u32::from_le_bytes(sum_q_buf),
+                        norm_q: f32::from_le_bytes(norm_q_buf),
+                    };
 
                     vector_ids.push((doc_id, field_name.clone()));
-                    vectors.insert((doc_id, field_name), Vector::new(values));
+                    records.push((doc_id, field_name, int8, meta));
                 }
-                (VectorStorage::Owned(Arc::new(vectors)), vector_ids)
+                let pool = QuantizedVectorPool::build(params, dimension, records);
+                (VectorStorage::OwnedQuantized(Arc::new(pool)), vector_ids)
             }
             crate::storage::LoadingMode::Lazy => {
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
-                let start_pos = 8; // num_vectors(4) + dimension(4)
+
+                // Seek to start of per-vector entries: Flat preamble
+                // (count u32 + dim u32 = 8 bytes) + VectorSegmentHeader
+                // (Stage-1 Scalar8Bit = 24 bytes) = 32 bytes.
+                let start_pos =
+                    8u64 + VectorSegmentHeader::scalar_8bit(params).serialized_size() as u64;
                 input
                     .seek(std::io::SeekFrom::Start(start_pos))
-                    .map_err(LaurusError::Io)?; // Fixed Io argument
+                    .map_err(LaurusError::Io)?;
+
+                let quant_payload_size = quantized_record_payload_size(dimension) as i64;
 
                 for _ in 0..num_vectors {
                     let start_offset = input.stream_position().map_err(LaurusError::Io)?;
@@ -148,35 +172,21 @@ impl FlatVectorIndexReader {
                         LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                     })?;
 
-                    // Store offset for this vector
-                    // We need to point to where the vector data STARTS? or where the entry starts?
-                    // FlatIndexReader logic for OnDemand likely needs to reread everything unless we store offset of metadata/vector.
-                    // Let's assume OnDemand reads entry from start_offset.
                     offsets.insert((doc_id, field_name.clone()), start_offset);
                     vector_ids.push((doc_id, field_name));
 
-                    // Skip vector data
-                    let skip_bytes = dimension * 4; // f32 = 4 bytes
+                    // Skip int8 payload + per-vector meta.
                     input
-                        .seek(std::io::SeekFrom::Current(skip_bytes as i64))
+                        .seek(std::io::SeekFrom::Current(quant_payload_size))
                         .map_err(LaurusError::Io)?;
                 }
-
-                // Re-open input for storage to avoid seeking issues with shared reference?
-                // Or clone? StorageInput is Box<dyn>.
-                // We need a NEW input for the OnDemand storage because the current `input` was used to scan.
-                // Or we can move `input` into OnDemand if we are done with it.
-                // VectorStorage::OnDemand takes `input: Mutex<Box<dyn StorageInput>>`.
-
-                // If we use `input` here, we need to reset it? No, OnDemand does seek.
-                // But `input` is scoped to this function.
-                // We construct VectorStorage::OnDemand { input: Mutex::new(input), offsets }
 
                 (
                     VectorStorage::OnDemand {
                         storage: storage.clone(),
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
+                        quant_params: Some(params),
                     },
                     vector_ids,
                 )
@@ -196,6 +206,13 @@ impl FlatVectorIndexReader {
 
     pub fn set_deletion_bitmap(&mut self, bitmap: Arc<DeletionBitmap>) {
         self.deletion_bitmap = Some(bitmap);
+    }
+
+    /// Borrow the underlying [`VectorStorage`] so the Flat searcher
+    /// can detect the [`VectorStorage::OwnedQuantized`] variant and
+    /// switch to the int8 hot path (Issue #481 Stage 1 Step 7).
+    pub fn vectors(&self) -> &VectorStorage {
+        &self.vectors
     }
 
     fn is_deleted(&self, doc_id: u64) -> bool {
@@ -274,6 +291,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
     fn stats(&self) -> VectorStats {
         let _memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
+            VectorStorage::OwnedQuantized(pool) => pool.data.len(),
             VectorStorage::OnDemand { offsets, .. } => {
                 // Estimate memory for offsets map + ID list
                 offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
@@ -292,6 +310,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
             VectorStorage::Owned(vectors) => {
                 vectors.contains_key(&(doc_id, field_name.to_string()))
             }
+            VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
             VectorStorage::OnDemand { offsets, .. } => {
                 offsets.contains_key(&(doc_id, field_name.to_string()))
             }
@@ -394,6 +413,21 @@ impl VectorIndexReader for FlatVectorIndexReader {
                         ));
                     }
                 }
+            }
+            VectorStorage::OwnedQuantized(pool) => {
+                for (id, field) in &self.vector_ids {
+                    if !pool.contains(*id, field) {
+                        errors.push(format!(
+                            "Vector {}:{} found in keys but missing in quantized pool",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push(
+                    "OwnedQuantized mode: dimension / NaN checks skipped (int8 storage \
+                     guarantees finite values within [offset, offset + 255*scale])"
+                        .to_string(),
+                );
             }
             VectorStorage::OnDemand { offsets, .. } => {
                 for (id, field) in &self.vector_ids {

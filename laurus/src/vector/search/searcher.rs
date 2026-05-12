@@ -70,6 +70,18 @@ impl VectorIndexQuery {
         self.field_name = Some(field_name);
         self
     }
+
+    /// Set two-stage rerank multiplier (Issue #481 Stage 2 — pre-design).
+    ///
+    /// Currently the searcher returns
+    /// [`crate::error::LaurusError::NotImplemented`] when this is set
+    /// to `Some(_)`. The API surface is reserved here so existing
+    /// callers can opt in once Stage 2 lands without further proto /
+    /// binding revisions.
+    pub fn rerank_factor(mut self, factor: usize) -> Self {
+        self.params.rerank_factor = Some(factor);
+        self
+    }
 }
 
 /// Configuration for low-level vector index query operations.
@@ -88,6 +100,20 @@ pub struct VectorIndexQueryParams {
     pub include_vectors: bool,
     /// Search timeout in milliseconds.
     pub timeout_ms: Option<u64>,
+    /// Two-stage rerank multiplier (Issue #481 Stage 2 — pre-design).
+    ///
+    /// When set to `Some(n)`, the index searcher will first fetch
+    /// `top_k * n` candidates via the int8 quantized hot path and then
+    /// re-score them against the full f32 vectors before returning
+    /// the top `top_k`. This recovers the recall lost to scalar
+    /// quantization at modest extra cost.
+    ///
+    /// **Stage 2 of Issue #481 — currently returns
+    /// [`crate::error::LaurusError::NotImplemented`] when set to
+    /// `Some(_)`.** `None` (the default) runs the Stage 1
+    /// quantized-only search.
+    #[serde(default)]
+    pub rerank_factor: Option<usize>,
 }
 
 impl Default for VectorIndexQueryParams {
@@ -98,6 +124,7 @@ impl Default for VectorIndexQueryParams {
             include_scores: true,
             include_vectors: false,
             timeout_ms: None,
+            rerank_factor: None,
         }
     }
 }

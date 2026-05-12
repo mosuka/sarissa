@@ -83,6 +83,18 @@ message VectorParams {
   VectorScoreMode score_mode = 2;
   float overfetch = 3;
   float min_score = 4;
+
+  // Two-stage rerank multiplier (Issue #481 Stage 2).
+  //
+  // When set, the searcher fetches `top_k * rerank_factor` candidates
+  // via the int8 quantized hot path and then re-scores them with the
+  // full f32 vectors before returning the final top_k.
+  //
+  // STAGE 2 STATUS: not yet implemented in laurus core. Requesting a
+  // value here today returns LaurusError::NotImplemented. The field
+  // is reserved at proto tag 5 so older / newer clients can negotiate
+  // the upgrade without another schema bump.
+  optional uint32 rerank_factor = 5;
 }
 
 enum VectorScoreMode {

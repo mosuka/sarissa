@@ -7,9 +7,14 @@ use rayon::prelude::*;
 
 use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
+use crate::vector::core::quantization::ScalarQuantParams;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::FlatIndexConfig;
 use crate::vector::index::field::LegacyVectorFieldWriter;
+use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
+use crate::vector::index::quantized_io::{
+    quantize_segment, read_dequantized_vector, write_quantized_record,
+};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
 /// Builder for flat vector indexes (exact search).
@@ -108,7 +113,14 @@ impl FlatIndexWriter {
             )));
         }
 
-        // Read vectors with field names
+        // Read the Issue #481 Stage 1 vector segment header (LVS1).
+        // Pre-Stage-1 segments are rejected with IncompatibleFormat.
+        let header = VectorSegmentHeader::read_from(&mut input)?;
+        let QuantHeader::Scalar8Bit(params) = header.quant;
+
+        // Read quantized vectors, dequantizing back to f32 so the
+        // in-memory writer state stays compatible with downstream
+        // operations (delete_document, vectors() accessor, etc.).
         let mut vectors = Vec::with_capacity(num_vectors);
         for _ in 0..num_vectors {
             let mut doc_id_buf = [0u8; 8];
@@ -126,13 +138,8 @@ impl FlatIndexWriter {
                 LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
             })?;
 
-            // Read vector data
-            let mut values = vec![0.0f32; dimension];
-            for value in &mut values {
-                let mut value_buf = [0u8; 4];
-                input.read_exact(&mut value_buf)?;
-                *value = f32::from_le_bytes(value_buf);
-            }
+            // Read quantized payload + dequantize.
+            let values = read_dequantized_vector(&mut input, dimension, &params)?;
 
             vectors.push((doc_id, field_name, Vector::new(values)));
         }
@@ -396,8 +403,27 @@ impl VectorIndexWriter for FlatIndexWriter {
         output.write_all(&vector_count.to_le_bytes())?;
         output.write_all(&(self.index_config.dimension as u32).to_le_bytes())?;
 
-        // Write vectors with field names and metadata
-        for (doc_id, field_name, vector) in &self.vectors {
+        // Issue #481 Stage 1, Step 7: train per-segment SQ params on
+        // the f32 vectors and emit the LVS1 quantized format. Empty
+        // segments fall back to neutral (0.0, 1.0) params so the
+        // header is still emitted (test_put_document_* exercise this
+        // path).
+        let f32_vectors: Vec<Vector> = self.vectors.iter().map(|(_, _, v)| v.clone()).collect();
+        let (params, records) = if f32_vectors.is_empty() {
+            (
+                ScalarQuantParams {
+                    offset: 0.0,
+                    scale: 1.0,
+                },
+                Vec::new(),
+            )
+        } else {
+            quantize_segment(&f32_vectors, self.index_config.dimension)?
+        };
+        VectorSegmentHeader::scalar_8bit(params).write_to(&mut output)?;
+
+        // Write vectors with field names and quantized records.
+        for ((doc_id, field_name, _), (int8, meta)) in self.vectors.iter().zip(records.iter()) {
             output.write_all(&doc_id.to_le_bytes())?;
 
             // Write field name length and field name
@@ -405,10 +431,8 @@ impl VectorIndexWriter for FlatIndexWriter {
             output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
             output.write_all(field_name_bytes)?;
 
-            // Write vector data
-            for value in vector.data.iter() {
-                output.write_all(&value.to_le_bytes())?;
-            }
+            // Write quantized payload (dim int8 + sum_q + norm_q).
+            write_quantized_record(&mut output, int8, *meta)?;
         }
 
         output.flush()?;

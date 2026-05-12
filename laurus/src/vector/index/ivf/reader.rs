@@ -7,7 +7,11 @@ use crate::error::{LaurusError, Result};
 use crate::maintenance::deletion::DeletionBitmap;
 use crate::storage::Storage;
 use crate::vector::core::distance::DistanceMetric;
+use crate::vector::core::quantization::QuantizedVectorMeta;
 use crate::vector::core::vector::Vector;
+use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
+use crate::vector::index::quantized_io::quantized_record_payload_size;
+use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::index::storage::VectorStorage;
 use crate::vector::reader::{ValidationReport, VectorIndexMetadata, VectorStats};
 use crate::vector::reader::{VectorIndexReader, VectorIterator};
@@ -115,13 +119,20 @@ impl IvfIndexReader {
             centroids.push(Vector::new(values));
         }
 
+        // Read the Issue #481 Stage 1 vector segment header (LVS1)
+        // before the inverted lists. Pre-Stage-1 segments are
+        // rejected with IncompatibleFormat.
+        let header = VectorSegmentHeader::read_from(&mut input)?;
+        let QuantHeader::Scalar8Bit(params) = header.quant;
+
         // Read inverted lists, preserving per-cluster grouping.
         let mut cluster_to_vectors: Vec<Vec<(u64, String)>> = Vec::with_capacity(n_clusters);
 
         let (vectors, vector_ids) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
-                let mut vectors = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
+                let mut records: Vec<(u64, String, Vec<u8>, QuantizedVectorMeta)> =
+                    Vec::with_capacity(num_vectors);
 
                 for _ in 0..n_clusters {
                     let mut list_size_buf = [0u8; 4];
@@ -147,25 +158,32 @@ impl IvfIndexReader {
                             ))
                         })?;
 
-                        let mut values = vec![0.0f32; dimension];
-                        for value in &mut values {
-                            let mut value_buf = [0u8; 4];
-                            input.read_exact(&mut value_buf)?;
-                            *value = f32::from_le_bytes(value_buf);
-                        }
+                        // Read int8 + meta directly (no dequantize).
+                        let mut int8 = vec![0u8; dimension];
+                        input.read_exact(&mut int8)?;
+                        let mut sum_q_buf = [0u8; 4];
+                        let mut norm_q_buf = [0u8; 4];
+                        input.read_exact(&mut sum_q_buf)?;
+                        input.read_exact(&mut norm_q_buf)?;
+                        let meta = QuantizedVectorMeta {
+                            sum_q: u32::from_le_bytes(sum_q_buf),
+                            norm_q: f32::from_le_bytes(norm_q_buf),
+                        };
 
                         let key = (doc_id, field_name.clone());
                         cluster_vecs.push(key.clone());
                         vector_ids.push(key.clone());
-                        vectors.insert(key, Vector::new(values));
+                        records.push((doc_id, field_name, int8, meta));
                     }
                     cluster_to_vectors.push(cluster_vecs);
                 }
-                (VectorStorage::Owned(Arc::new(vectors)), vector_ids)
+                let pool = QuantizedVectorPool::build(params, dimension, records);
+                (VectorStorage::OwnedQuantized(Arc::new(pool)), vector_ids)
             }
             crate::storage::LoadingMode::Lazy => {
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
+                let quant_payload_size = quantized_record_payload_size(dimension) as i64;
 
                 for _ in 0..n_clusters {
                     let mut list_size_buf = [0u8; 4];
@@ -198,9 +216,9 @@ impl IvfIndexReader {
                         cluster_vecs.push(key.clone());
                         vector_ids.push(key);
 
-                        // Skip vector
+                        // Skip int8 payload + per-vector meta.
                         input
-                            .seek(SeekFrom::Current((dimension * 4) as i64))
+                            .seek(SeekFrom::Current(quant_payload_size))
                             .map_err(LaurusError::Io)?;
                     }
                     cluster_to_vectors.push(cluster_vecs);
@@ -210,6 +228,7 @@ impl IvfIndexReader {
                         storage: storage.clone(),
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
+                        quant_params: Some(params),
                     },
                     vector_ids,
                 )
@@ -233,6 +252,13 @@ impl IvfIndexReader {
 
     pub fn set_deletion_bitmap(&mut self, bitmap: Arc<DeletionBitmap>) {
         self.deletion_bitmap = Some(bitmap);
+    }
+
+    /// Borrow the underlying [`VectorStorage`] so the IVF searcher
+    /// can detect the [`VectorStorage::OwnedQuantized`] variant and
+    /// switch to the int8 hot path (Issue #481 Stage 1 Step 7).
+    pub fn vectors(&self) -> &VectorStorage {
+        &self.vectors
     }
 
     fn is_deleted(&self, doc_id: u64) -> bool {
@@ -439,6 +465,21 @@ impl VectorIndexReader for IvfIndexReader {
                         ));
                     }
                 }
+            }
+            VectorStorage::OwnedQuantized(pool) => {
+                for (id, field) in &self.vector_ids {
+                    if !pool.contains(*id, field) {
+                        errors.push(format!(
+                            "Vector {}:{} found in keys but missing in quantized pool",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push(
+                    "OwnedQuantized mode: dimension / NaN checks skipped (int8 storage \
+                     guarantees finite values within [offset, offset + 255*scale])"
+                        .to_string(),
+                );
             }
             VectorStorage::OnDemand { offsets, .. } => {
                 for (id, field) in &self.vector_ids {

@@ -30,7 +30,7 @@ async fn test_segmented_field_manual_merge() -> Result<(), Box<dyn std::error::E
             m: 16, // Default or specific to test? Using defaults or standard values
             ef_construction: 200, // Standard default
             base_weight: 1.0,
-            quantizer: None,
+            quantizer: Default::default(),
             embedder: None,
         })),
         lexical: None,
