@@ -68,5 +68,20 @@ fn test_hnsw_integration() -> Result<()> {
     assert_eq!(results.results.len(), 1);
     assert_eq!(results.results[0].doc_id, 1);
 
+    // Stage 2 rerank API is reserved but not yet implemented (Issue #481):
+    // requesting rerank_factor must surface NotImplemented up-front so
+    // callers can plan migration without surprises.
+    let rerank_request = VectorIndexQuery::new(Vector::new(vec![0.9, 0.1, 0.0]))
+        .top_k(1)
+        .field_name("test".to_string())
+        .rerank_factor(2);
+    let err = searcher
+        .search(&rerank_request)
+        .expect_err("rerank_factor should return NotImplemented");
+    assert!(
+        matches!(err, crate::error::LaurusError::NotImplemented(_)),
+        "expected NotImplemented, got {err:?}"
+    );
+
     Ok(())
 }

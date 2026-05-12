@@ -117,6 +117,15 @@ impl VectorIndexSearcher for IvfSearcher {
     fn search(&self, request: &VectorIndexQuery) -> Result<VectorIndexQueryResults> {
         use crate::util::time::Timer;
 
+        // Issue #481 Stage 2 (rerank) -- API surface only in Stage 1.
+        if request.params.rerank_factor.is_some() {
+            return Err(crate::error::LaurusError::NotImplemented(
+                "Two-stage rerank (Issue #481 Stage 2) is not yet implemented. \
+                 Pass rerank_factor = None for the Stage 1 quantized search."
+                    .to_string(),
+            ));
+        }
+
         let start = Timer::now();
         let mut results = VectorIndexQueryResults::new();
 
