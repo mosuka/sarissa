@@ -273,10 +273,6 @@ fn distance_from_proto(d: i32) -> DistanceMetric {
 
 fn quantization_to_proto(q: &QuantizationMethod) -> v1::QuantizationConfig {
     match q {
-        QuantizationMethod::None => v1::QuantizationConfig {
-            method: v1::QuantizationMethod::None as i32,
-            subvector_count: 0,
-        },
         QuantizationMethod::Scalar8Bit => v1::QuantizationConfig {
             method: v1::QuantizationMethod::Scalar8bit as i32,
             subvector_count: 0,
@@ -289,15 +285,19 @@ fn quantization_to_proto(q: &QuantizationMethod) -> v1::QuantizationConfig {
 }
 
 fn quantization_from_proto(q: &v1::QuantizationConfig) -> QuantizationMethod {
+    // Issue #481 Stage 1 removed the unquantized variant from the Rust enum.
+    // The proto wire format still carries `None = 0` for backward compatibility,
+    // but it is silently mapped to `Scalar8Bit` (the new default) to preserve
+    // forward compatibility for older clients that omit the quantizer field.
     match v1::QuantizationMethod::try_from(q.method) {
-        Ok(v1::QuantizationMethod::None) => QuantizationMethod::None,
-        Ok(v1::QuantizationMethod::Scalar8bit) => QuantizationMethod::Scalar8Bit,
+        Ok(v1::QuantizationMethod::Scalar8bit) | Ok(v1::QuantizationMethod::None) | Err(_) => {
+            QuantizationMethod::Scalar8Bit
+        }
         Ok(v1::QuantizationMethod::ProductQuantization) => {
             QuantizationMethod::ProductQuantization {
                 subvector_count: q.subvector_count as usize,
             }
         }
-        Err(_) => QuantizationMethod::None,
     }
 }
 

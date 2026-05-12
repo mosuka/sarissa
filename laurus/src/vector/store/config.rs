@@ -287,7 +287,7 @@ impl Default for FlatIndexConfig {
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             use_quantization: false,
-            quantization_method: quantization::QuantizationMethod::None,
+            quantization_method: quantization::QuantizationMethod::Scalar8Bit,
             merge_factor: 10,
             max_segments: 100,
             embedder: default_embedder(),
@@ -385,7 +385,7 @@ impl Default for HnswIndexConfig {
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             use_quantization: false,
-            quantization_method: quantization::QuantizationMethod::None,
+            quantization_method: quantization::QuantizationMethod::Scalar8Bit,
             merge_factor: 10,
             max_segments: 100,
             embedder: default_embedder(),
@@ -486,7 +486,7 @@ impl Default for IvfIndexConfig {
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             use_quantization: false,
-            quantization_method: quantization::QuantizationMethod::None,
+            quantization_method: quantization::QuantizationMethod::Scalar8Bit,
             merge_factor: 10,
             max_segments: 100,
             embedder: default_embedder(),
