@@ -65,6 +65,7 @@ use laurus::lexical::core::field::{
 };
 use laurus::vector::DistanceMetric;
 use laurus::vector::core::field::{FlatOption, HnswOption, IvfOption};
+use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::{AnalyzerSpec, BuiltinAnalyzerSpec, FieldOption, Schema};
 
 /// Field type names shown in the interactive prompt.
@@ -369,6 +370,7 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
     let distance = prompt_distance_metric()?;
     let m = prompt_usize("M (max connections per node)", 16)?;
     let ef_construction = prompt_usize("ef_construction", 200)?;
+    let rerank_storage = prompt_rerank_storage()?;
 
     Ok(FieldOption::Hnsw(HnswOption {
         dimension,
@@ -377,9 +379,28 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
         ef_construction,
         base_weight: 1.0,
         quantizer: Default::default(),
-        rerank_storage: None,
+        rerank_storage,
         embedder: None,
     }))
+}
+
+/// Prompt the user to optionally enable Stage 2 rerank storage
+/// (Issue #481). Defaults to disabled (Stage 1 int8-only behavior).
+///
+/// When enabled, the writer emits a per-field f32 sidecar so the
+/// HNSW searcher can run two-stage rerank: a wide int8 candidate
+/// fetch followed by an exact f32 rescoring of the top
+/// `top_k * rerank_factor` candidates.
+fn prompt_rerank_storage() -> Result<Option<RerankStorageKind>> {
+    let enable = Confirm::new()
+        .with_prompt("Enable Stage 2 rerank storage (extra f32 sidecar, +4 bytes/dim)?")
+        .default(false)
+        .interact()?;
+    Ok(if enable {
+        Some(RerankStorageKind::F32)
+    } else {
+        None
+    })
 }
 
 /// Prompt for FlatOption.
@@ -490,5 +511,48 @@ mod tests {
         });
         assert_eq!(field_type_label(&opt), "Geo3d");
         assert!(is_lexical_field(&opt));
+    }
+
+    /// Stage 2 (Issue #481): the schema TOML accepts `rerank_storage =
+    /// "F32"` on an HNSW field and the field round-trips through the
+    /// same toml::from_str path the cli uses to load schema.toml.
+    /// Omitting the key keeps the Stage 1 default (None).
+    #[test]
+    fn schema_toml_round_trips_rerank_storage_on_hnsw_field() {
+        let toml_with = r#"
+[fields.embedding.Hnsw]
+dimension = 4
+distance = "Cosine"
+m = 4
+ef_construction = 16
+rerank_storage = "F32"
+"#;
+        let schema: Schema =
+            toml::from_str(toml_with).expect("schema TOML with rerank_storage must parse");
+        let opt = schema
+            .fields
+            .get("embedding")
+            .expect("embedding field must be present");
+        match opt {
+            FieldOption::Hnsw(h) => {
+                assert_eq!(h.rerank_storage, Some(RerankStorageKind::F32));
+            }
+            other => panic!("expected Hnsw field, got {:?}", field_type_label(other)),
+        }
+
+        let toml_without = r#"
+[fields.embedding.Hnsw]
+dimension = 4
+distance = "Cosine"
+m = 4
+ef_construction = 16
+"#;
+        let schema: Schema = toml::from_str(toml_without)
+            .expect("schema TOML without rerank_storage must still parse");
+        let opt = schema.fields.get("embedding").unwrap();
+        match opt {
+            FieldOption::Hnsw(h) => assert!(h.rerank_storage.is_none()),
+            other => panic!("expected Hnsw field, got {:?}", field_type_label(other)),
+        }
     }
 }

@@ -183,6 +183,7 @@ base_weight = 1.0
 | `ef_construction` | `integer` | `200` | Search width during index construction. Higher = better quality, slower build |
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
 | `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
+| `rerank_storage` | `string` | *(omit)* | Optional Stage 2 rerank sidecar (see [Rerank Storage](#rerank-storage)). `"F32"` enables a per-field f32 sidecar so search can rescore int8 candidates against the original vectors. Omit to keep Stage 1 int8-only behavior. |
 
 **Tuning guidelines:**
 
@@ -207,6 +208,7 @@ base_weight = 1.0
 | `distance` | `string` | `"Cosine"` | Distance metric (see [Distance Metrics](#distance-metrics)) |
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
 | `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
+| `rerank_storage` | `string` | *(omit)* | Reserved for [Rerank Storage](#rerank-storage). Currently emitted only by the HNSW writer; Flat / IVF accept the field for schema symmetry but do not yet write or consume the sidecar. |
 
 #### Ivf
 
@@ -229,6 +231,7 @@ base_weight = 1.0
 | `n_probe` | `integer` | `1` | Number of clusters to search at query time. Higher = better recall, slower |
 | `base_weight` | `float` | `1.0` | Scoring weight in hybrid search fusion |
 | `quantizer` | `object` | `"Scalar8Bit"` | Quantization method (see [Quantization](#quantization)). Mandatory; default keeps the int8 format introduced in Issue #481 Stage 1. |
+| `rerank_storage` | `string` | *(omit)* | Reserved for [Rerank Storage](#rerank-storage). Currently emitted only by the HNSW writer; Flat / IVF accept the field for schema symmetry but do not yet write or consume the sidecar. |
 
 > **Note:** Unlike Hnsw and Flat, the `dimension` field in Ivf is **required** and has no default value.
 
@@ -295,6 +298,37 @@ subvector_count = 48
 > set `quantizer` to a "none" value are no longer valid. Existing
 > vector indexes built with a pre-Stage-1 laurus build cannot be
 > read; rebuild from source data after upgrading.
+
+## Rerank Storage
+
+Optional Stage 2 sidecar (Issue #481) that keeps the original
+full-precision vectors alongside the int8 segment so the HNSW
+searcher can do a wide candidate fetch over int8 (cheap) and then
+rescore the top `top_k * rerank_factor` candidates against the
+exact f32 values (accurate).
+
+The sidecar is configured per field with `rerank_storage`:
+
+```toml
+[fields.embedding.Hnsw]
+dimension = 384
+distance = "Cosine"
+rerank_storage = "F32"  # opt-in; omit for Stage 1 int8-only behavior
+```
+
+| Value | On-disk overhead | Description |
+| :--- | :--- | :--- |
+| `"F32"` | +4 bytes/dim per vector | IEEE-754 single-precision sidecar (Lucene 99 / FAISS convention). |
+
+When omitted, no sidecar is written and the field stays on the
+Stage 1 int8-only search path. Queries that pass `rerank_factor`
+against a field without `rerank_storage` silently fall back to
+Stage 1 ranking — the searcher cannot recover f32 information that
+was discarded at index time.
+
+> **Scope:** Stage 2 lands HNSW only. Flat / IVF accept the field
+> for schema symmetry but currently neither emit nor consume the
+> sidecar.
 
 ## Complete Examples
 
