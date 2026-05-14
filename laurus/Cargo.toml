@@ -138,6 +138,9 @@ required-features = ["embeddings-multimodal"]
 [[example]]
 name = "sift_rerank_probe"
 
+[[example]]
+name = "pq_brute_force_probe"
+
 [[bench]]
 name = "distance_bench"
 harness = false
