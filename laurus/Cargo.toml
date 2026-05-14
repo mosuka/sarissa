@@ -135,6 +135,9 @@ required-features = ["embeddings-openai"]
 name = "multimodal_search"
 required-features = ["embeddings-multimodal"]
 
+[[example]]
+name = "sift_rerank_probe"
+
 [[bench]]
 name = "distance_bench"
 harness = false

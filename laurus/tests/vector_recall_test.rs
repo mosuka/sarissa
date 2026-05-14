@@ -1,5 +1,5 @@
 //! Quantized vector search recall acceptance tests for Issue #481
-//! Stage 1 and Stage 2.
+//! Stage 1 / Stage 2 and Issue #498 (real-data Stage 2 validation).
 //!
 //! Stage 1 acceptance asks for "recall ≥ 0.95 vs the f32 baseline"
 //! on the quantized HNSW search path. Since Stage 1 removed the f32
@@ -758,4 +758,152 @@ fn hnsw_quantized_recall_at_10_with_rerank_large_fixture_smoke() {
          (Issue #481 Stage 2 recall gate, large fixture). \
          corpus = {n_corpus}, ef_search = {ef_search}, rerank_factor = {rerank_factor}."
     );
+}
+
+// ============================================================================
+// Issue #498 — Stage 2 real-data validation on SIFT1M
+// ============================================================================
+
+/// Issue #498 acceptance: Recall@10 ≥ 0.99 on a real ANN benchmark
+/// dataset (SIFT1M, the textbook 128-dim ANN benchmark from TEXMEX).
+///
+/// This is the **strict 0.99 gate matching the original #481 Stage 2
+/// issue wording**, defended end-to-end on real data rather than the
+/// synthetic random unit-norm distribution the existing Stage 2
+/// fixture uses. The non-real-data tests above are deliberately split
+/// into a strict kernel layer (`stage2_brute_force_rerank_recall_at_10_meets_kernel_gate`,
+/// 0.99) and a looser HNSW layer (0.98); real data clears the strict
+/// 0.99 on the HNSW path directly, so the gate here is set to 0.99.
+///
+/// # Configuration
+///
+/// `(m, ef_construction, ef_search, rerank_factor) = (16, 200, 200, 5)`
+/// over a 50 000-vector SIFT1M subsample. Phase 0 sweep results
+/// (see `~/.claude/tasks/laurus/20260514_498_real_data_speed_validation/`)
+/// measured Recall@10 = 0.9985 at this cell, with the matching f32 HNSW
+/// baseline at the same cell taking 650.90 µs/query versus 359.95
+/// µs/query for the Stage 2 path — a 1.81× speedup that meets the
+/// Issue #498 ≥ 1.5× real-data speed gate (the original Issue #481
+/// wording of "≥ 3×" was reduced after Phase 0 measurements showed it
+/// is unreachable on SIFT1M with the current implementation; see the
+/// issue thread).
+///
+/// # Opt-in
+///
+/// Gated on `LAURUS_REAL_BENCHMARK=1` AND the presence of
+/// `.cache/sift/sift/sift_base.fvecs`. The test prints a skip message
+/// and returns success when either is missing so default CI is
+/// unchanged. To run locally:
+///
+/// ```sh
+/// ./scripts/fetch-sift.sh --large
+/// LAURUS_REAL_BENCHMARK=1 cargo test --release \
+///     --test vector_recall_test \
+///     hnsw_quantized_recall_at_10_with_rerank_on_sift_meets_stage2_real_data_recall_gate \
+///     -- --nocapture
+/// ```
+#[test]
+fn hnsw_quantized_recall_at_10_with_rerank_on_sift_meets_stage2_real_data_recall_gate() {
+    if std::env::var("LAURUS_REAL_BENCHMARK").as_deref() != Ok("1") {
+        eprintln!(
+            "skipping Issue #498 real-data recall test; set \
+             LAURUS_REAL_BENCHMARK=1 and run ./scripts/fetch-sift.sh \
+             --large to enable."
+        );
+        return;
+    }
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cache = manifest
+        .parent()
+        .expect("workspace root is one level up from laurus/")
+        .join(".cache")
+        .join("sift");
+    let base_path = cache.join("sift").join("sift_base.fvecs");
+    let query_path = cache.join("sift").join("sift_query.fvecs");
+    if !base_path.exists() || !query_path.exists() {
+        eprintln!(
+            "skipping Issue #498 real-data recall test: SIFT1M fixture \
+             not found at {}. Run ./scripts/fetch-sift.sh --large.",
+            base_path.display()
+        );
+        return;
+    }
+
+    let n_corpus = 50_000usize;
+    let n_queries = 200usize;
+    let ef_search = 200usize;
+    let rerank_factor = 5usize;
+
+    let mut corpus = read_fvecs_unit_norm(&base_path, DIM, Some(n_corpus));
+    let mut queries = read_fvecs_unit_norm(&query_path, DIM, Some(n_queries));
+    assert_eq!(corpus.len(), n_corpus, "subsample size mismatch");
+    assert!(!queries.is_empty(), "query set must be non-empty");
+    for v in corpus.iter_mut() {
+        debug_assert_eq!(v.len(), DIM);
+    }
+    for v in queries.iter_mut() {
+        debug_assert_eq!(v.len(), DIM);
+    }
+
+    let recall = measure_recall_with_rerank(corpus, &queries, ef_search, rerank_factor);
+    eprintln!(
+        "Issue #498 SIFT1M-{} Stage 2 Recall@{TOP_K} = {recall:.4} \
+         (m=16, ef_construction=200, ef_search={ef_search}, rerank_factor={rerank_factor}, \
+         queries={})",
+        n_corpus,
+        queries.len()
+    );
+
+    const REAL_DATA_RECALL_THRESHOLD: f32 = 0.99;
+    assert!(
+        recall >= REAL_DATA_RECALL_THRESHOLD,
+        "Issue #498 SIFT1M-50k Stage 2 Recall@{TOP_K} = {recall:.4} < {REAL_DATA_RECALL_THRESHOLD} \
+         (m=16, ef_construction=200, ef_search={ef_search}, rerank_factor={rerank_factor}). \
+         Phase 0 measured 0.9985 at this configuration; a sub-0.99 \
+         result here points at a Stage 2 regression."
+    );
+}
+
+/// Load `.fvecs` records, L2-normalise each vector so Cosine distance
+/// is well-defined (SIFT vectors are non-negative integer histograms
+/// with non-zero norms). The shared helper lives in
+/// `laurus/benches/common.rs` but is duplicated here so the test file
+/// stays self-contained (`benches/` is not a Rust module from the
+/// integration-test perspective).
+fn read_fvecs_unit_norm(
+    path: &std::path::Path,
+    expect_dim: usize,
+    max: Option<usize>,
+) -> Vec<Vec<f32>> {
+    use std::io::{BufReader, Read};
+    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    let mut reader = BufReader::new(file);
+    let mut out = Vec::new();
+    let mut hdr = [0u8; 4];
+    let mut vec_buf = vec![0u8; expect_dim * 4];
+    loop {
+        if reader.read_exact(&mut hdr).is_err() {
+            break;
+        }
+        let dim = u32::from_le_bytes(hdr) as usize;
+        assert_eq!(dim, expect_dim, "dim mismatch in {}", path.display());
+        reader.read_exact(&mut vec_buf).expect("vec body");
+        let mut v = Vec::with_capacity(dim);
+        for chunk in vec_buf.chunks_exact(4) {
+            v.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+        }
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for x in v.iter_mut() {
+                *x /= norm;
+            }
+        }
+        out.push(v);
+        if let Some(cap) = max
+            && out.len() >= cap
+        {
+            break;
+        }
+    }
+    out
 }
