@@ -638,14 +638,22 @@ impl PostingList {
         let tail = n % POSTING_BLOCK_LEN;
 
         // Section 1: doc_ids.
+        //
+        // Issue #504: prefer the zero-copy `read_raw_with` path so
+        // mmap-backed segments hand the compressed block straight to
+        // `bitpacking` without the intermediate `Vec<u8>` allocation +
+        // `copy_from_slice` that `read_raw` would otherwise perform.
+        // The fallback (buffered file I/O) still works through the
+        // same callback — it just routes through a heap buffer.
         let mut doc_ids: Vec<u32> = Vec::with_capacity(n);
         let mut buf = [0u32; POSTING_BLOCK_LEN];
         let mut initial: u32 = 0;
         for _ in 0..full_blocks {
             let num_bits = reader.read_u8()?;
             let bytes = num_bits as usize * POSTING_BLOCK_LEN / 8;
-            let compressed = reader.read_raw(bytes)?;
-            bitpacker.decompress_sorted(initial, &compressed, &mut buf, num_bits);
+            reader.read_raw_with(bytes, |compressed| {
+                bitpacker.decompress_sorted(initial, compressed, &mut buf, num_bits);
+            })?;
             doc_ids.extend_from_slice(&buf);
             initial = buf[POSTING_BLOCK_LEN - 1];
         }
@@ -661,13 +669,14 @@ impl PostingList {
             prev_did = did;
         }
 
-        // Section 2: frequencies.
+        // Section 2: frequencies (same zero-copy block path).
         let mut frequencies: Vec<u32> = Vec::with_capacity(n);
         for _ in 0..full_blocks {
             let num_bits = reader.read_u8()?;
             let bytes = num_bits as usize * POSTING_BLOCK_LEN / 8;
-            let compressed = reader.read_raw(bytes)?;
-            bitpacker.decompress(&compressed, &mut buf, num_bits);
+            reader.read_raw_with(bytes, |compressed| {
+                bitpacker.decompress(compressed, &mut buf, num_bits);
+            })?;
             frequencies.extend_from_slice(&buf);
         }
         for _ in 0..tail {
