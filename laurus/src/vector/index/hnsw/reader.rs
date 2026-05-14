@@ -364,6 +364,12 @@ impl HnswIndexReader {
                 }
                 idx
             }
+            VectorStorage::OwnedPq(_) => {
+                // PQ records are M bytes each (8-32 bytes) — small
+                // enough that prefetching adds no benefit; the LUT is
+                // the more important cache occupant.
+                HashMap::new()
+            }
             VectorStorage::OnDemand { .. } => HashMap::new(),
         };
 
@@ -555,6 +561,7 @@ impl VectorIndexReader for HnswIndexReader {
         let memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
             VectorStorage::OwnedQuantized(pool) => pool.data.len(),
+            VectorStorage::OwnedPq(pool) => pool.data.len() + pool.codebook.len() * 4,
             VectorStorage::OnDemand { offsets, .. } => {
                 // Estimate memory for offsets map + ID list
                 offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
@@ -575,6 +582,7 @@ impl VectorIndexReader for HnswIndexReader {
                 vectors.contains_key(&(doc_id, field_name.to_string()))
             }
             VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
+            VectorStorage::OwnedPq(pool) => pool.contains(doc_id, field_name),
             VectorStorage::OnDemand { offsets, .. } => {
                 offsets.contains_key(&(doc_id, field_name.to_string()))
             }
@@ -690,6 +698,21 @@ impl VectorIndexReader for HnswIndexReader {
                 warnings.push(
                     "OwnedQuantized mode: dimension / NaN checks skipped (int8 storage \
                      guarantees finite values within [offset, offset + 255*scale])"
+                        .to_string(),
+                );
+            }
+            VectorStorage::OwnedPq(pool) => {
+                for (id, field) in &self.vector_ids {
+                    if !pool.contains(*id, field) {
+                        errors.push(format!(
+                            "Vector {}:{} found in keys but missing in PQ pool",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push(
+                    "OwnedPq mode: dimension / NaN checks skipped (codes index into \
+                     the trained codebook which is bounded by construction)"
                         .to_string(),
                 );
             }

@@ -490,6 +490,21 @@ impl VectorIndexReader for IvfIndexReader {
                         .to_string(),
                 );
             }
+            VectorStorage::OwnedPq(pool) => {
+                for (id, field) in &self.vector_ids {
+                    if !pool.contains(*id, field) {
+                        errors.push(format!(
+                            "Vector {}:{} found in keys but missing in PQ pool",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push(
+                    "OwnedPq mode: dimension / NaN checks skipped (codes index into \
+                     the trained codebook)"
+                        .to_string(),
+                );
+            }
             VectorStorage::OnDemand { offsets, .. } => {
                 for (id, field) in &self.vector_ids {
                     if !offsets.contains_key(&(*id, field.clone())) {

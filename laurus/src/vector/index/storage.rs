@@ -6,6 +6,7 @@ use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
 use crate::vector::core::quantization::{QuantizedVectorMeta, ScalarQuantParams};
 use crate::vector::core::vector::Vector;
+use crate::vector::index::pq_storage::PqVectorPool;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
 
 /// Storage for vectors (in-memory or on-demand from disk).
@@ -30,6 +31,12 @@ pub enum VectorStorage {
     /// [`Self::get`], which dequantizes lazily for the legacy
     /// [`crate::vector::reader::VectorIndexReader::get_vector`] API.
     OwnedQuantized(Arc<QuantizedVectorPool>),
+    /// All vectors are loaded into memory as PQ codes plus the
+    /// per-segment codebook (Issue #481 Stage 3, HNSW only). The
+    /// search hot loop accesses the inner [`PqVectorPool`] directly
+    /// via [`Self::pq_pool`] and feeds codes + the per-query LUT to
+    /// [`crate::vector::core::distance_quantized::distance_pq_adc`].
+    OwnedPq(Arc<PqVectorPool>),
     /// Vectors are read from disk on demand.
     ///
     /// Each [`get`](Self::get) call opens a fresh [`StorageInput`](crate::storage::StorageInput)
@@ -57,13 +64,24 @@ pub enum VectorStorage {
 }
 
 impl VectorStorage {
-    /// If this storage is the in-memory quantized variant, return the
-    /// underlying [`QuantizedVectorPool`] so the search hot loop can
-    /// pull `(int8 slice, meta)` directly without going through the
-    /// dequantizing [`Self::get`] path.
+    /// If this storage is the in-memory Scalar8Bit quantized variant,
+    /// return the underlying [`QuantizedVectorPool`] so the search hot
+    /// loop can pull `(int8 slice, meta)` directly without going
+    /// through the dequantizing [`Self::get`] path.
     pub fn quantized_pool(&self) -> Option<&Arc<QuantizedVectorPool>> {
         match self {
             VectorStorage::OwnedQuantized(pool) => Some(pool),
+            _ => None,
+        }
+    }
+
+    /// If this storage is the in-memory PQ variant (Stage 3), return
+    /// the underlying [`PqVectorPool`] so the search hot loop can pull
+    /// `(codes, codebook)` directly and dispatch to the PQ ADC
+    /// kernel.
+    pub fn pq_pool(&self) -> Option<&Arc<PqVectorPool>> {
+        match self {
+            VectorStorage::OwnedPq(pool) => Some(pool),
             _ => None,
         }
     }
@@ -73,6 +91,7 @@ impl VectorStorage {
         match self {
             VectorStorage::Owned(map) => map.keys().cloned().collect(),
             VectorStorage::OwnedQuantized(pool) => pool.keys(),
+            VectorStorage::OwnedPq(pool) => pool.keys(),
             VectorStorage::OnDemand { offsets, .. } => offsets.keys().cloned().collect(),
         }
     }
@@ -82,6 +101,7 @@ impl VectorStorage {
         match self {
             VectorStorage::Owned(map) => map.len(),
             VectorStorage::OwnedQuantized(pool) => pool.vector_count,
+            VectorStorage::OwnedPq(pool) => pool.vector_count,
             VectorStorage::OnDemand { offsets, .. } => offsets.len(),
         }
     }
@@ -100,6 +120,7 @@ impl VectorStorage {
         match self {
             VectorStorage::Owned(map) => map.contains_key(key),
             VectorStorage::OwnedQuantized(pool) => pool.contains(key.0, &key.1),
+            VectorStorage::OwnedPq(pool) => pool.contains(key.0, &key.1),
             VectorStorage::OnDemand { offsets, .. } => offsets.contains_key(key),
         }
     }
@@ -127,6 +148,7 @@ impl VectorStorage {
         match self {
             VectorStorage::Owned(map) => Ok(map.get(key).cloned()),
             VectorStorage::OwnedQuantized(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
+            VectorStorage::OwnedPq(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
             VectorStorage::OnDemand {
                 storage,
                 file_name,
