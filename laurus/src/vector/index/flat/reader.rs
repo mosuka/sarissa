@@ -96,7 +96,16 @@ impl FlatVectorIndexReader {
         // Read the Issue #481 Stage 1 vector segment header (LVS1).
         // Pre-Stage-1 segments are rejected with IncompatibleFormat.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let QuantHeader::Scalar8Bit(params) = header.quant;
+        let params = match header.quant {
+            QuantHeader::Scalar8Bit(p) => p,
+            QuantHeader::ProductQuantization { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "Product quantization (Issue #481 Stage 3) is HNSW-only; \
+                     the Flat reader does not support PQ segments yet"
+                        .to_string(),
+                ));
+            }
+        };
 
         let (vectors, vector_ids) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
@@ -292,6 +301,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
         let _memory_usage = match &self.vectors {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
             VectorStorage::OwnedQuantized(pool) => pool.data.len(),
+            VectorStorage::OwnedPq(pool) => pool.data.len() + pool.codebook.len() * 4,
             VectorStorage::OnDemand { offsets, .. } => {
                 // Estimate memory for offsets map + ID list
                 offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
@@ -311,6 +321,7 @@ impl VectorIndexReader for FlatVectorIndexReader {
                 vectors.contains_key(&(doc_id, field_name.to_string()))
             }
             VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
+            VectorStorage::OwnedPq(pool) => pool.contains(doc_id, field_name),
             VectorStorage::OnDemand { offsets, .. } => {
                 offsets.contains_key(&(doc_id, field_name.to_string()))
             }
@@ -426,6 +437,21 @@ impl VectorIndexReader for FlatVectorIndexReader {
                 warnings.push(
                     "OwnedQuantized mode: dimension / NaN checks skipped (int8 storage \
                      guarantees finite values within [offset, offset + 255*scale])"
+                        .to_string(),
+                );
+            }
+            VectorStorage::OwnedPq(pool) => {
+                for (id, field) in &self.vector_ids {
+                    if !pool.contains(*id, field) {
+                        errors.push(format!(
+                            "Vector {}:{} found in keys but missing in PQ pool",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push(
+                    "OwnedPq mode: dimension / NaN checks skipped (codes index into \
+                     the trained codebook which is bounded by construction)"
                         .to_string(),
                 );
             }

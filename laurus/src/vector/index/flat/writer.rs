@@ -116,7 +116,16 @@ impl FlatIndexWriter {
         // Read the Issue #481 Stage 1 vector segment header (LVS1).
         // Pre-Stage-1 segments are rejected with IncompatibleFormat.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let QuantHeader::Scalar8Bit(params) = header.quant;
+        let params = match header.quant {
+            QuantHeader::Scalar8Bit(p) => p,
+            QuantHeader::ProductQuantization { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "Product quantization (Issue #481 Stage 3) is HNSW-only; \
+                     the Flat writer does not support PQ segments yet"
+                        .to_string(),
+                ));
+            }
+        };
 
         // Read quantized vectors, dequantizing back to f32 so the
         // in-memory writer state stays compatible with downstream

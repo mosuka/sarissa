@@ -425,3 +425,74 @@ fn writer_load_round_trips_byte_exact_via_sidecar() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
+    use crate::vector::core::quantization::QuantizationMethod;
+    use crate::vector::index::hnsw::searcher::HnswSearcher;
+    use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
+
+    let storage_config = StorageConfig::Memory(MemoryStorageConfig::default());
+    let storage = StorageFactory::create(storage_config)?;
+
+    // Two well-separated clusters in 4-D Euclidean space. M=2 → sub_dim=2.
+    let config = HnswIndexConfig {
+        dimension: 4,
+        m: 8,
+        ef_construction: 50,
+        distance_metric: DistanceMetric::Euclidean,
+        quantization_method: QuantizationMethod::ProductQuantization { subvector_count: 2 },
+        ..Default::default()
+    };
+
+    let index = HnswIndex::create(storage.clone(), "pq_round_trip", config.clone())?;
+    let mut writer = index.writer()?;
+
+    let vectors = vec![
+        (
+            1u64,
+            "embedding".to_string(),
+            Vector::new(vec![10.0, 10.0, 20.0, 20.0]),
+        ),
+        (
+            2,
+            "embedding".to_string(),
+            Vector::new(vec![10.1, 10.1, 20.1, 20.1]),
+        ),
+        (
+            3,
+            "embedding".to_string(),
+            Vector::new(vec![-10.0, -10.0, -20.0, -20.0]),
+        ),
+        (
+            4,
+            "embedding".to_string(),
+            Vector::new(vec![-10.1, -10.1, -20.1, -20.1]),
+        ),
+        (
+            5,
+            "embedding".to_string(),
+            Vector::new(vec![9.9, 9.9, 19.9, 19.9]),
+        ),
+    ];
+    writer.build(vectors.clone())?;
+    writer.finalize()?;
+    writer.commit()?;
+
+    let reader = index.reader()?;
+    let searcher = HnswSearcher::new(reader)?;
+
+    // Query close to the (+10, +10, +20, +20) cluster — top-3 results
+    // must all come from that cluster (doc_ids 1 / 2 / 5).
+    let query = Vector::new(vec![10.0, 10.0, 20.0, 20.0]);
+    let request = VectorIndexQuery::new(query)
+        .top_k(3)
+        .field_name("embedding".to_string());
+    let results = searcher.search(&request)?;
+    assert_eq!(results.results.len(), 3, "expected top-3 results");
+    let ids: std::collections::HashSet<u64> = results.results.iter().map(|r| r.doc_id).collect();
+    assert!(ids.contains(&1), "missing doc_id 1; got {:?}", ids);
+    assert!(ids.contains(&2), "missing doc_id 2; got {:?}", ids);
+    assert!(ids.contains(&5), "missing doc_id 5; got {:?}", ids);
+    Ok(())
+}

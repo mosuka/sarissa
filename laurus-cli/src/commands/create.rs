@@ -370,6 +370,7 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
     let distance = prompt_distance_metric()?;
     let m = prompt_usize("M (max connections per node)", 16)?;
     let ef_construction = prompt_usize("ef_construction", 200)?;
+    let quantizer = prompt_quantization_method(dimension)?;
     let rerank_storage = prompt_rerank_storage()?;
 
     Ok(FieldOption::Hnsw(HnswOption {
@@ -378,10 +379,53 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
         m,
         ef_construction,
         base_weight: 1.0,
-        quantizer: Default::default(),
+        quantizer,
         rerank_storage,
         embedder: None,
     }))
+}
+
+/// Prompt for the quantization method.
+///
+/// Default = Scalar8Bit (Stage 1, 4x compression, recall ~0.95).
+/// Optional Product Quantization (Stage 3, Issue #481) requires the
+/// user to pick an `M` that divides the vector dimension; the
+/// codebook is trained per segment with K = 256 centroids per
+/// sub-vector. PQ delivers 8-19x compression at the cost of recall —
+/// usually paired with rerank storage to compensate.
+fn prompt_quantization_method(
+    dimension: usize,
+) -> Result<laurus::vector::core::quantization::QuantizationMethod> {
+    use laurus::vector::core::quantization::QuantizationMethod;
+    let kinds = [
+        "Scalar8Bit (Stage 1, 4x)",
+        "ProductQuantization (Stage 3, 8-32x)",
+    ];
+    let idx = Select::new()
+        .with_prompt("Quantization method")
+        .items(kinds.as_slice())
+        .default(0)
+        .interact()?;
+    match idx {
+        0 => Ok(QuantizationMethod::Scalar8Bit),
+        _ => {
+            // Default M = max divisor of dim in {32, 16, 8} so the
+            // codebook is well-formed and the codes-to-dim ratio is
+            // sensible (sub_dim ≥ 2 to keep ADC meaningful).
+            let default_m = [32usize, 16, 8]
+                .iter()
+                .copied()
+                .find(|m| dimension.is_multiple_of(*m) && dimension / m >= 2)
+                .unwrap_or(8);
+            let subvector_count = prompt_usize("M (subvector count, must divide dim)", default_m)?;
+            if !dimension.is_multiple_of(subvector_count) {
+                return Err(anyhow::anyhow!(
+                    "subvector_count {subvector_count} does not divide dimension {dimension}"
+                ));
+            }
+            Ok(QuantizationMethod::ProductQuantization { subvector_count })
+        }
+    }
 }
 
 /// Prompt the user to optionally enable Stage 2 rerank storage

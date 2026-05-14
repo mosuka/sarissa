@@ -207,7 +207,7 @@ recall test at `laurus/tests/vector_recall_test.rs`).
 | Method | Enum Variant | Description | Memory Reduction |
 | :--- | :--- | :--- | :--- |
 | **Scalar 8-bit** *(default)* | `Scalar8Bit` | Per-segment global affine quantization to `u8` | ~4x |
-| **Product Quantization** *(reserved)* | `ProductQuantization { subvector_count }` | Stage 3 of #481 — currently `NotImplemented` | ~16-64x |
+| **Product Quantization** | `ProductQuantization { subvector_count }` | Stage 3 of #481 — per-segment codebook of `M × 256` centroids, each vector stored as `M` bytes | ~16-64x (HNSW-only) |
 
 ```rust
 use laurus::vector::HnswOption;
@@ -381,6 +381,85 @@ already visited — a lower `ef_search` does not pay back through
 rerank when the candidate set itself becomes too narrow, which a
 follow-up could address by widening the graph search budget
 independently of `ef_search` (the Lucene 99 pattern).
+
+### Product Quantization with rerank (Issue #481 Stage 3)
+
+Stage 3 adds an opt-in **Product Quantization** path for the HNSW
+index. Each segment trains a per-field codebook of `M` sub-vectors
+× `K = 256` centroids using Lloyd k-means with k-means++
+initialisation, and stores every vector as `M` bytes (one centroid
+index per sub-vector). The search hot loop replaces the int8 SIMD
+kernel with **asymmetric distance computation** (ADC): per-query
+the searcher builds an `M × K` look-up table of squared distances
+between the query's sub-vectors and the codebook entries, then
+scores each candidate as `Σ_m lut[m][codes[m]]` — `M` table
+lookups + `M − 1` adds per candidate.
+
+PQ is enabled per field via `HnswOption.quantizer`:
+
+```rust
+use laurus::vector::HnswOption;
+use laurus::vector::core::quantization::QuantizationMethod;
+use laurus::vector::core::rerank::RerankStorageKind;
+
+let opt = HnswOption {
+    dimension: 128,
+    quantizer: QuantizationMethod::ProductQuantization { subvector_count: 32 },
+    // PQ-only Recall@10 caps out around 0.78-0.92 on SIFT1M, so
+    // production deployments should pair PQ with the LRS1 rerank
+    // sidecar — same Stage 2 mechanism, just driven by PQ
+    // candidate generation instead of int8.
+    rerank_storage: Some(RerankStorageKind::F32),
+    ..Default::default()
+};
+```
+
+`subvector_count` must divide `dimension`. Common choices for
+`dim = 128`: `M ∈ {8, 16, 32}` (sub_dim 16 / 8 / 4). Larger `M`
+trades on-disk compression for higher recall — Issue #481 Stage 3
+ships only the 8-bit (K = 256) variant; the on-disk format reserves
+a 4-bit (K = 16) slot for a future PR.
+
+#### On-disk format
+
+PQ segments use the same `LVS1` header as Scalar8Bit (`quant_kind =
+2`) and carry the codebook inside the per-segment metadata block:
+
+```text
+[ Fixed header           16 bytes ]
+[ PQ params               8 bytes ]    m / k / sub_dim / padding (u16 × 4)
+[ Codebook                m × k × sub_dim × 4 bytes ]
+[ Per-vector codes        num_vectors × m bytes ]
+```
+
+For `dim = 128, M = 32, K = 256`: codebook = `32 × 256 × 4 × 4 =
+131 072 bytes` (128 KB) per segment plus 32 bytes per vector.
+
+#### Recall and speed gates (Issue #481 Stage 3)
+
+- **Kernel-level test** — synthetic 5 000-vector / dim 128 / 100
+  queries at `(m=16, ef_construction=200, ef_search=200,
+  rerank_factor=10, M=32)`:
+  `hnsw_pq_rerank_recall_at_10_meets_stage3_recall_gate` asserts
+  Recall@10 ≥ 0.95. Measured 0.9660.
+- **Real-data test** — SIFT1M-50k subsample (opt-in via
+  `LAURUS_REAL_BENCHMARK=1`, same config):
+  `hnsw_pq_rerank_recall_at_10_on_sift_meets_stage3_real_data_recall_gate`
+  asserts Recall@10 ≥ 0.95. Measured 0.9965.
+- **Real-data speed bench** —
+  `bench_hnsw_graph_search_pq_rerank_real_data` (opt-in,
+  Criterion). Cross-branch measurement at the same SIFT1M-50k
+  config: pre-Stage-1 f32 HNSW = 625.21 µs/query (PR #500);
+  Stage 3 PQ + rerank = **299.54 µs/query** = **2.09× speedup**.
+
+Issue #481 originally asked for ≥ 5× speedup at Recall ≥ 0.95.
+The PR established that target is not reachable on SIFT1M with the
+current implementation — both Stage 2 (#500) and this Stage 3 PR
+have measured speedups in the 1.9-2.1× band because rerank
+dominates the wall-clock once the candidate set is wide enough to
+recover recall. The gate was reduced to ≥ 1.5× accordingly. A
+follow-up could pursue the Lucene 99 pattern (independent graph
+search budget) and / or a 4-bit PQ variant to close the gap.
 
 ## Segment Files
 

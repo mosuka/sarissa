@@ -15,6 +15,8 @@ pub mod format;
 pub mod hnsw;
 pub mod io;
 pub mod ivf;
+pub mod pq_io;
+pub mod pq_storage;
 pub mod quantized_io;
 pub mod quantized_segment;
 pub mod quantized_storage;

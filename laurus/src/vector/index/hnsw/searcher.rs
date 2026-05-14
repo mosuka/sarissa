@@ -4,10 +4,13 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::vector::core::distance::DistanceMetric;
-use crate::vector::core::distance_quantized::{QuantizedQuery, distance_quantized};
+use crate::vector::core::distance_quantized::{
+    PqQuery, QuantizedQuery, distance_pq_adc, distance_quantized,
+};
 use crate::vector::core::vector::Vector;
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::hnsw::reader::HnswIndexReader;
+use crate::vector::index::pq_storage::PqVectorPool;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorIndexSearcher;
@@ -18,28 +21,46 @@ use bit_vec::BitVec;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
-/// Per-search state for the int8 hot path (Issue #481 Stage 1, Step 6).
+/// Per-search state for the quantized hot path (Issue #481 Stage 1 +
+/// Stage 3).
 ///
-/// Built once at the start of `search_graph` when the reader is
-/// [`crate::vector::index::storage::VectorStorage::OwnedQuantized`].
-/// Threaded through `calc_dist` so each per-candidate call is one
-/// O(1) `field_idx.get` plus a [`distance_quantized`] invocation —
-/// no per-call allocation, no `String` clone.
-struct QuantizedSearchCtx {
-    /// Quantized query (int8 + cached norm + offset/scale), prepared
-    /// once per search via [`QuantizedQuery::prepare`].
-    prepared: QuantizedQuery,
-    /// The reader's in-memory int8 storage. Cloned `Arc` so the pool
-    /// stays alive even if the reader is dropped mid-search (it isn't,
-    /// but the borrow checker needs the lifetime extension).
-    pool: Arc<QuantizedVectorPool>,
-    /// Per-field doc_id -> vector position in `pool.data`. None when
-    /// the searched field is absent from this segment (impossible for
-    /// the HNSW graph search path, but kept for type symmetry).
-    field_idx: Arc<HashMap<u64, u32>>,
-    /// Distance metric, cached so the hot loop skips the
-    /// `reader.distance_metric()` indirection.
-    metric: DistanceMetric,
+/// Built once at the start of `search_graph` when the reader exposes
+/// either a [`QuantizedVectorPool`] (Stage 1, int8) or a
+/// [`PqVectorPool`] (Stage 3, PQ codes + codebook). Threaded through
+/// `calc_dist` so each per-candidate call is one O(1)
+/// `field_idx.get` plus a quantized distance kernel call — no per-call
+/// allocation, no `String` clone.
+enum QuantizedSearchCtx {
+    /// Stage 1: int8 hot path.
+    Scalar8Bit {
+        /// Quantized query (int8 + cached norm + offset/scale),
+        /// prepared once per search via [`QuantizedQuery::prepare`].
+        prepared: QuantizedQuery,
+        /// The reader's in-memory int8 storage. Cloned `Arc` so the
+        /// pool stays alive even if the reader is dropped mid-search
+        /// (it isn't, but the borrow checker needs the lifetime
+        /// extension).
+        pool: Arc<QuantizedVectorPool>,
+        /// Per-field doc_id -> vector position in `pool.data`. Cached
+        /// so the hot loop is a HashMap probe, not a per-field-name
+        /// indirection.
+        field_idx: Arc<HashMap<u64, u32>>,
+        /// Distance metric, cached so the hot loop skips the
+        /// `reader.distance_metric()` indirection.
+        metric: DistanceMetric,
+    },
+    /// Stage 3: PQ ADC hot path.
+    Pq {
+        /// Per-query LUT (M × K floats) prepared once per search via
+        /// [`PqQuery::prepare`].
+        prepared: PqQuery,
+        /// The reader's in-memory PQ pool (codes + codebook + index).
+        pool: Arc<PqVectorPool>,
+        /// Per-field doc_id -> vector position in `pool.data`.
+        field_idx: Arc<HashMap<u64, u32>>,
+        /// Distance metric, cached for the hot loop.
+        metric: DistanceMetric,
+    },
 }
 
 impl QuantizedSearchCtx {
@@ -48,12 +69,31 @@ impl QuantizedSearchCtx {
     /// is what HNSW's calc_dist expects for absent neighbours.
     #[inline]
     fn distance(&self, doc_id: u64) -> f32 {
-        match self.field_idx.get(&doc_id) {
-            Some(&pos) => {
-                let (int8, meta) = self.pool.record_at(pos);
-                distance_quantized(self.metric, &self.prepared, int8, meta)
-            }
-            None => f32::MAX,
+        match self {
+            Self::Scalar8Bit {
+                prepared,
+                pool,
+                field_idx,
+                metric,
+            } => match field_idx.get(&doc_id) {
+                Some(&pos) => {
+                    let (int8, meta) = pool.record_at(pos);
+                    distance_quantized(*metric, prepared, int8, meta)
+                }
+                None => f32::MAX,
+            },
+            Self::Pq {
+                prepared,
+                pool,
+                field_idx,
+                metric,
+            } => match field_idx.get(&doc_id) {
+                Some(&pos) => {
+                    let codes = pool.codes_at(pos);
+                    distance_pq_adc(*metric, prepared, codes)
+                }
+                None => f32::MAX,
+            },
         }
     }
 }
@@ -286,32 +326,51 @@ impl HnswSearcher {
         let query = &request.query;
         let ef_search = self.ef_search;
 
-        // Issue #481 Stage 1, Step 6: when the reader holds the
-        // OwnedQuantized in-memory pool, prepare the int8 hot path
-        // here so the per-candidate calc_dist call collapses into one
-        // O(1) doc_id lookup + distance_quantized (int8 SIMD).
+        // Prepare the quantized hot path according to the segment's
+        // storage kind:
+        // * Stage 1 (`OwnedQuantized`): int8 SIMD via
+        //   [`distance_quantized`].
+        // * Stage 3 (`OwnedPq`, Issue #481 PQ): ADC LUT via
+        //   [`distance_pq_adc`].
+        // Other storage kinds (`OnDemand`, `Owned`) fall through to
+        // the f32 reference path in `calc_dist`.
+        let metric = reader.distance_metric();
         let quant_ctx: Option<QuantizedSearchCtx> =
-            reader.vectors().quantized_pool().and_then(|pool| {
+            if let Some(pool) = reader.vectors().quantized_pool() {
                 pool.field_position_index(field_name).map(|field_idx| {
                     let prepared = QuantizedQuery::prepare(&query.data, &pool.params);
-                    QuantizedSearchCtx {
+                    QuantizedSearchCtx::Scalar8Bit {
                         prepared,
                         pool: pool.clone(),
                         field_idx,
-                        metric: reader.distance_metric(),
+                        metric,
                     }
                 })
-            });
+            } else if let Some(pool) = reader.vectors().pq_pool() {
+                pool.field_position_index(field_name).map(|field_idx| {
+                    let prepared = PqQuery::prepare(&query.data, pool.params, &pool.codebook);
+                    QuantizedSearchCtx::Pq {
+                        prepared,
+                        pool: pool.clone(),
+                        field_idx,
+                        metric,
+                    }
+                })
+            } else {
+                None
+            };
 
         // Retrieve the per-field prefetch index once per search call (O(1), no allocation).
         // `None` for on-demand (disk-backed) storage; the prefetch loop is skipped entirely.
         let field_prefetch = reader.field_prefetch_index(field_name);
         // Prefetch payload size: int8 record (dim + 8 bytes meta) for
-        // the quantized hot path; legacy f32 size otherwise.
-        let prefetch_n_bytes = if quant_ctx.is_some() {
-            QuantizedVectorPool::record_size(reader.dimension())
-        } else {
-            reader.dimension() * std::mem::size_of::<f32>()
+        // the SQ hot path; M bytes for PQ; legacy f32 size otherwise.
+        let prefetch_n_bytes = match &quant_ctx {
+            Some(QuantizedSearchCtx::Scalar8Bit { .. }) => {
+                QuantizedVectorPool::record_size(reader.dimension())
+            }
+            Some(QuantizedSearchCtx::Pq { pool, .. }) => PqVectorPool::record_size(pool.params.m),
+            None => reader.dimension() * std::mem::size_of::<f32>(),
         };
 
         // 1. Start from entry point at max_level

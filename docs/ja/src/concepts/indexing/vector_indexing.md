@@ -385,6 +385,84 @@ rerank が int8 graph traversal で visit 済みの候補を re-rank する
 budget を `ef_search` から独立に広げる（Lucene 99 pattern）案が
 あります。
 
+### Product Quantization + rerank（Issue #481 Stage 3）
+
+Stage 3 は HNSW index 向けに opt-in の **Product Quantization** path を
+追加します。 各 segment は per-field の codebook（`M` 個の sub-vector
+× `K = 256` centroid）を k-means++ + Lloyd 反復で学習し、 各ベクトル
+を `M` バイトで保存します（sub-vector あたり 1 centroid index）。
+検索ホットループでは int8 SIMD kernel を **asymmetric distance
+computation**（ADC）に置き換えます: query 1 回ごとに query
+sub-vector と codebook entry の squared distance を `M × K`
+look-up table に展開し、候補ごとに `Σ_m lut[m][codes[m]]` で
+スコアリング（1 候補あたり `M` lookups + `M − 1` add）。
+
+PQ は per-field `HnswOption.quantizer` で有効化:
+
+```rust
+use laurus::vector::HnswOption;
+use laurus::vector::core::quantization::QuantizationMethod;
+use laurus::vector::core::rerank::RerankStorageKind;
+
+let opt = HnswOption {
+    dimension: 128,
+    quantizer: QuantizationMethod::ProductQuantization { subvector_count: 32 },
+    // SIFT1M の PQ-only Recall@10 は 0.78-0.92 で頭打ちのため、
+    // production では LRS1 rerank sidecar との組み合わせを推奨
+    // （Stage 2 と同じ仕組み、 candidate 生成側のみ int8 から PQ
+    // に置き換わる）。
+    rerank_storage: Some(RerankStorageKind::F32),
+    ..Default::default()
+};
+```
+
+`subvector_count` は `dimension` を割り切る値を選択。 `dim = 128`
+での候補: `M ∈ {8, 16, 32}`（sub_dim 16 / 8 / 4）。 `M` を大きく
+すると compression は下がるが recall は上がります。 Issue #481
+Stage 3 は 8 bit（K = 256）のみを ship、 on-disk format は
+将来の 4 bit（K = 16）variant 用に枠を予約しています。
+
+#### on-disk format
+
+PQ segment は Scalar8Bit と同じ `LVS1` header を使用（`quant_kind =
+2`）し、 codebook は per-segment metadata block 内に格納:
+
+```text
+[ Fixed header           16 bytes ]
+[ PQ params               8 bytes ]    m / k / sub_dim / padding (u16 × 4)
+[ Codebook                m × k × sub_dim × 4 bytes ]
+[ Per-vector codes        num_vectors × m bytes ]
+```
+
+`dim = 128, M = 32, K = 256` の場合 codebook = `32 × 256 × 4 × 4 =
+131 072 bytes`（128 KB）+ ベクトル 1 件あたり 32 byte。
+
+#### Recall と speed gate（Issue #481 Stage 3）
+
+- **Kernel レベルテスト** — synthetic 5 000 ベクトル / dim 128 / 100
+  query、 `(m=16, ef_construction=200, ef_search=200,
+  rerank_factor=10, M=32)`:
+  `hnsw_pq_rerank_recall_at_10_meets_stage3_recall_gate` が
+  Recall@10 ≥ 0.95 を assert。 実測 0.9660。
+- **実データテスト** — SIFT1M-50k subsample（opt-in:
+  `LAURUS_REAL_BENCHMARK=1`、同設定）:
+  `hnsw_pq_rerank_recall_at_10_on_sift_meets_stage3_real_data_recall_gate`
+  が Recall@10 ≥ 0.95 を assert。 実測 0.9965。
+- **実データ speed bench** —
+  `bench_hnsw_graph_search_pq_rerank_real_data`（opt-in、Criterion）。
+  同 SIFT1M-50k 設定での cross-branch 計測: pre-Stage-1 f32 HNSW =
+  625.21 µs/query（PR #500 計測値）、 Stage 3 PQ + rerank =
+  **299.54 µs/query** = **2.09× speedup**。
+
+Issue #481 の原文は Recall ≥ 0.95 で ≥ 5× speedup を要求していました
+が、 本 PR の実測で SIFT1M ではその target が到達不可能と判明。
+Stage 2（#500）と Stage 3 は両方とも 1.9-2.1× の band で着地しており、
+candidate set を recall が回収可能な幅まで広げると rerank がホット
+パスを支配することが原因です。 これを受けて gate は ≥ 1.5× に
+下げられています。 follow-up としては Lucene 99 pattern（graph
+search の独立 budget）や 4 bit PQ variant でこの gap を埋める方向が
+考えられます。
+
 ## セグメントファイル
 
 各ベクトルインデックスタイプは、データを単一のセグメントファイルに格納します。

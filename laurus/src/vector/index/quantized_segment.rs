@@ -159,9 +159,19 @@ impl QuantizedSegmentVectors {
     ///   read failure (EOF, etc.).
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
         let header = VectorSegmentHeader::read_from(reader)?;
-        // Stage 1 has a single variant; Stage 3 (PQ) will turn this
-        // into a `match` with a NotImplemented arm.
-        let QuantHeader::Scalar8Bit(params) = header.quant;
+        // Stage 3 (PQ) segments are handled by a separate code path
+        // (see `crate::vector::index::pq_segment`); this Stage 1
+        // helper only reads Scalar8Bit segments.
+        let params = match header.quant {
+            QuantHeader::Scalar8Bit(p) => p,
+            QuantHeader::ProductQuantization { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "QuantizedSegmentVectors (Stage 1) cannot read PQ segments; \
+                     the PQ-aware reader lives in vector::index::pq_segment"
+                        .to_string(),
+                ));
+            }
+        };
 
         let mut dim_bytes = [0u8; 4];
         let mut count_bytes = [0u8; 4];

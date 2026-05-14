@@ -37,7 +37,7 @@
 use wide::i32x8;
 
 use crate::vector::core::distance::DistanceMetric;
-use crate::vector::core::quantization::{QuantizedVectorMeta, ScalarQuantParams};
+use crate::vector::core::quantization::{PqParams, QuantizedVectorMeta, ScalarQuantParams};
 
 /// Per-query state cached once per HNSW search invocation.
 ///
@@ -321,6 +321,114 @@ pub fn abs_diff_u8_to_i32(a: &[u8], b: &[u8]) -> i32 {
     total
 }
 
+// ============================================================================
+// Stage 3 — Product Quantization (PQ) ADC kernel
+// ============================================================================
+
+/// Per-query state for the Stage 3 PQ ADC distance.
+///
+/// Built once per HNSW search invocation from the f32 query and the
+/// segment's PQ codebook. Stores an `M × K` look-up table where each
+/// entry `lut[m * K + k]` is the squared L2 distance from sub-vector
+/// `m` of the query to centroid `k` of sub-vector `m`'s codebook.
+///
+/// The hot per-candidate distance call collapses to `M` table lookups
+/// and `M - 1` adds — the asymmetric distance computation (ADC) trick
+/// that gives PQ its per-call latency advantage.
+#[derive(Debug, Clone)]
+pub struct PqQuery {
+    /// Per-query L2² look-up table, row-major `[m][k]` of length
+    /// `params.codebook_len() / sub_dim = m * k`.
+    pub lut: Vec<f32>,
+    /// `||query||² = Σ_i query[i]²`. Cached so the Cosine path can
+    /// compute the cosine numerator without re-scanning `query`.
+    pub query_norm_sq: f32,
+    /// PQ parameters this LUT was built against (so the kernel can
+    /// recover `m` and `k` without an extra arg).
+    pub params: PqParams,
+}
+
+impl PqQuery {
+    /// Build the per-query LUT from a raw f32 query and the segment's
+    /// codebook.
+    ///
+    /// `codebook` must have length `params.codebook_len()` and be laid
+    /// out row-major `[m][k][sub_dim]` as produced by
+    /// [`crate::vector::core::quantization::pq_train_codebook`].
+    pub fn prepare(query: &[f32], params: PqParams, codebook: &[f32]) -> Self {
+        debug_assert_eq!(query.len(), params.original_dim());
+        debug_assert_eq!(codebook.len(), params.codebook_len());
+
+        let m = params.m as usize;
+        let k = params.k as usize;
+        let sub_dim = params.sub_dim as usize;
+        let mut lut = vec![0.0_f32; m * k];
+
+        for sub in 0..m {
+            let q_sub = &query[sub * sub_dim..(sub + 1) * sub_dim];
+            let cb_base = sub * k * sub_dim;
+            for ki in 0..k {
+                let c = &codebook[cb_base + ki * sub_dim..cb_base + (ki + 1) * sub_dim];
+                let mut acc = 0.0_f32;
+                for d in 0..sub_dim {
+                    let diff = q_sub[d] - c[d];
+                    acc += diff * diff;
+                }
+                lut[sub * k + ki] = acc;
+            }
+        }
+
+        let query_norm_sq: f32 = query.iter().map(|x| x * x).sum();
+
+        Self {
+            lut,
+            query_norm_sq,
+            params,
+        }
+    }
+}
+
+/// Compute distance from a [`PqQuery`] to one PQ-encoded candidate.
+///
+/// `codes` must have length `query.params.m`.
+///
+/// Returns the same metric scale as
+/// [`crate::vector::core::distance::DistanceMetric::distance`]
+/// (smaller = more similar). Only Cosine and Euclidean are supported
+/// in Stage 3; other metrics return [`f32::INFINITY`] so the searcher
+/// can refuse the segment cleanly without a panic.
+pub fn distance_pq_adc(metric: DistanceMetric, query: &PqQuery, codes: &[u8]) -> f32 {
+    debug_assert_eq!(codes.len(), query.params.m as usize);
+    let m = query.params.m as usize;
+    let k = query.params.k as usize;
+
+    // `Σ_m lut[m][codes[m]]` — squared L2 distance between the query
+    // and the decoded candidate. The hot loop is bounded by `M`
+    // (typically 8-32) so SIMD is unnecessary at this layer; the win
+    // vs the f32 path is the `M` lookups vs `dim` multiplications.
+    let mut l2_sq = 0.0_f32;
+    for (sub, &code) in codes.iter().enumerate().take(m) {
+        l2_sq += query.lut[sub * k + code as usize];
+    }
+
+    match metric {
+        DistanceMetric::Euclidean => l2_sq.max(0.0).sqrt(),
+        DistanceMetric::Cosine => {
+            // For unit-norm query and corpus (the laurus convention for
+            // Cosine via [`crate::vector::core::distance::DistanceMetric::prepare_query`]),
+            // `||q - v||² = 2 - 2 q·v`, so `cos_dist = 1 - q·v ≈ l2_sq /
+            // 2`. The clamp guards against numerical drift outside
+            // `[0, 2]`.
+            (l2_sq * 0.5).clamp(0.0, 2.0)
+        }
+        // Stage 3 ships Cosine + Euclidean only. Other metrics fall
+        // back to +inf so the searcher's segment-level dispatch can
+        // surface a clear NotImplemented at session start (kernel-level
+        // panic would be harder to attribute).
+        _ => f32::INFINITY,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,5 +689,156 @@ mod tests {
         assert_eq!(prepared.q_data.len(), dim);
         let expected_sum: u32 = prepared.q_data.iter().map(|&x| x as u32).sum();
         assert_eq!(prepared.sum_q, expected_sum);
+    }
+
+    // ------------------------------------------------------------------
+    // Stage 3 PQ ADC kernel tests
+    // ------------------------------------------------------------------
+
+    use crate::vector::core::quantization::{pq_decode, pq_encode, pq_train_codebook};
+
+    /// Build a small reproducible PQ codebook (dim 4, M=2, sub_dim=2)
+    /// from two well-separated clusters so the encoder picks deterministic
+    /// codes and the ADC kernel has unambiguous LUT entries to look up.
+    fn small_pq_setup() -> (PqParams, Vec<f32>, Vec<Vector>) {
+        let dim = 4;
+        let m = 2;
+        let params = PqParams::from_dim_and_m(dim, m).unwrap();
+        let training: Vec<Vector> = vec![
+            Vector::new(vec![5.0, 5.0, 10.0, 10.0]),
+            Vector::new(vec![-5.0, -5.0, -10.0, -10.0]),
+            Vector::new(vec![5.1, 5.1, 10.1, 10.1]),
+            Vector::new(vec![-4.9, -4.9, -9.9, -9.9]),
+        ];
+        let codebook = pq_train_codebook(dim, params, &training).unwrap();
+        (params, codebook, training)
+    }
+
+    #[test]
+    fn pq_lut_has_expected_dimensions() {
+        let (params, codebook, _) = small_pq_setup();
+        let query = vec![5.0_f32, 5.0, 10.0, 10.0];
+        let pq_query = PqQuery::prepare(&query, params, &codebook);
+        let m = params.m as usize;
+        let k = params.k as usize;
+        assert_eq!(pq_query.lut.len(), m * k);
+        // The query is a corpus point, so for at least one centroid in
+        // each sub-vector the LUT entry should be very small.
+        for sub in 0..m {
+            let row = &pq_query.lut[sub * k..(sub + 1) * k];
+            let min = row.iter().cloned().fold(f32::INFINITY, f32::min);
+            assert!(
+                min < 1.0,
+                "sub-vector {sub}: nearest centroid should have L2² near 0, got {min}"
+            );
+        }
+    }
+
+    #[test]
+    fn pq_adc_euclidean_matches_decoded_l2() {
+        let (params, codebook, training) = small_pq_setup();
+        // Encode the training set so we know each candidate's decoded form.
+        let encoded: Vec<Vec<u8>> = training
+            .iter()
+            .map(|v| pq_encode(&v.data, params, &codebook))
+            .collect();
+        // Pick an arbitrary query (not in the training set).
+        let query = vec![5.0_f32, 5.0, 9.5, 9.5];
+        let pq_query = PqQuery::prepare(&query, params, &codebook);
+        for codes in &encoded {
+            let approx = distance_pq_adc(DistanceMetric::Euclidean, &pq_query, codes);
+            // Reference: decode and compute exact L2 against the
+            // decoded vector. ADC must match this within FP noise.
+            let decoded = pq_decode(codes, params, &codebook);
+            let mut ref_l2_sq = 0.0_f32;
+            for (q, d) in query.iter().zip(decoded.iter()) {
+                let diff = q - d;
+                ref_l2_sq += diff * diff;
+            }
+            let ref_l2 = ref_l2_sq.sqrt();
+            assert!(
+                (approx - ref_l2).abs() < 1e-3,
+                "ADC Euclidean = {approx}, reference = {ref_l2}, codes = {codes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pq_adc_cosine_matches_l2_over_two_for_unit_norm() {
+        // L2-normalise both query and corpus so cos_dist = L2² / 2
+        // becomes exact (ignoring the PQ approximation).
+        let dim = 4;
+        let m = 2;
+        let params = PqParams::from_dim_and_m(dim, m).unwrap();
+
+        fn unit_norm(v: &mut [f32]) {
+            let n: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if n > 0.0 {
+                for x in v.iter_mut() {
+                    *x /= n;
+                }
+            }
+        }
+
+        let mut training: Vec<Vector> = vec![
+            Vector::new({
+                let mut v = vec![1.0_f32, 0.5, 0.2, 0.1];
+                unit_norm(&mut v);
+                v
+            }),
+            Vector::new({
+                let mut v = vec![-1.0_f32, -0.5, -0.2, -0.1];
+                unit_norm(&mut v);
+                v
+            }),
+            Vector::new({
+                let mut v = vec![0.9_f32, 0.45, 0.2, 0.1];
+                unit_norm(&mut v);
+                v
+            }),
+            Vector::new({
+                let mut v = vec![-0.9_f32, -0.45, -0.2, -0.1];
+                unit_norm(&mut v);
+                v
+            }),
+        ];
+        let codebook = pq_train_codebook(dim, params, &training).unwrap();
+
+        // Query in unit-norm basis matching the training distribution.
+        let mut query = vec![0.95_f32, 0.48, 0.2, 0.1];
+        unit_norm(&mut query);
+
+        let pq_query = PqQuery::prepare(&query, params, &codebook);
+        for v in training.iter_mut() {
+            let codes = pq_encode(&v.data, params, &codebook);
+            let cos = distance_pq_adc(DistanceMetric::Cosine, &pq_query, &codes);
+            let euc = distance_pq_adc(DistanceMetric::Euclidean, &pq_query, &codes);
+            // cos = euc² / 2 by construction; allow FP slack.
+            let expected = (euc * euc) * 0.5;
+            assert!(
+                (cos - expected).abs() < 1e-3,
+                "cosine {cos} vs euc²/2 {expected} (euc = {euc})"
+            );
+            assert!((0.0..=2.0).contains(&cos), "cosine {cos} outside [0, 2]");
+        }
+    }
+
+    #[test]
+    fn pq_adc_unsupported_metric_returns_infinity() {
+        let (params, codebook, training) = small_pq_setup();
+        let codes = pq_encode(&training[0].data, params, &codebook);
+        let query = vec![1.0_f32, 1.0, 1.0, 1.0];
+        let pq_query = PqQuery::prepare(&query, params, &codebook);
+        for metric in [
+            DistanceMetric::Manhattan,
+            DistanceMetric::DotProduct,
+            DistanceMetric::Angular,
+        ] {
+            let d = distance_pq_adc(metric, &pq_query, &codes);
+            assert!(
+                d.is_infinite(),
+                "metric {metric:?} should yield +inf, got {d}"
+            );
+        }
     }
 }

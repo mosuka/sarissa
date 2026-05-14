@@ -123,7 +123,16 @@ impl IvfIndexReader {
         // before the inverted lists. Pre-Stage-1 segments are
         // rejected with IncompatibleFormat.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let QuantHeader::Scalar8Bit(params) = header.quant;
+        let params = match header.quant {
+            QuantHeader::Scalar8Bit(p) => p,
+            QuantHeader::ProductQuantization { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "Product quantization (Issue #481 Stage 3) is HNSW-only; \
+                     the IVF reader does not support PQ segments yet"
+                        .to_string(),
+                ));
+            }
+        };
 
         // Read inverted lists, preserving per-cluster grouping.
         let mut cluster_to_vectors: Vec<Vec<(u64, String)>> = Vec::with_capacity(n_clusters);
@@ -478,6 +487,21 @@ impl VectorIndexReader for IvfIndexReader {
                 warnings.push(
                     "OwnedQuantized mode: dimension / NaN checks skipped (int8 storage \
                      guarantees finite values within [offset, offset + 255*scale])"
+                        .to_string(),
+                );
+            }
+            VectorStorage::OwnedPq(pool) => {
+                for (id, field) in &self.vector_ids {
+                    if !pool.contains(*id, field) {
+                        errors.push(format!(
+                            "Vector {}:{} found in keys but missing in PQ pool",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push(
+                    "OwnedPq mode: dimension / NaN checks skipped (codes index into \
+                     the trained codebook)"
                         .to_string(),
                 );
             }
