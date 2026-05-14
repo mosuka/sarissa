@@ -337,6 +337,68 @@ fn measure_recall_with_rerank_cfg(
     total_recall / queries.len() as f32
 }
 
+/// Stage 3 helper: build a PQ-quantised HNSW segment (with the LRS1
+/// f32 sidecar enabled) over `corpus`, run `queries` with the given
+/// `(ef_search, rerank_factor, subvector_count)`, and return the
+/// average Recall@K vs ground truth.
+///
+/// Mirrors [`measure_recall_with_rerank_cfg`] except the quantisation
+/// method is Product Quantization. The sidecar feeds the same
+/// `HnswSearcher::search_graph` rerank pass used by Stage 2; PQ is the
+/// candidate-generation half, rerank is the recall-recovery half.
+fn measure_recall_with_pq_rerank_cfg(
+    corpus: Vec<Vec<f32>>,
+    queries: &[Vec<f32>],
+    ef_search: usize,
+    rerank_factor: usize,
+    subvector_count: usize,
+    m: usize,
+    ef_construction: usize,
+) -> f32 {
+    use laurus::vector::core::quantization::QuantizationMethod;
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))
+        .expect("memory storage");
+    let config = HnswIndexConfig {
+        dimension: DIM,
+        m,
+        ef_construction,
+        distance_metric: DistanceMetric::Cosine,
+        quantization_method: QuantizationMethod::ProductQuantization { subvector_count },
+        rerank_storage: Some(RerankStorageKind::F32),
+        ..Default::default()
+    };
+    let index = HnswIndex::create(storage, "stage3_recall_index", config).expect("create index");
+    let mut writer = index.writer().expect("writer");
+
+    let docs: Vec<(u64, String, Vector)> = corpus
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (i as u64, "embedding".to_string(), Vector::new(v.clone())))
+        .collect();
+    writer.build(docs).expect("build");
+    writer.finalize().expect("finalize");
+    writer.commit().expect("commit");
+
+    let reader = index.reader().expect("reader");
+    let mut searcher = HnswSearcher::new(reader).expect("searcher");
+    searcher.set_ef_search(ef_search);
+
+    let mut total_recall = 0.0_f32;
+    for query in queries {
+        let exact = exact_top_k(&corpus, query, TOP_K);
+
+        let request = VectorIndexQuery::new(Vector::new(query.clone()))
+            .top_k(TOP_K)
+            .field_name("embedding".to_string())
+            .rerank_factor(rerank_factor);
+        let results = searcher.search(&request).expect("search");
+        let approx: HashSet<u64> = results.results.iter().map(|r| r.doc_id).collect();
+
+        total_recall += recall_at_k(&exact, &approx, TOP_K);
+    }
+    total_recall / queries.len() as f32
+}
+
 /// Stage 2 kernel-level diagnostic: brute-force int8 over the whole
 /// corpus, take the top `top_k * rerank_factor` by int8 distance,
 /// rescore each candidate against the original f32 vector, return
@@ -906,4 +968,172 @@ fn read_fvecs_unit_norm(
         }
     }
     out
+}
+
+// ============================================================================
+// Issue #481 Stage 3 — PQ + rerank recall acceptance tests
+// ============================================================================
+
+/// Issue #481 Stage 3 acceptance threshold for the **HNSW + PQ +
+/// rerank** path on the synthetic distribution.
+///
+/// PQ alone on SIFT1M tops out at Recall@10 ≈ 0.92 (#501 POC), so the
+/// Stage 3 wording was updated to require **PQ + rerank**. On the
+/// synthetic random unit-norm corpus the rerank pass over the PQ
+/// shortlist comfortably clears 0.98 (PQ's recall floor on synthetic
+/// data is higher than on SIFT because the distribution is closer to
+/// k-means' isotropic assumption).
+const STAGE3_HNSW_PQ_RECALL_THRESHOLD: f32 = 0.98;
+
+/// Stage 3 **HNSW + PQ + rerank** recall gate on the synthetic
+/// distribution. Always runs.
+///
+/// Mirrors the Stage 2 layer split: the strict 0.99 wording is the
+/// issue gate; the HNSW+PQ integration accommodates the same run-to-
+/// run variance band Stage 2's HNSW gate uses (±0.005-0.01 from graph
+/// build non-determinism). Configuration `(m=16, ef_construction=200,
+/// ef_search=400, rerank_factor=20, M=32)` was picked because:
+///
+/// * `M=32` (sub_dim=4) clears the PQ-only recall floor that #501 POC
+///   measured (~0.78 at M=32 on SIFT, similar on the synthetic
+///   distribution), leaving headroom for rerank to land at ≥ 0.98.
+/// * `rerank_factor=20` widens the rerank candidate window so the
+///   true top-10 reliably falls inside it — narrower windows (e.g.
+///   factor=10) measured 0.887 on this fixture, which would put
+///   the gate too close to flaky.
+#[test]
+fn hnsw_pq_rerank_recall_at_10_meets_stage3_recall_gate() {
+    let n_corpus = 5_000;
+    let ef_search = 400;
+    let rerank_factor = 20;
+    let subvector_count = 32;
+
+    let corpus: Vec<Vec<f32>> = (0..n_corpus)
+        .map(|i| pseudo_random_unit_norm(0xCAFE_0000 + i as u32, DIM))
+        .collect();
+    let queries: Vec<Vec<f32>> = (0..N_QUERIES)
+        .map(|i| pseudo_random_unit_norm(0xBEEF_0000 + i as u32, DIM))
+        .collect();
+
+    let recall = measure_recall_with_pq_rerank_cfg(
+        corpus,
+        &queries,
+        ef_search,
+        rerank_factor,
+        subvector_count,
+        16,  // HNSW m
+        200, // HNSW ef_construction
+    );
+    eprintln!(
+        "HNSW Stage 3 (PQ + rerank) Recall@{TOP_K} = {recall:.4} \
+         (corpus = {n_corpus}, dim = {DIM}, queries = {N_QUERIES}, \
+         ef_search = {ef_search}, rerank_factor = {rerank_factor}, \
+         subvector_count = {subvector_count})"
+    );
+
+    assert!(
+        recall >= STAGE3_HNSW_PQ_RECALL_THRESHOLD,
+        "HNSW Stage 3 (PQ + rerank) Recall@{TOP_K} = {recall:.4} < \
+         {STAGE3_HNSW_PQ_RECALL_THRESHOLD} (Issue #481 Stage 3 recall gate, \
+         synthetic HNSW piece). corpus = {n_corpus}, ef_search = {ef_search}, \
+         rerank_factor = {rerank_factor}, subvector_count = {subvector_count}. \
+         Possible causes: (1) PQ codebook drift after a k-means or encoding \
+         change, (2) rerank rescore did not pick up the LRS1 sidecar in the \
+         PQ search path, (3) HNSW + PQ candidate generation regression."
+    );
+}
+
+/// Issue #481 Stage 3 real-data recall gate (SIFT1M).
+///
+/// Strict Recall@10 ≥ 0.95 from the updated Issue #481 Stage 3
+/// acceptance wording, defended end-to-end on SIFT1M-50k. Opt-in via
+/// `LAURUS_REAL_BENCHMARK=1`; default CI is unchanged.
+///
+/// # Configuration
+///
+/// `(m=16, ef_construction=200, ef_search=400, rerank_factor=10,
+/// subvector_count=16)`. ef_search and rerank_factor are sized higher
+/// than the Stage 2 SIFT test (#500: ef=200, rerank=5) because PQ's
+/// per-candidate recall floor is below int8's — rerank needs a wider
+/// candidate window to recover.
+///
+/// # Opt-in
+///
+/// ```sh
+/// ./scripts/fetch-sift.sh --large
+/// LAURUS_REAL_BENCHMARK=1 cargo test --release \
+///     --test vector_recall_test \
+///     hnsw_pq_rerank_recall_at_10_on_sift_meets_stage3_real_data_recall_gate \
+///     -- --nocapture
+/// ```
+#[test]
+fn hnsw_pq_rerank_recall_at_10_on_sift_meets_stage3_real_data_recall_gate() {
+    if std::env::var("LAURUS_REAL_BENCHMARK").as_deref() != Ok("1") {
+        eprintln!(
+            "skipping Issue #481 Stage 3 real-data recall test; set \
+             LAURUS_REAL_BENCHMARK=1 and run ./scripts/fetch-sift.sh \
+             --large to enable."
+        );
+        return;
+    }
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cache = manifest
+        .parent()
+        .expect("workspace root is one level up from laurus/")
+        .join(".cache")
+        .join("sift");
+    let base_path = cache.join("sift").join("sift_base.fvecs");
+    let query_path = cache.join("sift").join("sift_query.fvecs");
+    if !base_path.exists() || !query_path.exists() {
+        eprintln!(
+            "skipping Issue #481 Stage 3 real-data recall test: SIFT1M \
+             fixture not found at {}. Run ./scripts/fetch-sift.sh --large.",
+            base_path.display()
+        );
+        return;
+    }
+
+    let n_corpus = 50_000usize;
+    let n_queries = 200usize;
+    let ef_search = 400usize;
+    let rerank_factor = 20usize;
+    let subvector_count = 32usize;
+
+    let mut corpus = read_fvecs_unit_norm(&base_path, DIM, Some(n_corpus));
+    let mut queries = read_fvecs_unit_norm(&query_path, DIM, Some(n_queries));
+    assert_eq!(corpus.len(), n_corpus, "subsample size mismatch");
+    assert!(!queries.is_empty(), "query set must be non-empty");
+    for v in corpus.iter_mut() {
+        debug_assert_eq!(v.len(), DIM);
+    }
+    for v in queries.iter_mut() {
+        debug_assert_eq!(v.len(), DIM);
+    }
+
+    let recall = measure_recall_with_pq_rerank_cfg(
+        corpus,
+        &queries,
+        ef_search,
+        rerank_factor,
+        subvector_count,
+        16,  // HNSW m
+        200, // HNSW ef_construction
+    );
+    eprintln!(
+        "Issue #481 SIFT1M-{n_corpus} Stage 3 (PQ + rerank) \
+         Recall@{TOP_K} = {recall:.4} (m=16, ef_construction=200, \
+         ef_search={ef_search}, rerank_factor={rerank_factor}, \
+         subvector_count={subvector_count}, queries={n_queries})"
+    );
+
+    const STAGE3_SIFT_RECALL_THRESHOLD: f32 = 0.95;
+    assert!(
+        recall >= STAGE3_SIFT_RECALL_THRESHOLD,
+        "Issue #481 SIFT1M-{n_corpus} Stage 3 (PQ + rerank) \
+         Recall@{TOP_K} = {recall:.4} < {STAGE3_SIFT_RECALL_THRESHOLD} \
+         (m=16, ef_construction=200, ef_search={ef_search}, \
+         rerank_factor={rerank_factor}, subvector_count={subvector_count}). \
+         PQ-only on SIFT1M tops out at 0.92 (PR #501); the rerank pass must \
+         recover the remaining 0.03+ via the LRS1 sidecar."
+    );
 }
