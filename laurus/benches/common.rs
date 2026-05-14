@@ -142,6 +142,100 @@ pub fn lcg_vec_unit(state: &mut u64, dim: usize) -> Vec<f32> {
 }
 
 // ============================================================================
+// .fvecs loader (Issue #498 real ANN benchmark data)
+// ============================================================================
+
+/// Read vectors from a `.fvecs` file (TEXMEX format used by SIFT1M /
+/// GIST / GloVe distributions). Each vector record on disk is laid out
+/// as:
+///
+/// ```text
+/// [dim: u32 LE]                4 bytes
+/// [values: f32 LE × dim]       dim * 4 bytes
+/// ```
+///
+/// # Arguments
+///
+/// * `path` - File path to the `.fvecs` file.
+/// * `expect_dim` - Required dimension; the function panics if any
+///   record disagrees so a corrupted fixture fails loudly.
+/// * `max` - Optional cap on the number of vectors to read; useful for
+///   sub-sampling (e.g. the SIFT1M-50k case is `max = Some(50_000)`).
+///
+/// # Returns
+///
+/// A `Vec<Vec<f32>>` of length up to `max` (or the full file).
+pub fn load_fvecs(
+    path: &std::path::Path,
+    expect_dim: usize,
+    max: Option<usize>,
+) -> std::io::Result<Vec<Vec<f32>>> {
+    use std::io::{BufReader, Read};
+    let file = std::fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut out = Vec::new();
+    let mut hdr = [0u8; 4];
+    let mut vec_buf = vec![0u8; expect_dim * 4];
+    loop {
+        if reader.read_exact(&mut hdr).is_err() {
+            break;
+        }
+        let dim = u32::from_le_bytes(hdr) as usize;
+        if dim != expect_dim {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "{}: per-vector dim {} != expected {}",
+                    path.display(),
+                    dim,
+                    expect_dim
+                ),
+            ));
+        }
+        reader.read_exact(&mut vec_buf)?;
+        let mut v = Vec::with_capacity(dim);
+        for chunk in vec_buf.chunks_exact(4) {
+            v.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+        }
+        out.push(v);
+        if let Some(cap) = max
+            && out.len() >= cap
+        {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// L2-normalise a vector in place so Cosine distance is well-defined.
+/// SIFT vectors are non-negative integer histograms (norms > 0); this
+/// rescales them onto the unit hypersphere to match the distribution
+/// the Cosine searcher assumes.
+pub fn l2_normalise(v: &mut [f32]) {
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for x in v.iter_mut() {
+            *x /= norm;
+        }
+    }
+}
+
+/// Repo-relative path to the `.cache/sift/` directory populated by
+/// `scripts/fetch-sift.sh`. The path is anchored at this crate's
+/// manifest dir so it works from `cargo test`, `cargo bench`, or any
+/// other workspace member's working directory.
+pub fn sift_cache_dir() -> std::path::PathBuf {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    // CARGO_MANIFEST_DIR for the laurus crate is `<repo>/laurus`; the
+    // .cache directory lives at the repo root one level up.
+    manifest
+        .parent()
+        .expect("workspace root is one level up from laurus/")
+        .join(".cache")
+        .join("sift")
+}
+
+// ============================================================================
 // Cold-cache bench harness
 // ============================================================================
 //

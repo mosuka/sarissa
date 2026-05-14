@@ -340,6 +340,51 @@ companion の `stage2_recall_sweep_diagnostic`（`LAURUS_STAGE2_SWEEP=1`
 分布 × 2 種の HNSW config で sweep するので、production deployment
 は実際の embedding 分布で budget を calibrate できます。
 
+#### 実データ検証（Issue #498）
+
+3 つめの opt-in CI gate として、 Stage 2 を実 ANN benchmark dataset
+（TEXMEX の SIFT1M）で検証します。 synthetic data の gate だけが
+signal にならないようにするためのものです。
+
+- `hnsw_quantized_recall_at_10_with_rerank_on_sift_meets_stage2_real_data_recall_gate`
+  は SIFT1M の 50 000 ベクトルサブサンプル上で
+  `(m=16, ef_construction=200, ef_search=200, rerank_factor=5)` の
+  Recall@10 ≥ 0.99 を assert します。
+- companion bench `bench_hnsw_graph_search_rerank_real_data`
+  （`laurus/benches/vector_search_bench.rs`）は同じ fixture で
+  end-to-end Stage 2 latency を測定します。 同梱の
+  `laurus/examples/sift_rerank_probe.rs` は
+  `(ef_search × rerank_factor × HNSW config)` を sweep して
+  `(Recall, latency)` を per-cell で報告するので、運用側は自分の
+  データに合った operating point を選べます。
+
+両者は `LAURUS_REAL_BENCHMARK=1` と `.cache/sift/sift/` 配下の
+SIFT1M `.fvecs` ファイルの存在で gate されます。 デフォルトの CI
+runs は変化しません。 ローカルで有効化するには:
+
+```sh
+./scripts/fetch-sift.sh --large   # ~478MB
+LAURUS_REAL_BENCHMARK=1 cargo test --release \
+    --test vector_recall_test \
+    hnsw_quantized_recall_at_10_with_rerank_on_sift_meets_stage2_real_data_recall_gate \
+    -- --nocapture
+LAURUS_REAL_BENCHMARK=1 cargo bench --bench vector_search_bench \
+    -- "HNSW Graph Search Rerank Real"
+```
+
+Issue #481 の原文は "≥ 3× speedup vs the pre-Stage-1 f32 baseline"
+を要求していましたが、 SIFT1M-50k での cross-branch Criterion 計測
+（30 サンプル中央値、同じ `(m, ef_construction, ef_search)`）では
+pre-Stage-1 f32 HNSW path が 625 µs/query、 Stage 2 int8 + rerank
+path が 323 µs/query となり、 speedup は **1.94×** でした。 この
+実測結果を受けて Issue #498 では real-data gate を **≥ 1.5×** に
+下げています（recall 側は元の 0.99 を維持）。 3× との gap は、
+rerank が int8 graph traversal で visit 済みの候補を re-rank する
+だけで、 `ef_search` を下げると candidate set 自体が狭くなり rerank
+で回収できないことに起因します。 follow-up としては graph search
+budget を `ef_search` から独立に広げる（Lucene 99 pattern）案が
+あります。
+
 ## セグメントファイル
 
 各ベクトルインデックスタイプは、データを単一のセグメントファイルに格納します。

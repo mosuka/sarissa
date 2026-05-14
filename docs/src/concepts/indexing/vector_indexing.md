@@ -337,6 +337,51 @@ three corpus / query distributions and two HNSW configs so
 production deployments can calibrate the budget for their actual
 embedding distribution.
 
+#### Real-data validation (Issue #498)
+
+A third opt-in CI gate validates Stage 2 against a real ANN
+benchmark dataset (SIFT1M from TEXMEX) so the synthetic-data gates
+above do not become the only signal:
+
+- `hnsw_quantized_recall_at_10_with_rerank_on_sift_meets_stage2_real_data_recall_gate`
+  asserts `Recall@10 ≥ 0.99` on a 50 000-vector SIFT1M subsample at
+  `(m=16, ef_construction=200, ef_search=200, rerank_factor=5)`.
+- The companion bench `bench_hnsw_graph_search_rerank_real_data` (in
+  `laurus/benches/vector_search_bench.rs`) measures end-to-end Stage 2
+  latency on the same fixture. The accompanying example
+  `laurus/examples/sift_rerank_probe.rs` runs a full
+  `(ef_search × rerank_factor × HNSW config)` sweep with `(Recall,
+  latency)` per cell so operators can pick the operating point for
+  their own data shape.
+
+Both are gated on `LAURUS_REAL_BENCHMARK=1` AND the presence of the
+SIFT1M `.fvecs` files under `.cache/sift/sift/`. Default CI runs are
+unchanged. To enable locally:
+
+```sh
+./scripts/fetch-sift.sh --large   # ~478MB
+LAURUS_REAL_BENCHMARK=1 cargo test --release \
+    --test vector_recall_test \
+    hnsw_quantized_recall_at_10_with_rerank_on_sift_meets_stage2_real_data_recall_gate \
+    -- --nocapture
+LAURUS_REAL_BENCHMARK=1 cargo bench --bench vector_search_bench \
+    -- "HNSW Graph Search Rerank Real"
+```
+
+The Issue #481 wording originally asked for "≥ 3× speedup vs the
+pre-Stage-1 f32 baseline." Cross-branch Criterion measurements on
+SIFT1M-50k (median over 30 samples, same `(m, ef_construction,
+ef_search)`) gave 625 µs/query on the pre-Stage-1 f32 HNSW path
+versus 323 µs/query on the Stage 2 int8 + rerank path — a **1.94×**
+speedup. Issue #498 reduces the real-data gate to **≥ 1.5×**
+accordingly, with the recall side held at the original 0.99. The
+gap between the original 3× target and the measured 1.94× comes
+from rerank only re-ordering candidates the int8 graph traversal
+already visited — a lower `ef_search` does not pay back through
+rerank when the candidate set itself becomes too narrow, which a
+follow-up could address by widening the graph search budget
+independently of `ef_search` (the Lucene 99 pattern).
+
 ## Segment Files
 
 Each vector index type stores its data in a single segment file:

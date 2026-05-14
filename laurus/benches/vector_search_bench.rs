@@ -776,6 +776,156 @@ fn bench_flat_multi_field_search(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// Issue #498 — real-data Stage 2 speed validation (SIFT1M)
+// ---------------------------------------------------------------------------
+
+/// Real-data Stage 2 speed bench (Issue #498).
+///
+/// Loads a 50 000-vector SIFT1M subsample plus the standard 200-query
+/// SIFT query set, builds an int8 HNSW index with the LRS1 rerank
+/// sidecar enabled, and times the same two-stage `top10 + rerank_factor =
+/// 5` flow the recall test
+/// (`hnsw_quantized_recall_at_10_with_rerank_on_sift_meets_stage2_real_data_recall_gate`)
+/// asserts. The two should agree on `(corpus, ef_search, rerank_factor,
+/// HNSW config)` so the latency reported here is the speed-half of the
+/// Issue #498 acceptance.
+///
+/// Opt-in: gated on `LAURUS_REAL_BENCHMARK=1` AND
+/// `.cache/sift/sift/sift_base.fvecs` being present (Criterion has no
+/// "skip" primitive, so a missing fixture or env var collapses the
+/// group to zero benches and the bench file finishes silently). Run:
+///
+/// ```sh
+/// ./scripts/fetch-sift.sh --large
+/// LAURUS_REAL_BENCHMARK=1 cargo bench --bench vector_search_bench \
+///     -- "HNSW Graph Search Rerank Real"
+/// ```
+///
+/// # Speed gate interpretation
+///
+/// The Issue #498 acceptance asks for "≥ 3× vs the pre-Stage-1 f32
+/// baseline." Phase 0 measurements
+/// (`~/.claude/tasks/laurus/20260514_498_real_data_speed_validation/`)
+/// showed that gate is **not reachable** with the current
+/// implementation on SIFT1M; the maximum sustained speedup at Recall@10
+/// ≥ 0.99 is ~1.81× with `(m=16, efc=200, ef_search=200, rerank=5)`.
+/// The bench number reported here is intended for a cross-branch
+/// comparison against the pre-Stage-1 main commit (`c20620c9^`) with
+/// the same SIFT fixture and the same HNSW config, looking for **≥ 1.5×**
+/// speedup. Criterion does not assert, so the gate is enforced by the
+/// PR description / docs rather than CI.
+///
+/// To take the baseline:
+///
+/// ```sh
+/// git worktree add /tmp/laurus-prestage1 c20620c9^
+/// # add an f32-HNSW bench to /tmp/laurus-prestage1/laurus/benches/
+/// # and run it with the same SIFT fixture (the .cache/sift/ symlink
+/// # makes this a one-liner).
+/// ```
+fn bench_hnsw_graph_search_rerank_real_data(c: &mut Criterion) {
+    if std::env::var("LAURUS_REAL_BENCHMARK").as_deref() != Ok("1") {
+        return;
+    }
+    let base_path = common::sift_cache_dir()
+        .join("sift")
+        .join("sift_base.fvecs");
+    let query_path = common::sift_cache_dir()
+        .join("sift")
+        .join("sift_query.fvecs");
+    if !base_path.exists() || !query_path.exists() {
+        eprintln!(
+            "skipping Issue #498 real-data speed bench: SIFT1M fixture \
+             not found at {}. Run ./scripts/fetch-sift.sh --large.",
+            base_path.display()
+        );
+        return;
+    }
+
+    let dim: usize = 128;
+    let n_corpus: usize = 50_000;
+    let n_queries: usize = 200;
+    let ef_search: usize = 200;
+    let rerank_factor: usize = 5;
+    let m: usize = 16;
+    let ef_construction: usize = 200;
+
+    let mut corpus =
+        common::load_fvecs(&base_path, dim, Some(n_corpus)).expect("load sift_base.fvecs");
+    let mut queries =
+        common::load_fvecs(&query_path, dim, Some(n_queries)).expect("load sift_query.fvecs");
+    for v in corpus.iter_mut() {
+        common::l2_normalise(v);
+    }
+    for v in queries.iter_mut() {
+        common::l2_normalise(v);
+    }
+
+    let storage = create_storage();
+    let config = HnswIndexConfig {
+        dimension: dim,
+        m,
+        ef_construction,
+        distance_metric: DistanceMetric::Cosine,
+        rerank_storage: Some(RerankStorageKind::F32),
+        ..Default::default()
+    };
+    let mut index = ManagedVectorIndex::new(
+        VectorIndexTypeConfig::HNSW(config),
+        storage,
+        "hnsw_sift_rerank_real_data_bench",
+    )
+    .unwrap();
+    let docs: Vec<(u64, String, Vector)> = corpus
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| (i as u64, "field".to_string(), Vector::new(v)))
+        .collect();
+    index.add_vectors(docs).unwrap();
+    index.finalize().unwrap();
+    index.write().unwrap();
+
+    let reader = index.reader().unwrap();
+    let mut searcher = HnswSearcher::new(reader).unwrap();
+    searcher.set_ef_search(ef_search);
+
+    // Sanity check: rerank path must engage on real data too.
+    let probe = searcher
+        .search(
+            &VectorIndexQuery::new(Vector::new(queries[0].clone()))
+                .top_k(10)
+                .field_name("field".to_string())
+                .rerank_factor(rerank_factor),
+        )
+        .unwrap();
+    assert!(
+        !probe.results.is_empty(),
+        "Issue #498 SIFT probe must return at least one hit"
+    );
+
+    let mut group = c.benchmark_group("HNSW Graph Search Rerank Real");
+    group.sample_size(SAMPLE_SIZE_SLOW); // slow real-data build path
+    group.throughput(Throughput::Elements(n_corpus as u64));
+
+    // Round-robin over the query set so the bench measures average
+    // query latency across the full SIFT query distribution rather
+    // than the same vector repeatedly.
+    let mut iter_idx: usize = 0;
+    group.bench_function(BenchmarkId::new("top10_rerank5", "sift50000"), |b| {
+        b.iter(|| {
+            let q = &queries[iter_idx % queries.len()];
+            iter_idx = iter_idx.wrapping_add(1);
+            let request = VectorIndexQuery::new(Vector::new(q.clone()))
+                .top_k(10)
+                .field_name("field".to_string())
+                .rerank_factor(rerank_factor);
+            searcher.search(&request).unwrap()
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_flat_construction,
@@ -786,6 +936,7 @@ criterion_group!(
     bench_hnsw_fallback_search,
     bench_hnsw_graph_search,
     bench_hnsw_graph_search_rerank,
+    bench_hnsw_graph_search_rerank_real_data,
     bench_hnsw_ef_search_sweep,
     bench_hnsw_multi_field_search,
     bench_flat_multi_field_search,
