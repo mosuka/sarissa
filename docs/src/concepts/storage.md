@@ -64,23 +64,38 @@ let storage: Arc<dyn Storage> = Arc::new(FileStorage::new("/tmp/laurus-data", co
 
 ### FileStorage with Memory Mapping
 
-`FileStorage` supports memory-mapped file access via the `use_mmap` configuration flag. When enabled, the OS manages paging between memory and disk.
+`FileStorage` supports memory-mapped file access via the `use_mmap`
+configuration flag. When enabled, the OS manages paging between memory
+and disk; the lexical posting decoder (Issue #504) takes a zero-copy
+path through `StorageInput::as_slice`, handing PFOR-bit-packed blocks
+directly to `bitpacking::decompress*` instead of allocating an
+intermediate `Vec<u8>` and copying through `Read`.
+
+**Default `true` as of Issue #504.** Set the `LAURUS_NO_MMAP=1`
+environment variable when constructing the config (via
+`FileStorageConfig::new`) to fall back to buffered file I/O for
+debug sessions or hosts where mmap misbehaves.
 
 ```rust
 use std::sync::Arc;
 use laurus::Storage;
 use laurus::storage::file::{FileStorage, FileStorageConfig};
 
-let mut config = FileStorageConfig::new("/tmp/laurus-data");
-config.use_mmap = true;  // enable memory-mapped I/O
+// mmap is on by default — same as Issue #504 ships.
+let config = FileStorageConfig::new("/tmp/laurus-data");
+assert!(config.use_mmap);
 let storage: Arc<dyn Storage> = Arc::new(FileStorage::new("/tmp/laurus-data", config)?);
+
+// Explicit opt-out without touching the env var.
+let mut buffered_config = FileStorageConfig::new("/tmp/laurus-data");
+buffered_config.use_mmap = false;
 ```
 
 | Property | Value |
 | :--- | :--- |
 | Durability | Full (persisted to disk) |
-| Speed | Fast (OS-managed memory mapping) |
-| Use case | Large datasets, read-heavy workloads |
+| Speed | Fast (OS-managed memory mapping; zero-copy posting decode) |
+| Use case | Default for any production-scale workload |
 
 ## StorageFactory
 

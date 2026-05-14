@@ -64,23 +64,38 @@ let storage: Arc<dyn Storage> = Arc::new(FileStorage::new("/tmp/laurus-data", co
 
 ### メモリマッピング付き FileStorage
 
-`FileStorage` は `use_mmap` 設定フラグによるメモリマップドファイルアクセスをサポートします。有効にすると、OS がメモリとディスク間のページングを管理します。
+`FileStorage` は `use_mmap` 設定フラグによるメモリマップドファイル
+アクセスをサポートします。有効にすると OS がメモリとディスク間の
+ページングを管理し、レキシカルの posting デコーダ (Issue #504) は
+`StorageInput::as_slice` 経由の zero-copy パスを取り、PFOR
+ビットパック済みブロックを `bitpacking::decompress*` に直接渡します
+（`Read` 経由の `Vec<u8>` 確保とコピーを省略）。
+
+**Issue #504 以降、デフォルトは `true`。** デバッグや mmap が機能
+しないホストでバッファード I/O に切り替えるには、
+`FileStorageConfig::new` 呼び出し時に `LAURUS_NO_MMAP=1` 環境
+変数を設定します。
 
 ```rust
 use std::sync::Arc;
 use laurus::Storage;
 use laurus::storage::file::{FileStorage, FileStorageConfig};
 
-let mut config = FileStorageConfig::new("/tmp/laurus-data");
-config.use_mmap = true;  // enable memory-mapped I/O
+// Issue #504 以降は mmap がデフォルトで有効。
+let config = FileStorageConfig::new("/tmp/laurus-data");
+assert!(config.use_mmap);
 let storage: Arc<dyn Storage> = Arc::new(FileStorage::new("/tmp/laurus-data", config)?);
+
+// 環境変数に触れずに明示的にオプトアウト。
+let mut buffered_config = FileStorageConfig::new("/tmp/laurus-data");
+buffered_config.use_mmap = false;
 ```
 
 | プロパティ | 値 |
 | :--- | :--- |
 | 耐久性 | 完全（ディスクに永続化） |
-| 速度 | 高速（OS 管理のメモリマッピング） |
-| ユースケース | 大規模データセット、読み取り負荷の高いワークロード |
+| 速度 | 高速（OS 管理のメモリマッピング、zero-copy posting デコード） |
+| ユースケース | プロダクション規模ワークロードのデフォルト |
 
 ## StorageFactory
 
