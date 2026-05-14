@@ -201,30 +201,22 @@ impl HnswIndexReader {
                 }
             };
 
-        // Read the Issue #481 Stage 1 / Stage 3 vector segment header
-        // (LVS1). Pre-Stage-1 segments are rejected with
-        // IncompatibleFormat. PQ segments are not yet handled in this
-        // path (Phase 3 of #481 Stage 3 wires them through here).
+        // Read the Issue #481 vector segment header (LVS1). Pre-Stage-1
+        // segments are rejected with IncompatibleFormat. Both Scalar8Bit
+        // (Stage 1) and ProductQuantization (Stage 3) variants are
+        // handled here; Lazy mode silently degrades PQ to "not
+        // supported" because the OnDemand path's offsets table only
+        // carries Scalar8Bit params today.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let params = match header.quant {
-            QuantHeader::Scalar8Bit(p) => p,
-            QuantHeader::ProductQuantization { .. } => {
-                return Err(crate::error::LaurusError::NotImplemented(
-                    "Product quantization (Issue #481 Stage 3) HNSW reader wiring \
-                     is not yet implemented; see Phase 3 follow-up"
-                        .to_string(),
-                ));
-            }
-        };
 
-        let (vectors, vector_ids, graph) = match storage.loading_mode() {
-            crate::storage::LoadingMode::Eager => {
+        let (vectors, vector_ids, graph) = match (&header.quant, storage.loading_mode()) {
+            (QuantHeader::Scalar8Bit(params), crate::storage::LoadingMode::Eager) => {
                 // Step 6 of #481 Stage 1: load vectors as int8 + meta
                 // directly into a QuantizedVectorPool so the search
                 // hot loop can use distance_quantized without per-call
                 // dequantization. The legacy
                 // VectorIndexReader::get_vector API still works via
-                // VectorStorage::Owned-Quantized's dequantize-on-get.
+                // VectorStorage::OwnedQuantized's dequantize-on-get.
                 let mut vector_ids = Vec::with_capacity(num_vectors);
                 let mut records: Vec<(u64, String, Vec<u8>, QuantizedVectorMeta)> =
                     Vec::with_capacity(num_vectors);
@@ -234,7 +226,6 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    // Read field name
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
@@ -244,9 +235,6 @@ impl HnswIndexReader {
                         LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                     })?;
 
-                    // Read int8 payload + meta directly (no
-                    // dequantization). Step 6 keeps everything in int8
-                    // form for the cache-friendly hot path.
                     let mut int8 = vec![0u8; dimension];
                     input.read_exact(&mut int8)?;
                     let mut sum_q_buf = [0u8; 4];
@@ -262,14 +250,14 @@ impl HnswIndexReader {
                     records.push((doc_id, field_name, int8, meta));
                 }
                 let graph = read_graph(&mut input)?;
-                let pool = QuantizedVectorPool::build(params, dimension, records);
+                let pool = QuantizedVectorPool::build(*params, dimension, records);
                 (
                     VectorStorage::OwnedQuantized(Arc::new(pool)),
                     vector_ids,
                     graph,
                 )
             }
-            crate::storage::LoadingMode::Lazy => {
+            (QuantHeader::Scalar8Bit(params), crate::storage::LoadingMode::Lazy) => {
                 let mut offsets = HashMap::with_capacity(num_vectors);
                 let mut vector_ids = Vec::with_capacity(num_vectors);
 
@@ -278,13 +266,11 @@ impl HnswIndexReader {
                 // followed by VectorSegmentHeader (Stage-1, 24 bytes
                 // for Scalar8Bit) = 44 bytes.
                 let start_pos =
-                    20u64 + VectorSegmentHeader::scalar_8bit(params).serialized_size() as u64;
+                    20u64 + VectorSegmentHeader::scalar_8bit(*params).serialized_size() as u64;
                 input
                     .seek(std::io::SeekFrom::Start(start_pos))
                     .map_err(LaurusError::Io)?;
 
-                // Per-vector record size on disk: dim int8 + 8 bytes
-                // meta (sum_q + norm_q).
                 let quant_payload_size = quantized_record_payload_size(dimension) as i64;
 
                 for _ in 0..num_vectors {
@@ -294,7 +280,6 @@ impl HnswIndexReader {
                     input.read_exact(&mut doc_id_buf)?;
                     let doc_id = u64::from_le_bytes(doc_id_buf);
 
-                    // Read field name
                     let mut field_name_len_buf = [0u8; 4];
                     input.read_exact(&mut field_name_len_buf)?;
                     let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
@@ -305,13 +290,9 @@ impl HnswIndexReader {
                         LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
                     })?;
 
-                    // Record offset for on-demand loading. The offset
-                    // points to the entry start (doc_id), matching the
-                    // contract VectorStorage::get expects.
                     offsets.insert((doc_id, field_name.clone()), start_offset);
                     vector_ids.push((doc_id, field_name.clone()));
 
-                    // Skip int8 payload + per-vector meta.
                     input
                         .seek(std::io::SeekFrom::Current(quant_payload_size))
                         .map_err(LaurusError::Io)?;
@@ -323,11 +304,55 @@ impl HnswIndexReader {
                         storage: storage.clone(),
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
-                        quant_params: Some(params),
+                        quant_params: Some(*params),
                     },
                     vector_ids,
                     graph,
                 )
+            }
+            (
+                QuantHeader::ProductQuantization {
+                    params: pq_params,
+                    codebook,
+                },
+                _loading_mode,
+            ) => {
+                // Stage 3 (#481): read M-byte codes per vector into a
+                // PqVectorPool. Lazy mode is not yet supported for PQ
+                // segments (the OnDemand path's offsets table only
+                // carries Scalar8Bit params), so we eagerly load the
+                // codes regardless of `loading_mode`.
+                let mut vector_ids = Vec::with_capacity(num_vectors);
+                let mut records: Vec<(u64, String, Vec<u8>)> = Vec::with_capacity(num_vectors);
+                let codes_size = pq_params.m as usize;
+
+                for _ in 0..num_vectors {
+                    let mut doc_id_buf = [0u8; 8];
+                    input.read_exact(&mut doc_id_buf)?;
+                    let doc_id = u64::from_le_bytes(doc_id_buf);
+
+                    let mut field_name_len_buf = [0u8; 4];
+                    input.read_exact(&mut field_name_len_buf)?;
+                    let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                    let mut field_name_buf = vec![0u8; field_name_len];
+                    input.read_exact(&mut field_name_buf)?;
+                    let field_name = String::from_utf8(field_name_buf).map_err(|e| {
+                        LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+                    })?;
+
+                    let mut codes = vec![0u8; codes_size];
+                    input.read_exact(&mut codes)?;
+
+                    vector_ids.push((doc_id, field_name.clone()));
+                    records.push((doc_id, field_name, codes));
+                }
+                let graph = read_graph(&mut input)?;
+                let pool = crate::vector::index::pq_storage::PqVectorPool::build(
+                    *pq_params,
+                    codebook.clone(),
+                    records,
+                );
+                (VectorStorage::OwnedPq(Arc::new(pool)), vector_ids, graph)
             }
         };
 

@@ -17,8 +17,6 @@
 //! block — the codebook covers all the affine corrections SQ needs to
 //! reconstruct distances.
 
-#![allow(dead_code)] // Phase 3b will introduce the HNSW writer/reader call sites.
-
 use std::io::{Read, Write};
 
 use crate::error::Result;
@@ -27,7 +25,12 @@ use crate::vector::core::vector::Vector;
 
 /// Bytes consumed by the per-vector codes (everything after the
 /// field_name string ends). Equal to `m`.
+///
+/// Currently only used by the in-module roundtrip test; the writer
+/// (Phase 3b) inlines `codes.len()` and the reader inlines
+/// `params.m as usize` since both already carry that information.
 #[inline]
+#[cfg(test)]
 pub(super) const fn pq_record_payload_size(m: u16) -> usize {
     m as usize
 }

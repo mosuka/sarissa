@@ -306,23 +306,18 @@ impl HnswIndexWriter {
 
         // Read the Issue #481 Stage 1 / Stage 3 vector segment header
         // (LVS1). Pre-Stage-1 segments are rejected with
-        // IncompatibleFormat by the reader. PQ segments will be wired
-        // up by Phase 3 of Stage 3.
+        // IncompatibleFormat by the reader. Both Scalar8Bit and
+        // ProductQuantization (Stage 3, #481) variants are reconstituted
+        // back to f32 for the writer's in-memory state — the on-disk
+        // form is rebuilt from scratch in `write()` once add_vector /
+        // delete_document calls have replayed.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let params = match header.quant {
-            QuantHeader::Scalar8Bit(p) => p,
-            QuantHeader::ProductQuantization { .. } => {
-                return Err(crate::error::LaurusError::NotImplemented(
-                    "Product quantization (Issue #481 Stage 3) HNSW writer rebuild \
-                     is not yet implemented; see Phase 3 follow-up"
-                        .to_string(),
-                ));
-            }
-        };
 
         // Read quantized vectors and dequantize back to f32 for the
-        // in-memory writer state. Step 6 will switch the in-memory
-        // representation to int8 + meta directly.
+        // in-memory writer state. The dequantized values are a lossy
+        // approximation of the originals; if a Stage 2 sidecar is
+        // present we'll overwrite them below with the lossless f32
+        // payload.
         let mut vectors = Vec::with_capacity(num_vectors);
         for _ in 0..num_vectors {
             let mut doc_id_buf = [0u8; 8];
@@ -340,12 +335,18 @@ impl HnswIndexWriter {
                 LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
             })?;
 
-            // Read quantized payload (dim int8 + sum_q + norm_q) and
-            // dequantize back to f32 using the segment-level params.
-            // The dequantized values are a lossy approximation of the
-            // originals; if a Stage 2 sidecar is present we'll
-            // overwrite them below with the lossless f32 payload.
-            let values = read_dequantized_vector(&mut input, dimension, &params)?;
+            // Decode the per-vector payload according to the segment's
+            // quantization kind.
+            let values = match &header.quant {
+                QuantHeader::Scalar8Bit(params) => {
+                    read_dequantized_vector(&mut input, dimension, params)?
+                }
+                QuantHeader::ProductQuantization { params, codebook } => {
+                    crate::vector::index::pq_io::read_dequantized_pq_vector(
+                        &mut input, *params, codebook,
+                    )?
+                }
+            };
 
             vectors.push((doc_id, field_name, Vector::new(values)));
         }
@@ -1171,52 +1172,88 @@ impl VectorIndexWriter for HnswIndexWriter {
         output.write_all(&(self.index_config.m as u32).to_le_bytes())?;
         output.write_all(&(self.index_config.ef_construction as u32).to_le_bytes())?;
 
-        // Write vectors using the Issue #481 Stage 1 quantized format.
-        // The HNSW-specific 28-byte preamble above (count / dim / m / ef)
+        // Write vectors using the Issue #481 quantized format. The
+        // HNSW-specific 28-byte preamble above (count / dim / m / ef)
         // stays unchanged so the graph parameters are still readable
-        // first; the vector payload is quantized to int8 with a per-
-        // segment global affine, prefixed by VectorSegmentHeader (LVS1).
+        // first; the vector payload is quantized to int8 (Stage 1) or
+        // PQ codes (Stage 3, #481) according to the field's
+        // `quantization_method`, prefixed by `VectorSegmentHeader`
+        // (LVS1).
 
         // Sort by doc_id for deterministic serialization.
         let mut sorted_vectors: Vec<_> = self.vectors.iter().collect();
         sorted_vectors.sort_by_key(|(doc_id, _, _)| *doc_id);
 
-        // Train segment-level params on the f32 vectors and quantize
-        // each one. The records are returned in the same order as the
-        // input slice so we can pair them back with (doc_id, field).
-        // Empty segments fall back to neutral params (0.0, 1.0) since
-        // there is nothing to train on; the LVS1 header is still
-        // emitted so readers can dispatch on quant_kind uniformly.
         let f32_vectors: Vec<Vector> = sorted_vectors
             .iter()
             .map(|(_, _, v)| (*v).clone())
             .collect();
-        let (params, records) = if f32_vectors.is_empty() {
-            (
-                crate::vector::core::quantization::ScalarQuantParams {
-                    offset: 0.0,
-                    scale: 1.0,
-                },
-                Vec::new(),
-            )
-        } else {
-            quantize_segment(&f32_vectors, self.index_config.dimension)?
-        };
 
-        // Vector segment header (LVS1 magic + version + Scalar8Bit
-        // params) precedes the per-vector records.
-        VectorSegmentHeader::scalar_8bit(params).write_to(&mut output)?;
-
-        for ((doc_id, field_name, _), (int8, meta)) in sorted_vectors.iter().zip(records.iter()) {
-            output.write_all(&doc_id.to_le_bytes())?;
-
-            // Write field name length and field name
-            let field_name_bytes = field_name.as_bytes();
-            output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
-            output.write_all(field_name_bytes)?;
-
-            // Write quantized payload (dim int8 bytes + sum_q + norm_q).
-            write_quantized_record(&mut output, int8, *meta)?;
+        match self.index_config.quantization_method {
+            crate::vector::core::quantization::QuantizationMethod::Scalar8Bit => {
+                // Empty segments fall back to neutral params (0.0, 1.0)
+                // since there is nothing to train on; the LVS1 header
+                // is still emitted so readers can dispatch on
+                // quant_kind uniformly.
+                let (params, records) = if f32_vectors.is_empty() {
+                    (
+                        crate::vector::core::quantization::ScalarQuantParams {
+                            offset: 0.0,
+                            scale: 1.0,
+                        },
+                        Vec::new(),
+                    )
+                } else {
+                    quantize_segment(&f32_vectors, self.index_config.dimension)?
+                };
+                VectorSegmentHeader::scalar_8bit(params).write_to(&mut output)?;
+                for ((doc_id, field_name, _), (int8, meta)) in
+                    sorted_vectors.iter().zip(records.iter())
+                {
+                    output.write_all(&doc_id.to_le_bytes())?;
+                    let field_name_bytes = field_name.as_bytes();
+                    output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
+                    output.write_all(field_name_bytes)?;
+                    write_quantized_record(&mut output, int8, *meta)?;
+                }
+            }
+            crate::vector::core::quantization::QuantizationMethod::ProductQuantization {
+                subvector_count,
+            } => {
+                if f32_vectors.is_empty() {
+                    // An empty segment still needs a well-formed LVS1
+                    // header so the reader can dispatch on quant_kind.
+                    // We pick a minimal (m=1, sub_dim=dim) codebook of
+                    // a single zero centroid per sub-vector — readers
+                    // will never index into it because there are no
+                    // codes after it.
+                    let params = crate::vector::core::quantization::PqParams::from_dim_and_m(
+                        self.index_config.dimension,
+                        subvector_count.max(1),
+                    )?;
+                    let codebook = vec![0.0_f32; params.codebook_len()];
+                    VectorSegmentHeader::product_quantization(params, codebook)
+                        .write_to(&mut output)?;
+                } else {
+                    let (params, codebook, codes) =
+                        crate::vector::index::pq_io::quantize_segment_pq(
+                            &f32_vectors,
+                            self.index_config.dimension,
+                            subvector_count,
+                        )?;
+                    VectorSegmentHeader::product_quantization(params, codebook)
+                        .write_to(&mut output)?;
+                    for ((doc_id, field_name, _), codes_i) in
+                        sorted_vectors.iter().zip(codes.iter())
+                    {
+                        output.write_all(&doc_id.to_le_bytes())?;
+                        let field_name_bytes = field_name.as_bytes();
+                        output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
+                        output.write_all(field_name_bytes)?;
+                        crate::vector::index::pq_io::write_pq_record(&mut output, codes_i)?;
+                    }
+                }
+            }
         }
 
         // Write Graph Data
