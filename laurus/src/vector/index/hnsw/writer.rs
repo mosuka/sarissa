@@ -304,11 +304,21 @@ impl HnswIndexWriter {
             )));
         }
 
-        // Read the Issue #481 Stage 1 vector segment header
-        // (LVS1 magic + version + Scalar8Bit params). Pre-Stage-1
-        // segments are rejected with IncompatibleFormat by the reader.
+        // Read the Issue #481 Stage 1 / Stage 3 vector segment header
+        // (LVS1). Pre-Stage-1 segments are rejected with
+        // IncompatibleFormat by the reader. PQ segments will be wired
+        // up by Phase 3 of Stage 3.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let QuantHeader::Scalar8Bit(params) = header.quant;
+        let params = match header.quant {
+            QuantHeader::Scalar8Bit(p) => p,
+            QuantHeader::ProductQuantization { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "Product quantization (Issue #481 Stage 3) HNSW writer rebuild \
+                     is not yet implemented; see Phase 3 follow-up"
+                        .to_string(),
+                ));
+            }
+        };
 
         // Read quantized vectors and dequantize back to f32 for the
         // in-memory writer state. Step 6 will switch the in-memory

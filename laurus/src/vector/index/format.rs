@@ -1,5 +1,6 @@
 //! On-disk format header shared by all quantized vector segments
-//! (HNSW / Flat / IVF) introduced in Issue #481 Stage 1.
+//! (HNSW / Flat / IVF) introduced in Issue #481 Stage 1, extended in
+//! Stage 3 with the Product Quantization variant.
 //!
 //! # Layout
 //!
@@ -16,11 +17,30 @@
 //!      6     2  quant_kind    u16 LE  (1 = Scalar8Bit, 2 = PQ;
 //!                                       0 reserved for "no quant")
 //!      8     8  reserved      zero-padded
-//!     16     8  scalar_8bit_params (only when quant_kind = 1)
+//!     16     -  quantization metadata (variant-specific, see below)
+//!      :     -  vector data
+//! ```
+//!
+//! For `quant_kind = 1` (Scalar8Bit, Stage 1):
+//!
+//! ```text
+//!     16     8  scalar_8bit_params
 //!                              offset: f32 LE
 //!                              scale:  f32 LE
-//!     24     -  vector data (per-vector layout: dim bytes int8 +
+//!     24     -  vector data (per-vector: dim bytes int8 +
 //!                            QuantizedVectorMeta::SERIALIZED_SIZE)
+//! ```
+//!
+//! For `quant_kind = 2` (Product Quantization, Stage 3):
+//!
+//! ```text
+//!     16     2  m             u16 LE  (number of sub-vectors)
+//!     18     2  k             u16 LE  (centroids per sub-vector; = 256)
+//!     20     2  sub_dim       u16 LE  (dim / m)
+//!     22     2  padding       u16 LE  (zero, alignment)
+//!     24     -  codebook      m * k * sub_dim * 4 bytes (f32 LE,
+//!                              row-major: codebook[m][k][sub_dim])
+//!      :     -  vector data (per-vector: m bytes of u8 codes)
 //! ```
 //!
 //! Endianness is **little-endian** for all multi-byte integers and
@@ -32,10 +52,6 @@
 //! unquantized variant. The reader currently rejects it with
 //! [`LaurusError::IncompatibleFormat`].
 //!
-//! `quant_kind = 2` (Product Quantization) is reserved for Stage 3.
-//! The reader rejects it with [`LaurusError::NotImplemented`] until
-//! that work lands.
-//!
 //! # Backward compatibility
 //!
 //! Pre-Stage-1 (`f32`-only) segments do **not** have this header.
@@ -45,7 +61,7 @@
 use std::io::{Read, Write};
 
 use crate::error::{LaurusError, Result};
-use crate::vector::core::quantization::ScalarQuantParams;
+use crate::vector::core::quantization::{PqParams, ScalarQuantParams};
 
 /// 4-byte ASCII magic at offset 0 of every quantized vector segment.
 pub const VECTOR_SEGMENT_MAGIC: [u8; 4] = *b"LVS1";
@@ -77,6 +93,18 @@ pub const FIXED_HEADER_SIZE: usize = 16;
 /// (offset: f32 + scale: f32).
 pub const SCALAR_8BIT_METADATA_SIZE: usize = 8;
 
+/// Size in bytes of the fixed portion of the
+/// [`QuantHeader::ProductQuantization`] metadata block (the `m`, `k`,
+/// `sub_dim` + padding fields, before the codebook payload). The
+/// codebook itself adds `m * k * sub_dim * 4` bytes.
+pub const PQ_FIXED_METADATA_SIZE: usize = 8;
+
+/// Centroids per sub-vector in the Stage 3 PQ format. Encoded in the
+/// segment header so future 4-bit variants can be added without
+/// breaking the layout, but the writer always emits this value today
+/// (Issue #481 Stage 3 ships only 8-bit codes).
+pub const PQ_CENTROIDS_PER_SUBVECTOR: u16 = 256;
+
 /// Per-segment header read from / written to a vector segment file.
 ///
 /// Combines the fixed 16-byte header (magic / version / quant_kind /
@@ -100,9 +128,18 @@ pub struct VectorSegmentHeader {
 pub enum QuantHeader {
     /// `quant_kind = 1` — per-segment global affine SQ (Stage 1).
     Scalar8Bit(ScalarQuantParams),
-    // `quant_kind = 2` (Product Quantization) intentionally **not**
-    // a Rust variant here yet: until Stage 3 lands, the reader emits
-    // NotImplemented and the writer never produces it.
+    /// `quant_kind = 2` — Product Quantization (Stage 3).
+    ///
+    /// Carries the PQ parameters (`m`, `k`, `sub_dim`) plus the
+    /// per-segment codebook (`m * k * sub_dim` floats, row-major:
+    /// `codebook[m * k * sub_dim + k * sub_dim + d]`).
+    ProductQuantization {
+        /// Stage 3 quantizer parameters (M / K / sub_dim).
+        params: PqParams,
+        /// Per-segment codebook in row-major layout. The length is
+        /// always `m * k * sub_dim` floats.
+        codebook: Vec<f32>,
+    },
 }
 
 impl QuantHeader {
@@ -110,6 +147,7 @@ impl QuantHeader {
     pub fn kind_code(&self) -> u16 {
         match self {
             Self::Scalar8Bit(_) => quant_kind::SCALAR_8BIT,
+            Self::ProductQuantization { .. } => quant_kind::PRODUCT_QUANTIZATION,
         }
     }
 
@@ -118,6 +156,9 @@ impl QuantHeader {
     pub fn metadata_size(&self) -> usize {
         match self {
             Self::Scalar8Bit(_) => SCALAR_8BIT_METADATA_SIZE,
+            Self::ProductQuantization { params, .. } => {
+                PQ_FIXED_METADATA_SIZE + params.codebook_byte_size()
+            }
         }
     }
 }
@@ -128,6 +169,18 @@ impl VectorSegmentHeader {
         Self {
             version: CURRENT_VERSION,
             quant: QuantHeader::Scalar8Bit(params),
+        }
+    }
+
+    /// Build a Stage-3 (PQ) header with the given params and codebook.
+    ///
+    /// The codebook must contain exactly `params.codebook_len()` floats
+    /// in row-major layout (`m × k × sub_dim`).
+    pub fn product_quantization(params: PqParams, codebook: Vec<f32>) -> Self {
+        debug_assert_eq!(codebook.len(), params.codebook_len());
+        Self {
+            version: CURRENT_VERSION,
+            quant: QuantHeader::ProductQuantization { params, codebook },
         }
     }
 
@@ -149,6 +202,16 @@ impl VectorSegmentHeader {
             QuantHeader::Scalar8Bit(params) => {
                 writer.write_all(&params.offset.to_le_bytes())?;
                 writer.write_all(&params.scale.to_le_bytes())?;
+            }
+            QuantHeader::ProductQuantization { params, codebook } => {
+                writer.write_all(&params.m.to_le_bytes())?;
+                writer.write_all(&params.k.to_le_bytes())?;
+                writer.write_all(&params.sub_dim.to_le_bytes())?;
+                writer.write_all(&0u16.to_le_bytes())?; // padding
+                debug_assert_eq!(codebook.len(), params.codebook_len());
+                for &f in codebook {
+                    writer.write_all(&f.to_le_bytes())?;
+                }
             }
         }
         Ok(())
@@ -209,11 +272,25 @@ impl VectorSegmentHeader {
                 })
             }
             quant_kind::PRODUCT_QUANTIZATION => {
-                return Err(LaurusError::NotImplemented(
-                    "Product quantization (Issue #481 Stage 3) is not yet implemented; \
-                     the on-disk quant_kind = 2 is reserved but no reader exists yet"
-                        .to_string(),
-                ));
+                let mut buf2 = [0u8; 2];
+                reader.read_exact(&mut buf2)?;
+                let m = u16::from_le_bytes(buf2);
+                reader.read_exact(&mut buf2)?;
+                let k = u16::from_le_bytes(buf2);
+                reader.read_exact(&mut buf2)?;
+                let sub_dim = u16::from_le_bytes(buf2);
+                reader.read_exact(&mut buf2)?; // padding
+                let params = PqParams::new(m, k, sub_dim).map_err(|e| {
+                    LaurusError::IncompatibleFormat(format!("invalid PQ params: {e}"))
+                })?;
+                let codebook_len = params.codebook_len();
+                let mut codebook = Vec::with_capacity(codebook_len);
+                let mut fbuf = [0u8; 4];
+                for _ in 0..codebook_len {
+                    reader.read_exact(&mut fbuf)?;
+                    codebook.push(f32::from_le_bytes(fbuf));
+                }
+                QuantHeader::ProductQuantization { params, codebook }
             }
             quant_kind::NONE => {
                 return Err(LaurusError::IncompatibleFormat(
@@ -329,16 +406,94 @@ mod tests {
         assert!(matches!(err, LaurusError::IncompatibleFormat(_)));
     }
 
+    fn sample_pq_params() -> PqParams {
+        PqParams::new(4, 256, 2).expect("valid PQ params")
+    }
+
+    fn sample_pq_codebook(params: &PqParams) -> Vec<f32> {
+        // Deterministic codebook so the roundtrip test compares
+        // every byte: codebook[m_idx][k_idx][d] = m_idx * 100 +
+        // k_idx + d as f32.
+        let mut cb = Vec::with_capacity(params.codebook_len());
+        for m in 0..params.m as usize {
+            for k in 0..params.k as usize {
+                for d in 0..params.sub_dim as usize {
+                    cb.push((m * 100 + k) as f32 + d as f32 * 0.01);
+                }
+            }
+        }
+        cb
+    }
+
     #[test]
-    fn quant_kind_pq_returns_not_implemented() {
+    fn roundtrip_product_quantization_header() {
+        let params = sample_pq_params();
+        let codebook = sample_pq_codebook(&params);
+        let header = VectorSegmentHeader::product_quantization(params, codebook);
+
+        let mut buf: Vec<u8> = Vec::new();
+        header.write_to(&mut buf).unwrap();
+        assert_eq!(buf.len(), header.serialized_size());
+        // Fixed header (16) + PQ fixed metadata (8) + codebook
+        // (m * k * sub_dim * 4) = 16 + 8 + 4 * 256 * 2 * 4 = 24 +
+        // 8192.
+        assert_eq!(
+            buf.len(),
+            FIXED_HEADER_SIZE + PQ_FIXED_METADATA_SIZE + 4 * 256 * 2 * 4
+        );
+
+        let parsed = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap();
+        assert_eq!(parsed, header);
+    }
+
+    #[test]
+    fn pq_header_serialised_starts_with_magic_and_kind_two() {
+        let params = sample_pq_params();
+        let codebook = sample_pq_codebook(&params);
+        let header = VectorSegmentHeader::product_quantization(params, codebook);
+        let mut buf: Vec<u8> = Vec::new();
+        header.write_to(&mut buf).unwrap();
+        assert_eq!(&buf[0..4], b"LVS1");
+        assert_eq!(u16::from_le_bytes([buf[4], buf[5]]), CURRENT_VERSION);
+        assert_eq!(
+            u16::from_le_bytes([buf[6], buf[7]]),
+            quant_kind::PRODUCT_QUANTIZATION
+        );
+        // PQ params start at offset 16.
+        assert_eq!(u16::from_le_bytes([buf[16], buf[17]]), 4); // m
+        assert_eq!(u16::from_le_bytes([buf[18], buf[19]]), 256); // k
+        assert_eq!(u16::from_le_bytes([buf[20], buf[21]]), 2); // sub_dim
+        // padding zero
+        assert_eq!(u16::from_le_bytes([buf[22], buf[23]]), 0);
+    }
+
+    #[test]
+    fn pq_header_metadata_size_matches_codebook() {
+        let params = sample_pq_params();
+        let header = QuantHeader::ProductQuantization {
+            params,
+            codebook: vec![0.0; params.codebook_len()],
+        };
+        assert_eq!(
+            header.metadata_size(),
+            PQ_FIXED_METADATA_SIZE + params.codebook_byte_size()
+        );
+    }
+
+    #[test]
+    fn pq_header_rejects_invalid_params() {
+        // Construct a buffer with m = 0 (invalid).
         let mut buf = Vec::new();
         buf.extend_from_slice(b"LVS1");
         buf.extend_from_slice(&CURRENT_VERSION.to_le_bytes());
         buf.extend_from_slice(&quant_kind::PRODUCT_QUANTIZATION.to_le_bytes());
         buf.extend_from_slice(&[0u8; 8]);
-
+        buf.extend_from_slice(&0u16.to_le_bytes()); // m = 0
+        buf.extend_from_slice(&256u16.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
         let err = VectorSegmentHeader::read_from(&mut Cursor::new(&buf)).unwrap_err();
-        assert!(matches!(err, LaurusError::NotImplemented(_)));
+        assert!(matches!(err, LaurusError::IncompatibleFormat(_)));
     }
 
     #[test]

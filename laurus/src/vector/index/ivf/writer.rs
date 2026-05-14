@@ -150,7 +150,16 @@ impl IvfIndexWriter {
         // Read the Issue #481 Stage 1 vector segment header (LVS1).
         // Pre-Stage-1 segments are rejected with IncompatibleFormat.
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let QuantHeader::Scalar8Bit(params) = header.quant;
+        let params = match header.quant {
+            QuantHeader::Scalar8Bit(p) => p,
+            QuantHeader::ProductQuantization { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "Product quantization (Issue #481 Stage 3) is HNSW-only; \
+                     the IVF writer does not support PQ segments yet"
+                        .to_string(),
+                ));
+            }
+        };
 
         // Read inverted lists, dequantizing each record back to f32
         // for the in-memory writer state.

@@ -201,10 +201,21 @@ impl HnswIndexReader {
                 }
             };
 
-        // Read the Issue #481 Stage 1 vector segment header (LVS1).
-        // Pre-Stage-1 segments are rejected with IncompatibleFormat.
+        // Read the Issue #481 Stage 1 / Stage 3 vector segment header
+        // (LVS1). Pre-Stage-1 segments are rejected with
+        // IncompatibleFormat. PQ segments are not yet handled in this
+        // path (Phase 3 of #481 Stage 3 wires them through here).
         let header = VectorSegmentHeader::read_from(&mut input)?;
-        let QuantHeader::Scalar8Bit(params) = header.quant;
+        let params = match header.quant {
+            QuantHeader::Scalar8Bit(p) => p,
+            QuantHeader::ProductQuantization { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "Product quantization (Issue #481 Stage 3) HNSW reader wiring \
+                     is not yet implemented; see Phase 3 follow-up"
+                        .to_string(),
+                ));
+            }
+        };
 
         let (vectors, vector_ids, graph) = match storage.loading_mode() {
             crate::storage::LoadingMode::Eager => {
