@@ -564,6 +564,27 @@ pub trait StorageInput: Read + Seek + Send + Sync + std::fmt::Debug {
 
     /// Close the input stream.
     fn close(&mut self) -> Result<()>;
+
+    /// Borrow the remaining unread bytes as a slice, if the underlying
+    /// storage supports zero-copy access (mmap-backed `FileStorage`,
+    /// in-memory storage).
+    ///
+    /// Returns `None` when the input cannot expose a slice
+    /// (buffered file I/O, network-backed storage, etc.) — callers
+    /// then fall back to `Read` + `Seek` directly. The returned slice
+    /// reflects the current `Seek` position (slice starts at the
+    /// cursor) and is bounded by `&self`'s lifetime; advancing through
+    /// `read`/`seek` does **not** invalidate slices the caller is still
+    /// holding, but a subsequent `seek` resets which bytes a future
+    /// `as_slice()` call returns.
+    ///
+    /// Used by the lexical posting-list decoder (Issue #504) to skip
+    /// the `read_exact` copy that mmap-backed readers would otherwise
+    /// perform — the zero-copy slice goes straight into the bitpacking
+    /// decode.
+    fn as_slice(&self) -> Option<&[u8]> {
+        None
+    }
 }
 
 /// A trait for writing data to storage.
@@ -605,6 +626,10 @@ impl StorageInput for Box<dyn StorageInput> {
 
     fn close(&mut self) -> Result<()> {
         self.as_mut().close()
+    }
+
+    fn as_slice(&self) -> Option<&[u8]> {
+        self.as_ref().as_slice()
     }
 }
 

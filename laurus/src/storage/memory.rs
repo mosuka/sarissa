@@ -345,6 +345,16 @@ impl StorageInput for MemoryInput {
         // Nothing to close for memory input
         Ok(())
     }
+
+    /// Borrow the in-memory buffer from the current read position to
+    /// the end. Issue #504 zero-copy path: callers (the lexical
+    /// posting decoder) can take a slice into the buffer instead of
+    /// re-allocating + `copy_from_slice` through `Read`.
+    fn as_slice(&self) -> Option<&[u8]> {
+        let pos = self.cursor.position() as usize;
+        let data = self.cursor.get_ref();
+        Some(&data[pos.min(data.len())..])
+    }
 }
 
 /// A write handle backed by an in-memory byte buffer.
@@ -634,6 +644,31 @@ mod tests {
         assert_eq!(input.size().unwrap(), 14);
         assert_eq!(storage.file_count(), 1);
         assert_eq!(storage.total_size(), 14);
+    }
+
+    #[test]
+    fn as_slice_returns_remaining_bytes() {
+        // Issue #504: MemoryInput exposes a zero-copy slice into the
+        // in-memory buffer for the lexical posting decoder.
+        let storage = MemoryStorage::default();
+        let mut output = storage.create_output("data.bin").unwrap();
+        output.write_all(b"abcdefghij").unwrap();
+        output.close().unwrap();
+
+        let mut input = storage.open_input("data.bin").unwrap();
+        // Initial slice covers the whole file.
+        assert_eq!(input.as_slice(), Some(&b"abcdefghij"[..]));
+
+        // After advancing the read cursor by 3 bytes the slice tail
+        // matches.
+        let mut head = [0u8; 3];
+        input.read_exact(&mut head).unwrap();
+        assert_eq!(&head, b"abc");
+        assert_eq!(input.as_slice(), Some(&b"defghij"[..]));
+
+        // Seek to end → empty slice.
+        input.seek(SeekFrom::End(0)).unwrap();
+        assert_eq!(input.as_slice(), Some(&[][..]));
     }
 
     #[test]

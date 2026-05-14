@@ -739,6 +739,16 @@ impl StorageInput for MmapInput {
         // Memory map will be automatically unmapped when dropped
         Ok(())
     }
+
+    /// Borrow the mmap region from the current read position to the end
+    /// of the file. The slice is valid for the lifetime of `&self`; the
+    /// underlying `Arc<Mmap>` keeps the page mapping alive as long as
+    /// this `MmapInput` exists. Callers can advance through `seek`
+    /// independently of any slices they continue to hold.
+    fn as_slice(&self) -> Option<&[u8]> {
+        let start = (self.position as usize).min(self.mmap.len());
+        Some(&self.mmap[start..])
+    }
 }
 
 /// A file output implementation.
@@ -995,6 +1005,46 @@ mod tests {
     fn test_file_storage_creation() {
         let (_temp_dir, storage) = create_test_storage();
         assert!(!storage.closed);
+    }
+
+    #[test]
+    fn mmap_input_as_slice_returns_remaining_bytes() {
+        // Issue #504: MmapInput exposes a zero-copy slice into the
+        // mapped region from the current read position. Without mmap
+        // (default config), the BufReader-backed FileInput returns
+        // None via the trait default.
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = true;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+
+        let mut output = storage.create_output("data.bin").unwrap();
+        output.write_all(b"abcdefghij").unwrap();
+        output.close().unwrap();
+
+        let mut input = storage.open_input("data.bin").unwrap();
+        assert_eq!(input.as_slice(), Some(&b"abcdefghij"[..]));
+
+        let mut head = [0u8; 3];
+        input.read_exact(&mut head).unwrap();
+        assert_eq!(&head, b"abc");
+        assert_eq!(input.as_slice(), Some(&b"defghij"[..]));
+
+        input.seek(SeekFrom::End(0)).unwrap();
+        assert_eq!(input.as_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn buffered_file_input_falls_back_to_none() {
+        // When use_mmap is disabled, FileInput is buffered I/O and
+        // cannot expose a zero-copy slice. Callers must use the
+        // Read+Seek fallback.
+        let (_temp_dir, storage) = create_test_storage();
+        let mut output = storage.create_output("data.bin").unwrap();
+        output.write_all(b"abc").unwrap();
+        output.close().unwrap();
+        let input = storage.open_input("data.bin").unwrap();
+        assert_eq!(input.as_slice(), None);
     }
 
     #[test]
