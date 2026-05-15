@@ -64,23 +64,54 @@ let storage: Arc<dyn Storage> = Arc::new(FileStorage::new("/tmp/laurus-data", co
 
 ### メモリマッピング付き FileStorage
 
-`FileStorage` は `use_mmap` 設定フラグによるメモリマップドファイルアクセスをサポートします。有効にすると、OS がメモリとディスク間のページングを管理します。
+`FileStorage` は `use_mmap` 設定フラグによるメモリマップドファイル
+アクセスをサポートします。有効にすると OS がメモリとディスク間の
+ページングを管理し、レキシカルの posting デコーダ (Issue #504) は
+`StorageInput::as_slice` 経由の zero-copy パスを取り、PFOR
+ビットパック済みブロックを `bitpacking::decompress*` に直接渡します
+（`Read` 経由の `Vec<u8>` 確保とコピーを省略）。
+
+**デフォルトはプラットフォーム依存:**
+
+- **Unix (Linux / macOS / *BSD): `true`** (Issue #504 以降)。デバッグ
+  セッションや mmap が機能しないホストでバッファード I/O に切り替える
+  には、`FileStorageConfig::new` 呼び出し時に `LAURUS_NO_MMAP=1`
+  環境変数を設定します。
+- **Windows: `false`** (Issue #508 以降)。Windows はメモリマップ
+  ドファイルに排他ロックを持ち (`ERROR_USER_MAPPED_FILE`、os
+  error 1224)、reader が mmap を保持したまま writer がセグメント
+  ファイルを truncate / delete することを許可しません。現状の
+  segment file lifecycle はこのロックと整合しません。コミット頻度
+  が低い read-only / read-mostly ワークロードでは
+  `LAURUS_USE_MMAP=1` でオプトイン可能です。Windows mmap の完全
+  サポートは
+  [Issue #508](https://github.com/mosuka/laurus/issues/508) で
+  追跡しています。
 
 ```rust
 use std::sync::Arc;
 use laurus::Storage;
 use laurus::storage::file::{FileStorage, FileStorageConfig};
 
-let mut config = FileStorageConfig::new("/tmp/laurus-data");
-config.use_mmap = true;  // enable memory-mapped I/O
+// Unix では mmap がデフォルトで有効、Windows では LAURUS_USE_MMAP=1
+// を設定しない限り無効。
+let config = FileStorageConfig::new("/tmp/laurus-data");
 let storage: Arc<dyn Storage> = Arc::new(FileStorage::new("/tmp/laurus-data", config)?);
+
+// 環境変数に触れずに明示的にオプトアウト（OS 不問）。
+let mut buffered_config = FileStorageConfig::new("/tmp/laurus-data");
+buffered_config.use_mmap = false;
+
+// 明示的にオプトイン（Windows でも有効、OS 不問）。
+let mut mmap_config = FileStorageConfig::new("/tmp/laurus-data");
+mmap_config.use_mmap = true;
 ```
 
 | プロパティ | 値 |
 | :--- | :--- |
 | 耐久性 | 完全（ディスクに永続化） |
-| 速度 | 高速（OS 管理のメモリマッピング） |
-| ユースケース | 大規模データセット、読み取り負荷の高いワークロード |
+| 速度 | 高速（OS 管理のメモリマッピング、zero-copy posting デコード） |
+| ユースケース | プロダクション規模ワークロードのデフォルト |
 
 ## StorageFactory
 

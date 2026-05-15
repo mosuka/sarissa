@@ -620,6 +620,58 @@ impl<R: StorageInput> StructReader<R> {
         Ok(bytes)
     }
 
+    /// Run `f` against the next `length` raw bytes, taking a zero-copy
+    /// slice from the underlying storage when possible (mmap-backed
+    /// `FileStorage`, in-memory storage). Falls through to a heap-
+    /// allocated buffer + [`Read`] when the input cannot lend a slice
+    /// (buffered file I/O).
+    ///
+    /// This is the Issue #504 hot path for the lexical posting
+    /// decoder: every PFOR block is a contiguous run of bytes that
+    /// `bitpacking::BitPacker4x::decompress*` consumes via `&[u8]`,
+    /// so calling it on a borrowed mmap region skips the per-block
+    /// allocation + `copy_from_slice` that `read_raw` would otherwise
+    /// perform.
+    ///
+    /// The CRC checksum and stream position are updated identically
+    /// to [`Self::read_raw`]; callers see the same state-machine
+    /// progression regardless of which path was taken.
+    ///
+    /// # Errors
+    ///
+    /// * Underlying I/O failure (mmap seek or `read_exact` short
+    ///   read).
+    /// * `length` larger than the remaining bytes available in the
+    ///   slice path (caller is expected to bound the request by the
+    ///   posting block size).
+    pub fn read_raw_with<F, T>(&mut self, length: usize, f: F) -> Result<T>
+    where
+        F: FnOnce(&[u8]) -> T,
+    {
+        // Zero-copy path: only when the underlying storage can lend
+        // a slice large enough.
+        if let Some(slice) = self.reader.as_slice()
+            && slice.len() >= length
+        {
+            let chunk = &slice[..length];
+            // Compute the CRC and run the callback while the
+            // immutable borrow on `self.reader` is still live.
+            let new_checksum = crc32fast::hash(chunk);
+            let result = f(chunk);
+            // NLL: `chunk` is no longer used after the callback,
+            // so the immutable borrow ends here and we can mutate
+            // `self`.
+            self.checksum = new_checksum;
+            self.position += length as u64;
+            self.reader
+                .seek(std::io::SeekFrom::Current(length as i64))?;
+            return Ok(result);
+        }
+        // Fallback: heap-allocated buffer + Read.
+        let bytes = self.read_raw(length)?;
+        Ok(f(&bytes))
+    }
+
     /// Read a delta-compressed `u32` array.
     ///
     /// This reverses the encoding performed by

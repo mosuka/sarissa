@@ -98,7 +98,10 @@ pub struct FileStorageConfig {
     pub path: std::path::PathBuf,
 
     /// Whether to use memory-mapped files for reading.
-    /// When true, files are read using mmap instead of traditional I/O.
+    /// When true, files are read using mmap instead of traditional
+    /// I/O. **Default `true` as of Issue #504**; set the
+    /// `LAURUS_NO_MMAP=1` environment variable when constructing a
+    /// `FileStorageConfig` via [`Self::new`] to opt out.
     pub use_mmap: bool,
 
     /// Buffer size for traditional I/O operations (bytes).
@@ -139,7 +142,19 @@ impl FileStorageConfig {
     ///
     /// # Default Settings
     ///
-    /// - `use_mmap`: false
+    /// - `use_mmap`:
+    ///   - **Linux / macOS / other Unix: `true`** (Issue #504 — mmap-backed
+    ///     reads are the default so the lexical posting decoder can take
+    ///     the zero-copy path through `StorageInput::as_slice`). Set the
+    ///     `LAURUS_NO_MMAP=1` environment variable to opt out (debug /
+    ///     fallback for hosts where mmap misbehaves).
+    ///   - **Windows: `false`** (Issue #508). Windows holds an exclusive
+    ///     lock on memory-mapped files (`ERROR_USER_MAPPED_FILE`, os
+    ///     error 1224) which prevents the writer from truncating /
+    ///     deleting a segment file while a reader still holds an mmap.
+    ///     The current segment-file lifecycle is incompatible with
+    ///     that lock. Read-only / read-mostly workloads can opt in
+    ///     with `LAURUS_USE_MMAP=1` and accept the risk.
     /// - `buffer_size`: 65536 (64KB)
     /// - `sync_writes`: false
     /// - `use_locking`: true
@@ -147,9 +162,12 @@ impl FileStorageConfig {
     /// - `mmap_enable_prefault`: false
     /// - `mmap_enable_hugepages`: false
     pub fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
+        // The mmap default is platform-specific (Unix on / Windows
+        // off, Issue #504, #508); the per-OS policy lives in
+        // `super::platform` so this call site stays platform-agnostic.
         FileStorageConfig {
             path: path.as_ref().to_path_buf(),
-            use_mmap: false,
+            use_mmap: super::platform::default_use_mmap(),
             buffer_size: 65536,
             sync_writes: false,
             use_locking: true,
@@ -739,6 +757,16 @@ impl StorageInput for MmapInput {
         // Memory map will be automatically unmapped when dropped
         Ok(())
     }
+
+    /// Borrow the mmap region from the current read position to the end
+    /// of the file. The slice is valid for the lifetime of `&self`; the
+    /// underlying `Arc<Mmap>` keeps the page mapping alive as long as
+    /// this `MmapInput` exists. Callers can advance through `seek`
+    /// independently of any slices they continue to hold.
+    fn as_slice(&self) -> Option<&[u8]> {
+        let start = (self.position as usize).min(self.mmap.len());
+        Some(&self.mmap[start..])
+    }
 }
 
 /// A file output implementation.
@@ -995,6 +1023,124 @@ mod tests {
     fn test_file_storage_creation() {
         let (_temp_dir, storage) = create_test_storage();
         assert!(!storage.closed);
+    }
+
+    #[test]
+    fn mmap_input_as_slice_returns_remaining_bytes() {
+        // Issue #504: MmapInput exposes a zero-copy slice into the
+        // mapped region from the current read position. Without mmap
+        // (default config), the BufReader-backed FileInput returns
+        // None via the trait default.
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = true;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+
+        let mut output = storage.create_output("data.bin").unwrap();
+        output.write_all(b"abcdefghij").unwrap();
+        output.close().unwrap();
+
+        let mut input = storage.open_input("data.bin").unwrap();
+        assert_eq!(input.as_slice(), Some(&b"abcdefghij"[..]));
+
+        let mut head = [0u8; 3];
+        input.read_exact(&mut head).unwrap();
+        assert_eq!(&head, b"abc");
+        assert_eq!(input.as_slice(), Some(&b"defghij"[..]));
+
+        input.seek(SeekFrom::End(0)).unwrap();
+        assert_eq!(input.as_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn buffered_file_input_falls_back_to_none() {
+        // When use_mmap is disabled, FileInput is buffered I/O and
+        // cannot expose a zero-copy slice. Callers must use the
+        // Read+Seek fallback. Issue #504 flipped the default to mmap,
+        // so this test now constructs a config that opts out.
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = false;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+        let mut output = storage.create_output("data.bin").unwrap();
+        output.write_all(b"abc").unwrap();
+        output.close().unwrap();
+        let input = storage.open_input("data.bin").unwrap();
+        assert_eq!(input.as_slice(), None);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn config_new_defaults_use_mmap_true_on_unix() {
+        // SAFETY: tests in this module run single-threaded by default
+        // when scoped through `cargo test --test ...`; the env-var
+        // toggle is read at `FileStorageConfig::new` time so we
+        // bracket the var around the construction call. The
+        // surrounding `create_test_storage` does not set the var.
+        let temp_dir = TempDir::new().unwrap();
+        // SAFETY: this test temporarily mutates a process-global env
+        // var. It restores the prior state before returning so other
+        // tests in the binary are unaffected. Rust 2024 marks
+        // `remove_var`/`set_var` unsafe because they are not
+        // synchronised with concurrent threads; cargo test parallel
+        // sandboxing means another concurrent test could observe the
+        // intermediate state, but in practice the storage tests do
+        // not branch on LAURUS_NO_MMAP outside of this test, so the
+        // race is harmless.
+        let prior = std::env::var("LAURUS_NO_MMAP").ok();
+        unsafe {
+            std::env::remove_var("LAURUS_NO_MMAP");
+        }
+        let cfg = FileStorageConfig::new(temp_dir.path());
+        assert!(cfg.use_mmap, "Unix default config must enable mmap");
+        unsafe {
+            std::env::set_var("LAURUS_NO_MMAP", "1");
+        }
+        let cfg = FileStorageConfig::new(temp_dir.path());
+        assert!(
+            !cfg.use_mmap,
+            "LAURUS_NO_MMAP=1 must opt out of the mmap default on Unix"
+        );
+        unsafe {
+            match prior {
+                Some(v) => std::env::set_var("LAURUS_NO_MMAP", v),
+                None => std::env::remove_var("LAURUS_NO_MMAP"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn config_new_defaults_use_mmap_false_on_windows() {
+        // Issue #508: Windows defaults to mmap-off because the OS
+        // holds an exclusive lock on memory-mapped files that breaks
+        // the segment-overwrite path. Opt-in via LAURUS_USE_MMAP=1
+        // for read-only / read-mostly workloads.
+        let temp_dir = TempDir::new().unwrap();
+        let prior = std::env::var("LAURUS_USE_MMAP").ok();
+        // SAFETY: see config_new_defaults_use_mmap_true_on_unix.
+        unsafe {
+            std::env::remove_var("LAURUS_USE_MMAP");
+        }
+        let cfg = FileStorageConfig::new(temp_dir.path());
+        assert!(
+            !cfg.use_mmap,
+            "Windows default config must disable mmap (Issue #508)"
+        );
+        unsafe {
+            std::env::set_var("LAURUS_USE_MMAP", "1");
+        }
+        let cfg = FileStorageConfig::new(temp_dir.path());
+        assert!(
+            cfg.use_mmap,
+            "LAURUS_USE_MMAP=1 must opt into mmap on Windows"
+        );
+        unsafe {
+            match prior {
+                Some(v) => std::env::set_var("LAURUS_USE_MMAP", v),
+                None => std::env::remove_var("LAURUS_USE_MMAP"),
+            }
+        }
     }
 
     #[test]
