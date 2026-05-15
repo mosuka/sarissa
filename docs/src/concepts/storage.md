@@ -71,24 +71,39 @@ path through `StorageInput::as_slice`, handing PFOR-bit-packed blocks
 directly to `bitpacking::decompress*` instead of allocating an
 intermediate `Vec<u8>` and copying through `Read`.
 
-**Default `true` as of Issue #504.** Set the `LAURUS_NO_MMAP=1`
-environment variable when constructing the config (via
-`FileStorageConfig::new`) to fall back to buffered file I/O for
-debug sessions or hosts where mmap misbehaves.
+**Default is platform-specific:**
+
+- **Unix (Linux / macOS / *BSD): `true`** as of Issue #504. Set the
+  `LAURUS_NO_MMAP=1` environment variable when constructing the config
+  (via `FileStorageConfig::new`) to fall back to buffered file I/O for
+  debug sessions or hosts where mmap misbehaves.
+- **Windows: `false`** as of Issue #508. Windows holds an exclusive
+  lock on memory-mapped files (`ERROR_USER_MAPPED_FILE`, os error
+  1224) which prevents the writer from truncating / deleting a
+  segment file while a reader still holds an mmap. The current
+  segment-file lifecycle is incompatible with that lock. Set
+  `LAURUS_USE_MMAP=1` to opt in for read-only / read-mostly
+  workloads where commit frequency is low. Full Windows mmap
+  support is tracked in
+  [Issue #508](https://github.com/mosuka/laurus/issues/508).
 
 ```rust
 use std::sync::Arc;
 use laurus::Storage;
 use laurus::storage::file::{FileStorage, FileStorageConfig};
 
-// mmap is on by default — same as Issue #504 ships.
+// mmap is on by default on Unix; on Windows it is off unless
+// LAURUS_USE_MMAP=1 is set.
 let config = FileStorageConfig::new("/tmp/laurus-data");
-assert!(config.use_mmap);
 let storage: Arc<dyn Storage> = Arc::new(FileStorage::new("/tmp/laurus-data", config)?);
 
-// Explicit opt-out without touching the env var.
+// Explicit opt-out without touching the env var (works on any OS).
 let mut buffered_config = FileStorageConfig::new("/tmp/laurus-data");
 buffered_config.use_mmap = false;
+
+// Explicit opt-in (works on any OS, including Windows).
+let mut mmap_config = FileStorageConfig::new("/tmp/laurus-data");
+mmap_config.use_mmap = true;
 ```
 
 | Property | Value |

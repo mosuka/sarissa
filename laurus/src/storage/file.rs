@@ -162,26 +162,12 @@ impl FileStorageConfig {
     /// - `mmap_enable_prefault`: false
     /// - `mmap_enable_hugepages`: false
     pub fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
-        // mmap default policy is platform-aware:
-        // - Unix (Linux / macOS / *BSD): default ON, opt-out via
-        //   `LAURUS_NO_MMAP=1`. The kernel keeps mmap-backed inodes
-        //   alive across `unlink` / `truncate` / overwrite, so the
-        //   current segment-file lifecycle is compatible.
-        // - Windows: default OFF, opt-in via `LAURUS_USE_MMAP=1`.
-        //   Win32 file locks block mutate-in-place while an mmap is
-        //   live; full Windows mmap support is tracked in #508.
-        // Reading the env var at construction time keeps the toggle
-        // close to the policy decision (`new` is the single call site
-        // every caller funnels through) and lets tests / fixtures pick
-        // either path without code changes.
-        let use_mmap = if cfg!(target_os = "windows") {
-            matches!(std::env::var("LAURUS_USE_MMAP").as_deref(), Ok("1"))
-        } else {
-            !matches!(std::env::var("LAURUS_NO_MMAP").as_deref(), Ok("1"))
-        };
+        // The mmap default is platform-specific (Unix on / Windows
+        // off, Issue #504, #508); the per-OS policy lives in
+        // `super::platform` so this call site stays platform-agnostic.
         FileStorageConfig {
             path: path.as_ref().to_path_buf(),
-            use_mmap,
+            use_mmap: super::platform::default_use_mmap(),
             buffer_size: 65536,
             sync_writes: false,
             use_locking: true,
