@@ -13,6 +13,73 @@ use crate::storage::{StorageInput, StorageOutput};
 /// Block length for `BitPacker4x` (SSE3 / scalar fallback): 128 ints per block.
 const POSTING_BLOCK_LEN: usize = BitPacker4x::BLOCK_LEN;
 
+/// Branching factor for the multi-level skip table over a posting list
+/// (#503). Matches Lucene 90's `Lucene90PostingsFormat` — every level
+/// has 1/`SKIP_INTERVAL` of the lower level's entries, so seeking via
+/// [`InvertedIndexPostingIterator::skip_to`][super::super::reader::InvertedIndexPostingIterator]
+/// reaches O(log_8 N) instead of the linear-scan O(N) that
+/// `block_cache` paid before.
+///
+/// The constant is co-located with the on-disk encoder
+/// ([`PostingList::encode_v2`]) because the writer and reader must
+/// agree on the same interval; bumping it requires a format bump.
+pub const SKIP_INTERVAL: usize = 8;
+
+/// Build the multi-level skip table over a sorted doc-id slice.
+///
+/// Each output level holds the "last doc id" of each `step`-wide window
+/// of `doc_ids`, where `step = SKIP_INTERVAL^(level + 1)`. The function
+/// keeps adding levels until the top one has at most `SKIP_INTERVAL`
+/// entries — at that point a single `partition_point` on the top level
+/// covers the whole posting list.
+///
+/// Returns an empty `Vec` when `doc_ids.len() < SKIP_INTERVAL`: the
+/// linear-scan fallback inside `skip_to` is already O(N) ≤ O(SKIP_INTERVAL)
+/// for these short lists, so paying the skip-table build cost is a net
+/// loss.
+///
+/// # Arguments
+///
+/// * `doc_ids` - Ascending-sorted doc ids of the posting list.
+///
+/// # Returns
+///
+/// `Vec<Vec<u32>>` where index `0` is level 0 (step = `SKIP_INTERVAL`)
+/// and the last index is the top level (≤ `SKIP_INTERVAL` entries).
+pub fn build_skip_levels(doc_ids: &[u32]) -> Vec<Vec<u32>> {
+    let n = doc_ids.len();
+    if n < SKIP_INTERVAL {
+        return Vec::new();
+    }
+
+    let mut levels: Vec<Vec<u32>> = Vec::new();
+    let mut step = SKIP_INTERVAL;
+    // Level 0: stride directly over `doc_ids`.
+    loop {
+        let len = n / step;
+        if len == 0 {
+            break;
+        }
+        let mut level = Vec::with_capacity(len);
+        for i in 0..len {
+            // Last doc id of the i-th window of `step` postings.
+            level.push(doc_ids[(i + 1) * step - 1]);
+        }
+        levels.push(level);
+        // Stop once the top level has collapsed to a single window —
+        // a further level would have zero entries.
+        if len <= 1 {
+            break;
+        }
+        // Saturate to avoid overflow on absurdly large lists.
+        step = match step.checked_mul(SKIP_INTERVAL) {
+            Some(s) => s,
+            None => break,
+        };
+    }
+    levels
+}
+
 /// A single posting in a posting list.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Posting {
@@ -260,6 +327,14 @@ pub struct DecodedPostingList {
     /// positions for posting `i`: `Some(Vec<u32>)` if positions are present,
     /// `None` otherwise.
     pub positions: Option<Vec<Option<Vec<u32>>>>,
+    /// Multi-level skip table over `doc_ids` (#503). Index 0 is level 0
+    /// (step = [`SKIP_INTERVAL`]); the last index is the top level
+    /// (≤ `SKIP_INTERVAL` entries). Empty when the posting list is too
+    /// short to benefit (`doc_ids.len() < SKIP_INTERVAL`) or when the
+    /// decoder loaded a legacy v1 segment that did not carry skip
+    /// metadata — in the latter case the reader path rebuilds the
+    /// table on load via [`build_skip_levels`].
+    pub skip_levels: Vec<Vec<u32>>,
     /// Total term frequency across all documents.
     pub total_frequency: u64,
     /// Document frequency (number of documents containing this term).
@@ -305,12 +380,14 @@ impl DecodedPostingList {
             }
         }
 
+        let skip_levels = build_skip_levels(&doc_ids);
         DecodedPostingList {
             term: list.term.clone(),
             doc_ids,
             frequencies,
             weights,
             positions,
+            skip_levels,
             total_frequency: list.total_frequency,
             doc_frequency: list.doc_frequency,
         }
@@ -499,6 +576,53 @@ impl PostingList {
     ///
     /// * `writer` - The structured output writer.
     pub fn encode<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
+        self.encode_header_and_payload(writer, /* with_skip_levels */ false)
+    }
+
+    /// Encode the posting list in v2 format, which adds a multi-level
+    /// skip table after the header (#503).
+    ///
+    /// The header and payload sections (doc_ids / frequencies / weights /
+    /// positions) are byte-identical to [`Self::encode`]; the only
+    /// difference is the new **Skip levels** section inserted between
+    /// `any_positions` and Section 1. Concretely:
+    ///
+    /// ```text
+    /// [term: string]
+    /// [total_frequency: varint]
+    /// [doc_frequency: varint]
+    /// [posting_count N: varint]
+    /// [any_positions: u8]
+    ///
+    /// // ───── New v2 section: multi-level skip table ─────
+    /// [num_skip_levels: u8]
+    /// repeat num_skip_levels times:
+    ///   [level_len: varint]
+    ///   repeat level_len times: [doc_id: u32]   // raw little-endian u32
+    ///
+    /// // Sections 1-4 identical to v1
+    /// ```
+    ///
+    /// A v1 reader cannot decode a v2 payload — the format is gated by
+    /// [`TermPostingIndex`]'s on-disk version field, which v2 readers
+    /// inspect before dispatching to [`Self::decode_soa_v2`].
+    ///
+    /// # Arguments
+    ///
+    /// * `writer` - The structured output writer.
+    pub fn encode_v2<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
+        self.encode_header_and_payload(writer, /* with_skip_levels */ true)
+    }
+
+    /// Shared encoder used by both [`Self::encode`] (v1) and
+    /// [`Self::encode_v2`]. The two only differ in whether the
+    /// **Skip levels** section is emitted between the header and
+    /// Section 1.
+    fn encode_header_and_payload<W: StorageOutput>(
+        &self,
+        writer: &mut StructWriter<W>,
+        with_skip_levels: bool,
+    ) -> Result<()> {
         writer.write_string(&self.term)?;
         writer.write_varint(self.total_frequency)?;
         writer.write_varint(self.doc_frequency)?;
@@ -508,6 +632,36 @@ impl PostingList {
 
         let any_positions = self.postings.iter().any(|p| p.positions.is_some());
         writer.write_u8(u8::from(any_positions))?;
+
+        if with_skip_levels {
+            // Build the skip table from the in-memory postings. The
+            // doc_ids we send through `build_skip_levels` must match
+            // the ones the bit-packer is about to emit — we already
+            // enforce `doc_id ≤ u32::MAX` in Section 1, so reuse the
+            // same conversion + overflow check here.
+            let mut doc_ids_u32 = Vec::with_capacity(n);
+            for posting in &self.postings {
+                let did = posting.doc_id;
+                doc_ids_u32.push(u32::try_from(did).map_err(|_| {
+                    LaurusError::index(format!(
+                        "doc_id {did} exceeds u32::MAX; segment is too large for bit-packed posting format"
+                    ))
+                })?);
+            }
+            let levels = build_skip_levels(&doc_ids_u32);
+            writer.write_u8(u8::try_from(levels.len()).map_err(|_| {
+                LaurusError::index(format!(
+                    "skip level count {} exceeds u8::MAX; refusing to encode",
+                    levels.len()
+                ))
+            })?)?;
+            for level in &levels {
+                writer.write_varint(level.len() as u64)?;
+                for &did in level {
+                    writer.write_u32(did)?;
+                }
+            }
+        }
 
         if n == 0 {
             return Ok(());
@@ -611,11 +765,54 @@ impl PostingList {
     /// * `reader` - The structured input reader positioned at a posting-list
     ///   header.
     pub fn decode_soa<R: StorageInput>(reader: &mut StructReader<R>) -> Result<DecodedPostingList> {
+        Self::decode_soa_inner(reader, /* with_skip_levels */ false)
+    }
+
+    /// Decode a posting list previously written by [`Self::encode_v2`]
+    /// (#503). Reads the on-disk skip levels into
+    /// [`DecodedPostingList::skip_levels`] verbatim; the iterator then
+    /// uses them directly without rebuilding from `doc_ids`.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The structured input reader positioned at a v2
+    ///   posting-list header.
+    pub fn decode_soa_v2<R: StorageInput>(
+        reader: &mut StructReader<R>,
+    ) -> Result<DecodedPostingList> {
+        Self::decode_soa_inner(reader, /* with_skip_levels */ true)
+    }
+
+    /// Shared decoder used by both [`Self::decode_soa`] (v1) and
+    /// [`Self::decode_soa_v2`]. The two only differ in whether the
+    /// **Skip levels** section is consumed from the input stream; v1
+    /// rebuilds the skip table from `doc_ids` at the end instead.
+    fn decode_soa_inner<R: StorageInput>(
+        reader: &mut StructReader<R>,
+        with_skip_levels: bool,
+    ) -> Result<DecodedPostingList> {
         let term = reader.read_string()?;
         let total_frequency = reader.read_varint()?;
         let doc_frequency = reader.read_varint()?;
         let n = reader.read_varint()? as usize;
         let any_positions = reader.read_u8()? != 0;
+
+        // v2-only section: multi-level skip table. Always present (even
+        // for short posting lists where `num_skip_levels = 0`), so the
+        // byte layout stays deterministic.
+        let mut disk_skip_levels: Vec<Vec<u32>> = Vec::new();
+        if with_skip_levels {
+            let num_levels = reader.read_u8()? as usize;
+            disk_skip_levels.reserve(num_levels);
+            for _ in 0..num_levels {
+                let level_len = reader.read_varint()? as usize;
+                let mut level = Vec::with_capacity(level_len);
+                for _ in 0..level_len {
+                    level.push(reader.read_u32()?);
+                }
+                disk_skip_levels.push(level);
+            }
+        }
 
         if n == 0 {
             return Ok(DecodedPostingList {
@@ -628,6 +825,7 @@ impl PostingList {
                 } else {
                     None
                 },
+                skip_levels: disk_skip_levels,
                 total_frequency,
                 doc_frequency,
             });
@@ -716,12 +914,23 @@ impl PostingList {
             None
         };
 
+        // Issue #503: v2 segments carry skip levels on disk; v1 segments
+        // do not, so build the table from the decoded `doc_ids` at load
+        // time. The build cost is paid once per segment open, not per
+        // query, so the fallback path stays cheap.
+        let skip_levels = if with_skip_levels {
+            disk_skip_levels
+        } else {
+            build_skip_levels(&doc_ids)
+        };
+
         Ok(DecodedPostingList {
             term,
             doc_ids,
             frequencies,
             weights,
             positions,
+            skip_levels,
             total_frequency,
             doc_frequency,
         })
@@ -738,6 +947,19 @@ impl PostingList {
     ///   header.
     pub fn decode<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
         Ok(Self::decode_soa(reader)?.into_posting_list())
+    }
+
+    /// Decode a posting list previously written by [`Self::encode_v2`]
+    /// into the AoS [`Vec<Posting>`] form (#503). The on-disk skip
+    /// levels are consumed but discarded — AoS callers (tests, legacy
+    /// code paths) do not use them.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - The structured input reader positioned at a v2
+    ///   posting-list header.
+    pub fn decode_v2<R: StorageInput>(reader: &mut StructReader<R>) -> Result<Self> {
+        Ok(Self::decode_soa_v2(reader)?.into_posting_list())
     }
 }
 
@@ -923,11 +1145,18 @@ impl TermPostingIndex {
         }
     }
 
+    /// On-disk version of the [`TermPostingIndex`] format used by
+    /// [`Self::write_to_storage`]. Version 2 introduces the
+    /// multi-level skip table per posting list (#503); v1 segments
+    /// remain readable via [`Self::read_from_storage`]'s back-compat
+    /// branch.
+    const ON_DISK_VERSION: u32 = 2;
+
     /// Write the inverted index to storage.
     pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
         // Write header
         writer.write_u32(0x494E5658)?; // Magic number "INVX"
-        writer.write_u32(1)?; // Version
+        writer.write_u32(Self::ON_DISK_VERSION)?;
         writer.write_varint(self.doc_count)?;
         writer.write_varint(self.term_count)?;
         writer.write_varint(self.terms.len() as u64)?;
@@ -936,9 +1165,9 @@ impl TermPostingIndex {
         let mut sorted_terms: Vec<_> = self.terms.iter().collect();
         sorted_terms.sort_by_key(|(term, _)| *term);
 
-        // Write posting lists
+        // v2: every posting list carries an on-disk skip table.
         for (_, posting_list) in sorted_terms {
-            posting_list.encode(writer)?;
+            posting_list.encode_v2(writer)?;
         }
 
         Ok(())
@@ -953,7 +1182,7 @@ impl TermPostingIndex {
         }
 
         let version = reader.read_u32()?;
-        if version != 1 {
+        if version != 1 && version != 2 {
             return Err(LaurusError::index(format!(
                 "Unsupported index version: {version}"
             )));
@@ -965,9 +1194,15 @@ impl TermPostingIndex {
 
         let mut terms = AHashMap::with_capacity(posting_list_count);
 
-        // Read posting lists
+        // Dispatch posting-list decode by on-disk version. v1 segments
+        // do not carry skip levels; the SoA decoder rebuilds them at
+        // load time (#503 back-compat fallback).
         for _ in 0..posting_list_count {
-            let posting_list = PostingList::decode(reader)?;
+            let posting_list = if version == 1 {
+                PostingList::decode(reader)?
+            } else {
+                PostingList::decode_v2(reader)?
+            };
             terms.insert(posting_list.term.clone(), posting_list);
         }
 
@@ -1554,6 +1789,206 @@ mod tests {
         assert_eq!(rebuilt.doc_frequency, list.doc_frequency);
         for (orig, dec) in list.postings.iter().zip(rebuilt.postings.iter()) {
             assert_eq!(orig, dec);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // #503: multi-level skip table — build + on-disk v2 round-trip.
+    // ─────────────────────────────────────────────────────────────
+
+    /// `build_skip_levels` must return an empty `Vec` for posting lists
+    /// shorter than `SKIP_INTERVAL` — the tail linear scan in `skip_to`
+    /// is already O(SKIP_INTERVAL) for these cases, so paying the
+    /// skip-table cost is a net loss.
+    #[test]
+    fn test_build_skip_levels_below_interval() {
+        for n in 0..SKIP_INTERVAL {
+            let doc_ids: Vec<u32> = (0..n as u32).collect();
+            let levels = build_skip_levels(&doc_ids);
+            assert!(
+                levels.is_empty(),
+                "expected empty skip levels at n={n}, got {levels:?}"
+            );
+        }
+    }
+
+    /// Exactly one bottom-level entry: `n = SKIP_INTERVAL`. The top
+    /// level should have a single entry equal to the last doc id.
+    #[test]
+    fn test_build_skip_levels_single_block() {
+        let doc_ids: Vec<u32> = (0..SKIP_INTERVAL as u32).collect();
+        let levels = build_skip_levels(&doc_ids);
+        assert_eq!(levels.len(), 1, "{levels:?}");
+        assert_eq!(levels[0], vec![SKIP_INTERVAL as u32 - 1]);
+    }
+
+    /// At `n = SKIP_INTERVAL * SKIP_INTERVAL` the table should top out
+    /// at exactly two levels: L0 with `SKIP_INTERVAL` entries, L1 with
+    /// 1 entry pointing at the last doc id.
+    #[test]
+    fn test_build_skip_levels_two_levels() {
+        let n = SKIP_INTERVAL * SKIP_INTERVAL;
+        let doc_ids: Vec<u32> = (0..n as u32).collect();
+        let levels = build_skip_levels(&doc_ids);
+        assert_eq!(levels.len(), 2);
+        assert_eq!(levels[0].len(), SKIP_INTERVAL);
+        for (i, &v) in levels[0].iter().enumerate() {
+            assert_eq!(v, ((i + 1) * SKIP_INTERVAL - 1) as u32);
+        }
+        assert_eq!(levels[1], vec![(n - 1) as u32]);
+    }
+
+    /// 5000 sequential doc ids exercises 4 levels (8, 64, 512, 4096
+    /// strides). Verify each entry equals `doc_ids[(i + 1) * step - 1]`.
+    #[test]
+    fn test_build_skip_levels_5k_dense() {
+        let n: usize = 5_000;
+        let doc_ids: Vec<u32> = (0..n as u32).collect();
+        let levels = build_skip_levels(&doc_ids);
+        let mut step = SKIP_INTERVAL;
+        for level in &levels {
+            let expected_len = n / step;
+            assert_eq!(level.len(), expected_len, "step={step}");
+            for (i, &v) in level.iter().enumerate() {
+                assert_eq!(v, ((i + 1) * step - 1) as u32, "step={step} i={i}");
+            }
+            step *= SKIP_INTERVAL;
+        }
+        assert!(
+            levels.last().unwrap().len() <= SKIP_INTERVAL,
+            "top level should fit in a single skip window: {levels:?}"
+        );
+    }
+
+    /// Encoding via `encode_v2` and decoding via `decode_soa_v2` must
+    /// round-trip every field including the multi-level skip table —
+    /// the on-disk levels must equal the in-memory `build_skip_levels`
+    /// result.
+    #[test]
+    fn test_round_trip_v2_preserves_skip_levels() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        // Pick a size that triggers ≥ 2 skip levels so the encoder's
+        // count varint actually runs.
+        let n: usize = 2_000;
+        let mut original = PostingList::new("v2_round_trip".to_string());
+        for i in 0..n {
+            let did = (i as u64) * 3 + 1;
+            let freq = ((i % 7) + 1) as u32;
+            let weight = 0.25 + (i % 4) as f32 * 0.5;
+            original.add_posting(Posting::with_frequency(did, freq).with_weight(weight));
+        }
+
+        let path = "v2_round_trip.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            original.encode_v2(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let decoded = PostingList::decode_soa_v2(&mut reader).unwrap();
+
+        // Postings preserved.
+        assert_eq!(decoded.len(), n);
+        for (i, posting) in original.postings.iter().enumerate() {
+            assert_eq!(decoded.doc_ids[i], posting.doc_id as u32, "doc at {i}");
+            assert_eq!(decoded.frequencies[i], posting.frequency, "freq at {i}");
+        }
+
+        // Skip levels match what `build_skip_levels` produces.
+        let expected_levels = build_skip_levels(&decoded.doc_ids);
+        assert_eq!(decoded.skip_levels.len(), expected_levels.len());
+        for (i, (got, want)) in decoded
+            .skip_levels
+            .iter()
+            .zip(expected_levels.iter())
+            .enumerate()
+        {
+            assert_eq!(got, want, "level {i} mismatch");
+        }
+    }
+
+    /// Decoding a v1-encoded posting list must still populate
+    /// `skip_levels` (backward-compat fallback rebuilds it at load).
+    #[test]
+    fn test_v1_decode_populates_skip_levels_fallback() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let n: usize = 1_000;
+        let mut original = PostingList::new("v1_compat".to_string());
+        for i in 0..n {
+            let did = (i as u64) * 2;
+            original.add_posting(Posting::with_frequency(did, 1));
+        }
+
+        let path = "v1_compat.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            original.encode(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let decoded = PostingList::decode_soa(&mut reader).unwrap();
+
+        assert_eq!(decoded.len(), n);
+        let expected_levels = build_skip_levels(&decoded.doc_ids);
+        assert_eq!(decoded.skip_levels, expected_levels);
+    }
+
+    /// `TermPostingIndex` v1 segments (no skip levels on disk) must
+    /// still load correctly through `read_from_storage`'s back-compat
+    /// branch. We synthesize a v1 byte stream by writing the magic +
+    /// version=1 header and then `encode` (v1) for each posting list.
+    #[test]
+    fn test_term_posting_index_v1_back_compat() {
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        let mut original = TermPostingIndex::new();
+        original.add_document(
+            1,
+            vec![
+                ("hello".to_string(), 2, Some(vec![0, 5])),
+                ("world".to_string(), 1, Some(vec![1])),
+            ],
+        );
+        original.add_document(
+            2,
+            vec![
+                ("hello".to_string(), 1, Some(vec![2])),
+                ("rust".to_string(), 3, Some(vec![0, 3, 6])),
+            ],
+        );
+
+        // Synthesize a v1 file by hand (write_to_storage emits v2).
+        let path = "tpi_v1.bin";
+        {
+            let output = storage.create_output(path).unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(0x494E5658).unwrap(); // "INVX"
+            writer.write_u32(1).unwrap(); // version = 1 (legacy)
+            writer.write_varint(original.doc_count()).unwrap();
+            writer.write_varint(original.term_count()).unwrap();
+            writer.write_varint(3).unwrap(); // 3 distinct terms
+            let mut terms: Vec<_> = original.terms.iter().collect();
+            terms.sort_by_key(|(t, _)| *t);
+            for (_, posting_list) in terms {
+                posting_list.encode(&mut writer).unwrap();
+            }
+            writer.close().unwrap();
+        }
+
+        let input = storage.open_input(path).unwrap();
+        let mut reader = StructReader::new(input).unwrap();
+        let loaded = TermPostingIndex::read_from_storage(&mut reader).unwrap();
+
+        assert_eq!(loaded.doc_count(), original.doc_count());
+        assert_eq!(loaded.term_count(), original.term_count());
+        for term in ["hello", "world", "rust"] {
+            let want = original.get_posting_list(term).expect("term exists");
+            let got = loaded.get_posting_list(term).expect("term loaded");
+            assert_eq!(got.postings.len(), want.postings.len(), "term={term}");
         }
     }
 

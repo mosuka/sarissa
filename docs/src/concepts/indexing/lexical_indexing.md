@@ -79,6 +79,7 @@ yields fast SIMD-accelerated decoding through the
 
 ```text
 [term, total_frequency, doc_frequency, posting_count N, any_positions]
+[Skip levels              — v2 only: num_levels + per-level (len + u32 doc_ids)]
 [Section 1: doc_ids       — N/128 bit-packed blocks + varint tail]
 [Section 2: frequencies   — N/128 bit-packed blocks + varint tail]
 [Section 3: weights       — N raw f32 values]
@@ -94,6 +95,29 @@ produces parallel `Vec<u32>` slices for `doc_id` and `frequency` directly
 from disk without the intermediate `Vec<Posting>` reassembly. The query
 iterator stores those slices, so `next()` advances a single `u32` cursor
 over a dense slice instead of striding across a 40-byte `Posting` struct.
+
+### Multi-Level Skip Table
+
+A posting list of `N ≥ 8` postings carries a Lucene-90-style
+multi-level skip table immediately after the header (v2 format,
+introduced for `skip_to` performance on seek-heavy workloads).
+Each level stores the "last doc id" of a fixed-stride window over
+`doc_ids`; level 0 has one entry per `SKIP_INTERVAL = 8` postings,
+level 1 covers `8²` postings, and so on until the top level
+collapses to a single entry.
+
+`PostingIterator::skip_to(target)` walks the table top-down: at each
+level a single `partition_point` narrows the search window by a factor
+of `SKIP_INTERVAL`, descends one level, and finishes with a linear
+scan over the bottom-level window of at most 8 postings. Total work
+is `O(log_8 N + SKIP_INTERVAL)` per call — for `N = 1 M` that is
+~25 comparisons, versus the linear `O(N / block_size)` walk the
+single-level `block_cache` paid before.
+
+The table is co-located with the posting list rather than stored in a
+separate file, matching Lucene 9 / Tantivy. Segments written in the
+legacy v1 format (without the on-disk skip table) remain readable —
+the SoA decoder rebuilds the table from `doc_ids` at load time.
 
 ### Term Dictionary Storage Layers
 

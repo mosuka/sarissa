@@ -701,6 +701,69 @@ fn bench_topk_or_multi_segment(c: &mut Criterion) {
     group.finish();
 }
 
+/// Seek-heavy AND-conjunction benchmark for the multi-level skip list
+/// (#503). Drives a `BooleanQuery::Must(common_term, rare_term)`
+/// against corpora of 100 k and 1 M documents. The rare side has
+/// roughly 6 % document frequency (one [`LONG_TAIL`] word), the common
+/// side hits every document — so the conjunction matcher's leader is
+/// the rare side and the common side pays one `skip_to` call per rare
+/// hit, exercising the worst-case posting-list seek pattern that the
+/// linear-walk `find_block` path collapsed to O(N) per call.
+///
+/// The 1 M case is gated on `LAURUS_BENCH_LARGE=1` because corpus
+/// build alone takes ~30 s and the audit acceptance criterion
+/// explicitly targets that size; the 100 k case runs by default so a
+/// regression at the existing AND boundary remains visible without
+/// requiring opt-in.
+fn bench_seek_skewed(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("lexical/seek_skewed");
+    let mut sizes: Vec<usize> = vec![100_000];
+    if std::env::var("LAURUS_BENCH_LARGE").is_ok() {
+        sizes.push(1_000_000);
+    }
+    group.sample_size(SAMPLE_SIZE_SLOW);
+
+    for &n in &sizes {
+        let engine = rt.block_on(build_engine(n)).unwrap();
+
+        // Sanity probe: the AND must hit at least once at every
+        // benched n — otherwise the conjunction would short-circuit
+        // and we'd be measuring nothing.
+        let probe = rt.block_on(async {
+            let mut bq = BooleanQuery::new();
+            bq.add_must(Box::new(TermQuery::new("body", "search")));
+            bq.add_must(Box::new(TermQuery::new("body", "lattice")));
+            let request = SearchRequestBuilder::new()
+                .lexical_query(LexicalSearchQuery::Obj(Box::new(bq)))
+                .limit(10)
+                .build();
+            engine.search(request).await.unwrap()
+        });
+        assert!(
+            !probe.is_empty(),
+            "seek_skewed AND probe must return at least one hit at n={n}"
+        );
+
+        group.bench_with_input(BenchmarkId::new("and_common_rare", n), &n, |b, _| {
+            b.to_async(&rt).iter(|| {
+                let engine = &engine;
+                async move {
+                    let mut bq = BooleanQuery::new();
+                    bq.add_must(Box::new(TermQuery::new("body", "search")));
+                    bq.add_must(Box::new(TermQuery::new("body", "lattice")));
+                    let request = SearchRequestBuilder::new()
+                        .lexical_query(LexicalSearchQuery::Obj(Box::new(bq)))
+                        .limit(10)
+                        .build();
+                    black_box(engine.search(request).await.unwrap())
+                }
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_phrase_query(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("lexical/phrase_query");
@@ -893,6 +956,7 @@ criterion_group!(
     bench_boolean_query,
     bench_topk_or_skewed_tf,
     bench_topk_or_multi_segment,
+    bench_seek_skewed,
     bench_phrase_query,
     bench_fuzzy_query,
     bench_dsl_query,
