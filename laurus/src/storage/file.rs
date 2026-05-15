@@ -142,11 +142,19 @@ impl FileStorageConfig {
     ///
     /// # Default Settings
     ///
-    /// - `use_mmap`: **true** (Issue #504 — mmap-backed reads are the
-    ///   default so the lexical posting decoder can take the zero-copy
-    ///   path through `StorageInput::as_slice`). Set the
-    ///   `LAURUS_NO_MMAP=1` environment variable to opt out (debug /
-    ///   fallback for hosts where mmap misbehaves).
+    /// - `use_mmap`:
+    ///   - **Linux / macOS / other Unix: `true`** (Issue #504 — mmap-backed
+    ///     reads are the default so the lexical posting decoder can take
+    ///     the zero-copy path through `StorageInput::as_slice`). Set the
+    ///     `LAURUS_NO_MMAP=1` environment variable to opt out (debug /
+    ///     fallback for hosts where mmap misbehaves).
+    ///   - **Windows: `false`** (Issue #508). Windows holds an exclusive
+    ///     lock on memory-mapped files (`ERROR_USER_MAPPED_FILE`, os
+    ///     error 1224) which prevents the writer from truncating /
+    ///     deleting a segment file while a reader still holds an mmap.
+    ///     The current segment-file lifecycle is incompatible with
+    ///     that lock. Read-only / read-mostly workloads can opt in
+    ///     with `LAURUS_USE_MMAP=1` and accept the risk.
     /// - `buffer_size`: 65536 (64KB)
     /// - `sync_writes`: false
     /// - `use_locking`: true
@@ -154,12 +162,23 @@ impl FileStorageConfig {
     /// - `mmap_enable_prefault`: false
     /// - `mmap_enable_hugepages`: false
     pub fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
-        // mmap default is `true` unless the operator opts out via env.
+        // mmap default policy is platform-aware:
+        // - Unix (Linux / macOS / *BSD): default ON, opt-out via
+        //   `LAURUS_NO_MMAP=1`. The kernel keeps mmap-backed inodes
+        //   alive across `unlink` / `truncate` / overwrite, so the
+        //   current segment-file lifecycle is compatible.
+        // - Windows: default OFF, opt-in via `LAURUS_USE_MMAP=1`.
+        //   Win32 file locks block mutate-in-place while an mmap is
+        //   live; full Windows mmap support is tracked in #508.
         // Reading the env var at construction time keeps the toggle
         // close to the policy decision (`new` is the single call site
         // every caller funnels through) and lets tests / fixtures pick
         // either path without code changes.
-        let use_mmap = !matches!(std::env::var("LAURUS_NO_MMAP").as_deref(), Ok("1"));
+        let use_mmap = if cfg!(target_os = "windows") {
+            matches!(std::env::var("LAURUS_USE_MMAP").as_deref(), Ok("1"))
+        } else {
+            !matches!(std::env::var("LAURUS_NO_MMAP").as_deref(), Ok("1"))
+        };
         FileStorageConfig {
             path: path.as_ref().to_path_buf(),
             use_mmap,
@@ -1065,7 +1084,8 @@ mod tests {
     }
 
     #[test]
-    fn config_new_defaults_use_mmap_true() {
+    #[cfg(not(target_os = "windows"))]
+    fn config_new_defaults_use_mmap_true_on_unix() {
         // SAFETY: tests in this module run single-threaded by default
         // when scoped through `cargo test --test ...`; the env-var
         // toggle is read at `FileStorageConfig::new` time so we
@@ -1086,19 +1106,53 @@ mod tests {
             std::env::remove_var("LAURUS_NO_MMAP");
         }
         let cfg = FileStorageConfig::new(temp_dir.path());
-        assert!(cfg.use_mmap, "default config must enable mmap");
+        assert!(cfg.use_mmap, "Unix default config must enable mmap");
         unsafe {
             std::env::set_var("LAURUS_NO_MMAP", "1");
         }
         let cfg = FileStorageConfig::new(temp_dir.path());
         assert!(
             !cfg.use_mmap,
-            "LAURUS_NO_MMAP=1 must opt out of the mmap default"
+            "LAURUS_NO_MMAP=1 must opt out of the mmap default on Unix"
         );
         unsafe {
             match prior {
                 Some(v) => std::env::set_var("LAURUS_NO_MMAP", v),
                 None => std::env::remove_var("LAURUS_NO_MMAP"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn config_new_defaults_use_mmap_false_on_windows() {
+        // Issue #508: Windows defaults to mmap-off because the OS
+        // holds an exclusive lock on memory-mapped files that breaks
+        // the segment-overwrite path. Opt-in via LAURUS_USE_MMAP=1
+        // for read-only / read-mostly workloads.
+        let temp_dir = TempDir::new().unwrap();
+        let prior = std::env::var("LAURUS_USE_MMAP").ok();
+        // SAFETY: see config_new_defaults_use_mmap_true_on_unix.
+        unsafe {
+            std::env::remove_var("LAURUS_USE_MMAP");
+        }
+        let cfg = FileStorageConfig::new(temp_dir.path());
+        assert!(
+            !cfg.use_mmap,
+            "Windows default config must disable mmap (Issue #508)"
+        );
+        unsafe {
+            std::env::set_var("LAURUS_USE_MMAP", "1");
+        }
+        let cfg = FileStorageConfig::new(temp_dir.path());
+        assert!(
+            cfg.use_mmap,
+            "LAURUS_USE_MMAP=1 must opt into mmap on Windows"
+        );
+        unsafe {
+            match prior {
+                Some(v) => std::env::set_var("LAURUS_USE_MMAP", v),
+                None => std::env::remove_var("LAURUS_USE_MMAP"),
             }
         }
     }

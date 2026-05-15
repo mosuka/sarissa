@@ -836,11 +836,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_file_storage_config() {
-        // Issue #504: `use_mmap` defaults to true unless the
-        // `LAURUS_NO_MMAP=1` env var opts out. The dedicated toggle
-        // test in `storage::file::tests::config_new_defaults_use_mmap_true`
-        // exercises both branches; this one focuses on the other
-        // defaults and is robust to either mmap setting.
+        // Issue #504 / #508: `use_mmap` defaults to platform-specific
+        // policy (Unix on / Windows off) and is exercised in the
+        // dedicated platform-gated tests in `storage::file::tests`;
+        // this one focuses on the other defaults and is robust to
+        // either mmap setting.
         let config = FileStorageConfig::new("/tmp/test");
 
         assert_eq!(config.path, std::path::PathBuf::from("/tmp/test"));
