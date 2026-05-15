@@ -131,11 +131,14 @@ pub struct InvertedIndexPostingIterator {
     /// Current position in the parallel arrays.
     position: usize,
 
-    /// Block cache for efficient skip-to.
-    block_cache: Option<Vec<PostingBlock>>,
-
-    /// Current block being processed.
-    current_block: usize,
+    /// Multi-level skip table over `doc_ids` (#503). `skip_levels[0]` is
+    /// level 0 (one entry per [`crate::lexical::index::inverted::core::posting::SKIP_INTERVAL`]
+    /// postings); each level's stride is `SKIP_INTERVAL` times the
+    /// previous. Empty when the posting list is too short to benefit
+    /// (`doc_ids.len() < SKIP_INTERVAL`) — `skip_to` then falls back to
+    /// a single linear scan over the bottom-level window, which for
+    /// short lists is already O(SKIP_INTERVAL).
+    skip_levels: Vec<Vec<u32>>,
 
     /// Whether `next()` has been called at least once.
     started: bool,
@@ -145,60 +148,46 @@ pub struct InvertedIndexPostingIterator {
 /// Tuple is `(doc_ids, frequencies, optional positions sidecar)`.
 type SoaArrays = (Vec<u32>, Vec<u32>, Option<Vec<Option<Vec<u32>>>>);
 
-/// A block of postings for efficient processing.
-#[derive(Debug, Clone)]
-pub struct PostingBlock {
-    /// Minimum document ID in this block.
-    pub min_doc_id: u64,
-
-    /// Maximum document ID in this block.
-    pub max_doc_id: u64,
-
-    /// Starting position in the posting list.
-    pub start_position: usize,
-
-    /// Number of postings in this block.
-    pub count: usize,
-}
-
 impl InvertedIndexPostingIterator {
     /// Create a new advanced posting iterator from an AoS [`Vec<Posting>`].
     /// Performs an AoS→SoA conversion eagerly; prefer
     /// [`Self::from_decoded_soa`] in the query hot path to skip this copy.
     pub fn new(postings: Vec<Posting>) -> Self {
         let (doc_ids, frequencies, positions) = Self::soa_from_aos(&postings);
+        let skip_levels =
+            crate::lexical::index::inverted::core::posting::build_skip_levels(&doc_ids);
         InvertedIndexPostingIterator {
             doc_ids,
             frequencies,
             positions,
             position: 0,
-            block_cache: None,
-            current_block: 0,
+            skip_levels,
             started: false,
         }
     }
 
-    /// Create a posting iterator from AoS postings with block optimization.
-    /// Performs an AoS→SoA conversion eagerly; prefer
-    /// [`Self::from_decoded_soa_with_blocks`] in the query hot path.
-    pub fn with_blocks(postings: Vec<Posting>, block_size: usize) -> Self {
-        let (doc_ids, frequencies, positions) = Self::soa_from_aos(&postings);
-        let blocks = Self::create_blocks(&doc_ids, block_size);
-        InvertedIndexPostingIterator {
-            doc_ids,
-            frequencies,
-            positions,
-            position: 0,
-            block_cache: Some(blocks),
-            current_block: 0,
-            started: false,
-        }
+    /// Create a posting iterator from AoS postings with multi-level
+    /// skip table for O(log_8 N) `skip_to` (#503).
+    ///
+    /// The `_block_size` argument is kept for source compatibility with
+    /// callers that previously tuned the legacy single-level
+    /// `block_cache`; the multi-level skip layout is now controlled by
+    /// the fixed [`crate::lexical::index::inverted::core::posting::SKIP_INTERVAL`]
+    /// constant (Lucene-90 compatible branching factor 8), so this
+    /// argument is ignored. Prefer [`Self::from_decoded_soa_with_blocks`]
+    /// in the query hot path to skip the AoS→SoA copy.
+    pub fn with_blocks(postings: Vec<Posting>, _block_size: usize) -> Self {
+        Self::new(postings)
     }
 
     /// Construct an iterator directly from a SoA-decoded posting list,
     /// without paying an AoS reassembly. This is the fast path used by
     /// [`SegmentReader::postings`] / `term_postings` after
     /// [`PostingList::decode_soa`].
+    ///
+    /// The iterator inherits the skip table from `decoded`, which is
+    /// either decoded straight from a v2 segment or rebuilt at load
+    /// time for v1 segments (#503).
     ///
     /// # Arguments
     ///
@@ -209,30 +198,22 @@ impl InvertedIndexPostingIterator {
             frequencies: decoded.frequencies,
             positions: decoded.positions,
             position: 0,
-            block_cache: None,
-            current_block: 0,
+            skip_levels: decoded.skip_levels,
             started: false,
         }
     }
 
-    /// Like [`Self::from_decoded_soa`], but also pre-builds the skip-block
-    /// cache used by [`Self::skip_to`].
+    /// Like [`Self::from_decoded_soa`]. The `_block_size` argument is
+    /// kept for source compatibility but ignored — the skip table is
+    /// determined by the global [`crate::lexical::index::inverted::core::posting::SKIP_INTERVAL`]
+    /// branching factor (#503).
     ///
     /// # Arguments
     ///
     /// * `decoded` - SoA-decoded posting data.
-    /// * `block_size` - Number of postings per skip block.
-    pub fn from_decoded_soa_with_blocks(decoded: DecodedPostingList, block_size: usize) -> Self {
-        let blocks = Self::create_blocks(&decoded.doc_ids, block_size);
-        InvertedIndexPostingIterator {
-            doc_ids: decoded.doc_ids,
-            frequencies: decoded.frequencies,
-            positions: decoded.positions,
-            position: 0,
-            block_cache: Some(blocks),
-            current_block: 0,
-            started: false,
-        }
+    /// * `_block_size` - Ignored; retained for source-level compat.
+    pub fn from_decoded_soa_with_blocks(decoded: DecodedPostingList, _block_size: usize) -> Self {
+        Self::from_decoded_soa(decoded)
     }
 
     /// Convert AoS postings to parallel SoA arrays; the positions sidecar is
@@ -257,48 +238,85 @@ impl InvertedIndexPostingIterator {
         (doc_ids, frequencies, positions)
     }
 
-    /// Build skip-block index over the doc_id slice.
-    fn create_blocks(doc_ids: &[u32], block_size: usize) -> Vec<PostingBlock> {
-        let mut blocks = Vec::new();
-        let mut start = 0;
+    /// Walk the multi-level skip table from the top down to find the
+    /// smallest `doc_ids` index that is **guaranteed not to exceed** the
+    /// position of `target_u32` (#503). The returned index is the
+    /// starting point for a final linear scan inside `skip_to`.
+    ///
+    /// Each level descent bounds its `partition_point` window to at
+    /// most [`SKIP_INTERVAL`] entries — the bucket identified at the
+    /// parent level. The total work is `O(SKIP_INTERVAL · log_SKIP_INTERVAL N)`
+    /// comparisons per call (Lucene 90 / Tantivy compatible) instead
+    /// of the `O(N / SKIP_INTERVAL)` scan the legacy single-level
+    /// `block_cache` paid.
+    ///
+    /// The walk respects the current `self.position`: the search never
+    /// regresses below where the iterator already sits, so repeated
+    /// `skip_to(x); skip_to(y)` calls keep advancing monotonically
+    /// without redoing work behind the cursor.
+    fn skip_via_levels(&self, target_u32: u32) -> usize {
+        use crate::lexical::index::inverted::core::posting::SKIP_INTERVAL;
 
-        while start < doc_ids.len() {
-            let end = (start + block_size).min(doc_ids.len());
-            blocks.push(PostingBlock {
-                min_doc_id: doc_ids[start] as u64,
-                max_doc_id: doc_ids[end - 1] as u64,
-                start_position: start,
-                count: end - start,
-            });
-            start = end;
+        let n = self.doc_ids.len();
+        let cursor = self.position;
+        if cursor >= n {
+            return n;
+        }
+        if self.skip_levels.is_empty() {
+            // Posting list shorter than SKIP_INTERVAL — the tail scan
+            // inside `skip_to` handles the whole list.
+            return cursor;
         }
 
-        blocks
-    }
+        let top = self.skip_levels.len() - 1;
+        // step at the current level = SKIP_INTERVAL^(level + 1).
+        let mut step = SKIP_INTERVAL.saturating_pow((top + 1) as u32);
 
-    /// Find the block containing (or first ahead of) the target document ID.
-    fn find_block(&self, target: u64) -> Option<usize> {
-        if let Some(blocks) = &self.block_cache {
-            for (i, block) in blocks.iter().enumerate() {
-                if target >= block.min_doc_id && target <= block.max_doc_id {
-                    return Some(i);
-                }
-                if target < block.min_doc_id {
-                    // Target falls before this block. Start scanning from this
-                    // block since all prior blocks contain only smaller doc_ids.
-                    return Some(i);
-                }
-            }
-
-            // Target is beyond all blocks — return last block as starting point.
-            if !blocks.is_empty() {
-                Some(blocks.len() - 1)
-            } else {
-                None
-            }
-        } else {
-            None
+        // Top level: `build_skip_levels` guarantees ≤ SKIP_INTERVAL
+        // entries here, so a single `partition_point` already runs in
+        // ≤ log_2(SKIP_INTERVAL) comparisons.
+        let top_lvl = &self.skip_levels[top];
+        let bucket_lo = cursor / step;
+        if bucket_lo >= top_lvl.len() {
+            // Cursor is past every entry on the top level — descend
+            // straight into the linear-scan tail.
+            return cursor;
         }
+        let slice = &top_lvl[bucket_lo..];
+        let local = slice.partition_point(|&x| x < target_u32);
+        let mut bucket_index = bucket_lo + local;
+        let mut lower = bucket_index * step;
+
+        // Descend: at each lower level, restrict `partition_point` to
+        // the SKIP_INTERVAL-wide window corresponding to the parent's
+        // bucket. This bounds per-level work to log_2(SKIP_INTERVAL)
+        // comparisons (≈ 3 for SKIP_INTERVAL = 8) instead of the
+        // unbounded slice the naïve descent would search.
+        for level in (0..top).rev() {
+            step /= SKIP_INTERVAL;
+            let lvl = &self.skip_levels[level];
+
+            let parent_lo = bucket_index * SKIP_INTERVAL;
+            let parent_hi = (parent_lo + SKIP_INTERVAL).min(lvl.len());
+            // Skip entries strictly behind the cursor.
+            let lo = (cursor / step).max(parent_lo);
+            if lo >= parent_hi {
+                // No useful entry left in this bucket; keep `lower`
+                // monotone with `cursor` and prepare the next level.
+                lower = lower.max(cursor);
+                bucket_index = parent_hi.saturating_sub(1);
+                continue;
+            }
+            let slice = &lvl[lo..parent_hi];
+            let local = slice.partition_point(|&x| x < target_u32);
+            bucket_index = lo + local;
+            lower = bucket_index * step;
+        }
+
+        // Monotonic progress: never regress below the cursor, and
+        // clamp to the posting-list length so the tail scan inside
+        // `skip_to` does not run past the array.
+        lower.max(cursor).min(n)
     }
 }
 
@@ -352,18 +370,31 @@ impl crate::lexical::reader::PostingIterator for InvertedIndexPostingIterator {
         // Mark as started
         self.started = true;
 
-        // Use block optimization if available
-        if let Some(block_idx) = self.find_block(target_doc_id)
-            && let Some(blocks) = &self.block_cache
-        {
-            let block = &blocks[block_idx];
-            self.position = block.start_position;
-            self.current_block = block_idx;
+        let n = self.doc_ids.len();
+        if n == 0 {
+            return Ok(false);
         }
 
-        // Linear search within the current range
-        while self.position < self.doc_ids.len() {
-            if self.doc_ids[self.position] as u64 >= target_doc_id {
+        // Per-segment doc ids are bounded to u32::MAX (matches
+        // `PostingList::encode`). A target beyond u32::MAX cannot match
+        // any posting in this segment, so we exhaust the iterator
+        // straight away.
+        let target_u32 = match u32::try_from(target_doc_id) {
+            Ok(t) => t,
+            Err(_) => {
+                self.position = n;
+                return Ok(false);
+            }
+        };
+
+        // Descend the multi-level skip table to land on a small window
+        // (≤ SKIP_INTERVAL postings). The final linear scan below
+        // bounds the comparisons to that window — total work is
+        // O(log_8 N + SKIP_INTERVAL) per call (#503).
+        self.position = self.skip_via_levels(target_u32);
+
+        while self.position < n {
+            if self.doc_ids[self.position] >= target_u32 {
                 return Ok(true);
             }
             self.position += 1;
@@ -730,12 +761,19 @@ impl SegmentReader {
             }
         }
 
+        // After deletion filtering the doc_ids may shrink, so rebuild
+        // the skip table over the surviving entries. This is the same
+        // path #503's load-time fallback exercises.
+        let skip_levels =
+            crate::lexical::index::inverted::core::posting::build_skip_levels(&doc_ids);
+
         Ok(DecodedPostingList {
             term: decoded.term,
             doc_ids,
             frequencies,
             weights: Vec::new(), // weights are not consumed by the iterator API
             positions,
+            skip_levels,
             total_frequency: decoded.total_frequency,
             doc_frequency: decoded.doc_frequency,
         })
@@ -1002,8 +1040,22 @@ impl SegmentReader {
 
             // Decode the posting list in SoA-native form to skip the
             // intermediate `Vec<Posting>` reassembly and keep the iterator
-            // backed by parallel `Vec<u32>` slices.
-            let decoded = PostingList::decode_soa(&mut reader)?;
+            // backed by parallel `Vec<u32>` slices. Dispatch by on-disk
+            // posting format version (#503): v2 segments carry the
+            // multi-level skip table inline; v1 segments rebuild it from
+            // `doc_ids` at load time inside `decode_soa`.
+            let posting_format = self
+                .term_dictionary
+                .read()
+                .unwrap()
+                .as_ref()
+                .map(|dict| dict.posting_format_version())
+                .unwrap_or(2);
+            let decoded = if posting_format >= 2 {
+                PostingList::decode_soa_v2(&mut reader)?
+            } else {
+                PostingList::decode_soa(&mut reader)?
+            };
             let filtered = self.filter_deleted_soa(decoded)?;
 
             if filtered.is_empty() {
@@ -2249,6 +2301,102 @@ mod tests {
         // Test skip past end
         assert!(!iter.skip_to(15).unwrap());
         assert_eq!(iter.doc_id(), u64::MAX);
+    }
+
+    /// `skip_to` must agree with a naive linear scan across the full
+    /// sweep of corpus sizes and target positions — #503 multi-level
+    /// skip table must not change observable behaviour. Covers below
+    /// SKIP_INTERVAL (table empty, tail-only path), exact stride
+    /// boundaries, and several multi-level cases.
+    #[test]
+    fn test_skip_to_matches_linear_scan() {
+        use crate::lexical::index::inverted::core::posting::{Posting, SKIP_INTERVAL};
+
+        for &n in &[
+            1usize,
+            SKIP_INTERVAL - 1,
+            SKIP_INTERVAL,
+            SKIP_INTERVAL + 1,
+            SKIP_INTERVAL * SKIP_INTERVAL,
+            5_000,
+        ] {
+            // Build posting list with doc_id = i * 3 + 7 — gaps + offset
+            // so equality-on-boundary cases get exercised, not just
+            // contiguous ranges.
+            let postings: Vec<Posting> = (0..n as u64)
+                .map(|i| Posting::with_frequency(i * 3 + 7, 1))
+                .collect();
+            let doc_ids: Vec<u64> = postings.iter().map(|p| p.doc_id).collect();
+
+            // Pick a handful of target doc ids: before first, exactly
+            // first/last, one past every level boundary, and well past
+            // end-of-list.
+            let mut targets: Vec<u64> = vec![0, doc_ids[0]];
+            if n > 1 {
+                targets.push(doc_ids[n / 2]);
+                targets.push(doc_ids[n / 2] + 1);
+            }
+            targets.push(doc_ids[n - 1]);
+            targets.push(doc_ids[n - 1] + 1);
+            targets.push(doc_ids[n - 1] + 1000);
+            // Anything beyond u32::MAX must exhaust the iterator.
+            targets.push(u64::from(u32::MAX) + 1);
+
+            for &target in &targets {
+                let mut iter = InvertedIndexPostingIterator::new(postings.clone());
+                let got = iter.skip_to(target).unwrap();
+
+                // Linear-scan reference: the first doc id >= target.
+                let want_idx = doc_ids.iter().position(|&d| d >= target);
+                match want_idx {
+                    Some(idx) => {
+                        assert!(got, "expected hit at target={target} n={n}");
+                        assert_eq!(
+                            iter.doc_id(),
+                            doc_ids[idx],
+                            "wrong doc_id at target={target} n={n}"
+                        );
+                    }
+                    None => {
+                        assert!(!got, "expected miss at target={target} n={n}");
+                        assert_eq!(
+                            iter.doc_id(),
+                            u64::MAX,
+                            "exhausted iter should report u64::MAX (target={target} n={n})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Repeated `skip_to` calls must advance monotonically without
+    /// regressing. After `skip_to(x)` lands at index `i`, a subsequent
+    /// `skip_to(y)` with `y > x` must land at index ≥ `i`. This is the
+    /// invariant the BMW pivot loop and conjunction matchers rely on.
+    #[test]
+    fn test_skip_to_is_monotonic() {
+        use crate::lexical::index::inverted::core::posting::Posting;
+
+        let n: usize = 2_048;
+        let postings: Vec<Posting> = (0..n as u64)
+            .map(|i| Posting::with_frequency(i * 2 + 1, 1))
+            .collect();
+        let mut iter = InvertedIndexPostingIterator::new(postings);
+        let mut prev_doc: u64 = 0;
+        for target in (50..n as u64 * 2).step_by(101) {
+            assert!(iter.skip_to(target).unwrap(), "target={target}");
+            let current = iter.doc_id();
+            assert!(
+                current >= prev_doc,
+                "regressed: prev={prev_doc} current={current} target={target}"
+            );
+            assert!(
+                current >= target,
+                "landed before target: current={current} target={target}"
+            );
+            prev_doc = current;
+        }
     }
 
     #[test]

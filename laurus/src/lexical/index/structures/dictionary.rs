@@ -221,6 +221,13 @@ pub struct BlockTermDictionary {
     total_term_count: u64,
     /// Number of blocks in `block_section`.
     block_count: u32,
+    /// On-disk version of the segment's posting-list format implied by
+    /// this dictionary (#503). The dictionary itself does not contain
+    /// the posting lists, but it is the only segment-level file with a
+    /// magic + version, so its version implies the format used by the
+    /// sibling `.post` file. `1` = legacy (no on-disk skip levels);
+    /// `2` = multi-level skip table embedded per posting list.
+    posting_format_version: u32,
 }
 
 impl BlockTermDictionary {
@@ -348,7 +355,7 @@ impl BlockTermDictionary {
         }
 
         let version = reader.read_u32()?;
-        if version != 1 {
+        if version != 1 && version != 2 {
             return Err(LaurusError::index(format!(
                 "Unsupported BlockTermDictionary version: {version}"
             )));
@@ -383,14 +390,26 @@ impl BlockTermDictionary {
             term_infos,
             total_term_count,
             block_count,
+            posting_format_version: version,
         })
     }
 
-    /// Write the dictionary to storage in the v1 `LTDD` layout.
+    /// Return the on-disk posting-list format version implied by this
+    /// dictionary (#503). Readers dispatch between
+    /// [`super::super::inverted::core::posting::PostingList::decode_soa`]
+    /// (v1) and `decode_soa_v2` (v2) based on this value.
+    pub fn posting_format_version(&self) -> u32 {
+        self.posting_format_version
+    }
+
+    /// Write the dictionary to storage in the v2 `LTDD` layout.
     /// See [`Self::read_from_storage`] for the byte layout.
     pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
         writer.write_u32(MAGIC_LTDD)?;
-        writer.write_u32(1)?; // version
+        // v2 (#503): every sibling `.post` file uses the v2 posting list
+        // format with an on-disk multi-level skip table. v1 dictionaries
+        // remain readable for backward compat via `read_from_storage`.
+        writer.write_u32(2)?; // version
 
         let fst_bytes = self.fst.as_fst().as_inner();
         writer.write_u32(
@@ -495,6 +514,8 @@ impl TermDictionaryBuilder {
                 term_infos: Arc::from(Vec::<TermInfo>::new().into_boxed_slice()),
                 total_term_count: 0,
                 block_count: 0,
+                // Fresh builds always emit the latest format (#503).
+                posting_format_version: 2,
             });
         }
 
@@ -569,6 +590,8 @@ impl TermDictionaryBuilder {
             term_infos: Arc::from(term_infos.into_boxed_slice()),
             total_term_count,
             block_count,
+            // Fresh builds always emit the latest format (#503).
+            posting_format_version: 2,
         })
     }
 
