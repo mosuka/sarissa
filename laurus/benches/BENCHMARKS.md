@@ -161,7 +161,7 @@ warrant a dedicated harness. Single-shot perf benches don't need it.
 | `posting_skip_to_bench`       | Microbench     | (own setup)| Skip-list seek microbench |
 | `posting_merge_bench`         | Microbench     | (own setup)| Segment-merge microbench |
 | `dict_lookup_bench`           | Phase 3 / micro | (own setup) | Dictionary lookup variants |
-| `hybrid_search_bench`         | Phase 3        | (own setup) | Lexical + vector hybrid |
+| `hybrid_search_bench`         | Phase 3        | Yes        | Lexical + vector hybrid (cached via `cached_hybrid_engine`, #513 Stage 1) |
 | `bkd_bench`                   | Microbench     | (own setup)| Geo / numeric range |
 | `distance_bench`              | Microbench     | n/a        | Distance kernels |
 | `facet_bench`                 | Phase 3        | (own setup)| Facet collection |
@@ -173,14 +173,15 @@ warrant a dedicated harness. Single-shot perf benches don't need it.
 | `synonym_bench`               | Phase 3        | n/a        | Synonym expansion |
 | `text_analysis_bench`         | Microbench     | n/a        | Analyzer pipeline |
 | `vector_indexing_bench`       | Phase 2-like   | n/a        | Vector index build |
-| `vector_search_bench`         | Phase 3        | (own setup)| Vector kNN |
+| `vector_search_bench`         | Phase 3        | Yes        | Vector kNN (search-only benches cached via `cached_vector_reader`, #513 Stage 2; construction benches unchanged) |
 
 Items marked "(own setup)" use a smaller corpus shape or a different
-setup pattern that does not need a generalised cache. The cache
-pattern in `lexical_search_bench` can be lifted into
-`hybrid_search_bench` (close to identical) and `vector_search_bench`
-(more involved — multiple synthetic / real-data setups) via follow-up
-work. For now it lives where it delivers the most wall-time savings.
+setup pattern that does not need a generalised cache. With #513
+Stage 1 (`hybrid_search_bench`) and Stage 2 (`vector_search_bench`)
+shipped, every search-side bench in the table above reuses an
+on-disk cache. The cache helpers live next to the bench files that
+use them rather than being lifted into `benches/common.rs`; that
+extraction is a separate design discussion (issue #513 body).
 
 ## How to add a new search-side bench
 
@@ -208,7 +209,11 @@ caches will be auto-rebuilt on the next run.
 
 ## Background
 
-- `#510` introduced the on-disk cache and size-gate cleanup.
+- `#510` introduced the on-disk cache and size-gate cleanup for
+  `lexical_search_bench`.
+- `#513` extended the cache to `hybrid_search_bench` (Stage 1, PR #514)
+  and `vector_search_bench` (Stage 2, search-only benches via
+  `cached_vector_reader`).
 - `#403` defined the BMW acceptance-gate that anchored 100k as the
   reference size.
 - `#503` introduced `bench_seek_skewed`; the 1 M-doc case from #503's
