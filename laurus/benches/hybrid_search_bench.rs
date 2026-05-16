@@ -30,18 +30,37 @@
 //! 128-d vector in the `embedding` HNSW field. Inline copy with a
 //! "keep in sync" comment; consolidation deferred.
 //!
+//! # On-disk index cache (#513 Stage 1)
+//!
+//! [`cached_hybrid_engine`] persists the built index under
+//! `target/laurus_bench_index_cache/hybrid_<n>_dim<DIM>_v<N>/`. Mirrors
+//! the lexical bench's `cached_engine` (#510): pay the Phase 2 build
+//! cost (~tens of seconds for 5 k, minutes for 100 k including HNSW
+//! graph construction) once per fresh checkout; later `cargo bench`
+//! runs reopen the cached index in well under a second. Bump
+//! [`BENCH_INDEX_FORMAT_VERSION`] when anything that would alter the
+//! resulting index changes; `LAURUS_BENCH_REBUILD=1` forces a
+//! wipe-and-rebuild. See `benches/BENCHMARKS.md` for the architecture
+//! rationale.
+//!
 //! # Run
 //!
 //! ```sh
+//! # Daily iteration (fast — uses cache after first run):
 //! cargo bench --bench hybrid_search_bench
+//!
+//! # Acceptance / large-corpus sweep:
 //! LAURUS_BENCH_LARGE=1 cargo bench --bench hybrid_search_bench
+//!
+//! # Force a fresh cache build:
+//! LAURUS_BENCH_REBUILD=1 cargo bench --bench hybrid_search_bench
 //! ```
 //!
-//! Filter by case (substring match against the criterion id):
+//! Filter by case (regex match against the criterion id):
 //!
 //! ```sh
-//! cargo bench --bench hybrid_search_bench -- "rrf"
-//! cargo bench --bench hybrid_search_bench -- "top_k/k_500"
+//! cargo bench --bench hybrid_search_bench -- rrf
+//! cargo bench --bench hybrid_search_bench -- 'top_k/k_500'
 //! ```
 //!
 //! Compile-only smoke check:
@@ -50,11 +69,13 @@
 //! cargo bench --bench hybrid_search_bench --no-run
 //! ```
 //!
-//! See `benches/common.rs` for the suite-wide hygiene rules.
+//! See `benches/common.rs` for the suite-wide hygiene rules and
+//! `benches/BENCHMARKS.md` for the cross-cutting bench architecture.
 
 mod common;
 
 use std::hint::black_box;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -67,6 +88,8 @@ use laurus::analysis::analyzer::standard::StandardAnalyzer;
 use laurus::lexical::core::field::IntegerOption;
 use laurus::lexical::{TermQuery, TextOption};
 use laurus::storage::Storage;
+use laurus::storage::file::FileStorageConfig;
+use laurus::storage::{StorageConfig, StorageFactory};
 use laurus::vector::core::distance::DistanceMetric;
 use laurus::vector::core::field::HnswOption;
 use laurus::vector::core::vector::Vector;
@@ -133,16 +156,20 @@ fn build_body(i: usize) -> String {
 
 /// Bench-storage handle. Delegates to `common::select_storage()` so
 /// `LAURUS_BENCH_DISK=1` swaps the in-memory backend for a temp-dir
-/// `FileStorage` without changing call sites.
+/// `FileStorage` without changing call sites. Used by the bench when
+/// the on-disk cache is **not** in play (e.g. legacy callers); the
+/// `cached_hybrid_engine` helper below routes through its own
+/// deterministically-pathed `FileStorage` to persist across runs.
 fn memory_storage() -> Result<Arc<dyn Storage>> {
     Ok(select_storage())
 }
 
-async fn build_hybrid_engine(n: usize) -> Result<Engine> {
-    let storage = memory_storage()?;
-    let analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::default());
-
-    let schema = Schema::builder()
+/// Build the hybrid bench schema. Kept in one place so the persistent
+/// and ephemeral build paths cannot drift. Mirroring schema is what
+/// lets the cache's `recover()` correctly reattach segments written
+/// by an earlier bench run.
+fn hybrid_schema() -> Schema {
+    Schema::builder()
         .add_text_field("title", TextOption::default())
         .add_text_field("body", TextOption::default())
         .add_text_field("category", TextOption::default())
@@ -152,9 +179,12 @@ async fn build_hybrid_engine(n: usize) -> Result<Engine> {
             HnswOption::new(DIM).distance(DistanceMetric::Cosine),
         )
         .add_default_field("body")
-        .build();
+        .build()
+}
 
-    let engine = Engine::builder(storage, schema)
+async fn build_hybrid_engine_into_storage(storage: Arc<dyn Storage>, n: usize) -> Result<Engine> {
+    let analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::default());
+    let engine = Engine::builder(storage, hybrid_schema())
         .analyzer(analyzer)
         .build()
         .await?;
@@ -174,6 +204,99 @@ async fn build_hybrid_engine(n: usize) -> Result<Engine> {
     }
     engine.commit().await?;
     Ok(engine)
+}
+
+#[allow(dead_code)]
+async fn build_hybrid_engine(n: usize) -> Result<Engine> {
+    build_hybrid_engine_into_storage(memory_storage()?, n).await
+}
+
+/// Bump when anything about the persisted on-disk index would change:
+/// schema layout (`hybrid_schema`), analyzer defaults, doc-body /
+/// vector synthesis, or laurus's segment format. Caches written under
+/// a stale version are auto-rebuilt by [`cached_hybrid_engine`].
+const BENCH_INDEX_FORMAT_VERSION: &str = "1";
+
+/// Cache root, mirroring the lexical bench's layout
+/// (`target/laurus_bench_index_cache/...`). `CARGO_TARGET_DIR`
+/// (if set) overrides the workspace `target/` location.
+fn cache_root() -> PathBuf {
+    if let Ok(custom) = std::env::var("CARGO_TARGET_DIR") {
+        return PathBuf::from(custom).join("laurus_bench_index_cache");
+    }
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    Path::new(manifest_dir)
+        .parent()
+        .map(|p| p.join("target"))
+        .unwrap_or_else(|| PathBuf::from("target"))
+        .join("laurus_bench_index_cache")
+}
+
+fn cache_dir_for(n: usize) -> PathBuf {
+    cache_root().join(format!("hybrid_{n}_dim{DIM}_v{BENCH_INDEX_FORMAT_VERSION}"))
+}
+
+fn cache_is_valid(dir: &Path) -> bool {
+    let marker = dir.join(".bench_version");
+    if !marker.exists() {
+        return false;
+    }
+    matches!(
+        std::fs::read_to_string(&marker).map(|s| s.trim().to_string()),
+        Ok(v) if v == BENCH_INDEX_FORMAT_VERSION
+    )
+}
+
+async fn open_persistent_hybrid_engine(dir: &Path) -> Result<Engine> {
+    let config = FileStorageConfig::new(dir);
+    let storage = StorageFactory::create(StorageConfig::File(config))?;
+    let analyzer: Arc<dyn Analyzer> = Arc::new(StandardAnalyzer::default());
+    Engine::builder(storage, hybrid_schema())
+        .analyzer(analyzer)
+        .build()
+        .await
+}
+
+/// Return an engine for the hybrid (lexical + vector) bench corpus
+/// shape at size `n`, building it on disk the first time and re-opening
+/// it on subsequent runs (#513 Stage 1). Mirrors the lexical bench's
+/// `cached_engine` (#510 / #512), specialised for the hybrid schema:
+/// cache key includes `DIM` so a follow-up bench at a different
+/// embedding size lands in its own slot.
+///
+/// Invalidation works the same way as in `lexical_search_bench`:
+/// bump [`BENCH_INDEX_FORMAT_VERSION`] in source, or set
+/// `LAURUS_BENCH_REBUILD=1` for a one-off force-rebuild.
+fn cached_hybrid_engine(rt: &Runtime, n: usize) -> Arc<Engine> {
+    let dir = cache_dir_for(n);
+    let force_rebuild = std::env::var("LAURUS_BENCH_REBUILD").is_ok();
+
+    if !force_rebuild && cache_is_valid(&dir) {
+        match rt.block_on(open_persistent_hybrid_engine(&dir)) {
+            Ok(engine) => return Arc::new(engine),
+            Err(err) => {
+                eprintln!(
+                    "hybrid bench cache open failed at {} ({err}); rebuilding",
+                    dir.display()
+                );
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create hybrid bench cache dir");
+
+    let config = FileStorageConfig::new(&dir);
+    let storage = StorageFactory::create(StorageConfig::File(config))
+        .expect("create file storage for hybrid bench cache");
+    let engine = rt
+        .block_on(build_hybrid_engine_into_storage(storage, n))
+        .expect("hybrid bench cache build failed");
+
+    std::fs::write(dir.join(".bench_version"), BENCH_INDEX_FORMAT_VERSION)
+        .expect("write hybrid .bench_version marker");
+
+    Arc::new(engine)
 }
 
 fn corpus_sizes() -> Vec<usize> {
@@ -215,7 +338,7 @@ fn bench_hybrid_rrf(c: &mut Criterion) {
     group.sample_size(SAMPLE_SIZE_FAST);
 
     for &n in &corpus_sizes() {
-        let engine = rt.block_on(build_hybrid_engine(n)).unwrap();
+        let engine = cached_hybrid_engine(&rt, n);
 
         // Sanity: hybrid search must produce non-empty fused results.
         let probe = rt.block_on(async {
@@ -247,7 +370,7 @@ fn bench_hybrid_weighted_sum(c: &mut Criterion) {
     group.sample_size(SAMPLE_SIZE_FAST);
 
     for &n in &corpus_sizes() {
-        let engine = rt.block_on(build_hybrid_engine(n)).unwrap();
+        let engine = cached_hybrid_engine(&rt, n);
 
         let probe = rt.block_on(async {
             let req = build_hybrid_request(
@@ -290,7 +413,7 @@ fn bench_hybrid_top_k_sweep(c: &mut Criterion) {
     group.sample_size(SAMPLE_SIZE_FAST);
 
     let n = 5_000usize;
-    let engine = rt.block_on(build_hybrid_engine(n)).unwrap();
+    let engine = cached_hybrid_engine(&rt, n);
 
     let probe = rt.block_on(async {
         let req = build_hybrid_request(FusionAlgorithm::RRF { k: 60.0 }, 10);
