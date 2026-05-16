@@ -66,11 +66,36 @@
 //! this case is opt-in. Default runs (no env var) finish in well under
 //! five minutes on a typical workstation.
 //!
+//! # On-disk index cache (#513 Stage 2)
+//!
+//! [`cached_vector_reader`] persists the built vector index under
+//! `target/laurus_bench_index_cache/<slot>_v<N>/`, mirroring the
+//! lexical bench's `cached_engine` (#510) and the hybrid bench's
+//! `cached_hybrid_engine` (#513 Stage 1). On a fresh checkout the
+//! first run pays the index-build cost once per case; later
+//! `cargo bench` runs reopen the cached index via the type-specific
+//! reader loader (`FlatVectorIndexReader::load`,
+//! `IvfIndexReader::load`, `HnswIndexReader::load`) in well under a
+//! second. The cache is applied to **search-only** benches; the
+//! Construction benches (`bench_flat_construction`,
+//! `bench_ivf_construction`, `bench_hnsw_construction`) and the SIFT
+//! real-data benches' Criterion measurement window are unchanged.
+//! Bump [`BENCH_INDEX_FORMAT_VERSION`] when anything that would alter
+//! the resulting index changes; `LAURUS_BENCH_REBUILD=1` forces a
+//! wipe-and-rebuild. See `benches/BENCHMARKS.md` for the architecture
+//! rationale.
+//!
 //! # Run
 //!
 //! ```sh
+//! # Daily iteration (fast — uses cache after first run):
 //! cargo bench --bench vector_search_bench                          # default sizes
+//!
+//! # Acceptance / large-corpus sweep:
 //! LAURUS_BENCH_LARGE=1 cargo bench --bench vector_search_bench     # adds 100 k
+//!
+//! # Force a fresh cache build:
+//! LAURUS_BENCH_REBUILD=1 cargo bench --bench vector_search_bench
 //! ```
 //!
 //! Filter by group / case (substring match against the criterion id):
@@ -87,14 +112,19 @@
 //! cargo bench --bench vector_search_bench --no-run
 //! ```
 //!
-//! See `benches/common.rs` for the suite-wide hygiene rules.
+//! See `benches/common.rs` for the suite-wide hygiene rules and
+//! `benches/BENCHMARKS.md` for the cross-cutting bench architecture.
 
 mod common;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use laurus::storage::Storage;
+use laurus::storage::file::FileStorageConfig;
+use laurus::storage::{StorageConfig, StorageFactory};
+use laurus::vector::HnswIndexReader;
 use laurus::vector::core::distance::DistanceMetric;
 use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::vector::core::vector::Vector;
@@ -102,6 +132,9 @@ use laurus::vector::index::ManagedVectorIndex;
 use laurus::vector::index::config::{
     FlatIndexConfig, HnswIndexConfig, IvfIndexConfig, VectorIndexTypeConfig,
 };
+use laurus::vector::index::flat::reader::FlatVectorIndexReader;
+use laurus::vector::index::ivf::reader::IvfIndexReader;
+use laurus::vector::reader::VectorIndexReader;
 use laurus::vector::{
     FlatVectorSearcher, HnswSearcher, IvfSearcher, VectorIndexQuery, VectorIndexSearcher,
 };
@@ -195,6 +228,159 @@ fn hnsw_corpus_sizes() -> Vec<usize> {
         sizes.push(100_000);
     }
     sizes
+}
+
+// ---------------------------------------------------------------------------
+// On-disk index cache (#513 Stage 2)
+// ---------------------------------------------------------------------------
+
+/// Bump when anything about the persisted on-disk vector index would
+/// change: index-config defaults, vector synthesis ([`generate_vectors`]
+/// / [`generate_multi_field_vectors`]), or laurus's segment format.
+/// Caches written under a stale version are auto-rebuilt by
+/// [`cached_vector_reader`].
+const BENCH_INDEX_FORMAT_VERSION: &str = "1";
+
+/// Index path used inside every cache slot's storage tree. Kept
+/// constant so [`open_cached_reader`] can locate the file without
+/// caller-supplied bookkeeping.
+const CACHE_INDEX_NAME: &str = "bench";
+
+/// Cache root, mirroring the lexical / hybrid bench layout
+/// (`target/laurus_bench_index_cache/...`). `CARGO_TARGET_DIR`
+/// (if set) overrides the workspace `target/` location.
+fn cache_root() -> PathBuf {
+    if let Ok(custom) = std::env::var("CARGO_TARGET_DIR") {
+        return PathBuf::from(custom).join("laurus_bench_index_cache");
+    }
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    Path::new(manifest_dir)
+        .parent()
+        .map(|p| p.join("target"))
+        .unwrap_or_else(|| PathBuf::from("target"))
+        .join("laurus_bench_index_cache")
+}
+
+/// Resolve the cache directory for `slot`. `slot` must encode every
+/// input that affects the persisted index (index type, dim, n,
+/// per-config parameters, corpus shape, optional fixture-size proxy);
+/// the version key is appended automatically.
+fn cache_dir_for(slot: &str) -> PathBuf {
+    cache_root().join(format!("{slot}_v{BENCH_INDEX_FORMAT_VERSION}"))
+}
+
+/// Verify a cache entry: directory exists and `.bench_version` marker
+/// matches [`BENCH_INDEX_FORMAT_VERSION`].
+fn cache_is_valid(dir: &Path) -> bool {
+    let marker = dir.join(".bench_version");
+    if !marker.exists() {
+        return false;
+    }
+    matches!(
+        std::fs::read_to_string(&marker).map(|s| s.trim().to_string()),
+        Ok(v) if v == BENCH_INDEX_FORMAT_VERSION
+    )
+}
+
+/// Open an existing on-disk vector index. Dispatches to the
+/// type-specific loader so the cached segments are mmap-/file-loaded
+/// in their persisted form rather than rebuilt from an in-memory
+/// writer.
+fn open_cached_reader(
+    dir: &Path,
+    config: &VectorIndexTypeConfig,
+) -> laurus::Result<Arc<dyn VectorIndexReader>> {
+    let file_config = FileStorageConfig::new(dir);
+    let storage = StorageFactory::create(StorageConfig::File(file_config))?;
+    let distance = config.distance_metric();
+    let reader: Arc<dyn VectorIndexReader> = match config {
+        VectorIndexTypeConfig::Flat(_) => Arc::new(FlatVectorIndexReader::load(
+            storage,
+            CACHE_INDEX_NAME,
+            distance,
+        )?),
+        VectorIndexTypeConfig::IVF(_) => {
+            Arc::new(IvfIndexReader::load(storage, CACHE_INDEX_NAME, distance)?)
+        }
+        VectorIndexTypeConfig::HNSW(_) => {
+            Arc::new(HnswIndexReader::load(storage, CACHE_INDEX_NAME, distance)?)
+        }
+    };
+    Ok(reader)
+}
+
+/// Build the cache slot at `dir` from scratch: instantiates a
+/// `ManagedVectorIndex` on a fresh `FileStorage`, ingests the vectors
+/// produced by `build_vectors`, finalises, writes, and drops the
+/// version marker. Returns the reader handle the bench will hand to
+/// its searcher.
+fn build_cached_reader(
+    dir: &Path,
+    config: VectorIndexTypeConfig,
+    vectors: Vec<(u64, String, Vector)>,
+) -> laurus::Result<Arc<dyn VectorIndexReader>> {
+    let file_config = FileStorageConfig::new(dir);
+    let storage = StorageFactory::create(StorageConfig::File(file_config))?;
+    let mut index = ManagedVectorIndex::new(config, storage, CACHE_INDEX_NAME)?;
+    index.add_vectors(vectors)?;
+    index.finalize()?;
+    index.write()?;
+    let reader = index.reader()?;
+    std::fs::write(dir.join(".bench_version"), BENCH_INDEX_FORMAT_VERSION)?;
+    Ok(reader)
+}
+
+/// Return a reader for the cached vector index identified by `slot`,
+/// building it on disk the first time and re-opening it on subsequent
+/// runs (#513 Stage 2). Mirrors `lexical_search_bench::cached_engine`
+/// (#510 / #512) and `hybrid_search_bench::cached_hybrid_engine`
+/// (#513 Stage 1), specialised for vector indexes.
+///
+/// # Arguments
+///
+/// * `slot` - Cache-key fragment that must uniquely encode every input
+///   affecting the persisted index (index type, dim, n, config knobs,
+///   corpus shape, fixture-size proxy for real-data corpora). The
+///   version key from [`BENCH_INDEX_FORMAT_VERSION`] is appended
+///   automatically by [`cache_dir_for`].
+/// * `config` - The `VectorIndexTypeConfig` to build under (used both
+///   for the cache-miss build path and to dispatch the cache-hit
+///   loader to the right reader type).
+/// * `build_vectors` - Closure that produces the corpus when the cache
+///   is missing. Called only on cache miss so deterministic vector
+///   generation does not run when the cache hits.
+///
+/// # Invalidation
+///
+/// - Bump [`BENCH_INDEX_FORMAT_VERSION`] in source. Stale slots are
+///   auto-rebuilt on the next call.
+/// - `LAURUS_BENCH_REBUILD=1` forces a wipe-and-rebuild without
+///   touching the rest of `target/`.
+/// - `cargo clean` evicts the cache along with the rest of `target/`.
+fn cached_vector_reader(
+    slot: &str,
+    config: VectorIndexTypeConfig,
+    build_vectors: impl FnOnce() -> Vec<(u64, String, Vector)>,
+) -> Arc<dyn VectorIndexReader> {
+    let dir = cache_dir_for(slot);
+    let force_rebuild = std::env::var("LAURUS_BENCH_REBUILD").is_ok();
+
+    if !force_rebuild && cache_is_valid(&dir) {
+        match open_cached_reader(&dir, &config) {
+            Ok(reader) => return reader,
+            Err(err) => {
+                eprintln!(
+                    "vector bench cache open failed at {} ({err}); rebuilding",
+                    dir.display()
+                );
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create vector bench cache dir");
+
+    build_cached_reader(&dir, config, build_vectors()).expect("vector bench cache build failed")
 }
 
 // ---------------------------------------------------------------------------
@@ -295,20 +481,15 @@ fn bench_flat_search(c: &mut Criterion) {
     let dim = 128;
 
     for &count in &search_corpus_sizes() {
-        let vectors = generate_vectors(count, dim);
-        let storage = create_storage();
         let config = FlatIndexConfig {
             dimension: dim,
             distance_metric: DistanceMetric::Cosine,
             ..Default::default()
         };
-        let mut index =
-            ManagedVectorIndex::new(VectorIndexTypeConfig::Flat(config), storage, "flat_bench")
-                .unwrap();
-        index.add_vectors(vectors).unwrap();
-        index.finalize().unwrap();
-
-        let reader = index.reader().unwrap();
+        let slot = format!("flat_n{count}_dim{dim}_synthetic");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::Flat(config), || {
+            generate_vectors(count, dim)
+        });
         let searcher = FlatVectorSearcher::new(reader).unwrap();
         let query = generate_query(dim);
 
@@ -336,8 +517,6 @@ fn bench_ivf_search(c: &mut Criterion) {
     let dim = 128;
 
     for &count in &search_corpus_sizes() {
-        let vectors = generate_vectors(count, dim);
-        let storage = create_storage();
         let config = IvfIndexConfig {
             dimension: dim,
             distance_metric: DistanceMetric::Cosine,
@@ -345,14 +524,10 @@ fn bench_ivf_search(c: &mut Criterion) {
             n_probe: 3,
             ..Default::default()
         };
-        let mut index =
-            ManagedVectorIndex::new(VectorIndexTypeConfig::IVF(config), storage, "ivf_bench")
-                .unwrap();
-        index.add_vectors(vectors).unwrap();
-        index.finalize().unwrap();
-        index.write().unwrap();
-
-        let reader = index.reader().unwrap();
+        let slot = format!("ivf_n{count}_dim{dim}_nc10_synthetic");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::IVF(config), || {
+            generate_vectors(count, dim)
+        });
         let searcher = IvfSearcher::new(reader).unwrap();
         let query = generate_query(dim);
 
@@ -387,8 +562,6 @@ fn bench_hnsw_fallback_search(c: &mut Criterion) {
     let dim = 128;
 
     for &count in &hnsw_corpus_sizes() {
-        let vectors = generate_vectors(count, dim);
-        let storage = create_storage();
         let config = HnswIndexConfig {
             dimension: dim,
             m: 16,
@@ -396,17 +569,10 @@ fn bench_hnsw_fallback_search(c: &mut Criterion) {
             distance_metric: DistanceMetric::Cosine,
             ..Default::default()
         };
-        let mut index = ManagedVectorIndex::new(
-            VectorIndexTypeConfig::HNSW(config),
-            storage,
-            "hnsw_fallback_bench",
-        )
-        .unwrap();
-        index.add_vectors(vectors).unwrap();
-        index.finalize().unwrap();
-        index.write().unwrap();
-
-        let reader = index.reader().unwrap();
+        let slot = format!("hnsw_n{count}_dim{dim}_m16_efc200_synthetic");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::HNSW(config), || {
+            generate_vectors(count, dim)
+        });
         let searcher = HnswSearcher::new(reader).unwrap();
         let query = generate_query(dim);
 
@@ -470,8 +636,6 @@ fn bench_hnsw_graph_search_rerank(c: &mut Criterion) {
     let dim = 128;
 
     for &count in &hnsw_corpus_sizes() {
-        let vectors = generate_vectors(count, dim);
-        let storage = create_storage();
         let config = HnswIndexConfig {
             dimension: dim,
             m: 16,
@@ -480,17 +644,10 @@ fn bench_hnsw_graph_search_rerank(c: &mut Criterion) {
             rerank_storage: Some(RerankStorageKind::F32),
             ..Default::default()
         };
-        let mut index = ManagedVectorIndex::new(
-            VectorIndexTypeConfig::HNSW(config),
-            storage,
-            "hnsw_graph_rerank_bench",
-        )
-        .unwrap();
-        index.add_vectors(vectors).unwrap();
-        index.finalize().unwrap();
-        index.write().unwrap();
-
-        let reader = index.reader().unwrap();
+        let slot = format!("hnsw_n{count}_dim{dim}_m16_efc200_rerankF32_synthetic");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::HNSW(config), || {
+            generate_vectors(count, dim)
+        });
         let searcher = HnswSearcher::new(reader).unwrap();
         let query = generate_query(dim);
 
@@ -528,8 +685,6 @@ fn bench_hnsw_graph_search(c: &mut Criterion) {
     let dim = 128;
 
     for &count in &hnsw_corpus_sizes() {
-        let vectors = generate_vectors(count, dim);
-        let storage = create_storage();
         let config = HnswIndexConfig {
             dimension: dim,
             m: 16,
@@ -537,17 +692,12 @@ fn bench_hnsw_graph_search(c: &mut Criterion) {
             distance_metric: DistanceMetric::Cosine,
             ..Default::default()
         };
-        let mut index = ManagedVectorIndex::new(
-            VectorIndexTypeConfig::HNSW(config),
-            storage,
-            "hnsw_graph_bench",
-        )
-        .unwrap();
-        index.add_vectors(vectors).unwrap();
-        index.finalize().unwrap();
-        index.write().unwrap();
-
-        let reader = index.reader().unwrap();
+        // Shares the slot with `bench_hnsw_fallback_search` /
+        // `bench_hnsw_ef_search_sweep` — same persisted index.
+        let slot = format!("hnsw_n{count}_dim{dim}_m16_efc200_synthetic");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::HNSW(config), || {
+            generate_vectors(count, dim)
+        });
         let searcher = HnswSearcher::new(reader).unwrap();
         let query = generate_query(dim);
 
@@ -590,8 +740,6 @@ fn bench_hnsw_ef_search_sweep(c: &mut Criterion) {
     let dim = 128;
     let count = 5000usize;
 
-    let vectors = generate_vectors(count, dim);
-    let storage = create_storage();
     let config = HnswIndexConfig {
         dimension: dim,
         m: 16,
@@ -599,17 +747,12 @@ fn bench_hnsw_ef_search_sweep(c: &mut Criterion) {
         distance_metric: DistanceMetric::Cosine,
         ..Default::default()
     };
-    let mut index = ManagedVectorIndex::new(
-        VectorIndexTypeConfig::HNSW(config),
-        storage,
-        "hnsw_ef_bench",
-    )
-    .unwrap();
-    index.add_vectors(vectors).unwrap();
-    index.finalize().unwrap();
-    index.write().unwrap();
-
-    let reader = index.reader().unwrap();
+    // Same slot as `bench_hnsw_fallback_search` /
+    // `bench_hnsw_graph_search` at n=5000.
+    let slot = format!("hnsw_n{count}_dim{dim}_m16_efc200_synthetic");
+    let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::HNSW(config), || {
+        generate_vectors(count, dim)
+    });
     let query = generate_query(dim);
 
     for &ef in &[16usize, 64, 128, 256, 512] {
@@ -659,8 +802,6 @@ fn bench_hnsw_multi_field_search(c: &mut Criterion) {
     let dim = 128;
     let count = 5000usize;
 
-    let vectors = generate_multi_field_vectors(count, dim);
-    let storage = create_storage();
     let config = HnswIndexConfig {
         dimension: dim,
         m: 16,
@@ -668,17 +809,10 @@ fn bench_hnsw_multi_field_search(c: &mut Criterion) {
         distance_metric: DistanceMetric::Cosine,
         ..Default::default()
     };
-    let mut index = ManagedVectorIndex::new(
-        VectorIndexTypeConfig::HNSW(config),
-        storage,
-        "hnsw_multi_field_bench",
-    )
-    .unwrap();
-    index.add_vectors(vectors).unwrap();
-    index.finalize().unwrap();
-    index.write().unwrap();
-
-    let reader = index.reader().unwrap();
+    let slot = format!("hnsw_n{count}_dim{dim}_m16_efc200_multifield");
+    let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::HNSW(config), || {
+        generate_multi_field_vectors(count, dim)
+    });
     let searcher = HnswSearcher::new(reader).unwrap();
     let query = generate_query(dim);
 
@@ -725,23 +859,15 @@ fn bench_flat_multi_field_search(c: &mut Criterion) {
     let dim = 128;
 
     for &count in &search_corpus_sizes() {
-        let vectors = generate_multi_field_vectors(count, dim);
-        let storage = create_storage();
         let config = FlatIndexConfig {
             dimension: dim,
             distance_metric: DistanceMetric::Cosine,
             ..Default::default()
         };
-        let mut index = ManagedVectorIndex::new(
-            VectorIndexTypeConfig::Flat(config),
-            storage,
-            "flat_multi_field_bench",
-        )
-        .unwrap();
-        index.add_vectors(vectors).unwrap();
-        index.finalize().unwrap();
-
-        let reader = index.reader().unwrap();
+        let slot = format!("flat_n{count}_dim{dim}_multifield");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::Flat(config), || {
+            generate_multi_field_vectors(count, dim)
+        });
         let searcher = FlatVectorSearcher::new(reader).unwrap();
         let query = generate_query(dim);
 
@@ -851,18 +977,12 @@ fn bench_hnsw_graph_search_rerank_real_data(c: &mut Criterion) {
     let m: usize = 16;
     let ef_construction: usize = 200;
 
-    let mut corpus =
-        common::load_fvecs(&base_path, dim, Some(n_corpus)).expect("load sift_base.fvecs");
     let mut queries =
         common::load_fvecs(&query_path, dim, Some(n_queries)).expect("load sift_query.fvecs");
-    for v in corpus.iter_mut() {
-        common::l2_normalise(v);
-    }
     for v in queries.iter_mut() {
         common::l2_normalise(v);
     }
 
-    let storage = create_storage();
     let config = HnswIndexConfig {
         dimension: dim,
         m,
@@ -871,22 +991,27 @@ fn bench_hnsw_graph_search_rerank_real_data(c: &mut Criterion) {
         rerank_storage: Some(RerankStorageKind::F32),
         ..Default::default()
     };
-    let mut index = ManagedVectorIndex::new(
-        VectorIndexTypeConfig::HNSW(config),
-        storage,
-        "hnsw_sift_rerank_real_data_bench",
-    )
-    .unwrap();
-    let docs: Vec<(u64, String, Vector)> = corpus
-        .into_iter()
-        .enumerate()
-        .map(|(i, v)| (i as u64, "field".to_string(), Vector::new(v)))
-        .collect();
-    index.add_vectors(docs).unwrap();
-    index.finalize().unwrap();
-    index.write().unwrap();
-
-    let reader = index.reader().unwrap();
+    // Include sift_base.fvecs size as a cheap "did the fixture
+    // change?" proxy: re-fetching a different SIFT subset will give
+    // a different size and miss the cache cleanly.
+    let base_size = std::fs::metadata(&base_path)
+        .map(|m| m.len())
+        .unwrap_or_default();
+    let slot = format!(
+        "hnsw_sift_n{n_corpus}_dim{dim}_m{m}_efc{ef_construction}_rerankF32_size{base_size}",
+    );
+    let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::HNSW(config), || {
+        let mut corpus =
+            common::load_fvecs(&base_path, dim, Some(n_corpus)).expect("load sift_base.fvecs");
+        for v in corpus.iter_mut() {
+            common::l2_normalise(v);
+        }
+        corpus
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| (i as u64, "field".to_string(), Vector::new(v)))
+            .collect()
+    });
     let mut searcher = HnswSearcher::new(reader).unwrap();
     searcher.set_ef_search(ef_search);
 
@@ -988,18 +1113,12 @@ fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
     let m: usize = 16;
     let ef_construction: usize = 200;
 
-    let mut corpus =
-        common::load_fvecs(&base_path, dim, Some(n_corpus)).expect("load sift_base.fvecs");
     let mut queries =
         common::load_fvecs(&query_path, dim, Some(n_queries)).expect("load sift_query.fvecs");
-    for v in corpus.iter_mut() {
-        common::l2_normalise(v);
-    }
     for v in queries.iter_mut() {
         common::l2_normalise(v);
     }
 
-    let storage = create_storage();
     let config = HnswIndexConfig {
         dimension: dim,
         m,
@@ -1012,22 +1131,24 @@ fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
         rerank_storage: Some(RerankStorageKind::F32),
         ..Default::default()
     };
-    let mut index = ManagedVectorIndex::new(
-        VectorIndexTypeConfig::HNSW(config),
-        storage,
-        "hnsw_sift_pq_rerank_real_data_bench",
-    )
-    .unwrap();
-    let docs: Vec<(u64, String, Vector)> = corpus
-        .into_iter()
-        .enumerate()
-        .map(|(i, v)| (i as u64, "field".to_string(), Vector::new(v)))
-        .collect();
-    index.add_vectors(docs).unwrap();
-    index.finalize().unwrap();
-    index.write().unwrap();
-
-    let reader = index.reader().unwrap();
+    let base_size = std::fs::metadata(&base_path)
+        .map(|m| m.len())
+        .unwrap_or_default();
+    let slot = format!(
+        "hnsw_sift_n{n_corpus}_dim{dim}_m{m}_efc{ef_construction}_pq{subvector_count}_rerankF32_size{base_size}",
+    );
+    let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::HNSW(config), || {
+        let mut corpus =
+            common::load_fvecs(&base_path, dim, Some(n_corpus)).expect("load sift_base.fvecs");
+        for v in corpus.iter_mut() {
+            common::l2_normalise(v);
+        }
+        corpus
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| (i as u64, "field".to_string(), Vector::new(v)))
+            .collect()
+    });
     let mut searcher = HnswSearcher::new(reader).unwrap();
     searcher.set_ef_search(ef_search);
 

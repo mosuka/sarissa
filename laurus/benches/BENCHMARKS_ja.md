@@ -113,7 +113,7 @@ laurus は Criterion を素の Rust 関数形式で使います。理由:
 | `posting_skip_to_bench`       | Microbench     | 独自 setup     | Skip-list seek microbench |
 | `posting_merge_bench`         | Microbench     | 独自 setup     | Segment-merge microbench |
 | `dict_lookup_bench`           | Phase 3 / micro | 独自 setup     | 辞書 lookup バリエーション |
-| `hybrid_search_bench`         | Phase 3        | 独自 setup     | Lexical + vector hybrid |
+| `hybrid_search_bench`         | Phase 3        | 使う           | Lexical + vector hybrid（`cached_hybrid_engine` で cache 化、#513 Stage 1）|
 | `bkd_bench`                   | Microbench     | 独自 setup     | Geo / numeric range |
 | `distance_bench`              | Microbench     | n/a           | 距離 kernel |
 | `facet_bench`                 | Phase 3        | 独自 setup     | Facet collection |
@@ -125,9 +125,9 @@ laurus は Criterion を素の Rust 関数形式で使います。理由:
 | `synonym_bench`               | Phase 3        | n/a           | Synonym 展開 |
 | `text_analysis_bench`         | Microbench     | n/a           | Analyzer パイプライン |
 | `vector_indexing_bench`       | Phase 2 相当   | n/a           | Vector index build |
-| `vector_search_bench`         | Phase 3        | 独自 setup     | Vector kNN |
+| `vector_search_bench`         | Phase 3        | 使う           | Vector kNN（検索系 bench は `cached_vector_reader` で cache 化、#513 Stage 2。Construction 系は変更なし）|
 
-「独自 setup」は小さなコーパス形か、汎用キャッシュを必要としない別の setup パターンを使うもの。`lexical_search_bench` のキャッシュパターンは `hybrid_search_bench`（ほぼ同形）と `vector_search_bench`（合成・実データ両方の setup があり複雑度高め）に follow-up で横展開できる。今は最も時間節約効果が大きい所に住まわせている。
+「独自 setup」は小さなコーパス形か、汎用キャッシュを必要としない別の setup パターンを使うもの。#513 Stage 1 (`hybrid_search_bench`) と Stage 2 (`vector_search_bench`) の merge により、上表の検索系 bench はすべて on-disk cache を再利用するようになった。cache helper は各 bench ファイルに同居しており、`benches/common.rs` への抽出は別途設計議論が必要（issue #513 本文参照）。
 
 ## 新規 search-side bench の追加手順
 
@@ -144,6 +144,7 @@ laurus は Criterion を素の Rust 関数形式で使います。理由:
 
 ## 背景
 
-- `#510` がディスクキャッシュとサイズゲート整理を導入
+- `#510` が `lexical_search_bench` 向けのディスクキャッシュとサイズゲート整理を導入
+- `#513` がキャッシュを `hybrid_search_bench`（Stage 1, PR #514）および `vector_search_bench`（Stage 2, `cached_vector_reader` 経由で検索系 bench のみ）へ拡張
 - `#403` が BMW acceptance gate を定義し、参照サイズとして 100k を確立
 - `#503` が `bench_seek_skewed` を導入。1M docs ケースは #510 で削除（100k からの追加 1 階層は情報量が少ないと判断）
