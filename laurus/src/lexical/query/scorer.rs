@@ -3,10 +3,11 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use wide::f32x8;
+
 use crate::error::Result;
 use crate::lexical::index::structures::dictionary::BlockMax;
 use crate::lexical::query::Query;
-use crate::util::simd;
 
 /// Type alias for boolean scorer clauses.
 type BooleanScorerClauses =
@@ -202,6 +203,52 @@ pub trait Scorer: Send + Debug {
     /// concrete `BM25Scorer` / `ConstantScorer` without the
     /// per-doc vtable lookup.
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// SIMD batch scoring (#506). Compute scores for `doc_ids[i]` /
+    /// `term_freqs[i]` / `field_lengths[i]` and write them into
+    /// `out[i]`. All four slices must have the same length.
+    ///
+    /// The default implementation falls back to a per-element loop over
+    /// [`Self::score`] so non-BM25 scorers (e.g. `ConstantScorer`) and
+    /// custom impls keep working unchanged. BM25 — the hot-path leaf
+    /// scorer — overrides this with an `f32x8`-vectorised kernel
+    /// ([`BM25Scorer::batch_score_into`]).
+    ///
+    /// The `field_lengths` slice carries the per-doc field length the
+    /// caller already resolved (using the scorer's average when no
+    /// per-doc value is available); pass `Some(field_lengths[i])` into
+    /// `score` so the default impl matches the legacy scalar path
+    /// bit-for-bit.
+    ///
+    /// # Arguments
+    /// * `doc_ids` - parallel slice of doc ids; passed verbatim to `score`.
+    /// * `term_freqs` - parallel slice of term frequencies.
+    /// * `field_lengths` - parallel slice of per-doc field lengths.
+    /// * `out` - destination scratch slice; same length as the inputs.
+    fn batch_score(
+        &self,
+        doc_ids: &[u64],
+        term_freqs: &[f32],
+        field_lengths: &[f32],
+        out: &mut [f32],
+    ) {
+        debug_assert_eq!(doc_ids.len(), term_freqs.len());
+        debug_assert_eq!(doc_ids.len(), field_lengths.len());
+        debug_assert_eq!(doc_ids.len(), out.len());
+        for i in 0..doc_ids.len() {
+            out[i] = self.score(doc_ids[i], term_freqs[i], Some(field_lengths[i]));
+        }
+    }
+
+    /// Average field length the scorer would substitute when the
+    /// caller passes `None` to [`Self::score`] (#506). Used by the
+    /// batched default loop to pre-fill the `field_lengths` slice with
+    /// the scalar fallback value, keeping SIMD and scalar paths
+    /// numerically identical. The default implementation returns 0.0,
+    /// which non-BM25 scorers ignore.
+    fn avg_field_length(&self) -> f32 {
+        0.0
+    }
 }
 
 /// BM25 scorer implementation.
@@ -611,53 +658,102 @@ impl Scorer for BM25Scorer {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn batch_score(
+        &self,
+        _doc_ids: &[u64],
+        term_freqs: &[f32],
+        field_lengths: &[f32],
+        out: &mut [f32],
+    ) {
+        // BM25 ignores `doc_id` in scalar `score`, so the SIMD kernel
+        // does too. Forward to the heap-allocation-free implementation.
+        self.batch_score_into(term_freqs, field_lengths, out);
+    }
+
+    fn avg_field_length(&self) -> f32 {
+        self.avg_field_length as f32
+    }
 }
 
 impl BM25Scorer {
-    /// Batch score calculation for multiple documents using SIMD optimization.
+    /// SIMD batch BM25 scoring (#506). Computes `boost · idf · tf(tf, fl)`
+    /// for every `(term_freqs[i], field_lengths[i])` pair and writes the
+    /// result into `out[i]`. All slices must have equal length.
     ///
-    /// This method processes multiple documents simultaneously for better performance.
-    pub fn batch_score(&self, term_freqs: &[f32], field_lengths: &[f32]) -> Vec<f32> {
-        assert_eq!(term_freqs.len(), field_lengths.len());
+    /// Heap-allocation-free fast path: the kernel operates on `f32x8`
+    /// chunks of 8 directly into the caller's `out` buffer, avoiding the
+    /// per-call `Vec<f32>` allocations of the legacy [`Self::batch_score`].
+    /// This is the variant called by [`crate::lexical::query::scorer::Scorer::batch_score`]
+    /// when the BM25 implementation is the underlying scorer.
+    ///
+    /// # Arguments
+    /// * `term_freqs` - per-doc term frequencies (parallel to `field_lengths`/`out`).
+    /// * `field_lengths` - per-doc field lengths; caller substitutes the
+    ///   scorer's average field length when no per-doc value is available.
+    /// * `out` - destination slice, same length as the inputs.
+    pub fn batch_score_into(&self, term_freqs: &[f32], field_lengths: &[f32], out: &mut [f32]) {
+        debug_assert_eq!(term_freqs.len(), field_lengths.len());
+        debug_assert_eq!(term_freqs.len(), out.len());
 
-        if term_freqs.len() >= 4 {
-            self.batch_score_optimized(term_freqs, field_lengths)
-        } else {
-            // Fallback for small batches - use actual field lengths
-            term_freqs
-                .iter()
-                .enumerate()
-                .map(|(i, &tf)| {
-                    let idf = self.idf();
-                    let tf_score = self.tf(tf, field_lengths[i]);
-                    self.boost * idf * tf_score
-                })
-                .collect()
+        if self.doc_freq == 0 || self.total_docs == 0 {
+            out.fill(0.0);
+            return;
+        }
+
+        let idf = self.idf();
+        let mul = self.boost * idf;
+        let k1 = self.k1;
+        let k1_plus_1 = k1 + 1.0;
+        let b = self.b;
+        let avg_len = self.avg_field_length as f32;
+        let one_minus_b = 1.0 - b;
+
+        let len = term_freqs.len();
+        let mut i = 0;
+        // SIMD chunk: process 8 docs per iteration. `f32x8` is the wide
+        // crate's portable vector; LLVM lowers to AVX2 on x86_64 and NEON
+        // on aarch64.
+        while i + 8 <= len {
+            let tf_v = f32x8::from(&term_freqs[i..i + 8]);
+            let fl_v = f32x8::from(&field_lengths[i..i + 8]);
+
+            // norm = 1 - b + b * (field_len / avg_len)
+            let norm = f32x8::splat(one_minus_b) + f32x8::splat(b) * (fl_v / f32x8::splat(avg_len));
+            // tf_score = tf * (k1 + 1) / (tf + k1 * norm)
+            let tf_score = (tf_v * f32x8::splat(k1_plus_1)) / (tf_v + f32x8::splat(k1) * norm);
+            // final = boost * idf * tf_score
+            let score = f32x8::splat(mul) * tf_score;
+            let arr = score.to_array();
+            out[i..i + 8].copy_from_slice(&arr);
+            i += 8;
+        }
+
+        // Scalar tail for the remaining < 8 elements. Mirrors the
+        // formula above so SIMD and scalar paths produce bit-identical
+        // results.
+        while i < len {
+            let tf = term_freqs[i];
+            if tf == 0.0 {
+                // Match `BM25Scorer::score`'s short-circuit for tf == 0.
+                out[i] = 0.0;
+            } else {
+                let norm = one_minus_b + b * (field_lengths[i] / avg_len);
+                let tf_score = (tf * k1_plus_1) / (tf + k1 * norm);
+                out[i] = mul * tf_score;
+            }
+            i += 1;
         }
     }
 
-    /// Optimized batch scoring using SIMD operations.
-    fn batch_score_optimized(&self, term_freqs: &[f32], field_lengths: &[f32]) -> Vec<f32> {
-        let avg_len = self.avg_field_length as f32;
-
-        // Calculate normalization factors
-        let norm_factors: Vec<f32> = field_lengths
-            .iter()
-            .map(|&field_len| 1.0 - self.b + self.b * (field_len / avg_len))
-            .collect();
-
-        // Calculate TF scores using SIMD
-        let tf_scores = simd::numeric::batch_bm25_tf(term_freqs, self.k1, &norm_factors);
-
-        // Calculate IDF (same for all documents in this term)
-        let idf = self.idf();
-        let idf_scores = vec![idf; tf_scores.len()];
-
-        // Apply boost
-        let boosts = vec![self.boost; tf_scores.len()];
-
-        // Final score calculation using SIMD
-        simd::numeric::batch_bm25_final_score(&tf_scores, &idf_scores, &boosts)
+    /// Legacy heap-allocating wrapper around [`Self::batch_score_into`].
+    /// Retained for callers / tests that want the convenience of a
+    /// returned `Vec`. New hot-path code should use `batch_score_into`.
+    pub fn batch_score(&self, term_freqs: &[f32], field_lengths: &[f32]) -> Vec<f32> {
+        assert_eq!(term_freqs.len(), field_lengths.len());
+        let mut out = vec![0.0_f32; term_freqs.len()];
+        self.batch_score_into(term_freqs, field_lengths, &mut out);
+        out
     }
 
     /// Calculate scores for multiple terms and documents.
@@ -1325,5 +1421,63 @@ mod tests {
         assert_eq!(multi_scores.len(), 2);
         assert!(multi_scores[0] > 0.0);
         assert!(multi_scores[1] > 0.0);
+    }
+
+    /// `BM25Scorer::batch_score_into` must produce the same per-doc
+    /// score as the scalar [`Scorer::score`] path so the SIMD-default
+    /// non-WAND loop (#506) keeps top-K ranking identical to the old
+    /// scalar path.
+    #[test]
+    fn batch_score_into_matches_scalar() {
+        let scorer = BM25Scorer::new(10, 100, 50, 12.0, 1000, 1.7);
+
+        // 11 elements = one full SIMD chunk (8) + scalar tail (3).
+        let term_freqs: Vec<f32> = (1..=11).map(|i| i as f32 * 0.5).collect();
+        let field_lengths: Vec<f32> = (1..=11).map(|i| 4.0 + i as f32).collect();
+
+        let mut batched = vec![0.0_f32; term_freqs.len()];
+        scorer.batch_score_into(&term_freqs, &field_lengths, &mut batched);
+
+        for i in 0..term_freqs.len() {
+            let expected = scorer.score(0, term_freqs[i], Some(field_lengths[i]));
+            // SIMD and scalar paths share the same arithmetic; tolerance
+            // covers floating-point reordering between (a/b) and the
+            // SIMD pipeline.
+            assert!(
+                (batched[i] - expected).abs() <= expected.abs() * 1e-6 + 1e-7,
+                "mismatch at i={i}: batched={} scalar={}",
+                batched[i],
+                expected,
+            );
+        }
+    }
+
+    /// Trait-default `Scorer::batch_score` (used by non-BM25 scorers)
+    /// must equal the per-element scalar `score` path. Covers the
+    /// `ConstantScorer` arm of the SIMD-default loop fallback.
+    #[test]
+    fn trait_batch_score_default_matches_scalar() {
+        let scorer = ConstantScorer::new(0.75);
+        let doc_ids: Vec<u64> = (1..=5).collect();
+        let term_freqs = vec![1.0_f32; 5];
+        let field_lengths = vec![10.0_f32; 5];
+        let mut out = vec![0.0_f32; 5];
+        scorer.batch_score(&doc_ids, &term_freqs, &field_lengths, &mut out);
+        for i in 0..5 {
+            let expected = scorer.score(doc_ids[i], term_freqs[i], Some(field_lengths[i]));
+            assert_eq!(out[i], expected);
+        }
+    }
+
+    /// Scorer's `avg_field_length()` exposes the BM25 avg to the
+    /// batched loop so it can substitute the scalar fallback value
+    /// when a per-doc field length is not available.
+    #[test]
+    fn bm25_avg_field_length_matches_constructor() {
+        let scorer = BM25Scorer::new(10, 100, 50, 13.5, 1000, 1.0);
+        assert!((scorer.avg_field_length() - 13.5).abs() < 1e-7);
+
+        let constant = ConstantScorer::new(1.0);
+        assert_eq!(constant.avg_field_length(), 0.0);
     }
 }
