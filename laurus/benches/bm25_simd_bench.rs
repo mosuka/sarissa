@@ -25,12 +25,12 @@ use laurus::lexical::query::scorer::{BM25Scorer, Scorer};
 /// total_docs) and the default `(k1, b) = (1.2, 0.75)`.
 fn make_scorer() -> BM25Scorer {
     BM25Scorer::new(
-        50_000, // doc_freq
+        50_000,  // doc_freq
         500_000, // total_term_freq
         100_000, // field_doc_count
-        12.0,   // avg_field_length
+        12.0,    // avg_field_length
         100_000, // total_docs
-        1.0,    // boost
+        1.0,     // boost
     )
 }
 
@@ -102,5 +102,10 @@ fn bench_simd_batch_dyn(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_scalar, bench_simd_batch, bench_simd_batch_dyn);
+criterion_group!(
+    benches,
+    bench_scalar,
+    bench_simd_batch,
+    bench_simd_batch_dyn
+);
 criterion_main!(benches);
