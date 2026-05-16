@@ -123,6 +123,29 @@ impl InvertedIndexSearcher {
         // Create a scorer for the query
         let scorer = query.scorer(self.reader.as_ref())?;
 
+        // SIMD-batched default loop (#506). The scalar path collected
+        // one doc at a time via `scorer.score`; this version gathers up
+        // to `BATCH_SIZE` per-doc inputs (doc id / TF / field length)
+        // and lowers the cross-doc kernel through
+        // [`crate::lexical::query::scorer::Scorer::batch_score`], whose
+        // BM25 override is an `f32x8` SIMD kernel. Non-BM25 scorers
+        // inherit the trait's per-element default, so behaviour is
+        // identical there.
+        //
+        // Trade-off: the cumulative early-break (#403 PR-C) and the
+        // count-cap `needs_more()` check both consume the latest
+        // `min_competitive()`, so batching delays them by up to
+        // `BATCH_SIZE - 1` docs. The buffer flushes also fire before
+        // any per-block skip so the skip target stays accurate.
+        const BATCH_SIZE: usize = 8;
+        let mut doc_buf: [u64; BATCH_SIZE] = [0; BATCH_SIZE];
+        let mut tf_buf: [f32; BATCH_SIZE] = [0.0; BATCH_SIZE];
+        let mut fl_buf: [f32; BATCH_SIZE] = [0.0; BATCH_SIZE];
+        let mut score_buf: [f32; BATCH_SIZE] = [0.0; BATCH_SIZE];
+        let mut n: usize = 0;
+        let avg_fl = scorer.avg_field_length();
+        let query_field = query.field().map(|s| s.to_string());
+
         // Iterate through matching documents
         while !matcher.is_exhausted() {
             let doc_id = matcher.doc_id();
@@ -141,6 +164,26 @@ impl InvertedIndexSearcher {
             // below, still controls the hard `break`).
             let min_comp = collector.min_competitive();
             if scorer.current_block_max_score(doc_id) <= min_comp {
+                // Flush the buffered batch before deciding the skip
+                // target. The skip relies on `block_max_score_at`,
+                // which factors in the K-th score; that score can only
+                // be tight once buffered hits have been collected.
+                if n > 0 {
+                    scorer.batch_score(
+                        &doc_buf[..n],
+                        &tf_buf[..n],
+                        &fl_buf[..n],
+                        &mut score_buf[..n],
+                    );
+                    for i in 0..n {
+                        collector.collect(doc_buf[i], score_buf[i])?;
+                        if !collector.needs_more() {
+                            return Ok(collector);
+                        }
+                    }
+                    n = 0;
+                }
+                let min_comp = collector.min_competitive();
                 if scorer.block_max_score_at(doc_id) <= min_comp {
                     // Cumulative suffix bound already non-competitive
                     // → no later block can produce a top-K hit.
@@ -159,11 +202,13 @@ impl InvertedIndexSearcher {
                 // break path after scoring this doc.
             }
 
-            // Calculate score for this document
+            // Gather per-doc inputs into the batch buffer. The field
+            // length lookup mirrors the scalar path's reader downcasts
+            // (`InvertedIndexReader` / `PerSegmentReaderView`), but
+            // substitutes the scorer's avg when no per-doc value is
+            // available so the dense SIMD slice stays valid.
             let term_freq = matcher.term_freq() as f32;
-
-            // Retrieve actual field length if query targets a specific field
-            let field_length = if let Some(field_name) = query.field() {
+            let field_length = if let Some(field_name) = query_field.as_deref() {
                 if let Some(inverted_index_reader) =
                     self.reader.as_any().downcast_ref::<InvertedIndexReader>()
                 {
@@ -172,6 +217,7 @@ impl InvertedIndexSearcher {
                         .ok()
                         .flatten()
                         .map(|len| len as f32)
+                        .unwrap_or(avg_fl)
                 } else if let Some(view) =
                     self.reader.as_any().downcast_ref::<PerSegmentReaderView>()
                 {
@@ -182,36 +228,65 @@ impl InvertedIndexSearcher {
                         .ok()
                         .flatten()
                         .map(|len| len as f32)
+                        .unwrap_or(avg_fl)
                 } else {
-                    None
+                    avg_fl
                 }
             } else {
-                None
+                avg_fl
             };
 
-            let score = scorer.score(doc_id, term_freq, field_length);
+            doc_buf[n] = doc_id;
+            tf_buf[n] = term_freq;
+            fl_buf[n] = field_length;
+            n += 1;
 
-            // Collect the result
-            collector.collect(doc_id, score)?;
+            if n == BATCH_SIZE {
+                scorer.batch_score(
+                    &doc_buf[..n],
+                    &tf_buf[..n],
+                    &fl_buf[..n],
+                    &mut score_buf[..n],
+                );
+                let last_doc = doc_buf[n - 1];
+                for i in 0..n {
+                    collector.collect(doc_buf[i], score_buf[i])?;
+                    if !collector.needs_more() {
+                        return Ok(collector);
+                    }
+                }
+                n = 0;
 
-            // Cumulative early-break (#403 PR-C). After every collect
-            // the collector's `min_competitive()` may have tightened;
-            // ask the scorer for the right-cumulative upper bound at
-            // the matcher's current position. As soon as that bound
-            // drops below the K-th score, no later doc in the posting
-            // list can enter the top-K and the walk is provably done.
-            if scorer.block_max_score_at(doc_id) <= collector.min_competitive() {
-                break;
-            }
-
-            // Check if we need more results (count-cap collectors).
-            if !collector.needs_more() {
-                break;
+                // Cumulative early-break (#403 PR-C) once per batch.
+                // The K-th score is at its tightest right after the
+                // batch is collected; if the right-cumulative suffix
+                // bound has already fallen below it, no later doc can
+                // enter the top-K.
+                if scorer.block_max_score_at(last_doc) <= collector.min_competitive() {
+                    return Ok(collector);
+                }
             }
 
             // Move to next document
             if !matcher.next()? {
                 break;
+            }
+        }
+
+        // Final flush for any partial batch left when the matcher is
+        // exhausted (or a `break` above was taken without flushing).
+        if n > 0 {
+            scorer.batch_score(
+                &doc_buf[..n],
+                &tf_buf[..n],
+                &fl_buf[..n],
+                &mut score_buf[..n],
+            );
+            for i in 0..n {
+                collector.collect(doc_buf[i], score_buf[i])?;
+                if !collector.needs_more() {
+                    return Ok(collector);
+                }
             }
         }
 
