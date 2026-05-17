@@ -513,18 +513,30 @@ impl<R: StorageInput> StructReader<R> {
     ///
     /// Returns an error if the underlying I/O operation or decoding fails.
     pub fn read_varint(&mut self) -> Result<u64> {
-        let mut bytes = Vec::new();
+        // A u64 varint is at most 10 bytes (7 data bits per byte, 64 / 7 = 9.14).
+        // Using a stack-allocated buffer avoids the per-call heap allocation that
+        // `Vec::new()` + `push()` would incur — a hot path uncovered by perf
+        // profiling (see #520).
+        let mut buf = [0u8; 10];
+        let mut len = 0;
         loop {
             let byte = self.reader.read_u8()?;
-            bytes.push(byte);
+            buf[len] = byte;
+            len += 1;
             if byte & 0x80 == 0 {
                 break;
             }
+            if len == buf.len() {
+                // Malformed varint: continuation bit still set after the 10th byte.
+                // `decode_u64` would also catch this via its `shift >= 64` check,
+                // but we'd panic on the next `buf[len] = byte` before reaching it.
+                return Err(LaurusError::other("VarInt overflow"));
+            }
         }
 
-        let (value, _) = decode_u64(&bytes)?;
-        self.update_checksum(&bytes);
-        self.position += bytes.len() as u64;
+        let (value, _) = decode_u64(&buf[..len])?;
+        self.update_checksum(&buf[..len]);
+        self.position += len as u64;
         Ok(value)
     }
 
