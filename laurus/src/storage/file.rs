@@ -99,7 +99,8 @@ pub struct FileStorageConfig {
 
     /// Whether to use memory-mapped files for reading.
     /// When true, files are read using mmap instead of traditional
-    /// I/O. **Default `true` as of Issue #504**; set the
+    /// I/O. **Default `true` on every platform** as of Issue #504
+    /// (Linux/macOS) and Issue #508 (Windows); set the
     /// `LAURUS_NO_MMAP=1` environment variable when constructing a
     /// `FileStorageConfig` via [`Self::new`] to opt out.
     pub use_mmap: bool,
@@ -142,19 +143,14 @@ impl FileStorageConfig {
     ///
     /// # Default Settings
     ///
-    /// - `use_mmap`:
-    ///   - **Linux / macOS / other Unix: `true`** (Issue #504 — mmap-backed
-    ///     reads are the default so the lexical posting decoder can take
-    ///     the zero-copy path through `StorageInput::as_slice`). Set the
-    ///     `LAURUS_NO_MMAP=1` environment variable to opt out (debug /
-    ///     fallback for hosts where mmap misbehaves).
-    ///   - **Windows: `false`** (Issue #508). Windows holds an exclusive
-    ///     lock on memory-mapped files (`ERROR_USER_MAPPED_FILE`, os
-    ///     error 1224) which prevents the writer from truncating /
-    ///     deleting a segment file while a reader still holds an mmap.
-    ///     The current segment-file lifecycle is incompatible with
-    ///     that lock. Read-only / read-mostly workloads can opt in
-    ///     with `LAURUS_USE_MMAP=1` and accept the risk.
+    /// - `use_mmap`: **`true` on every platform** (Linux / macOS /
+    ///   other Unix per Issue #504; Windows per Issue #508 once the
+    ///   cache eviction in [`Self::create_output`] /
+    ///   [`Self::delete_file`] landed). mmap-backed reads are the
+    ///   default so the lexical posting decoder can take the
+    ///   zero-copy path through `StorageInput::as_slice`. Set the
+    ///   `LAURUS_NO_MMAP=1` environment variable to opt out (debug /
+    ///   fallback for hosts where mmap misbehaves).
     /// - `buffer_size`: 65536 (64KB)
     /// - `sync_writes`: false
     /// - `use_locking`: true
@@ -297,6 +293,39 @@ impl FileStorage {
         Ok(())
     }
 
+    /// Drop any cached memory map (and its metadata entry) for `name`
+    /// so a subsequent `truncate(true)` or `remove_file` on the
+    /// underlying file can proceed.
+    ///
+    /// # Why this exists
+    ///
+    /// On Windows the OS holds an exclusive lock on memory-mapped
+    /// files (`ERROR_USER_MAPPED_FILE`, os error 1224). Without this
+    /// eviction, [`Self::create_output`] and [`Self::delete_file`]
+    /// would fail whenever this `FileStorage` still owns a cached
+    /// `Arc<Mmap>` for the target file (Issue #508).
+    ///
+    /// On Unix the call is a no-op for correctness — the kernel keeps
+    /// the inode alive across truncate / unlink — but evicting the
+    /// stale entry is still useful so subsequent reads do not hand
+    /// out a mapping that no longer matches the file content.
+    ///
+    /// # Lifetime contract
+    ///
+    /// Any `Arc<Mmap>` clones previously handed out via
+    /// [`Self::open_input`] stay alive through the `Arc` refcount;
+    /// this method only drops *the cache's* clone. Callers must
+    /// ensure no other code path holds a `StorageInput` (or
+    /// `as_slice()` borrow derived from it) for the same `name` when
+    /// they invoke a mutation, otherwise the outstanding `Arc<Mmap>`
+    /// will keep the Windows file lock alive. Today every laurus
+    /// reader consumes its `StorageInput` within a single function
+    /// scope, so this contract holds by construction.
+    fn evict_mmap(&self, name: &str) {
+        self.mmap_cache.write().unwrap().remove(name);
+        self.mmap_metadata_cache.write().unwrap().remove(name);
+    }
+
     /// Get or create a memory map for a file.
     fn get_mmap(&self, name: &str) -> Result<Arc<Mmap>> {
         let file_path = self.file_path(name);
@@ -419,8 +448,25 @@ impl Storage for FileStorage {
         }
     }
 
+    /// Create a fresh output for `name`, truncating any existing file.
+    ///
+    /// # Concurrency
+    ///
+    /// On Windows the OS holds an exclusive lock on memory-mapped
+    /// files. This method evicts the storage's own mmap cache entry
+    /// for `name` before the truncate so the file lock can be
+    /// released (Issue #508). Any `StorageInput` previously returned
+    /// by [`Self::open_input`] for the same name must already be
+    /// dropped before another code path invokes this method —
+    /// otherwise the outstanding `Arc<Mmap>` clone will keep the
+    /// Windows lock alive and the OS returns `ERROR_USER_MAPPED_FILE`.
+    /// See [`Self::evict_mmap`] for the full lifetime contract.
     fn create_output(&self, name: &str) -> Result<Box<dyn StorageOutput>> {
         self.check_closed()?;
+
+        // Release the Windows file lock before opening with truncate.
+        // No-op on Unix; correctness-critical on Windows (Issue #508).
+        self.evict_mmap(name);
 
         let path = self.file_path(name);
 
@@ -446,8 +492,22 @@ impl Storage for FileStorage {
         )?))
     }
 
+    /// Open `name` for append, creating it if necessary.
+    ///
+    /// # Concurrency
+    ///
+    /// Append-mode targets (WAL, log files) are not memory-mapped in
+    /// the current codebase, so the cache eviction below is purely
+    /// defensive. If a future change starts mmap'ing one of these
+    /// files, the Windows lifecycle contract documented on
+    /// [`Self::evict_mmap`] already applies (Issue #508).
     fn create_output_append(&self, name: &str) -> Result<Box<dyn StorageOutput>> {
         self.check_closed()?;
+
+        // Defensive: keep symmetry with `create_output` / `delete_file`
+        // so a future caller cannot reintroduce the Windows lock bug
+        // by mmap'ing an append-mode target.
+        self.evict_mmap(name);
 
         let path = self.file_path(name);
 
@@ -480,8 +540,22 @@ impl Storage for FileStorage {
         self.file_path(name).exists()
     }
 
+    /// Delete `name` from the storage directory.
+    ///
+    /// # Concurrency
+    ///
+    /// On Windows, `remove_file` returns `ERROR_USER_MAPPED_FILE` if
+    /// any process still holds an mmap for the file. This method
+    /// evicts the storage's own cached `Arc<Mmap>` first to release
+    /// the lock (Issue #508). Outstanding `StorageInput` clones held
+    /// elsewhere keep the lock alive until they drop; the same
+    /// lifetime contract documented on [`Self::evict_mmap`] applies.
     fn delete_file(&self, name: &str) -> Result<()> {
         self.check_closed()?;
+
+        // Release the Windows file lock before unlinking. No-op on
+        // Unix; correctness-critical on Windows (Issue #508).
+        self.evict_mmap(name);
 
         let path = self.file_path(name);
         if path.exists() {
@@ -1070,14 +1144,93 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
-    fn config_new_defaults_use_mmap_true_on_unix() {
-        // SAFETY: tests in this module run single-threaded by default
-        // when scoped through `cargo test --test ...`; the env-var
-        // toggle is read at `FileStorageConfig::new` time so we
-        // bracket the var around the construction call. The
-        // surrounding `create_test_storage` does not set the var.
+    fn create_output_releases_mmap_lock() {
+        // Issue #508: with `use_mmap=true`, rewriting a file via
+        // `create_output` would hit `ERROR_USER_MAPPED_FILE` on
+        // Windows if the storage still held a cached `Arc<Mmap>`.
+        // `evict_mmap` (called from `create_output`) drops the cache
+        // entry before the truncate so the OS releases the lock.
+        //
+        // On Unix this assertion is a tautology — the kernel allows
+        // truncate while mapped. On Windows it is the actual
+        // regression gate; without the eviction the second
+        // `create_output` would fail with os error 1224.
         let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = true;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+
+        let mut output = storage.create_output("segment.bin").unwrap();
+        output.write_all(b"old-content").unwrap();
+        output.close().unwrap();
+
+        {
+            // Take a read mapping so the cache holds an Arc<Mmap>.
+            // Scope ends here, but the cached clone in FileStorage
+            // outlives this drop until we call `create_output` again.
+            let mut input = storage.open_input("segment.bin").unwrap();
+            assert_eq!(input.as_slice(), Some(&b"old-content"[..]));
+            let mut buf = Vec::new();
+            input.read_to_end(&mut buf).unwrap();
+            assert_eq!(buf, b"old-content");
+        }
+
+        // Re-write — must succeed on every OS now that
+        // `create_output` evicts the cache first.
+        let mut output = storage.create_output("segment.bin").unwrap();
+        output.write_all(b"new-content").unwrap();
+        output.close().unwrap();
+
+        let mut input = storage.open_input("segment.bin").unwrap();
+        let mut buf = Vec::new();
+        input.read_to_end(&mut buf).unwrap();
+        assert_eq!(buf, b"new-content");
+    }
+
+    #[test]
+    fn delete_file_releases_mmap_lock() {
+        // Sibling of `create_output_releases_mmap_lock` — same
+        // mechanism, exercised through the `delete_file` path that
+        // segment-manager merge / compaction calls (Issue #508).
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = FileStorageConfig::new(temp_dir.path());
+        config.use_mmap = true;
+        let storage = FileStorage::new(temp_dir.path(), config).unwrap();
+
+        let mut output = storage.create_output("doomed.bin").unwrap();
+        output.write_all(b"will-be-removed").unwrap();
+        output.close().unwrap();
+
+        {
+            let _input = storage.open_input("doomed.bin").unwrap();
+            // _input drops here; FileStorage still holds the cached
+            // Arc<Mmap> at this point.
+        }
+
+        // Must succeed on Windows after the eviction in
+        // `delete_file`; without it, os error 1224 fires here.
+        storage.delete_file("doomed.bin").unwrap();
+        assert!(!storage.file_exists("doomed.bin"));
+
+        // Re-create to confirm the cache slot is genuinely gone, not
+        // just shadowed.
+        let mut output = storage.create_output("doomed.bin").unwrap();
+        output.write_all(b"fresh").unwrap();
+        output.close().unwrap();
+        let mut input = storage.open_input("doomed.bin").unwrap();
+        let mut buf = Vec::new();
+        input.read_to_end(&mut buf).unwrap();
+        assert_eq!(buf, b"fresh");
+    }
+
+    #[test]
+    fn config_new_defaults_use_mmap_true() {
+        // Issue #504 (Unix) and Issue #508 (Windows): mmap is the
+        // default on every platform now. The opt-out is the
+        // `LAURUS_NO_MMAP=1` env var, applied symmetrically by both
+        // `platform/unix.rs` and `platform/windows.rs`.
+        let temp_dir = TempDir::new().unwrap();
+        let prior = std::env::var("LAURUS_NO_MMAP").ok();
         // SAFETY: this test temporarily mutates a process-global env
         // var. It restores the prior state before returning so other
         // tests in the binary are unaffected. Rust 2024 marks
@@ -1087,58 +1240,23 @@ mod tests {
         // intermediate state, but in practice the storage tests do
         // not branch on LAURUS_NO_MMAP outside of this test, so the
         // race is harmless.
-        let prior = std::env::var("LAURUS_NO_MMAP").ok();
         unsafe {
             std::env::remove_var("LAURUS_NO_MMAP");
         }
         let cfg = FileStorageConfig::new(temp_dir.path());
-        assert!(cfg.use_mmap, "Unix default config must enable mmap");
+        assert!(cfg.use_mmap, "default config must enable mmap");
         unsafe {
             std::env::set_var("LAURUS_NO_MMAP", "1");
         }
         let cfg = FileStorageConfig::new(temp_dir.path());
         assert!(
             !cfg.use_mmap,
-            "LAURUS_NO_MMAP=1 must opt out of the mmap default on Unix"
+            "LAURUS_NO_MMAP=1 must opt out of the mmap default"
         );
         unsafe {
             match prior {
                 Some(v) => std::env::set_var("LAURUS_NO_MMAP", v),
                 None => std::env::remove_var("LAURUS_NO_MMAP"),
-            }
-        }
-    }
-
-    #[test]
-    #[cfg(target_os = "windows")]
-    fn config_new_defaults_use_mmap_false_on_windows() {
-        // Issue #508: Windows defaults to mmap-off because the OS
-        // holds an exclusive lock on memory-mapped files that breaks
-        // the segment-overwrite path. Opt-in via LAURUS_USE_MMAP=1
-        // for read-only / read-mostly workloads.
-        let temp_dir = TempDir::new().unwrap();
-        let prior = std::env::var("LAURUS_USE_MMAP").ok();
-        // SAFETY: see config_new_defaults_use_mmap_true_on_unix.
-        unsafe {
-            std::env::remove_var("LAURUS_USE_MMAP");
-        }
-        let cfg = FileStorageConfig::new(temp_dir.path());
-        assert!(
-            !cfg.use_mmap,
-            "Windows default config must disable mmap (Issue #508)"
-        );
-        unsafe {
-            std::env::set_var("LAURUS_USE_MMAP", "1");
-        }
-        let cfg = FileStorageConfig::new(temp_dir.path());
-        assert!(
-            cfg.use_mmap,
-            "LAURUS_USE_MMAP=1 must opt into mmap on Windows"
-        );
-        unsafe {
-            match prior {
-                Some(v) => std::env::set_var("LAURUS_USE_MMAP", v),
-                None => std::env::remove_var("LAURUS_USE_MMAP"),
             }
         }
     }
