@@ -4,7 +4,9 @@
 
 use crate::error::Result;
 use crate::lexical::index::inverted::core::terms::{TermStats, TermsEnum};
-use crate::util::levenshtein::{damerau_levenshtein_distance, levenshtein_distance};
+use crate::util::levenshtein::{
+    damerau_levenshtein_distance_threshold, levenshtein_distance_threshold,
+};
 
 /// A simple Levenshtein automaton for fuzzy string matching.
 ///
@@ -32,6 +34,11 @@ pub trait Automaton: Send + Sync {
 pub struct LevenshteinAutomaton {
     /// The pattern string to match against
     pattern: String,
+    /// Precomputed prefix of `pattern` of length `prefix_length`, if any. Stored
+    /// to avoid recomputing `pattern.chars().take(prefix_length).collect()` on
+    /// every `matches` call — that allocation showed up under inlined
+    /// `AutomatonTermsEnum::next` as a per-term hot spot (see #530).
+    pattern_prefix: Option<String>,
     /// Maximum edit distance
     max_edits: u32,
     /// Minimum prefix length that must match exactly
@@ -48,8 +55,15 @@ impl LevenshteinAutomaton {
         prefix_length: usize,
         transpositions: bool,
     ) -> Self {
+        let pattern: String = pattern.into();
+        let pattern_prefix = if prefix_length > 0 {
+            Some(pattern.chars().take(prefix_length).collect())
+        } else {
+            None
+        };
         LevenshteinAutomaton {
-            pattern: pattern.into(),
+            pattern,
+            pattern_prefix,
             max_edits,
             prefix_length,
             transpositions,
@@ -79,30 +93,29 @@ impl LevenshteinAutomaton {
 
 impl Automaton for LevenshteinAutomaton {
     fn matches(&self, candidate: &str) -> bool {
-        // Check prefix requirement
-        if self.prefix_length > 0 {
-            let pattern_prefix: String = self.pattern.chars().take(self.prefix_length).collect();
-            if !candidate.starts_with(&pattern_prefix) {
-                return false;
-            }
+        // Check prefix requirement against the precomputed prefix.
+        if let Some(prefix) = &self.pattern_prefix
+            && !candidate.starts_with(prefix.as_str())
+        {
+            return false;
         }
 
-        // Calculate edit distance
+        // Calculate edit distance using the threshold-aware variants. They use
+        // a 2-row (or 3-row for Damerau) sliding buffer instead of the full
+        // N × M matrix, terminate early when the per-row minimum exceeds the
+        // threshold, and avoid heap allocations for the matrix on the
+        // non-matching majority of candidates.
+        let threshold = self.max_edits as usize;
         let distance = if self.transpositions {
-            damerau_levenshtein_distance(&self.pattern, candidate) as u32
+            damerau_levenshtein_distance_threshold(&self.pattern, candidate, threshold)
         } else {
-            levenshtein_distance(&self.pattern, candidate) as u32
+            levenshtein_distance_threshold(&self.pattern, candidate, threshold)
         };
-
-        distance <= self.max_edits
+        distance.is_some()
     }
 
     fn initial_seek_term(&self) -> Option<String> {
-        if self.prefix_length > 0 {
-            Some(self.pattern.chars().take(self.prefix_length).collect())
-        } else {
-            None
-        }
+        self.pattern_prefix.clone()
     }
 }
 
