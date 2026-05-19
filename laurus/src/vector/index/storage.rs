@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::error::{LaurusError, Result};
-use crate::storage::Storage;
+use crate::storage::{Storage, StorageInput};
 use crate::vector::core::quantization::{QuantizedVectorMeta, ScalarQuantParams};
 use crate::vector::core::vector::Vector;
 use crate::vector::index::pq_storage::PqVectorPool;
@@ -60,6 +60,19 @@ pub enum VectorStorage {
         /// format is the Stage-1 quantized layout. `None` means the
         /// legacy f32 layout.
         quant_params: Option<ScalarQuantParams>,
+        /// Lazily-opened input handle, shared across `get()` calls in
+        /// the same search. Avoids paying the
+        /// `Storage::open_input(file_name)` cost (`statx` syscall via
+        /// the mmap-cache metadata check, mmap-cache lookup, `Arc`
+        /// clone, and `Box` allocation) on every candidate-vector
+        /// lookup. Subsequent gets call `clone_input()` to obtain a
+        /// fresh seek cursor without re-opening the file. See #522.
+        ///
+        /// The lock is read-heavy: after the first `get()` populates
+        /// it, every subsequent `get()` takes a read lock and never
+        /// blocks another reader, so concurrent HNSW searches do not
+        /// serialise on this field.
+        cached_input: Arc<RwLock<Option<Box<dyn StorageInput>>>>,
     },
 }
 
@@ -154,13 +167,44 @@ impl VectorStorage {
                 file_name,
                 offsets,
                 quant_params,
+                cached_input,
             } => {
                 let Some(&offset) = offsets.get(key) else {
                     return Ok(None);
                 };
-                let mut input = storage.open_input(file_name).map_err(|e| {
-                    LaurusError::internal(format!("Failed to open vector file: {e}"))
-                })?;
+                // Reuse the cached input handle if it has been opened by a
+                // previous `get()` on this storage. The cache is read-heavy:
+                // after the first opener wins the write lock, every subsequent
+                // call takes the read lock and clones via `clone_input()` —
+                // no `statx` syscall, no mmap-cache lookup, just an `Arc`
+                // clone and a `Box` allocation for the fresh cursor.
+                let mut input = {
+                    let guard = cached_input
+                        .read()
+                        .map_err(|_| LaurusError::internal("cached_input RwLock poisoned"))?;
+                    if let Some(cached) = guard.as_ref() {
+                        cached.clone_input()?
+                    } else {
+                        // First call — drop the read lock and acquire the
+                        // write lock so we can lazily open the file. The
+                        // double-check after locking handles the rare case
+                        // where another thread populated the cache between
+                        // our read-lock release and write-lock acquisition.
+                        drop(guard);
+                        let mut wguard = cached_input
+                            .write()
+                            .map_err(|_| LaurusError::internal("cached_input RwLock poisoned"))?;
+                        if wguard.is_none() {
+                            *wguard = Some(storage.open_input(file_name).map_err(|e| {
+                                LaurusError::internal(format!("Failed to open vector file: {e}"))
+                            })?);
+                        }
+                        wguard
+                            .as_ref()
+                            .expect("cached_input populated above")
+                            .clone_input()?
+                    }
+                };
 
                 input
                     .seek(SeekFrom::Start(offset))

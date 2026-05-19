@@ -238,6 +238,7 @@ impl IvfIndexReader {
                         file_name: file_name.clone(),
                         offsets: Arc::new(offsets),
                         quant_params: Some(params),
+                        cached_input: Arc::new(std::sync::RwLock::new(None)),
                     },
                     vector_ids,
                 )
