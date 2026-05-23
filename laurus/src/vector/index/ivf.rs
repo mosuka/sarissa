@@ -1,6 +1,5 @@
 //! IVF vector index implementation.
 
-pub mod field_reader;
 pub mod maintenance;
 pub mod reader;
 pub mod searcher;
