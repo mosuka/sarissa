@@ -620,6 +620,11 @@ fn json_to_hnsw_option(json: &Value) -> Result<v1::HnswOption, String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
+        // Issue #644: optional schema-level `ef_search` default.
+        default_ef_search: json
+            .get("default_ef_search")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
     })
 }
 
@@ -864,6 +869,11 @@ fn json_to_vector_params(json: &Value) -> Option<v1::VectorParams> {
         // falls back to Stage 1 ranking.
         rerank_factor: obj
             .get("rerank_factor")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
+        // Issue #644: per-query override for HNSW `ef_search`.
+        ef_search: obj
+            .get("ef_search")
             .and_then(|v| v.as_u64())
             .map(|n| n as u32),
     })

@@ -107,11 +107,21 @@ let opt = HnswOption {
     distance: DistanceMetric::Cosine,                // distance metric
     m: 16,                                           // max connections per layer
     ef_construction: 200,                            // construction search width
+    default_ef_search: Some(100),                    // schema-level ef_search default (issue #644)
     base_weight: 1.0,                                // default scoring weight
     quantizer: QuantizationMethod::Scalar8Bit,       // 必須（デフォルト Scalar8Bit）
     embedder: None,                                  // 任意の embedder 名
 };
 ```
+
+#### `default_ef_search`: 検索時の recall 調整パラメータ
+
+`ef_search` はクエリ時の動的候補リストのサイズを制御するパラメータです（`ef_construction` がインデックス**ビルド時**にだけ影響するのとは別物です）。値を大きくするほどグラフ近傍の探索範囲が広がり、レイテンシと引き換えに recall が上がります。
+
+- **スキーマレベルのデフォルト**: `HnswOption.default_ef_search = Some(ef)` でフィールドごとのデフォルトを引き上げられます。`None` の場合、サーチャは内部 fallback (`50`) を使用します。
+- **クエリごとのオーバーライド**: 検索リクエスト側で [`SearchRequestBuilder::vector_ef_search`](../laurus.md) を指定すると、スキーマデフォルトより優先されます。
+- **自動引き上げ**: いずれの経路で `ef_search` を指定した場合でも、サーチャは少なくとも `top_k`（`rerank_factor` 併用時は `top_k * rerank_factor`）まで持ち上げるため、`top_k` 要求に対して候補ヒープが不足することはありません。
+- Issue [#644](https://github.com/mosuka/laurus/issues/644) で対応。
 
 パラメータの詳細なガイダンスについては、[Vector インデクシング](indexing/vector_indexing.md)を参照してください。
 

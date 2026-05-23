@@ -260,7 +260,14 @@ impl VectorIndex for HnswIndex {
     fn searcher(&self) -> Result<Box<dyn VectorIndexSearcher>> {
         self.check_closed()?;
         let reader = self.reader()?;
-        Ok(Box::new(HnswSearcher::new(reader)?))
+        // Pull the schema-level default `ef_search` from the config so the
+        // monolithic search path honours `HnswOption.default_ef_search`
+        // (Issue #644). Per-query overrides via
+        // `VectorIndexQueryParams.ef_search` still take precedence.
+        Ok(Box::new(HnswSearcher::with_default_ef_search(
+            reader,
+            self.config.default_ef_search,
+        )?))
     }
 
     fn embedder(&self) -> Arc<dyn Embedder> {

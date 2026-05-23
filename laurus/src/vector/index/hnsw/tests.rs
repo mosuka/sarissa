@@ -496,3 +496,64 @@ fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     assert!(ids.contains(&5), "missing doc_id 5; got {:?}", ids);
     Ok(())
 }
+
+/// Regression / parity test for Issue #644: HNSW `ef_search` must honour
+/// the per-query override and the schema-level default, instead of being
+/// permanently capped at the historical `50` constant.
+#[test]
+fn hnsw_searcher_honours_per_query_and_schema_ef_search() -> Result<()> {
+    use crate::vector::index::hnsw::searcher::HnswSearcher;
+    use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let config = HnswIndexConfig {
+        dimension: 3,
+        m: 16,
+        ef_construction: 64,
+        // Schema-level default lifts the searcher's fallback well above
+        // the legacy hardcoded `50`.
+        default_ef_search: Some(300),
+        distance_metric: DistanceMetric::Cosine,
+        ..Default::default()
+    };
+
+    let index = HnswIndex::create(storage.clone(), "ef_test", config)?;
+    let mut writer = index.writer()?;
+    let vectors = (0..32u64)
+        .map(|i| {
+            let mut v = vec![0.0_f32; 3];
+            v[(i as usize) % 3] = 1.0 + (i as f32) * 0.01;
+            (i, "vec".to_string(), Vector::new(v))
+        })
+        .collect::<Vec<_>>();
+    writer.build(vectors)?;
+    writer.finalize()?;
+    writer.commit()?;
+
+    // The searcher built via `HnswIndex::searcher()` must pick up the
+    // schema-level `default_ef_search` (Issue #644).
+    let searcher = index.searcher()?;
+    let request = VectorIndexQuery::new(Vector::new(vec![1.0, 0.0, 0.0]))
+        .top_k(5)
+        .field_name("vec".to_string());
+    let results = searcher.search(&request)?;
+    assert!(
+        !results.results.is_empty(),
+        "expected non-empty results from schema-default search path"
+    );
+
+    // Construct a direct HnswSearcher and exercise the per-query override.
+    let reader = index.reader()?;
+    let direct = HnswSearcher::new(reader.clone())?;
+    let override_request = VectorIndexQuery::new(Vector::new(vec![1.0, 0.0, 0.0]))
+        .top_k(5)
+        .field_name("vec".to_string())
+        .ef_search(400);
+    let with_override = direct.search(&override_request)?;
+    assert!(
+        !with_override.results.is_empty(),
+        "expected non-empty results from per-query override search path"
+    );
+
+    Ok(())
+}

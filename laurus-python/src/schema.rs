@@ -249,9 +249,14 @@ impl PySchema {
     ///     distance: Distance metric — "cosine" (default), "euclidean", "dot_product".
     ///     m: HNSW branching factor (default 16).
     ///     ef_construction: Build-time expansion factor (default 200).
+    ///     default_ef_search: Schema-level default for the search-time
+    ///         `ef_search` candidate-list size (Issue #644). When unset,
+    ///         the searcher uses an internal fallback of 50. Per-query
+    ///         overrides via the search request still take precedence.
     ///     embedder: Optional embedder name registered via `add_embedder`.
     ///         When set, text payloads are automatically embedded by the Rust engine.
-    #[pyo3(signature = (name, dimension, *, distance="cosine", m=16, ef_construction=200, embedder=None))]
+    #[pyo3(signature = (name, dimension, *, distance="cosine", m=16, ef_construction=200, default_ef_search=None, embedder=None))]
+    #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
         &mut self,
         name: &str,
@@ -259,6 +264,7 @@ impl PySchema {
         distance: &str,
         m: usize,
         ef_construction: usize,
+        default_ef_search: Option<usize>,
         embedder: Option<String>,
     ) -> PyResult<()> {
         let opt = HnswOption {
@@ -266,6 +272,7 @@ impl PySchema {
             distance: parse_distance(distance)?,
             m,
             ef_construction,
+            default_ef_search,
             embedder,
             ..Default::default()
         };

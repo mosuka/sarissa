@@ -95,6 +95,14 @@ message VectorParams {
   // is reserved at proto tag 5 so older / newer clients can negotiate
   // the upgrade without another schema bump.
   optional uint32 rerank_factor = 5;
+
+  // Per-query override for the HNSW `ef_search` candidate-list size
+  // (Issue #644). When unset, the searcher uses the schema-level
+  // `HnswOption.default_ef_search` or an internal fallback (`50`).
+  // The effective ef is always lifted to `max(top_k, top_k * rerank_factor)`
+  // so the candidate heap is never undersized for the requested
+  // `top_k`.
+  optional uint32 ef_search = 6;
 }
 
 enum VectorScoreMode {

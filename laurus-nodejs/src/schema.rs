@@ -257,8 +257,13 @@ impl JsSchema {
     /// * `distance` - Distance metric — "cosine" (default), "euclidean", "dot_product".
     /// * `m` - HNSW branching factor (default 16).
     /// * `ef_construction` - Build-time expansion factor (default 200).
+    /// * `defaultEfSearch` - Schema-level default for the search-time
+    ///   `ef_search` candidate-list size (Issue #644). When omitted, the
+    ///   searcher uses an internal fallback of 50. Per-query overrides
+    ///   via the search request still take precedence.
     /// * `embedder` - Optional embedder name registered via `addEmbedder`.
     #[napi]
+    #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
         &mut self,
         name: String,
@@ -266,6 +271,7 @@ impl JsSchema {
         distance: Option<String>,
         m: Option<u32>,
         ef_construction: Option<u32>,
+        default_ef_search: Option<u32>,
         embedder: Option<String>,
     ) -> Result<()> {
         let opt = HnswOption {
@@ -273,6 +279,7 @@ impl JsSchema {
             distance: parse_distance(distance.as_deref().unwrap_or("cosine"))?,
             m: m.unwrap_or(16) as usize,
             ef_construction: ef_construction.unwrap_or(200) as usize,
+            default_ef_search: default_ef_search.map(|v| v as usize),
             embedder,
             ..Default::default()
         };

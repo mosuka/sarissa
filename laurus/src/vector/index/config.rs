@@ -438,6 +438,19 @@ pub struct HnswIndexConfig {
     /// Higher values improve index quality but increase construction time.
     pub ef_construction: usize,
 
+    /// Default size of the dynamic candidate list during search
+    /// (`ef_search`).
+    ///
+    /// When `None` (the default), the searcher uses an internal
+    /// fallback of `50` so existing schemas keep their previous
+    /// behaviour. Per-query
+    /// [`crate::vector::search::searcher::VectorIndexQueryParams::ef_search`]
+    /// always takes precedence over this schema-level default.
+    ///
+    /// Issue [#644](https://github.com/mosuka/laurus/issues/644).
+    #[serde(default)]
+    pub default_ef_search: Option<usize>,
+
     /// Maximum number of vectors per segment.
     pub max_vectors_per_segment: u64,
 
@@ -486,6 +499,7 @@ impl Default for HnswIndexConfig {
             normalize_vectors: true,
             m: 16,
             ef_construction: 200,
+            default_ef_search: None,
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
             use_quantization: false,
@@ -507,6 +521,7 @@ impl std::fmt::Debug for HnswIndexConfig {
             .field("normalize_vectors", &self.normalize_vectors)
             .field("m", &self.m)
             .field("ef_construction", &self.ef_construction)
+            .field("default_ef_search", &self.default_ef_search)
             .field("max_vectors_per_segment", &self.max_vectors_per_segment)
             .field("write_buffer_size", &self.write_buffer_size)
             .field("use_quantization", &self.use_quantization)

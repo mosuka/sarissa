@@ -145,6 +145,7 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             base_weight: o.base_weight,
             quantizer: Some(quantization_to_proto(&o.quantizer)),
             embedder: o.embedder.clone().unwrap_or_default(),
+            default_ef_search: o.default_ef_search.map(|v| v as u32),
         })),
         FieldOption::Flat(o) => Some(Opt::Flat(v1::FlatOption {
             dimension: o.dimension as u32,
@@ -214,6 +215,7 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
             distance: distance_from_proto(o.distance),
             m: o.m as usize,
             ef_construction: o.ef_construction as usize,
+            default_ef_search: o.default_ef_search.map(|v| v as usize),
             base_weight: o.base_weight,
             quantizer: o
                 .quantizer
