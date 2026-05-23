@@ -1,6 +1,5 @@
 //! HNSW vector index implementation.
 
-pub mod field_reader;
 pub mod graph;
 pub mod maintenance;
 pub mod reader;
