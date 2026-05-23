@@ -32,3 +32,4 @@ pub struct SegmentInfo {
 pub mod manager;
 pub mod merge_engine;
 pub mod merge_policy;
+pub mod reader_cache;

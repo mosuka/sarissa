@@ -19,6 +19,7 @@ use crate::vector::index::hnsw::reader::HnswIndexReader;
 use crate::vector::index::hnsw::searcher::HnswSearcher;
 use crate::vector::index::hnsw::segment::manager::{ManagedSegmentInfo, SegmentManager};
 use crate::vector::index::hnsw::segment::merge_engine::{MergeConfig, MergeEngine};
+use crate::vector::index::hnsw::segment::reader_cache::SegmentedReaderCache;
 use crate::vector::index::hnsw::writer::HnswIndexWriter;
 use crate::vector::search::searcher::{
     VectorIndexQuery, VectorIndexQueryParams, VectorIndexSearcher,
@@ -50,6 +51,16 @@ pub struct SegmentedVectorField {
 
     /// Global deletion bitmap.
     pub deletion_bitmap: Option<Arc<DeletionBitmap>>,
+
+    /// Per-segment [`HnswIndexReader`] cache used by
+    /// [`Self::search_managed_segments`]. Without this cache every query
+    /// reloaded every managed segment from disk; with it, the second and
+    /// subsequent queries against the same segment hit memory only.
+    ///
+    /// Invalidated by [`Self::perform_merge_with_policy`] when source
+    /// segments are removed as part of a merge. Issue
+    /// [#660](https://github.com/mosuka/laurus/issues/660).
+    pub reader_cache: Arc<SegmentedReaderCache>,
 }
 
 impl SegmentedVectorField {
@@ -79,6 +90,7 @@ impl SegmentedVectorField {
             storage,
             active_segment: Arc::new(RwLock::new(None)),
             deletion_bitmap,
+            reader_cache: Arc::new(SegmentedReaderCache::new()),
         };
 
         Ok(field)
@@ -193,7 +205,22 @@ impl SegmentedVectorField {
 
             let info = ManagedSegmentInfo::new(new_segment_id, result.stats.vectors_merged, 0, 0);
 
+            // Capture source segment ids before `apply_merge` consumes
+            // `candidate`, so we can invalidate their cache entries below.
+            // Issue #660: source readers are no longer reachable through the
+            // manager after `apply_merge`; clearing their cache entries
+            // prevents stale orphan readers from lingering in memory.
+            let source_ids: Vec<String> = candidate
+                .segments
+                .iter()
+                .map(|s| s.segment_id.clone())
+                .collect();
+
             self.segment_manager.apply_merge(candidate, info)?;
+
+            for id in &source_ids {
+                self.reader_cache.invalidate(id);
+            }
         }
         Ok(())
     }
@@ -366,14 +393,23 @@ impl SegmentedVectorField {
         };
 
         for info in segments {
-            // Load reader for segment
-            let mut reader =
-                HnswIndexReader::load(self.storage.clone(), &info.segment_id, distance_metric)?;
-
-            // Inject deletion bitmap if available
-            if let Some(bitmap) = &self.deletion_bitmap {
-                reader.set_deletion_bitmap(bitmap.clone());
-            }
+            // Issue #660: fetch the reader from the per-segment cache to
+            // avoid the per-query reload from disk. The first search for a
+            // given `segment_id` invokes the loader (paying the full
+            // `HnswIndexReader::load` cost); subsequent searches receive
+            // the cached `Arc<HnswIndexReader>` directly. Entries are
+            // invalidated by `perform_merge_with_policy` when the
+            // underlying segment is removed.
+            let storage = self.storage.clone();
+            let deletion_bitmap = self.deletion_bitmap.clone();
+            let segment_id = info.segment_id.clone();
+            let reader = self.reader_cache.get_or_load(&segment_id, || {
+                let mut r = HnswIndexReader::load(storage, &segment_id, distance_metric)?;
+                if let Some(bitmap) = deletion_bitmap {
+                    r.set_deletion_bitmap(bitmap);
+                }
+                Ok(r)
+            })?;
 
             // Issue #644: prefer the schema-level `default_ef_search` when
             // the user has configured one. Otherwise fall back to the legacy
@@ -386,8 +422,7 @@ impl SegmentedVectorField {
             } else {
                 50
             };
-            let searcher =
-                HnswSearcher::with_default_ef_search(Arc::new(reader), Some(default_ef))?;
+            let searcher = HnswSearcher::with_default_ef_search(reader, Some(default_ef))?;
 
             let params = VectorIndexQueryParams {
                 top_k: limit,
