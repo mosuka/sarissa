@@ -101,10 +101,15 @@ impl SegmentedVectorField {
         let segment_id = self.segment_manager.generate_segment_id();
 
         // Get HNSW parameters from config
-        let (dimension, distance, m, ef_construction) = match &self.config.vector {
-            Some(FieldOption::Hnsw(opt)) => {
-                (opt.dimension, opt.distance, opt.m, opt.ef_construction)
-            }
+        let (dimension, distance, m, ef_construction, default_ef_search) = match &self.config.vector
+        {
+            Some(FieldOption::Hnsw(opt)) => (
+                opt.dimension,
+                opt.distance,
+                opt.m,
+                opt.ef_construction,
+                opt.default_ef_search,
+            ),
             _ => {
                 return Err(LaurusError::invalid_config(
                     "SegmentedVectorField requires HNSW configuration".to_string(),
@@ -117,6 +122,7 @@ impl SegmentedVectorField {
             distance_metric: distance,
             m,
             ef_construction,
+            default_ef_search,
             normalize_vectors: distance == crate::vector::core::distance::DistanceMetric::Cosine,
             ..Default::default()
         };
@@ -148,8 +154,13 @@ impl SegmentedVectorField {
         policy: &dyn crate::vector::index::hnsw::segment::merge_policy::MergePolicy,
     ) -> Result<()> {
         if let Some(candidate) = self.segment_manager.check_merge(policy) {
-            let (dimension, m, ef_construction) = match &self.config.vector {
-                Some(FieldOption::Hnsw(opt)) => (opt.dimension, opt.m, opt.ef_construction),
+            let (dimension, m, ef_construction, default_ef_search) = match &self.config.vector {
+                Some(FieldOption::Hnsw(opt)) => (
+                    opt.dimension,
+                    opt.m,
+                    opt.ef_construction,
+                    opt.default_ef_search,
+                ),
                 _ => {
                     return Err(LaurusError::invalid_config(
                         "SegmentedVectorField requires HNSW configuration".to_string(),
@@ -164,6 +175,7 @@ impl SegmentedVectorField {
                     dimension,
                     m,
                     ef_construction,
+                    default_ef_search,
                     ..Default::default()
                 },
                 VectorIndexWriterConfig {
@@ -363,13 +375,19 @@ impl SegmentedVectorField {
                 reader.set_deletion_bitmap(bitmap.clone());
             }
 
-            let mut searcher = HnswSearcher::new(Arc::new(reader))?;
-
-            // Set ef_search based on config if available
-            if let Some(FieldOption::Hnsw(opt)) = &self.config.vector {
-                // Use a higher ef_search for better recall (increase search effort relative to construction)
-                searcher.set_ef_search(opt.ef_construction.max(50) * 2);
-            }
+            // Issue #644: prefer the schema-level `default_ef_search` when
+            // the user has configured one. Otherwise fall back to the legacy
+            // segmented-field heuristic of `ef_construction.max(50) * 2`
+            // (which kept Round-1 / Round-2 multi-segment recall stable).
+            // Per-query `VectorIndexQueryParams.ef_search` overrides both.
+            let default_ef = if let Some(FieldOption::Hnsw(opt)) = &self.config.vector {
+                opt.default_ef_search
+                    .unwrap_or_else(|| opt.ef_construction.max(50) * 2)
+            } else {
+                50
+            };
+            let searcher =
+                HnswSearcher::with_default_ef_search(Arc::new(reader), Some(default_ef))?;
 
             let params = VectorIndexQueryParams {
                 top_k: limit,

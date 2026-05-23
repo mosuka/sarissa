@@ -82,6 +82,24 @@ impl VectorIndexQuery {
         self.params.rerank_factor = Some(factor);
         self
     }
+
+    /// Override the HNSW `ef_search` candidate-list size for this query
+    /// (Issue [#644](https://github.com/mosuka/laurus/issues/644)).
+    ///
+    /// `ef_search` controls the recall / latency trade-off on the HNSW
+    /// graph search. Higher values explore more graph neighbours and
+    /// give higher recall, at the cost of latency. When unset, the
+    /// searcher uses the schema-level
+    /// [`crate::vector::core::field::HnswOption::default_ef_search`]
+    /// (or its internal fallback of `50` when neither is set).
+    ///
+    /// The effective `ef_search` is always lifted to at least
+    /// `top_k * rerank_factor.unwrap_or(1)` so the candidate heap is
+    /// never undersized for the requested `top_k`.
+    pub fn ef_search(mut self, ef: usize) -> Self {
+        self.params.ef_search = Some(ef);
+        self
+    }
 }
 
 /// Configuration for low-level vector index query operations.
@@ -114,6 +132,23 @@ pub struct VectorIndexQueryParams {
     /// quantized-only search.
     #[serde(default)]
     pub rerank_factor: Option<usize>,
+    /// Per-query override for the HNSW `ef_search` candidate-list size
+    /// (Issue [#644](https://github.com/mosuka/laurus/issues/644)).
+    ///
+    /// When `None` (the default), the searcher uses the schema-level
+    /// [`crate::vector::core::field::HnswOption::default_ef_search`]
+    /// or its internal fallback (`50`). When `Some(ef)`, this value
+    /// takes precedence over the schema default.
+    ///
+    /// The effective `ef_search` used by the searcher is always lifted
+    /// to at least `max(top_k, top_k * rerank_factor.unwrap_or(1))` so
+    /// the candidate heap is never undersized for the requested
+    /// `top_k` (or for the candidate-widening implied by Stage-2
+    /// rerank).
+    ///
+    /// This field is ignored by non-HNSW index types.
+    #[serde(default)]
+    pub ef_search: Option<usize>,
 }
 
 impl Default for VectorIndexQueryParams {
@@ -125,6 +160,7 @@ impl Default for VectorIndexQueryParams {
             include_vectors: false,
             timeout_ms: None,
             rerank_factor: None,
+            ef_search: None,
         }
     }
 }
@@ -304,6 +340,15 @@ pub struct VectorSearchParams {
     /// configured at index time; otherwise silently ignored.
     #[serde(default)]
     pub rerank_factor: Option<usize>,
+    /// Per-query override for the HNSW `ef_search` candidate-list size
+    /// (Issue [#644](https://github.com/mosuka/laurus/issues/644)).
+    ///
+    /// When `None` (the default), the searcher uses the schema-level
+    /// [`crate::vector::core::field::HnswOption::default_ef_search`]
+    /// or its internal fallback (`50`). Ignored by non-HNSW index
+    /// types.
+    #[serde(default)]
+    pub ef_search: Option<usize>,
 }
 
 impl Default for VectorSearchParams {
@@ -316,6 +361,7 @@ impl Default for VectorSearchParams {
             min_score: 0.0,
             allowed_ids: None,
             rerank_factor: None,
+            ef_search: None,
         }
     }
 }

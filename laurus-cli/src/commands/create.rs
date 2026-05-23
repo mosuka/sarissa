@@ -378,6 +378,7 @@ fn prompt_hnsw_option() -> Result<FieldOption> {
         distance,
         m,
         ef_construction,
+        default_ef_search: None,
         base_weight: 1.0,
         quantizer,
         rerank_storage,

@@ -137,6 +137,7 @@ impl VectorStore {
                         distance_metric: opt.distance,
                         m: opt.m,
                         ef_construction: opt.ef_construction,
+                        default_ef_search: opt.default_ef_search,
                         embedder: config.embedder.clone(),
                         ..Default::default()
                     }),
@@ -452,6 +453,9 @@ impl VectorStore {
             if let Some(factor) = request.params.rerank_factor {
                 index_request = index_request.rerank_factor(factor);
             }
+            if let Some(ef) = request.params.ef_search {
+                index_request = index_request.ef_search(ef);
+            }
             let results = searcher.search(&index_request)?;
 
             let mut hits: Vec<VectorHit> = results
@@ -506,6 +510,9 @@ impl VectorStore {
                 .top_k(request.params.limit.saturating_mul(2)); // Overfetch for better results
             if let Some(factor) = request.params.rerank_factor {
                 index_request = index_request.rerank_factor(factor);
+            }
+            if let Some(ef) = request.params.ef_search {
+                index_request = index_request.ef_search(ef);
             }
 
             let results = searcher.search(&index_request)?;

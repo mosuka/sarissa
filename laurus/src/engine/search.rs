@@ -141,6 +141,17 @@ pub struct VectorSearchOptions {
     /// `rerank_storage`; other configurations silently ignore the value.
     /// `None` keeps Stage 1 behavior (int8-only).
     pub rerank_factor: Option<usize>,
+
+    /// Per-query override for the HNSW `ef_search` candidate-list size
+    /// (Issue [#644](https://github.com/mosuka/laurus/issues/644)).
+    ///
+    /// When `None` (the default), the searcher uses the schema-level
+    /// [`HnswOption::default_ef_search`](crate::vector::core::field::HnswOption::default_ef_search)
+    /// or its internal fallback (`50`). Ignored by non-HNSW index types.
+    /// The effective `ef_search` is always lifted to at least `top_k`
+    /// (and `top_k * rerank_factor` when both are set) so the candidate
+    /// heap is never undersized for the requested `top_k`.
+    pub ef_search: Option<usize>,
 }
 
 impl Default for VectorSearchOptions {
@@ -149,6 +160,7 @@ impl Default for VectorSearchOptions {
             score_mode: VectorScoreMode::WeightedSum,
             min_score: 0.0,
             rerank_factor: None,
+            ef_search: None,
         }
     }
 }
@@ -415,6 +427,18 @@ impl SearchRequestBuilder {
     /// Other vector configurations silently ignore the value.
     pub fn vector_rerank_factor(mut self, factor: usize) -> Self {
         self.vector_options.rerank_factor = Some(factor);
+        self
+    }
+
+    /// Override the HNSW `ef_search` candidate-list size for this
+    /// search (Issue [#644](https://github.com/mosuka/laurus/issues/644)).
+    ///
+    /// When unset, the searcher uses the schema-level
+    /// [`HnswOption::default_ef_search`](crate::vector::core::field::HnswOption::default_ef_search)
+    /// or its internal fallback (`50`). Per-query overrides always
+    /// take precedence. Ignored by non-HNSW index types.
+    pub fn vector_ef_search(mut self, ef: usize) -> Self {
+        self.vector_options.ef_search = Some(ef);
         self
     }
 

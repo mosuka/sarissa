@@ -873,6 +873,7 @@ impl Engine {
                 min_score: opts.min_score,
                 allowed_ids: None,
                 rerank_factor: opts.rerank_factor,
+                ef_search: opts.ef_search,
             },
         }
     }

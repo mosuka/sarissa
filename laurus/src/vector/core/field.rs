@@ -154,6 +154,24 @@ pub struct HnswOption {
     /// build times. Defaults to `200`.
     #[serde(default = "default_getting_ef_construction")]
     pub ef_construction: usize,
+    /// Default size of the dynamic candidate list during search (`ef_search`).
+    ///
+    /// Controls the recall / latency trade-off at query time. Higher values
+    /// explore more graph neighbours, improving recall at the cost of latency.
+    ///
+    /// When `None` (the default), the searcher uses an internal fallback of
+    /// `50` so existing schemas behave unchanged. Per-query
+    /// [`VectorIndexQueryParams::ef_search`] always takes precedence over this
+    /// schema-level default.
+    ///
+    /// Regardless of which source is used, the effective `ef_search` is also
+    /// lifted to `max(ef_search, top_k * rerank_factor.unwrap_or(1), top_k)`
+    /// so the candidate heap is never undersized for the requested `top_k`
+    /// (or for the candidate-widening implied by Stage-2 rerank).
+    ///
+    /// Issue [#644](https://github.com/mosuka/laurus/issues/644).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_ef_search: Option<usize>,
     /// Base weight applied to similarity scores from this field. Defaults to `1.0`.
     #[serde(default = "default_weight")]
     pub base_weight: f32,
@@ -190,6 +208,7 @@ impl Default for HnswOption {
             distance: default_distance_metric(),
             m: default_getting_m(),
             ef_construction: default_getting_ef_construction(),
+            default_ef_search: None,
             base_weight: default_weight(),
             quantizer: quantization::QuantizationMethod::Scalar8Bit,
             rerank_storage: None,
@@ -356,6 +375,17 @@ impl HnswOption {
 
     pub fn ef_construction(mut self, ef: usize) -> Self {
         self.ef_construction = ef;
+        self
+    }
+
+    /// Set the schema-level default for `ef_search` at query time.
+    ///
+    /// Per-query [`crate::vector::search::searcher::VectorIndexQueryParams::ef_search`]
+    /// still takes precedence. When this builder method is not called, the
+    /// searcher falls back to its internal default (`50`). See
+    /// [`HnswOption::default_ef_search`] for the full precedence rules.
+    pub fn default_ef_search(mut self, ef: usize) -> Self {
+        self.default_ef_search = Some(ef);
         self
     }
 

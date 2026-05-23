@@ -29,6 +29,7 @@ async fn test_segmented_field_manual_merge() -> Result<(), Box<dyn std::error::E
             distance: DistanceMetric::Euclidean,
             m: 16, // Default or specific to test? Using defaults or standard values
             ef_construction: 200, // Standard default
+            default_ef_search: None,
             base_weight: 1.0,
             quantizer: Default::default(),
             rerank_storage: None,

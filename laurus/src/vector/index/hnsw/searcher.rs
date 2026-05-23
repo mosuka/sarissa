@@ -98,27 +98,84 @@ impl QuantizedSearchCtx {
     }
 }
 
+/// Fallback `ef_search` used when neither the per-query
+/// [`VectorIndexQueryParams::ef_search`] nor the schema-level
+/// [`crate::vector::core::field::HnswOption::default_ef_search`] is set.
+///
+/// Issue [#644](https://github.com/mosuka/laurus/issues/644).
+pub(crate) const HNSW_DEFAULT_EF_SEARCH: usize = 50;
+
 /// HNSW vector searcher that performs approximate nearest neighbor search.
+///
+/// The searcher's `default_ef_search` field holds the schema-level
+/// fallback for the `ef_search` parameter. Per-query callers can override
+/// it via [`VectorIndexQueryParams::ef_search`]; the effective value used
+/// by the graph traversal is computed by [`Self::effective_ef`] for each
+/// search request.
 #[derive(Debug)]
 pub struct HnswSearcher {
     index_reader: Arc<dyn VectorIndexReader>,
-    ef_search: usize,
+    default_ef_search: usize,
 }
 
 impl HnswSearcher {
-    /// Create a new HNSW searcher.
+    /// Create a new HNSW searcher with the built-in fallback `ef_search`
+    /// of [`HNSW_DEFAULT_EF_SEARCH`].
+    ///
+    /// For schemas that opt into a higher schema-level default, use
+    /// [`Self::with_default_ef_search`] instead. Per-query overrides are
+    /// honoured regardless of how the searcher was constructed.
     pub fn new(index_reader: Arc<dyn VectorIndexReader>) -> Result<Self> {
-        // Default ef_search value
-        let ef_search = 50;
         Ok(Self {
             index_reader,
-            ef_search,
+            default_ef_search: HNSW_DEFAULT_EF_SEARCH,
         })
     }
 
-    /// Set the search parameter ef.
+    /// Create a new HNSW searcher with an explicit schema-level
+    /// `default_ef_search`. Pass `None` to use the built-in fallback
+    /// ([`HNSW_DEFAULT_EF_SEARCH`]).
+    ///
+    /// Issue [#644](https://github.com/mosuka/laurus/issues/644).
+    pub fn with_default_ef_search(
+        index_reader: Arc<dyn VectorIndexReader>,
+        default_ef_search: Option<usize>,
+    ) -> Result<Self> {
+        Ok(Self {
+            index_reader,
+            default_ef_search: default_ef_search.unwrap_or(HNSW_DEFAULT_EF_SEARCH),
+        })
+    }
+
+    /// Override the schema-level default `ef_search`. Equivalent to
+    /// constructing the searcher with [`Self::with_default_ef_search`]
+    /// after the fact.
+    ///
+    /// Per-query [`VectorIndexQueryParams::ef_search`] overrides this
+    /// value at search time.
     pub fn set_ef_search(&mut self, ef_search: usize) {
-        self.ef_search = ef_search;
+        self.default_ef_search = ef_search;
+    }
+
+    /// Compute the `ef_search` used for a specific request.
+    ///
+    /// Precedence:
+    /// 1. Per-query [`VectorIndexQueryParams::ef_search`] (highest)
+    /// 2. The searcher's schema-level `default_ef_search`
+    /// 3. The built-in fallback [`HNSW_DEFAULT_EF_SEARCH`] (= `50`)
+    ///
+    /// In all cases the result is lifted to at least
+    /// `max(top_k, top_k * rerank_factor.unwrap_or(1))` so the
+    /// candidate heap is never undersized for the requested `top_k`
+    /// (Issue [#644](https://github.com/mosuka/laurus/issues/644)).
+    #[inline]
+    fn effective_ef(&self, request: &VectorIndexQuery) -> usize {
+        let params = &request.params;
+        let user_ef = params.ef_search.unwrap_or(self.default_ef_search);
+        let rerank = params.rerank_factor.unwrap_or(1).max(1);
+        user_ef
+            .max(params.top_k.saturating_mul(rerank))
+            .max(params.top_k)
     }
 }
 
@@ -324,7 +381,7 @@ impl HnswSearcher {
         };
 
         let query = &request.query;
-        let ef_search = self.ef_search;
+        let ef_search = self.effective_ef(request);
 
         // Prepare the quantized hot path according to the segment's
         // storage kind:
@@ -634,5 +691,102 @@ impl HnswSearcher {
                 offset += 64;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod ef_search_tests {
+    //! Unit tests for `HnswSearcher::effective_ef` (Issue #644).
+    //!
+    //! These tests verify the precedence and `max` formula in isolation —
+    //! integration tests in `tests.rs` cover the end-to-end flow.
+
+    use super::*;
+    use crate::vector::core::distance::DistanceMetric;
+    use crate::vector::core::vector::Vector;
+    use crate::vector::reader::SimpleVectorReader;
+    use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexQueryParams};
+
+    fn make_searcher(default_ef: Option<usize>) -> HnswSearcher {
+        let reader = Arc::new(
+            SimpleVectorReader::new(
+                vec![(1u64, "f".to_string(), Vector::new(vec![1.0, 0.0]))],
+                2,
+                DistanceMetric::Cosine,
+            )
+            .expect("reader"),
+        );
+        HnswSearcher::with_default_ef_search(reader, default_ef).expect("searcher")
+    }
+
+    fn req(top_k: usize, ef: Option<usize>, rerank: Option<usize>) -> VectorIndexQuery {
+        VectorIndexQuery {
+            query: Vector::new(vec![1.0, 0.0]),
+            params: VectorIndexQueryParams {
+                top_k,
+                ef_search: ef,
+                rerank_factor: rerank,
+                ..Default::default()
+            },
+            field_name: Some("f".to_string()),
+        }
+    }
+
+    #[test]
+    fn fallback_default_is_50_when_no_override() {
+        let s = make_searcher(None);
+        // top_k below the fallback => the fallback (50) wins.
+        assert_eq!(s.effective_ef(&req(10, None, None)), 50);
+    }
+
+    #[test]
+    fn lifts_to_top_k_when_top_k_exceeds_default() {
+        let s = make_searcher(None);
+        // top_k = 100 > 50 fallback => effective_ef is lifted to top_k.
+        assert_eq!(s.effective_ef(&req(100, None, None)), 100);
+    }
+
+    #[test]
+    fn schema_default_takes_precedence_over_fallback() {
+        let s = make_searcher(Some(300));
+        // Schema default 300 wins over the 50 fallback.
+        assert_eq!(s.effective_ef(&req(10, None, None)), 300);
+    }
+
+    #[test]
+    fn per_query_override_beats_schema_default_and_fallback() {
+        let s = make_searcher(Some(300));
+        // Per-query 200 wins over schema default 300 *only when it is >= the
+        // top_k floor*. With top_k = 10 the formula returns 200 since 200 > 10.
+        assert_eq!(s.effective_ef(&req(10, Some(200), None)), 200);
+    }
+
+    #[test]
+    fn rerank_factor_lifts_effective_ef() {
+        let s = make_searcher(None);
+        // top_k * rerank = 10 * 10 = 100 > 50 fallback => 100 wins.
+        assert_eq!(s.effective_ef(&req(10, None, Some(10))), 100);
+    }
+
+    #[test]
+    fn user_ef_still_wins_if_larger_than_top_k_times_rerank() {
+        let s = make_searcher(None);
+        // top_k * rerank = 100, user ef = 500 => 500 wins.
+        assert_eq!(s.effective_ef(&req(10, Some(500), Some(10))), 500);
+    }
+
+    #[test]
+    fn top_k_zero_is_safe() {
+        let s = make_searcher(None);
+        // top_k = 0 is degenerate; effective_ef should at least equal the fallback (50).
+        assert_eq!(s.effective_ef(&req(0, None, None)), 50);
+    }
+
+    #[test]
+    fn rerank_zero_is_treated_as_one() {
+        let s = make_searcher(None);
+        // rerank_factor = Some(0) is treated as 1 (defensive) so we never
+        // collapse the candidate widening to zero.
+        assert_eq!(s.effective_ef(&req(10, None, Some(0))), 50);
     }
 }

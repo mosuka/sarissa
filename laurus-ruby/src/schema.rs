@@ -303,6 +303,10 @@ impl RbSchema {
     ///   - `distance:` (String, default "cosine"): Distance metric.
     ///   - `m:` (usize, default 16): HNSW branching factor.
     ///   - `ef_construction:` (usize, default 200): Build-time expansion factor.
+    ///   - `default_ef_search:` (usize, optional): Schema-level default for the
+    ///     search-time `ef_search` candidate-list size (Issue #644). When
+    ///     omitted, the searcher uses an internal fallback of 50. Per-query
+    ///     overrides via the search request still take precedence.
     ///   - `embedder:` (String, optional): Embedder name registered via `add_embedder`.
     fn add_hnsw_field(&self, args: &[Value]) -> Result<(), Error> {
         let args = scan_args::<(String, usize), (), (), (), RHash, ()>(args)?;
@@ -314,21 +318,29 @@ impl RbSchema {
                 Option<String>,
                 Option<usize>,
                 Option<usize>,
+                Option<usize>,
                 Option<Option<String>>,
             ),
             (),
         >(
             args.keywords,
             &[],
-            &["distance", "m", "ef_construction", "embedder"],
+            &[
+                "distance",
+                "m",
+                "ef_construction",
+                "default_ef_search",
+                "embedder",
+            ],
         )?;
-        let (distance, m, ef_construction, embedder) = kwargs.optional;
+        let (distance, m, ef_construction, default_ef_search, embedder) = kwargs.optional;
         let distance_str = distance.as_deref().unwrap_or("cosine");
         let opt = HnswOption {
             dimension,
             distance: parse_distance(distance_str)?,
             m: m.unwrap_or(16),
             ef_construction: ef_construction.unwrap_or(200),
+            default_ef_search,
             embedder: embedder.flatten(),
             ..Default::default()
         };

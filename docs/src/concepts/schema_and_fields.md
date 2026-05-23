@@ -108,11 +108,31 @@ let opt = HnswOption {
     distance: DistanceMetric::Cosine,                // distance metric
     m: 16,                                           // max connections per layer
     ef_construction: 200,                            // construction search width
+    default_ef_search: Some(100),                    // schema-level ef_search default (issue #644)
     base_weight: 1.0,                                // default scoring weight
     quantizer: QuantizationMethod::Scalar8Bit,       // mandatory; default Scalar8Bit
     embedder: None,                                  // optional named embedder
 };
 ```
+
+#### `default_ef_search`: the search-time recall knob
+
+`ef_search` controls the dynamic candidate list size during query time
+(distinct from `ef_construction`, which only affects index *build*). Higher
+values explore more graph neighbours and yield higher recall at the cost of
+latency.
+
+- **Schema-level default**: set `HnswOption.default_ef_search = Some(ef)` to
+  raise the per-field default. When `None`, the searcher falls back to its
+  built-in `50`.
+- **Per-query override**: search requests honour
+  [`SearchRequestBuilder::vector_ef_search`](../laurus.md). The per-query
+  value takes precedence over the schema default.
+- **Auto-lifting**: regardless of which source provides `ef_search`, the
+  searcher lifts the effective value to at least `top_k` (and
+  `top_k * rerank_factor` when both are set) so the candidate heap is never
+  undersized for the requested `top_k`.
+- Tracked under Issue [#644](https://github.com/mosuka/laurus/issues/644).
 
 See [Vector Indexing](indexing/vector_indexing.md) for detailed parameter guidance.
 

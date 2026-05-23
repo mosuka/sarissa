@@ -225,8 +225,13 @@ impl PhpSchema {
     /// * `distance` - Distance metric (default: "cosine").
     /// * `m` - HNSW branching factor (default: 16).
     /// * `ef_construction` - Build-time expansion factor (default: 200).
+    /// * `default_ef_search` - Schema-level default for the search-time
+    ///   `ef_search` candidate-list size (Issue #644). When `null`, the
+    ///   searcher uses an internal fallback of 50. Per-query overrides
+    ///   via the search request still take precedence.
     /// * `embedder` - Embedder name registered via `addEmbedder` (default: "" for none).
     #[php(defaults(m = 16, ef_construction = 200))]
+    #[allow(clippy::too_many_arguments)]
     pub fn add_hnsw_field(
         &self,
         name: String,
@@ -234,6 +239,7 @@ impl PhpSchema {
         distance: Option<String>,
         m: i64,
         ef_construction: i64,
+        default_ef_search: Option<i64>,
         embedder: Option<String>,
     ) -> PhpResult<()> {
         let dist_str = distance.unwrap_or_else(|| "cosine".to_string());
@@ -242,6 +248,7 @@ impl PhpSchema {
             distance: parse_distance(&dist_str)?,
             m: m as usize,
             ef_construction: ef_construction as usize,
+            default_ef_search: default_ef_search.map(|v| v as usize),
             embedder,
             ..Default::default()
         };
