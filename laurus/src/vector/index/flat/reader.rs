@@ -105,6 +105,14 @@ impl FlatVectorIndexReader {
                         .to_string(),
                 ));
             }
+            #[cfg(feature = "pq-fastscan")]
+            QuantHeader::ProductQuantizationFastScan { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "PQ FastScan (#695) is HNSW-only; the Flat reader does not \
+                     support PQ FastScan segments"
+                        .to_string(),
+                ));
+            }
         };
 
         let (vectors, vector_ids) = match storage.loading_mode() {

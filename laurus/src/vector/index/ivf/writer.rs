@@ -159,6 +159,14 @@ impl IvfIndexWriter {
                         .to_string(),
                 ));
             }
+            #[cfg(feature = "pq-fastscan")]
+            QuantHeader::ProductQuantizationFastScan { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "PQ FastScan (#695) is HNSW-only; the IVF writer does not \
+                     support PQ FastScan segments"
+                        .to_string(),
+                ));
+            }
         };
 
         // Read inverted lists, dequantizing each record back to f32

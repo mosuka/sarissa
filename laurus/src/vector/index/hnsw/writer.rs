@@ -346,6 +346,14 @@ impl HnswIndexWriter {
                         &mut input, *params, codebook,
                     )?
                 }
+                #[cfg(feature = "pq-fastscan")]
+                QuantHeader::ProductQuantizationFastScan { .. } => {
+                    return Err(LaurusError::NotImplemented(
+                        "PQ FastScan (#695) writer reload path is wired up in a \
+                         later commit of part D"
+                            .to_string(),
+                    ));
+                }
             };
 
             vectors.push((doc_id, field_name, Vector::new(values)));
@@ -1253,6 +1261,16 @@ impl VectorIndexWriter for HnswIndexWriter {
                         crate::vector::index::pq_io::write_pq_record(&mut output, codes_i)?;
                     }
                 }
+            }
+            #[cfg(feature = "pq-fastscan")]
+            crate::vector::core::quantization::QuantizationMethod::ProductQuantizationFastScan {
+                ..
+            } => {
+                return Err(LaurusError::NotImplemented(
+                    "PQ FastScan (#695) writer path is wired up in a later commit \
+                     of part D; Phase 1 only lands the format / config plumbing"
+                        .to_string(),
+                ));
             }
         }
 

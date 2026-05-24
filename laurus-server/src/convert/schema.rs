@@ -298,6 +298,13 @@ fn quantization_to_proto(q: &QuantizationMethod) -> v1::QuantizationConfig {
             method: v1::QuantizationMethod::ProductQuantization as i32,
             subvector_count: *subvector_count as u32,
         },
+        #[cfg(feature = "pq-fastscan")]
+        QuantizationMethod::ProductQuantizationFastScan { subvector_count } => {
+            v1::QuantizationConfig {
+                method: v1::QuantizationMethod::ProductQuantizationFastscan as i32,
+                subvector_count: *subvector_count as u32,
+            }
+        }
     }
 }
 
@@ -315,6 +322,19 @@ fn quantization_from_proto(q: &v1::QuantizationConfig) -> QuantizationMethod {
                 subvector_count: q.subvector_count as usize,
             }
         }
+        #[cfg(feature = "pq-fastscan")]
+        Ok(v1::QuantizationMethod::ProductQuantizationFastscan) => {
+            QuantizationMethod::ProductQuantizationFastScan {
+                subvector_count: q.subvector_count as usize,
+            }
+        }
+        // Feature off: a client that sends FastScan over gRPC will be
+        // silently downgraded to scalar quantization. Returning an
+        // error here would require changing the function signature
+        // across many call sites; we accept the lossy mapping for
+        // Phase 1 and revisit when FastScan exits experimental.
+        #[cfg(not(feature = "pq-fastscan"))]
+        Ok(v1::QuantizationMethod::ProductQuantizationFastscan) => QuantizationMethod::Scalar8Bit,
     }
 }
 

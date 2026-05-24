@@ -572,6 +572,9 @@ fn json_to_quantizer(json: &Value) -> Option<v1::QuantizationConfig> {
     let method = match method_str.to_lowercase().as_str() {
         "scalar_8bit" => v1::QuantizationMethod::Scalar8bit as i32,
         "product_quantization" => v1::QuantizationMethod::ProductQuantization as i32,
+        "product_quantization_fastscan" => {
+            v1::QuantizationMethod::ProductQuantizationFastscan as i32
+        }
         _ => v1::QuantizationMethod::None as i32,
     };
     let subvector_count = obj
@@ -589,6 +592,7 @@ fn quantizer_to_json(q: &v1::QuantizationConfig) -> Value {
         Ok(v1::QuantizationMethod::None) => "none",
         Ok(v1::QuantizationMethod::Scalar8bit) => "scalar_8bit",
         Ok(v1::QuantizationMethod::ProductQuantization) => "product_quantization",
+        Ok(v1::QuantizationMethod::ProductQuantizationFastscan) => "product_quantization_fastscan",
         Err(_) => "none",
     };
     json!({
