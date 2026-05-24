@@ -455,18 +455,25 @@ impl PqParams {
     /// # Errors
     ///
     /// Returns [`LaurusError::InvalidOperation`] if any field is zero
-    /// or if `k` is not the supported value (256).
+    /// or if `k` is not one of the supported centroid counts (`16` or
+    /// `256`).
+    ///
+    /// `k = 256` is the 8-bit PQ variant shipped in Issue #481 Stage 3.
+    /// `k = 16` is the FastScan 4-bit variant introduced in Issue #651
+    /// part A (#692); the on-disk format and search-time kernels live
+    /// in parallel modules under [`crate::vector::core::distance_pq_fastscan`]
+    /// and [`crate::vector::index::pq_fastscan_storage`].
     pub fn new(m: u16, k: u16, sub_dim: u16) -> Result<Self> {
         if m == 0 || k == 0 || sub_dim == 0 {
             return Err(LaurusError::InvalidOperation(format!(
                 "PqParams components must be > 0 (got m={m}, k={k}, sub_dim={sub_dim})"
             )));
         }
-        if k != 256 {
+        if !matches!(k, 16 | 256) {
             return Err(LaurusError::InvalidOperation(format!(
-                "PqParams::k is currently fixed at 256 (got {k}); the on-disk \
-                 format reserves the field for future 4-bit variants but no \
-                 reader for those exists yet"
+                "PqParams::k must be one of {{16, 256}} (got {k}); 256 is the \
+                 8-bit PQ variant (Issue #481 Stage 3), 16 is the FastScan \
+                 4-bit variant (Issue #651 / #692)"
             )));
         }
         Ok(Self { m, k, sub_dim })
