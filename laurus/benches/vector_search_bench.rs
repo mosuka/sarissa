@@ -1185,6 +1185,134 @@ fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
     group.finish();
 }
 
+/// PQ FastScan + F32 rerank real-data benchmark on SIFT1M
+/// (Issue [#703](https://github.com/mosuka/laurus/issues/703), Phase 4
+/// of #695). Mirrors [`bench_hnsw_graph_search_pq_rerank_real_data`]
+/// exactly — same SIFT1M 50k corpus + 200 queries + L2-normalised
+/// Cosine + `m=16` HNSW + `ef_construction=200` + `ef_search=200` +
+/// `rerank_factor=10` + `subvector_count=32` — and swaps only the
+/// `quantization_method` to `ProductQuantizationFastScan`. The
+/// resulting wall-clock ratio (this bench / the K=256 PQ bench) is
+/// the acceptance gate the umbrella [#695](https://github.com/mosuka/laurus/issues/695)
+/// uses to decide whether FastScan ships as the default PQ
+/// implementation or stays behind the `pq-fastscan` cargo feature.
+///
+/// Opt-in via `LAURUS_REAL_BENCHMARK=1` and the `pq-fastscan` feature
+/// flag (`cargo bench --features pq-fastscan ...`). The corpus is
+/// taken from `.cache/sift/sift/sift_*.fvecs`; run
+/// `./scripts/fetch-sift.sh --large` once to populate it.
+#[cfg(feature = "pq-fastscan")]
+fn bench_hnsw_graph_search_pq_fastscan_real_data(c: &mut Criterion) {
+    if std::env::var("LAURUS_REAL_BENCHMARK").as_deref() != Ok("1") {
+        return;
+    }
+    let base_path = common::sift_cache_dir()
+        .join("sift")
+        .join("sift_base.fvecs");
+    let query_path = common::sift_cache_dir()
+        .join("sift")
+        .join("sift_query.fvecs");
+    if !base_path.exists() || !query_path.exists() {
+        eprintln!(
+            "skipping Issue #703 FastScan real-data speed bench: SIFT1M \
+             fixture not found at {}. Run ./scripts/fetch-sift.sh --large.",
+            base_path.display()
+        );
+        return;
+    }
+
+    let dim: usize = 128;
+    let n_corpus: usize = 50_000;
+    let n_queries: usize = 200;
+    // Match the K=256 PQ bench parameters one-to-one so the ratio is
+    // taken at the same operating point.
+    let ef_search: usize = 200;
+    let rerank_factor: usize = 10;
+    let subvector_count: usize = 32;
+    let m: usize = 16;
+    let ef_construction: usize = 200;
+
+    let mut queries =
+        common::load_fvecs(&query_path, dim, Some(n_queries)).expect("load sift_query.fvecs");
+    for v in queries.iter_mut() {
+        common::l2_normalise(v);
+    }
+
+    let config = HnswIndexConfig {
+        dimension: dim,
+        m,
+        ef_construction,
+        distance_metric: DistanceMetric::Cosine,
+        quantization_method:
+            laurus::vector::core::quantization::QuantizationMethod::ProductQuantizationFastScan {
+                subvector_count,
+            },
+        rerank_storage: Some(RerankStorageKind::F32),
+        ..Default::default()
+    };
+    let base_size = std::fs::metadata(&base_path)
+        .map(|m| m.len())
+        .unwrap_or_default();
+    // Distinct cache slot from the K=256 PQ bench so both flavours can
+    // coexist in the bench cache. The "pqfs" prefix keeps the slot
+    // human-readable for `du -sh target/laurus_bench_index_cache/`.
+    let slot = format!(
+        "hnsw_sift_n{n_corpus}_dim{dim}_m{m}_efc{ef_construction}_pqfs{subvector_count}_rerankF32_size{base_size}",
+    );
+    let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::HNSW(config), || {
+        let mut corpus =
+            common::load_fvecs(&base_path, dim, Some(n_corpus)).expect("load sift_base.fvecs");
+        for v in corpus.iter_mut() {
+            common::l2_normalise(v);
+        }
+        corpus
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| (i as u64, "field".to_string(), Vector::new(v)))
+            .collect()
+    });
+    let mut searcher = HnswSearcher::new(reader).unwrap();
+    searcher.set_ef_search(ef_search);
+
+    // Sanity check: the FastScan + rerank path must engage on real data.
+    let probe = searcher
+        .search(
+            &VectorIndexQuery::new(Vector::new(queries[0].clone()))
+                .top_k(10)
+                .field_name("field".to_string())
+                .rerank_factor(rerank_factor),
+        )
+        .unwrap();
+    assert!(
+        !probe.results.is_empty(),
+        "Issue #703 FastScan SIFT probe must return at least one hit"
+    );
+
+    let mut group = c.benchmark_group("HNSW Graph Search PQ FastScan Rerank Real");
+    group.sample_size(SAMPLE_SIZE_SLOW);
+    group.throughput(Throughput::Elements(n_corpus as u64));
+
+    let mut iter_idx: usize = 0;
+    group.bench_function(BenchmarkId::new("top10_pqfs_rerank10", "sift50000"), |b| {
+        b.iter(|| {
+            let q = &queries[iter_idx % queries.len()];
+            iter_idx = iter_idx.wrapping_add(1);
+            let request = VectorIndexQuery::new(Vector::new(q.clone()))
+                .top_k(10)
+                .field_name("field".to_string())
+                .rerank_factor(rerank_factor);
+            searcher.search(&request).unwrap()
+        });
+    });
+    group.finish();
+}
+
+#[cfg(not(feature = "pq-fastscan"))]
+fn bench_hnsw_graph_search_pq_fastscan_real_data(_c: &mut Criterion) {
+    // No-op without the `pq-fastscan` feature so the criterion_group
+    // macro can reference this symbol unconditionally.
+}
+
 criterion_group!(
     benches,
     bench_flat_construction,
@@ -1197,6 +1325,7 @@ criterion_group!(
     bench_hnsw_graph_search_rerank,
     bench_hnsw_graph_search_rerank_real_data,
     bench_hnsw_graph_search_pq_rerank_real_data,
+    bench_hnsw_graph_search_pq_fastscan_real_data,
     bench_hnsw_ef_search_sweep,
     bench_hnsw_multi_field_search,
     bench_flat_multi_field_search,
