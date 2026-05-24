@@ -3,9 +3,16 @@
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
 
-[target.aarch64-unknown-linux-gnu]
-linker = "aarch64-linux-gnu-gcc"
-runner = "qemu-aarch64-static -L /usr/aarch64-linux-gnu"
+# NOTE: For local aarch64 cross-compile + QEMU testing (Issue #694
+# Part C), set these in your user-level config (`~/.cargo/config.toml`)
+# or via environment variables — NOT here. The `runner` setting in
+# this repo-wide file is applied even when the host itself is aarch64,
+# which breaks the native `ubuntu-24.04-arm` CI runner that does not
+# have qemu installed:
+#
+#     [target.aarch64-unknown-linux-gnu]
+#     linker = "aarch64-linux-gnu-gcc"
+#     runner = "qemu-aarch64-static -L /usr/aarch64-linux-gnu"
 
 # Environment variables exported to cargo, build scripts, and rustc.
 #
