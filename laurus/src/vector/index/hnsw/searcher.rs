@@ -2,16 +2,20 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "pq-fastscan")]
-use crate::error::LaurusError;
 use crate::error::Result;
 use crate::vector::core::distance::DistanceMetric;
+#[cfg(feature = "pq-fastscan")]
+use crate::vector::core::distance_pq_fastscan::PqFastScanQuery;
 use crate::vector::core::distance_quantized::{
     PqQuery, QuantizedQuery, distance_pq_adc, distance_quantized,
 };
 use crate::vector::core::vector::Vector;
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::hnsw::reader::HnswIndexReader;
+#[cfg(feature = "pq-fastscan")]
+use crate::vector::index::pq_fastscan_avx2::distance_pq_fastscan_block;
+#[cfg(feature = "pq-fastscan")]
+use crate::vector::index::pq_fastscan_storage::{BLOCK_SIZE, PqFastScanPool};
 use crate::vector::index::pq_storage::PqVectorPool;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
 use crate::vector::reader::VectorIndexReader;
@@ -63,6 +67,30 @@ enum QuantizedSearchCtx {
         /// Distance metric, cached for the hot loop.
         metric: DistanceMetric,
     },
+    /// PQ FastScan hot path (Issue #695 / #702, experimental).
+    ///
+    /// The kernel computes 32 distances per call via
+    /// [`distance_pq_fastscan_block`] (AVX2 / NEON / scalar dispatch),
+    /// so `distance()` evaluates one block and returns the in-block
+    /// offset. For dense HNSW search this wastes 31/32 of the block
+    /// computation, but it keeps the per-doc interface used by the
+    /// graph traversal — fully batched block evaluation (one block
+    /// per HNSW hop's neighbour list) is a future optimisation.
+    #[cfg(feature = "pq-fastscan")]
+    PqFastScan {
+        /// Per-query state with the FastScan u8 / f32 LUTs prepared
+        /// once via [`PqFastScanQuery::prepare`].
+        prepared: PqFastScanQuery,
+        /// The reader's in-memory FastScan pool (block-transposed
+        /// 4-bit codes + K=16 codebook + per-field doc-id index).
+        pool: Arc<PqFastScanPool>,
+        /// Per-field doc_id -> vector position in `pool.packed`
+        /// (block-transposed, so `pos / BLOCK_SIZE` is the block and
+        /// `pos % BLOCK_SIZE` is the in-block offset).
+        field_idx: Arc<HashMap<u64, u32>>,
+        /// Distance metric, cached for the hot loop.
+        metric: DistanceMetric,
+    },
 }
 
 impl QuantizedSearchCtx {
@@ -93,6 +121,25 @@ impl QuantizedSearchCtx {
                 Some(&pos) => {
                     let codes = pool.codes_at(pos);
                     distance_pq_adc(*metric, prepared, codes)
+                }
+                None => f32::MAX,
+            },
+            #[cfg(feature = "pq-fastscan")]
+            Self::PqFastScan {
+                prepared,
+                pool,
+                field_idx,
+                metric,
+            } => match field_idx.get(&doc_id) {
+                Some(&pos) => {
+                    let pos = pos as usize;
+                    let block_idx = pos / BLOCK_SIZE;
+                    let in_block = pos % BLOCK_SIZE;
+                    let stride = pool.block_stride();
+                    let block_base = block_idx * stride;
+                    let packed_block = &pool.packed[block_base..block_base + stride];
+                    let distances = distance_pq_fastscan_block(*metric, prepared, packed_block);
+                    distances[in_block]
                 }
                 None => f32::MAX,
             },
@@ -394,21 +441,6 @@ impl HnswSearcher {
         // Other storage kinds (`OnDemand`, `Owned`) fall through to
         // the f32 reference path in `calc_dist`.
         let metric = reader.distance_metric();
-        // Phase 2 of #695 lets HNSW writer/reader build a
-        // `VectorStorage::OwnedPqFastScan`, but the searcher does not
-        // yet route through the FastScan SIMD kernel (#702 wires it up
-        // in Phase 3). Fail loudly here so users that opt into the
-        // experimental feature do not silently fall back to the f32
-        // reference path on every query.
-        #[cfg(feature = "pq-fastscan")]
-        if reader.vectors().pq_fastscan_pool().is_some() {
-            return Err(LaurusError::NotImplemented(
-                "PQ FastScan searcher integration is part of #702 (Phase 3 of #695); \
-                 Phase 2 only wires the writer and reader"
-                    .to_string(),
-            ));
-        }
-
         let quant_ctx: Option<QuantizedSearchCtx> =
             if let Some(pool) = reader.vectors().quantized_pool() {
                 pool.field_position_index(field_name).map(|field_idx| {
@@ -431,7 +463,26 @@ impl HnswSearcher {
                     }
                 })
             } else {
-                None
+                #[cfg(feature = "pq-fastscan")]
+                {
+                    if let Some(pool) = reader.vectors().pq_fastscan_pool() {
+                        let field_idx = pool.field_position_index(field_name);
+                        let prepared =
+                            PqFastScanQuery::prepare(&query.data, pool.params, &pool.codebook)?;
+                        field_idx.map(|field_idx| QuantizedSearchCtx::PqFastScan {
+                            prepared,
+                            pool: pool.clone(),
+                            field_idx,
+                            metric,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                #[cfg(not(feature = "pq-fastscan"))]
+                {
+                    None
+                }
             };
 
         // Retrieve the per-field prefetch index once per search call (O(1), no allocation).
@@ -444,6 +495,14 @@ impl HnswSearcher {
                 QuantizedVectorPool::record_size(reader.dimension())
             }
             Some(QuantizedSearchCtx::Pq { pool, .. }) => PqVectorPool::record_size(pool.params.m),
+            #[cfg(feature = "pq-fastscan")]
+            Some(QuantizedSearchCtx::PqFastScan { pool, .. }) => {
+                // FastScan reads one entire block (M * 16 bytes) per
+                // candidate via the SIMD kernel; prefetch the same block
+                // stride so the next neighbour's block lands in L1 by
+                // the time the kernel walks it.
+                pool.block_stride()
+            }
             None => reader.dimension() * std::mem::size_of::<f32>(),
         };
 
