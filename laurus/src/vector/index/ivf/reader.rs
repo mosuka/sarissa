@@ -132,6 +132,14 @@ impl IvfIndexReader {
                         .to_string(),
                 ));
             }
+            #[cfg(feature = "pq-fastscan")]
+            QuantHeader::ProductQuantizationFastScan { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "PQ FastScan (#695) is HNSW-only; the IVF reader does not \
+                     support PQ FastScan segments"
+                        .to_string(),
+                ));
+            }
         };
 
         // Read inverted lists, preserving per-cluster grouping.

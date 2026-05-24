@@ -125,6 +125,14 @@ impl FlatIndexWriter {
                         .to_string(),
                 ));
             }
+            #[cfg(feature = "pq-fastscan")]
+            QuantHeader::ProductQuantizationFastScan { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "PQ FastScan (#695) is HNSW-only; the Flat writer does not \
+                     support PQ FastScan segments"
+                        .to_string(),
+                ));
+            }
         };
 
         // Read quantized vectors, dequantizing back to f32 so the

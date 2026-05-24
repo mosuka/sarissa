@@ -355,6 +355,15 @@ impl HnswIndexReader {
                 );
                 (VectorStorage::OwnedPq(Arc::new(pool)), vector_ids, graph)
             }
+            #[cfg(feature = "pq-fastscan")]
+            (QuantHeader::ProductQuantizationFastScan { .. }, _) => {
+                return Err(LaurusError::NotImplemented(
+                    "PQ FastScan (#695) reader path is wired up in a later commit \
+                     of part D; the format header is recognised but the in-memory \
+                     load is not yet implemented"
+                        .to_string(),
+                ));
+            }
         };
 
         // Build zero-allocation prefetch lookup. For OwnedQuantized

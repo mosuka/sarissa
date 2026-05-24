@@ -171,6 +171,14 @@ impl QuantizedSegmentVectors {
                         .to_string(),
                 ));
             }
+            #[cfg(feature = "pq-fastscan")]
+            QuantHeader::ProductQuantizationFastScan { .. } => {
+                return Err(crate::error::LaurusError::NotImplemented(
+                    "QuantizedSegmentVectors (Stage 1) cannot read PQ FastScan \
+                     segments; the FastScan reader lives in vector::index::hnsw::reader"
+                        .to_string(),
+                ));
+            }
         };
 
         let mut dim_bytes = [0u8; 4];

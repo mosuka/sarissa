@@ -40,6 +40,10 @@ embeddings-all = [
     "embeddings-multimodal",
     "embeddings-openai",
 ]
+# Forwards the experimental PQ FastScan integration (Issue #695 /
+# part D of #651) from the laurus crate. Enables the
+# `ProductQuantizationFastScan` proto<->Rust conversion arms.
+pq-fastscan = ["laurus/pq-fastscan"]
 
 [build-dependencies]
 tonic-build = { workspace = true }

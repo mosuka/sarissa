@@ -104,6 +104,12 @@ embeddings-all = [
     "embeddings-multimodal",
     "embeddings-openai",
 ]
+# Experimental opt-in for the PQ FastScan integration in HNSW indexes
+# (Issue #695 / part D of #651). Enables the SIMD-accelerated K=16
+# 4-bit PQ ADC path. The underlying kernels (#692 / #693 / #694) are
+# always compiled; this feature only switches on the writer / reader /
+# searcher wiring and the `ProductQuantizationFastScan` schema option.
+pq-fastscan = []
 
 [[example]]
 name = "quickstart"

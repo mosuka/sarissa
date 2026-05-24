@@ -58,6 +58,23 @@ pub enum QuantizationMethod {
         /// to derive the codebook layout.
         subvector_count: usize,
     },
+    /// FastScan product quantization (K=16 4-bit codes + SIMD LUT
+    /// distance). Experimental, only available with the `pq-fastscan`
+    /// cargo feature and only supported by HNSW indexes today
+    /// (Issue [#695](https://github.com/mosuka/laurus/issues/695) /
+    /// part D of [#651](https://github.com/mosuka/laurus/issues/651)).
+    ///
+    /// Use this when the HNSW search latency is dominated by the PQ
+    /// ADC kernel and the corpus fits the FAISS-style block layout
+    /// (32 vectors / block, 4-bit packed codes).
+    #[cfg(feature = "pq-fastscan")]
+    ProductQuantizationFastScan {
+        /// Number of sub-vectors. Same semantics as
+        /// [`Self::ProductQuantization::subvector_count`]; the only
+        /// difference is the K=16 codebook (4-bit codes) and the
+        /// block-transposed packing.
+        subvector_count: usize,
+    },
 }
 
 /// Segment-level scalar quantization parameters.
@@ -658,6 +675,14 @@ impl VectorQuantizer {
                  from_params is Scalar8Bit-only"
                     .to_string(),
             )),
+            #[cfg(feature = "pq-fastscan")]
+            QuantizationMethod::ProductQuantizationFastScan { .. } => {
+                Err(LaurusError::InvalidOperation(
+                    "Use VectorQuantizer::from_pq_codebook for ProductQuantizationFastScan; \
+                     from_params is Scalar8Bit-only"
+                        .to_string(),
+                ))
+            }
         }
     }
 
@@ -715,6 +740,17 @@ impl VectorQuantizer {
             }
             QuantizationMethod::ProductQuantization { subvector_count } => {
                 let params = PqParams::from_dim_and_m(self.dimension, subvector_count)?;
+                let codebook = pq_train_codebook(self.dimension, params, vectors)?;
+                self.state = QuantizerState::ProductQuantization { params, codebook };
+                Ok(())
+            }
+            #[cfg(feature = "pq-fastscan")]
+            QuantizationMethod::ProductQuantizationFastScan { subvector_count } => {
+                // FastScan uses K=16; reuse `from_dim_and_m` which validates
+                // divisibility and propagate via the standard PQ codebook
+                // training (k-means on each sub-vector).
+                let mut params = PqParams::from_dim_and_m(self.dimension, subvector_count)?;
+                params.k = 16;
                 let codebook = pq_train_codebook(self.dimension, params, vectors)?;
                 self.state = QuantizerState::ProductQuantization { params, codebook };
                 Ok(())
@@ -817,6 +853,17 @@ impl VectorQuantizer {
                     1.0
                 } else {
                     (self.dimension * 4) as f32 / subvector_count as f32
+                }
+            }
+            #[cfg(feature = "pq-fastscan")]
+            QuantizationMethod::ProductQuantizationFastScan { subvector_count } => {
+                // FastScan stores 4 bits per sub-vector (half a byte per
+                // sub), so the compressed size is `subvector_count / 2`
+                // bytes per vector.
+                if subvector_count == 0 {
+                    1.0
+                } else {
+                    (self.dimension * 4) as f32 / (subvector_count as f32 / 2.0)
                 }
             }
         }

@@ -180,6 +180,11 @@ enum QuantizationMethod {
   QUANTIZATION_METHOD_NONE = 0;
   QUANTIZATION_METHOD_SCALAR_8BIT = 1;
   QUANTIZATION_METHOD_PRODUCT_QUANTIZATION = 2;
+  // PQ FastScan (K=16 4-bit codes + SIMD LUT distance). Issue #695 /
+  // part D of #651. Requires the server to be built with the
+  // `pq-fastscan` cargo feature; otherwise the conversion path rejects
+  // the value with an explicit error.
+  QUANTIZATION_METHOD_PRODUCT_QUANTIZATION_FASTSCAN = 3;
 }
 
 message QuantizationConfig {

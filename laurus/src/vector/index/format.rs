@@ -83,6 +83,15 @@ pub mod quant_kind {
     pub const SCALAR_8BIT: u16 = 1;
     /// Product quantization. Stage 3 — reader returns NotImplemented.
     pub const PRODUCT_QUANTIZATION: u16 = 2;
+    /// FastScan Product Quantization (K=16 4-bit codes + SIMD LUT
+    /// distance). Issue [#695](https://github.com/mosuka/laurus/issues/695)
+    /// / part D of [#651](https://github.com/mosuka/laurus/issues/651).
+    /// Same on-disk layout as [`PRODUCT_QUANTIZATION`] (m / k / sub_dim
+    /// header followed by the codebook) but `k == 16` and the per-vector
+    /// records are 4-bit packed instead of 8-bit AoS. Only available
+    /// with the `pq-fastscan` cargo feature.
+    #[cfg(feature = "pq-fastscan")]
+    pub const PRODUCT_QUANTIZATION_FASTSCAN: u16 = 3;
 }
 
 /// Size in bytes of the fixed portion of the segment header (the part
@@ -140,6 +149,23 @@ pub enum QuantHeader {
         /// always `m * k * sub_dim` floats.
         codebook: Vec<f32>,
     },
+    /// `quant_kind = 3` — FastScan Product Quantization (#695 / #651).
+    ///
+    /// Wire-identical to [`Self::ProductQuantization`] on disk (same
+    /// m / k / sub_dim header + codebook); the distinguishing factor is
+    /// `k == 16` (4-bit codes) and the per-vector record format used
+    /// by the reader to build a
+    /// [`crate::vector::index::pq_fastscan_storage::PqFastScanPool`]
+    /// instead of a [`crate::vector::index::pq_storage::PqVectorPool`].
+    /// Only constructible when the `pq-fastscan` cargo feature is on.
+    #[cfg(feature = "pq-fastscan")]
+    ProductQuantizationFastScan {
+        /// FastScan quantizer parameters (M / K=16 / sub_dim).
+        params: PqParams,
+        /// Per-segment codebook in row-major layout. The length is
+        /// always `m * 16 * sub_dim` floats.
+        codebook: Vec<f32>,
+    },
 }
 
 impl QuantHeader {
@@ -148,6 +174,8 @@ impl QuantHeader {
         match self {
             Self::Scalar8Bit(_) => quant_kind::SCALAR_8BIT,
             Self::ProductQuantization { .. } => quant_kind::PRODUCT_QUANTIZATION,
+            #[cfg(feature = "pq-fastscan")]
+            Self::ProductQuantizationFastScan { .. } => quant_kind::PRODUCT_QUANTIZATION_FASTSCAN,
         }
     }
 
@@ -157,6 +185,10 @@ impl QuantHeader {
         match self {
             Self::Scalar8Bit(_) => SCALAR_8BIT_METADATA_SIZE,
             Self::ProductQuantization { params, .. } => {
+                PQ_FIXED_METADATA_SIZE + params.codebook_byte_size()
+            }
+            #[cfg(feature = "pq-fastscan")]
+            Self::ProductQuantizationFastScan { params, .. } => {
                 PQ_FIXED_METADATA_SIZE + params.codebook_byte_size()
             }
         }
@@ -184,6 +216,22 @@ impl VectorSegmentHeader {
         }
     }
 
+    /// Build a FastScan PQ header (Issue #695 / part D).
+    ///
+    /// `params.k` must be 16. The codebook layout is the same as
+    /// [`Self::product_quantization`] (row-major `m × k × sub_dim`
+    /// floats) — only the per-vector record format on disk differs
+    /// (4-bit packed instead of 8-bit AoS).
+    #[cfg(feature = "pq-fastscan")]
+    pub fn product_quantization_fastscan(params: PqParams, codebook: Vec<f32>) -> Self {
+        debug_assert_eq!(params.k, 16, "FastScan requires k == 16");
+        debug_assert_eq!(codebook.len(), params.codebook_len());
+        Self {
+            version: CURRENT_VERSION,
+            quant: QuantHeader::ProductQuantizationFastScan { params, codebook },
+        }
+    }
+
     /// Total serialized size: fixed header + quant-kind metadata.
     pub fn serialized_size(&self) -> usize {
         FIXED_HEADER_SIZE + self.quant.metadata_size()
@@ -204,6 +252,17 @@ impl VectorSegmentHeader {
                 writer.write_all(&params.scale.to_le_bytes())?;
             }
             QuantHeader::ProductQuantization { params, codebook } => {
+                writer.write_all(&params.m.to_le_bytes())?;
+                writer.write_all(&params.k.to_le_bytes())?;
+                writer.write_all(&params.sub_dim.to_le_bytes())?;
+                writer.write_all(&0u16.to_le_bytes())?; // padding
+                debug_assert_eq!(codebook.len(), params.codebook_len());
+                for &f in codebook {
+                    writer.write_all(&f.to_le_bytes())?;
+                }
+            }
+            #[cfg(feature = "pq-fastscan")]
+            QuantHeader::ProductQuantizationFastScan { params, codebook } => {
                 writer.write_all(&params.m.to_le_bytes())?;
                 writer.write_all(&params.k.to_le_bytes())?;
                 writer.write_all(&params.sub_dim.to_le_bytes())?;
@@ -291,6 +350,34 @@ impl VectorSegmentHeader {
                     codebook.push(f32::from_le_bytes(fbuf));
                 }
                 QuantHeader::ProductQuantization { params, codebook }
+            }
+            #[cfg(feature = "pq-fastscan")]
+            quant_kind::PRODUCT_QUANTIZATION_FASTSCAN => {
+                let mut buf2 = [0u8; 2];
+                reader.read_exact(&mut buf2)?;
+                let m = u16::from_le_bytes(buf2);
+                reader.read_exact(&mut buf2)?;
+                let k = u16::from_le_bytes(buf2);
+                reader.read_exact(&mut buf2)?;
+                let sub_dim = u16::from_le_bytes(buf2);
+                reader.read_exact(&mut buf2)?; // padding
+                let params = PqParams::new(m, k, sub_dim).map_err(|e| {
+                    LaurusError::IncompatibleFormat(format!("invalid PQ FastScan params: {e}"))
+                })?;
+                if params.k != 16 {
+                    return Err(LaurusError::IncompatibleFormat(format!(
+                        "PQ FastScan segment must declare k == 16, got k = {}",
+                        params.k
+                    )));
+                }
+                let codebook_len = params.codebook_len();
+                let mut codebook = Vec::with_capacity(codebook_len);
+                let mut fbuf = [0u8; 4];
+                for _ in 0..codebook_len {
+                    reader.read_exact(&mut fbuf)?;
+                    codebook.push(f32::from_le_bytes(fbuf));
+                }
+                QuantHeader::ProductQuantizationFastScan { params, codebook }
             }
             quant_kind::NONE => {
                 return Err(LaurusError::IncompatibleFormat(
