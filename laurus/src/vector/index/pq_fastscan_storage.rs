@@ -200,6 +200,15 @@ impl PqFastScanPool {
         self.n_vectors
     }
 
+    /// Cheap O(1) lookup of the per-field `doc_id -> position` map.
+    /// Mirrors [`crate::vector::index::pq_storage::PqVectorPool::field_position_index`]
+    /// so the HNSW searcher can build its quantised context with a
+    /// single pool reference + the per-field index handle.
+    #[inline]
+    pub fn field_position_index(&self, field: &str) -> Option<Arc<HashMap<u64, u32>>> {
+        self.field_index.get(field).cloned()
+    }
+
     /// Whether the pool contains the given `(doc_id, field)` key.
     #[inline]
     pub fn contains(&self, doc_id: u64, field: &str) -> bool {
