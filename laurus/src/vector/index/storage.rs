@@ -6,6 +6,8 @@ use crate::error::{LaurusError, Result};
 use crate::storage::{Storage, StorageInput};
 use crate::vector::core::quantization::{QuantizedVectorMeta, ScalarQuantParams};
 use crate::vector::core::vector::Vector;
+#[cfg(feature = "pq-fastscan")]
+use crate::vector::index::pq_fastscan_storage::PqFastScanPool;
 use crate::vector::index::pq_storage::PqVectorPool;
 use crate::vector::index::quantized_storage::QuantizedVectorPool;
 
@@ -37,6 +39,15 @@ pub enum VectorStorage {
     /// via [`Self::pq_pool`] and feeds codes + the per-query LUT to
     /// [`crate::vector::core::distance_quantized::distance_pq_adc`].
     OwnedPq(Arc<PqVectorPool>),
+    /// All vectors are loaded into memory as 4-bit packed FastScan
+    /// codes plus the per-segment K=16 codebook (Issue #695 / part D
+    /// of #651, HNSW only, experimental). The search hot loop walks
+    /// the inner [`PqFastScanPool`] directly through
+    /// [`crate::vector::index::pq_fastscan_avx2::distance_pq_fastscan_block`]
+    /// which dispatches to AVX2 / NEON / scalar by CPU. Available only
+    /// when the crate is built with the `pq-fastscan` cargo feature.
+    #[cfg(feature = "pq-fastscan")]
+    OwnedPqFastScan(Arc<PqFastScanPool>),
     /// Vectors are read from disk on demand.
     ///
     /// Each [`get`](Self::get) call opens a fresh [`StorageInput`](crate::storage::StorageInput)
@@ -99,12 +110,28 @@ impl VectorStorage {
         }
     }
 
+    /// If this storage is the in-memory PQ FastScan variant (Issue
+    /// #695 / part D of #651), return the underlying
+    /// [`PqFastScanPool`] so the search hot loop can walk the
+    /// block-transposed 4-bit packed codes directly and dispatch to
+    /// the AVX2 / NEON / scalar FastScan kernel via
+    /// [`crate::vector::index::pq_fastscan_avx2::distance_pq_fastscan_block`].
+    #[cfg(feature = "pq-fastscan")]
+    pub fn pq_fastscan_pool(&self) -> Option<&Arc<PqFastScanPool>> {
+        match self {
+            VectorStorage::OwnedPqFastScan(pool) => Some(pool),
+            _ => None,
+        }
+    }
+
     /// Returns all keys stored in this vector storage.
     pub fn keys(&self) -> Vec<(u64, String)> {
         match self {
             VectorStorage::Owned(map) => map.keys().cloned().collect(),
             VectorStorage::OwnedQuantized(pool) => pool.keys(),
             VectorStorage::OwnedPq(pool) => pool.keys(),
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(pool) => pool.keys(),
             VectorStorage::OnDemand { offsets, .. } => offsets.keys().cloned().collect(),
         }
     }
@@ -115,6 +142,8 @@ impl VectorStorage {
             VectorStorage::Owned(map) => map.len(),
             VectorStorage::OwnedQuantized(pool) => pool.vector_count,
             VectorStorage::OwnedPq(pool) => pool.vector_count,
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(pool) => pool.vector_count(),
             VectorStorage::OnDemand { offsets, .. } => offsets.len(),
         }
     }
@@ -134,6 +163,8 @@ impl VectorStorage {
             VectorStorage::Owned(map) => map.contains_key(key),
             VectorStorage::OwnedQuantized(pool) => pool.contains(key.0, &key.1),
             VectorStorage::OwnedPq(pool) => pool.contains(key.0, &key.1),
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(pool) => pool.contains(key.0, &key.1),
             VectorStorage::OnDemand { offsets, .. } => offsets.contains_key(key),
         }
     }
@@ -162,6 +193,8 @@ impl VectorStorage {
             VectorStorage::Owned(map) => Ok(map.get(key).cloned()),
             VectorStorage::OwnedQuantized(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
             VectorStorage::OwnedPq(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(pool) => Ok(pool.dequantize_to_vector(key.0, &key.1)),
             VectorStorage::OnDemand {
                 storage,
                 file_name,

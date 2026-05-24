@@ -347,12 +347,10 @@ impl HnswIndexWriter {
                     )?
                 }
                 #[cfg(feature = "pq-fastscan")]
-                QuantHeader::ProductQuantizationFastScan { .. } => {
-                    return Err(LaurusError::NotImplemented(
-                        "PQ FastScan (#695) writer reload path is wired up in a \
-                         later commit of part D"
-                            .to_string(),
-                    ));
+                QuantHeader::ProductQuantizationFastScan { params, codebook } => {
+                    crate::vector::index::pq_fastscan_io::read_dequantized_pq_fastscan_vector(
+                        &mut input, *params, codebook,
+                    )?
                 }
             };
 
@@ -1264,13 +1262,44 @@ impl VectorIndexWriter for HnswIndexWriter {
             }
             #[cfg(feature = "pq-fastscan")]
             crate::vector::core::quantization::QuantizationMethod::ProductQuantizationFastScan {
-                ..
+                subvector_count,
             } => {
-                return Err(LaurusError::NotImplemented(
-                    "PQ FastScan (#695) writer path is wired up in a later commit \
-                     of part D; Phase 1 only lands the format / config plumbing"
-                        .to_string(),
-                ));
+                if f32_vectors.is_empty() {
+                    // Empty segment: emit a well-formed LVS1 header with a
+                    // minimal zero-centroid K=16 codebook so the reader can
+                    // dispatch on quant_kind. Mirrors the PQ-256 empty path.
+                    let m = subvector_count.max(1);
+                    let sub_dim = self.index_config.dimension / m;
+                    let params = crate::vector::core::quantization::PqParams::new(
+                        m as u16,
+                        16,
+                        sub_dim as u16,
+                    )?;
+                    let codebook = vec![0.0_f32; params.codebook_len()];
+                    VectorSegmentHeader::product_quantization_fastscan(params, codebook)
+                        .write_to(&mut output)?;
+                } else {
+                    let (params, codebook, codes) =
+                        crate::vector::index::pq_fastscan_io::quantize_segment_pq_fastscan(
+                            &f32_vectors,
+                            self.index_config.dimension,
+                            subvector_count,
+                        )?;
+                    VectorSegmentHeader::product_quantization_fastscan(params, codebook)
+                        .write_to(&mut output)?;
+                    for ((doc_id, field_name, _), codes_i) in
+                        sorted_vectors.iter().zip(codes.iter())
+                    {
+                        output.write_all(&doc_id.to_le_bytes())?;
+                        let field_name_bytes = field_name.as_bytes();
+                        output.write_all(&(field_name_bytes.len() as u32).to_le_bytes())?;
+                        output.write_all(field_name_bytes)?;
+                        crate::vector::index::pq_fastscan_io::write_pq_fastscan_record(
+                            &mut output,
+                            codes_i,
+                        )?;
+                    }
+                }
             }
         }
 

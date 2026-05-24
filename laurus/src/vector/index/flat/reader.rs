@@ -311,6 +311,10 @@ impl VectorIndexReader for FlatVectorIndexReader {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
             VectorStorage::OwnedQuantized(pool) => pool.data.len(),
             VectorStorage::OwnedPq(pool) => pool.data.len() + pool.codebook.len() * 4,
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(_) => {
+                unreachable!("Flat reader rejects PQ FastScan at the segment header (HNSW-only)")
+            }
             VectorStorage::OnDemand { offsets, .. } => {
                 // Estimate memory for offsets map + ID list
                 offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
@@ -331,6 +335,10 @@ impl VectorIndexReader for FlatVectorIndexReader {
             }
             VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
             VectorStorage::OwnedPq(pool) => pool.contains(doc_id, field_name),
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(_) => {
+                unreachable!("Flat reader rejects PQ FastScan at the segment header (HNSW-only)")
+            }
             VectorStorage::OnDemand { offsets, .. } => {
                 offsets.contains_key(&(doc_id, field_name.to_string()))
             }
@@ -463,6 +471,10 @@ impl VectorIndexReader for FlatVectorIndexReader {
                      the trained codebook which is bounded by construction)"
                         .to_string(),
                 );
+            }
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(_) => {
+                unreachable!("Flat reader rejects PQ FastScan at the segment header (HNSW-only)")
             }
             VectorStorage::OnDemand { offsets, .. } => {
                 for (id, field) in &self.vector_ids {
