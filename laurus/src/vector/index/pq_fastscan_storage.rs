@@ -40,6 +40,7 @@ use std::sync::Arc;
 
 use crate::error::{LaurusError, Result};
 use crate::vector::core::quantization::PqParams;
+use crate::vector::core::vector::Vector;
 
 /// Number of vectors packed into one FastScan block.
 ///
@@ -189,6 +190,51 @@ impl PqFastScanPool {
             *slot = (byte >> shift) & 0x0F;
         }
         out
+    }
+
+    /// Total vector count held by this pool. Alias for [`Self::n_vectors`]
+    /// so callers can use the same accessor name as
+    /// [`crate::vector::index::pq_storage::PqVectorPool::vector_count`].
+    #[inline]
+    pub fn vector_count(&self) -> usize {
+        self.n_vectors
+    }
+
+    /// Whether the pool contains the given `(doc_id, field)` key.
+    #[inline]
+    pub fn contains(&self, doc_id: u64, field: &str) -> bool {
+        self.field_index
+            .get(field)
+            .is_some_and(|m| m.contains_key(&doc_id))
+    }
+
+    /// Iterate over `(doc_id, field_name)` pairs in this pool. The
+    /// returned list is sorted by doc_id so callers get a stable
+    /// ordering across runs (mirrors the K=256 PqVectorPool API).
+    pub fn keys(&self) -> Vec<(u64, String)> {
+        let mut keys: Vec<(u64, String)> = self
+            .field_index
+            .iter()
+            .flat_map(|(field, map)| map.keys().map(move |id| (*id, field.clone())))
+            .collect();
+        keys.sort_by_key(|(id, _)| *id);
+        keys
+    }
+
+    /// Reconstruct an approximate f32 vector for `(doc_id, field)` by
+    /// decoding the 4-bit codes through the per-segment codebook.
+    /// Used by the legacy
+    /// [`crate::vector::reader::VectorIndexReader::get_vector`] API
+    /// path; the search hot loop never calls this and goes through the
+    /// SIMD kernels via
+    /// [`crate::vector::index::pq_fastscan_avx2::distance_pq_fastscan_block`]
+    /// instead.
+    pub fn dequantize_to_vector(&self, doc_id: u64, field: &str) -> Option<Vector> {
+        let pos = *self.field_index.get(field)?.get(&doc_id)?;
+        let codes = self.codes_at(pos as usize);
+        let data =
+            crate::vector::core::quantization::pq_decode(&codes, self.params, &self.codebook);
+        Some(Vector::new(data))
     }
 }
 

@@ -356,13 +356,52 @@ impl HnswIndexReader {
                 (VectorStorage::OwnedPq(Arc::new(pool)), vector_ids, graph)
             }
             #[cfg(feature = "pq-fastscan")]
-            (QuantHeader::ProductQuantizationFastScan { .. }, _) => {
-                return Err(LaurusError::NotImplemented(
-                    "PQ FastScan (#695) reader path is wired up in a later commit \
-                     of part D; the format header is recognised but the in-memory \
-                     load is not yet implemented"
-                        .to_string(),
-                ));
+            (
+                QuantHeader::ProductQuantizationFastScan {
+                    params: pq_params,
+                    codebook,
+                },
+                _loading_mode,
+            ) => {
+                // Mirror the K=256 PQ load path but read 4-bit packed
+                // codes via `pq_fastscan_io::read_pq_fastscan_record`
+                // and build a `PqFastScanPool` for the SIMD-friendly
+                // block-transposed in-memory layout.
+                let mut vector_ids = Vec::with_capacity(num_vectors);
+                let mut records: Vec<(u64, String, Vec<u8>)> = Vec::with_capacity(num_vectors);
+
+                for _ in 0..num_vectors {
+                    let mut doc_id_buf = [0u8; 8];
+                    input.read_exact(&mut doc_id_buf)?;
+                    let doc_id = u64::from_le_bytes(doc_id_buf);
+
+                    let mut field_name_len_buf = [0u8; 4];
+                    input.read_exact(&mut field_name_len_buf)?;
+                    let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+                    let mut field_name_buf = vec![0u8; field_name_len];
+                    input.read_exact(&mut field_name_buf)?;
+                    let field_name = String::from_utf8(field_name_buf).map_err(|e| {
+                        LaurusError::InvalidOperation(format!("Invalid UTF-8 in field name: {}", e))
+                    })?;
+
+                    let codes = crate::vector::index::pq_fastscan_io::read_pq_fastscan_record(
+                        &mut input, *pq_params,
+                    )?;
+
+                    vector_ids.push((doc_id, field_name.clone()));
+                    records.push((doc_id, field_name, codes));
+                }
+                let graph = read_graph(&mut input)?;
+                let pool = crate::vector::index::pq_fastscan_storage::PqFastScanPool::build(
+                    *pq_params,
+                    codebook.clone(),
+                    records,
+                )?;
+                (
+                    VectorStorage::OwnedPqFastScan(Arc::new(pool)),
+                    vector_ids,
+                    graph,
+                )
             }
         };
 
@@ -403,6 +442,14 @@ impl HnswIndexReader {
                 // PQ records are M bytes each (8-32 bytes) — small
                 // enough that prefetching adds no benefit; the LUT is
                 // the more important cache occupant.
+                HashMap::new()
+            }
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(_) => {
+                // FastScan uses 4-bit packed codes; the SIMD kernel
+                // streams entire 32-vector blocks (~16M bytes/block
+                // for typical M) so per-vector prefetch hints add
+                // nothing on top of the natural sequential access.
                 HashMap::new()
             }
             VectorStorage::OnDemand { .. } => HashMap::new(),
@@ -597,6 +644,8 @@ impl VectorIndexReader for HnswIndexReader {
             VectorStorage::Owned(vectors) => vectors.len() * (8 + self.dimension * 4),
             VectorStorage::OwnedQuantized(pool) => pool.data.len(),
             VectorStorage::OwnedPq(pool) => pool.data.len() + pool.codebook.len() * 4,
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(pool) => pool.packed.len() + pool.codebook.len() * 4,
             VectorStorage::OnDemand { offsets, .. } => {
                 // Estimate memory for offsets map + ID list
                 offsets.len() * (8 + 32 + 8) // Key + Valid + Offset roughly
@@ -618,6 +667,8 @@ impl VectorIndexReader for HnswIndexReader {
             }
             VectorStorage::OwnedQuantized(pool) => pool.contains(doc_id, field_name),
             VectorStorage::OwnedPq(pool) => pool.contains(doc_id, field_name),
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(pool) => pool.contains(doc_id, field_name),
             VectorStorage::OnDemand { offsets, .. } => {
                 offsets.contains_key(&(doc_id, field_name.to_string()))
             }
@@ -748,6 +799,22 @@ impl VectorIndexReader for HnswIndexReader {
                 warnings.push(
                     "OwnedPq mode: dimension / NaN checks skipped (codes index into \
                      the trained codebook which is bounded by construction)"
+                        .to_string(),
+                );
+            }
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(pool) => {
+                for (id, field) in &self.vector_ids {
+                    if !pool.contains(*id, field) {
+                        errors.push(format!(
+                            "Vector {}:{} found in keys but missing in PQ FastScan pool",
+                            id, field
+                        ));
+                    }
+                }
+                warnings.push(
+                    "OwnedPqFastScan mode: dimension / NaN checks skipped (4-bit codes \
+                     index into the trained K=16 codebook which is bounded by construction)"
                         .to_string(),
                 );
             }

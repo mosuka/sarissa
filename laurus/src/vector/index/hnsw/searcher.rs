@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "pq-fastscan")]
+use crate::error::LaurusError;
 use crate::error::Result;
 use crate::vector::core::distance::DistanceMetric;
 use crate::vector::core::distance_quantized::{
@@ -392,6 +394,21 @@ impl HnswSearcher {
         // Other storage kinds (`OnDemand`, `Owned`) fall through to
         // the f32 reference path in `calc_dist`.
         let metric = reader.distance_metric();
+        // Phase 2 of #695 lets HNSW writer/reader build a
+        // `VectorStorage::OwnedPqFastScan`, but the searcher does not
+        // yet route through the FastScan SIMD kernel (#702 wires it up
+        // in Phase 3). Fail loudly here so users that opt into the
+        // experimental feature do not silently fall back to the f32
+        // reference path on every query.
+        #[cfg(feature = "pq-fastscan")]
+        if reader.vectors().pq_fastscan_pool().is_some() {
+            return Err(LaurusError::NotImplemented(
+                "PQ FastScan searcher integration is part of #702 (Phase 3 of #695); \
+                 Phase 2 only wires the writer and reader"
+                    .to_string(),
+            ));
+        }
+
         let quant_ctx: Option<QuantizedSearchCtx> =
             if let Some(pool) = reader.vectors().quantized_pool() {
                 pool.field_position_index(field_name).map(|field_idx| {

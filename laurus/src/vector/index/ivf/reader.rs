@@ -514,6 +514,10 @@ impl VectorIndexReader for IvfIndexReader {
                         .to_string(),
                 );
             }
+            #[cfg(feature = "pq-fastscan")]
+            VectorStorage::OwnedPqFastScan(_) => {
+                unreachable!("IVF reader rejects PQ FastScan at the segment header (HNSW-only)")
+            }
             VectorStorage::OnDemand { offsets, .. } => {
                 for (id, field) in &self.vector_ids {
                     if !offsets.contains_key(&(*id, field.clone())) {

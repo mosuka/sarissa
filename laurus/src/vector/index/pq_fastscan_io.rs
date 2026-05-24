@@ -1,8 +1,3 @@
-// Phase 1 of part D (#695) lands the FastScan I/O helpers ahead of
-// their writer / reader call sites; Phase 2 wires them in and these
-// `allow(dead_code)` attributes go away.
-#![allow(dead_code)]
-
 //! Writer / reader helpers for the HNSW PQ FastScan segment payload
 //! (Issue [#695](https://github.com/mosuka/laurus/issues/695) / part D
 //! of [#651](https://github.com/mosuka/laurus/issues/651)).
@@ -33,12 +28,17 @@
 use std::io::{Read, Write};
 
 use crate::error::{LaurusError, Result};
-use crate::vector::core::quantization::{PqParams, QuantizationMethod, VectorQuantizer};
+use crate::vector::core::quantization::{PqParams, QuantizationMethod, VectorQuantizer, pq_decode};
 use crate::vector::core::vector::Vector;
 
 /// Bytes consumed by the per-vector codes section (everything after
 /// the field_name string ends), i.e. `ceil(m / 2)`.
+///
+/// Currently only used by in-module round-trip tests; the writer and
+/// reader inline `m.div_ceil(2)` since they already have `params.m`
+/// in scope.
 #[inline]
+#[cfg(test)]
 pub(super) const fn pq_fastscan_record_payload_size(m: u16) -> usize {
     (m as usize).div_ceil(2)
 }
@@ -155,6 +155,21 @@ pub(super) fn read_pq_fastscan_record<R: Read>(input: &mut R, params: PqParams) 
     let mut packed = vec![0u8; packed_len];
     input.read_exact(&mut packed)?;
     Ok(unpack_one_record(&packed, m))
+}
+
+/// Read the 4-bit packed codes tail of one FastScan record and
+/// reconstruct it back to a `Vec<f32>` of length `params.original_dim()`
+/// via the codebook. Used by HNSW writer's load path that keeps the
+/// in-memory representation as f32 on rebuild — mirrors
+/// [`crate::vector::index::pq_io::read_dequantized_pq_vector`] for the
+/// 8-bit PQ variant.
+pub(super) fn read_dequantized_pq_fastscan_vector<R: Read>(
+    input: &mut R,
+    params: PqParams,
+    codebook: &[f32],
+) -> Result<Vec<f32>> {
+    let codes = read_pq_fastscan_record(input, params)?;
+    Ok(pq_decode(&codes, params, codebook))
 }
 
 #[cfg(test)]
