@@ -185,9 +185,15 @@ pub fn distance_pq_fastscan_block_scalar(
 /// This is the production-facing entry point that Part D ([#695])
 /// wires into the HNSW / IVF search hot path.
 ///
-/// Currently the AVX2 path requires `query.params.m as usize <= 64` so
-/// the u16 accumulator cannot overflow (`255 × 64 = 16320 < 65535`).
-/// Larger `M` falls back to the scalar path.
+/// Routing:
+/// - `x86_64` with AVX2 + `M ≤ 64` → AVX2 kernel
+/// - `aarch64` with `M ≤ 64` → NEON kernel (NEON is mandatory on
+///   ARMv8 so no runtime check is needed)
+/// - Everything else → scalar fallback
+///
+/// The `M ≤ 64` guard keeps the u16 accumulator from overflowing
+/// (`255 × 64 = 16320 < 65535`); larger `M` always falls through to
+/// the scalar path regardless of architecture.
 pub fn distance_pq_fastscan_block(
     metric: DistanceMetric,
     query: &PqFastScanQuery,
@@ -203,6 +209,17 @@ pub fn distance_pq_fastscan_block(
             return unsafe { distance_pq_fastscan_block_avx2(metric, query, packed_block) };
         }
     }
+    #[cfg(target_arch = "aarch64")]
+    {
+        use crate::vector::index::pq_fastscan_neon::distance_pq_fastscan_block_neon;
+        if (query.params.m as usize) <= 64 {
+            // SAFETY: NEON is part of the ARMv8 baseline (mandatory
+            // on aarch64), the M ≤ 64 guard ensures the u16
+            // accumulator cannot overflow, and the buffer lengths are
+            // validated upstream.
+            return unsafe { distance_pq_fastscan_block_neon(metric, query, packed_block) };
+        }
+    }
     distance_pq_fastscan_block_scalar(metric, query, packed_block)
 }
 
@@ -211,7 +228,7 @@ mod tests {
     use super::*;
     use crate::vector::core::quantization::{PqParams, pq_encode, pq_train_codebook};
     use crate::vector::core::vector::Vector;
-    use crate::vector::index::pq_fastscan_storage::{PqFastScanPool, pack_codes_into_blocks};
+    use crate::vector::index::pq_fastscan_storage::PqFastScanPool;
 
     /// Deterministic pseudo-random training corpus identical in shape
     /// to the helper used by the Part A tests, so the resulting
@@ -342,7 +359,6 @@ mod tests {
         let codes: Vec<Vec<u8>> = (0..5)
             .map(|i| (0..m).map(|sub| ((i + sub) % 16) as u8).collect())
             .collect();
-        let _packed = pack_codes_into_blocks(&codes, m);
         let pool = PqFastScanPool::build(
             params,
             codebook.clone(),
