@@ -26,10 +26,14 @@
 use std::arch::x86_64::*;
 
 use crate::vector::core::distance::DistanceMetric;
+#[cfg(target_arch = "x86_64")]
+use crate::vector::core::distance_pq_fastscan::apply_metric;
 use crate::vector::core::distance_pq_fastscan::{
-    PqFastScanQuery, apply_metric, distance_pq_fastscan_u8_global_scalar,
+    PqFastScanQuery, distance_pq_fastscan_u8_global_scalar,
 };
-use crate::vector::index::pq_fastscan_storage::{BLOCK_SIZE, BYTES_PER_SUB_PER_BLOCK};
+use crate::vector::index::pq_fastscan_storage::BLOCK_SIZE;
+#[cfg(target_arch = "x86_64")]
+use crate::vector::index::pq_fastscan_storage::BYTES_PER_SUB_PER_BLOCK;
 
 /// Returns `true` when the current x86_64 CPU supports AVX2.
 ///
