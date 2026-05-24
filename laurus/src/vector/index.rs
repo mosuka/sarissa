@@ -15,6 +15,7 @@ pub mod hnsw;
 pub mod io;
 pub mod ivf;
 pub mod pq_fastscan_avx2;
+pub mod pq_fastscan_neon;
 pub mod pq_fastscan_storage;
 pub mod pq_io;
 pub mod pq_storage;
