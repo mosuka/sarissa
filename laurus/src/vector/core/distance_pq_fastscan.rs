@@ -58,6 +58,21 @@ pub struct PqFastScanQuery {
     /// Per-sub-quantiser bias of the affine quantisation. Length is
     /// `M`.
     pub lut_bias: Vec<f32>,
+    /// Globally-quantised LUT for the SIMD path (#693 AVX2 / #694 NEON
+    /// kernels). Row-major `[m][k]` of length `m * K`. All entries
+    /// share the single [`Self::lut_scale_global`] and decode to
+    /// `lut_f32 ≈ u8 * lut_scale_global + lut_bias_per_sub[m]`, where
+    /// the per-sub bias is folded into [`Self::lut_bias_sum`] for the
+    /// distance reconstruction.
+    pub lut4_global: Vec<u8>,
+    /// Single global scale shared across all sub-quantisers. Built by
+    /// [`quantise_lut_global`] so the SIMD u8 saturating accumulator
+    /// pattern is correct (FAISS pq4_fast_scan convention).
+    pub lut_scale_global: f32,
+    /// Sum of per-sub-quantiser biases (`Σ_m bias[m]`). The SIMD
+    /// kernel adds this once per vector after the u16 reduction:
+    /// `distance = u16_sum * lut_scale_global + lut_bias_sum`.
+    pub lut_bias_sum: f32,
     /// `||query||² = Σ_i query[i]²`, cached for the metrics that need
     /// it (currently unused by the scalar kernels but kept for API
     /// parity with [`crate::vector::core::distance_quantized::PqQuery`]).
@@ -122,6 +137,7 @@ impl PqFastScanQuery {
         }
 
         let (lut4, lut_scale, lut_bias) = quantise_lut_per_sub(&lut_f32, m);
+        let (lut4_global, lut_scale_global, lut_bias_sum) = quantise_lut_global(&lut_f32, m);
         let query_norm_sq: f32 = query.iter().map(|x| x * x).sum();
 
         Ok(Self {
@@ -130,6 +146,9 @@ impl PqFastScanQuery {
             lut4,
             lut_scale,
             lut_bias,
+            lut4_global,
+            lut_scale_global,
+            lut_bias_sum,
             query_norm_sq,
         })
     }
@@ -181,6 +200,64 @@ pub fn quantise_lut_per_sub(lut_f32: &[f32], m: usize) -> (Vec<u8>, Vec<f32>, Ve
     }
 
     (lut4, lut_scale, lut_bias)
+}
+
+/// Quantise an f32 LUT to `u8` using a single **global scale** and
+/// per-sub-quantiser biases, the form the FastScan SIMD kernels in
+/// parts B (#693 AVX2) and C (#694 NEON) consume.
+///
+/// Unlike [`quantise_lut_per_sub`], all sub-quantisers share one
+/// `scale_global`, so the SIMD path can accumulate distances in a u8
+/// saturating accumulator across sub-quantisers and dequantise once
+/// per vector at the end via
+/// `distance = u8_sum * scale_global + bias_sum`.
+///
+/// Algorithm:
+/// 1. For each sub `m`, `bias[m] = min(lut_f32[m * K .. (m + 1) * K])`.
+/// 2. `max_normalised = max(lut_f32[m, k] - bias[m])` across all `m, k`.
+/// 3. `scale_global = max_normalised / 255.0` (or `0.0` if everything
+///    collapses to the per-sub minima).
+/// 4. `lut4[m * K + k] = round((lut_f32[m, k] - bias[m]) / scale_global)`,
+///    clamped to `[0, 255]`. Degenerate (constant) sub-quantisers get
+///    all-zero codes so the dequantiser recovers `bias[m]` exactly.
+/// 5. `bias_sum = Σ_m bias[m]`, folded into the per-vector constant.
+///
+/// Returns `(lut4_global, scale_global, bias_sum)`:
+///
+/// - `lut4_global.len() == m * K`, each entry in `[0, 255]`.
+/// - `scale_global` is a single non-negative `f32`.
+/// - `bias_sum` is `Σ_m bias[m]` (any sign).
+pub fn quantise_lut_global(lut_f32: &[f32], m: usize) -> (Vec<u8>, f32, f32) {
+    debug_assert_eq!(lut_f32.len(), m * K);
+    let mut bias = vec![0.0_f32; m];
+    let mut max_normalised: f32 = 0.0;
+    for sub in 0..m {
+        let chunk = &lut_f32[sub * K..(sub + 1) * K];
+        let min = chunk.iter().copied().fold(f32::INFINITY, f32::min);
+        bias[sub] = min;
+        for &v in chunk {
+            let normalised = v - min;
+            if normalised > max_normalised {
+                max_normalised = normalised;
+            }
+        }
+    }
+    let scale_global = if max_normalised > 0.0 {
+        max_normalised / 255.0
+    } else {
+        0.0
+    };
+    let mut lut4 = vec![0u8; m * K];
+    if scale_global > 0.0 {
+        for sub in 0..m {
+            for k in 0..K {
+                let v = lut_f32[sub * K + k] - bias[sub];
+                lut4[sub * K + k] = (v / scale_global).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    let bias_sum: f32 = bias.iter().sum();
+    (lut4, scale_global, bias_sum)
 }
 
 /// Decode the M 4-bit codes for `vec_idx_in_block` out of a single
@@ -258,6 +335,32 @@ pub fn distance_pq_fastscan_u8_scalar(
     apply_metric(metric, l2_sq)
 }
 
+/// Scalar FastScan ADC distance using the **global**-scale u8 LUT.
+///
+/// Mirrors the FAISS-style SIMD pipeline that parts B (#693 AVX2) and
+/// C (#694 NEON) implement: accumulate `Σ_m lut4_global[m * K + code_m]`
+/// in u16, then dequantise once via
+/// `distance = u16_sum as f32 * lut_scale_global + lut_bias_sum`.
+///
+/// The arithmetic here is bit-identical to the SIMD kernels (no
+/// intermediate floats inside the accumulator) so this function serves
+/// as the **correctness anchor** for the SIMD kernels' property tests.
+pub fn distance_pq_fastscan_u8_global_scalar(
+    metric: DistanceMetric,
+    query: &PqFastScanQuery,
+    packed_block: &[u8],
+    vec_idx_in_block: usize,
+) -> f32 {
+    let m = query.params.m as usize;
+    let codes = decode_codes_in_block(packed_block, m, vec_idx_in_block);
+    let mut u16_sum: u32 = 0;
+    for (sub, &code) in codes.iter().enumerate() {
+        u16_sum += query.lut4_global[sub * K + code as usize] as u32;
+    }
+    let l2_sq = u16_sum as f32 * query.lut_scale_global + query.lut_bias_sum;
+    apply_metric(metric, l2_sq)
+}
+
 /// Apply the metric-specific post-processing to the raw L2² sum.
 ///
 /// Same convention as
@@ -266,7 +369,7 @@ pub fn distance_pq_fastscan_u8_scalar(
 /// any other metric returns `f32::INFINITY` to make the searcher's
 /// dispatch fail cleanly.
 #[inline]
-fn apply_metric(metric: DistanceMetric, l2_sq: f32) -> f32 {
+pub(crate) fn apply_metric(metric: DistanceMetric, l2_sq: f32) -> f32 {
     match metric {
         DistanceMetric::Euclidean => l2_sq.max(0.0).sqrt(),
         DistanceMetric::Cosine => (l2_sq * 0.5).clamp(0.0, 2.0),
@@ -555,6 +658,94 @@ mod tests {
             assert!(
                 (kernel - direct).abs() < 1e-3,
                 "vec_idx={vec_idx}: kernel={kernel} direct={direct}"
+            );
+        }
+    }
+
+    #[test]
+    fn quantise_lut_global_round_trip_within_tolerance() {
+        // Build a synthetic LUT with a known per-sub range. The
+        // expected max element-wise error after dequantise is
+        // `scale_global / 2` (round-to-nearest).
+        let m = 4;
+        let mut lut_f32 = vec![0.0_f32; m * K];
+        for sub in 0..m {
+            for i in 0..K {
+                lut_f32[sub * K + i] = (sub as f32) * 20.0 + (i as f32) * (1.0 + sub as f32);
+            }
+        }
+        let (lut4_global, scale_global, bias_sum) = quantise_lut_global(&lut_f32, m);
+
+        // Reconstruct per-sub bias to dequantise: we know
+        // `bias[sub] = min(lut_f32[sub * K..(sub + 1) * K])`.
+        let mut bias = vec![0.0_f32; m];
+        for sub in 0..m {
+            bias[sub] = lut_f32[sub * K..(sub + 1) * K]
+                .iter()
+                .copied()
+                .fold(f32::INFINITY, f32::min);
+        }
+        assert!((bias.iter().sum::<f32>() - bias_sum).abs() < 1e-4);
+
+        let tolerance = scale_global / 2.0 + 1e-5;
+        for sub in 0..m {
+            for i in 0..K {
+                let reconstructed = lut4_global[sub * K + i] as f32 * scale_global + bias[sub];
+                let original = lut_f32[sub * K + i];
+                assert!(
+                    (reconstructed - original).abs() <= tolerance,
+                    "sub={sub} i={i}: |{reconstructed} - {original}| > {tolerance}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn quantise_lut_global_handles_degenerate_lut() {
+        // All-zero LUT collapses to scale_global = 0 and bias_sum = 0.
+        let m = 2;
+        let lut_f32 = vec![0.0_f32; m * K];
+        let (lut4, scale, bias_sum) = quantise_lut_global(&lut_f32, m);
+        assert!(lut4.iter().all(|&c| c == 0));
+        assert_eq!(scale, 0.0);
+        assert_eq!(bias_sum, 0.0);
+    }
+
+    #[test]
+    fn u8_global_scalar_matches_f32_scalar_within_tolerance() {
+        // Codebook + query setup identical to the per-sub property
+        // test above so we can reuse the expectation framework.
+        let m = 4;
+        let sub_dim = 2;
+        let dim = m * sub_dim;
+        let (params, codebook, vectors) = train_small_codebook(m, sub_dim, 256);
+        let query: Vec<f32> = vectors[0].data.to_vec();
+        assert_eq!(query.len(), dim);
+        let q = PqFastScanQuery::prepare(&query, params, &codebook).unwrap();
+
+        // Pack a couple of vectors into one block and walk every
+        // in-block index.
+        let codes: Vec<Vec<u8>> = (0..32)
+            .map(|i| encode_vec(&vectors[i % vectors.len()].data, params, &codebook))
+            .collect();
+        let block = pack_codes_into_blocks(&codes, m);
+
+        let max_error = (m as f32) * q.lut_scale_global / 2.0 + 1e-4;
+        for vec_idx in 0..32 {
+            let f32_val =
+                distance_pq_fastscan_f32_scalar(DistanceMetric::Euclidean, &q, &block, vec_idx);
+            let u8_val = distance_pq_fastscan_u8_global_scalar(
+                DistanceMetric::Euclidean,
+                &q,
+                &block,
+                vec_idx,
+            );
+            // The two are computed in different precision regimes
+            // (sqrt of the L2² sum) so we compare the squared values.
+            let diff_sq = (f32_val.powi(2) - u8_val.powi(2)).abs();
+            assert!(
+                diff_sq <= max_error,
+                "vec {vec_idx}: |{f32_val}² - {u8_val}²| = {diff_sq} > {max_error}"
             );
         }
     }
