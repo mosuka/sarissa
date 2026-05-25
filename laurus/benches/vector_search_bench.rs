@@ -1082,6 +1082,77 @@ fn bench_hnsw_graph_search_rerank_real_data(c: &mut Criterion) {
 /// for Stage 2's 3× target), with the exact ratio taken via the
 /// cross-branch worktree pattern Issue #498 documented.
 fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
+    // Default operating point: top_k=10, rerank_factor=10 — matches the
+    // Stage 3 recall test config (subvector_count=32, ef_search=200)
+    // so latency is taken at the same point the recall assertion
+    // defends.
+    run_pq_real_data_bench(
+        c,
+        PqRealDataBenchParams {
+            top_k: 10,
+            rerank_factor: 10,
+            bench_id_label: "top10_pq_rerank20",
+        },
+    );
+}
+
+/// Issue #706 Phase 0 micro-experiment: PQ-256 with rerank disabled
+/// (`rerank_factor = 1`). Compared against the matching FastScan
+/// variant ([`bench_hnsw_graph_search_pq_fastscan_real_data_no_rerank`])
+/// to isolate the wall-clock contribution of the rerank pass.
+///
+/// Same opt-in gating as [`bench_hnsw_graph_search_pq_rerank_real_data`].
+fn bench_hnsw_graph_search_pq_rerank_real_data_no_rerank(c: &mut Criterion) {
+    run_pq_real_data_bench(
+        c,
+        PqRealDataBenchParams {
+            top_k: 10,
+            rerank_factor: 1,
+            bench_id_label: "top10_pq_no_rerank",
+        },
+    );
+}
+
+/// Issue #706 Phase 0 micro-experiment: PQ-256 generating 100
+/// candidates without rerank. The FastScan twin
+/// ([`bench_hnsw_graph_search_pq_fastscan_real_data_kernel_only`]) runs
+/// the same shape, so the resulting ratio isolates the candidate-
+/// generation kernel from both the rerank pass and any top-k specific
+/// overhead.
+///
+/// Same opt-in gating as [`bench_hnsw_graph_search_pq_rerank_real_data`].
+fn bench_hnsw_graph_search_pq_rerank_real_data_kernel_only(c: &mut Criterion) {
+    run_pq_real_data_bench(
+        c,
+        PqRealDataBenchParams {
+            top_k: 100,
+            rerank_factor: 1,
+            bench_id_label: "top100_pq_kernel_only",
+        },
+    );
+}
+
+/// Parameters for the PQ-256 SIFT1M real-data benchmark family.
+///
+/// `top_k` and `rerank_factor` flow straight through to the
+/// [`VectorIndexQuery`] used per iteration. `bench_id_label` is the
+/// per-variant id under the shared
+/// `"HNSW Graph Search PQ Rerank Real"` Criterion group.
+struct PqRealDataBenchParams {
+    top_k: usize,
+    rerank_factor: usize,
+    bench_id_label: &'static str,
+}
+
+/// Shared body for the PQ-256 SIFT1M real-data benchmarks (Issue
+/// [#481](https://github.com/mosuka/laurus/issues/481) Stage 3 and
+/// Issue [#706](https://github.com/mosuka/laurus/issues/706) Phase 0).
+///
+/// The HNSW index is shared across variants via [`cached_vector_reader`]:
+/// the cache slot depends only on the corpus + index parameters, not on
+/// `top_k` / `rerank_factor`, so all PQ-256 variants reuse the same
+/// pre-built segment.
+fn run_pq_real_data_bench(c: &mut Criterion, params: PqRealDataBenchParams) {
     if std::env::var("LAURUS_REAL_BENCHMARK").as_deref() != Ok("1") {
         return;
     }
@@ -1103,12 +1174,7 @@ fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
     let dim: usize = 128;
     let n_corpus: usize = 50_000;
     let n_queries: usize = 200;
-    // Matches the Stage 3 recall test's
-    // `(ef_search=200, rerank_factor=10, subvector_count=32)` config
-    // so latency is taken at the same operating point the recall
-    // assertion defends.
     let ef_search: usize = 200;
-    let rerank_factor: usize = 10;
     let subvector_count: usize = 32;
     let m: usize = 16;
     let ef_construction: usize = 200;
@@ -1156,9 +1222,9 @@ fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
     let probe = searcher
         .search(
             &VectorIndexQuery::new(Vector::new(queries[0].clone()))
-                .top_k(10)
+                .top_k(params.top_k)
                 .field_name("field".to_string())
-                .rerank_factor(rerank_factor),
+                .rerank_factor(params.rerank_factor),
         )
         .unwrap();
     assert!(
@@ -1171,14 +1237,14 @@ fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
     group.throughput(Throughput::Elements(n_corpus as u64));
 
     let mut iter_idx: usize = 0;
-    group.bench_function(BenchmarkId::new("top10_pq_rerank20", "sift50000"), |b| {
+    group.bench_function(BenchmarkId::new(params.bench_id_label, "sift50000"), |b| {
         b.iter(|| {
             let q = &queries[iter_idx % queries.len()];
             iter_idx = iter_idx.wrapping_add(1);
             let request = VectorIndexQuery::new(Vector::new(q.clone()))
-                .top_k(10)
+                .top_k(params.top_k)
                 .field_name("field".to_string())
-                .rerank_factor(rerank_factor);
+                .rerank_factor(params.rerank_factor);
             searcher.search(&request).unwrap()
         });
     });
@@ -1203,6 +1269,77 @@ fn bench_hnsw_graph_search_pq_rerank_real_data(c: &mut Criterion) {
 /// `./scripts/fetch-sift.sh --large` once to populate it.
 #[cfg(feature = "pq-fastscan")]
 fn bench_hnsw_graph_search_pq_fastscan_real_data(c: &mut Criterion) {
+    // Default operating point matches the PQ-256 default
+    // ([`bench_hnsw_graph_search_pq_rerank_real_data`]) one-to-one so
+    // the umbrella's ratio gate is taken at the same point.
+    run_pq_fastscan_real_data_bench(
+        c,
+        PqFastScanRealDataBenchParams {
+            top_k: 10,
+            rerank_factor: 10,
+            bench_id_label: "top10_pqfs_rerank10",
+        },
+    );
+}
+
+/// Issue #706 Phase 0 micro-experiment: FastScan with rerank disabled
+/// (`rerank_factor = 1`). Twin of
+/// [`bench_hnsw_graph_search_pq_rerank_real_data_no_rerank`].
+#[cfg(feature = "pq-fastscan")]
+fn bench_hnsw_graph_search_pq_fastscan_real_data_no_rerank(c: &mut Criterion) {
+    run_pq_fastscan_real_data_bench(
+        c,
+        PqFastScanRealDataBenchParams {
+            top_k: 10,
+            rerank_factor: 1,
+            bench_id_label: "top10_pqfs_no_rerank",
+        },
+    );
+}
+
+/// Issue #706 Phase 0 micro-experiment: FastScan generating 100
+/// candidates without rerank — kernel-only comparison against
+/// [`bench_hnsw_graph_search_pq_rerank_real_data_kernel_only`].
+#[cfg(feature = "pq-fastscan")]
+fn bench_hnsw_graph_search_pq_fastscan_real_data_kernel_only(c: &mut Criterion) {
+    run_pq_fastscan_real_data_bench(
+        c,
+        PqFastScanRealDataBenchParams {
+            top_k: 100,
+            rerank_factor: 1,
+            bench_id_label: "top100_pqfs_kernel_only",
+        },
+    );
+}
+
+#[cfg(not(feature = "pq-fastscan"))]
+fn bench_hnsw_graph_search_pq_fastscan_real_data(_c: &mut Criterion) {
+    // No-op without the `pq-fastscan` feature so the criterion_group
+    // macro can reference this symbol unconditionally.
+}
+
+#[cfg(not(feature = "pq-fastscan"))]
+fn bench_hnsw_graph_search_pq_fastscan_real_data_no_rerank(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "pq-fastscan"))]
+fn bench_hnsw_graph_search_pq_fastscan_real_data_kernel_only(_c: &mut Criterion) {}
+
+/// Parameters for the FastScan SIFT1M real-data benchmark family
+/// (mirror of [`PqRealDataBenchParams`]).
+#[cfg(feature = "pq-fastscan")]
+struct PqFastScanRealDataBenchParams {
+    top_k: usize,
+    rerank_factor: usize,
+    bench_id_label: &'static str,
+}
+
+/// Shared body for the FastScan SIFT1M real-data benchmarks. Mirror of
+/// [`run_pq_real_data_bench`] — same opt-in gating, same SIFT
+/// fixture, same ef_search / subvector_count / m / ef_construction;
+/// only the `quantization_method` differs (`ProductQuantizationFastScan`
+/// instead of `ProductQuantization`).
+#[cfg(feature = "pq-fastscan")]
+fn run_pq_fastscan_real_data_bench(c: &mut Criterion, params: PqFastScanRealDataBenchParams) {
     if std::env::var("LAURUS_REAL_BENCHMARK").as_deref() != Ok("1") {
         return;
     }
@@ -1224,10 +1361,7 @@ fn bench_hnsw_graph_search_pq_fastscan_real_data(c: &mut Criterion) {
     let dim: usize = 128;
     let n_corpus: usize = 50_000;
     let n_queries: usize = 200;
-    // Match the K=256 PQ bench parameters one-to-one so the ratio is
-    // taken at the same operating point.
     let ef_search: usize = 200;
-    let rerank_factor: usize = 10;
     let subvector_count: usize = 32;
     let m: usize = 16;
     let ef_construction: usize = 200;
@@ -1278,9 +1412,9 @@ fn bench_hnsw_graph_search_pq_fastscan_real_data(c: &mut Criterion) {
     let probe = searcher
         .search(
             &VectorIndexQuery::new(Vector::new(queries[0].clone()))
-                .top_k(10)
+                .top_k(params.top_k)
                 .field_name("field".to_string())
-                .rerank_factor(rerank_factor),
+                .rerank_factor(params.rerank_factor),
         )
         .unwrap();
     assert!(
@@ -1293,24 +1427,18 @@ fn bench_hnsw_graph_search_pq_fastscan_real_data(c: &mut Criterion) {
     group.throughput(Throughput::Elements(n_corpus as u64));
 
     let mut iter_idx: usize = 0;
-    group.bench_function(BenchmarkId::new("top10_pqfs_rerank10", "sift50000"), |b| {
+    group.bench_function(BenchmarkId::new(params.bench_id_label, "sift50000"), |b| {
         b.iter(|| {
             let q = &queries[iter_idx % queries.len()];
             iter_idx = iter_idx.wrapping_add(1);
             let request = VectorIndexQuery::new(Vector::new(q.clone()))
-                .top_k(10)
+                .top_k(params.top_k)
                 .field_name("field".to_string())
-                .rerank_factor(rerank_factor);
+                .rerank_factor(params.rerank_factor);
             searcher.search(&request).unwrap()
         });
     });
     group.finish();
-}
-
-#[cfg(not(feature = "pq-fastscan"))]
-fn bench_hnsw_graph_search_pq_fastscan_real_data(_c: &mut Criterion) {
-    // No-op without the `pq-fastscan` feature so the criterion_group
-    // macro can reference this symbol unconditionally.
 }
 
 criterion_group!(
@@ -1325,7 +1453,11 @@ criterion_group!(
     bench_hnsw_graph_search_rerank,
     bench_hnsw_graph_search_rerank_real_data,
     bench_hnsw_graph_search_pq_rerank_real_data,
+    bench_hnsw_graph_search_pq_rerank_real_data_no_rerank,
+    bench_hnsw_graph_search_pq_rerank_real_data_kernel_only,
     bench_hnsw_graph_search_pq_fastscan_real_data,
+    bench_hnsw_graph_search_pq_fastscan_real_data_no_rerank,
+    bench_hnsw_graph_search_pq_fastscan_real_data_kernel_only,
     bench_hnsw_ef_search_sweep,
     bench_hnsw_multi_field_search,
     bench_flat_multi_field_search,
