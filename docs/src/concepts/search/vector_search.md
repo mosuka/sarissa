@@ -126,6 +126,34 @@ Each clause produces a vector that is searched against its respective field. Res
 | `MaxSim` | Maximum similarity score across clauses |
 | `LateInteraction` | ColBERT-style late interaction scoring |
 
+### Parallel Multi-Vector Execution
+
+When a request carries multiple query vectors (e.g., ColBERT-style late
+interaction, multi-vector MaxSim, ensemble rerankers), Laurus dispatches the
+per-query similarity searches in parallel via [rayon][rayon-crate].
+
+Behaviour:
+
+- On native builds (default `native` feature), once `query_vectors.len()`
+  reaches the internal `MULTI_QUERY_PARALLEL_THRESHOLD` (currently `4`), the
+  per-query HNSW / Flat / IVF searches run on rayon's global thread pool.
+  Below that threshold the serial loop wins because rayon's dispatch
+  overhead (~1-2 µs) would otherwise dominate a single 50-200 µs query.
+- On `wasm32` targets the serial path is always used because rayon is
+  unavailable.
+- Aggregation (the score-mode merge) and the final sort run serially after
+  the per-query phase. Score ties are broken by ascending `doc_id` so the
+  results are deterministic regardless of rayon's work-stealing schedule.
+
+The external API surface (`VectorStore::search`, gRPC `Search`, REST
+`POST /v1/search`, all language bindings) is unchanged; parallel execution
+is purely an internal optimisation enabled by upgrading laurus. Speedups
+scale with the host's available cores — on a 4-core / 8-thread laptop CPU
+the parallel path reaches roughly 2× throughput at `B = 64` query vectors,
+limited by physical core count and HyperThreading sharing.
+
+[rayon-crate]: https://docs.rs/rayon
+
 ### Weights
 
 Use the `^` boost syntax in DSL or `weight` in `QueryVector` to adjust how much each field contributes:
