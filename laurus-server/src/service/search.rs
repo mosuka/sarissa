@@ -15,7 +15,7 @@ use laurus::Engine;
 
 use crate::convert::{error, search as search_convert};
 use crate::proto::laurus::v1::{
-    SearchRequest, SearchResponse, SearchResult,
+    SearchBatchRequest, SearchBatchResponse, SearchRequest, SearchResponse, SearchResult,
     search_service_server::SearchService as SearchServiceTrait,
 };
 
@@ -89,5 +89,61 @@ impl SearchServiceTrait for SearchService {
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    /// Executes multiple independent search queries in a single round trip.
+    ///
+    /// Each `SearchRequest` in `queries` is dispatched in parallel on the
+    /// server via [`laurus::Engine::search_batch`]. Returns one
+    /// `SearchResponse` per input query, in the same order. Empty input
+    /// short-circuits to an empty `results` list without invoking the
+    /// engine.
+    ///
+    /// Issue [#716](https://github.com/mosuka/laurus/issues/716)
+    /// Phase 3a of [#648](https://github.com/mosuka/laurus/issues/648).
+    async fn search_batch(
+        &self,
+        request: Request<SearchBatchRequest>,
+    ) -> Result<Response<SearchBatchResponse>, Status> {
+        let req = request.into_inner();
+
+        if req.queries.is_empty() {
+            return Ok(Response::new(SearchBatchResponse {
+                results: Vec::new(),
+            }));
+        }
+
+        let search_requests: Vec<laurus::SearchRequest> = req
+            .queries
+            .iter()
+            .map(search_convert::from_proto)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let guard = self.engine.read().await;
+        let engine = guard
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("No index is open"))?;
+
+        let batch_results = engine
+            .search_batch(search_requests)
+            .await
+            .map_err(error::to_status)?;
+
+        let results: Vec<SearchResponse> = batch_results
+            .into_iter()
+            .map(|per_query_results| {
+                let total_hits = per_query_results.len() as u64;
+                let proto_results: Vec<SearchResult> = per_query_results
+                    .iter()
+                    .map(search_convert::result_to_proto)
+                    .collect();
+                SearchResponse {
+                    results: proto_results,
+                    total_hits,
+                }
+            })
+            .collect();
+
+        Ok(Response::new(SearchBatchResponse { results }))
     }
 }

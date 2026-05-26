@@ -58,5 +58,6 @@ pub fn create_router(state: GatewayState) -> Router {
         .route("/v1/commit", post(document::commit))
         .route("/v1/search", post(search::search))
         .route("/v1/search/stream", post(search::search_stream))
+        .route("/v1/search/batch", post(search::search_batch))
         .with_state(state)
 }

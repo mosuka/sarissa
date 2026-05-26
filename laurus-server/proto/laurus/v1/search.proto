@@ -10,6 +10,26 @@ service SearchService {
 
   // Execute a search and stream results one by one.
   rpc SearchStream(SearchRequest) returns (stream SearchResult);
+
+  // Execute multiple independent searches in a single round trip.
+  //
+  // Each `SearchRequest` in `queries` is dispatched in parallel on the
+  // server (the engine uses `futures::future::try_join_all` under the
+  // hood). Returns one `SearchResponse` per input query, in the same
+  // order. Empty input returns an empty `results` list.
+  //
+  // Issue #714 Phase 3a of #648.
+  rpc SearchBatch(SearchBatchRequest) returns (SearchBatchResponse);
+}
+
+message SearchBatchRequest {
+  // List of independent search requests to execute in parallel.
+  repeated SearchRequest queries = 1;
+}
+
+message SearchBatchResponse {
+  // One response per input query, in input order.
+  repeated SearchResponse results = 1;
 }
 
 message SearchRequest {
