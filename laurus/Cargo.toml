@@ -168,6 +168,10 @@ name = "vector_search_bench"
 harness = false
 
 [[bench]]
+name = "vector_multi_query_bench"
+harness = false
+
+[[bench]]
 name = "bkd_bench"
 harness = false
 

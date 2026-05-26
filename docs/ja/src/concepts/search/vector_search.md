@@ -94,6 +94,35 @@ let request = VectorSearchRequestBuilder::new()
 | `MaxSim` | クエリ句間の最大類似度スコア |
 | `LateInteraction` | ColBERT スタイルの Late Interaction スコアリング |
 
+### マルチベクトル検索の並列実行
+
+複数のクエリベクトル（ColBERT スタイルの late interaction、マルチベクトル
+MaxSim、ensemble reranker など）を含むリクエストに対して、Laurus は
+[rayon][rayon-crate] を使ってクエリごとの類似度検索を並列に実行します。
+
+動作:
+
+- ネイティブビルド（`native` feature がデフォルトで有効）では、
+  `query_vectors.len()` が内部の `MULTI_QUERY_PARALLEL_THRESHOLD`（現状 `4`）
+  に達した時点で、HNSW / Flat / IVF のクエリごとの検索が rayon のグローバル
+  スレッドプール上で並列実行されます。これを下回るとシリアルループのほうが
+  速くなります（rayon のディスパッチオーバーヘッド ~1-2 µs が、単一クエリの
+  50-200 µs を上回りやすいため）。
+- `wasm32` ターゲットでは rayon が使用できないため、常にシリアルパスを
+  通ります。
+- 集約（スコアモードによるマージ）と最終ソートはクエリ並列フェーズの後に
+  シリアル実行されます。スコアが同点の場合は `doc_id` の昇順でタイブレーク
+  するため、rayon のワークスチール順序に依存しない決定的な結果になります。
+
+外部 API（`VectorStore::search`、gRPC の `Search`、REST の
+`POST /v1/search`、各言語バインディング）は一切変更されません。並列実行は
+完全に内部最適化で、laurus をアップグレードするだけで有効になります。
+speedup はホストの利用可能コア数に応じてスケールアップします（4 物理コア /
+8 スレッドの HT 有効ラップトップ CPU では、B = 64 クエリ時にスループットが
+およそ 2× 向上します。これは物理コア数と HT 共有による上限に近い値です）。
+
+[rayon-crate]: https://docs.rs/rayon
+
 ### ウェイト
 
 DSL では `^` ブースト構文を使用するか、`QueryVector` の `weight` で各フィールドの寄与度を調整します。
