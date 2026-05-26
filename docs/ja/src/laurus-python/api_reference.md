@@ -26,6 +26,7 @@ class Index:
 | `delete_documents(id)` | 指定 ID の全バージョンを削除します。 |
 | `commit()` | バッファリングされた書き込みをフラッシュし、すべての保留中の変更を検索可能にします。 |
 | `search(query, *, limit=10, offset=0) -> list[SearchResult]` | 検索クエリを実行します。 |
+| `search_batch(queries, *, limit=10, offset=0) -> list[list[SearchResult]]` | 独立した複数の検索を 1 回の呼び出しで実行します。各クエリは内部の tokio ランタイム上で並列に dispatch されます。`results[i]` は `queries[i]` に対応し、入力が空のリストの場合は `[]` を返します。 |
 | `stats() -> dict` | インデックス統計（`document_count`、`vector_fields`）を返します。 |
 
 ### `search` の query 引数
@@ -36,6 +37,8 @@ class Index:
 - **Lexical クエリオブジェクト**（`TermQuery`、`PhraseQuery`、`BooleanQuery` など）
 - **Vector クエリオブジェクト**（`VectorQuery`、`VectorTextQuery`）
 - **`SearchRequest`**（完全な制御が必要な場合）
+
+`search_batch` の `queries` リストの各要素も同じ種類の値を受け付けます。DSL 文字列・クエリオブジェクト・`SearchRequest` を 1 つのバッチ内で混在させることもできます。
 
 ---
 
