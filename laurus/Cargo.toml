@@ -172,6 +172,10 @@ name = "vector_multi_query_bench"
 harness = false
 
 [[bench]]
+name = "engine_search_batch_bench"
+harness = false
+
+[[bench]]
 name = "bkd_bench"
 harness = false
 

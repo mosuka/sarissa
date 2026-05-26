@@ -1,4 +1,4 @@
-//! Search endpoints (unary + SSE streaming).
+//! Search endpoints (unary + SSE streaming + batch).
 
 use std::convert::Infallible;
 
@@ -12,6 +12,7 @@ use tokio_stream::StreamExt;
 use super::GatewayState;
 use super::convert;
 use super::error::{BadRequest, GatewayError};
+use crate::proto::laurus::v1::SearchBatchRequest;
 
 /// `POST /v1/search` — Executes a search and returns all results at once.
 pub async fn search(
@@ -78,4 +79,56 @@ pub async fn search_stream(
     });
 
     Sse::new(sse_stream).into_response()
+}
+
+/// `POST /v1/search/batch` — Executes multiple independent searches in one
+/// round trip and returns all responses in input order.
+///
+/// Request body: `{ "queries": [SearchRequest, SearchRequest, ...] }`.
+/// Each entry follows the same schema as `POST /v1/search`'s body. Empty
+/// input returns `{ "results": [] }` without invoking the gRPC service.
+///
+/// Issue [#716](https://github.com/mosuka/laurus/issues/716) Phase 3a of
+/// [#648](https://github.com/mosuka/laurus/issues/648).
+pub async fn search_batch(
+    State(mut state): State<GatewayState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, Response> {
+    let queries_value = body
+        .get("queries")
+        .ok_or_else(|| BadRequest("missing `queries` field".to_string()).into_response())?;
+    let queries_array = queries_value
+        .as_array()
+        .ok_or_else(|| BadRequest("`queries` must be an array".to_string()).into_response())?;
+
+    let queries = queries_array
+        .iter()
+        .map(convert::json_to_proto_search_request)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| BadRequest(e).into_response())?;
+
+    let response = state
+        .search_client
+        .search_batch(SearchBatchRequest { queries })
+        .await
+        .map_err(|s| GatewayError(s).into_response())?;
+
+    let inner = response.into_inner();
+    let results: Vec<Value> = inner
+        .results
+        .iter()
+        .map(|search_response| {
+            let per_query_results: Vec<Value> = search_response
+                .results
+                .iter()
+                .map(convert::proto_search_result_to_json)
+                .collect();
+            json!({
+                "total_hits": search_response.total_hits,
+                "results": per_query_results,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "results": results })))
 }
