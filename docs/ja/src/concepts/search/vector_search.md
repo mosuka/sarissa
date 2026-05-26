@@ -102,8 +102,10 @@ MaxSim、ensemble reranker など）を含むリクエストに対して、Lauru
 
 動作:
 
-- ネイティブビルド（`native` feature がデフォルトで有効）では、
-  `query_vectors.len()` が内部の `MULTI_QUERY_PARALLEL_THRESHOLD`（現状 `4`）
+- 並列化は `VectorIndexSearcher::search_batch` トレイトメソッドの
+  デフォルト実装内に置かれています。ネイティブビルド（`native` feature が
+  デフォルトで有効）では、`queries.len()` が searcher の
+  `parallel_threshold`（デフォルト `4`、 searcher 単位で override 可能）
   に達した時点で、HNSW / Flat / IVF のクエリごとの検索が rayon のグローバル
   スレッドプール上で並列実行されます。これを下回るとシリアルループのほうが
   速くなります（rayon のディスパッチオーバーヘッド ~1-2 µs が、単一クエリの

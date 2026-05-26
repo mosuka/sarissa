@@ -275,6 +275,66 @@ pub trait VectorIndexSearcher: Send + Sync + std::fmt::Debug {
         // any necessary warm-up steps, such as loading index data into memory.
         Ok(())
     }
+
+    /// Threshold above which [`Self::search_batch`] switches to rayon
+    /// parallel iteration over the input queries.
+    ///
+    /// Below this threshold the serial loop wins because rayon's
+    /// thread-pool dispatch overhead (~1-2 µs) would otherwise dominate
+    /// a single 50-200 µs query. The default of `4` matches the value
+    /// Phase 1 of [#648](https://github.com/mosuka/laurus/issues/648)
+    /// settled on for the HNSW / Flat / IVF mix; concrete searchers
+    /// MAY override to tune for their per-query cost.
+    ///
+    /// Issue [#712](https://github.com/mosuka/laurus/issues/712)
+    /// Phase 2 of [#648](https://github.com/mosuka/laurus/issues/648).
+    fn parallel_threshold(&self) -> usize {
+        4
+    }
+
+    /// Execute `B` independent vector queries in one call.
+    ///
+    /// The default impl dispatches via [`Self::search_batch_with_threshold`]
+    /// using [`Self::parallel_threshold`]: when `queries.len()` meets the
+    /// threshold the per-query searches run on rayon's global thread pool,
+    /// otherwise they run serially. Overriders MAY exploit shared state
+    /// across the `B` queries (e.g., per-field prefetch index, codebook)
+    /// to amortise setup costs.
+    ///
+    /// Returns one [`VectorIndexQueryResults`] per input query, in the
+    /// same order as `queries`.
+    ///
+    /// Issue [#712](https://github.com/mosuka/laurus/issues/712)
+    /// Phase 2 of [#648](https://github.com/mosuka/laurus/issues/648).
+    fn search_batch(&self, queries: &[VectorIndexQuery]) -> Result<Vec<VectorIndexQueryResults>> {
+        self.search_batch_with_threshold(queries, self.parallel_threshold())
+    }
+
+    /// Test-only variant of [`Self::search_batch`] that lets the caller
+    /// pin the parallelisation threshold.
+    ///
+    /// `parallel_threshold == 0` forces parallel execution;
+    /// `usize::MAX` forces serial. Production code should call
+    /// [`Self::search_batch`] which uses [`Self::parallel_threshold`].
+    #[doc(hidden)]
+    fn search_batch_with_threshold(
+        &self,
+        queries: &[VectorIndexQuery],
+        parallel_threshold: usize,
+    ) -> Result<Vec<VectorIndexQueryResults>> {
+        #[cfg(feature = "native")]
+        {
+            use rayon::prelude::*;
+            if queries.len() >= parallel_threshold {
+                return queries
+                    .par_iter()
+                    .map(|q| self.search(q))
+                    .collect::<Result<Vec<_>>>();
+            }
+        }
+        let _ = parallel_threshold;
+        queries.iter().map(|q| self.search(q)).collect()
+    }
 }
 
 // ── High-level search request types ──────────────────────────────────────────
