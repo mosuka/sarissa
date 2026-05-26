@@ -1516,6 +1516,54 @@ impl Engine {
 
         Ok(results)
     }
+
+    /// Execute multiple independent search requests in parallel.
+    ///
+    /// Batched form of [`Self::search`] that runs each request
+    /// concurrently on the tokio runtime via
+    /// [`futures::future::try_join_all`]. Internal vector-search work
+    /// additionally parallelises per-request via rayon (Phase 1 of
+    /// issue [#648](https://github.com/mosuka/laurus/issues/648), PR
+    /// [#711](https://github.com/mosuka/laurus/pull/711)), so a batch
+    /// of `B` requests benefits from two-level parallelism: `B`
+    /// requests in parallel on tokio, each request's multi-vector
+    /// path in parallel on rayon.
+    ///
+    /// External callers (gRPC service, REST gateway, language
+    /// bindings) invoke this method to amortise IPC and serialisation
+    /// overhead across multiple queries, in addition to the per-query
+    /// parallelism already provided by Phases 1 and 2 of
+    /// [#648](https://github.com/mosuka/laurus/issues/648).
+    ///
+    /// # Parameters
+    ///
+    /// - `requests` - The list of independent search requests. Order
+    ///   is preserved in the output.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<Vec<SearchResult>>` where `results[i]` is the result of
+    /// `requests[i]`. Empty input returns an empty `Vec` without
+    /// invoking [`Self::search`] at all.
+    ///
+    /// # Errors
+    ///
+    /// Short-circuits with the first error encountered; the other
+    /// in-flight requests are dropped per
+    /// [`futures::future::try_join_all`] semantics.
+    ///
+    /// Issue [#715](https://github.com/mosuka/laurus/issues/715)
+    /// (Phase 3 prerequisite of
+    /// [#648](https://github.com/mosuka/laurus/issues/648)).
+    pub async fn search_batch(
+        &self,
+        requests: Vec<self::search::SearchRequest>,
+    ) -> Result<Vec<Vec<self::search::SearchResult>>> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+        futures::future::try_join_all(requests.into_iter().map(|r| self.search(r))).await
+    }
 }
 
 /// Builder for constructing an [`Engine`] with custom configuration.
