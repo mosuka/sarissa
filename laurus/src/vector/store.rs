@@ -29,8 +29,6 @@ pub mod response;
 
 use std::sync::Arc;
 
-#[cfg(feature = "native")]
-use rayon::prelude::*;
 use tokio::sync::Mutex;
 
 use crate::data::{DataValue, Document};
@@ -48,36 +46,6 @@ use crate::vector::writer::VectorIndexWriter;
 use self::config::VectorIndexConfig;
 use self::request::{VectorScoreMode, VectorSearchRequest};
 use self::response::{VectorHit, VectorSearchResults, VectorStats};
-
-/// Threshold above which the multi-vector search path uses rayon parallel
-/// iteration over query vectors.
-///
-/// Below this threshold the serial loop wins because rayon thread-pool
-/// dispatch adds roughly 1-2 µs of overhead per query, and a single HNSW
-/// graph search is typically 50-200 µs. Above this threshold the per-query
-/// HNSW work dominates and parallelism pays for itself on multi-core hosts.
-///
-/// Issue [#710](https://github.com/mosuka/laurus/issues/710) Phase 1 of
-/// [#648](https://github.com/mosuka/laurus/issues/648).
-#[cfg(feature = "native")]
-const MULTI_QUERY_PARALLEL_THRESHOLD: usize = 4;
-
-/// The default parallel-threshold used by [`VectorStore::search`].
-///
-/// On native builds this returns [`MULTI_QUERY_PARALLEL_THRESHOLD`]; on
-/// non-native (wasm32) builds it returns [`usize::MAX`] so the multi-vector
-/// path always stays serial (rayon is unavailable).
-#[inline]
-fn default_parallel_threshold() -> usize {
-    #[cfg(feature = "native")]
-    {
-        MULTI_QUERY_PARALLEL_THRESHOLD
-    }
-    #[cfg(not(feature = "native"))]
-    {
-        usize::MAX
-    }
-}
 
 /// A simplified vector storage component following the LexicalStore pattern.
 ///
@@ -458,7 +426,7 @@ impl VectorStore {
     /// Returns an error if obtaining the searcher or executing the underlying
     /// index search fails, or if the query contains unresolved payloads.
     pub fn search(&self, request: VectorSearchRequest) -> Result<VectorSearchResults> {
-        self.search_with_threshold(request, default_parallel_threshold())
+        self.search_impl(request, None)
     }
 
     /// Test-only variant of [`Self::search`] that lets the caller pin the
@@ -467,17 +435,32 @@ impl VectorStore {
     /// When `parallel_threshold == 0` the multi-vector path always runs in
     /// parallel (when the `native` feature is on); when it is `usize::MAX`
     /// the path always runs serially. Production code goes through
-    /// [`Self::search`], which uses
-    /// [`MULTI_QUERY_PARALLEL_THRESHOLD`] (or `usize::MAX` on non-native
-    /// builds).
+    /// [`Self::search`], which uses the searcher's
+    /// [`VectorIndexSearcher::parallel_threshold`] (default `4`).
     ///
     /// Issue [#710](https://github.com/mosuka/laurus/issues/710) Phase 1 of
-    /// [#648](https://github.com/mosuka/laurus/issues/648).
+    /// [#648](https://github.com/mosuka/laurus/issues/648); refactored in
+    /// Phase 2 ([#712](https://github.com/mosuka/laurus/issues/712)) to
+    /// dispatch through the trait method.
     #[doc(hidden)]
     pub fn search_with_threshold(
         &self,
         request: VectorSearchRequest,
         parallel_threshold: usize,
+    ) -> Result<VectorSearchResults> {
+        self.search_impl(request, Some(parallel_threshold))
+    }
+
+    /// Common implementation for [`Self::search`] and
+    /// [`Self::search_with_threshold`].
+    ///
+    /// `threshold_override == None` uses the searcher's own
+    /// [`VectorIndexSearcher::parallel_threshold`]; `Some(t)` pins the
+    /// threshold for tests.
+    fn search_impl(
+        &self,
+        request: VectorSearchRequest,
+        threshold_override: Option<usize>,
     ) -> Result<VectorSearchResults> {
         use crate::vector::search::searcher::VectorSearchQuery;
 
@@ -555,67 +538,45 @@ impl VectorStore {
             return Ok(VectorSearchResults { hits });
         }
 
-        // Phase 1 of #648 (issue #710): each query is processed independently
-        // into a `Vec<(doc_id, weighted_score)>`, then merged serially. The
-        // per-query phase uses rayon parallel iteration when
-        // `query_vectors.len() >= parallel_threshold`; below that the serial
-        // loop wins because rayon thread-pool dispatch (~1-2 µs) would
-        // dominate the typical 50-200 µs single-query HNSW search.
-        let process_query = |qv: &self::request::QueryVector| -> Result<Vec<(u64, f32)>> {
-            let mut index_request = VectorIndexQuery::new(qv.vector.clone())
-                .top_k(request.params.limit.saturating_mul(2));
-            if let Some(factor) = request.params.rerank_factor {
-                index_request = index_request.rerank_factor(factor);
-            }
-            if let Some(ef) = request.params.ef_search {
-                index_request = index_request.ef_search(ef);
-            }
-
-            let results = searcher.search(&index_request)?;
-            let hits: Vec<(u64, f32)> = results
-                .results
-                .into_iter()
-                .filter(|r| {
-                    if let Some(ref allowed) = request.params.allowed_ids
-                        && !allowed.contains(&r.doc_id)
-                    {
-                        return false;
-                    }
-                    r.similarity >= request.params.min_score
-                })
-                .map(|r| (r.doc_id, r.similarity * qv.weight))
-                .collect();
-            Ok(hits)
+        // Phase 2 of #648 (issue #712): build all B index queries, dispatch
+        // via the `VectorIndexSearcher::search_batch_with_threshold` trait
+        // method, then merge serially. Parallelisation across the B queries
+        // happens inside the trait method's default impl (or any override).
+        let index_queries: Vec<VectorIndexQuery> = query_vectors
+            .iter()
+            .map(|qv| {
+                let mut q = VectorIndexQuery::new(qv.vector.clone())
+                    .top_k(request.params.limit.saturating_mul(2));
+                if let Some(factor) = request.params.rerank_factor {
+                    q = q.rerank_factor(factor);
+                }
+                if let Some(ef) = request.params.ef_search {
+                    q = q.ef_search(ef);
+                }
+                q
+            })
+            .collect();
+        let per_query_results = match threshold_override {
+            Some(t) => searcher.search_batch_with_threshold(&index_queries, t)?,
+            None => searcher.search_batch(&index_queries)?,
         };
 
-        #[cfg(feature = "native")]
-        let per_query_hits: Vec<Vec<(u64, f32)>> = if query_vectors.len() >= parallel_threshold {
-            query_vectors
-                .par_iter()
-                .map(&process_query)
-                .collect::<Result<Vec<_>>>()?
-        } else {
-            query_vectors
-                .iter()
-                .map(&process_query)
-                .collect::<Result<Vec<_>>>()?
-        };
-        #[cfg(not(feature = "native"))]
-        let per_query_hits: Vec<Vec<(u64, f32)>> = {
-            // On non-native targets rayon is unavailable; `parallel_threshold`
-            // is accepted only for API symmetry with the native path.
-            let _ = parallel_threshold;
-            query_vectors
-                .iter()
-                .map(&process_query)
-                .collect::<Result<Vec<_>>>()?
-        };
-
-        // Serial merge by score_mode.
+        // Serial merge by score_mode (applies allowed_ids / min_score filter
+        // and the per-query weight that the trait method intentionally does
+        // not know about).
         let mut all_hits: std::collections::HashMap<u64, f32> = std::collections::HashMap::new();
-        for hits in per_query_hits {
-            for (doc_id, weighted_score) in hits {
-                let entry = all_hits.entry(doc_id).or_insert(0.0);
+        for (qv, results) in query_vectors.iter().zip(per_query_results) {
+            for result in results.results {
+                if let Some(ref allowed) = request.params.allowed_ids
+                    && !allowed.contains(&result.doc_id)
+                {
+                    continue;
+                }
+                if result.similarity < request.params.min_score {
+                    continue;
+                }
+                let weighted_score = result.similarity * qv.weight;
+                let entry = all_hits.entry(result.doc_id).or_insert(0.0);
                 match request.params.score_mode {
                     VectorScoreMode::WeightedSum | VectorScoreMode::LateInteraction => {
                         // WeightedSum: sum of similarity * weight across all query vectors.

@@ -134,10 +134,12 @@ per-query similarity searches in parallel via [rayon][rayon-crate].
 
 Behaviour:
 
-- On native builds (default `native` feature), once `query_vectors.len()`
-  reaches the internal `MULTI_QUERY_PARALLEL_THRESHOLD` (currently `4`), the
-  per-query HNSW / Flat / IVF searches run on rayon's global thread pool.
-  Below that threshold the serial loop wins because rayon's dispatch
+- The parallelisation lives in
+  `VectorIndexSearcher::search_batch`'s default implementation. On native
+  builds (default `native` feature), once `queries.len()` reaches the
+  searcher's `parallel_threshold` (default `4`, overridable per searcher),
+  the per-query HNSW / Flat / IVF searches run on rayon's global thread
+  pool. Below that threshold the serial loop wins because rayon's dispatch
   overhead (~1-2 µs) would otherwise dominate a single 50-200 µs query.
 - On `wasm32` targets the serial path is always used because rayon is
   unavailable.
