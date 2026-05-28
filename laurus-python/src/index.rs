@@ -199,6 +199,70 @@ impl PyIndex {
             .collect()
     }
 
+    /// Execute multiple independent searches in one call.
+    ///
+    /// Each query in `queries` is dispatched in parallel on the underlying
+    /// tokio runtime via `laurus::Engine::search_batch`. Each entry can
+    /// be the same kind of value `search()` accepts: a DSL string, a
+    /// `LexicalQuery` / `VectorQuery` / `VectorTextQuery` object, or a
+    /// `SearchRequest`. The same `limit` and `offset` are applied to
+    /// every query in the batch.
+    ///
+    /// Args:
+    ///     queries: A list of queries to execute. Order is preserved in
+    ///         the output.
+    ///     limit: Maximum number of results to return per query
+    ///         (default 10).
+    ///     offset: Pagination offset applied to each query (default 0).
+    ///
+    /// Returns:
+    ///     A list of lists: `results[i]` is the result list for
+    ///     `queries[i]`. Empty input returns an empty list without
+    ///     invoking the engine.
+    ///
+    /// Issue [#717](https://github.com/mosuka/laurus/issues/717)
+    /// Phase 3b of [#648](https://github.com/mosuka/laurus/issues/648).
+    #[pyo3(signature = (queries, *, limit=10, offset=0))]
+    pub fn search_batch(
+        &self,
+        py: Python,
+        queries: &Bound<PyAny>,
+        limit: usize,
+        offset: usize,
+    ) -> PyResult<Vec<Vec<PySearchResult>>> {
+        let queries_seq = queries.try_iter().map_err(|_| {
+            PyRuntimeError::new_err(
+                "search_batch: expected an iterable of queries (DSL string, Query object, or SearchRequest)",
+            )
+        })?;
+
+        let mut requests = Vec::new();
+        for item in queries_seq {
+            let item = item?;
+            requests.push(build_request_from_py(py, &item, limit, offset)?);
+        }
+
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let engine = self.engine.clone();
+        let batch_results = self
+            .rt
+            .block_on(engine.search_batch(requests))
+            .map_err(laurus_err)?;
+
+        batch_results
+            .into_iter()
+            .map(|per_query_results| {
+                per_query_results
+                    .into_iter()
+                    .map(|r| to_py_search_result(py, r))
+                    .collect::<PyResult<Vec<_>>>()
+            })
+            .collect()
+    }
+
     // ── Schema & stats ────────────────────────────────────────────────────
 
     /// Return index statistics.
