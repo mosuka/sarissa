@@ -310,6 +310,61 @@ impl JsIndex {
         Ok(results.into_iter().map(to_js_search_result).collect())
     }
 
+    /// Execute multiple independent searches in one call.
+    ///
+    /// Each query is dispatched in parallel on the underlying tokio
+    /// runtime via `laurus::Engine::search_batch`. The same `limit`
+    /// and `offset` are applied to every query in the batch.
+    ///
+    /// # Arguments
+    ///
+    /// * `queries` - An array of query DSL strings.
+    /// * `limit` - Maximum number of results per query (default 10).
+    /// * `offset` - Pagination offset applied to each query (default 0).
+    ///
+    /// # Returns
+    ///
+    /// An array of arrays: `results[i]` is the result list for
+    /// `queries[i]`. Empty input returns `[]` without invoking the
+    /// engine.
+    ///
+    /// Issue [#718](https://github.com/mosuka/laurus/issues/718)
+    /// Phase 3c of [#648](https://github.com/mosuka/laurus/issues/648).
+    #[napi]
+    pub async fn search_batch(
+        &self,
+        queries: Vec<String>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<Vec<Vec<JsSearchResult>>> {
+        if queries.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let limit = limit.unwrap_or(10) as usize;
+        let offset = offset.unwrap_or(0) as usize;
+        let requests: Vec<_> = queries
+            .into_iter()
+            .map(|q| build_dsl_request(q, limit, offset))
+            .collect();
+
+        let batch_results = self
+            .engine
+            .search_batch(requests)
+            .await
+            .map_err(laurus_err)?;
+
+        Ok(batch_results
+            .into_iter()
+            .map(|per_query_results| {
+                per_query_results
+                    .into_iter()
+                    .map(to_js_search_result)
+                    .collect()
+            })
+            .collect())
+    }
+
     // ── Stats ─────────────────────────────────────────────────────────────
 
     /// Return index statistics.

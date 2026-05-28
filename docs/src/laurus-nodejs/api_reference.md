@@ -34,6 +34,7 @@ class Index {
 | `searchVector(field, vector, limit?, offset?)` | Search with a pre-computed vector. |
 | `searchVectorText(field, text, limit?, offset?)` | Search with text (auto-embedded). |
 | `searchWithRequest(request)` | Search with a `SearchRequest`. |
+| `searchBatch(queries, limit?, offset?)` | Execute multiple DSL string queries in parallel. `results[i]` corresponds to `queries[i]`. Returns `Promise<Array<Array<JsSearchResult>>>`. Empty input returns `[]`. |
 | `stats()` | Return index statistics (`documentCount`, `vectorFields`). |
 
 All document methods and search methods are async
