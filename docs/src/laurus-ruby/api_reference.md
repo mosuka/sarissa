@@ -25,6 +25,7 @@ Laurus::Index.new(path: nil, schema: nil)
 | `delete_documents(id)` | Delete all versions for the given ID. |
 | `commit` | Flush buffered writes and make all pending changes searchable. |
 | `search(query, limit: 10, offset: 0) -> Array<SearchResult>` | Execute a search query. |
+| `search_batch(queries, limit: 10, offset: 0) -> Array<Array<SearchResult>>` | Execute multiple independent searches in one call. Each query is dispatched in parallel on the underlying tokio runtime. `results[i]` corresponds to `queries[i]`. Empty input returns `[]`. |
 | `stats -> Hash` | Return index statistics (`"document_count"`, `"vector_fields"`). |
 
 ### `search` query argument
@@ -35,6 +36,8 @@ The `query` parameter accepts any of the following:
 - A **lexical query object** (`TermQuery`, `PhraseQuery`, `BooleanQuery`, ...)
 - A **vector query object** (`VectorQuery`, `VectorTextQuery`)
 - A **`SearchRequest`** for full control
+
+The same value kinds are accepted as the elements of `search_batch`'s `queries` Array — DSL strings, query objects, and `SearchRequest` instances may be mixed within a single batch.
 
 ---
 
