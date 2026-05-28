@@ -10,7 +10,7 @@ use crate::search::{build_request_from_rb, to_rb_search_result};
 use laurus::{Engine, EngineStats, Storage, StorageConfig, StorageFactory};
 use magnus::prelude::*;
 use magnus::scan_args::{get_kwargs, scan_args};
-use magnus::{Error, RArray, RHash, RModule, Ruby, Value};
+use magnus::{Error, RArray, RHash, RModule, Ruby, TryConvert, Value};
 
 // ---------------------------------------------------------------------------
 // Index
@@ -214,6 +214,77 @@ impl RbIndex {
         Ok(arr)
     }
 
+    /// Execute multiple independent searches in one call.
+    ///
+    /// Each entry in `queries` is dispatched in parallel on the
+    /// underlying tokio runtime via `laurus::Engine::search_batch`.
+    /// The same `limit:` and `offset:` keyword arguments apply to every
+    /// query in the batch. Each entry accepts the same kinds of values
+    /// as `search`: a DSL string, a lexical / vector query object, or
+    /// a `SearchRequest`.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - Positional and keyword arguments:
+    ///   - `queries`: An Array of queries to execute.
+    ///   - `limit:` (Integer, default 10): Maximum number of results per query.
+    ///   - `offset:` (Integer, default 0): Pagination offset per query.
+    ///
+    /// # Returns
+    ///
+    /// An Array of Arrays: `results[i]` is the result Array for
+    /// `queries[i]`. Empty input returns an empty Array without
+    /// invoking the engine.
+    ///
+    /// Issue [#719](https://github.com/mosuka/laurus/issues/719)
+    /// Phase 3d of [#648](https://github.com/mosuka/laurus/issues/648).
+    fn search_batch(&self, args: &[Value]) -> Result<RArray, Error> {
+        let ruby = Ruby::get().expect("called from Ruby thread");
+        let args = scan_args::<(Value,), (), (), (), RHash, ()>(args)?;
+        let (queries,) = args.required;
+        let kwargs = get_kwargs::<_, (), (Option<usize>, Option<usize>), ()>(
+            args.keywords,
+            &[],
+            &["limit", "offset"],
+        )?;
+        let (limit, offset) = kwargs.optional;
+        let limit = limit.unwrap_or(10);
+        let offset = offset.unwrap_or(0);
+
+        let queries_array: RArray = TryConvert::try_convert(queries).map_err(|_| {
+            Error::new(
+                ruby.exception_arg_error(),
+                "search_batch: expected an Array of queries (DSL string, Query object, or SearchRequest)",
+            )
+        })?;
+
+        if queries_array.is_empty() {
+            return Ok(ruby.ary_new());
+        }
+
+        let mut requests = Vec::with_capacity(queries_array.len());
+        for item in queries_array.into_iter() {
+            requests.push(build_request_from_rb(item, limit, offset)?);
+        }
+
+        let engine = self.engine.clone();
+        let batch_results = self
+            .rt
+            .block_on(engine.search_batch(requests))
+            .map_err(laurus_err)?;
+
+        let outer = ruby.ary_new_capa(batch_results.len());
+        for per_query_results in batch_results {
+            let inner = ruby.ary_new_capa(per_query_results.len());
+            for r in per_query_results {
+                let rb_result = to_rb_search_result(r);
+                inner.push(ruby.into_value(rb_result))?;
+            }
+            outer.push(inner)?;
+        }
+        Ok(outer)
+    }
+
     // ── Schema & stats ────────────────────────────────────────────────────
 
     /// Return index statistics.
@@ -294,6 +365,7 @@ pub fn define(ruby: &Ruby, module: &RModule) -> Result<(), Error> {
     )?;
     class.define_method("commit", magnus::method!(RbIndex::commit, 0))?;
     class.define_method("search", magnus::method!(RbIndex::search, -1))?;
+    class.define_method("search_batch", magnus::method!(RbIndex::search_batch, -1))?;
     class.define_method("stats", magnus::method!(RbIndex::stats, 0))?;
     class.define_method("inspect", magnus::method!(RbIndex::inspect, 0))?;
     class.define_method("to_s", magnus::method!(RbIndex::inspect, 0))?;
