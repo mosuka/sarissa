@@ -25,6 +25,7 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null)
 | `deleteDocuments(string $id): void` | 指定 ID の全バージョンを削除します。 |
 | `commit(): void` | バッファリングされた書き込みをフラッシュし、すべての保留中の変更を検索可能にします。 |
 | `search(mixed $query, int $limit = 10, int $offset = 0): array` | 検索クエリを実行します。`SearchResult` の配列を返します。 |
+| `searchBatch(array $queries, int $limit = 10, int $offset = 0): array` | 独立した複数の検索を 1 回の呼び出しで実行します。各クエリは内部の tokio ランタイム上で並列に dispatch されます。`results[i]` は `queries[i]` に対応し、`SearchResult` の配列の配列を返します。入力が空の配列の場合は `[]` を返します。 |
 | `stats(): array` | インデックス統計（`"documentCount"`、`"vectorFields"`）を返します。 |
 
 ### `search` の query 引数
@@ -35,6 +36,8 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null)
 - **Lexical クエリオブジェクト**（`TermQuery`、`PhraseQuery`、`BooleanQuery` など）
 - **Vector クエリオブジェクト**（`VectorQuery`、`VectorTextQuery`）
 - **`SearchRequest`**（完全な制御が必要な場合）
+
+`searchBatch` の `$queries` 配列の各要素も同じ種類の値を受け付けます。DSL 文字列・クエリオブジェクト・`SearchRequest` を 1 つのバッチ内で混在させることもできます。
 
 ---
 

@@ -192,6 +192,72 @@ impl PhpIndex {
         Ok(results.into_iter().map(to_php_search_result).collect())
     }
 
+    /// Execute multiple independent searches in one call.
+    ///
+    /// Each entry of `queries` is dispatched in parallel on the
+    /// underlying tokio runtime via `laurus::Engine::search_batch`.
+    /// The same `limit` and `offset` are applied to every query in the
+    /// batch. Each entry accepts the same kinds of values as `search`:
+    /// a DSL string, a lexical / vector query object, or a
+    /// `SearchRequest`.
+    ///
+    /// # Arguments
+    ///
+    /// * `queries` - An array of queries to execute.
+    /// * `limit` - Maximum number of results per query (default: 10).
+    /// * `offset` - Pagination offset per query (default: 0).
+    ///
+    /// # Returns
+    ///
+    /// An array of arrays: `results[i]` is the result array for
+    /// `queries[i]`. Empty input returns an empty array without
+    /// invoking the engine.
+    ///
+    /// Issue [#720](https://github.com/mosuka/laurus/issues/720)
+    /// Phase 3e of [#648](https://github.com/mosuka/laurus/issues/648).
+    #[php(defaults(limit = 10, offset = 0))]
+    pub fn search_batch(
+        &self,
+        queries: &Zval,
+        limit: i64,
+        offset: i64,
+    ) -> PhpResult<Vec<Vec<PhpSearchResult>>> {
+        let arr = queries.array().ok_or_else(|| {
+            PhpException::from(
+                "search_batch: expected an array of queries (DSL string, Query object, or SearchRequest)".to_string(),
+            )
+        })?;
+
+        if arr.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut requests = Vec::with_capacity(arr.len());
+        for (_, value) in arr.iter() {
+            requests.push(build_request_from_php(
+                value,
+                limit as usize,
+                offset as usize,
+            )?);
+        }
+
+        let engine = self.engine.clone();
+        let batch_results = self
+            .rt
+            .block_on(engine.search_batch(requests))
+            .map_err(laurus_err)?;
+
+        Ok(batch_results
+            .into_iter()
+            .map(|per_query_results| {
+                per_query_results
+                    .into_iter()
+                    .map(to_php_search_result)
+                    .collect()
+            })
+            .collect())
+    }
+
     // ── Schema & stats ────────────────────────────────────────────────────
 
     /// Return index statistics as an associative array.
