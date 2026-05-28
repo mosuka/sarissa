@@ -34,6 +34,7 @@ class Index {
 | `searchVector(field, vector, limit?, offset?)` | 事前計算ベクトルで検索。 |
 | `searchVectorText(field, text, limit?, offset?)` | テキストを自動埋め込みして検索。 |
 | `searchWithRequest(request)` | `SearchRequest` で検索。 |
+| `searchBatch(queries, limit?, offset?)` | 複数の DSL 文字列クエリを並列実行します。`results[i]` は `queries[i]` に対応。戻り値は `Promise<Array<Array<JsSearchResult>>>`。空入力の場合は `[]` を返します。 |
 | `stats()` | インデックス統計（`documentCount`、`vectorFields`）を返す。 |
 
 ドキュメント操作と検索メソッドはすべて非同期で Promise を返します。
