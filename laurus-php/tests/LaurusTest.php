@@ -463,4 +463,96 @@ class LaurusTest extends TestCase
         $this->assertStringContainsString("SearchResult(", $str);
         $this->assertStringContainsString("doc1", $str);
     }
+
+    // ── searchBatch (Phase 3e of #648, issue #720) ───────────────────────
+
+    /**
+     * Return a fresh in-memory index with three indexed documents — used
+     * specifically by the searchBatch tests to provide three distinct
+     * query targets.
+     */
+    private function createBatchIndex(): Laurus\Index
+    {
+        $schema = new Laurus\Schema();
+        $schema->addTextField("title");
+        $schema->addTextField("body");
+        $idx = new Laurus\Index(null, $schema);
+        $idx->putDocument("doc1", ["title" => "Introduction to Rust", "body" => "Systems programming language."]);
+        $idx->putDocument("doc2", ["title" => "Python for Data Science", "body" => "Data analysis with Python."]);
+        $idx->putDocument("doc3", ["title" => "Distributed Systems", "body" => "Engineering at scale."]);
+        $idx->commit();
+        return $idx;
+    }
+
+    public function testSearchBatchEmpty(): void
+    {
+        $idx = $this->createBatchIndex();
+        $results = $idx->searchBatch([]);
+        $this->assertSame([], $results);
+    }
+
+    public function testSearchBatchSingleQueryMatchesSearch(): void
+    {
+        $idx = $this->createBatchIndex();
+        $serial = $idx->search("title:rust", 5);
+        $batch = $idx->searchBatch(["title:rust"], 5);
+
+        $this->assertCount(1, $batch);
+        $this->assertCount(count($serial), $batch[0]);
+        foreach ($serial as $i => $s) {
+            $this->assertEquals($s->getId(), $batch[0][$i]->getId());
+        }
+    }
+
+    public function testSearchBatchMultiQueryPreservesOrder(): void
+    {
+        $idx = $this->createBatchIndex();
+        $queries = ["title:rust", "body:python", "title:distributed"];
+        $expectedTopIds = ["doc1", "doc2", "doc3"];
+
+        $batch = $idx->searchBatch($queries, 5);
+        $this->assertCount(count($queries), $batch);
+
+        foreach ($queries as $i => $q) {
+            $this->assertGreaterThanOrEqual(1, count($batch[$i]), "expected at least 1 hit for $q");
+            $this->assertEquals($expectedTopIds[$i], $batch[$i][0]->getId());
+        }
+    }
+
+    public function testSearchBatchWithQueryObjects(): void
+    {
+        $idx = $this->createBatchIndex();
+        $queries = [
+            new Laurus\TermQuery("title", "rust"),
+            new Laurus\TermQuery("body", "python"),
+        ];
+        $batch = $idx->searchBatch($queries, 5);
+
+        $this->assertCount(2, $batch);
+        $this->assertEquals("doc1", $batch[0][0]->getId());
+        $this->assertEquals("doc2", $batch[1][0]->getId());
+    }
+
+    public function testSearchBatchNoMatchReturnsEmptyInnerArray(): void
+    {
+        $idx = $this->createBatchIndex();
+        $queries = ["title:rust", "title:nonexistent_xyz"];
+        $batch = $idx->searchBatch($queries, 5);
+
+        $this->assertCount(2, $batch);
+        $this->assertGreaterThanOrEqual(1, count($batch[0]));
+        $this->assertSame([], $batch[1]);
+    }
+
+    public function testSearchBatchLimitPerQuery(): void
+    {
+        $idx = $this->createBatchIndex();
+        $queries = ["body:programming OR body:data", "body:programming OR body:data"];
+        $batch = $idx->searchBatch($queries, 1);
+
+        $this->assertCount(2, $batch);
+        foreach ($batch as $results) {
+            $this->assertLessThanOrEqual(1, count($results));
+        }
+    }
 }

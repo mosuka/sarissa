@@ -25,6 +25,7 @@ new \Laurus\Index(?string $path = null, ?Schema $schema = null)
 | `deleteDocuments(string $id): void` | Delete all versions for the given ID. |
 | `commit(): void` | Flush buffered writes and make all pending changes searchable. |
 | `search(mixed $query, int $limit = 10, int $offset = 0): array` | Execute a search query. Returns an array of `SearchResult`. |
+| `searchBatch(array $queries, int $limit = 10, int $offset = 0): array` | Execute multiple independent searches in one call. Each query is dispatched in parallel on the underlying tokio runtime. `results[i]` corresponds to `queries[i]`. Returns an array of arrays of `SearchResult`. Empty input returns `[]`. |
 | `stats(): array` | Return index statistics (`"documentCount"`, `"vectorFields"`). |
 
 ### `search` query argument
@@ -35,6 +36,8 @@ The `$query` parameter accepts any of the following:
 - A **lexical query object** (`TermQuery`, `PhraseQuery`, `BooleanQuery`, ...)
 - A **vector query object** (`VectorQuery`, `VectorTextQuery`)
 - A **`SearchRequest`** for full control
+
+The same value kinds are accepted as the elements of `searchBatch`'s `$queries` array — DSL strings, query objects, and `SearchRequest` instances may be mixed within a single batch.
 
 ---
 
