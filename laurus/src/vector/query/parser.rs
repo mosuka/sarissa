@@ -12,7 +12,6 @@ use pest_derive::Parser;
 
 use crate::data::DataValue;
 use crate::embedding::embedder::{EmbedInput, Embedder};
-use crate::embedding::per_field::PerFieldEmbedder;
 use crate::error::{LaurusError, Result};
 use crate::vector::core::vector::Vector;
 use crate::vector::store::request::{
@@ -55,6 +54,10 @@ struct VectorQueryStringParser;
 pub struct VectorQueryParser {
     embedder: Arc<dyn Embedder>,
     default_fields: Vec<String>,
+    /// Optional query-time embedding cache, shared with the engine so DSL
+    /// queries reuse embeddings produced by the direct payload path
+    /// (Issue #678). `None` disables caching.
+    embedding_cache: Option<Arc<crate::embedding::cache::EmbeddingCache>>,
 }
 
 impl VectorQueryParser {
@@ -66,7 +69,21 @@ impl VectorQueryParser {
         Self {
             embedder,
             default_fields: Vec::new(),
+            embedding_cache: None,
         }
+    }
+
+    /// Attach a shared query-time embedding cache (Issue #678).
+    ///
+    /// When set, identical query payloads embedded by the same field /
+    /// embedder are produced only once. The cache is normally shared with
+    /// the owning [`Engine`](crate::engine::Engine).
+    pub fn with_embedding_cache(
+        mut self,
+        cache: Arc<crate::embedding::cache::EmbeddingCache>,
+    ) -> Self {
+        self.embedding_cache = Some(cache);
+        self
     }
 
     /// Set a single default field for queries without explicit field prefix.
@@ -132,13 +149,17 @@ impl VectorQueryParser {
         })
     }
 
-    /// Embed input for a specific field, using PerFieldEmbedder if available.
+    /// Embed input for a specific field, consulting the shared embedding
+    /// cache when configured (Issue #678) and using `PerFieldEmbedder`
+    /// routing when the embedder supports it.
     async fn embed_for_field(&self, field: &str, input: &EmbedInput<'_>) -> Result<Vector> {
-        if let Some(pf) = self.embedder.as_any().downcast_ref::<PerFieldEmbedder>() {
-            pf.embed_field(field, input).await
-        } else {
-            self.embedder.embed(input).await
-        }
+        crate::embedding::cache::embed_with_cache(
+            self.embedding_cache.as_ref(),
+            &self.embedder,
+            field,
+            input,
+        )
+        .await
     }
 
     /// Parse a single vector clause (e.g., `content:"cute kitten"^0.8` or `content:python`).
