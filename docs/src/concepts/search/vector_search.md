@@ -166,7 +166,24 @@ text_vec:"cute kitten"^1.0 image_vec:"fluffy cat"^0.5
 
 This means text similarity counts twice as much as image similarity.
 
-## Filtered Vector Search
+### Field Routing
+
+In a multi-field schema, each vector field has its own HNSW graph. By
+default a query searches every vector field; restricting it to named
+fields skips the others' graph work entirely.
+
+Two routing inputs are honored, in priority order:
+
+1. **Per-query** — `QueryVector.fields`. The DSL parser sets this from the
+   field a clause names, so `image_vec:"fluffy cat"` only searches
+   `image_vec`.
+2. **Request-level** — `VectorSearchParams.fields`, a list of selectors:
+   - `Exact("image_vec")` — match a field by exact name.
+   - `Prefix("image_")` — match every field whose name starts with the
+     prefix (resolved against the index's field names).
+
+When neither is set, all fields are searched (the default). A query routed
+to a field never returns documents that lack a vector in that field.
 
 You can apply lexical filters to narrow the vector search results:
 
