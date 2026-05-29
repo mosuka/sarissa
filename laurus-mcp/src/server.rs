@@ -21,7 +21,7 @@ use tracing::info;
 use laurus_server::proto::laurus::v1::{
     AddDocumentRequest, AddFieldRequest, CommitRequest, CreateIndexRequest, DeleteDocumentsRequest,
     DeleteFieldRequest, GetDocumentsRequest, GetIndexRequest, GetSchemaRequest, PutDocumentRequest,
-    SearchRequest, document_service_client::DocumentServiceClient,
+    SearchBatchRequest, SearchRequest, document_service_client::DocumentServiceClient,
     index_service_client::IndexServiceClient, search_service_client::SearchServiceClient,
 };
 
@@ -152,6 +152,21 @@ struct SearchParams {
     ///
     /// Example: `{"title": 2.0, "body": 1.0}`
     field_boosts: Option<String>,
+}
+
+/// Parameters for the `search_batch` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SearchBatchParams {
+    /// Array of query strings, each in the laurus unified query DSL (same
+    /// syntax as the `search` tool's `query`). All queries are executed in
+    /// parallel on the server in a single round trip.
+    queries: Vec<String>,
+
+    /// Maximum number of results to return per query. Defaults to `10`.
+    limit: Option<u32>,
+
+    /// Number of results to skip per query for pagination. Defaults to `0`.
+    offset: Option<u32>,
 }
 
 /// Parameters for the `add_field` tool.
@@ -712,6 +727,81 @@ impl LaurusMcpServer {
                 )]))
             }
             Err(e) => Ok(Self::tool_error(format!("Search failed: {e}"))),
+        }
+    }
+
+    #[tool(
+        description = "Execute multiple independent searches in a single round trip. Takes an array of query strings (each in the laurus unified query DSL, same syntax as the search tool) and runs them in parallel on the server. The same limit and offset apply to every query. Returns JSON with a `batch` array; batch[i] holds the total count and results (id, score, document) for queries[i], in input order. Useful for agents issuing several sub-queries per turn."
+    )]
+    async fn search_batch(
+        &self,
+        Parameters(params): Parameters<SearchBatchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let channel = match self.channel.read().await.clone() {
+            Some(ch) => ch,
+            None => {
+                return Ok(Self::tool_error(
+                    "Not connected. Call the connect tool first.",
+                ));
+            }
+        };
+
+        if params.queries.is_empty() {
+            let output = json!({ "batch": [] });
+            return Ok(CallToolResult::success(vec![Content::text(
+                output.to_string(),
+            )]));
+        }
+
+        let limit = params.limit.unwrap_or(10);
+        let offset = params.offset.unwrap_or(0);
+        let queries: Vec<SearchRequest> = params
+            .queries
+            .into_iter()
+            .map(|query| SearchRequest {
+                query,
+                limit,
+                offset,
+                ..Default::default()
+            })
+            .collect();
+
+        let request = SearchBatchRequest { queries };
+
+        match SearchServiceClient::new(channel)
+            .search_batch(request)
+            .await
+        {
+            Ok(resp) => {
+                let r = resp.into_inner();
+                let batch: Vec<Value> = r
+                    .results
+                    .iter()
+                    .map(|per_query| {
+                        let json_results: Vec<Value> = per_query
+                            .results
+                            .iter()
+                            .map(|result| {
+                                json!({
+                                    "id": result.id,
+                                    "score": result.score,
+                                    "document": result.document.as_ref().map(convert::document_to_json),
+                                })
+                            })
+                            .collect();
+                        json!({
+                            "total": per_query.total_hits,
+                            "results": json_results,
+                        })
+                    })
+                    .collect();
+
+                let output = json!({ "batch": batch });
+                Ok(CallToolResult::success(vec![Content::text(
+                    output.to_string(),
+                )]))
+            }
+            Err(e) => Ok(Self::tool_error(format!("Batch search failed: {e}"))),
         }
     }
 }

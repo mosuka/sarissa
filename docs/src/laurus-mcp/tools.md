@@ -382,6 +382,46 @@ Search documents using the laurus unified query DSL. Supports lexical search, ve
 
 ---
 
+## search_batch
+
+Execute multiple independent searches in a single round trip. All queries
+run in parallel on the server; the same `limit` and `offset` apply to every
+query. Useful for agents issuing several sub-queries per turn.
+
+### Parameters
+
+| Name | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `queries` | array of string | Yes | Query strings, each in the laurus unified query DSL (same syntax as `search`) |
+| `limit` | integer | No | Maximum results per query (default: 10) |
+| `offset` | integer | No | Results to skip per query for pagination (default: 0) |
+
+### Result
+
+The `batch` array preserves input order: `batch[i]` is the result set for
+`queries[i]`.
+
+```json
+{
+  "batch": [
+    {
+      "total": 1,
+      "results": [
+        { "id": "doc-1", "score": 3.14, "document": { "title": "Hello World" } }
+      ]
+    },
+    {
+      "total": 1,
+      "results": [
+        { "id": "doc-2", "score": 2.71, "document": { "title": "Vector Search" } }
+      ]
+    }
+  ]
+}
+```
+
+---
+
 ## Typical Workflow
 
 ```text
