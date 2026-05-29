@@ -73,13 +73,28 @@ async fn build_engine() -> Engine {
 
 /// Boot the gRPC `SearchService` on an ephemeral loopback port and return
 /// the bound address.
+///
+/// Each accepted connection has `TCP_NODELAY` enabled. tonic sets this
+/// automatically on the sockets it accepts via `serve(addr)`, but
+/// `serve_with_incoming` hands tonic a caller-supplied stream, so the
+/// option must be applied here. Without it, small HTTP/2 frames hit
+/// Nagle's algorithm + delayed-ACK and every RPC pays a ~40ms penalty,
+/// which would otherwise dwarf the actual per-query work and distort the
+/// batching comparison (issue #732).
 async fn start_server(engine: Arc<RwLock<Option<Engine>>>) -> SocketAddr {
+    use tokio_stream::StreamExt;
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind");
     let addr = listener.local_addr().expect("local_addr");
     let svc = SearchService { engine };
-    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener).map(|conn| {
+        if let Ok(ref stream) = conn {
+            let _ = stream.set_nodelay(true);
+        }
+        conn
+    });
     tokio::spawn(async move {
         Server::builder()
             .add_service(SearchServiceServer::new(svc))
