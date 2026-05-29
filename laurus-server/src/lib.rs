@@ -16,7 +16,7 @@ mod context;
 pub mod convert;
 pub mod gateway;
 pub mod server;
-mod service;
+pub mod service;
 
 /// Generated protobuf/gRPC code.
 pub mod proto {

@@ -2696,6 +2696,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "criterion",
  "laurus",
  "prost",
  "serde",
