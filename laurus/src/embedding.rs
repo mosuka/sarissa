@@ -10,6 +10,10 @@ pub mod embedder;
 // Per-field embedder support (analogous to PerFieldAnalyzer)
 pub mod per_field;
 
+// Query-time embedding cache shared by the engine and the vector query
+// parser (Issue #678).
+pub mod cache;
+
 // Embedder for pre-computed vectors (analogous to NoOpAnalyzer)
 pub mod precomputed;
 

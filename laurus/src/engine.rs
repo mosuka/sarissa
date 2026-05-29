@@ -5,6 +5,7 @@ pub mod type_coercion;
 pub mod type_inference;
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -14,6 +15,7 @@ use crate::analysis::analyzer::keyword::KeywordAnalyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::data::Document;
+use crate::embedding::cache::{EmbeddingCache, embed_with_cache};
 use crate::embedding::embedder::Embedder;
 use crate::error::Result;
 use crate::lexical::store::LexicalStore;
@@ -54,6 +56,14 @@ pub struct Engine {
     /// per-field analyzer references. See
     /// [`EngineBuilder::register_runtime_analyzer`].
     runtime_analyzers: HashMap<String, Arc<dyn Analyzer>>,
+    /// Optional LRU cache for query-time embeddings (Issue #678).
+    ///
+    /// `None` when the cache is disabled (the default); enabled via
+    /// [`EngineBuilder::embedding_cache_capacity`]. Shared (via `Arc`) with
+    /// the [`VectorQueryParser`](crate::vector::query::parser::VectorQueryParser)
+    /// built in [`Self::unified_query_parser`], so both the direct
+    /// `Payloads` path and the DSL path hit the same cache.
+    embedding_cache: Option<Arc<EmbeddingCache>>,
 }
 
 use crate::engine::search::{FusionAlgorithm, SearchResult};
@@ -566,6 +576,11 @@ impl Engine {
         let mut vector_parser = crate::vector::query::parser::VectorQueryParser::new(embedder);
         if !vector_fields.is_empty() {
             vector_parser = vector_parser.with_default_fields(vector_fields);
+        }
+        if let Some(cache) = &self.embedding_cache {
+            // Share the engine's cache so DSL queries hit the same entries
+            // as the direct Payloads path (Issue #678).
+            vector_parser = vector_parser.with_embedding_cache(cache.clone());
         }
 
         Ok(
@@ -1299,7 +1314,6 @@ impl Engine {
             {
                 use crate::data::DataValue;
                 use crate::embedding::embedder::EmbedInput;
-                use crate::embedding::per_field::PerFieldEmbedder;
                 use crate::vector::store::request::QueryVector;
 
                 let embedder = self.vector.embedder();
@@ -1318,12 +1332,13 @@ impl Engine {
                     } else {
                         unreachable!()
                     };
-                    let vector =
-                        if let Some(pf) = embedder.as_any().downcast_ref::<PerFieldEmbedder>() {
-                            pf.embed_field(&field_name, &input).await?
-                        } else {
-                            embedder.embed(&input).await?
-                        };
+                    let vector = embed_with_cache(
+                        self.embedding_cache.as_ref(),
+                        &embedder,
+                        &field_name,
+                        &input,
+                    )
+                    .await?;
                     query_vectors.push(QueryVector {
                         vector,
                         weight: payload.weight,
@@ -1594,6 +1609,7 @@ pub struct EngineBuilder {
     analyzer: Option<Arc<dyn Analyzer>>,
     embedder: Option<Arc<dyn Embedder>>,
     runtime_analyzers: HashMap<String, Arc<dyn Analyzer>>,
+    embedding_cache_capacity: Option<usize>,
 }
 
 impl EngineBuilder {
@@ -1605,6 +1621,7 @@ impl EngineBuilder {
             analyzer: None,
             embedder: None,
             runtime_analyzers: HashMap::new(),
+            embedding_cache_capacity: None,
         }
     }
 
@@ -1655,6 +1672,22 @@ impl EngineBuilder {
         self
     }
 
+    /// Enable an LRU cache for query-time embeddings, holding up to
+    /// `capacity` entries (Issue #678).
+    ///
+    /// When set, identical query payloads embedded by the same field /
+    /// embedder are produced only once and reused on subsequent searches,
+    /// avoiding repeated model inference (or network round trips for remote
+    /// embedders). Disabled by default; `capacity = 0` is treated as
+    /// disabled.
+    ///
+    /// The cache only affects query-time embedding in [`Engine::search`];
+    /// document-ingestion embedding is unaffected.
+    pub fn embedding_cache_capacity(mut self, capacity: usize) -> Self {
+        self.embedding_cache_capacity = Some(capacity);
+        self
+    }
+
     /// Build the [`Engine`].
     ///
     /// Creates the lexical store, vector store, and document log (WAL),
@@ -1688,12 +1721,18 @@ impl EngineBuilder {
             document_storage,
         )?);
 
+        let embedding_cache = self
+            .embedding_cache_capacity
+            .and_then(NonZeroUsize::new)
+            .map(|cap| Arc::new(EmbeddingCache::new(cap)));
+
         let engine = Engine {
             schema: RwLock::new(self.schema),
             lexical,
             vector,
             log,
             runtime_analyzers: self.runtime_analyzers,
+            embedding_cache,
         };
 
         engine.recover().await?;

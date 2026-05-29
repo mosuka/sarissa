@@ -38,8 +38,9 @@ let schema = Schema::builder()
     .build();
 
 let engine = Engine::builder(storage, schema)
-    .analyzer(my_analyzer)    // オプション: カスタムテキストAnalyzer
-    .embedder(my_embedder)    // オプション: ベクトルEmbedder
+    .analyzer(my_analyzer)            // オプション: カスタムテキストAnalyzer
+    .embedder(my_embedder)            // オプション: ベクトルEmbedder
+    .embedding_cache_capacity(1024)   // オプション: クエリEmbeddingをキャッシュ
     .build()
     .await?;
 ```
@@ -50,7 +51,23 @@ let engine = Engine::builder(storage, schema)
 | :--- | :--- | :--- | :--- |
 | `analyzer()` | `Arc<dyn Analyzer>` | `StandardAnalyzer` | Lexicalフィールド用のテキスト解析パイプライン |
 | `embedder()` | `Arc<dyn Embedder>` | None | Vectorフィールド用のEmbeddingモデル |
+| `embedding_cache_capacity()` | `usize` | None（無効） | 最大 N 件のクエリEmbeddingをLRUキャッシュする |
 | `build()` | -- | -- | Engineを構築（非同期） |
+
+### クエリEmbeddingキャッシュ
+
+`embedding_cache_capacity(n)` は **クエリ時** のEmbeddingに対するLRU
+キャッシュを有効化します（ドキュメント取り込み時のEmbeddingは対象外）。
+Vector / hybrid 検索でクエリペイロードをEmbeddingする際、結果を
+`(field, embedder 名, payload ハッシュ)` をキーにキャッシュし、以降の同一
+クエリで再利用します。DSL パス（例: `content:"cute kitten"`）と事前
+Embedding 済みの `Payloads` パスは同じキャッシュを共有します。
+
+これにより、繰り返しクエリのワークロード（オートコンプリート、ダッシュ
+ボード更新、A/B 評価など）で、ローカル Embedder のモデル推論やリモート
+Embedder のネットワークラウンドトリップを回避できます。デフォルトでは
+無効です。識別可能なクエリの working set に応じてメモリを抑える容量を
+指定してください。
 
 ### Buildライフサイクル
 

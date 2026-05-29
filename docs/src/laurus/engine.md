@@ -38,8 +38,9 @@ let schema = Schema::builder()
     .build();
 
 let engine = Engine::builder(storage, schema)
-    .analyzer(my_analyzer)    // optional: custom text analyzer
-    .embedder(my_embedder)    // optional: vector embedder
+    .analyzer(my_analyzer)            // optional: custom text analyzer
+    .embedder(my_embedder)            // optional: vector embedder
+    .embedding_cache_capacity(1024)   // optional: cache query embeddings
     .build()
     .await?;
 ```
@@ -50,7 +51,22 @@ let engine = Engine::builder(storage, schema)
 | :--- | :--- | :--- | :--- |
 | `analyzer()` | `Arc<dyn Analyzer>` | `StandardAnalyzer` | Text analysis pipeline for lexical fields |
 | `embedder()` | `Arc<dyn Embedder>` | None | Embedding model for vector fields |
+| `embedding_cache_capacity()` | `usize` | None (disabled) | Enable an LRU cache of up to N query embeddings |
 | `build()` | -- | -- | Create the Engine (async) |
+
+### Query embedding cache
+
+`embedding_cache_capacity(n)` enables an LRU cache for **query-time**
+embeddings (document-ingestion embedding is unaffected). When a vector or
+hybrid search embeds a query payload, the result is cached keyed by
+`(field, embedder name, payload hash)` and reused on subsequent identical
+queries — both the DSL path (e.g. `content:"cute kitten"`) and the
+pre-embedded `Payloads` path share the same cache.
+
+This avoids repeated model inference for local embedders, or network round
+trips for remote ones, on repeated-query workloads (autocomplete, dashboard
+refreshes, A/B evaluation). It is disabled by default; pick a capacity that
+bounds memory to your working set of distinct queries.
 
 ### Build Lifecycle
 
