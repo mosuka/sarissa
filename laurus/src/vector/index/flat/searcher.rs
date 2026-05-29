@@ -27,6 +27,11 @@ impl VectorIndexSearcher for FlatVectorSearcher {
     fn search(&self, request: &VectorIndexQuery) -> Result<VectorIndexQueryResults> {
         use crate::util::time::Timer;
 
+        // `request.filter` (Issue #645 filter-aware traversal) is intentionally
+        // ignored here: the flat scan is exhaustive, so the store's post-filter
+        // already discards non-matching docs without losing recall. Honouring
+        // it inline is a follow-up optimisation, not a correctness need.
+
         // Issue #481 Stage 2 (rerank) -- API surface only in Stage 1.
         if request.params.rerank_factor.is_some() {
             return Err(crate::error::LaurusError::NotImplemented(

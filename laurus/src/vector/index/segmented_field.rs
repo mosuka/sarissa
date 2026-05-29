@@ -433,6 +433,11 @@ impl SegmentedVectorField {
                 query: Vector::new(query.to_vec()),
                 params,
                 field_name: Some(self.name.clone()),
+                // SegmentedVectorField is not on the VectorStore::search path
+                // and does not yet thread the filter through (Issue #645 is
+                // scoped to the main HNSW path). Filtering for this path stays
+                // a post-filter concern.
+                filter: None,
             };
 
             let results = searcher.search(&request)?;

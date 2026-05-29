@@ -117,6 +117,11 @@ impl VectorIndexSearcher for IvfSearcher {
     fn search(&self, request: &VectorIndexQuery) -> Result<VectorIndexQueryResults> {
         use crate::util::time::Timer;
 
+        // `request.filter` (Issue #645 filter-aware traversal) is intentionally
+        // ignored here: the IVF scan over the probed clusters is exhaustive, so
+        // the store's post-filter discards non-matching docs without recall
+        // loss. Honouring it inline is a follow-up optimisation.
+
         // Issue #481 Stage 2 (rerank) -- API surface only in Stage 1.
         if request.params.rerank_factor.is_some() {
             return Err(crate::error::LaurusError::NotImplemented(

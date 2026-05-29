@@ -27,6 +27,17 @@ use bit_vec::BitVec;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
+/// Upper bound on visited nodes for a filter-aware traversal, expressed as
+/// a multiple of `max(ef_search, top_k)` (Issue #645).
+///
+/// A filtered search keeps only matching documents in its result heap, so
+/// when the filter is selective the result heap fills slowly and the search
+/// would otherwise walk most of the graph chasing matches. This cap bounds
+/// that worst case, trading recall for a latency ceiling; the unfiltered
+/// path is unaffected (it uses no cap). The chosen factor of `16` lets a
+/// default `ef_search = 50` visit ~800 nodes before giving up.
+const MAX_VISIT_FACTOR: usize = 16;
+
 /// Per-search state for the quantized hot path (Issue #481 Stage 1 +
 /// Stage 3).
 ///
@@ -571,50 +582,137 @@ impl HnswSearcher {
         let mut visited = BitVec::from_elem(graph.max_doc_id() as usize + 1, false);
         visited.set(curr_obj as usize, true);
 
-        while let Some(curr) = candidates.pop() {
-            if let Some(furthest) = found.peek()
-                && curr.distance > furthest.distance
-                && found.len() >= ef_search
-            {
-                break;
-            }
+        // Filter-aware traversal (Issue #645). When a filter is present the
+        // result heap (`found`) admits only matching documents, while the
+        // frontier (`candidates`) still expands through every neighbour so the
+        // search can cross non-matching regions to reach matching clusters — a
+        // plain post-filter cannot, which is why a selective filter could
+        // otherwise return far fewer hits than exist (or none). `max_visits`
+        // bounds the worst case where matches are rare.
+        //
+        // The two paths are split deliberately: the unfiltered `else` branch
+        // is byte-for-byte the pre-#645 loop, so adding filter support cannot
+        // change the codegen (and thus the latency) of the common, unfiltered
+        // search — the dominant production case. The filtered branch carries
+        // the extra per-neighbour bookkeeping (`n_visited`, the allow-set
+        // probe) that the unfiltered path must not pay for.
+        if let Some(filter) = request.filter.as_deref() {
+            let max_visits = ef_search
+                .max(request.params.top_k)
+                .saturating_mul(MAX_VISIT_FACTOR)
+                .min(graph.max_doc_id() as usize + 1);
+            let mut n_visited = 1usize; // entry point already marked visited
 
-            if let Some(neighbors) = graph.get_neighbors(curr.id, 0) {
-                // Pass 1: issue prefetch hints for unvisited neighbors.
-                // O(1) per neighbor (u64 HashMap lookup, no allocation).
-                if let Some(idx) = field_prefetch {
+            while let Some(curr) = candidates.pop() {
+                if let Some(furthest) = found.peek()
+                    && curr.distance > furthest.distance
+                    && found.len() >= ef_search
+                {
+                    break;
+                }
+                if n_visited >= max_visits {
+                    break;
+                }
+
+                if let Some(neighbors) = graph.get_neighbors(curr.id, 0) {
+                    if let Some(idx) = field_prefetch {
+                        for &neighbor_id in neighbors {
+                            if !visited.get(neighbor_id as usize).unwrap_or(false) {
+                                Self::prefetch_neighbor(idx, neighbor_id, prefetch_n_bytes);
+                            }
+                        }
+                    }
+
                     for &neighbor_id in neighbors {
-                        if !visited.get(neighbor_id as usize).unwrap_or(false) {
-                            Self::prefetch_neighbor(idx, neighbor_id, prefetch_n_bytes);
+                        let nbr_idx = neighbor_id as usize;
+                        if visited.get(nbr_idx).unwrap_or(false) {
+                            continue;
+                        }
+                        visited.set(nbr_idx, true);
+                        n_visited += 1;
+
+                        let d = self.calc_dist(
+                            reader,
+                            query,
+                            quant_ctx.as_ref(),
+                            neighbor_id,
+                            field_name,
+                        )?;
+                        let furthest_dist = found.peek().map(|c| c.distance).unwrap_or(f32::MAX);
+
+                        if d < furthest_dist || found.len() < ef_search {
+                            // Frontier expands through every neighbour, even
+                            // ones the filter rejects, to preserve connectivity.
+                            candidates.push(Candidate {
+                                id: neighbor_id,
+                                distance: d,
+                            });
+                            // Result heap keeps only filter-matching docs.
+                            if filter.contains(&neighbor_id) {
+                                found.push(ResultCandidate {
+                                    id: neighbor_id,
+                                    distance: d,
+                                });
+                                if found.len() > ef_search {
+                                    found.pop();
+                                }
+                            }
                         }
                     }
                 }
+            }
+        } else {
+            // Unfiltered path — unchanged from before #645.
+            while let Some(curr) = candidates.pop() {
+                if let Some(furthest) = found.peek()
+                    && curr.distance > furthest.distance
+                    && found.len() >= ef_search
+                {
+                    break;
+                }
 
-                // Pass 2: compute distances for unvisited neighbors (data loading
-                // overlaps with the prefetch hints issued above).
-                for &neighbor_id in neighbors {
-                    let nbr_idx = neighbor_id as usize;
-                    if visited.get(nbr_idx).unwrap_or(false) {
-                        continue;
+                if let Some(neighbors) = graph.get_neighbors(curr.id, 0) {
+                    // Pass 1: issue prefetch hints for unvisited neighbors.
+                    // O(1) per neighbor (u64 HashMap lookup, no allocation).
+                    if let Some(idx) = field_prefetch {
+                        for &neighbor_id in neighbors {
+                            if !visited.get(neighbor_id as usize).unwrap_or(false) {
+                                Self::prefetch_neighbor(idx, neighbor_id, prefetch_n_bytes);
+                            }
+                        }
                     }
-                    visited.set(nbr_idx, true);
 
-                    let d =
-                        self.calc_dist(reader, query, quant_ctx.as_ref(), neighbor_id, field_name)?;
-                    let furthest_dist = found.peek().map(|c| c.distance).unwrap_or(f32::MAX);
+                    // Pass 2: compute distances for unvisited neighbors (data
+                    // loading overlaps with the prefetch hints issued above).
+                    for &neighbor_id in neighbors {
+                        let nbr_idx = neighbor_id as usize;
+                        if visited.get(nbr_idx).unwrap_or(false) {
+                            continue;
+                        }
+                        visited.set(nbr_idx, true);
 
-                    if d < furthest_dist || found.len() < ef_search {
-                        candidates.push(Candidate {
-                            id: neighbor_id,
-                            distance: d,
-                        });
-                        found.push(ResultCandidate {
-                            id: neighbor_id,
-                            distance: d,
-                        });
+                        let d = self.calc_dist(
+                            reader,
+                            query,
+                            quant_ctx.as_ref(),
+                            neighbor_id,
+                            field_name,
+                        )?;
+                        let furthest_dist = found.peek().map(|c| c.distance).unwrap_or(f32::MAX);
 
-                        if found.len() > ef_search {
-                            found.pop();
+                        if d < furthest_dist || found.len() < ef_search {
+                            candidates.push(Candidate {
+                                id: neighbor_id,
+                                distance: d,
+                            });
+                            found.push(ResultCandidate {
+                                id: neighbor_id,
+                                distance: d,
+                            });
+
+                            if found.len() > ef_search {
+                                found.pop();
+                            }
                         }
                     }
                 }
@@ -815,6 +913,7 @@ mod ef_search_tests {
                 ..Default::default()
             },
             field_name: Some("f".to_string()),
+            filter: None,
         }
     }
 

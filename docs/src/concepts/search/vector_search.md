@@ -232,6 +232,26 @@ let results = engine.search(request).await?;
 
 The filter query runs first on the lexical index to identify allowed document IDs, then the vector search is restricted to those IDs.
 
+#### Filter-Aware HNSW Traversal
+
+For HNSW fields the allowed-ID set is pushed into the graph search itself, not
+just applied afterwards. During traversal the frontier still expands through
+*every* neighbour — including non-matching ones — so the search can cross
+non-matching regions of the graph, but only matching documents enter the
+result set.
+
+This matters for selective filters. A plain post-filter inspects the fixed
+`ef_search` window of nearest neighbours and keeps whichever happen to match;
+when matches are rare they can fall entirely outside that window, so the query
+returns far fewer hits than exist — sometimes none, even though matching
+documents are reachable. Filter-aware traversal keeps searching until it has
+collected enough matches or hits an internal visit cap (a multiple of
+`ef_search`) that bounds latency for very selective filters.
+
+The unfiltered path is unchanged: with no filter the traversal behaves exactly
+as before. Flat and IVF fields use the post-filter (their scan is exhaustive,
+so no recall is lost).
+
 ### Filter with Numeric Range
 
 ```rust
