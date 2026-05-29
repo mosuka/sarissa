@@ -448,33 +448,41 @@ fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     let index = HnswIndex::create(storage.clone(), "pq_round_trip", config.clone())?;
     let mut writer = index.writer()?;
 
-    let vectors = vec![
-        (
-            1u64,
-            "embedding".to_string(),
-            Vector::new(vec![10.0, 10.0, 20.0, 20.0]),
-        ),
-        (
-            2,
-            "embedding".to_string(),
-            Vector::new(vec![10.1, 10.1, 20.1, 20.1]),
-        ),
-        (
-            3,
-            "embedding".to_string(),
-            Vector::new(vec![-10.0, -10.0, -20.0, -20.0]),
-        ),
-        (
-            4,
-            "embedding".to_string(),
-            Vector::new(vec![-10.1, -10.1, -20.1, -20.1]),
-        ),
-        (
-            5,
-            "embedding".to_string(),
-            Vector::new(vec![9.9, 9.9, 19.9, 19.9]),
-        ),
+    // Two widely-separated clusters with multiple points each. PQ trains a
+    // per-sub-vector k-means codebook; a tiny corpus (e.g. 5 points) makes
+    // the codebook degenerate, and platform-dependent f32 reduction order in
+    // k-means can then flip a near/far quantisation code, occasionally
+    // pulling a far-cluster doc into the top-k (issue #730 — flaked on
+    // x86_64). Using a denser corpus and a much larger cluster separation
+    // keeps the quantiser stable across platforms: the far cluster is so
+    // distant that no quantisation error can place it among the near
+    // neighbours.
+    //
+    // Near cluster (doc_ids 1..=8) sits around (10, 10, 20, 20); far cluster
+    // (doc_ids 9..=16) sits around (-100, -100, -200, -200).
+    let near_offsets = [
+        [0.0, 0.0, 0.0, 0.0],
+        [0.1, 0.1, 0.1, 0.1],
+        [-0.1, -0.1, -0.1, -0.1],
+        [0.2, -0.2, 0.2, -0.2],
+        [-0.2, 0.2, -0.2, 0.2],
+        [0.05, 0.05, -0.05, -0.05],
+        [-0.05, -0.05, 0.05, 0.05],
+        [0.15, -0.1, 0.1, -0.15],
     ];
+    let near_base = [10.0_f32, 10.0, 20.0, 20.0];
+    let far_base = [-100.0_f32, -100.0, -200.0, -200.0];
+
+    let mut vectors = Vec::with_capacity(16);
+    for (i, off) in near_offsets.iter().enumerate() {
+        let v: Vec<f32> = near_base.iter().zip(off).map(|(b, o)| b + o).collect();
+        vectors.push(((i + 1) as u64, "embedding".to_string(), Vector::new(v)));
+    }
+    for (i, off) in near_offsets.iter().enumerate() {
+        let v: Vec<f32> = far_base.iter().zip(off).map(|(b, o)| b + o).collect();
+        vectors.push(((i + 9) as u64, "embedding".to_string(), Vector::new(v)));
+    }
+
     writer.build(vectors.clone())?;
     writer.finalize()?;
     writer.commit()?;
@@ -482,8 +490,11 @@ fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     let reader = index.reader()?;
     let searcher = HnswSearcher::new(reader)?;
 
-    // Query close to the (+10, +10, +20, +20) cluster — top-3 results
-    // must all come from that cluster (doc_ids 1 / 2 / 5).
+    // Query at the near cluster centre — every top-3 result must come from
+    // the near cluster (doc_ids 1..=8), never the far cluster (9..=16).
+    // The exact ordering within the near cluster is not asserted because PQ
+    // is approximate; only cluster membership is guaranteed by the large
+    // separation.
     let query = Vector::new(vec![10.0, 10.0, 20.0, 20.0]);
     let request = VectorIndexQuery::new(query)
         .top_k(3)
@@ -491,9 +502,12 @@ fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     let results = searcher.search(&request)?;
     assert_eq!(results.results.len(), 3, "expected top-3 results");
     let ids: std::collections::HashSet<u64> = results.results.iter().map(|r| r.doc_id).collect();
-    assert!(ids.contains(&1), "missing doc_id 1; got {:?}", ids);
-    assert!(ids.contains(&2), "missing doc_id 2; got {:?}", ids);
-    assert!(ids.contains(&5), "missing doc_id 5; got {:?}", ids);
+    for id in &ids {
+        assert!(
+            (1..=8).contains(id),
+            "top-3 must all be near-cluster doc_ids (1..=8); got {ids:?}",
+        );
+    }
     Ok(())
 }
 
