@@ -597,10 +597,16 @@ impl HnswSearcher {
         // the extra per-neighbour bookkeeping (`n_visited`, the allow-set
         // probe) that the unfiltered path must not pay for.
         if let Some(filter) = request.filter.as_deref() {
+            // Deliberately NOT clamped to the node count: `n_visited` rises at
+            // most once per node (the `visited` guard), so when
+            // `ef_search * MAX_VISIT_FACTOR >= N` the cap is simply never hit
+            // and the traversal runs to completion. Clamping to `N` instead
+            // made the cap fire exactly as the last node was visited, dropping
+            // whichever match happened to sit last in the (graph-shape- and
+            // platform-dependent) traversal order.
             let max_visits = ef_search
                 .max(request.params.top_k)
-                .saturating_mul(MAX_VISIT_FACTOR)
-                .min(graph.max_doc_id() as usize + 1);
+                .saturating_mul(MAX_VISIT_FACTOR);
             let mut n_visited = 1usize; // entry point already marked visited
 
             while let Some(curr) = candidates.pop() {
