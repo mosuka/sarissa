@@ -658,6 +658,16 @@ impl HnswSearcher {
         let field_name_owned = field_name.to_string();
         let mut final_results = Vec::new();
         for c in candidates_for_results {
+            // Skip candidates that have no vector in the searched field
+            // (Issue #676). The single HNSW graph mixes documents from every
+            // field; `calc_dist` returns `f32::MAX` for a doc that lacks a
+            // vector in `field_name`. Such docs must not leak into a
+            // field-routed query's results — without this guard they would
+            // surface whenever the result set is smaller than `top_k`.
+            if c.distance == f32::MAX {
+                continue;
+            }
+
             // Convert cached distance to similarity without re-reading vectors.
             let similarity = reader.distance_metric().distance_to_similarity(c.distance);
 

@@ -44,7 +44,7 @@ use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
 use crate::vector::writer::VectorIndexWriter;
 
 use self::config::VectorIndexConfig;
-use self::request::{VectorScoreMode, VectorSearchRequest};
+use self::request::{FieldSelector, QueryVector, VectorScoreMode, VectorSearchRequest};
 use self::response::{VectorHit, VectorSearchResults, VectorStats};
 
 /// A simplified vector storage component following the LexicalStore pattern.
@@ -402,13 +402,20 @@ impl VectorStore {
     /// sorted by descending score, and truncated to
     /// [`limit`](crate::vector::search::searcher::VectorSearchParams::limit).
     ///
+    /// Field routing (Issue #676): each query vector is routed to a set of
+    /// target fields. A query's own
+    /// [`fields`](crate::vector::store::request::QueryVector::fields) take
+    /// precedence; otherwise the request-level
+    /// [`fields`](crate::vector::search::searcher::VectorSearchParams::fields)
+    /// selectors apply ([`Exact`](crate::vector::store::request::FieldSelector::Exact)
+    /// by name, [`Prefix`](crate::vector::store::request::FieldSelector::Prefix)
+    /// resolved against the reader's field names). When neither is set, all
+    /// indexed fields are searched (the default).
+    ///
     /// **Note:** The following request fields are currently **ignored** by this
     /// implementation:
     /// - `VectorSearchQuery::Payloads` -- callers must embed payloads into
     ///   vectors before calling this method.
-    /// - [`fields`](crate::vector::search::searcher::VectorSearchParams::fields)
-    ///   -- field-level filtering is not yet implemented; all indexed vectors
-    ///   are searched.
     /// - [`overfetch`](crate::vector::search::searcher::VectorSearchParams::overfetch)
     ///   -- a hardcoded 2x overfetch (`limit * 2`) is used instead.
     ///
@@ -451,6 +458,46 @@ impl VectorStore {
         self.search_impl(request, Some(parallel_threshold))
     }
 
+    /// Resolve the set of vector fields a single query should be routed to
+    /// (Issue #676).
+    ///
+    /// Precedence:
+    /// 1. `QueryVector.fields` (per-query) when set — the engine populates
+    ///    this from the field a DSL clause names (e.g. `image_vec:"..."`).
+    /// 2. Otherwise `VectorSearchParams.fields` (request-level), resolving
+    ///    [`FieldSelector::Exact`] directly and [`FieldSelector::Prefix`]
+    ///    against `reader_field_names`.
+    /// 3. Otherwise an empty `Vec`, meaning "search all fields" (the
+    ///    historical behaviour — one query with `field_name = None`).
+    ///
+    /// `reader_field_names` is only consulted for `Prefix` selectors; the
+    /// caller passes an empty slice when no `Prefix` is present.
+    fn resolve_target_fields(
+        qv: &QueryVector,
+        params_fields: Option<&[FieldSelector]>,
+        reader_field_names: &[String],
+    ) -> Vec<String> {
+        if let Some(fields) = &qv.fields {
+            return fields.clone();
+        }
+        if let Some(selectors) = params_fields {
+            let mut out = Vec::new();
+            for selector in selectors {
+                match selector {
+                    FieldSelector::Exact(name) => out.push(name.clone()),
+                    FieldSelector::Prefix(prefix) => out.extend(
+                        reader_field_names
+                            .iter()
+                            .filter(|n| n.starts_with(prefix))
+                            .cloned(),
+                    ),
+                }
+            }
+            return out;
+        }
+        Vec::new()
+    }
+
     /// Common implementation for [`Self::search`] and
     /// [`Self::search_with_threshold`].
     ///
@@ -481,18 +528,58 @@ impl VectorStore {
         let searcher_guard = self.acquire_searcher_guard()?;
         let searcher = searcher_guard.as_ref().unwrap();
 
-        // Fast path: single query vector, skip HashMap aggregation.
-        if query_vectors.len() == 1 {
-            let qv = &query_vectors[0];
-            let mut index_request = VectorIndexQuery::new(qv.vector.clone())
-                .top_k(request.params.limit.saturating_mul(2));
-            if let Some(factor) = request.params.rerank_factor {
-                index_request = index_request.rerank_factor(factor);
+        // Resolve reader field names only when a Prefix selector is present
+        // (Issue #676); Exact selectors and per-query fields need no lookup.
+        let reader_field_names: Vec<String> = match &request.params.fields {
+            Some(sels) if sels.iter().any(|s| matches!(s, FieldSelector::Prefix(_))) => {
+                self.index.reader()?.field_names().unwrap_or_default()
             }
-            if let Some(ef) = request.params.ef_search {
-                index_request = index_request.ef_search(ef);
+            _ => Vec::new(),
+        };
+
+        // Expand each query vector to its target fields (Issue #676). A query
+        // with no resolved fields searches all fields (`field_name = None`);
+        // one targeting N fields becomes N index queries. `query_weights`
+        // runs parallel to `index_queries` so per-query weights survive the
+        // 1 → N expansion.
+        let mut index_queries: Vec<VectorIndexQuery> = Vec::new();
+        let mut query_weights: Vec<f32> = Vec::new();
+        for qv in query_vectors {
+            let targets = Self::resolve_target_fields(
+                qv,
+                request.params.fields.as_deref(),
+                &reader_field_names,
+            );
+            let make = |field: Option<&str>| {
+                let mut q = VectorIndexQuery::new(qv.vector.clone())
+                    .top_k(request.params.limit.saturating_mul(2));
+                if let Some(field) = field {
+                    q = q.field_name(field.to_string());
+                }
+                if let Some(factor) = request.params.rerank_factor {
+                    q = q.rerank_factor(factor);
+                }
+                if let Some(ef) = request.params.ef_search {
+                    q = q.ef_search(ef);
+                }
+                q
+            };
+            if targets.is_empty() {
+                index_queries.push(make(None));
+                query_weights.push(qv.weight);
+            } else {
+                for field in &targets {
+                    index_queries.push(make(Some(field)));
+                    query_weights.push(qv.weight);
+                }
             }
-            let results = searcher.search(&index_request)?;
+        }
+
+        // Fast path: a single index query (one query vector routed to one or
+        // no specific field) — skip HashMap aggregation.
+        if index_queries.len() == 1 {
+            let weight = query_weights[0];
+            let results = searcher.search(&index_queries[0])?;
 
             let mut hits: Vec<VectorHit> = results
                 .results
@@ -507,7 +594,7 @@ impl VectorStore {
                 })
                 .map(|r| VectorHit {
                     doc_id: r.doc_id,
-                    score: r.similarity * qv.weight,
+                    score: r.similarity * weight,
                     field_hits: vec![],
                 })
                 .collect();
@@ -538,24 +625,9 @@ impl VectorStore {
             return Ok(VectorSearchResults { hits });
         }
 
-        // Phase 2 of #648 (issue #712): build all B index queries, dispatch
-        // via the `VectorIndexSearcher::search_batch_with_threshold` trait
-        // method, then merge serially. Parallelisation across the B queries
-        // happens inside the trait method's default impl (or any override).
-        let index_queries: Vec<VectorIndexQuery> = query_vectors
-            .iter()
-            .map(|qv| {
-                let mut q = VectorIndexQuery::new(qv.vector.clone())
-                    .top_k(request.params.limit.saturating_mul(2));
-                if let Some(factor) = request.params.rerank_factor {
-                    q = q.rerank_factor(factor);
-                }
-                if let Some(ef) = request.params.ef_search {
-                    q = q.ef_search(ef);
-                }
-                q
-            })
-            .collect();
+        // Multi-query / multi-field path (Phase 2 of #648, issue #712):
+        // dispatch the batch via `search_batch_with_threshold` (parallelised
+        // inside the trait method) and merge serially.
         let per_query_results = match threshold_override {
             Some(t) => searcher.search_batch_with_threshold(&index_queries, t)?,
             None => searcher.search_batch(&index_queries)?,
@@ -563,9 +635,10 @@ impl VectorStore {
 
         // Serial merge by score_mode (applies allowed_ids / min_score filter
         // and the per-query weight that the trait method intentionally does
-        // not know about).
+        // not know about). `query_weights[i]` is the weight for the query that
+        // produced `per_query_results[i]`.
         let mut all_hits: std::collections::HashMap<u64, f32> = std::collections::HashMap::new();
-        for (qv, results) in query_vectors.iter().zip(per_query_results) {
+        for (weight, results) in query_weights.iter().zip(per_query_results) {
             for result in results.results {
                 if let Some(ref allowed) = request.params.allowed_ids
                     && !allowed.contains(&result.doc_id)
@@ -575,7 +648,7 @@ impl VectorStore {
                 if result.similarity < request.params.min_score {
                     continue;
                 }
-                let weighted_score = result.similarity * qv.weight;
+                let weighted_score = result.similarity * weight;
                 let entry = all_hits.entry(result.doc_id).or_insert(0.0);
                 match request.params.score_mode {
                     VectorScoreMode::WeightedSum | VectorScoreMode::LateInteraction => {
