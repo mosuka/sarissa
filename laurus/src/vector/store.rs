@@ -537,6 +537,17 @@ impl VectorStore {
             _ => Vec::new(),
         };
 
+        // Build the filter-aware allow-set once (Issue #645). `allowed_ids`
+        // arrives as a `Vec<u64>`; the HNSW traversal needs O(1) membership,
+        // so it is hashed into an `Arc<AHashSet>` shared (by Arc clone) across
+        // the 1 → N field expansion below. Flat / IVF ignore it and rely on
+        // the post-filter further down.
+        let filter_set: Option<std::sync::Arc<ahash::AHashSet<u64>>> = request
+            .params
+            .allowed_ids
+            .as_ref()
+            .map(|ids| std::sync::Arc::new(ids.iter().copied().collect()));
+
         // Expand each query vector to its target fields (Issue #676). A query
         // with no resolved fields searches all fields (`field_name = None`);
         // one targeting N fields becomes N index queries. `query_weights`
@@ -561,6 +572,9 @@ impl VectorStore {
                 }
                 if let Some(ef) = request.params.ef_search {
                     q = q.ef_search(ef);
+                }
+                if let Some(ref f) = filter_set {
+                    q = q.filter(f.clone());
                 }
                 q
             };

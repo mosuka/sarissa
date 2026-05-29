@@ -1,5 +1,8 @@
 //! Vector searcher trait and query/response types.
 
+use std::sync::Arc;
+
+use ahash::AHashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -90,6 +93,18 @@ pub struct VectorIndexQuery {
     /// Optional field name to filter search results.
     /// If None, searches across all fields.
     pub field_name: Option<String>,
+    /// Filter-aware traversal allow-set (Issue #645).
+    ///
+    /// When `Some`, the HNSW searcher keeps only documents in this set in
+    /// its result heap while still expanding the search frontier through
+    /// non-matching neighbours, so it can reach matching documents that are
+    /// surrounded by non-matching ones (which a post-filter alone cannot).
+    /// `None` (the default) is the unchanged plain-ANN path.
+    ///
+    /// Flat / IVF searchers ignore this field; the store's post-filter still
+    /// applies to them. The set is wrapped in an [`Arc`] so the 1 → N field
+    /// expansion in the store shares a single allocation.
+    pub filter: Option<Arc<AHashSet<u64>>>,
 }
 
 impl VectorIndexQuery {
@@ -99,7 +114,20 @@ impl VectorIndexQuery {
             query,
             params: VectorIndexQueryParams::default(),
             field_name: None,
+            filter: None,
         }
+    }
+
+    /// Set the filter-aware traversal allow-set (Issue #645).
+    ///
+    /// # Arguments
+    ///
+    /// * `filter` - Shared set of allowed document IDs. Only these IDs are
+    ///   eligible for the result heap; the frontier still expands through
+    ///   the others to preserve graph connectivity.
+    pub fn filter(mut self, filter: Arc<AHashSet<u64>>) -> Self {
+        self.filter = Some(filter);
+        self
     }
 
     /// Set the number of results to return.
