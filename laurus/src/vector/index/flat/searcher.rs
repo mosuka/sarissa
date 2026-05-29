@@ -65,8 +65,6 @@ impl VectorIndexSearcher for FlatVectorSearcher {
             let ids = self.index_reader.doc_ids_for_field(field_name);
             results.candidates_examined = ids.len();
 
-            let mut candidates: Vec<(u64, f32, f32, Vector)> = Vec::with_capacity(ids.len());
-
             // Step-7 hot path: prepare quantized query once and look
             // up per-field doc_id -> position once per search.
             let quant_ctx = quant_pool.as_ref().and_then(|pool| {
@@ -76,30 +74,37 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                 })
             });
 
-            for &doc_id in ids.iter() {
-                if let Some((prepared, pool, idx)) = &quant_ctx
-                    && let Some(&pos) = idx.get(&doc_id)
-                {
-                    let (int8, meta) = pool.record_at(pos);
-                    let distance = distance_quantized(metric, prepared, int8, meta);
-                    let similarity = metric.distance_to_similarity(distance);
-                    // include_vectors path still needs the f32 vector;
-                    // dequantize lazily only when requested.
-                    let vector = if request.params.include_vectors {
-                        pool.dequantize_to_vector(doc_id, field_name)
-                            .unwrap_or_else(|| Vector::new(Vec::new()))
-                    } else {
-                        Vector::new(Vec::new())
-                    };
-                    candidates.push((doc_id, similarity, distance, vector));
-                    continue;
-                }
-                if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, field_name) {
-                    let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
-                    let similarity = metric.distance_to_similarity(distance);
-                    candidates.push((doc_id, similarity, distance, vector));
-                }
-            }
+            // Distance scan, parallelised across candidates above
+            // PARALLEL_SCAN_THRESHOLD (#662). The quantized hot path and the
+            // f32 fallback both run inside the per-candidate closure; a
+            // missing vector yields `Ok(None)` (skipped) and a dimension
+            // mismatch propagates as `Err`.
+            let mut candidates: Vec<(u64, f32, f32, Vector)> =
+                crate::vector::search::searcher::parallel_scan(&ids[..], |&doc_id| {
+                    if let Some((prepared, pool, idx)) = &quant_ctx
+                        && let Some(&pos) = idx.get(&doc_id)
+                    {
+                        let (int8, meta) = pool.record_at(pos);
+                        let distance = distance_quantized(metric, prepared, int8, meta);
+                        let similarity = metric.distance_to_similarity(distance);
+                        // include_vectors path still needs the f32 vector;
+                        // dequantize lazily only when requested.
+                        let vector = if request.params.include_vectors {
+                            pool.dequantize_to_vector(doc_id, field_name)
+                                .unwrap_or_else(|| Vector::new(Vec::new()))
+                        } else {
+                            Vector::new(Vec::new())
+                        };
+                        return Ok(Some((doc_id, similarity, distance, vector)));
+                    }
+                    if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, field_name) {
+                        let distance =
+                            metric.distance_with_prepared(&prepared_query, &vector.data)?;
+                        let similarity = metric.distance_to_similarity(distance);
+                        return Ok(Some((doc_id, similarity, distance, vector)));
+                    }
+                    Ok(None)
+                })?;
 
             candidates.sort_unstable_by(|a, b| {
                 b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
@@ -133,15 +138,29 @@ impl VectorIndexSearcher for FlatVectorSearcher {
             let candidates_list = self.index_reader.vector_ids()?;
             results.candidates_examined = self.index_reader.vector_count();
 
+            // Distance scan, parallelised across candidates above
+            // PARALLEL_SCAN_THRESHOLD (#662). Each candidate may belong to a
+            // different field, so the field name travels with the result.
             let mut candidates: Vec<(u64, String, f32, f32, Vector)> =
-                Vec::with_capacity(candidates_list.len());
-            for (doc_id, field_name) in candidates_list {
-                if let Ok(Some(vector)) = self.index_reader.get_vector(doc_id, &field_name) {
-                    let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
-                    let similarity = metric.distance_to_similarity(distance);
-                    candidates.push((doc_id, field_name, similarity, distance, vector));
-                }
-            }
+                crate::vector::search::searcher::parallel_scan(
+                    &candidates_list[..],
+                    |(doc_id, field_name)| {
+                        if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name)
+                        {
+                            let distance =
+                                metric.distance_with_prepared(&prepared_query, &vector.data)?;
+                            let similarity = metric.distance_to_similarity(distance);
+                            return Ok(Some((
+                                *doc_id,
+                                field_name.clone(),
+                                similarity,
+                                distance,
+                                vector,
+                            )));
+                        }
+                        Ok(None)
+                    },
+                )?;
 
             candidates.sort_unstable_by(|a, b| {
                 b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)

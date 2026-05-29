@@ -5,6 +5,73 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::vector::core::vector::Vector;
 
+/// Candidate count at or above which a brute-force distance scan
+/// (Flat / IVF) is dispatched to rayon instead of looping serially.
+///
+/// Below this the serial loop wins because rayon's per-job dispatch
+/// (~1-2 µs) would dominate a scan of a few hundred candidates. This
+/// counts *candidates within one query*, in contrast to
+/// [`VectorIndexSearcher::parallel_threshold`] which counts *queries in a
+/// batch* (#710). Both guards can be active at once: a batch parallelises
+/// across queries, and each large-enough query further parallelises its
+/// own scan on the same rayon global pool (work-stealing bounds total
+/// parallelism to the pool size, so there is no OS-thread
+/// oversubscription).
+///
+/// Issue [#662](https://github.com/mosuka/laurus/issues/662).
+// `dead_code` only on `wasm32` (no `native` feature → no rayon → the
+// const is never read by the serial-only `parallel_scan`).
+#[cfg_attr(not(feature = "native"), allow(dead_code))]
+pub(crate) const PARALLEL_SCAN_THRESHOLD: usize = 2048;
+
+/// Map `compute` over every brute-force candidate, in parallel when the
+/// candidate count reaches [`PARALLEL_SCAN_THRESHOLD`] and the `native`
+/// feature (rayon) is enabled, serially otherwise.
+///
+/// Used by the Flat and IVF searchers to parallelise their per-candidate
+/// distance computation (#662). The distance kernel has no side effects,
+/// so the output order is irrelevant — callers sort the collected results
+/// afterwards, keeping the search deterministic.
+///
+/// # Arguments
+///
+/// * `items` - The candidate identifiers to scan (e.g. `doc_id`s or
+///   `(doc_id, field_name)` pairs).
+/// * `compute` - Maps one candidate to `Ok(Some(result))`, `Ok(None)` to
+///   skip it (e.g. its vector is missing), or `Err` to abort the scan.
+///
+/// # Returns
+///
+/// The collected non-skipped results in unspecified order, or the first
+/// error `compute` produced.
+pub(crate) fn parallel_scan<I, T, F>(items: &[I], compute: F) -> Result<Vec<T>>
+where
+    I: Sync,
+    T: Send,
+    F: Fn(&I) -> Result<Option<T>> + Sync + Send,
+{
+    #[cfg(feature = "native")]
+    {
+        if items.len() >= PARALLEL_SCAN_THRESHOLD {
+            use rayon::prelude::*;
+            return Ok(items
+                .par_iter()
+                .map(&compute)
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect());
+        }
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        if let Some(t) = compute(item)? {
+            out.push(t);
+        }
+    }
+    Ok(out)
+}
+
 /// Low-level query for a single-vector search against a vector index.
 ///
 /// This type represents a single nearest-neighbor query at the index level,
@@ -474,4 +541,55 @@ pub trait VectorSearcher: Send + Sync + std::fmt::Debug {
     /// Returns the number of documents that match the given search request,
     /// applying the min_score threshold if specified in the request.
     fn count(&self, request: &VectorSearchRequest) -> crate::error::Result<u64>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both the serial and rayon paths of [`parallel_scan`] must return the
+    /// same multiset of results. The rayon path's output order is
+    /// unspecified, so results are sorted before comparison. Exercises a
+    /// count below `PARALLEL_SCAN_THRESHOLD` (serial) and above it
+    /// (parallel).
+    #[test]
+    fn parallel_scan_parallel_matches_serial() {
+        for n in [100usize, PARALLEL_SCAN_THRESHOLD + 500] {
+            let items: Vec<u64> = (0..n as u64).collect();
+            let mut got = parallel_scan(&items[..], |&x| Ok(Some(x * 2))).unwrap();
+            got.sort_unstable();
+            let expected: Vec<u64> = (0..n as u64).map(|x| x * 2).collect();
+            assert_eq!(got, expected, "n = {n}");
+        }
+    }
+
+    /// `Ok(None)` candidates are skipped on both paths.
+    #[test]
+    fn parallel_scan_skips_none() {
+        for n in [100usize, PARALLEL_SCAN_THRESHOLD + 500] {
+            let items: Vec<u64> = (0..n as u64).collect();
+            let mut got =
+                parallel_scan(&items[..], |&x| Ok(if x % 2 == 0 { Some(x) } else { None }))
+                    .unwrap();
+            got.sort_unstable();
+            let expected: Vec<u64> = (0..n as u64).filter(|x| x % 2 == 0).collect();
+            assert_eq!(got, expected, "n = {n}");
+        }
+    }
+
+    /// An `Err` from any candidate aborts the whole scan, on both paths.
+    #[test]
+    fn parallel_scan_propagates_error() {
+        for n in [100usize, PARALLEL_SCAN_THRESHOLD + 500] {
+            let items: Vec<u64> = (0..n as u64).collect();
+            let result: Result<Vec<u64>> = parallel_scan(&items[..], |&x| {
+                if x == (n as u64 / 2) {
+                    Err(crate::error::LaurusError::internal("boom"))
+                } else {
+                    Ok(Some(x))
+                }
+            });
+            assert!(result.is_err(), "n = {n}");
+        }
+    }
 }
