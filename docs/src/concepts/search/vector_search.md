@@ -156,6 +156,24 @@ limited by physical core count and HyperThreading sharing.
 
 [rayon-crate]: https://docs.rs/rayon
 
+### Parallel Brute-Force Scan
+
+Flat and IVF indexes rank candidates with an exhaustive distance scan rather
+than a graph walk. When one query's candidate count reaches an internal
+threshold (`2048`), that scan is dispatched across [rayon][rayon-crate]'s
+global thread pool; below it the serial loop wins because rayon's per-job
+dispatch (~1-2 µs) would dominate a small scan.
+
+This is orthogonal to the per-query parallelism above: a batch parallelises
+across queries, and each large query further parallelises its own scan on the
+same pool, with work-stealing bounding total parallelism to the pool size (no
+OS-thread oversubscription). The distance kernel has no side effects, so
+results are collected in arbitrary order and then sorted, keeping output
+deterministic. On `wasm32` (no rayon) the scan is always serial.
+
+Speedup scales with the host's physical cores and is largest for big Flat
+indexes or a wide IVF `n_probe`; scans below the threshold are unaffected.
+
 ### Weights
 
 Use the `^` boost syntax in DSL or `weight` in `QueryVector` to adjust how much each field contributes:

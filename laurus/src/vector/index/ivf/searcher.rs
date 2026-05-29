@@ -155,32 +155,49 @@ impl VectorIndexSearcher for IvfSearcher {
             )
         });
 
+        // Distance scan over the probed clusters, parallelised across
+        // candidates above PARALLEL_SCAN_THRESHOLD (#662). The quantized hot
+        // path and the f32 fallback both run inside the per-candidate closure.
         let mut candidates: Vec<(u64, String, f32, f32, Vector)> =
-            Vec::with_capacity(vector_ids.len());
-
-        for (doc_id, field_name) in &vector_ids {
-            if let (Some(pool), Some(prepared)) = (&quant_pool, &prepared_quantized)
-                && let Some((int8, meta)) = pool.get_record(*doc_id, field_name)
-            {
-                let distance = crate::vector::core::distance_quantized::distance_quantized(
-                    metric, prepared, int8, meta,
-                );
-                let similarity = metric.distance_to_similarity(distance);
-                let vector = if request.params.include_vectors {
-                    pool.dequantize_to_vector(*doc_id, field_name)
-                        .unwrap_or_else(|| Vector::new(Vec::new()))
-                } else {
-                    Vector::new(Vec::new())
-                };
-                candidates.push((*doc_id, field_name.clone(), similarity, distance, vector));
-                continue;
-            }
-            if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name) {
-                let distance = metric.distance_with_prepared(&prepared_query, &vector.data)?;
-                let similarity = metric.distance_to_similarity(distance);
-                candidates.push((*doc_id, field_name.clone(), similarity, distance, vector));
-            }
-        }
+            crate::vector::search::searcher::parallel_scan(
+                &vector_ids[..],
+                |(doc_id, field_name)| {
+                    if let (Some(pool), Some(prepared)) = (&quant_pool, &prepared_quantized)
+                        && let Some((int8, meta)) = pool.get_record(*doc_id, field_name)
+                    {
+                        let distance = crate::vector::core::distance_quantized::distance_quantized(
+                            metric, prepared, int8, meta,
+                        );
+                        let similarity = metric.distance_to_similarity(distance);
+                        let vector = if request.params.include_vectors {
+                            pool.dequantize_to_vector(*doc_id, field_name)
+                                .unwrap_or_else(|| Vector::new(Vec::new()))
+                        } else {
+                            Vector::new(Vec::new())
+                        };
+                        return Ok(Some((
+                            *doc_id,
+                            field_name.clone(),
+                            similarity,
+                            distance,
+                            vector,
+                        )));
+                    }
+                    if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name) {
+                        let distance =
+                            metric.distance_with_prepared(&prepared_query, &vector.data)?;
+                        let similarity = metric.distance_to_similarity(distance);
+                        return Ok(Some((
+                            *doc_id,
+                            field_name.clone(),
+                            similarity,
+                            distance,
+                            vector,
+                        )));
+                    }
+                    Ok(None)
+                },
+            )?;
 
         // Sort by similarity (descending)
         candidates
