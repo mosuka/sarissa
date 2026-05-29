@@ -48,3 +48,13 @@ pq-fastscan = ["laurus/pq-fastscan"]
 [build-dependencies]
 tonic-build = { workspace = true }
 tonic-prost-build = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["async_tokio"] }
+# `net` feature provides `TcpListenerStream`, used by the client-server
+# bench to serve the gRPC service on an ephemeral port (#727).
+tokio-stream = { workspace = true, features = ["net"] }
+
+[[bench]]
+name = "search_batch_grpc_bench"
+harness = false
