@@ -8,6 +8,16 @@ use crate::vector::reader::VectorIndexReader;
 use crate::vector::search::searcher::VectorIndexSearcher;
 use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexQueryResults};
 
+/// Fallback `n_probe` used when no schema-level value is supplied.
+///
+/// Matches the
+/// [`IvfIndexConfig`](crate::vector::index::config::IvfIndexConfig) default,
+/// so a searcher built via [`IvfSearcher::new`] probes only the single
+/// nearest cluster. Callers that go through the index
+/// [`searcher()`](crate::vector::index::VectorIndex::searcher) factory
+/// instead receive the configured `n_probe` via [`IvfSearcher::with_n_probe`].
+const IVF_DEFAULT_N_PROBE: usize = 1;
+
 /// IVF (Inverted File) vector searcher that performs approximate search by
 /// restricting distance computations to vectors in the `n_probe` nearest
 /// clusters.
@@ -19,7 +29,15 @@ pub struct IvfSearcher {
 }
 
 impl IvfSearcher {
-    /// Create a new IVF searcher with `n_probe = 1`.
+    /// Create a new IVF searcher with the built-in fallback `n_probe`
+    /// ([`IVF_DEFAULT_N_PROBE`] = 1).
+    ///
+    /// Most callers should construct the searcher through the index
+    /// [`searcher()`](crate::vector::index::VectorIndex::searcher) factory,
+    /// which threads the schema-level
+    /// [`IvfIndexConfig::n_probe`](crate::vector::index::config::IvfIndexConfig::n_probe)
+    /// in via [`Self::with_n_probe`]. The number of probed clusters can still
+    /// be adjusted afterwards with [`Self::set_n_probe`].
     ///
     /// # Arguments
     ///
@@ -30,7 +48,32 @@ impl IvfSearcher {
     ///
     /// A new `IvfSearcher` instance.
     pub fn new(index_reader: Arc<dyn VectorIndexReader>) -> Result<Self> {
-        let n_probe = 1;
+        Self::with_n_probe(index_reader, IVF_DEFAULT_N_PROBE)
+    }
+
+    /// Create a new IVF searcher that probes the configured number of
+    /// nearest clusters.
+    ///
+    /// This is the constructor used by the index
+    /// [`searcher()`](crate::vector::index::VectorIndex::searcher) factory so
+    /// the schema-level
+    /// [`IvfIndexConfig::n_probe`](crate::vector::index::config::IvfIndexConfig::n_probe)
+    /// is honoured at search time (Issue
+    /// [#741](https://github.com/mosuka/laurus/issues/741)). Before this, the
+    /// searcher always probed a single cluster regardless of configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `index_reader` - The underlying vector index reader (must be an
+    ///   [`IvfIndexReader`](super::reader::IvfIndexReader)).
+    /// * `n_probe` - Number of nearest clusters to probe during search.
+    ///   Higher values improve recall at the cost of query latency. The
+    ///   effective count is capped at the number of available clusters.
+    ///
+    /// # Returns
+    ///
+    /// A new `IvfSearcher` instance.
+    pub fn with_n_probe(index_reader: Arc<dyn VectorIndexReader>, n_probe: usize) -> Result<Self> {
         Ok(Self {
             index_reader,
             n_probe,
@@ -134,10 +177,12 @@ impl VectorIndexSearcher for IvfSearcher {
         let start = Timer::now();
         let mut results = VectorIndexQueryResults::new();
 
-        // Probe only the n_probe nearest clusters
-        let n_probe = self.n_probe.min(10);
+        // Probe the configured number of nearest clusters (Issue #741).
+        // `probe_clusters` already caps the effective count at the number of
+        // available centroids via `take`, so no artificial upper clamp is
+        // applied here.
         let vector_ids =
-            self.probe_clusters(&request.query, n_probe, request.field_name.as_deref())?;
+            self.probe_clusters(&request.query, self.n_probe, request.field_name.as_deref())?;
 
         // Calculate distances for vectors in the probed clusters.
         // Cache the query-side norm once per search (#414); for Cosine /

@@ -259,7 +259,13 @@ impl VectorIndex for IvfIndex {
     fn searcher(&self) -> Result<Box<dyn VectorIndexSearcher>> {
         self.check_closed()?;
         let reader = self.reader()?;
-        Ok(Box::new(IvfSearcher::new(reader)?))
+        // Thread the schema-level `n_probe` from the config into the searcher
+        // so IVF search probes the configured number of clusters instead of
+        // the hard-coded single nearest cluster (Issue #741).
+        Ok(Box::new(IvfSearcher::with_n_probe(
+            reader,
+            self.config.n_probe,
+        )?))
     }
 
     fn embedder(&self) -> Arc<dyn Embedder> {
