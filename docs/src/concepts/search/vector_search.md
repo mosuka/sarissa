@@ -249,8 +249,11 @@ collected enough matches or hits an internal visit cap (a multiple of
 `ef_search`) that bounds latency for very selective filters.
 
 The unfiltered path is unchanged: with no filter the traversal behaves exactly
-as before. Flat and IVF fields use the post-filter (their scan is exhaustive,
-so no recall is lost).
+as before. Flat and IVF fields honour the allow-set *inline* — a candidate
+whose document ID is not in the set is skipped before the distance kernel runs,
+so a selective filter avoids the wasted distance computations a post-filter
+would incur. Their scan is exhaustive either way, so recall is unchanged; the
+store's post-filter still runs afterwards as a redundant safety net.
 
 When the allow-set is smaller than `ef_search`, the HNSW field skips the graph
 walk entirely and scores the allowed documents directly. With so few candidates

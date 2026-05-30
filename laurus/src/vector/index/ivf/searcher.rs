@@ -160,10 +160,11 @@ impl VectorIndexSearcher for IvfSearcher {
     fn search(&self, request: &VectorIndexQuery) -> Result<VectorIndexQueryResults> {
         use crate::util::time::Timer;
 
-        // `request.filter` (Issue #645 filter-aware traversal) is intentionally
-        // ignored here: the IVF scan over the probed clusters is exhaustive, so
-        // the store's post-filter discards non-matching docs without recall
-        // loss. Honouring it inline is a follow-up optimisation.
+        // `request.filter` (Issue #645 allow-set) is honoured inline (Issue
+        // #740): candidates whose `doc_id` is not in the set are skipped before
+        // the distance kernel, saving the distance computation for a selective
+        // filter. The store's post-filter still runs but becomes a no-op for
+        // the already-filtered results, so recall is unchanged.
 
         // Issue #481 Stage 2 (rerank) -- API surface only in Stage 1.
         if request.params.rerank_factor.is_some() {
@@ -205,6 +206,11 @@ impl VectorIndexSearcher for IvfSearcher {
             )
         });
 
+        // Filter-aware allow-set honoured inline (Issue #740). Borrowed once
+        // before the scan; `&AHashSet` is `Send + Sync`, so it composes with
+        // the rayon-parallel candidate loop below.
+        let filter = request.filter.as_deref();
+
         // Distance scan over the probed clusters, parallelised across
         // candidates above PARALLEL_SCAN_THRESHOLD (#662). The quantized hot
         // path and the f32 fallback both run inside the per-candidate closure.
@@ -212,6 +218,12 @@ impl VectorIndexSearcher for IvfSearcher {
             crate::vector::search::searcher::parallel_scan(
                 &vector_ids[..],
                 |(doc_id, field_name)| {
+                    // Skip non-matching candidates before the distance kernel.
+                    if let Some(allowed) = filter
+                        && !allowed.contains(doc_id)
+                    {
+                        return Ok(None);
+                    }
                     if let (Some(pool), Some(prepared)) = (&quant_pool, &prepared_quantized)
                         && let Some((int8, meta)) = pool.get_record(*doc_id, field_name)
                     {
