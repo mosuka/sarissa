@@ -221,3 +221,31 @@ async fn empty_filter_returns_empty() {
     let results = store.search(request(10, Some(vec![]))).unwrap();
     assert!(results.hits.is_empty(), "empty allow-set => no hits");
 }
+
+// --- Issue #738: cardinality-driven brute-force mode ---
+//
+// When the allow-set is smaller than `ef_search` (default 50) the searcher
+// scores the allowed documents directly instead of walking the graph. That
+// path is *exact* and does not depend on the (randomised) graph structure, so
+// unlike the approximate graph traversal it yields a deterministic, exactly
+// ranked result — these tests assert that exactness.
+
+#[tokio::test(flavor = "multi_thread")]
+async fn brute_force_sparse_filter_is_exact() {
+    let store = setup_store().await;
+    // 3 allowed docs (< ef_search) → brute-force. Nearest-first is ascending
+    // id on the gradient, so the result is exactly [5, 50, 150], every run.
+    let results = store
+        .search(request(10, Some(vec![5u64, 50, 150])))
+        .unwrap();
+    assert_eq!(hit_ids(&results), vec![5, 50, 150]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn brute_force_reaches_lone_distant_match() {
+    let store = setup_store().await;
+    // A single far-down-the-gradient match: the graph walk could miss it, but
+    // the brute-force scan scores it directly, so it is always returned.
+    let results = store.search(request(10, Some(vec![150u64]))).unwrap();
+    assert_eq!(hit_ids(&results), vec![150]);
+}
