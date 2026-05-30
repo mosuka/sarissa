@@ -259,6 +259,53 @@ fn test_ivf_searcher_honors_n_probe() {
     }
 }
 
+/// The IVF searcher must skip non-matching candidates before the distance
+/// kernel when an allow-set filter is supplied (Issue #740), and leave the
+/// no-filter path unchanged.
+#[test]
+fn test_ivf_searcher_honors_filter_inline() {
+    use crate::vector::index::ivf::reader::IvfIndexReader;
+    use crate::vector::index::ivf::searcher::IvfSearcher;
+    use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
+    use ahash::AHashSet;
+
+    let storage = build_singleton_cluster_index("test_ivf_filter_inline");
+    let reader: Arc<dyn crate::vector::reader::VectorIndexReader> = Arc::new(
+        IvfIndexReader::load(storage, "test_ivf_filter_inline", DistanceMetric::Euclidean).unwrap(),
+    );
+
+    let query = Vector::new(vec![1000.0, 0.0]);
+    // Probe all 12 singleton clusters so every doc is a scan candidate.
+    let searcher = IvfSearcher::with_n_probe(reader, 12).unwrap();
+
+    // No filter: every singleton cluster is scored — unchanged.
+    let unfiltered = searcher
+        .search(&VectorIndexQuery::new(query.clone()).top_k(12))
+        .unwrap();
+    assert_eq!(unfiltered.candidates_examined, 12);
+
+    // Inline allow-set: only the allowed doc_ids reach the distance kernel.
+    let allow: Arc<AHashSet<u64>> = Arc::new([0u64, 5, 11].into_iter().collect());
+    let filtered = searcher
+        .search(
+            &VectorIndexQuery::new(query.clone())
+                .top_k(12)
+                .filter(allow.clone()),
+        )
+        .unwrap();
+    assert_eq!(
+        filtered.candidates_examined, 3,
+        "only allowed docs should reach the distance kernel"
+    );
+    for r in &filtered.results {
+        assert!(
+            allow.contains(&r.doc_id),
+            "result {} not in allow-set",
+            r.doc_id
+        );
+    }
+}
+
 /// `IvfIndex::searcher()` must inherit `IvfIndexConfig::n_probe` so that
 /// configured recall is actually applied at search time (Issue #741).
 #[test]

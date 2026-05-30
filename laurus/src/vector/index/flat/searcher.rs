@@ -27,10 +27,11 @@ impl VectorIndexSearcher for FlatVectorSearcher {
     fn search(&self, request: &VectorIndexQuery) -> Result<VectorIndexQueryResults> {
         use crate::util::time::Timer;
 
-        // `request.filter` (Issue #645 filter-aware traversal) is intentionally
-        // ignored here: the flat scan is exhaustive, so the store's post-filter
-        // already discards non-matching docs without losing recall. Honouring
-        // it inline is a follow-up optimisation, not a correctness need.
+        // `request.filter` (Issue #645 allow-set) is honoured inline (Issue
+        // #740): candidates whose `doc_id` is not in the set are skipped before
+        // the distance kernel, saving the distance computation for a selective
+        // filter. The store's post-filter still runs but becomes a no-op for
+        // the already-filtered results, so recall is unchanged.
 
         // Issue #481 Stage 2 (rerank) -- API surface only in Stage 1.
         if request.params.rerank_factor.is_some() {
@@ -60,6 +61,11 @@ impl VectorIndexSearcher for FlatVectorSearcher {
             .downcast_ref::<FlatVectorIndexReader>();
         let quant_pool = flat_reader.and_then(|r| r.vectors().quantized_pool().cloned());
 
+        // Filter-aware allow-set honoured inline (Issue #740). Borrowed once
+        // before the scan; `&AHashSet` is `Send + Sync`, so it composes with
+        // the rayon-parallel candidate loops below.
+        let filter = request.filter.as_deref();
+
         if let Some(ref field_name) = request.field_name {
             // Field-filtered path: fetch the per-field doc-id slice from the
             // reader's pre-built index (#405 — O(1) Arc clone, avoids the full
@@ -86,6 +92,12 @@ impl VectorIndexSearcher for FlatVectorSearcher {
             // mismatch propagates as `Err`.
             let mut candidates: Vec<(u64, f32, f32, Vector)> =
                 crate::vector::search::searcher::parallel_scan(&ids[..], |&doc_id| {
+                    // Skip non-matching candidates before the distance kernel.
+                    if let Some(allowed) = filter
+                        && !allowed.contains(&doc_id)
+                    {
+                        return Ok(None);
+                    }
                     if let Some((prepared, pool, idx)) = &quant_ctx
                         && let Some(&pos) = idx.get(&doc_id)
                     {
@@ -110,6 +122,13 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                     }
                     Ok(None)
                 })?;
+
+            // With an inline allow-set the scored count (post-skip) is the
+            // meaningful "candidates examined" figure (Issue #740); the
+            // unfiltered figure (`ids.len()`) is kept when no filter is set.
+            if filter.is_some() {
+                results.candidates_examined = candidates.len();
+            }
 
             candidates.sort_unstable_by(|a, b| {
                 b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
@@ -150,6 +169,12 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                 crate::vector::search::searcher::parallel_scan(
                     &candidates_list[..],
                     |(doc_id, field_name)| {
+                        // Skip non-matching candidates before the distance kernel.
+                        if let Some(allowed) = filter
+                            && !allowed.contains(doc_id)
+                        {
+                            return Ok(None);
+                        }
                         if let Ok(Some(vector)) = self.index_reader.get_vector(*doc_id, field_name)
                         {
                             let distance =
@@ -166,6 +191,13 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                         Ok(None)
                     },
                 )?;
+
+            // With an inline allow-set the scored count (post-skip) is the
+            // meaningful "candidates examined" figure (Issue #740); the
+            // unfiltered figure (`vector_count()`) is kept when no filter is set.
+            if filter.is_some() {
+                results.candidates_examined = candidates.len();
+            }
 
             candidates.sort_unstable_by(|a, b| {
                 b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)
@@ -209,5 +241,100 @@ impl VectorIndexSearcher for FlatVectorSearcher {
         } else {
             Ok(self.index_reader.vector_ids()?.len() as u64)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::memory::MemoryStorage;
+    use crate::vector::core::distance::DistanceMetric;
+    use crate::vector::index::FlatIndexConfig;
+    use crate::vector::index::flat::writer::FlatIndexWriter;
+    use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+    use ahash::AHashSet;
+
+    /// Build a 20-vector flat index (all in field `f`) on a line so the
+    /// nearest-to-query ordering is deterministic.
+    fn build_flat_reader(name: &str) -> Arc<dyn VectorIndexReader> {
+        let storage = Arc::new(MemoryStorage::default());
+        let config = FlatIndexConfig {
+            dimension: 2,
+            distance_metric: DistanceMetric::Euclidean,
+            normalize_vectors: false,
+            ..FlatIndexConfig::default()
+        };
+        let mut writer = FlatIndexWriter::with_storage(
+            config,
+            VectorIndexWriterConfig::default(),
+            name,
+            storage,
+        )
+        .unwrap();
+        let vectors: Vec<(u64, String, Vector)> = (0..20)
+            .map(|i| (i as u64, "f".to_string(), Vector::new(vec![i as f32, 0.0])))
+            .collect();
+        writer.build(vectors).unwrap();
+        writer.finalize().unwrap();
+        writer.write().unwrap();
+        writer.build_reader().unwrap()
+    }
+
+    /// The flat searcher must skip non-matching candidates before the distance
+    /// kernel when an allow-set filter is supplied (Issue #740), on both the
+    /// unfiltered and field-filtered scan paths, while leaving the no-filter
+    /// path unchanged.
+    #[test]
+    fn test_flat_searcher_honors_filter_inline() {
+        let reader = build_flat_reader("test_flat_filter_inline");
+        let searcher = FlatVectorSearcher::new(reader).unwrap();
+        let query = Vector::new(vec![3.0, 0.0]);
+        let allow: Arc<AHashSet<u64>> = Arc::new([3u64, 7, 15].into_iter().collect());
+
+        // No filter (unfiltered path): every vector is scored — unchanged.
+        let unfiltered = searcher
+            .search(&VectorIndexQuery::new(query.clone()).top_k(20))
+            .unwrap();
+        assert_eq!(unfiltered.candidates_examined, 20);
+
+        // Unfiltered path + inline allow-set: only the 3 allowed docs scored.
+        let filtered = searcher
+            .search(
+                &VectorIndexQuery::new(query.clone())
+                    .top_k(20)
+                    .filter(allow.clone()),
+            )
+            .unwrap();
+        assert_eq!(
+            filtered.candidates_examined, 3,
+            "only allowed docs should reach the distance kernel"
+        );
+        for r in &filtered.results {
+            assert!(
+                allow.contains(&r.doc_id),
+                "result {} not in allow-set",
+                r.doc_id
+            );
+        }
+
+        // Field-filtered path (field_name set) + inline allow-set.
+        let field_filtered = searcher
+            .search(
+                &VectorIndexQuery::new(query.clone())
+                    .top_k(20)
+                    .field_name("f".to_string())
+                    .filter(allow.clone()),
+            )
+            .unwrap();
+        assert_eq!(field_filtered.candidates_examined, 3);
+        for r in &field_filtered.results {
+            assert!(
+                allow.contains(&r.doc_id),
+                "result {} not in allow-set",
+                r.doc_id
+            );
+        }
+        // Closest allowed vector to the query (3, 0) is doc 3.
+        assert_eq!(field_filtered.results[0].doc_id, 3);
     }
 }
