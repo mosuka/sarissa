@@ -252,6 +252,13 @@ The unfiltered path is unchanged: with no filter the traversal behaves exactly
 as before. Flat and IVF fields use the post-filter (their scan is exhaustive,
 so no recall is lost).
 
+When the allow-set is smaller than `ef_search`, the HNSW field skips the graph
+walk entirely and scores the allowed documents directly. With so few candidates
+there is nothing for the graph to *find*; the direct scan touches exactly the
+allowed documents — never more than the walk would — and is **exact**, so a very
+selective filter returns the true nearest matches rather than an approximation.
+Larger allow-sets keep using the filter-aware traversal above.
+
 ### Filter with Numeric Range
 
 ```rust

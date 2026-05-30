@@ -517,6 +517,41 @@ impl HnswSearcher {
             None => reader.dimension() * std::mem::size_of::<f32>(),
         };
 
+        // Cardinality-driven mode (Issue #738): when the filter is selective
+        // enough that fewer documents are allowed than the candidate-list size
+        // (`ef_search`), scoring those documents directly is both cheaper and
+        // exact — it touches exactly `cardinality` documents, never more than
+        // the graph walk's `ef_search`, and computes the true distance to
+        // every match (no approximation). The graph walk's job is to *find*
+        // near neighbours among many; when the allow-set is already tiny there
+        // is nothing to find.
+        if let Some(filter) = request.filter.as_deref()
+            && filter.len() <= ef_search
+        {
+            let mut found = BinaryHeap::new();
+            for &doc_id in filter.iter() {
+                let d = self.calc_dist(reader, query, quant_ctx.as_ref(), doc_id, field_name)?;
+                // Skip docs with no vector in this field (Issue #676);
+                // `finalize_graph_results` also guards this, but skipping here
+                // keeps the heap small.
+                if d == f32::MAX {
+                    continue;
+                }
+                found.push(ResultCandidate {
+                    id: doc_id,
+                    distance: d,
+                });
+            }
+            return self.finalize_graph_results(
+                reader,
+                query,
+                request,
+                field_name,
+                found,
+                filter.len(),
+            );
+        }
+
         // 1. Start from entry point at max_level
         let mut curr_obj = entry_point;
         // Note: Assuming entry_point is in field_name. If not, we might fail to get vector.
@@ -725,6 +760,39 @@ impl HnswSearcher {
             }
         }
 
+        self.finalize_graph_results(reader, query, request, field_name, found, visited.len())
+    }
+
+    /// Turn the result heap from a graph search (or the brute-force scan, see
+    /// [`Self::search_graph`]'s `#738` mode) into ranked results.
+    ///
+    /// Shared tail of both HNSW search modes: applies the optional Stage 2
+    /// rerank (Issue #481), drops field-missing candidates (`f32::MAX`, Issue
+    /// #676), filters by `min_similarity`, sorts by similarity, and truncates
+    /// to `top_k`. Lives outside the per-neighbour hot loop, so factoring it
+    /// out does not affect graph-traversal latency.
+    ///
+    /// # Arguments
+    ///
+    /// * `found` - The candidate heap (int8 / quantized distances).
+    /// * `candidates_examined` - Number of candidates the caller scored (the
+    ///   visited-node count for a graph search, or the filter cardinality for
+    ///   the brute-force scan); reported back for diagnostics.
+    //
+    // `#[inline]` so the graph-search call site folds this back in: extracting
+    // the shared tail must not change the codegen (and thus latency) of the
+    // unfiltered graph path, which is the dominant production case (Issue #645
+    // showed how sensitive that path is to function-shape changes).
+    #[inline]
+    fn finalize_graph_results(
+        &self,
+        reader: &HnswIndexReader,
+        query: &Vector,
+        request: &VectorIndexQuery,
+        field_name: &str,
+        found: BinaryHeap<ResultCandidate>,
+        candidates_examined: usize,
+    ) -> Result<VectorIndexQueryResults> {
         // Stage 2 (Issue #481): if the query asks for rerank
         // (`rerank_factor`) and the reader has the LRS1 sidecar loaded
         // (`reader.rerank_storage()`), widen the int8 candidate set to
@@ -809,7 +877,7 @@ impl HnswSearcher {
 
         Ok(VectorIndexQueryResults {
             results: final_results,
-            candidates_examined: visited.len(),
+            candidates_examined,
             search_time_ms: 0.0, // Set by caller
             query_metadata: std::collections::HashMap::new(),
         })
