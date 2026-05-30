@@ -26,6 +26,7 @@ use crate::lexical::query::collector::{
     Collector, CountCollector, TopDocsCollector, TopFieldCollector,
 };
 use crate::lexical::query::parser::LexicalQueryParser;
+use crate::lexical::query::term::TermQuery;
 use crate::lexical::query::{LexicalSearchResults, SearchHit};
 use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::{
@@ -857,6 +858,30 @@ impl InvertedIndexSearcher {
         // Check if query is empty
         if query.is_empty(self.reader.as_ref())? {
             return Ok(0);
+        }
+
+        // O(1) fast path (Issue #610): a bare `TermQuery` with no score
+        // threshold over a reader with no deletions equals the term's document
+        // frequency, which is already stored in the term dictionary — so the
+        // full posting-list walk the slow path performs is unnecessary.
+        //
+        // All three guards are required for correctness; if any fails we fall
+        // through to the slow path, so the fast path can never miscount:
+        // - `min_score <= 0.0`: with a positive threshold each doc's score must
+        //   be computed, so a count cannot come from `doc_freq` alone.
+        // - `doc_count() == max_doc()`: the term dictionary's `doc_freq` counts
+        //   raw postings, including deleted docs, whereas the slow path filters
+        //   deletions out. The equality holds iff the index has no deletions,
+        //   in which case the two agree. (Conservative: any inequality, for any
+        //   reason, just keeps the slow path.)
+        // - the query is exactly a `TermQuery` (not a Boolean/phrase/etc.).
+        if request.params.min_score <= 0.0
+            && self.reader.doc_count() == self.reader.max_doc()
+            && let Some(term_query) = query.as_any().downcast_ref::<TermQuery>()
+        {
+            return self
+                .reader
+                .term_doc_freq(term_query.field(), term_query.term());
         }
 
         // Use count collector with min_score if specified
