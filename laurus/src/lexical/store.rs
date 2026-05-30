@@ -866,6 +866,109 @@ mod tests {
         assert_eq!(count, 0);
     }
 
+    /// Helper: a `LexicalStore` over file storage with `titles` indexed (one
+    /// document per title, internal id = index + 1), committed.
+    fn store_with_titles(temp_dir: &TempDir, titles: &[&str]) -> LexicalStore {
+        let storage = Arc::new(
+            FileStorage::new(temp_dir.path(), FileStorageConfig::new(temp_dir.path())).unwrap(),
+        );
+        let store = LexicalStore::new(storage, LexicalIndexConfig::default()).unwrap();
+        for (i, title) in titles.iter().enumerate() {
+            store
+                .upsert_document(
+                    (i + 1) as u64,
+                    create_test_document(title, "shared body text"),
+                )
+                .unwrap();
+        }
+        store.commit().unwrap();
+        store
+    }
+
+    fn term_count(store: &LexicalStore, field: &str, term: &str) -> u64 {
+        let q = Box::new(TermQuery::new(field, term)) as Box<dyn Query>;
+        store.count(LexicalSearchRequest::new(q)).unwrap()
+    }
+
+    /// Issue #610: `TermQuery::count` over an index with no deletions returns
+    /// the term's document frequency (the O(1) fast path), matching the true
+    /// number of matching documents.
+    #[test]
+    fn test_count_term_query_o1_no_deletions() {
+        let temp_dir = TempDir::new().unwrap();
+        // "world" appears in 3 titles, "hello" in 1.
+        let store = store_with_titles(&temp_dir, &["Hello World", "Goodbye World", "Big World"]);
+        assert_eq!(term_count(&store, "title", "world"), 3);
+        assert_eq!(term_count(&store, "title", "hello"), 1);
+    }
+
+    /// Issue #610: with deletions present the fast path must NOT fire — the
+    /// raw `doc_freq` still counts the deleted posting, so the count must come
+    /// from the deletion-aware slow path. Deleting one of three "world"
+    /// documents yields a count of 2, not 3.
+    #[test]
+    fn test_count_term_query_excludes_deleted() {
+        let temp_dir = TempDir::new().unwrap();
+        let store = store_with_titles(&temp_dir, &["Hello World", "Goodbye World", "Big World"]);
+        assert_eq!(term_count(&store, "title", "world"), 3);
+
+        store.delete_document_by_internal_id(2).unwrap();
+        store.commit().unwrap();
+
+        assert_eq!(
+            term_count(&store, "title", "world"),
+            2,
+            "deleted document must not be counted"
+        );
+    }
+
+    /// Issue #610: a non-`TermQuery` (here a Boolean AND) bypasses the fast
+    /// path and is counted correctly by the slow path.
+    #[test]
+    fn test_count_boolean_query_falls_back() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+
+        let temp_dir = TempDir::new().unwrap();
+        let store = store_with_titles(&temp_dir, &["Hello World", "Goodbye World", "Big World"]);
+
+        // title:world AND title:hello → only "Hello World".
+        let q = Box::new(
+            BooleanQueryBuilder::new()
+                .must(Box::new(TermQuery::new("title", "world")))
+                .must(Box::new(TermQuery::new("title", "hello")))
+                .build(),
+        ) as Box<dyn Query>;
+        let count = store.count(LexicalSearchRequest::new(q)).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    /// Issue #610: a positive `min_score` forces the scoring slow path (the
+    /// fast path cannot honour a score threshold). An unreachable threshold
+    /// yields zero; a zero threshold counts every match.
+    #[test]
+    fn test_count_with_min_score_falls_back() {
+        let temp_dir = TempDir::new().unwrap();
+        let store = store_with_titles(&temp_dir, &["Hello World", "Goodbye World", "Big World"]);
+
+        let all = term_count(&store, "title", "world");
+        assert_eq!(all, 3);
+
+        let q = Box::new(TermQuery::new("title", "world")) as Box<dyn Query>;
+        let thresholded = store
+            .count(LexicalSearchRequest::new(q).min_score(f32::MAX))
+            .unwrap();
+        assert_eq!(thresholded, 0, "no document scores above f32::MAX");
+    }
+
+    /// Issue #610: a term absent from the index counts as zero (handled by the
+    /// `is_empty` guard before the fast path).
+    #[test]
+    fn test_count_nonexistent_term() {
+        let temp_dir = TempDir::new().unwrap();
+        let store = store_with_titles(&temp_dir, &["Hello World"]);
+        assert_eq!(term_count(&store, "title", "nonexistent"), 0);
+    }
+
     #[test]
     fn test_engine_refresh() {
         let temp_dir = TempDir::new().unwrap();
