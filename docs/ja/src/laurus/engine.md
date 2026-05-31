@@ -69,6 +69,11 @@ Embedder のネットワークラウンドトリップを回避できます。�
 無効です。識別可能なクエリの working set に応じてメモリを抑える容量を
 指定してください。
 
+1 つのクエリ内では、その全 payload を 1 回の `Embedder::embed_batch`
+呼び出しでEmbedding します（キャッシュミスのみ、`PerFieldEmbedder` では
+field ごとにグルーピング）。これにより、バッチ対応 Embedder ではマルチ
+ベクトルクエリでも payload ごとではなく 1 往復で済みます（Issue #671）。
+
 ### Buildライフサイクル
 
 `build()` が呼び出されると、以下の処理が実行されます。

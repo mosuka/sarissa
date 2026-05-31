@@ -15,7 +15,7 @@ use crate::analysis::analyzer::keyword::KeywordAnalyzer;
 use crate::analysis::analyzer::per_field::PerFieldAnalyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
 use crate::data::Document;
-use crate::embedding::cache::{EmbeddingCache, embed_with_cache};
+use crate::embedding::cache::{EmbeddingCache, embed_batch_with_cache};
 use crate::embedding::embedder::Embedder;
 use crate::error::Result;
 use crate::lexical::store::LexicalStore;
@@ -1316,35 +1316,51 @@ impl Engine {
                 use crate::embedding::embedder::EmbedInput;
                 use crate::vector::store::request::QueryVector;
 
-                let embedder = self.vector.embedder();
-                let mut query_vectors = Vec::new();
+                // Owned payload data for the embeddable (Text / Bytes) payloads,
+                // keeping each one's field and weight. Non-text / non-bytes
+                // payloads are skipped, as before. Owned buffers must outlive the
+                // borrowed `EmbedInput`s handed to the batch call below.
+                enum Owned {
+                    Text(String),
+                    Bytes(Vec<u8>, Option<String>),
+                }
+                let mut owned: Vec<(String, f32, Owned)> = Vec::new();
                 for payload in payloads {
-                    let (text_owned, bytes_owned, mime_owned) = match &payload.payload {
-                        DataValue::Text(t) => (Some(t.clone()), None, None),
-                        DataValue::Bytes(b, m) => (None, Some(b.clone()), m.clone()),
+                    let data = match &payload.payload {
+                        DataValue::Text(t) => Owned::Text(t.clone()),
+                        DataValue::Bytes(b, m) => Owned::Bytes(b.clone(), m.clone()),
                         _ => continue,
                     };
-                    let field_name = payload.field.clone();
-                    let input = if let Some(ref text) = text_owned {
-                        EmbedInput::Text(text)
-                    } else if let Some(ref bytes) = bytes_owned {
-                        EmbedInput::Bytes(bytes, mime_owned.as_deref())
-                    } else {
-                        unreachable!()
-                    };
-                    let vector = embed_with_cache(
-                        self.embedding_cache.as_ref(),
-                        &embedder,
-                        &field_name,
-                        &input,
-                    )
-                    .await?;
-                    query_vectors.push(QueryVector {
-                        vector,
-                        weight: payload.weight,
-                        fields: Some(vec![payload.field.clone()]),
-                    });
+                    owned.push((payload.field.clone(), payload.weight, data));
                 }
+
+                // Embed every payload in one batch (Issue #671) so a
+                // batch-capable embedder pays one round trip instead of one per
+                // payload, while preserving cache and per-field routing.
+                let items: Vec<(String, EmbedInput<'_>)> = owned
+                    .iter()
+                    .map(|(field, _, data)| {
+                        let input = match data {
+                            Owned::Text(t) => EmbedInput::Text(t),
+                            Owned::Bytes(b, m) => EmbedInput::Bytes(b, m.as_deref()),
+                        };
+                        (field.clone(), input)
+                    })
+                    .collect();
+                let embedder = self.vector.embedder();
+                let vectors =
+                    embed_batch_with_cache(self.embedding_cache.as_ref(), &embedder, &items)
+                        .await?;
+
+                let query_vectors: Vec<QueryVector> = owned
+                    .iter()
+                    .zip(vectors)
+                    .map(|((field, weight, _), vector)| QueryVector {
+                        vector,
+                        weight: *weight,
+                        fields: Some(vec![field.clone()]),
+                    })
+                    .collect();
                 vreq.query =
                     crate::vector::search::searcher::VectorSearchQuery::Vectors(query_vectors);
             }

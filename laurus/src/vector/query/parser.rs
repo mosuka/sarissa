@@ -13,7 +13,6 @@ use pest_derive::Parser;
 use crate::data::DataValue;
 use crate::embedding::embedder::{EmbedInput, Embedder};
 use crate::error::{LaurusError, Result};
-use crate::vector::core::vector::Vector;
 use crate::vector::store::request::{
     QueryPayload, QueryVector, VectorSearchQuery, VectorSearchRequest,
 };
@@ -127,39 +126,41 @@ impl VectorQueryParser {
             ));
         }
 
-        // Embed each text payload into a query vector.
-        let mut query_vectors = Vec::new();
-        for payload in payloads {
+        // Embed every clause's payload in one batch (Issue #671) so a
+        // batch-capable embedder pays one round trip instead of one per clause,
+        // while preserving the shared embedding cache (#678) and per-field
+        // routing. Non-text / non-bytes payloads are skipped, as before.
+        let mut kept: Vec<&QueryPayload> = Vec::new();
+        let mut items: Vec<(String, EmbedInput<'_>)> = Vec::new();
+        for payload in &payloads {
             let input = match &payload.payload {
                 DataValue::Text(t) => EmbedInput::Text(t),
                 DataValue::Bytes(b, m) => EmbedInput::Bytes(b, m.as_deref()),
                 _ => continue,
             };
-            let vector = self.embed_for_field(&payload.field, &input).await?;
-            query_vectors.push(QueryVector {
+            items.push((payload.field.clone(), input));
+            kept.push(payload);
+        }
+        let vectors = crate::embedding::cache::embed_batch_with_cache(
+            self.embedding_cache.as_ref(),
+            &self.embedder,
+            &items,
+        )
+        .await?;
+        let query_vectors: Vec<QueryVector> = kept
+            .into_iter()
+            .zip(vectors)
+            .map(|(payload, vector)| QueryVector {
                 vector,
                 weight: payload.weight,
-                fields: Some(vec![payload.field]),
-            });
-        }
+                fields: Some(vec![payload.field.clone()]),
+            })
+            .collect();
 
         Ok(VectorSearchRequest {
             query: VectorSearchQuery::Vectors(query_vectors),
             params: Default::default(),
         })
-    }
-
-    /// Embed input for a specific field, consulting the shared embedding
-    /// cache when configured (Issue #678) and using `PerFieldEmbedder`
-    /// routing when the embedder supports it.
-    async fn embed_for_field(&self, field: &str, input: &EmbedInput<'_>) -> Result<Vector> {
-        crate::embedding::cache::embed_with_cache(
-            self.embedding_cache.as_ref(),
-            &self.embedder,
-            field,
-            input,
-        )
-        .await
     }
 
     /// Parse a single vector clause (e.g., `content:"cute kitten"^0.8` or `content:python`).
@@ -238,6 +239,7 @@ mod tests {
 
     use super::*;
     use crate::embedding::embedder::EmbedInputType;
+    use crate::vector::core::vector::Vector;
 
     /// Mock embedder that returns a zero vector of the configured dimension.
     #[derive(Debug)]
