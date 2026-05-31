@@ -379,6 +379,35 @@ impl VectorStore {
         Ok(parking_lot::RwLockWriteGuard::downgrade(guard))
     }
 
+    /// Warm the cached searcher so the first query does not pay its setup cost
+    /// (Issue #677).
+    ///
+    /// Eagerly builds and caches the index searcher — which loads the reader
+    /// (file → memory for `InMemory`, the offset table for `Mmap`) — and then
+    /// invokes the searcher's
+    /// [`warmup`](crate::vector::search::searcher::VectorIndexSearcher::warmup),
+    /// which pre-faults on-disk vector data into the OS page cache where
+    /// applicable (HNSW `Mmap` mode). This moves the searcher-construction and
+    /// page-fault latency off the first query.
+    ///
+    /// Safe to call multiple times and from any index type (a no-op
+    /// `warmup` for searchers that do not override it). Typically called once
+    /// at startup via [`Engine::warmup`](crate::engine::Engine::warmup).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if building the searcher (reader load) fails.
+    pub fn warmup(&self) -> Result<()> {
+        let mut guard = self.searcher_cache.write();
+        if guard.is_none() {
+            *guard = Some(self.index.searcher()?);
+        }
+        if let Some(searcher) = guard.as_mut() {
+            searcher.warmup()?;
+        }
+        Ok(())
+    }
+
     /// Execute a low-level vector similarity search.
     pub fn search_index(
         &self,

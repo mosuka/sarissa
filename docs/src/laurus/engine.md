@@ -190,6 +190,24 @@ let request = SearchRequestBuilder::new()
 let results = engine.search(request).await?;
 ```
 
+### Warmup
+
+`engine.warmup()` (Issue #677) primes the vector searcher so the **first**
+vector / hybrid query does not pay one-time setup costs. Call it once after
+building the engine, before serving traffic:
+
+```rust,ignore
+let engine = builder.build()?;
+engine.warmup()?;   // optional: move first-query latency to startup
+```
+
+It eagerly builds and caches the vector searcher — loading the reader (file →
+memory for `InMemory`, the offset table for `Mmap`) — and, for HNSW indexes in
+`Mmap` mode, pre-faults the on-disk vector data into the OS page cache. The HNSW
+graph is always loaded eagerly, so only the vector data needs warming.
+`warmup()` is safe to call multiple times and is a no-op for lexical-only
+workloads.
+
 ## SearchRequest
 
 | Field | Type | Default | Description |

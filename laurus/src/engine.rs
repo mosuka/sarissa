@@ -1128,6 +1128,22 @@ impl Engine {
         Ok((lexical_config, vector_config))
     }
 
+    /// Warm the vector searcher so the first vector / hybrid query does not pay
+    /// the searcher-construction and page-fault cost (Issue #677).
+    ///
+    /// Delegates to [`VectorStore::warmup`](crate::vector::VectorStore::warmup):
+    /// it eagerly builds the cached searcher (loading the reader) and pre-faults
+    /// on-disk vector data into the OS page cache where applicable (HNSW `Mmap`
+    /// mode). Call once after building the engine, before serving traffic.
+    /// Safe to call multiple times; lexical search needs no warming.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if building the vector searcher (reader load) fails.
+    pub fn warmup(&self) -> Result<()> {
+        self.vector.warmup()
+    }
+
     /// Search the index.
     ///
     /// Supports three modes depending on how the
