@@ -68,6 +68,11 @@ trips for remote ones, on repeated-query workloads (autocomplete, dashboard
 refreshes, A/B evaluation). It is disabled by default; pick a capacity that
 bounds memory to your working set of distinct queries.
 
+Within a single query, all of its payloads are embedded in one
+`Embedder::embed_batch` call (cache misses only, grouped per field for
+`PerFieldEmbedder`), so a batch-capable embedder pays one round trip for a
+multi-vector query instead of one per payload (Issue #671).
+
 ### Build Lifecycle
 
 When `build()` is called, the following steps occur:
