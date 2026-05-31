@@ -120,6 +120,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use ahash::AHashSet;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use laurus::storage::Storage;
 use laurus::storage::file::FileStorageConfig;
@@ -190,6 +191,18 @@ fn generate_multi_field_vectors(count: usize, dim: usize) -> Vec<(u64, String, V
             )
         })
         .collect()
+}
+
+/// `(label, stride)` pairs for the allow-set filter benches (Issue #747).
+/// The allow-set keeps every `stride`-th doc id, so `stride = 100` is ~1 %,
+/// `10` is ~10 %, and `2` is ~50 % of the corpus.
+const ALLOWSET_SELECTIVITIES: &[(&str, usize)] = &[("1pct", 100), ("10pct", 10), ("50pct", 2)];
+
+/// Build a deterministic allow-set keeping every `stride`-th doc id in
+/// `0..count`. Used by the inline filter benches (Issue #740 / #747) to drive
+/// the Flat / IVF scan at a known selectivity.
+fn make_allow_set(count: usize, stride: usize) -> Arc<AHashSet<u64>> {
+    Arc::new((0..count as u64).step_by(stride).collect())
 }
 
 /// Build a deterministic query vector. Uses a different starting seed from
@@ -902,6 +915,152 @@ fn bench_flat_multi_field_search(c: &mut Criterion) {
     group.finish();
 }
 
+/// Flat search with an inline allow-set filter (Issue #740 / follow-up #747).
+///
+/// A candidate whose doc id is not in `request.filter` is skipped before the
+/// distance kernel, so a more selective allow-set should lower latency. The
+/// `unfiltered` case is the reference baseline (it must be unchanged by this
+/// work). The corpus is the same cached single-field synthetic set used by
+/// `bench_flat_search`, so no extra build is incurred.
+fn bench_flat_filtered_allowset(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Flat Filtered Allow-set");
+    let dim = 128;
+
+    for &count in &search_corpus_sizes() {
+        let config = FlatIndexConfig {
+            dimension: dim,
+            distance_metric: DistanceMetric::Cosine,
+            ..Default::default()
+        };
+        let slot = format!("flat_n{count}_dim{dim}_synthetic");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::Flat(config), || {
+            generate_vectors(count, dim)
+        });
+        let searcher = FlatVectorSearcher::new(reader).unwrap();
+        let query = generate_query(dim);
+
+        group.throughput(Throughput::Elements(count as u64));
+
+        // Unfiltered baseline.
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("unfiltered/{count}")),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let request = VectorIndexQuery::new(query.clone()).top_k(10);
+                    searcher.search(&request).unwrap()
+                });
+            },
+        );
+
+        for &(label, stride) in ALLOWSET_SELECTIVITIES {
+            let allow = make_allow_set(count, stride);
+
+            // Sanity: the flat scan is exhaustive, so every allowed doc is a
+            // candidate and a top-10 query must still return hits.
+            let probe = searcher
+                .search(
+                    &VectorIndexQuery::new(query.clone())
+                        .top_k(10)
+                        .filter(allow.clone()),
+                )
+                .unwrap();
+            assert!(
+                !probe.results.is_empty(),
+                "flat allow-set probe must hit ({label}, count={count})"
+            );
+
+            group.bench_with_input(
+                BenchmarkId::from_parameter(format!("{label}/{count}")),
+                &count,
+                |b, _| {
+                    b.iter(|| {
+                        let request = VectorIndexQuery::new(query.clone())
+                            .top_k(10)
+                            .filter(allow.clone());
+                        searcher.search(&request).unwrap()
+                    });
+                },
+            );
+        }
+    }
+
+    group.finish();
+}
+
+/// IVF search with an inline allow-set filter (Issue #740 / follow-up #747).
+///
+/// Probes 3 of the 10 clusters (matching the bench IVF `n_probe`) and skips
+/// non-matching candidates before the distance kernel. Unlike the flat scan,
+/// a selective filter combined with cluster probing can legitimately return
+/// no hits when the allowed docs fall outside the probed clusters, so the
+/// filtered probe only asserts the search succeeds (timing the scan + skip is
+/// still meaningful). The corpus reuses the cached set from `bench_ivf_search`.
+fn bench_ivf_filtered_allowset(c: &mut Criterion) {
+    let mut group = c.benchmark_group("IVF Filtered Allow-set");
+    let dim = 128;
+    let n_probe = 3;
+
+    for &count in &search_corpus_sizes() {
+        let config = IvfIndexConfig {
+            dimension: dim,
+            distance_metric: DistanceMetric::Cosine,
+            n_clusters: 10,
+            n_probe,
+            ..Default::default()
+        };
+        let slot = format!("ivf_n{count}_dim{dim}_nc10_synthetic");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::IVF(config), || {
+            generate_vectors(count, dim)
+        });
+        let searcher = IvfSearcher::with_n_probe(reader, n_probe).unwrap();
+        let query = generate_query(dim);
+
+        group.throughput(Throughput::Elements(count as u64));
+
+        // Unfiltered baseline (probing `n_probe` clusters).
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("unfiltered/{count}")),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let request = VectorIndexQuery::new(query.clone()).top_k(10);
+                    searcher.search(&request).unwrap()
+                });
+            },
+        );
+
+        for &(label, stride) in ALLOWSET_SELECTIVITIES {
+            let allow = make_allow_set(count, stride);
+
+            // Confirm the filtered path runs without error; an empty result is
+            // acceptable for a selective filter under cluster probing.
+            searcher
+                .search(
+                    &VectorIndexQuery::new(query.clone())
+                        .top_k(10)
+                        .filter(allow.clone()),
+                )
+                .unwrap();
+
+            group.bench_with_input(
+                BenchmarkId::from_parameter(format!("{label}/{count}")),
+                &count,
+                |b, _| {
+                    b.iter(|| {
+                        let request = VectorIndexQuery::new(query.clone())
+                            .top_k(10)
+                            .filter(allow.clone());
+                        searcher.search(&request).unwrap()
+                    });
+                },
+            );
+        }
+    }
+
+    group.finish();
+}
+
 // ---------------------------------------------------------------------------
 // Issue #498 — real-data Stage 2 speed validation (SIFT1M)
 // ---------------------------------------------------------------------------
@@ -1461,5 +1620,7 @@ criterion_group!(
     bench_hnsw_ef_search_sweep,
     bench_hnsw_multi_field_search,
     bench_flat_multi_field_search,
+    bench_flat_filtered_allowset,
+    bench_ivf_filtered_allowset,
 );
 criterion_main!(benches);
