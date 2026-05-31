@@ -563,6 +563,66 @@ fn bench_ivf_search(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark `IvfSearcher` at **large cluster counts** (Issue #668).
+///
+/// `bench_ivf_search` builds only `n_clusters = 10`, where `probe_clusters`
+/// (centroid distance scan + nearest-`n_probe` selection) is negligible.
+/// #668 targets the `K = 1024-4096` regime, where the per-query centroid scan
+/// dominates. `n_clusters` straddles
+/// [`PARALLEL_SCAN_THRESHOLD`](laurus::vector::search::searcher) (2048): 512
+/// exercises the serial `select_nth_unstable_by` path, 2048 the rayon-parallel
+/// centroid scan. `n_probe` is held small (8) so the centroid scan — not the
+/// candidate scan over probed clusters — sits on the critical path.
+///
+/// First run builds the k-means index once per `n_clusters` (the 2048-cluster
+/// build is the heavy one); subsequent runs re-open the cached on-disk index.
+fn bench_ivf_search_large_k(c: &mut Criterion) {
+    let mut group = c.benchmark_group("IVF Search Large K");
+    let dim = 128;
+    let n_probe = 8usize;
+
+    for &n_clusters in &[512usize, 2048] {
+        // ~4 vectors per cluster; k-means requires at least `n_clusters` points.
+        let count = n_clusters * 4;
+        let config = IvfIndexConfig {
+            dimension: dim,
+            distance_metric: DistanceMetric::Cosine,
+            n_clusters,
+            n_probe,
+            ..Default::default()
+        };
+        let slot = format!("ivf_largek_n{count}_dim{dim}_nc{n_clusters}_synthetic");
+        let reader = cached_vector_reader(&slot, VectorIndexTypeConfig::IVF(config), || {
+            generate_vectors(count, dim)
+        });
+        // `with_n_probe` pins the probe count independent of how the cached
+        // reader was built, keeping the centroid scan the dominant cost.
+        let searcher = IvfSearcher::with_n_probe(reader, n_probe).unwrap();
+        let query = generate_query(dim);
+
+        // Sanity check: the probe must return top-10 hits before timing.
+        let probe = searcher
+            .search(&VectorIndexQuery::new(query.clone()).top_k(10))
+            .unwrap();
+        assert!(
+            !probe.results.is_empty(),
+            "ivf large-K top-10 probe must return at least one hit at n_clusters={n_clusters}"
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("top10", n_clusters),
+            &n_clusters,
+            |b, _| {
+                b.iter(|| {
+                    let request = VectorIndexQuery::new(query.clone()).top_k(10);
+                    searcher.search(&request).unwrap()
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 /// Benchmark the **fallback (linear-scan) path** of `HnswSearcher::search`.
 ///
 /// `VectorIndexQuery::new` leaves `field_name` as `None`. The graph branch
@@ -1607,6 +1667,7 @@ criterion_group!(
     bench_hnsw_construction,
     bench_flat_search,
     bench_ivf_search,
+    bench_ivf_search_large_k,
     bench_hnsw_fallback_search,
     bench_hnsw_graph_search,
     bench_hnsw_graph_search_rerank,

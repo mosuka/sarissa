@@ -174,6 +174,19 @@ deterministic. On `wasm32` (no rayon) the scan is always serial.
 Speedup scales with the host's physical cores and is largest for big Flat
 indexes or a wide IVF `n_probe`; scans below the threshold are unaffected.
 
+### IVF Cluster Selection
+
+Before the distance scan, an IVF query first chooses *which* clusters to scan:
+it scores the query against every centroid and keeps the `n_probe` nearest.
+Because the probed clusters are then merged and re-ranked by similarity, the
+centroids' relative order does not matter, so the nearest `n_probe` are taken
+with an `O(K)` partial selection (`select_nth_unstable_by`) over the `K`
+centroids rather than a full `O(K log K)` sort. The saving grows with the
+cluster count `K`; at `K = 2048` it cut the per-query coarse step by roughly
+18% (Issue #668). The centroid scan itself stays serial — each centroid is a
+single distance computation, so dispatching it to rayon costs more than it
+saves at realistic cluster counts (`K ≈ √N`).
+
 ### Weights
 
 Use the `^` boost syntax in DSL or `weight` in `QueryVector` to adjust how much each field contributes:

@@ -118,7 +118,12 @@ impl IvfSearcher {
                 return Ok(Vec::new());
             }
 
-            // Calculate distances to all centroids
+            // Distance to every centroid. Kept serial: each item is a single
+            // distance computation, so the candidate-scan rayon path (#662)
+            // adds more per-job dispatch overhead than it saves here — at
+            // K = 2048 parallelising this scan measured ~+9% slower (Issue
+            // #668). The centroid count K is ~√N in practice, so the serial
+            // scan stays well below where parallelism would pay off.
             let mut centroid_distances: Vec<(usize, f32)> = centroids
                 .iter()
                 .enumerate()
@@ -130,14 +135,24 @@ impl IvfSearcher {
                 })
                 .collect();
 
-            // Sort by distance (ascending)
-            centroid_distances.sort_unstable_by(|a, b| {
-                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-            });
+            // Select the `n_probe` nearest centroids. Their relative order is
+            // irrelevant — `search()` re-sorts the collected candidates by
+            // similarity afterwards — so a full sort (O(K log K)) is wasteful.
+            // Partition around the `n`-th smallest distance in O(K) with
+            // `select_nth_unstable_by` instead (Issue #668, suggested fix (1)).
+            let n = n_probe.min(centroid_distances.len());
+            if n == 0 {
+                return Ok(Vec::new());
+            }
+            if n < centroid_distances.len() {
+                centroid_distances.select_nth_unstable_by(n - 1, |a, b| {
+                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
 
-            // Collect vector IDs from the n_probe nearest clusters
+            // Collect vector IDs from the `n` nearest clusters.
             let mut result = Vec::new();
-            for &(cluster_idx, _) in centroid_distances.iter().take(n_probe) {
+            for &(cluster_idx, _) in centroid_distances.iter().take(n) {
                 let cluster_vecs = ivf_reader.cluster_vectors(cluster_idx);
                 if let Some(field) = field_name {
                     result.extend(cluster_vecs.iter().filter(|(_, f)| f == field).cloned());
@@ -305,5 +320,124 @@ impl VectorIndexSearcher for IvfSearcher {
         } else {
             Ok(self.index_reader.vector_ids()?.len() as u64)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for `probe_clusters` partial-selection correctness (Issue
+    //! #668). The child module can reach the private `probe_clusters`, so the
+    //! selected cluster *set* is asserted directly — independent of `top_k` /
+    //! `min_similarity` filtering in the public `search()` path.
+
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+
+    use super::IvfSearcher;
+    use crate::storage::memory::MemoryStorage;
+    use crate::vector::core::distance::DistanceMetric;
+    use crate::vector::core::vector::Vector;
+    use crate::vector::index::config::IvfIndexConfig;
+    use crate::vector::index::ivf::reader::IvfIndexReader;
+    use crate::vector::index::ivf::writer::IvfIndexWriter;
+    use crate::vector::reader::VectorIndexReader;
+    use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
+
+    /// Build 12 well-separated singleton clusters (one vector per centroid,
+    /// spaced 1000 units apart) and return a loaded reader. Because each
+    /// cluster holds exactly one vector whose `doc_id == position / 1000 - 1`,
+    /// the set of vectors `probe_clusters` returns is a direct read-out of
+    /// which centroids were selected.
+    fn singleton_cluster_reader(name: &str) -> Arc<dyn VectorIndexReader> {
+        let storage = Arc::new(MemoryStorage::default());
+        let config = IvfIndexConfig {
+            dimension: 2,
+            distance_metric: DistanceMetric::Euclidean,
+            n_clusters: 12,
+            n_probe: 1,
+            normalize_vectors: false,
+            ..IvfIndexConfig::default()
+        };
+        let mut writer = IvfIndexWriter::with_storage(
+            config,
+            VectorIndexWriterConfig::default(),
+            name,
+            storage.clone(),
+        )
+        .unwrap();
+
+        let vectors: Vec<(u64, String, Vector)> = (0..12)
+            .map(|i| {
+                (
+                    i as u64,
+                    "f".to_string(),
+                    Vector::new(vec![(i as f32 + 1.0) * 1000.0, 0.0]),
+                )
+            })
+            .collect();
+        writer.build(vectors).unwrap();
+        writer.finalize().unwrap();
+        writer.write().unwrap();
+
+        let reader = IvfIndexReader::load(storage, name, DistanceMetric::Euclidean).unwrap();
+        assert_eq!(
+            reader.centroids().len(),
+            12,
+            "k-means should produce one centroid per well-separated input"
+        );
+        Arc::new(reader)
+    }
+
+    fn probed_doc_ids(searcher: &IvfSearcher, query: &Vector, n_probe: usize) -> BTreeSet<u64> {
+        searcher
+            .probe_clusters(query, n_probe, None)
+            .unwrap()
+            .into_iter()
+            .map(|(doc_id, _)| doc_id)
+            .collect()
+    }
+
+    /// `select_nth_unstable_by` must keep the *nearest* `n_probe` centroids,
+    /// not an arbitrary `n_probe` subset. Centroids sit at x = 1000..=12000;
+    /// a query at x = 1000 has them in strictly increasing distance order, so
+    /// the nearest three are docs {0, 1, 2}.
+    #[test]
+    fn probe_clusters_selects_nearest_set() {
+        let reader = singleton_cluster_reader("test_probe_nearest_set");
+        let searcher = IvfSearcher::with_n_probe(reader, 1).unwrap();
+
+        let near = Vector::new(vec![1000.0, 0.0]);
+        assert_eq!(
+            probed_doc_ids(&searcher, &near, 3),
+            BTreeSet::from([0, 1, 2])
+        );
+
+        // Querying from the far end selects the far centroids instead.
+        let far = Vector::new(vec![12000.0, 0.0]);
+        assert_eq!(probed_doc_ids(&searcher, &far, 2), BTreeSet::from([10, 11]));
+    }
+
+    /// `n_probe >= number of centroids` probes every cluster (the
+    /// `select_nth_unstable_by` step is skipped). Covers both `n_probe == K`
+    /// and `n_probe > K`.
+    #[test]
+    fn probe_clusters_n_probe_ge_k_probes_all() {
+        let reader = singleton_cluster_reader("test_probe_ge_k");
+        let searcher = IvfSearcher::with_n_probe(reader, 1).unwrap();
+        let query = Vector::new(vec![1000.0, 0.0]);
+
+        let all: BTreeSet<u64> = (0..12).collect();
+        assert_eq!(probed_doc_ids(&searcher, &query, 12), all);
+        assert_eq!(probed_doc_ids(&searcher, &query, 20), all);
+    }
+
+    /// `n_probe == 0` probes nothing (the early-return guard).
+    #[test]
+    fn probe_clusters_n_probe_zero_returns_empty() {
+        let reader = singleton_cluster_reader("test_probe_zero");
+        let searcher = IvfSearcher::with_n_probe(reader, 1).unwrap();
+        let query = Vector::new(vec![1000.0, 0.0]);
+
+        assert!(probed_doc_ids(&searcher, &query, 0).is_empty());
     }
 }
