@@ -412,12 +412,17 @@ impl VectorStore {
     /// resolved against the reader's field names). When neither is set, all
     /// indexed fields are searched (the default).
     ///
-    /// **Note:** The following request fields are currently **ignored** by this
+    /// The per-field candidate pool is widened by
+    /// [`overfetch`](crate::vector::search::searcher::VectorSearchParams::overfetch)
+    /// via
+    /// [`overfetch_top_k`](crate::vector::search::searcher::VectorSearchParams::overfetch_top_k)
+    /// (Issue #675) so the score-mode merge has headroom before the final
+    /// truncation to `limit`.
+    ///
+    /// **Note:** The following request field is currently **ignored** by this
     /// implementation:
     /// - `VectorSearchQuery::Payloads` -- callers must embed payloads into
     ///   vectors before calling this method.
-    /// - [`overfetch`](crate::vector::search::searcher::VectorSearchParams::overfetch)
-    ///   -- a hardcoded 2x overfetch (`limit * 2`) is used instead.
     ///
     /// # Arguments
     ///
@@ -563,7 +568,7 @@ impl VectorStore {
             );
             let make = |field: Option<&str>| {
                 let mut q = VectorIndexQuery::new(qv.vector.clone())
-                    .top_k(request.params.limit.saturating_mul(2));
+                    .top_k(request.params.overfetch_top_k());
                 if let Some(field) = field {
                     q = q.field_name(field.to_string());
                 }

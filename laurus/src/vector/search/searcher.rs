@@ -457,8 +457,16 @@ fn default_query_limit() -> usize {
     10
 }
 
+/// Default overfetch factor (Issue #675).
+///
+/// `2.0` matches the historical hardcoded behaviour (`top_k = limit * 2`) that
+/// [`VectorStore::search`](crate::vector::store::VectorStore::search) applied
+/// before the factor was honoured, and the documented gRPC default. Keeping the
+/// declared default at `2.0` means callers that do not set `overfetch`
+/// (including the engine, which passes `2.0` explicitly) see no behaviour
+/// change now that the factor drives `top_k`.
 fn default_overfetch() -> f32 {
-    1.0
+    2.0
 }
 
 /// Parameters for vector search operations.
@@ -478,7 +486,13 @@ pub struct VectorSearchParams {
     /// How to combine scores from multiple query vectors.
     #[serde(default)]
     pub score_mode: crate::vector::store::request::VectorScoreMode,
-    /// Overfetch factor for better result quality.
+    /// Overfetch factor for better result quality (Issue #675).
+    ///
+    /// Each per-field index query fetches `ceil(limit * overfetch)` candidates
+    /// (see [`Self::overfetch_top_k`]) so the multi-vector score-mode merge has
+    /// headroom before the final truncation to [`limit`](Self::limit). A factor
+    /// `<= 1.0` (or non-finite) disables overfetch. Defaults to `2.0`
+    /// ([`default_overfetch`]).
     #[serde(default = "default_overfetch")]
     pub overfetch: f32,
     /// Minimum score threshold. Results below this score are filtered out.
@@ -517,6 +531,34 @@ impl Default for VectorSearchParams {
             allowed_ids: None,
             rerank_factor: None,
             ef_search: None,
+        }
+    }
+}
+
+impl VectorSearchParams {
+    /// Resolve the per-field index `top_k` (the overfetch candidate pool) from
+    /// [`limit`](Self::limit) and [`overfetch`](Self::overfetch) (Issue #675).
+    ///
+    /// Overfetching pulls more candidates than `limit` so the multi-vector
+    /// score-mode merge in
+    /// [`VectorStore::search`](crate::vector::store::VectorStore::search) has
+    /// headroom before the final truncation to `limit`. An `overfetch` factor
+    /// `f` yields `ceil(limit * f)` candidates; a factor `<= 1.0` or non-finite
+    /// disables overfetch (`top_k == limit`), and the result never drops below
+    /// `limit`. Before this was honoured a hardcoded `2x` was always used.
+    ///
+    /// # Returns
+    ///
+    /// The number of candidates each per-field index query should request.
+    pub(crate) fn overfetch_top_k(&self) -> usize {
+        if !self.overfetch.is_finite() || self.overfetch <= 1.0 {
+            return self.limit;
+        }
+        let scaled = (self.limit as f32 * self.overfetch).ceil();
+        if scaled >= usize::MAX as f32 {
+            usize::MAX
+        } else {
+            (scaled as usize).max(self.limit)
         }
     }
 }
@@ -619,5 +661,52 @@ mod tests {
             });
             assert!(result.is_err(), "n = {n}");
         }
+    }
+
+    fn params_with_overfetch(limit: usize, overfetch: f32) -> VectorSearchParams {
+        VectorSearchParams {
+            limit,
+            overfetch,
+            ..Default::default()
+        }
+    }
+
+    /// `overfetch_top_k` scales `limit` by the factor with a ceiling, honouring
+    /// the user-supplied value (Issue #675).
+    #[test]
+    fn overfetch_top_k_scales_limit() {
+        assert_eq!(params_with_overfetch(10, 2.0).overfetch_top_k(), 20);
+        assert_eq!(params_with_overfetch(10, 3.0).overfetch_top_k(), 30);
+        // Non-integer factors round up so the pool never undershoots.
+        assert_eq!(params_with_overfetch(10, 1.5).overfetch_top_k(), 15);
+        assert_eq!(params_with_overfetch(3, 1.5).overfetch_top_k(), 5);
+    }
+
+    /// The default factor (`2.0`) reproduces the historical `limit * 2`
+    /// candidate pool, so callers that never set `overfetch` are unaffected.
+    #[test]
+    fn overfetch_top_k_default_is_2x() {
+        assert_eq!(VectorSearchParams::default().overfetch, 2.0);
+        assert_eq!(
+            params_with_overfetch(7, default_overfetch()).overfetch_top_k(),
+            14
+        );
+    }
+
+    /// Factors `<= 1.0` (and degenerate values) disable overfetch — `top_k`
+    /// equals `limit` and never drops below it.
+    #[test]
+    fn overfetch_top_k_clamps_low_and_degenerate_factors() {
+        assert_eq!(params_with_overfetch(10, 1.0).overfetch_top_k(), 10);
+        assert_eq!(params_with_overfetch(10, 0.5).overfetch_top_k(), 10);
+        assert_eq!(params_with_overfetch(10, 0.0).overfetch_top_k(), 10);
+        assert_eq!(params_with_overfetch(10, -1.0).overfetch_top_k(), 10);
+        assert_eq!(params_with_overfetch(10, f32::NAN).overfetch_top_k(), 10);
+        assert_eq!(
+            params_with_overfetch(10, f32::INFINITY).overfetch_top_k(),
+            10
+        );
+        // limit == 0 stays 0 regardless of factor.
+        assert_eq!(params_with_overfetch(0, 4.0).overfetch_top_k(), 0);
     }
 }
