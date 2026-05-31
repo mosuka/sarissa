@@ -189,6 +189,23 @@ let request = SearchRequestBuilder::new()
 let results = engine.search(request).await?;
 ```
 
+### ウォームアップ
+
+`engine.warmup()`（Issue #677）は Vector searcher を事前に準備し、**初回**の
+Vector / ハイブリッドクエリが one-time のセットアップコストを払わないようにします。
+Engine 構築後、トラフィック処理を始める前に一度呼び出します:
+
+```rust,ignore
+let engine = builder.build()?;
+engine.warmup()?;   // オプション: 初回クエリの latency を起動時に移す
+```
+
+Vector searcher を先行構築・キャッシュし（reader をロード — `InMemory` は
+ファイル→メモリ、`Mmap` はオフセット表）、HNSW の `Mmap` モードではディスク上の
+Vector データを OS page cache に pre-fault します。HNSW グラフは常に eager に
+ロードされるため、warming が必要なのは Vector データのみです。`warmup()` は
+複数回呼んでも安全で、lexical のみのワークロードでは no-op です。
+
 ## SearchRequest
 
 | フィールド | 型 | デフォルト | 説明 |

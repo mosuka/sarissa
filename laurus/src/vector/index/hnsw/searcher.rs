@@ -374,6 +374,45 @@ impl VectorIndexSearcher for HnswSearcher {
             Ok(self.index_reader.vector_ids()?.len() as u64)
         }
     }
+
+    /// Pre-fault the on-disk vector data into the OS page cache (Issue #677).
+    ///
+    /// Only the [`OnDemand`](crate::vector::index::storage::VectorStorage::OnDemand)
+    /// (`Mmap` / lazy) storage benefits: without warming, the first query pays
+    /// a page fault for every candidate vector it reads. Touching each stored
+    /// vector once moves that cost to startup. The `Owned*` variants are
+    /// already heap-resident after the reader load that
+    /// [`VectorStore::warmup`](crate::vector::VectorStore::warmup) forces, so
+    /// this is a no-op for them. The HNSW graph is always loaded into memory
+    /// eagerly, so only the vector data needs warming.
+    ///
+    /// Individual read failures are skipped rather than aborting startup —
+    /// warming is a best-effort optimisation, and a genuinely unreadable vector
+    /// would surface on the real query regardless.
+    fn warmup(&mut self) -> Result<()> {
+        let Some(reader) = self.index_reader.as_any().downcast_ref::<HnswIndexReader>() else {
+            return Ok(());
+        };
+        if !matches!(
+            reader.vectors(),
+            crate::vector::index::storage::VectorStorage::OnDemand { .. }
+        ) {
+            return Ok(());
+        }
+        // Read every stored vector so its backing page is faulted in. The
+        // accumulator (kept live via `black_box`) stops the loop from being
+        // optimised away as dead code.
+        let mut acc = 0u64;
+        for (doc_id, field) in reader.vector_ids()? {
+            if let Ok(Some(vector)) = reader.get_vector(doc_id, &field)
+                && let Some(first) = vector.data.first()
+            {
+                acc = acc.wrapping_add(first.to_bits() as u64);
+            }
+        }
+        std::hint::black_box(acc);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
