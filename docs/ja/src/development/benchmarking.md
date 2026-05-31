@@ -15,7 +15,7 @@
 | `spell_correction_bench.rs` | `SpellingCorrector::correct`、各イテレーションごとに fresh corrector を渡す cold-state 計測 |
 | `synonym_bench.rs` | `SynonymDictionary::get_synonyms` のルックアップ（100 / 1k / 10k グループ）と構築コスト |
 | `text_analysis_bench.rs` | `StandardAnalyzer::analyze` のシングルドキュメントとバッチ（100 ドキュメント）解析 |
-| `vector_search_bench.rs` | Flat / IVF / HNSW の構築と検索（1k / 5k ベクタ、dim 128、top-10） |
+| `vector_search_bench.rs` | Flat / IVF / HNSW の構築と検索（1k / 5k ベクタ、dim 128、top-10）。加えてクラスタ選択パス用の大 K IVF ケース（512 / 2048 クラスタ、#668） |
 
 各ファイル冒頭の `//!` ドキュメントコメントにスコープ・シナリオ・フィルタ方法が書かれています。実行前に確認してください。
 

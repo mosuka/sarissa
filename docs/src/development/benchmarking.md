@@ -15,7 +15,7 @@ The benchmark suite lives in [`laurus/benches/`](https://github.com/mosuka/lauru
 | `spell_correction_bench.rs` | `SpellingCorrector::correct` with a fresh corrector per iteration (cold-state measurement) |
 | `synonym_bench.rs` | `SynonymDictionary::get_synonyms` lookup at 100 / 1k / 10k groups, plus build cost |
 | `text_analysis_bench.rs` | `StandardAnalyzer::analyze` single-document and batch (100 docs) |
-| `vector_search_bench.rs` | Flat / IVF / HNSW construction and search at 1k / 5k vectors, dim 128, top-10 |
+| `vector_search_bench.rs` | Flat / IVF / HNSW construction and search at 1k / 5k vectors, dim 128, top-10; plus a large-K IVF case (512 / 2048 clusters) for the cluster-selection path (#668) |
 
 Each file declares its scope, scenarios, and how to filter in its top-of-file `//!` doc comment. Read it before running.
 
