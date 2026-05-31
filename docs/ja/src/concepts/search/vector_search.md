@@ -70,7 +70,7 @@ let request = VectorSearchRequestBuilder::new()
 | `limit(n)` | 結果の最大件数（デフォルト: 10） |
 | `score_mode(VectorScoreMode)` | スコア結合モード（`WeightedSum`、`MaxSim`、`LateInteraction`） |
 | `min_score(f32)` | 最小スコア閾値（デフォルト: 0.0） |
-| `overfetch(f32)` | 結果品質向上のためのオーバーフェッチ係数（デフォルト: 1.0） |
+| `overfetch(f32)` | オーバーフェッチ係数（デフォルト: 2.0、#675）。各クエリは `ceil(limit × overfetch)` 件の候補を取得し、融合後に `limit` へ切り詰める。`<= 1.0` で無効化 |
 | `build()` | `VectorSearchRequest` を構築 |
 
 ## マルチフィールド Vector 検索
