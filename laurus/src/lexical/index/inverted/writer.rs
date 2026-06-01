@@ -657,29 +657,7 @@ impl InvertedIndexWriter {
 
         let segment_name = format!("{}_{:06}", self.config.segment_prefix, self.current_segment);
 
-        // Write inverted index
-        self.write_inverted_index(&segment_name)?;
-
-        // Write stored documents
-        self.write_stored_documents(&segment_name)?;
-
-        // Write field lengths
-        self.write_field_lengths(&segment_name)?;
-
-        // Write field statistics
-        self.write_field_stats(&segment_name)?;
-
-        // Write DocValues
-        self.write_doc_values(&segment_name)?;
-
-        // Write segment metadata
-        self.write_segment_metadata(&segment_name)?;
-
-        // Write BKD trees for numeric fields
-        self.write_bkd_trees(&segment_name)?;
-
-        // COMPATIBILITY: Also write documents as JSON for BasicIndexReader
-        self.write_json_documents(&segment_name)?;
+        self.write_segment_files(&segment_name)?;
 
         // Clear buffers
         self.buffered_docs.clear();
@@ -697,6 +675,64 @@ impl InvertedIndexWriter {
         self.stats.segments_created += 1;
 
         Ok(())
+    }
+
+    /// Write all per-segment files for the currently buffered documents under
+    /// `segment_name`, returning the written file paths.
+    ///
+    /// Shared by the normal flush path ([`Self::flush_segment`]) and the merge
+    /// path ([`Self::flush_buffered_to_segment`], Issue #753) so both produce an
+    /// identical, complete, typed segment. Does not touch buffers or the
+    /// auto-naming counter — callers manage those.
+    ///
+    /// # Arguments
+    ///
+    /// * `segment_name` - Name the segment's files are written under.
+    fn write_segment_files(&self, segment_name: &str) -> Result<Vec<String>> {
+        self.write_inverted_index(segment_name)?;
+        self.write_stored_documents(segment_name)?;
+        self.write_field_lengths(segment_name)?;
+        self.write_field_stats(segment_name)?;
+        self.write_doc_values(segment_name)?;
+        self.write_segment_metadata(segment_name)?;
+        self.write_bkd_trees(segment_name)?;
+        // COMPATIBILITY: also write documents as JSON for BasicIndexReader
+        // (removed in #756).
+        self.write_json_documents(segment_name)?;
+
+        // Collect every file written under this segment prefix (the BKD step
+        // writes one `.{field}.bkd` per numeric/geo field, so enumerate rather
+        // than hard-code the set).
+        let prefix = format!("{segment_name}.");
+        let paths = self
+            .storage
+            .list_files()?
+            .into_iter()
+            .filter(|f| f.starts_with(&prefix))
+            .collect();
+        Ok(paths)
+    }
+
+    /// Flush the currently buffered documents to a caller-named segment,
+    /// returning the written file paths (Issue #753).
+    ///
+    /// Unlike [`Self::flush_segment`], the segment name is supplied by the
+    /// caller (the merge engine names the merged segment) and the auto-naming
+    /// counter is left untouched. Buffers are cleared afterwards so the writer
+    /// can be dropped. Returns an empty vector when nothing is buffered.
+    ///
+    /// # Arguments
+    ///
+    /// * `segment_name` - Name the merged segment's files are written under.
+    pub fn flush_buffered_to_segment(&mut self, segment_name: &str) -> Result<Vec<String>> {
+        if self.buffered_docs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let paths = self.write_segment_files(segment_name)?;
+        self.buffered_docs.clear();
+        self.inverted_index = TermPostingIndex::new();
+        self.stats.segments_created += 1;
+        Ok(paths)
     }
 
     /// Write the inverted index to storage.
@@ -1100,17 +1136,12 @@ impl InvertedIndexWriter {
     }
 
     /// Write DocValues to storage.
-    fn write_doc_values(&self, _segment_name: &str) -> Result<()> {
-        // DocValues are written using local filesystem approach
-        // since Storage trait doesn't directly support it yet.
-        // We'll write to a temporary location and then upload if needed.
-
-        // For now, write directly using the doc_values_writer's write method
-        self.doc_values_writer.write()?;
-
-        // If using remote storage, we would need to upload the .dv file here
-        // For filesystem-based storage, the file is already in the right place
-
+    fn write_doc_values(&self, segment_name: &str) -> Result<()> {
+        // Write under the caller-supplied segment name. On the normal flush
+        // path this equals the writer's own `segment_name`; the merge path
+        // (Issue #753) passes the merged segment's name so accumulated values
+        // land in the right `.dv` file.
+        self.doc_values_writer.write_to(segment_name)?;
         Ok(())
     }
 

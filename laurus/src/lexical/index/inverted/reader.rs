@@ -1020,6 +1020,17 @@ impl SegmentReader {
     }
 
     /// Get posting list for a field and term.
+    /// Return this segment's term dictionary, loading it on demand.
+    ///
+    /// Exposes the dictionary so the segment merge (Issue #753) can enumerate
+    /// every `"field:term"` key (via [`BlockTermDictionary::iter`]) and re-read
+    /// each term's postings through [`Self::postings`] without re-tokenizing.
+    /// Returns `None` when the segment has no on-disk term dictionary.
+    pub fn term_dictionary(&self) -> Result<Option<Arc<BlockTermDictionary>>> {
+        self.load_term_dictionary()?;
+        Ok(self.term_dictionary.read().unwrap().clone())
+    }
+
     pub fn postings(&self, field: &str, term: &str) -> Result<Option<Box<dyn PostingIterator>>> {
         // Load postings from storage
         let postings_file = format!("{}.post", self.info.segment_id);

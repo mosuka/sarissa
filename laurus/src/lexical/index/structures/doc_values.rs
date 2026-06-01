@@ -87,9 +87,23 @@ impl DocValuesWriter {
             .set(doc_id, value);
     }
 
-    /// Write DocValues to storage
+    /// Write DocValues to storage under this writer's configured segment name.
     pub fn write(&self) -> Result<()> {
-        let dv_filename = format!("{}{}", self.segment_name, DOC_VALUES_EXTENSION);
+        self.write_to(&self.segment_name)
+    }
+
+    /// Write DocValues to storage under an explicit `segment_name`.
+    ///
+    /// Used by the segment merge path (Issue #753), which accumulates values in
+    /// a writer constructed with a placeholder name and then flushes them to the
+    /// final merged segment's name. The normal flush path calls [`Self::write`],
+    /// which delegates here with the writer's own `segment_name`.
+    ///
+    /// # Arguments
+    ///
+    /// * `segment_name` - Segment name the `.dv` file is written under.
+    pub fn write_to(&self, segment_name: &str) -> Result<()> {
+        let dv_filename = format!("{}{}", segment_name, DOC_VALUES_EXTENSION);
         let mut output = self.storage.create_output(&dv_filename)?;
 
         // Write magic number and version
