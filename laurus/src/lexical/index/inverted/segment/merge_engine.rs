@@ -6,21 +6,18 @@
 use crate::lexical::core::field::FieldValue;
 use std::sync::Arc;
 
-use ahash::AHashSet;
+use ahash::{AHashMap, AHashSet};
 
 use crate::error::{LaurusError, Result};
-use crate::lexical::core::document::Document;
-use crate::lexical::index::inverted::core::posting::TermPostingIndex;
-use crate::lexical::index::inverted::reader::InvertedIndexReader;
+use crate::lexical::core::analyzed::{AnalyzedDocument, AnalyzedTerm};
+use crate::lexical::index::inverted::reader::{InvertedIndexReader, SegmentReader};
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::inverted::segment::manager::{
     ManagedSegmentInfo, MergeCandidate, MergeStrategy,
 };
-use crate::lexical::index::structures::dictionary::TermDictionaryBuilder;
-use crate::lexical::index::structures::dictionary::TermInfo;
+use crate::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
 use crate::lexical::reader::LexicalIndexReader;
 use crate::storage::Storage;
-use crate::storage::structured::StructWriter;
 
 /// Configuration for merge operations.
 #[derive(Debug, Clone)]
@@ -275,88 +272,74 @@ impl MergeEngine {
             ..Default::default()
         };
 
-        // Create merged inverted index
-        let mut merged_index = TermPostingIndex::new();
-        let mut all_documents = Vec::new();
-        let mut deleted_doc_ids = AHashSet::<u64>::new();
+        // Reconstruct every live document's analyzed form from each source
+        // segment's postings + stored fields (no re-tokenization; #753). The
+        // postings are the source of truth for the inverted index, so
+        // index-only (non-stored) fields are preserved, and original doc_ids
+        // are kept (they encode the shard and are referenced by deletion
+        // bitmaps / external-id maps).
+        //
+        // `docs` keyed by doc_id with `order` tracking first-seen order makes
+        // doc_id collisions across segments (an update re-wrote a doc in a
+        // newer segment) resolve to the last-processed version.
+        let mut order: Vec<u64> = Vec::new();
+        let mut docs: AHashMap<u64, AnalyzedDocument> = AHashMap::new();
+        // Whether the source segments stored term positions; detected from the
+        // first posting seen so the merged segment matches.
+        let mut store_positions: Option<bool> = None;
 
-        // Load deletion information for each segment
         for segment in segments {
-            if segment.segment_info.has_deletions {
-                let bitmap_file = format!("{}.delmap", segment.segment_info.segment_id);
-                if let Ok(input) = self.storage.open_input(&bitmap_file) {
-                    use crate::maintenance::deletion::DeletionBitmap;
-                    use crate::storage::structured::StructReader;
-
-                    if let Ok(mut reader) = StructReader::new(input)
-                        && let Ok(bitmap) = DeletionBitmap::read_from_storage(&mut reader)
-                    {
-                        for doc_id in bitmap.get_deleted_docs() {
-                            deleted_doc_ids.insert(doc_id);
-                        }
-                    }
+            let reader = SegmentReader::open(segment.segment_info.clone(), self.storage.clone())?;
+            let deleted = self.load_deleted_docs(&segment.segment_info)?;
+            let reconstructed = Self::reconstruct_segment(&reader, &deleted, &mut store_positions)?;
+            stats.deleted_docs_removed += deleted.len() as u64;
+            for (doc_id, analyzed) in reconstructed {
+                if docs.insert(doc_id, analyzed).is_none() {
+                    order.push(doc_id);
                 }
             }
         }
 
-        // Process documents from all segments
-        for segment in segments {
-            // Load segment reader
-            let segment_reader = self.load_segment_reader(&segment.segment_info)?;
-
-            // Process documents in batches
-            let mut batch_docs = Vec::new();
-
-            // In Stable ID mode, we iterate over actual document IDs present in the segment.
-            for doc_id in segment_reader.doc_ids()? {
-                // Skip deleted documents if configured
-                if self.config.remove_deleted_docs && deleted_doc_ids.contains(&doc_id) {
-                    stats.deleted_docs_removed += 1;
-                    continue;
-                }
-
-                // Load document
-                if let Some(document) = segment_reader.document(doc_id)? {
-                    batch_docs.push((doc_id, document));
-
-                    // Process batch when full
-                    if batch_docs.len() >= self.config.batch_size {
-                        self.process_document_batch(&mut merged_index, &mut batch_docs)?;
-                        all_documents.append(&mut batch_docs);
-                        stats.docs_processed += self.config.batch_size as u64;
-                    }
-                }
-            }
-
-            // Process remaining documents
-            if !batch_docs.is_empty() {
-                self.process_document_batch(&mut merged_index, &mut batch_docs)?;
-                stats.docs_processed += batch_docs.len() as u64;
-                all_documents.extend(batch_docs);
-            }
-        }
-
-        // Sort documents by ID if configured
         if self.config.sort_by_doc_id {
-            all_documents.sort_by_key(|(doc_id, _)| *doc_id);
+            order.sort_unstable();
         }
 
-        let min_doc_id = all_documents.iter().map(|(id, _)| *id).min().unwrap_or(0);
-        let max_doc_id = all_documents.iter().map(|(id, _)| *id).max().unwrap_or(0);
+        let doc_count = order.len() as u64;
+        let min_doc_id = order.iter().copied().min().unwrap_or(0);
+        let max_doc_id = order.iter().copied().max().unwrap_or(0);
+
+        // Replay the reconstructed analyzed documents through a writer so the
+        // merged segment is written by the same complete, typed write path as a
+        // normal flush, then flush to the merged segment's name. Buffers are
+        // unbounded so the merge produces exactly one output segment.
+        let writer_config = InvertedIndexWriterConfig {
+            store_term_positions: store_positions.unwrap_or(true),
+            shard_id: stats.shard_id,
+            max_buffered_docs: usize::MAX,
+            max_buffer_memory: usize::MAX,
+            ..Default::default()
+        };
+        let mut writer = InvertedIndexWriter::new(self.storage.clone(), writer_config)?;
+        for doc_id in &order {
+            if let Some(analyzed) = docs.remove(doc_id) {
+                writer.upsert_analyzed_document(*doc_id, analyzed)?;
+            }
+        }
+        let file_paths = writer.flush_buffered_to_segment(new_segment_id)?;
+
+        stats.docs_processed = doc_count;
+        stats.postings_merged = doc_count;
 
         // Create new segment info
         let segment_info = SegmentInfo {
             segment_id: new_segment_id.to_string(),
-            doc_count: all_documents.len() as u64,
+            doc_count,
             min_doc_id,
             max_doc_id,
             generation: 0,        // Will be assigned by segment manager
             has_deletions: false, // New merged segment has no deleted docs until updated
             shard_id: stats.shard_id,
         };
-
-        // Write merged segment to storage
-        let file_paths = self.write_merged_segment(&segment_info, &merged_index, &all_documents)?;
 
         // Calculate segment size
         let size_bytes = file_paths
@@ -374,15 +357,33 @@ impl MergeEngine {
         managed_info.size_bytes = size_bytes;
         managed_info.file_paths = file_paths.clone();
 
-        // Update statistics
-        stats.terms_merged = merged_index.term_count();
-        stats.postings_merged = merged_index.doc_count();
-
         Ok(MergeResult {
             new_segment: managed_info,
             stats,
             file_paths,
         })
+    }
+
+    /// Load the set of deleted doc_ids for a segment from its `.delmap`.
+    fn load_deleted_docs(&self, segment_info: &SegmentInfo) -> Result<AHashSet<u64>> {
+        let mut deleted = AHashSet::new();
+        if !segment_info.has_deletions {
+            return Ok(deleted);
+        }
+        let bitmap_file = format!("{}.delmap", segment_info.segment_id);
+        if let Ok(input) = self.storage.open_input(&bitmap_file) {
+            use crate::maintenance::deletion::DeletionBitmap;
+            use crate::storage::structured::StructReader;
+
+            if let Ok(mut reader) = StructReader::new(input)
+                && let Ok(bitmap) = DeletionBitmap::read_from_storage(&mut reader)
+            {
+                for doc_id in bitmap.get_deleted_docs() {
+                    deleted.insert(doc_id);
+                }
+            }
+        }
+        Ok(deleted)
     }
 
     /// Load a segment reader for the given segment.
@@ -400,126 +401,124 @@ impl MergeEngine {
         Ok(Box::new(reader) as Box<dyn LexicalIndexReader>)
     }
 
-    /// Process a batch of documents for indexing.
-    fn process_document_batch(
-        &self,
-        merged_index: &mut TermPostingIndex,
-        documents: &mut [(u64, Document)],
-    ) -> Result<()> {
-        for (doc_id, document) in documents {
-            // Add document to index
-            // Convert document to the expected format for add_document
-            let document_terms: Vec<(String, u32, Option<Vec<u32>>)> = document
-                .fields
-                .keys()
-                .map(|field_name| {
-                    (field_name.clone(), 1, None) // Simple frequency, no positions for now
-                })
-                .collect();
-            merged_index.add_document(*doc_id, document_terms);
-        }
-        Ok(())
-    }
-
-    /// Write merged segment to storage.
-    fn write_merged_segment(
-        &self,
-        segment_info: &SegmentInfo,
-        merged_index: &TermPostingIndex,
-        documents: &[(u64, Document)],
-    ) -> Result<Vec<String>> {
-        let mut file_paths = Vec::new();
-
-        // Write inverted index
-        let index_file = format!("{}.idx", segment_info.segment_id);
-        {
-            let output = self.storage.create_output(&index_file)?;
-            let mut writer = StructWriter::new(output);
-            merged_index.write_to_storage(&mut writer)?;
-            writer.close()?;
-            file_paths.push(index_file);
-        }
-
-        // Write term dictionary
-        let dict_file = format!("{}.dict", segment_info.segment_id);
-        {
-            let output = self.storage.create_output(&dict_file)?;
-            let mut writer = StructWriter::new(output);
-
-            // Build sorted dictionary from index
-            let mut builder = TermDictionaryBuilder::new();
-            for term in merged_index.terms() {
-                let postings = merged_index.get_posting_list(term).unwrap();
-                let term_info = TermInfo::new(
-                    0,                          // Will be updated during actual write
-                    postings.len() as u64 * 16, // Estimate
-                    postings.len() as u64,
-                    postings.iter().map(|p| p.frequency as u64).sum(),
-                );
-                builder.add_term(term.clone(), term_info);
+    /// Reconstruct every live document's [`AnalyzedDocument`] from one source
+    /// segment, without re-tokenizing (Issue #753).
+    ///
+    /// `field_terms` are rebuilt from the segment's postings (the authoritative
+    /// source for the inverted index, so index-only fields survive);
+    /// `stored_fields` from the stored documents; `point_values` are re-derived
+    /// from the stored numeric / geo / datetime fields; `field_lengths` are read
+    /// back from the segment. Deleted docs are excluded.
+    ///
+    /// `store_positions` is set from the first posting seen (whether the source
+    /// stored term positions) so the merged segment matches.
+    fn reconstruct_segment(
+        reader: &SegmentReader,
+        deleted: &AHashSet<u64>,
+        store_positions: &mut Option<bool>,
+    ) -> Result<Vec<(u64, AnalyzedDocument)>> {
+        // Pass 1: bucket postings into per-doc analyzed terms.
+        let mut field_terms: AHashMap<u64, AHashMap<String, Vec<AnalyzedTerm>>> = AHashMap::new();
+        if let Some(dict) = reader.term_dictionary()? {
+            for (term_key, _info) in dict.iter() {
+                let Some((field, term)) = term_key.split_once(':') else {
+                    continue;
+                };
+                if let Some(mut iter) = reader.postings(field, term)? {
+                    while iter.next()? {
+                        let doc_id = iter.doc_id();
+                        if deleted.contains(&doc_id) {
+                            continue;
+                        }
+                        let positions = iter.positions()?;
+                        let freq = iter.term_freq();
+                        if store_positions.is_none() {
+                            *store_positions = Some(!positions.is_empty());
+                        }
+                        let terms = field_terms
+                            .entry(doc_id)
+                            .or_default()
+                            .entry(field.to_string())
+                            .or_default();
+                        if positions.is_empty() {
+                            // Frequency-only segment: one analyzed term carries
+                            // the whole frequency.
+                            terms.push(AnalyzedTerm {
+                                term: term.to_string(),
+                                position: 0,
+                                frequency: freq as u32,
+                                offset: (0, 0),
+                            });
+                        } else {
+                            // One analyzed term per stored position so the
+                            // rebuilt posting list reproduces the positions.
+                            for pos in positions {
+                                terms.push(AnalyzedTerm {
+                                    term: term.to_string(),
+                                    position: pos as u32,
+                                    frequency: freq as u32,
+                                    offset: (0, 0),
+                                });
+                            }
+                        }
+                    }
+                }
             }
-
-            let dictionary = builder.build()?;
-            dictionary.write_to_storage(&mut writer)?;
-            writer.close()?;
-            file_paths.push(dict_file);
         }
 
-        // Write documents
-        let docs_file = format!("{}.docs", segment_info.segment_id);
-        {
-            let output = self.storage.create_output(&docs_file)?;
-            let mut writer = StructWriter::new(output);
+        // Pass 2: assemble each live document.
+        let mut out = Vec::new();
+        for doc_id in reader.doc_ids()? {
+            if deleted.contains(&doc_id) {
+                continue;
+            }
+            let Some(stored) = reader.document(doc_id)? else {
+                continue;
+            };
 
-            writer.write_varint(documents.len() as u64)?;
-            for (doc_id, document) in documents {
-                writer.write_u64(*doc_id)?;
+            let mut analyzed = AnalyzedDocument::new();
+            analyzed.field_terms = field_terms.remove(&doc_id).unwrap_or_default();
 
-                // Write document fields
-                writer.write_varint(document.fields.len() as u64)?;
-                for (field_name, field_value) in &document.fields {
-                    writer.write_string(field_name)?;
-                    let field_str = match field_value {
-                        FieldValue::Text(s) => s.clone(),
-                        FieldValue::Int64(i) => i.to_string(),
-                        FieldValue::Float64(f) => f.to_string(),
-                        FieldValue::Bool(b) => b.to_string(),
-                        FieldValue::Bytes(data, mime) => {
-                            format!("[blob: {:?} ({} bytes)]", mime, data.len())
-                        }
-                        FieldValue::DateTime(dt) => dt.to_rfc3339(),
-                        FieldValue::Geo(p) => {
-                            format!("{},{}", p.lat, p.lon)
-                        }
-                        FieldValue::GeoEcef(p) => {
-                            format!("{},{},{}", p.x, p.y, p.z)
-                        }
-                        FieldValue::Vector(v) => format!("[vector: {} dims]", v.len()),
-                        FieldValue::Null => "null".to_string(),
-                        FieldValue::Int64Array(arr) => format!(
-                            "[{}]",
-                            arr.iter()
-                                .map(|v| v.to_string())
-                                .collect::<Vec<_>>()
-                                .join(",")
-                        ),
-                        FieldValue::Float64Array(arr) => format!(
-                            "[{}]",
-                            arr.iter()
-                                .map(|v| v.to_string())
-                                .collect::<Vec<_>>()
-                                .join(",")
-                        ),
-                    };
-                    writer.write_string(&field_str)?;
+            for (field_name, value) in &stored.fields {
+                analyzed
+                    .stored_fields
+                    .insert(field_name.clone(), value.clone());
+                if let Some(point) = Self::data_value_point(value) {
+                    analyzed
+                        .point_values
+                        .insert(field_name.clone(), vec![point]);
                 }
             }
 
-            writer.close()?;
-            file_paths.push(docs_file);
+            // Field lengths are read back from the segment so BM25 length
+            // normalization is preserved exactly. Only indexed fields have a
+            // recorded length.
+            let indexed_fields: Vec<String> = analyzed.field_terms.keys().cloned().collect();
+            for field_name in indexed_fields {
+                if let Some(len) = reader.field_length(doc_id, &field_name)? {
+                    analyzed.field_lengths.insert(field_name, len);
+                }
+            }
+
+            out.push((doc_id, analyzed));
         }
 
-        Ok(file_paths)
+        Ok(out)
+    }
+
+    /// Re-derive the BKD point for a numeric / geo / datetime field value,
+    /// mirroring the analyzer's point extraction. Returns `None` for field
+    /// types that do not contribute a point (text, bool, bytes, vector, null,
+    /// arrays).
+    fn data_value_point(value: &FieldValue) -> Option<Vec<f64>> {
+        match value {
+            FieldValue::Int64(n) => Some(vec![*n as f64]),
+            FieldValue::Float64(f) => Some(vec![*f]),
+            FieldValue::DateTime(dt) => Some(vec![dt.timestamp() as f64]),
+            FieldValue::Geo(p) => Some(vec![p.lat, p.lon]),
+            FieldValue::GeoEcef(p) => Some(vec![p.x, p.y, p.z]),
+            _ => None,
+        }
     }
 
     /// Verify the integrity of a merged segment.
@@ -608,5 +607,104 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(stats_zero.space_savings(), 0.0);
+    }
+
+    use crate::data::{DataValue, Document};
+    use crate::lexical::index::inverted::reader::{InvertedIndexReader, SegmentReader};
+    use crate::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
+    use crate::lexical::reader::LexicalIndexReader;
+
+    fn text_int_doc(title: &str, num: i64) -> Document {
+        Document::builder()
+            .add_field("title", DataValue::Text(title.to_string()))
+            .add_field("num", DataValue::Int64(num))
+            .build()
+    }
+
+    fn load_segment_info(storage: &Arc<dyn Storage>, seg_id: &str) -> SegmentInfo {
+        let mut input = storage.open_input(&format!("{seg_id}.meta")).unwrap();
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut input, &mut buf).unwrap();
+        serde_json::from_slice(&buf).unwrap()
+    }
+
+    /// End-to-end correctness of the rewritten merge (Issue #753, closes #556):
+    /// merging two segments must produce one segment that preserves the
+    /// documents, their *typed* stored fields (int stays int — the #556 bug
+    /// stringified everything), and their searchable postings.
+    #[test]
+    fn merge_preserves_docs_typed_fields_and_postings() {
+        let storage: Arc<dyn Storage> =
+            Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+        // Two segments via two commits.
+        let mut writer =
+            InvertedIndexWriter::new(storage.clone(), InvertedIndexWriterConfig::default())
+                .unwrap();
+        let d0 = writer
+            .add_document(text_int_doc("alpha bravo", 10))
+            .unwrap();
+        let d1 = writer
+            .add_document(text_int_doc("bravo charlie", 20))
+            .unwrap();
+        writer.commit().unwrap(); // segment_000000
+        let d2 = writer
+            .add_document(text_int_doc("charlie delta", 30))
+            .unwrap();
+        writer.commit().unwrap(); // segment_000001
+        drop(writer);
+
+        let si0 = load_segment_info(&storage, "segment_000000");
+        let si1 = load_segment_info(&storage, "segment_000001");
+        let candidate = MergeCandidate {
+            segments: vec![si0.segment_id.clone(), si1.segment_id.clone()],
+            priority: 1.0,
+            estimated_size: 0,
+            strategy: MergeStrategy::SizeBased,
+        };
+        let engine = MergeEngine::new(MergeConfig::default(), storage.clone());
+        let result = engine
+            .merge_segments(
+                &candidate,
+                &[ManagedSegmentInfo::new(si0), ManagedSegmentInfo::new(si1)],
+                1,
+            )
+            .unwrap();
+
+        // All three docs survive the merge (verify_after_merge also checks this).
+        assert_eq!(result.new_segment.segment_info.doc_count, 3);
+
+        // Typed stored fields round-trip: `num` stays an Int64 (the #556 bug
+        // wrote it as a stringified value).
+        let merged =
+            SegmentReader::open(result.new_segment.segment_info.clone(), storage.clone()).unwrap();
+        for (doc_id, expected) in [(d0, 10i64), (d1, 20), (d2, 30)] {
+            let doc = merged
+                .document(doc_id)
+                .unwrap()
+                .unwrap_or_else(|| panic!("doc {doc_id} missing after merge"));
+            match doc.fields.get("num") {
+                Some(DataValue::Int64(n)) => assert_eq!(*n, expected, "doc {doc_id} num"),
+                other => panic!("doc {doc_id} `num` not Int64 after merge: {other:?}"),
+            }
+        }
+
+        // Postings are reconstructed (not empty): "bravo" appears in d0 and d1.
+        let reader = InvertedIndexReader::new(
+            vec![result.new_segment.segment_info.clone()],
+            storage.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        let mut got = Vec::new();
+        if let Some(mut it) = reader.postings("title", "bravo").unwrap() {
+            while it.next().unwrap() {
+                got.push(it.doc_id());
+            }
+        }
+        got.sort_unstable();
+        let mut want = vec![d0, d1];
+        want.sort_unstable();
+        assert_eq!(got, want, "`title:bravo` postings after merge");
     }
 }
