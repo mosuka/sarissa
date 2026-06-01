@@ -261,7 +261,11 @@ impl InvertedIndex {
         let mut segments = Vec::new();
 
         for file in &files {
-            if file.starts_with("segment_") && file.ends_with(".meta") {
+            // Both freshly flushed segments (`segment_*`) and segments produced
+            // by a merge (`merged_*`, Issue #754) are discovered here.
+            if (file.starts_with("segment_") || file.starts_with("merged_"))
+                && file.ends_with(".meta")
+            {
                 let mut input = self.storage.open_input(file)?;
                 let mut data = Vec::new();
                 Read::read_to_end(&mut input, &mut data)?;
@@ -276,6 +280,114 @@ impl InvertedIndex {
 
         segments.sort_by_key(|s| s.generation);
         Ok(segments)
+    }
+
+    /// Force-merge every current segment into a single new segment (Issue
+    /// #754), the classic `optimize()` / force-merge semantics.
+    ///
+    /// Discovers the current segments, merges them with the (correct, typed)
+    /// [`MergeEngine`](self::segment::merge_engine::MergeEngine), rewrites the
+    /// merged segment's metadata generation so it sorts as the newest segment,
+    /// and deletes the now-merged source segments' files so segment discovery
+    /// ([`Self::load_segments`]) sees only the merged result. A no-op when
+    /// fewer than two segments exist.
+    fn force_merge_all(&self) -> Result<()> {
+        use self::segment::manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
+        use self::segment::merge_engine::{MergeConfig, MergeEngine};
+
+        let segments = self.load_segments()?;
+        if segments.len() < 2 {
+            // Zero or one segment: nothing to compact.
+            return Ok(());
+        }
+
+        // The merged segment must sort as the newest, so its generation is one
+        // past the highest source generation.
+        let next_generation = segments.iter().map(|s| s.generation).max().unwrap_or(0) + 1;
+
+        let managed: Vec<ManagedSegmentInfo> = segments
+            .iter()
+            .map(|info| {
+                let mut mi = ManagedSegmentInfo::new(info.clone());
+                mi.size_bytes = self.segment_size_bytes(&info.segment_id);
+                mi
+            })
+            .collect();
+        let candidate = MergeCandidate {
+            segments: segments.iter().map(|s| s.segment_id.clone()).collect(),
+            priority: 1.0,
+            estimated_size: 0,
+            strategy: MergeStrategy::SizeBased,
+        };
+
+        let engine = MergeEngine::new(MergeConfig::default(), self.storage.clone());
+        let result = engine.merge_segments(&candidate, &managed, next_generation)?;
+        let merged_id = result.new_segment.segment_info.segment_id.clone();
+
+        // The merged segment's `.meta` was written with the merge writer's own
+        // generation (0); rewrite it with `next_generation` so it is the newest.
+        self.set_segment_generation(&merged_id, next_generation)?;
+
+        // Remove the now-merged source segments so discovery sees only the
+        // merged result. Delete every source's `.meta` first: discovery keys
+        // on `.meta`, so this drops the sources out of the searchable set
+        // before their (now-orphaned, harmless) data files are removed,
+        // minimizing the window in which a doc could be seen in both a source
+        // and the merged segment.
+        for info in &segments {
+            let meta = format!("{}.meta", info.segment_id);
+            if self.storage.file_exists(&meta) {
+                self.storage.delete_file(&meta)?;
+            }
+        }
+        for info in &segments {
+            self.delete_segment_files(&info.segment_id)?;
+        }
+
+        Ok(())
+    }
+
+    /// Sum the on-disk size of every file belonging to `segment_id`.
+    fn segment_size_bytes(&self, segment_id: &str) -> u64 {
+        let prefix = format!("{segment_id}.");
+        self.storage
+            .list_files()
+            .map(|files| {
+                files
+                    .iter()
+                    .filter(|f| f.starts_with(&prefix))
+                    .map(|f| self.storage.metadata(f).map(|m| m.size).unwrap_or(0))
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
+
+    /// Rewrite a segment's `.meta` with an updated generation.
+    fn set_segment_generation(&self, segment_id: &str, generation: u64) -> Result<()> {
+        let meta_file = format!("{segment_id}.meta");
+        let mut input = self.storage.open_input(&meta_file)?;
+        let mut data = Vec::new();
+        Read::read_to_end(&mut input, &mut data)?;
+        let mut info: SegmentInfo = serde_json::from_slice(&data)
+            .map_err(|e| LaurusError::index(format!("Failed to parse segment metadata: {e}")))?;
+        info.generation = generation;
+        let json = serde_json::to_string_pretty(&info).map_err(|e| {
+            LaurusError::index(format!("Failed to serialize segment metadata: {e}"))
+        })?;
+        let mut output = self.storage.create_output(&meta_file)?;
+        std::io::Write::write_all(&mut output, json.as_bytes())?;
+        output.close()?;
+        Ok(())
+    }
+
+    /// Delete every file belonging to `segment_id`.
+    fn delete_segment_files(&self, segment_id: &str) -> Result<()> {
+        let prefix = format!("{segment_id}.");
+        let files = self.storage.list_files()?;
+        for file in files.iter().filter(|f| f.starts_with(&prefix)) {
+            self.storage.delete_file(file)?;
+        }
+        Ok(())
     }
 
     /// Check if an index exists in the given directory.
@@ -406,6 +518,7 @@ impl LexicalIndex for InvertedIndex {
 
     fn optimize(&self) -> Result<()> {
         self.check_closed()?;
+        self.force_merge_all()?;
         self.update_metadata()?;
         Ok(())
     }

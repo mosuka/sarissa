@@ -270,13 +270,17 @@ impl LexicalStore {
         Ok(())
     }
 
-    /// Optimize the index.
+    /// Optimize the index by force-merging all segments into one (Issue #754).
     ///
     /// This method delegates to [`LexicalIndex::optimize()`], which for the default
     /// [`InvertedIndex`](crate::lexical::index::inverted::InvertedIndex) implementation
-    /// updates the index metadata (e.g., the `modified` timestamp) and persists it to storage.
+    /// force-merges every current segment into a single new segment (the classic
+    /// `optimize` / force-merge semantics): it rewrites the live documents into one
+    /// segment, reclaiming logically deleted documents and removing the source
+    /// segment files. This bounds the per-query cost that otherwise grows with the
+    /// number of commits. It is a no-op when fewer than two segments exist.
     /// After optimization, the searcher cache is invalidated so subsequent searches
-    /// reflect the updated state.
+    /// reflect the merged state.
     ///
     /// # Returns
     ///
