@@ -5,6 +5,9 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ahash::AHashMap;
+use roaring::RoaringTreemap;
+
 use crate::util::time::Timer;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -408,8 +411,6 @@ impl InvertedIndexSearcher {
         boolean_query: &BooleanQuery,
         mut collector: C,
     ) -> Result<C> {
-        use std::collections::{HashMap, HashSet};
-
         let clauses = boolean_query.clauses();
 
         if clauses.is_empty() {
@@ -443,35 +444,49 @@ impl InvertedIndexSearcher {
             })
             .collect();
 
-        // Separate results by Occur type
-        let mut must_sets: Vec<HashMap<u64, f32>> = Vec::new();
-        let mut should_map: HashMap<u64, f32> = HashMap::new();
-        let mut must_not_set: HashSet<u64> = HashSet::new();
+        // Fold each clause's hits into Roaring bitmaps for the set logic (#587)
+        // and a flat `(doc_id, score)` list for Must/Should score accumulation.
+        // The set operations (AND / ANDNOT / OR) run as Roaring word-walks
+        // instead of `HashMap::retain` / `HashSet::remove`, and the final
+        // selection is delegated to the collector's bounded top-K heap rather
+        // than a full sort over the whole candidate set.
+        //
+        // Filter clauses contribute to membership only (score 0), so their docs
+        // go into `must_bitmaps` but never into `scored_hits`.
+        let mut must_bitmaps: Vec<RoaringTreemap> = Vec::new();
+        let mut should_bitmap = RoaringTreemap::new();
+        let mut must_not_bitmap = RoaringTreemap::new();
+        let mut scored_hits: Vec<(u64, f32)> = Vec::new();
         let mut first_error: Option<LaurusError> = None;
 
         for (occur, result) in clause_results {
             match result {
                 Ok(hits) => match occur {
-                    Occur::Must | Occur::Filter => {
-                        let mut m = HashMap::with_capacity(hits.len());
+                    Occur::Must => {
+                        let mut bitmap = RoaringTreemap::new();
                         for hit in hits {
-                            let score = if occur == Occur::Filter {
-                                0.0
-                            } else {
-                                hit.score
-                            };
-                            m.insert(hit.doc_id, score);
+                            bitmap.insert(hit.doc_id);
+                            scored_hits.push((hit.doc_id, hit.score));
                         }
-                        must_sets.push(m);
+                        must_bitmaps.push(bitmap);
+                    }
+                    Occur::Filter => {
+                        // Membership only — Filter does not contribute to score.
+                        let mut bitmap = RoaringTreemap::new();
+                        for hit in hits {
+                            bitmap.insert(hit.doc_id);
+                        }
+                        must_bitmaps.push(bitmap);
                     }
                     Occur::Should => {
                         for hit in hits {
-                            *should_map.entry(hit.doc_id).or_insert(0.0) += hit.score;
+                            should_bitmap.insert(hit.doc_id);
+                            scored_hits.push((hit.doc_id, hit.score));
                         }
                     }
                     Occur::MustNot => {
                         for hit in hits {
-                            must_not_set.insert(hit.doc_id);
+                            must_not_bitmap.insert(hit.doc_id);
                         }
                     }
                 },
@@ -488,61 +503,47 @@ impl InvertedIndexSearcher {
             return Err(e);
         }
 
-        // Apply boolean logic
         let minimum_should_match = boolean_query.minimum_should_match();
-        let has_must = !must_sets.is_empty();
+        let has_must = !must_bitmaps.is_empty();
 
-        // Build the candidate set
-        let mut candidates: HashMap<u64, f32> = if has_must {
-            // Sort must_sets by size ascending for faster intersection.
-            must_sets.sort_unstable_by_key(|s| s.len());
-            // Start with the smallest Must/Filter set, intersect with the rest
-            let mut result = must_sets.swap_remove(0);
-            for other in &must_sets {
-                result.retain(|doc_id, score| {
-                    if let Some(other_score) = other.get(doc_id) {
-                        *score += other_score;
-                        true
-                    } else {
-                        false
-                    }
-                });
+        // Build the survivor membership set via Roaring set operations.
+        let mut survivor = if has_must {
+            // Intersect smallest-first so the running result shrinks fastest.
+            must_bitmaps.sort_unstable_by_key(|b| b.len());
+            let mut bitmaps = must_bitmaps.into_iter();
+            let mut acc = bitmaps.next().unwrap_or_default();
+            for bitmap in bitmaps {
+                acc &= &bitmap;
             }
-            result
+            acc
         } else {
-            // No Must clauses: Should clauses form the candidate set
-            should_map.clone()
+            // No Must/Filter clauses: the Should union is the candidate set.
+            should_bitmap.clone()
         };
 
-        // Add Should scores to Must candidates (boost, not filter)
-        if has_must {
-            for (doc_id, score) in candidates.iter_mut() {
-                if let Some(should_score) = should_map.get(doc_id) {
-                    *score += should_score;
-                }
-            }
+        // With minimum_should_match > 0 a Must candidate must also appear in at
+        // least one Should clause (preserves the existing parallel semantics).
+        if has_must && minimum_should_match > 0 {
+            survivor &= &should_bitmap;
+        }
 
-            // If minimum_should_match > 0, filter candidates that don't match enough Should clauses
-            if minimum_should_match > 0 {
-                // Count Should matches per doc
-                // (should_map already contains the union; we need per-clause counts)
-                // For simplicity, treat minimum_should_match as requiring the doc to appear in should_map
-                candidates.retain(|doc_id, _| should_map.contains_key(doc_id));
+        // Exclude MustNot documents.
+        if !must_not_bitmap.is_empty() {
+            survivor -= &must_not_bitmap;
+        }
+
+        // Accumulate scores for survivors only (one pass over Must/Should hits),
+        // then feed the collector. The collector keeps the top-K via a bounded
+        // min-heap, so no full sort over the candidate set is needed.
+        let mut score_acc: AHashMap<u64, f32> = AHashMap::with_capacity(survivor.len() as usize);
+        for (doc_id, score) in scored_hits {
+            if survivor.contains(doc_id) {
+                *score_acc.entry(doc_id).or_insert(0.0) += score;
             }
         }
 
-        // Exclude MustNot documents
-        for doc_id in &must_not_set {
-            candidates.remove(doc_id);
-        }
-
-        // Feed results into the collector
-        // Sort by score descending for deterministic results
-        let mut sorted: Vec<(u64, f32)> = candidates.into_iter().collect();
-        // Use unstable sort since stability is not needed for (doc_id, score) pairs.
-        sorted.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
-
-        for (doc_id, score) in sorted {
+        for doc_id in survivor.iter() {
+            let score = score_acc.get(&doc_id).copied().unwrap_or(0.0);
             collector.collect(doc_id, score)?;
             if !collector.needs_more() {
                 break;
@@ -1756,5 +1757,185 @@ mod tests {
             cached_set.iter().all(|&d| d % 6 == 0),
             "must(alpha=even) ∩ filter(beta=%3) == ids divisible by 6"
         );
+    }
+
+    // ----- Issue #587: Roaring-backed parallel boolean executor -----
+
+    /// Single-segment store with a tiny, hand-checkable corpus for the parallel
+    /// boolean set-logic tests:
+    /// doc0=alpha, doc1=alpha+beta, doc2=beta, doc3=alpha+beta+gamma, doc4=gamma.
+    fn build_boolean_corpus() -> crate::lexical::store::LexicalStore {
+        use crate::Document;
+        use crate::lexical::store::LexicalStore;
+        use crate::lexical::store::config::LexicalIndexConfig;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let store = LexicalStore::new(storage, LexicalIndexConfig::default()).unwrap();
+        for (id, body) in [
+            (0u64, "alpha"),
+            (1, "alpha beta"),
+            (2, "beta"),
+            (3, "alpha beta gamma"),
+            (4, "gamma"),
+        ] {
+            store
+                .upsert_document(id, Document::builder().add_text("body", body).build())
+                .unwrap();
+        }
+        store.commit().unwrap();
+        store
+    }
+
+    /// Drive `query` through the parallel boolean executor and return the
+    /// sorted result doc-id set.
+    fn parallel_doc_ids(
+        store: &crate::lexical::store::LexicalStore,
+        query: Box<dyn Query>,
+    ) -> Vec<u64> {
+        let reader = store.reader_for_tests().unwrap();
+        let searcher = InvertedIndexSearcher::from_arc(reader);
+        let mut ids: Vec<u64> = searcher
+            .search_with_collector_parallel(query, TopDocsCollector::new(100), true)
+            .unwrap()
+            .results()
+            .into_iter()
+            .map(|h| h.doc_id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    #[test]
+    fn parallel_boolean_must_should_membership() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        // Must(alpha) + Should(gamma): membership = docs with alpha (gamma only boosts).
+        let q: Box<dyn Query> = Box::new(
+            BooleanQueryBuilder::new()
+                .must(Box::new(TermQuery::new("body", "alpha")))
+                .should(Box::new(TermQuery::new("body", "gamma")))
+                .build(),
+        );
+        assert_eq!(parallel_doc_ids(&build_boolean_corpus(), q), vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn parallel_boolean_must_not_excludes() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        // Must(alpha) AND NOT beta -> only doc 0.
+        let q: Box<dyn Query> = Box::new(
+            BooleanQueryBuilder::new()
+                .must(Box::new(TermQuery::new("body", "alpha")))
+                .must_not(Box::new(TermQuery::new("body", "beta")))
+                .build(),
+        );
+        assert_eq!(parallel_doc_ids(&build_boolean_corpus(), q), vec![0]);
+    }
+
+    #[test]
+    fn parallel_boolean_filter_narrows() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        // Must(alpha) AND Filter(beta) -> alpha ∩ beta = {1, 3}.
+        let q: Box<dyn Query> = Box::new(
+            BooleanQueryBuilder::new()
+                .must(Box::new(TermQuery::new("body", "alpha")))
+                .filter(Box::new(TermQuery::new("body", "beta")))
+                .build(),
+        );
+        assert_eq!(parallel_doc_ids(&build_boolean_corpus(), q), vec![1, 3]);
+    }
+
+    #[test]
+    fn parallel_boolean_should_only_union() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        // Should(alpha) OR Should(beta) -> {0, 1, 2, 3}.
+        let q: Box<dyn Query> = Box::new(
+            BooleanQueryBuilder::new()
+                .should(Box::new(TermQuery::new("body", "alpha")))
+                .should(Box::new(TermQuery::new("body", "beta")))
+                .build(),
+        );
+        assert_eq!(
+            parallel_doc_ids(&build_boolean_corpus(), q),
+            vec![0, 1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn parallel_boolean_minimum_should_match() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        // Must(alpha) + Should(beta) with msm=1 -> alpha ∩ beta = {1, 3}.
+        let q: Box<dyn Query> = Box::new(
+            BooleanQueryBuilder::new()
+                .must(Box::new(TermQuery::new("body", "alpha")))
+                .should(Box::new(TermQuery::new("body", "beta")))
+                .minimum_should_match(1)
+                .build(),
+        );
+        assert_eq!(parallel_doc_ids(&build_boolean_corpus(), q), vec![1, 3]);
+    }
+
+    /// Should scores accumulate onto Must candidates: a Must doc that also
+    /// matches a Should clause must outrank one that does not.
+    #[test]
+    fn parallel_boolean_should_boosts_score() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        let store = build_boolean_corpus();
+        let q: Box<dyn Query> = Box::new(
+            BooleanQueryBuilder::new()
+                .must(Box::new(TermQuery::new("body", "alpha")))
+                .should(Box::new(TermQuery::new("body", "gamma")))
+                .build(),
+        );
+        let reader = store.reader_for_tests().unwrap();
+        let searcher = InvertedIndexSearcher::from_arc(reader);
+        let hits = searcher
+            .search_with_collector_parallel(q, TopDocsCollector::new(100), true)
+            .unwrap()
+            .results();
+        let s3 = hits.iter().find(|h| h.doc_id == 3).unwrap().score;
+        let s0 = hits.iter().find(|h| h.doc_id == 0).unwrap().score;
+        assert!(
+            s3 > s0,
+            "doc 3 (alpha+gamma) must outscore doc 0 (alpha only): s3={s3} s0={s0}"
+        );
+        assert_eq!(hits[0].doc_id, 3, "the should-boosted doc must rank first");
+    }
+
+    /// Parallel and serial paths must agree on membership for a Must-present
+    /// shape (both implement the same boolean membership there).
+    #[test]
+    fn parallel_matches_serial_membership() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        use std::collections::BTreeSet;
+
+        let store = build_boolean_corpus();
+        let make = || -> Box<dyn Query> {
+            Box::new(
+                BooleanQueryBuilder::new()
+                    .must(Box::new(TermQuery::new("body", "alpha")))
+                    .should(Box::new(TermQuery::new("body", "gamma")))
+                    .must_not(Box::new(TermQuery::new("body", "beta")))
+                    .build(),
+            )
+        };
+        let reader = store.reader_for_tests().unwrap();
+        let searcher = InvertedIndexSearcher::from_arc(reader);
+        let collect_ids = |parallel: bool| -> BTreeSet<u64> {
+            searcher
+                .search_with_collector_parallel(make(), TopDocsCollector::new(100), parallel)
+                .unwrap()
+                .results()
+                .into_iter()
+                .map(|h| h.doc_id)
+                .collect()
+        };
+        let par = collect_ids(true);
+        assert_eq!(
+            par,
+            collect_ids(false),
+            "parallel/serial membership must agree"
+        );
+        // alpha ∩ not beta = {0} (doc 3 has beta → excluded; gamma only boosts).
+        assert_eq!(par.into_iter().collect::<Vec<_>>(), vec![0]);
     }
 }
