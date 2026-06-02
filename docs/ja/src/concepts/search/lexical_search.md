@@ -316,6 +316,39 @@ let query = parser.parse("year:[2020 TO 2024]")?;
 
 完全な構文リファレンスは [Query DSL](../query_dsl.md) を参照してください。
 
+## フィルタ結果キャッシュ（Filter Result Cache）
+
+テナント・カテゴリ・ステータスフラグなどの filter 句は、多数のリクエストで繰り返し
+再利用されます。毎回ゼロから評価すると同じ posting list を何度も走査することになります。
+laurus は filter がマッチする**ドキュメント ID の集合**をメモ化し、繰り返しの filter を
+posting 走査ではなく単一のルックアップで済ませます。
+
+- **スナップショット連動・自己無効化（snapshot-scoped, self-invalidating）。**
+  キャッシュは reader 上に存在し、reader は `commit()` / `optimize()` / `refresh()` の
+  たびに再構築されます。各 reader は point-in-time スナップショットなので、手動の無効化は
+  不要です。インデックス変更後の次の検索は空のキャッシュから始まり、常にコミット済みの
+  データを反映します。
+- **スコア非依存（score-independent）。** filter は relevance に影響せずドキュメントを
+  選別するだけなので、キャッシュ値は単なる doc-id 集合（Roaring ビットマップ）です。
+  [ハイブリッド検索 / フィルタ検索](hybrid_search.md) の `filter_query` に使われ、
+  lexical 側・vector 側の両方に供給されます。
+- **構造的に安全（safe by construction）。** canonical なキーを持つクエリのみキャッシュ
+  されます。Term・Phrase・Prefix・Wildcard・Regexp・Fuzzy・Range・Geo・Geo3d クエリは
+  キャッシュ可能で、キャッシュ可能な句のみで構成され、かつ少なくとも 1 つの正句
+  （Must / Should / Filter）を持つ BooleanQuery も同様です。正句のない BooleanQuery・
+  Span クエリ・マルチフィールドクエリは毎回新規評価され（キャッシュされず）、結果は常に
+  正しくなります。
+
+キャッシュはデフォルトで有効です。インデックス設定で調整・無効化できます。
+
+```rust
+use laurus::lexical::store::config::LexicalIndexConfig;
+
+let config = LexicalIndexConfig::builder()
+    .query_filter_cache_capacity(4096) // スナップショットあたりのエントリ数。0 で無効化
+    .build();
+```
+
 ## 次のステップ
 
 - 意味的類似性検索: [Vector 検索](vector_search.md)

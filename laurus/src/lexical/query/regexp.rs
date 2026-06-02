@@ -159,6 +159,16 @@ impl Query for RegexpQuery {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + pattern + rewrite method determine the matched set; boost is
+        // score-only and excluded. The compiled automaton is derived from the
+        // pattern, so it need not appear in the key.
+        Some(format!(
+            "regexp|{:?}|{:?}|{:?}",
+            self.field, self.pattern, self.rewrite_method
+        ))
+    }
 }
 
 #[cfg(test)]

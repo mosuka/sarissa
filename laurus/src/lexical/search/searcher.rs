@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use roaring::RoaringTreemap;
+
 use crate::error::Result;
 use crate::lexical::query::{LexicalSearchResults, Query};
 
@@ -240,4 +242,37 @@ pub trait LexicalSearcher: Send + Sync + std::fmt::Debug {
     /// Returns the number of documents that match the given search request,
     /// applying the min_score threshold if specified in the request parameters.
     fn count(&self, request: LexicalSearchRequest) -> Result<u64>;
+
+    /// Return the set of document ids matching `query`, ignoring score
+    /// thresholds (Issue [#578](https://github.com/mosuka/laurus/issues/578)).
+    ///
+    /// This powers filter evaluation: a filter selects documents without
+    /// affecting relevance, so the result is a score-independent doc-id set.
+    /// Implementations backed by a snapshot-scoped cache (notably
+    /// [`InvertedIndexSearcher`](crate::lexical::index::inverted::searcher::InvertedIndexSearcher))
+    /// memoise the set so repeated filters are served without re-walking
+    /// posting lists.
+    ///
+    /// The default implementation drains an unbounded [`search`](Self::search)
+    /// and collects the matching doc ids — correct for any searcher but
+    /// uncached. The returned set excludes deleted documents.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The query whose matching document set is requested.
+    ///
+    /// # Returns
+    ///
+    /// An `Arc<RoaringTreemap>` of matching document ids.
+    fn matching_doc_ids(&self, query: Box<dyn Query>) -> Result<Arc<RoaringTreemap>> {
+        let request = LexicalSearchRequest::new(query)
+            .limit(usize::MAX)
+            .load_documents(false);
+        let results = self.search(request)?;
+        let mut bitmap = RoaringTreemap::new();
+        for hit in results.hits {
+            bitmap.insert(hit.doc_id);
+        }
+        Ok(Arc::new(bitmap))
+    }
 }

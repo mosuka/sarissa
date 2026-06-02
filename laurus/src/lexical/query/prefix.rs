@@ -164,6 +164,16 @@ impl Query for PrefixQuery {
     fn field(&self) -> Option<&str> {
         Some(&self.field)
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + prefix + rewrite method determine the matched set (the
+        // rewrite method can cap term expansion, which affects membership);
+        // boost is score-only and excluded.
+        Some(format!(
+            "prefix|{:?}|{:?}|{:?}",
+            self.field, self.prefix, self.rewrite_method
+        ))
+    }
 }
 
 #[cfg(test)]

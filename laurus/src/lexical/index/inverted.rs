@@ -36,6 +36,7 @@ pub(crate) mod bmw;
 pub mod core;
 pub mod maintenance;
 pub(crate) mod per_segment_view;
+pub mod query_cache;
 pub mod reader;
 pub mod searcher;
 pub mod segment;
@@ -498,9 +499,12 @@ impl LexicalIndex for InvertedIndex {
 
         let segments = self.load_segments()?;
 
-        // Use analyzer from index config
+        // Use analyzer from index config. The query/filter cache capacity must
+        // be set explicitly here: `InvertedIndexReaderConfig::default()` would
+        // otherwise mask the value configured on the index (Issue #578).
         let reader_config = InvertedIndexReaderConfig {
             analyzer: self.config.analyzer.clone(),
+            query_filter_cache_capacity: self.config.query_filter_cache_capacity,
             ..InvertedIndexReaderConfig::default()
         };
 

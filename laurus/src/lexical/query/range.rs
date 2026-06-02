@@ -188,6 +188,15 @@ impl Query for RangeQuery {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + both bounds (inclusivity is encoded in the `Bound` variant)
+        // determine the matched set; boost is score-only and excluded.
+        Some(format!(
+            "range|{:?}|{:?}|{:?}",
+            self.field, self.lower_bound, self.upper_bound
+        ))
+    }
 }
 
 /// Matcher for range queries.
@@ -690,6 +699,20 @@ impl Query for NumericRangeQuery {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + numeric type + both byte-encoded bounds + inclusivity flags
+        // determine the matched set; boost is score-only and excluded.
+        Some(format!(
+            "nrange|{:?}|{:?}|{:?}|{:?}|{}|{}",
+            self.field,
+            self.numeric_type,
+            self.lower_bound,
+            self.upper_bound,
+            self.lower_inclusive,
+            self.upper_inclusive
+        ))
+    }
 }
 
 /// Optimized matcher for numeric range queries.
@@ -1065,6 +1088,19 @@ impl Query for DateTimeRangeQuery {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + both timestamp bounds + inclusivity flags determine the
+        // matched set; boost is score-only and excluded.
+        Some(format!(
+            "dtrange|{:?}|{:?}|{:?}|{}|{}",
+            self.field,
+            self.lower_bound,
+            self.upper_bound,
+            self.lower_inclusive,
+            self.upper_inclusive
+        ))
     }
 }
 

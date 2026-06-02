@@ -146,6 +146,13 @@ impl Query for TermQuery {
     fn field(&self) -> Option<&str> {
         Some(&self.field)
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + term fully determine the matched document set; boost only
+        // scales scores, so it is excluded. `{:?}` escapes each string so the
+        // concatenation is unambiguous regardless of the contents.
+        Some(format!("term|{:?}|{:?}", self.field, self.term))
+    }
 }
 
 #[cfg(test)]

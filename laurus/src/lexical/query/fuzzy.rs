@@ -223,6 +223,23 @@ impl Query for FuzzyQuery {
     fn field(&self) -> Option<&str> {
         Some(&self.field)
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Every field below affects which terms (and therefore which
+        // documents) match: edit distance, the untouched prefix length,
+        // transposition support, the expansion cap, and the rewrite method.
+        // Boost is score-only and excluded.
+        Some(format!(
+            "fuzzy|{:?}|{:?}|{}|{}|{}|{}|{:?}",
+            self.field,
+            self.term,
+            self.max_edits,
+            self.prefix_length,
+            self.transpositions,
+            self.max_expansions,
+            self.rewrite_method
+        ))
+    }
 }
 
 #[cfg(test)]
