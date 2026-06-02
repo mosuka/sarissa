@@ -521,6 +521,15 @@ impl Query for PhraseQuery {
     fn field(&self) -> Option<&str> {
         Some(&self.field)
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + ordered terms + slop determine the matched set; boost is
+        // score-only and excluded. `{:?}` on the term vector is unambiguous.
+        Some(format!(
+            "phrase|{:?}|{:?}|{}",
+            self.field, self.terms, self.slop
+        ))
+    }
 }
 
 #[cfg(test)]

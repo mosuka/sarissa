@@ -459,6 +459,42 @@ impl Query for BooleanQuery {
             }
         }
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // R1 safety: a boolean with no positive (Must/Should/Filter) clause is
+        // realised as `AllMatcher` / `NotMatcher` over the entire
+        // `[0, max_doc)` doc-id space (see `matcher` above), which includes
+        // deleted and never-assigned ids. That set is not a canonical "live
+        // document" set, so refuse to cache it.
+        let has_positive = self
+            .clauses
+            .iter()
+            .any(|c| matches!(c.occur, Occur::Must | Occur::Should | Occur::Filter));
+        if !has_positive {
+            return None;
+        }
+
+        // Compose from each clause's own `cache_key`. If any child is
+        // uncacheable, the whole boolean is uncacheable — a non-canonical
+        // child would make the composite key non-canonical (the `?` below
+        // short-circuits to `None`). Clause order is preserved: the matched
+        // set is order-independent, so order only affects cache fragmentation,
+        // never correctness. `minimum_should_match` affects membership and is
+        // included; boost is score-only and excluded. Each child key is
+        // `{:?}`-escaped so the concatenation is unambiguous.
+        let mut key = format!("bool|msm={}|", self.minimum_should_match);
+        for clause in &self.clauses {
+            let tag = match clause.occur {
+                Occur::Must => 'M',
+                Occur::Should => 'S',
+                Occur::MustNot => 'N',
+                Occur::Filter => 'F',
+            };
+            let child = clause.query.cache_key()?;
+            key.push_str(&format!("{tag}{child:?};"));
+        }
+        Some(key)
+    }
 }
 
 /// Builder for creating boolean queries.
@@ -653,5 +689,75 @@ mod tests {
 
         let matcher = query.matcher(&reader).unwrap();
         assert!(matcher.is_exhausted());
+    }
+
+    // ----- Issue #578: cache_key composition rules -----
+
+    /// `cache_key` composes children and excludes boost (which scales scores,
+    /// not membership); a different child term yields a different key.
+    #[test]
+    fn cache_key_composes_and_excludes_boost() {
+        let base = BooleanQueryBuilder::new()
+            .must(Box::new(TermQuery::new("f", "a")))
+            .should(Box::new(TermQuery::new("g", "b")))
+            .build();
+        let key = base
+            .cache_key()
+            .expect("a boolean over cacheable children is cacheable");
+
+        let mut boosted = BooleanQueryBuilder::new()
+            .must(Box::new(TermQuery::new("f", "a")))
+            .should(Box::new(TermQuery::new("g", "b")))
+            .build();
+        boosted.set_boost(3.5);
+        assert_eq!(
+            boosted.cache_key().unwrap(),
+            key,
+            "boost must not change the cache key"
+        );
+
+        let other = BooleanQueryBuilder::new()
+            .must(Box::new(TermQuery::new("f", "z")))
+            .should(Box::new(TermQuery::new("g", "b")))
+            .build();
+        assert_ne!(
+            other.cache_key().unwrap(),
+            key,
+            "a different child term must change the key"
+        );
+    }
+
+    /// A boolean with no positive (Must/Should/Filter) clause is realised over
+    /// the whole doc-id space (R1) and must be uncacheable.
+    #[test]
+    fn cache_key_none_for_mustnot_only() {
+        let q = BooleanQueryBuilder::new()
+            .must_not(Box::new(TermQuery::new("f", "a")))
+            .build();
+        assert!(
+            q.cache_key().is_none(),
+            "a MustNot-only boolean has no positive clause and must be uncacheable"
+        );
+    }
+
+    /// An uncacheable child (here a span query, whose key is `None`) must make
+    /// the whole boolean uncacheable.
+    #[test]
+    fn cache_key_none_when_child_uncacheable() {
+        use crate::lexical::query::span::{SpanQueryWrapper, SpanTermQuery};
+
+        let span: Box<dyn Query> = Box::new(SpanQueryWrapper::new(Box::new(SpanTermQuery::new(
+            "f", "a",
+        ))));
+        assert!(span.cache_key().is_none(), "span queries are not cacheable");
+
+        let q = BooleanQueryBuilder::new()
+            .must(span)
+            .should(Box::new(TermQuery::new("g", "b")))
+            .build();
+        assert!(
+            q.cache_key().is_none(),
+            "an uncacheable child must make the whole boolean uncacheable"
+        );
     }
 }

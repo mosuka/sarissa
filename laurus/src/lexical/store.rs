@@ -13,6 +13,7 @@ use crate::lexical::index::LexicalIndex;
 use crate::lexical::index::factory::LexicalIndexFactory;
 use crate::lexical::index::inverted::InvertedIndexStats;
 use crate::lexical::query::LexicalSearchResults;
+use crate::lexical::query::Query;
 #[cfg(test)]
 use crate::lexical::reader::LexicalIndexReader;
 use crate::lexical::search::searcher::{LexicalSearchRequest, LexicalSearcher};
@@ -526,6 +527,41 @@ impl LexicalStore {
         }
         let guard = parking_lot::RwLockWriteGuard::downgrade(guard);
         guard.as_ref().unwrap().count(request)
+    }
+
+    /// Return the set of document ids matching `query`, ignoring score
+    /// thresholds, via the snapshot-scoped query / filter cache (Issue
+    /// [#578](https://github.com/mosuka/laurus/issues/578)).
+    ///
+    /// Filters select documents without affecting relevance, so the result is a
+    /// score-independent doc-id set. This goes through the cached searcher (and
+    /// thus the reader's filter cache), so a repeated filter is served without
+    /// re-walking posting lists. The cache is invalidated automatically by
+    /// `commit()` / `optimize()` / `refresh()`, which drop the cached searcher.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The query whose matching document set is requested.
+    ///
+    /// # Returns
+    ///
+    /// An `Arc<roaring::RoaringTreemap>` of matching document ids.
+    pub fn matching_doc_ids(&self, query: Box<dyn Query>) -> Result<Arc<roaring::RoaringTreemap>> {
+        // Fast path: read lock, cache hit.
+        {
+            let guard = self.searcher_cache.read();
+            if let Some(ref searcher) = *guard {
+                return searcher.matching_doc_ids(query);
+            }
+        }
+
+        // Slow path: populate under write lock, then downgrade to read lock.
+        let mut guard = self.searcher_cache.write();
+        if guard.is_none() {
+            *guard = Some(self.index.searcher()?);
+        }
+        let guard = parking_lot::RwLockWriteGuard::downgrade(guard);
+        guard.as_ref().unwrap().matching_doc_ids(query)
     }
 
     /// Close the search engine and release resources.

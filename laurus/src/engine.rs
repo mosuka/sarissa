@@ -1246,18 +1246,17 @@ impl Engine {
 
         // 0b. Pre-process Filter
         let (allowed_ids, lexical_query_override) = if let Some(filter_query) = &request_filter {
-            let req = crate::lexical::search::searcher::LexicalSearchRequest::new(
-                filter_query.clone_box(),
-            )
-            .limit(1_000_000)
-            .load_documents(false);
+            // Evaluate the filter through the snapshot-scoped query/filter cache
+            // (Issue #578): a repeated filter is served as a cached doc-id set
+            // instead of re-walking posting lists. Unlike the previous path,
+            // this is not capped at 1M matches.
+            let allowed = self.lexical.matching_doc_ids(filter_query.clone_box())?;
 
-            let filter_hits = self.lexical.search(req)?.hits;
-            let ids: Vec<u64> = filter_hits.into_iter().map(|h| h.doc_id).collect();
-
-            if ids.is_empty() {
+            if allowed.is_empty() {
                 return Ok(Vec::new());
             }
+
+            let ids: Vec<u64> = allowed.iter().collect();
 
             let new_lexical_query: Option<Box<dyn crate::lexical::query::Query>> =
                 if let Some(lex_req) = &lexical_search_request {

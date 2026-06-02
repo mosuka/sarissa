@@ -434,6 +434,16 @@ impl Query for GeoDistanceQuery {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + center + radius determine the matched set; boost is
+        // score-only and excluded. `{:?}` renders the f64 coordinates
+        // deterministically.
+        Some(format!(
+            "geodist|{:?}|{:?}|{:?}",
+            self.field, self.center, self.distance_m
+        ))
+    }
 }
 
 /// A geographical bounding box query.
@@ -786,6 +796,12 @@ impl Query for GeoBoundingBoxQuery {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + bounding box determine the matched set; boost is score-only
+        // and excluded.
+        Some(format!("geobbox|{:?}|{:?}", self.field, self.bounding_box))
     }
 }
 

@@ -42,6 +42,7 @@ pest_derive = "2.8.6"
 rand = "0.10.1"
 regex = "1.12.3"
 rkyv = { version = "0.8.16", features = ["std"] }
+roaring = "0.11.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

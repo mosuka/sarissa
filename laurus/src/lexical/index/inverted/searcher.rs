@@ -908,6 +908,21 @@ impl crate::lexical::search::searcher::LexicalSearcher for InvertedIndexSearcher
     ) -> Result<u64> {
         InvertedIndexSearcher::count(self, request)
     }
+
+    fn matching_doc_ids(&self, query: Box<dyn Query>) -> Result<Arc<roaring::RoaringTreemap>> {
+        // The common case: the reader is an `InvertedIndexReader`, which owns
+        // the snapshot-scoped query/filter cache (Issue #578) and serves
+        // cacheable queries without re-walking posting lists.
+        if let Some(inverted_reader) = self.reader.as_any().downcast_ref::<InvertedIndexReader>() {
+            return inverted_reader.matching_doc_ids(query.as_ref());
+        }
+        // Fallback for a non-inverted reader (e.g. a transient
+        // `PerSegmentReaderView`): no snapshot cache is available, so drain the
+        // matcher directly using the shared helper.
+        let matcher = query.matcher(self.reader.as_ref())?;
+        let bitmap = crate::lexical::index::inverted::query_cache::drain_matcher(matcher)?;
+        Ok(Arc::new(bitmap))
+    }
 }
 
 #[cfg(test)]
@@ -1384,5 +1399,223 @@ mod tests {
         );
         let count = store.count(LexicalSearchRequest::new(query)).unwrap();
         assert!(count > 0, "count query on multi-seg corpus must hit");
+    }
+
+    // ----- Issue #578: query / filter result cache -----
+
+    /// `matching_doc_ids` must return exactly the doc-id set that an unbounded
+    /// `search` produces, for both a term filter and a boolean filter. The
+    /// cache is score-independent, so only the *set* (not scores) is compared.
+    #[test]
+    fn matching_doc_ids_matches_search_hit_set() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        use std::collections::BTreeSet;
+
+        let store = build_skewed_store_with_segments(1);
+
+        let cases: Vec<Box<dyn Query>> = vec![
+            Box::new(TermQuery::new("body", "alpha")),
+            Box::new(
+                BooleanQueryBuilder::new()
+                    .must(Box::new(TermQuery::new("body", "alpha")))
+                    .should(Box::new(TermQuery::new("body", "beta")))
+                    .build(),
+            ),
+        ];
+
+        for query in cases {
+            let bitmap = store.matching_doc_ids(query.clone_box()).unwrap();
+            let cached_set: BTreeSet<u64> = bitmap.iter().collect();
+
+            let search_set: BTreeSet<u64> = store
+                .search(
+                    LexicalSearchRequest::new(query.clone_box())
+                        .limit(usize::MAX)
+                        .load_documents(false),
+                )
+                .unwrap()
+                .hits
+                .into_iter()
+                .map(|h| h.doc_id)
+                .collect();
+
+            assert_eq!(
+                cached_set,
+                search_set,
+                "matching_doc_ids must equal the search hit set for {}",
+                query.description()
+            );
+            assert!(!cached_set.is_empty(), "corpus should match the query");
+        }
+    }
+
+    /// A repeated cacheable lookup against the same reader snapshot is served
+    /// from the cache: it returns the very same `Arc` and bumps the hit
+    /// counter.
+    #[test]
+    fn matching_doc_ids_cache_hit_returns_shared_arc() {
+        let store = build_skewed_store_with_segments(1);
+        let reader = store.reader_for_tests().unwrap();
+        let inverted = reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .expect("memory store yields an InvertedIndexReader");
+
+        let query: Box<dyn Query> = Box::new(TermQuery::new("body", "alpha"));
+
+        let first = inverted.matching_doc_ids(query.as_ref()).unwrap();
+        let second = inverted.matching_doc_ids(query.as_ref()).unwrap();
+
+        assert_eq!(first, second, "cache hit must return the same set");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "second lookup should be served from the cache (same Arc)"
+        );
+
+        let stats = inverted.query_cache_stats();
+        assert_eq!(stats.misses, 1, "first lookup is a miss");
+        assert_eq!(stats.hits, 1, "second lookup is a hit");
+    }
+
+    /// Deleted documents must not appear in a cached filter set (deletions are
+    /// filtered at the posting-iterator level, before the matcher).
+    #[test]
+    fn matching_doc_ids_excludes_deleted_docs() {
+        use crate::Document;
+        use crate::lexical::store::LexicalStore;
+        use crate::lexical::store::config::LexicalIndexConfig;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let store = LexicalStore::new(storage, LexicalIndexConfig::default()).unwrap();
+        for id in 0..10u64 {
+            let doc = Document::builder().add_text("body", "shared term").build();
+            store.upsert_document(id, doc).unwrap();
+        }
+        store.commit().unwrap();
+
+        let query = || -> Box<dyn Query> { Box::new(TermQuery::new("body", "shared")) };
+        let before = store.matching_doc_ids(query()).unwrap();
+        assert_eq!(before.len(), 10);
+
+        store.delete_document_by_internal_id(3).unwrap();
+        store.commit().unwrap();
+
+        let after = store.matching_doc_ids(query()).unwrap();
+        assert_eq!(after.len(), 9, "deleted doc must be excluded");
+        assert!(!after.contains(3), "doc 3 was deleted");
+    }
+
+    /// `commit` drops the cached searcher (and its reader's cache), so the next
+    /// lookup recomputes against the new snapshot and sees freshly added docs.
+    #[test]
+    fn commit_invalidates_query_filter_cache() {
+        use crate::Document;
+        use crate::lexical::store::LexicalStore;
+        use crate::lexical::store::config::LexicalIndexConfig;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let store = LexicalStore::new(storage, LexicalIndexConfig::default()).unwrap();
+        for id in 0..5u64 {
+            let doc = Document::builder().add_text("body", "rust").build();
+            store.upsert_document(id, doc).unwrap();
+        }
+        store.commit().unwrap();
+
+        let query = || -> Box<dyn Query> { Box::new(TermQuery::new("body", "rust")) };
+        let before = store.matching_doc_ids(query()).unwrap();
+        assert_eq!(before.len(), 5);
+
+        // Add a matching doc and commit; the cached searcher is invalidated.
+        store
+            .upsert_document(99, Document::builder().add_text("body", "rust").build())
+            .unwrap();
+        store.commit().unwrap();
+
+        let after = store.matching_doc_ids(query()).unwrap();
+        assert_eq!(
+            after.len(),
+            6,
+            "post-commit lookup must see the new doc (cache invalidated)"
+        );
+        assert!(after.contains(99));
+    }
+
+    /// A query whose `cache_key` is `None` (here a MustNot-only boolean, R1)
+    /// must never touch the cache: it recomputes each call (distinct `Arc`) and
+    /// leaves the hit/miss counters untouched, while still returning a stable,
+    /// correct set.
+    #[test]
+    fn uncacheable_query_bypasses_cache() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+
+        let store = build_skewed_store_with_segments(1);
+        let reader = store.reader_for_tests().unwrap();
+        let inverted = reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .unwrap();
+
+        let make = || -> Box<dyn Query> {
+            Box::new(
+                BooleanQueryBuilder::new()
+                    .must_not(Box::new(TermQuery::new("body", "alpha")))
+                    .build(),
+            )
+        };
+        assert!(
+            make().cache_key().is_none(),
+            "MustNot-only boolean must be uncacheable"
+        );
+
+        let first = inverted.matching_doc_ids(make().as_ref()).unwrap();
+        let second = inverted.matching_doc_ids(make().as_ref()).unwrap();
+
+        assert_eq!(
+            first, second,
+            "uncacheable query still returns a stable set"
+        );
+        assert!(
+            !Arc::ptr_eq(&first, &second),
+            "uncacheable query must recompute (a distinct Arc each call)"
+        );
+        let stats = inverted.query_cache_stats();
+        assert_eq!(stats.hits, 0, "uncacheable query never hits the cache");
+        assert_eq!(stats.misses, 0, "uncacheable query never probes the cache");
+    }
+
+    /// Many threads hammering the same cached filter must not deadlock or race
+    /// on the cache `Mutex`, and every thread must observe the same set.
+    #[test]
+    fn concurrent_matching_doc_ids_is_consistent() {
+        use std::collections::BTreeSet;
+        use std::thread;
+
+        let store = Arc::new(build_skewed_store_with_segments(1));
+        // Prime the cached searcher so all threads share one reader + cache.
+        let expected: BTreeSet<u64> = store
+            .matching_doc_ids(Box::new(TermQuery::new("body", "alpha")))
+            .unwrap()
+            .iter()
+            .collect();
+        assert!(!expected.is_empty());
+
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let store = Arc::clone(&store);
+            let expected = expected.clone();
+            handles.push(thread::spawn(move || {
+                for _ in 0..50 {
+                    let set: BTreeSet<u64> = store
+                        .matching_doc_ids(Box::new(TermQuery::new("body", "alpha")))
+                        .unwrap()
+                        .iter()
+                        .collect();
+                    assert_eq!(set, expected, "every thread sees the same cached set");
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }

@@ -188,4 +188,34 @@ pub trait Query: Send + Sync + Debug {
             self.set_boost(self.boost() * b);
         }
     }
+
+    /// Return a stable, canonical cache key identifying the **set of documents**
+    /// this query matches within a reader snapshot, or `None` if the query must
+    /// not be cached.
+    ///
+    /// This key backs the snapshot-scoped filter/doc-id result cache
+    /// (see [`QueryFilterCache`](crate::lexical::index::inverted::query_cache::QueryFilterCache)).
+    /// It is **score-independent**: two queries that match the same document set
+    /// must produce the same key, and the query's boost — which only scales
+    /// scores, never changes membership — is deliberately excluded.
+    ///
+    /// # Correctness contract
+    ///
+    /// Returning `Some(key)` is a promise that the key is *canonical*: any two
+    /// query instances that would match different document sets MUST yield
+    /// different keys. Implementors that cannot guarantee this (e.g. a key built
+    /// from a non-deterministic `HashMap` iteration order, or one that omits a
+    /// membership-affecting parameter) MUST return `None` so the query bypasses
+    /// the cache and is evaluated fresh. The default is `None` (not cacheable),
+    /// which is always safe.
+    ///
+    /// Keys are namespaced with a per-type tag (e.g. `"term|…"`) so that two
+    /// different query types can never collide in the shared cache map.
+    ///
+    /// # Returns
+    ///
+    /// `Some(canonical_key)` if this query may be cached, `None` otherwise.
+    fn cache_key(&self) -> Option<String> {
+        None
+    }
 }

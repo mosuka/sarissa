@@ -73,10 +73,23 @@ pub struct InvertedIndexConfig {
     /// If empty, all fields are indexed with default options (schema-less).
     #[serde(default)]
     pub fields: HashMap<String, FieldOption>,
+
+    /// Maximum number of entries in the snapshot-scoped query / filter result
+    /// cache (Issue #578).
+    ///
+    /// Repeated filter clauses (tenancy, category, status, …) are memoised as
+    /// document-id sets so they are evaluated once per reader snapshot instead
+    /// of on every request. `0` disables the cache. Defaults to `1024`.
+    #[serde(default = "default_query_filter_cache_capacity")]
+    pub query_filter_cache_capacity: usize,
 }
 
 fn default_analyzer() -> Arc<dyn Analyzer> {
     Arc::new(StandardAnalyzer::new().expect("StandardAnalyzer should be creatable"))
+}
+
+fn default_query_filter_cache_capacity() -> usize {
+    1024
 }
 
 impl Default for InvertedIndexConfig {
@@ -95,6 +108,7 @@ impl Default for InvertedIndexConfig {
             default_fields: Vec::new(),
             shard_id: 0,
             fields: HashMap::new(),
+            query_filter_cache_capacity: default_query_filter_cache_capacity(),
         }
     }
 }
@@ -110,6 +124,10 @@ impl std::fmt::Debug for InvertedIndexConfig {
             .field("max_segments", &self.max_segments)
             .field("analyzer", &self.analyzer.name())
             .field("default_fields", &self.default_fields)
+            .field(
+                "query_filter_cache_capacity",
+                &self.query_filter_cache_capacity,
+            )
             .finish()
     }
 }

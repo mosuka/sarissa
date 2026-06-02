@@ -139,6 +139,7 @@ pub struct LexicalIndexConfigBuilder {
     max_segments: Option<u32>,
     default_fields: Vec<String>,
     fields: HashMap<String, FieldOption>,
+    query_filter_cache_capacity: Option<usize>,
 }
 
 use crate::lexical::core::field::FieldOption;
@@ -162,6 +163,7 @@ impl LexicalIndexConfigBuilder {
             max_segments: None,
             default_fields: Vec::new(),
             fields: HashMap::new(),
+            query_filter_cache_capacity: None,
         }
     }
 
@@ -278,6 +280,17 @@ impl LexicalIndexConfigBuilder {
         self
     }
 
+    /// Set the maximum number of entries in the snapshot-scoped query / filter
+    /// result cache (Issue #578).
+    ///
+    /// Repeated filter clauses are memoised as document-id sets and reused
+    /// within a reader snapshot. `0` disables the cache.
+    /// Default: 1024
+    pub fn query_filter_cache_capacity(mut self, capacity: usize) -> Self {
+        self.query_filter_cache_capacity = Some(capacity);
+        self
+    }
+
     /// Add a field-specific configuration.
     pub fn add_field(mut self, name: impl Into<String>, option: FieldOption) -> Self {
         self.fields.insert(name.into(), option);
@@ -317,6 +330,9 @@ impl LexicalIndexConfigBuilder {
         }
         if !self.fields.is_empty() {
             config.fields = self.fields;
+        }
+        if let Some(capacity) = self.query_filter_cache_capacity {
+            config.query_filter_cache_capacity = capacity;
         }
 
         LexicalIndexConfig::Inverted(config)

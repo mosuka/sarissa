@@ -402,6 +402,15 @@ impl Query for Geo3dDistanceQuery {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + center + radius determine the matched set; boost is
+        // score-only and excluded.
+        Some(format!(
+            "geo3ddist|{:?}|{:?}|{:?}",
+            self.field, self.center, self.distance_m
+        ))
+    }
 }
 
 /// A 3D bounding-box query against an ECEF-typed field.
@@ -559,6 +568,15 @@ impl Query for Geo3dBoundingBoxQuery {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + min/max corners determine the matched set; boost is
+        // score-only and excluded.
+        Some(format!(
+            "geo3dbbox|{:?}|{:?}|{:?}",
+            self.field, self.min, self.max
+        ))
     }
 }
 
@@ -880,6 +898,16 @@ impl Query for Geo3dNearestQuery {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn cache_key(&self) -> Option<String> {
+        // Field + center + k + the radius schedule fully determine which k
+        // documents are returned within a snapshot; boost is score-only and
+        // excluded.
+        Some(format!(
+            "geo3dnear|{:?}|{:?}|{}|{:?}|{:?}",
+            self.field, self.center, self.k, self.initial_radius_m, self.max_radius_m
+        ))
     }
 }
 

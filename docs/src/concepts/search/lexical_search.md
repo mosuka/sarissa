@@ -317,6 +317,40 @@ let query = parser.parse("year:[2020 TO 2024]")?;
 
 See [Query DSL](../query_dsl.md) for the complete syntax reference.
 
+## Filter Result Cache
+
+Filter clauses — tenancy, category, status flags, and similar — are frequently
+reused across many requests. Re-evaluating them from scratch every time re-walks
+the same posting lists. Laurus memoises the **set of document ids** a filter
+matches so a repeated filter becomes a single lookup instead of a full posting
+walk.
+
+- **Snapshot-scoped, self-invalidating.** The cache lives on the reader, which
+  is rebuilt on every `commit()` / `optimize()` / `refresh()`. Each reader is a
+  point-in-time snapshot, so the cache needs no manual invalidation: after the
+  index changes, the next search starts from a fresh, empty cache and always
+  reflects committed data.
+- **Score-independent.** A filter selects documents without affecting relevance,
+  so the cached value is a plain doc-id set (a Roaring bitmap). It is used for
+  the `filter_query` of a [hybrid / filtered search](hybrid_search.md) and feeds
+  both the lexical and vector sides.
+- **Safe by construction.** Only queries with a canonical key are cached. Term,
+  phrase, prefix, wildcard, regexp, fuzzy, range, geo, and geo3d queries are
+  cacheable, as are boolean queries composed entirely of cacheable clauses with
+  at least one positive (Must / Should / Filter) clause. Boolean queries with no
+  positive clause, span queries, and multi-field queries are evaluated fresh
+  (never cached), so results are always correct.
+
+The cache is enabled by default. Tune or disable it via the index config:
+
+```rust
+use laurus::lexical::store::config::LexicalIndexConfig;
+
+let config = LexicalIndexConfig::builder()
+    .query_filter_cache_capacity(4096) // entries per snapshot; 0 disables the cache
+    .build();
+```
+
 ## Next Steps
 
 - Semantic similarity search: [Vector Search](vector_search.md)

@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use ahash::AHashMap;
+use roaring::RoaringTreemap;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
 use crate::analysis::analyzer::standard::StandardAnalyzer;
@@ -19,11 +20,13 @@ use crate::lexical::index::inverted::core::posting::{DecodedPostingList, Posting
 use crate::lexical::index::inverted::core::terms::{
     InvertedIndexTerms, MergedInvertedIndexTerms, TermDictionaryAccess, Terms,
 };
+use crate::lexical::index::inverted::query_cache::QueryFilterCache;
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::structures::bkd_tree::{BKDReader, BKDTree};
 use crate::lexical::index::structures::dictionary::BlockTermDictionary;
 use crate::lexical::index::structures::dictionary::TermInfo;
 use crate::lexical::index::structures::doc_values::DocValuesReader;
+use crate::lexical::query::Query;
 use crate::lexical::reader::FieldStats;
 use crate::lexical::reader::PostingIterator;
 use crate::maintenance::deletion::DeletionBitmap;
@@ -48,6 +51,11 @@ pub struct InvertedIndexReaderConfig {
     /// Maximum number of cached terms per field.
     pub max_cached_terms_per_field: usize,
 
+    /// Maximum number of entries in the snapshot-scoped query / filter result
+    /// cache (Issue #578). `0` disables the cache. See
+    /// [`QueryFilterCache`](crate::lexical::index::inverted::query_cache::QueryFilterCache).
+    pub query_filter_cache_capacity: usize,
+
     /// Analyzer for query term analysis.
     pub analyzer: Arc<dyn Analyzer>,
 }
@@ -63,6 +71,10 @@ impl std::fmt::Debug for InvertedIndexReaderConfig {
                 "max_cached_terms_per_field",
                 &self.max_cached_terms_per_field,
             )
+            .field(
+                "query_filter_cache_capacity",
+                &self.query_filter_cache_capacity,
+            )
             .field("analyzer", &self.analyzer.name())
             .finish()
     }
@@ -76,6 +88,7 @@ impl Default for InvertedIndexReaderConfig {
             enable_posting_cache: true,
             preload_segments: false,
             max_cached_terms_per_field: 10000,
+            query_filter_cache_capacity: 1024,
             analyzer: Arc::new(
                 StandardAnalyzer::new().expect("StandardAnalyzer should be creatable"),
             ),
@@ -1504,6 +1517,14 @@ pub struct InvertedIndexReader {
     /// Cache manager.
     cache_manager: Arc<CacheManager>,
 
+    /// Snapshot-scoped query / filter result cache (Issue #578).
+    ///
+    /// `Arc` so that `#[derive(Clone)]` shares a single cache across clones of
+    /// this reader rather than deep-cloning an empty one. The cache is bound to
+    /// this reader's snapshot and is dropped when a new reader is built after a
+    /// commit / optimize / refresh.
+    query_cache: Arc<QueryFilterCache>,
+
     /// Reader configuration.
     config: InvertedIndexReaderConfig,
 
@@ -1522,6 +1543,7 @@ impl InvertedIndexReader {
         config: InvertedIndexReaderConfig,
     ) -> Result<Self> {
         let cache_manager = Arc::new(CacheManager::new(config.max_cache_memory));
+        let query_cache = Arc::new(QueryFilterCache::new(config.query_filter_cache_capacity));
         let mut segment_readers = Vec::new();
         let mut total_doc_count = 0;
 
@@ -1540,6 +1562,7 @@ impl InvertedIndexReader {
             segment_readers,
             segment_infos: segments,
             cache_manager,
+            query_cache,
             config,
             closed: Arc::new(AtomicBool::new(false)),
             total_doc_count,
@@ -1549,6 +1572,53 @@ impl InvertedIndexReader {
     /// Get cache statistics.
     pub fn cache_stats(&self) -> CacheStats {
         self.cache_manager.stats()
+    }
+
+    /// Snapshot of the query / filter result cache hit / miss counters (Issue
+    /// #578).
+    pub fn query_cache_stats(
+        &self,
+    ) -> crate::lexical::index::inverted::query_cache::QueryFilterCacheStats {
+        self.query_cache.stats()
+    }
+
+    /// Return the set of document ids matching `query` within this reader
+    /// snapshot, consulting the snapshot-scoped query / filter cache (Issue
+    /// [#578](https://github.com/mosuka/laurus/issues/578)).
+    ///
+    /// On a cache hit the stored [`RoaringTreemap`] is returned as a refcount
+    /// bump. On a miss — or for an uncacheable query, i.e. one whose
+    /// [`Query::cache_key`] is `None` — the query's matcher is drained into a
+    /// fresh bitmap; cacheable results are then stored for reuse. The returned
+    /// set is **score-independent** and excludes deleted documents (deletions
+    /// are filtered at the posting-iterator level, so a posting-derived matcher
+    /// never emits them).
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The query whose matching document set is requested.
+    ///
+    /// # Returns
+    ///
+    /// An `Arc<RoaringTreemap>` of matching document ids, shared with the cache
+    /// when the query is cacheable.
+    pub fn matching_doc_ids(&self, query: &dyn Query) -> Result<Arc<RoaringTreemap>> {
+        if let Some(key) = query.cache_key() {
+            if let Some(cached) = self.query_cache.get(&key) {
+                return Ok(cached);
+            }
+            let bitmap = Arc::new(self.drain_matching(query)?);
+            self.query_cache.put(key, Arc::clone(&bitmap));
+            Ok(bitmap)
+        } else {
+            Ok(Arc::new(self.drain_matching(query)?))
+        }
+    }
+
+    /// Drain `query`'s matcher over this reader into a [`RoaringTreemap`].
+    fn drain_matching(&self, query: &dyn Query) -> Result<RoaringTreemap> {
+        let matcher = query.matcher(self)?;
+        crate::lexical::index::inverted::query_cache::drain_matcher(matcher)
     }
 
     /// Get the analyzer from configuration.
