@@ -329,6 +329,30 @@ impl InvertedIndexSearcher {
             )
         };
 
+        // Build a cross-segment matching-doc-ids closure (#764) so each
+        // PerSegmentReaderView can resolve a cacheable filter clause against the
+        // cross-segment snapshot cache rather than re-walking postings per
+        // segment. The fanout is only entered when `self.reader` is an
+        // InvertedIndexReader (dispatch gate), so the downcast succeeds; the
+        // defensive branch drains the matcher uncached.
+        let global_matching_doc_ids_fn = {
+            let reader_arc = self.reader.clone();
+            std::sync::Arc::new(
+                move |query: &dyn Query| -> Result<Arc<roaring::RoaringTreemap>> {
+                    if let Some(inverted) =
+                        reader_arc.as_any().downcast_ref::<InvertedIndexReader>()
+                    {
+                        inverted.matching_doc_ids(query)
+                    } else {
+                        let matcher = query.matcher(reader_arc.as_ref())?;
+                        Ok(Arc::new(
+                            crate::lexical::index::inverted::query_cache::drain_matcher(matcher)?,
+                        ))
+                    }
+                },
+            )
+        };
+
         // Per-segment K. The collector wants `top_k` hits globally;
         // each segment returns up to `top_k` so the merge has the
         // headroom to pick any combination of per-segment hits.
@@ -348,6 +372,7 @@ impl InvertedIndexSearcher {
                     global_doc_count,
                     global_max_doc,
                     global_term_info_fn.clone(),
+                    global_matching_doc_ids_fn.clone(),
                 );
                 let view_reader: Arc<dyn LexicalIndexReader> = Arc::new(view);
                 let temp_searcher = InvertedIndexSearcher::from_arc(view_reader);
@@ -1617,5 +1642,119 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+    }
+
+    // ----- Issue #764: Occur::Filter clause reuses the filter cache -----
+
+    /// A repeated `must(...).filter(...)` search must serve the `Occur::Filter`
+    /// clause from `QueryFilterCache` (single-segment / non-fanout path).
+    #[test]
+    fn filter_clause_reuses_cache_single_segment() {
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+
+        let store = build_skewed_store_with_segments(1);
+        let reader = store.reader_for_tests().unwrap();
+        let searcher = InvertedIndexSearcher::from_arc(reader.clone());
+
+        let make = || -> Box<dyn Query> {
+            Box::new(
+                BooleanQueryBuilder::new()
+                    .must(Box::new(TermQuery::new("body", "alpha")))
+                    .filter(Box::new(TermQuery::new("body", "beta")))
+                    .build(),
+            )
+        };
+
+        // First search populates the filter-clause set; second reuses it.
+        let _ = searcher
+            .search_with_collector(make(), TopDocsCollector::new(10))
+            .unwrap();
+        let _ = searcher
+            .search_with_collector(make(), TopDocsCollector::new(10))
+            .unwrap();
+
+        let inverted = reader
+            .as_any()
+            .downcast_ref::<InvertedIndexReader>()
+            .unwrap();
+        let stats = inverted.query_cache_stats();
+        assert!(
+            stats.hits >= 1,
+            "the Occur::Filter clause must hit the cache on the repeat search (stats: {stats:?})"
+        );
+    }
+
+    /// Cache-on must produce exactly the same result set as cache-off for a
+    /// filtered boolean across a multi-segment index (exercises the fanout
+    /// path through `PerSegmentReaderView::matching_doc_ids`).
+    #[test]
+    fn filter_clause_cache_matches_uncached_multi_segment() {
+        use crate::Document;
+        use crate::lexical::query::boolean::BooleanQueryBuilder;
+        use crate::lexical::store::LexicalStore;
+        use crate::lexical::store::config::LexicalIndexConfig;
+        use std::collections::BTreeSet;
+
+        // Build a 4-segment store with the given cache capacity. alpha = even
+        // ids, beta = multiples of 3, so must(alpha) ∩ filter(beta) = ids % 6.
+        let build = |capacity: usize| -> LexicalStore {
+            let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+            let config = LexicalIndexConfig::builder()
+                .query_filter_cache_capacity(capacity)
+                .build();
+            let store = LexicalStore::new(storage, config).unwrap();
+            for id in 0..400u64 {
+                let mut body = String::new();
+                if id % 2 == 0 {
+                    body.push_str("alpha ");
+                }
+                if id % 3 == 0 {
+                    body.push_str("beta ");
+                }
+                body.push_str("filler");
+                let doc = Document::builder().add_text("body", &body).build();
+                store.upsert_document(id, doc).unwrap();
+                if id % 100 == 99 {
+                    store.commit().unwrap();
+                }
+            }
+            store.commit().unwrap();
+            store
+        };
+
+        let make = || -> Box<dyn Query> {
+            Box::new(
+                BooleanQueryBuilder::new()
+                    .must(Box::new(TermQuery::new("body", "alpha")))
+                    .filter(Box::new(TermQuery::new("body", "beta")))
+                    .build(),
+            )
+        };
+        let run = |store: &LexicalStore| -> BTreeSet<u64> {
+            store
+                .search(
+                    LexicalSearchRequest::new(make())
+                        .limit(usize::MAX)
+                        .load_documents(false),
+                )
+                .unwrap()
+                .hits
+                .into_iter()
+                .map(|h| h.doc_id)
+                .collect()
+        };
+
+        let cached_set = run(&build(1024));
+        let uncached_set = run(&build(0));
+
+        assert_eq!(
+            cached_set, uncached_set,
+            "cache-on must equal cache-off for a filtered boolean (fanout path)"
+        );
+        assert!(!cached_set.is_empty(), "filter should match some docs");
+        assert!(
+            cached_set.iter().all(|&d| d % 6 == 0),
+            "must(alpha=even) ∩ filter(beta=%3) == ids divisible by 6"
+        );
     }
 }

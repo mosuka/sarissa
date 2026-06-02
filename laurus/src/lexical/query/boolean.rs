@@ -2,11 +2,15 @@
 
 use std::sync::Arc;
 
+use roaring::RoaringTreemap;
+
 use crate::error::Result;
+use crate::lexical::index::inverted::per_segment_view::PerSegmentReaderView;
+use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::query::Query;
 use crate::lexical::query::matcher::{
     AllMatcher, ConjunctionMatcher, ConjunctionNotMatcher, DisjunctionMatcher, EmptyMatcher,
-    Matcher, NotMatcher,
+    Matcher, NotMatcher, PreComputedMatcher,
 };
 use crate::lexical::query::scorer::{BM25Scorer, Scorer};
 use crate::lexical::reader::LexicalIndexReader;
@@ -170,6 +174,50 @@ impl Clone for BooleanQuery {
     }
 }
 
+/// Resolve the cached doc-id set for `query` when `reader` exposes a snapshot
+/// query/filter cache (#578/#764).
+///
+/// Reachable on the cross-segment [`InvertedIndexReader`] and on the
+/// per-segment fanout [`PerSegmentReaderView`] (which delegates to the
+/// cross-segment cache). Doc ids are global in both, so the same cached set is
+/// valid in either context. Returns `None` when no cache is reachable, so the
+/// caller falls back to the query's normal matcher.
+fn cached_filter_doc_ids(
+    query: &dyn Query,
+    reader: &dyn LexicalIndexReader,
+) -> Result<Option<Arc<RoaringTreemap>>> {
+    if let Some(inverted) = reader.as_any().downcast_ref::<InvertedIndexReader>() {
+        return Ok(Some(inverted.matching_doc_ids(query)?));
+    }
+    if let Some(view) = reader.as_any().downcast_ref::<PerSegmentReaderView>() {
+        return Ok(Some(view.matching_doc_ids(query)?));
+    }
+    Ok(None)
+}
+
+/// Build the matcher for a single boolean clause, reusing the snapshot-scoped
+/// filter cache for cacheable `Occur::Filter` clauses (#764).
+///
+/// A Filter clause selects documents without contributing to scoring, so its
+/// matched set can be served from the cache as a `RoaringTreemap` and iterated
+/// via a membership-only [`PreComputedMatcher`] instead of re-walking posting
+/// lists. Any non-Filter clause, an uncacheable query
+/// ([`Query::cache_key`] is `None`), or a reader without a reachable cache
+/// falls back to the query's normal matcher — so behaviour is unchanged there.
+fn clause_matcher(
+    clause: &BooleanClause,
+    reader: &dyn LexicalIndexReader,
+) -> Result<Box<dyn Matcher>> {
+    if clause.occur == Occur::Filter
+        && clause.query.cache_key().is_some()
+        && let Some(bitmap) = cached_filter_doc_ids(clause.query.as_ref(), reader)?
+    {
+        let doc_ids: Vec<u64> = bitmap.iter().collect();
+        return Ok(Box::new(PreComputedMatcher::new(doc_ids)));
+    }
+    clause.query.matcher(reader)
+}
+
 impl Query for BooleanQuery {
     fn matcher(&self, reader: &dyn LexicalIndexReader) -> Result<Box<dyn Matcher>> {
         if self.clauses.is_empty() {
@@ -194,12 +242,12 @@ impl Query for BooleanQuery {
             let mut positive_matcher = if !required_clauses.is_empty() {
                 if required_clauses.len() == 1 {
                     // Single required clause
-                    required_clauses[0].query.matcher(reader)?
+                    clause_matcher(required_clauses[0], reader)?
                 } else {
                     // Multiple required clauses - use ConjunctionMatcher
                     let mut matchers = Vec::new();
                     for clause in &required_clauses {
-                        let matcher = clause.query.matcher(reader)?;
+                        let matcher = clause_matcher(clause, reader)?;
                         if matcher.is_exhausted() {
                             return Ok(Box::new(EmptyMatcher::new()));
                         }

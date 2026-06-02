@@ -332,6 +332,9 @@ posting 走査ではなく単一のルックアップで済ませます。
   選別するだけなので、キャッシュ値は単なる doc-id 集合（Roaring ビットマップ）です。
   [ハイブリッド検索 / フィルタ検索](hybrid_search.md) の `filter_query` に使われ、
   lexical 側・vector 側の両方に供給されます。
+- **BooleanQuery 内でも再利用。** `BooleanQuery` 内の `Occur::Filter` 句
+  （例: `must(user_query).filter(tenant_filter)`）も、posting 再走査ではなくキャッシュから
+  マッチ集合を取得します。マルチセグメント時の per-segment fanout 経路でも有効です。
 - **構造的に安全（safe by construction）。** canonical なキーを持つクエリのみキャッシュ
   されます。Term・Phrase・Prefix・Wildcard・Regexp・Fuzzy・Range・Geo・Geo3d クエリは
   キャッシュ可能で、キャッシュ可能な句のみで構成され、かつ少なくとも 1 つの正句
