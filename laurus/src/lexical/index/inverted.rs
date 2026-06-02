@@ -292,20 +292,70 @@ impl InvertedIndex {
     /// ([`Self::load_segments`]) sees only the merged result. A no-op when
     /// fewer than two segments exist.
     fn force_merge_all(&self) -> Result<()> {
-        use self::segment::manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
-        use self::segment::merge_engine::{MergeConfig, MergeEngine};
-
         let segments = self.load_segments()?;
         if segments.len() < 2 {
             // Zero or one segment: nothing to compact.
             return Ok(());
         }
-
         // The merged segment must sort as the newest, so its generation is one
         // past the highest source generation.
         let next_generation = segments.iter().map(|s| s.generation).max().unwrap_or(0) + 1;
+        self.merge_segment_set(&segments, next_generation)
+    }
 
-        let managed: Vec<ManagedSegmentInfo> = segments
+    /// Auto-merge implementation behind the [`LexicalIndex::maybe_merge`] hook
+    /// run after each commit (Issue #755).
+    ///
+    /// Keeps the segment count bounded without a manual
+    /// [`optimize()`](LexicalIndex::optimize): when the number of segments
+    /// exceeds [`InvertedIndexConfig::max_segments`], the smallest
+    /// [`merge_factor`](InvertedIndexConfig::merge_factor) segments are merged
+    /// into one (Lucene-style "merge small segments first"). A single merge is
+    /// performed per call; repeated commits converge the count. Cheap when no
+    /// merge is needed (a segment count check). Disable by raising
+    /// `max_segments`.
+    fn auto_merge(&self) -> Result<()> {
+        let segments = self.load_segments()?;
+        if segments.len() <= self.config.max_segments as usize {
+            // Under the threshold: nothing to do.
+            return Ok(());
+        }
+
+        // Merge the smallest `merge_factor` segments (small-first keeps merge
+        // cost low and bounds per-commit latency).
+        let mut by_size: Vec<(SegmentInfo, u64)> = segments
+            .iter()
+            .map(|s| (s.clone(), self.segment_size_bytes(&s.segment_id)))
+            .collect();
+        by_size.sort_by_key(|(_, size)| *size);
+
+        let take = (self.config.merge_factor as usize).clamp(2, segments.len());
+        let subset: Vec<SegmentInfo> = by_size.into_iter().take(take).map(|(s, _)| s).collect();
+
+        let next_generation = segments.iter().map(|s| s.generation).max().unwrap_or(0) + 1;
+        self.merge_segment_set(&subset, next_generation)
+    }
+
+    /// Merge a set of source segments into a single new segment.
+    ///
+    /// Shared by [`Self::force_merge_all`] (all segments) and
+    /// [`Self::maybe_merge`] (a policy-selected subset). Runs the (correct,
+    /// typed) [`MergeEngine`](self::segment::merge_engine::MergeEngine), rewrites
+    /// the merged segment's generation to `next_generation` so it sorts as the
+    /// newest, and deletes the source segments (their `.meta` first, so they
+    /// drop out of `.meta` file-scan discovery before their now-orphaned data
+    /// files are removed — minimizing any window in which a document could be
+    /// seen in both a source and the merged segment). A no-op for fewer than
+    /// two sources.
+    fn merge_segment_set(&self, sources: &[SegmentInfo], next_generation: u64) -> Result<()> {
+        use self::segment::manager::{ManagedSegmentInfo, MergeCandidate, MergeStrategy};
+        use self::segment::merge_engine::{MergeConfig, MergeEngine};
+
+        if sources.len() < 2 {
+            return Ok(());
+        }
+
+        let managed: Vec<ManagedSegmentInfo> = sources
             .iter()
             .map(|info| {
                 let mut mi = ManagedSegmentInfo::new(info.clone());
@@ -314,7 +364,7 @@ impl InvertedIndex {
             })
             .collect();
         let candidate = MergeCandidate {
-            segments: segments.iter().map(|s| s.segment_id.clone()).collect(),
+            segments: sources.iter().map(|s| s.segment_id.clone()).collect(),
             priority: 1.0,
             estimated_size: 0,
             strategy: MergeStrategy::SizeBased,
@@ -322,25 +372,17 @@ impl InvertedIndex {
 
         let engine = MergeEngine::new(MergeConfig::default(), self.storage.clone());
         let result = engine.merge_segments(&candidate, &managed, next_generation)?;
-        let merged_id = result.new_segment.segment_info.segment_id.clone();
+        self.set_segment_generation(&result.new_segment.segment_info.segment_id, next_generation)?;
 
-        // The merged segment's `.meta` was written with the merge writer's own
-        // generation (0); rewrite it with `next_generation` so it is the newest.
-        self.set_segment_generation(&merged_id, next_generation)?;
-
-        // Remove the now-merged source segments so discovery sees only the
-        // merged result. Delete every source's `.meta` first: discovery keys
-        // on `.meta`, so this drops the sources out of the searchable set
-        // before their (now-orphaned, harmless) data files are removed,
-        // minimizing the window in which a doc could be seen in both a source
-        // and the merged segment.
-        for info in &segments {
+        // Delete each source's `.meta` first (drops it from discovery), then the
+        // remaining data files.
+        for info in sources {
             let meta = format!("{}.meta", info.segment_id);
             if self.storage.file_exists(&meta) {
                 self.storage.delete_file(&meta)?;
             }
         }
-        for info in &segments {
+        for info in sources {
             self.delete_segment_files(&info.segment_id)?;
         }
 
@@ -521,6 +563,11 @@ impl LexicalIndex for InvertedIndex {
         self.force_merge_all()?;
         self.update_metadata()?;
         Ok(())
+    }
+
+    fn maybe_merge(&self) -> Result<()> {
+        self.check_closed()?;
+        self.auto_merge()
     }
 
     fn refresh(&self) -> Result<()> {

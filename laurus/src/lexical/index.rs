@@ -67,6 +67,17 @@ pub trait LexicalIndex: Send + Sync + std::fmt::Debug {
     /// Uses interior mutability for thread-safe access.
     fn optimize(&self) -> Result<()>;
 
+    /// Auto-merge hook invoked after each commit (Issue #755).
+    ///
+    /// Implementations may opportunistically merge segments to keep their
+    /// number bounded (e.g. when it exceeds a configured threshold), without a
+    /// manual [`optimize()`](Self::optimize). The default is a no-op; the
+    /// inverted index merges its smallest segments when the count exceeds
+    /// `max_segments`. Must be cheap when no merge is needed.
+    fn maybe_merge(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Refresh the index metadata from storage.
     ///
     /// Should be called after external writes (e.g. by a Writer) to ensure

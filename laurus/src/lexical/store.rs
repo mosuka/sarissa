@@ -231,6 +231,10 @@ impl LexicalStore {
     /// - All write operations (add, update, delete) are not persisted until commit
     /// - After commit, the reader cache is invalidated automatically
     /// - The writer cache is cleared and will be recreated on the next write operation
+    /// - An auto-merge runs after the commit (Issue #755): once the segment
+    ///   count exceeds `max_segments`, the smallest `merge_factor` segments are
+    ///   merged so the count stays bounded without a manual `optimize()`. It is
+    ///   a no-op below the threshold; raise `max_segments` to disable it.
     ///
     /// # Example
     ///
@@ -264,6 +268,12 @@ impl LexicalStore {
         // Sync storage to ensure all file metadata (creation, rename, size) is
         // flushed to disk. This is critical on Windows where directory listings
         // and file visibility may be cached until the directory is synced.
+        self.index.storage().sync()?;
+        // Auto-merge after the new segment is visible (Issue #755): keeps the
+        // segment count bounded without a manual `optimize()`. A no-op below the
+        // configured threshold, so most commits pay only a segment-count check.
+        // Sync again afterwards so any merge output is durable/visible.
+        self.index.maybe_merge()?;
         self.index.storage().sync()?;
         self.index.refresh()?;
         *self.searcher_cache.write() = None;

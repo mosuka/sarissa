@@ -233,7 +233,7 @@ graph TB
 
 1. **Create**: A new segment is created each time `commit()` is called
 2. **Search**: All segments are searched in parallel and results are merged
-3. **Merge**: Periodically, multiple small segments are merged into larger ones to improve query performance
+3. **Merge**: After each `commit()`, an auto-merge merges the smallest segments once the count exceeds `max_segments`, keeping the segment count bounded; a manual `optimize()` force-merges everything into one segment
 4. **Delete**: When a document is deleted, its ID is added to a deletion bitmap rather than physically removed (see [Deletions & Compaction](../../laurus/deletions.md))
 
 ## BM25 Scoring
