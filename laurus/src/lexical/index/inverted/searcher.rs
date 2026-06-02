@@ -21,6 +21,7 @@ use crate::error::{LaurusError, Result};
 // Note: Geo and DateTime were removed from FieldValue definition implicitly by switching to DataValue.
 // Only standard types remain. Logic using Geo/DateTime needs update.
 use crate::lexical::index::inverted::bmw::{BlockMaxOrExecutor, is_bmw_eligible};
+use crate::lexical::index::inverted::parsed_query_cache::ParsedQueryCache;
 use crate::lexical::index::inverted::per_segment_view::PerSegmentReaderView;
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
 use crate::lexical::query::Query;
@@ -36,6 +37,10 @@ use crate::lexical::search::searcher::{
     LexicalSearchParams, LexicalSearchQuery, LexicalSearchRequest, SortField, SortOrder,
 };
 
+/// Default capacity (entries) of the per-searcher parsed-DSL query cache
+/// (Issue #590) when none is configured.
+const DEFAULT_PARSED_QUERY_CACHE_CAPACITY: usize = 1024;
+
 /// A searcher that executes queries against an index reader.
 #[derive(Debug)]
 pub struct InvertedIndexSearcher {
@@ -43,6 +48,10 @@ pub struct InvertedIndexSearcher {
     reader: Arc<dyn LexicalIndexReader>,
     /// Default fields to search if none specified in query.
     default_fields: Vec<String>,
+    /// Snapshot-scoped parsed-DSL query cache (Issue #590). The analyzer and
+    /// `default_fields` are fixed for this searcher's lifetime, so a DSL string
+    /// alone keys it; rebuilt (empty) whenever the store rebuilds the searcher.
+    parsed_query_cache: ParsedQueryCache,
 }
 
 impl InvertedIndexSearcher {
@@ -51,6 +60,7 @@ impl InvertedIndexSearcher {
         InvertedIndexSearcher {
             reader: Arc::from(reader),
             default_fields: Vec::new(),
+            parsed_query_cache: ParsedQueryCache::new(DEFAULT_PARSED_QUERY_CACHE_CAPACITY),
         }
     }
 
@@ -59,6 +69,7 @@ impl InvertedIndexSearcher {
         InvertedIndexSearcher {
             reader,
             default_fields: Vec::new(),
+            parsed_query_cache: ParsedQueryCache::new(DEFAULT_PARSED_QUERY_CACHE_CAPACITY),
         }
     }
 
@@ -68,9 +79,23 @@ impl InvertedIndexSearcher {
         self
     }
 
+    /// Set the capacity (entries) of the parsed-DSL query cache (Issue #590).
+    /// `0` disables the cache. Replaces the default-capacity cache.
+    pub fn with_parsed_query_cache_capacity(mut self, capacity: usize) -> Self {
+        self.parsed_query_cache = ParsedQueryCache::new(capacity);
+        self
+    }
+
     /// Get the index reader.
     pub fn reader(&self) -> &Arc<dyn LexicalIndexReader> {
         &self.reader
+    }
+
+    /// Snapshot of the parsed-DSL query cache hit / miss counters (Issue #590).
+    pub fn parsed_query_cache_stats(
+        &self,
+    ) -> crate::lexical::index::inverted::parsed_query_cache::ParsedQueryCacheStats {
+        self.parsed_query_cache.stats()
     }
 
     /// Execute a search with a custom collector.
@@ -662,22 +687,34 @@ impl InvertedIndexSearcher {
         // Convert DSL query to Query object if necessary
         let query = match &request.query {
             LexicalSearchQuery::Dsl(dsl_string) => {
-                // Get analyzer from reader
-                let analyzer = if let Some(inverted_index_reader) =
-                    self.reader.as_any().downcast_ref::<InvertedIndexReader>()
-                {
-                    inverted_index_reader.analyzer().clone()
+                // Parsed-query cache (#590): a popular DSL string is parsed once
+                // per snapshot and reused via `clone_box` (cheap — refcount
+                // bumps for boolean clause subtrees). The analyzer and
+                // `default_fields` are fixed for this searcher, so the DSL
+                // string alone keys the cache.
+                if let Some(cached) = self.parsed_query_cache.get(dsl_string) {
+                    cached.clone_box()
                 } else {
-                    // Fallback to standard analyzer
-                    Arc::new(StandardAnalyzer::new()?)
-                };
+                    // Get analyzer from reader
+                    let analyzer = if let Some(inverted_index_reader) =
+                        self.reader.as_any().downcast_ref::<InvertedIndexReader>()
+                    {
+                        inverted_index_reader.analyzer().clone()
+                    } else {
+                        // Fallback to standard analyzer
+                        Arc::new(StandardAnalyzer::new()?)
+                    };
 
-                // Parse DSL string into Query object
-                let mut parser = LexicalQueryParser::new(analyzer.clone());
-                if !self.default_fields.is_empty() {
-                    parser = parser.with_default_fields(self.default_fields.clone());
+                    // Parse DSL string into Query object
+                    let mut parser = LexicalQueryParser::new(analyzer.clone());
+                    if !self.default_fields.is_empty() {
+                        parser = parser.with_default_fields(self.default_fields.clone());
+                    }
+                    let parsed: Arc<dyn Query> = Arc::from(parser.parse(dsl_string)?);
+                    self.parsed_query_cache
+                        .put(dsl_string.clone(), parsed.clone());
+                    parsed.clone_box()
                 }
-                parser.parse(dsl_string)?
             }
             LexicalSearchQuery::Obj(q) => q.clone_box(),
         };
@@ -1937,5 +1974,79 @@ mod tests {
         );
         // alpha ∩ not beta = {0} (doc 3 has beta → excluded; gamma only boosts).
         assert_eq!(par.into_iter().collect::<Vec<_>>(), vec![0]);
+    }
+
+    // ----- Issue #590: parsed-DSL query cache -----
+
+    /// A repeated DSL search is parsed once: the second call is a cache hit and
+    /// returns the identical result set (Issue #590).
+    #[test]
+    fn dsl_parse_cache_hit_on_repeat() {
+        let store = build_skewed_store_with_segments(1);
+        let reader = store.reader_for_tests().unwrap();
+        let searcher = InvertedIndexSearcher::from_arc(reader);
+
+        let req = || {
+            LexicalSearchRequest::from_dsl("body:alpha")
+                .limit(10)
+                .load_documents(false)
+        };
+        let ids1: Vec<u64> = searcher
+            .search(req())
+            .unwrap()
+            .hits
+            .iter()
+            .map(|h| h.doc_id)
+            .collect();
+        let ids2: Vec<u64> = searcher
+            .search(req())
+            .unwrap()
+            .hits
+            .iter()
+            .map(|h| h.doc_id)
+            .collect();
+
+        assert_eq!(ids1, ids2, "repeat DSL search must return the same results");
+        assert!(!ids1.is_empty(), "corpus should match body:alpha");
+
+        let stats = searcher.parsed_query_cache_stats();
+        assert_eq!(
+            stats.misses, 1,
+            "the DSL is parsed once (first call misses)"
+        );
+        assert!(stats.hits >= 1, "the repeat DSL search hits the cache");
+    }
+
+    /// With the cache disabled (capacity 0) the DSL is parsed every time, yet
+    /// results are unchanged.
+    #[test]
+    fn dsl_parse_cache_disabled_still_correct() {
+        let store = build_skewed_store_with_segments(1);
+        let reader = store.reader_for_tests().unwrap();
+        let searcher = InvertedIndexSearcher::from_arc(reader).with_parsed_query_cache_capacity(0);
+
+        let req = || {
+            LexicalSearchRequest::from_dsl("body:alpha")
+                .limit(10)
+                .load_documents(false)
+        };
+        let ids1: Vec<u64> = searcher
+            .search(req())
+            .unwrap()
+            .hits
+            .iter()
+            .map(|h| h.doc_id)
+            .collect();
+        let ids2: Vec<u64> = searcher
+            .search(req())
+            .unwrap()
+            .hits
+            .iter()
+            .map(|h| h.doc_id)
+            .collect();
+
+        assert_eq!(ids1, ids2);
+        let stats = searcher.parsed_query_cache_stats();
+        assert_eq!(stats.hits, 0, "a disabled cache never hits");
     }
 }

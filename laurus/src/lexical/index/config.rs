@@ -82,6 +82,15 @@ pub struct InvertedIndexConfig {
     /// of on every request. `0` disables the cache. Defaults to `1024`.
     #[serde(default = "default_query_filter_cache_capacity")]
     pub query_filter_cache_capacity: usize,
+
+    /// Maximum number of entries in the snapshot-scoped parsed-DSL query cache
+    /// (Issue #590).
+    ///
+    /// A repeated DSL query string is parsed once per searcher snapshot and
+    /// reused, avoiding the pest parse + analyzer tokenisation on every call.
+    /// `0` disables the cache. Defaults to `1024`.
+    #[serde(default = "default_parsed_query_cache_capacity")]
+    pub parsed_query_cache_capacity: usize,
 }
 
 fn default_analyzer() -> Arc<dyn Analyzer> {
@@ -89,6 +98,10 @@ fn default_analyzer() -> Arc<dyn Analyzer> {
 }
 
 fn default_query_filter_cache_capacity() -> usize {
+    1024
+}
+
+fn default_parsed_query_cache_capacity() -> usize {
     1024
 }
 
@@ -109,6 +122,7 @@ impl Default for InvertedIndexConfig {
             shard_id: 0,
             fields: HashMap::new(),
             query_filter_cache_capacity: default_query_filter_cache_capacity(),
+            parsed_query_cache_capacity: default_parsed_query_cache_capacity(),
         }
     }
 }
@@ -127,6 +141,10 @@ impl std::fmt::Debug for InvertedIndexConfig {
             .field(
                 "query_filter_cache_capacity",
                 &self.query_filter_cache_capacity,
+            )
+            .field(
+                "parsed_query_cache_capacity",
+                &self.parsed_query_cache_capacity,
             )
             .finish()
     }

@@ -355,6 +355,27 @@ let config = LexicalIndexConfig::builder()
     .build();
 ```
 
+## Parsed Query Cache
+
+Searching with a DSL string (`SearchRequest::from_dsl`, or a `LexicalSearchQuery::Dsl`)
+parses the string with the pest grammar and re-tokenises its terms with the analyzer on
+every call. Autocomplete and popular-query workloads repeat the same strings, so Laurus
+memoises `dsl string → parsed query`: a repeated DSL string is parsed once and then reused
+(a cheap clone of the parsed query tree).
+
+Like the filter cache, it is **snapshot-scoped**: the cache lives on the searcher, which is
+rebuilt on every `commit()` / `optimize()` / `refresh()`. The analyzer and default fields are
+fixed for that searcher, so the DSL string alone is the key; a schema/analyzer change yields a
+fresh, empty cache. Enabled by default; tune or disable via the index config:
+
+```rust
+use laurus::lexical::store::config::LexicalIndexConfig;
+
+let config = LexicalIndexConfig::builder()
+    .parsed_query_cache_capacity(2048) // entries per snapshot; 0 disables the cache
+    .build();
+```
+
 ## Next Steps
 
 - Semantic similarity search: [Vector Search](vector_search.md)

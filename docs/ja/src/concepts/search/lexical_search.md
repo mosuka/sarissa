@@ -352,6 +352,26 @@ let config = LexicalIndexConfig::builder()
     .build();
 ```
 
+## パース済みクエリキャッシュ（Parsed Query Cache）
+
+DSL 文字列での検索（`SearchRequest::from_dsl` や `LexicalSearchQuery::Dsl`）は、毎回 pest
+文法でパースし、語を analyzer で再トークン化します。オートコンプリートや人気クエリでは同じ
+文字列が繰り返されるため、laurus は `DSL 文字列 → パース済みクエリ` をメモ化します。繰り返し
+の DSL 文字列は一度だけパースされ、以降は再利用されます（パース済みクエリツリーの安価な複製）。
+
+フィルタキャッシュと同様に**スナップショット連動**です。キャッシュは searcher 上に存在し、
+`commit()` / `optimize()` / `refresh()` のたびに再構築されます。analyzer と default fields は
+その searcher で固定なので DSL 文字列のみがキーになり、スキーマ/analyzer 変更時は空の新しい
+キャッシュになります。デフォルトで有効。インデックス設定で調整・無効化できます。
+
+```rust
+use laurus::lexical::store::config::LexicalIndexConfig;
+
+let config = LexicalIndexConfig::builder()
+    .parsed_query_cache_capacity(2048) // スナップショットあたりのエントリ数。0 で無効化
+    .build();
+```
+
 ## 次のステップ
 
 - 意味的類似性検索: [Vector 検索](vector_search.md)
