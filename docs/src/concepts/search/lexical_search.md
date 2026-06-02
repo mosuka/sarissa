@@ -376,6 +376,30 @@ let config = LexicalIndexConfig::builder()
     .build();
 ```
 
+## Posting Cache
+
+Evaluating a term reads its posting list from the segment's `.post` file and decodes it
+(varint doc-ids, deletion filtering, skip table). Without caching, every query for the same
+term repeats that read + decode — and on cloud/remote storage the read dominates. Each segment
+reader keeps a small cache of decoded, deletion-filtered posting lists, so a repeated
+`(field, term)` lookup within a snapshot reuses the decoded list.
+
+Because a segment is immutable for a reader snapshot, the cached list is always consistent with
+its deletions; a commit builds new segment readers with empty caches. The cache is **byte-budget
+bounded** (posting lists vary widely in size) — least-recently-used lists are evicted once the
+budget is exceeded, and a single list larger than the whole budget is not cached. It is enabled
+by default and shares the `max_cache_memory` budget; control it via the index config:
+
+```rust
+use laurus::lexical::store::config::LexicalIndexConfig;
+use laurus::lexical::index::config::InvertedIndexConfig;
+
+let mut inverted = InvertedIndexConfig::default();
+inverted.enable_posting_cache = false;        // disable entirely
+inverted.max_cache_memory = 256 * 1024 * 1024; // or resize the cache budget (bytes)
+let config = LexicalIndexConfig::Inverted(inverted);
+```
+
 ## Next Steps
 
 - Semantic similarity search: [Vector Search](vector_search.md)
