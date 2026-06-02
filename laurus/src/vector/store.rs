@@ -40,6 +40,7 @@ use crate::vector::core::vector::Vector;
 use crate::vector::index::VectorIndex;
 use crate::vector::index::config::VectorIndexTypeConfig;
 use crate::vector::index::factory::VectorIndexFactory;
+use crate::vector::search::filter_set::FilterSet;
 use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
 use crate::vector::writer::VectorIndexWriter;
 
@@ -571,16 +572,23 @@ impl VectorStore {
             _ => Vec::new(),
         };
 
-        // Build the filter-aware allow-set once (Issue #645). `allowed_ids`
-        // arrives as a `Vec<u64>`; the HNSW traversal needs O(1) membership,
-        // so it is hashed into an `Arc<AHashSet>` shared (by Arc clone) across
-        // the 1 → N field expansion below. Flat / IVF ignore it and rely on
-        // the post-filter further down.
-        let filter_set: Option<std::sync::Arc<ahash::AHashSet<u64>>> = request
-            .params
-            .allowed_ids
-            .as_ref()
-            .map(|ids| std::sync::Arc::new(ids.iter().copied().collect()));
+        // Build the filter-aware allow-set once (Issues #645 / #739), shared
+        // (by Arc clone) across the 1 → N field expansion below and reused by
+        // the inline Flat / IVF filters and the post-filter. The Engine path
+        // hands us a pre-built `Arc<RoaringTreemap>` (`allowed_filter`) from the
+        // lexical filter cache, which we wrap as a `FilterSet::Bitmap` without
+        // copying; external callers pass `allowed_ids: Vec<u64>`, from which we
+        // pick a representation by shape.
+        let filter_set: Option<std::sync::Arc<FilterSet>> =
+            if let Some(bitmap) = request.params.allowed_filter.as_ref() {
+                Some(std::sync::Arc::new(FilterSet::from_bitmap(bitmap.clone())))
+            } else {
+                request
+                    .params
+                    .allowed_ids
+                    .as_ref()
+                    .map(|ids| std::sync::Arc::new(FilterSet::from_doc_ids(ids)))
+            };
 
         // Expand each query vector to its target fields (Issue #676). A query
         // with no resolved fields searches all fields (`field_name = None`);
@@ -633,8 +641,8 @@ impl VectorStore {
                 .results
                 .into_iter()
                 .filter(|r| {
-                    if let Some(ref allowed) = request.params.allowed_ids
-                        && !allowed.contains(&r.doc_id)
+                    if let Some(ref allowed) = filter_set
+                        && !allowed.contains(r.doc_id)
                     {
                         return false;
                     }
@@ -688,8 +696,8 @@ impl VectorStore {
         let mut all_hits: std::collections::HashMap<u64, f32> = std::collections::HashMap::new();
         for (weight, results) in query_weights.iter().zip(per_query_results) {
             for result in results.results {
-                if let Some(ref allowed) = request.params.allowed_ids
-                    && !allowed.contains(&result.doc_id)
+                if let Some(ref allowed) = filter_set
+                    && !allowed.contains(result.doc_id)
                 {
                     continue;
                 }

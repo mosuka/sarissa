@@ -8,4 +8,5 @@
 //! `scoring` submodule that previously lived here was a parallel
 //! similarity-metric / ranking API that no production caller invoked.
 
+pub mod filter_set;
 pub mod searcher;

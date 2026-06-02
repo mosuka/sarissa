@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
-use ahash::AHashSet;
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::vector::core::vector::Vector;
+use crate::vector::search::filter_set::FilterSet;
 
 /// Candidate count at or above which a brute-force distance scan
 /// (Flat / IVF) is dispatched to rayon instead of looping serially.
@@ -101,10 +102,10 @@ pub struct VectorIndexQuery {
     /// surrounded by non-matching ones (which a post-filter alone cannot).
     /// `None` (the default) is the unchanged plain-ANN path.
     ///
-    /// Flat / IVF searchers ignore this field; the store's post-filter still
-    /// applies to them. The set is wrapped in an [`Arc`] so the 1 → N field
-    /// expansion in the store shares a single allocation.
-    pub filter: Option<Arc<AHashSet<u64>>>,
+    /// Flat / IVF searchers honour it inline too (Issues #645 / #740). The set
+    /// is a typed [`FilterSet`] (Issue #739) wrapped in an [`Arc`] so the
+    /// 1 → N field expansion in the store shares a single allocation.
+    pub filter: Option<Arc<FilterSet>>,
 }
 
 impl VectorIndexQuery {
@@ -122,10 +123,10 @@ impl VectorIndexQuery {
     ///
     /// # Arguments
     ///
-    /// * `filter` - Shared set of allowed document IDs. Only these IDs are
-    ///   eligible for the result heap; the frontier still expands through
-    ///   the others to preserve graph connectivity.
-    pub fn filter(mut self, filter: Arc<AHashSet<u64>>) -> Self {
+    /// * `filter` - Shared [`FilterSet`] of allowed document IDs. Only these
+    ///   IDs are eligible for the result heap; the frontier still expands
+    ///   through the others to preserve graph connectivity.
+    pub fn filter(mut self, filter: Arc<FilterSet>) -> Self {
         self.filter = Some(filter);
         self
     }
@@ -499,8 +500,21 @@ pub struct VectorSearchParams {
     #[serde(default)]
     pub min_score: f32,
     /// List of allowed document IDs (for internal use by Engine filtering).
+    ///
+    /// External callers set this; the store builds a [`FilterSet`] from it by
+    /// shape. The Engine prefers [`allowed_filter`](Self::allowed_filter) to
+    /// avoid re-materialising a set it already holds.
     #[serde(skip)]
     pub allowed_ids: Option<Vec<u64>>,
+    /// Pre-built allow-set shared from the lexical filter cache (Issue #739).
+    ///
+    /// When `Some`, the store wraps it as a [`FilterSet::Bitmap`] directly
+    /// (zero-copy `Arc` share) and ignores [`allowed_ids`](Self::allowed_ids),
+    /// so the engine's filtered hybrid search materialises the set once
+    /// (`InvertedIndexReader::matching_doc_ids` → here) instead of
+    /// `RoaringTreemap → Vec<u64> → AHashSet`. Internal use by the Engine.
+    #[serde(skip)]
+    pub allowed_filter: Option<Arc<RoaringTreemap>>,
     /// Optional Stage 2 rerank factor (Issue #481).
     ///
     /// When `Some(factor)`, the HNSW searcher widens the int8 candidate
@@ -529,6 +543,7 @@ impl Default for VectorSearchParams {
             overfetch: default_overfetch(),
             min_score: 0.0,
             allowed_ids: None,
+            allowed_filter: None,
             rerank_factor: None,
             ef_search: None,
         }

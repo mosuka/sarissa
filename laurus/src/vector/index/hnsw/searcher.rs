@@ -565,10 +565,10 @@ impl HnswSearcher {
         // near neighbours among many; when the allow-set is already tiny there
         // is nothing to find.
         if let Some(filter) = request.filter.as_deref()
-            && filter.len() <= ef_search
+            && filter.len() <= ef_search as u64
         {
             let mut found = BinaryHeap::new();
-            for &doc_id in filter.iter() {
+            for doc_id in filter.iter() {
                 let d = self.calc_dist(reader, query, quant_ctx.as_ref(), doc_id, field_name)?;
                 // Skip docs with no vector in this field (Issue #676);
                 // `finalize_graph_results` also guards this, but skipping here
@@ -587,7 +587,7 @@ impl HnswSearcher {
                 request,
                 field_name,
                 found,
-                filter.len(),
+                filter.len() as usize,
             );
         }
 
@@ -728,7 +728,7 @@ impl HnswSearcher {
                                 distance: d,
                             });
                             // Result heap keeps only filter-matching docs.
-                            if filter.contains(&neighbor_id) {
+                            if filter.contains(neighbor_id) {
                                 found.push(ResultCandidate {
                                     id: neighbor_id,
                                     distance: d,

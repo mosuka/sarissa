@@ -887,6 +887,7 @@ impl Engine {
                 overfetch: 2.0,
                 min_score: opts.min_score,
                 allowed_ids: None,
+                allowed_filter: None,
                 rerank_factor: opts.rerank_factor,
                 ef_search: opts.ef_search,
             },
@@ -1245,18 +1246,18 @@ impl Engine {
             };
 
         // 0b. Pre-process Filter
-        let (allowed_ids, lexical_query_override) = if let Some(filter_query) = &request_filter {
+        let (allowed_filter, lexical_query_override) = if let Some(filter_query) = &request_filter {
             // Evaluate the filter through the snapshot-scoped query/filter cache
             // (Issue #578): a repeated filter is served as a cached doc-id set
             // instead of re-walking posting lists. Unlike the previous path,
-            // this is not capped at 1M matches.
+            // this is not capped at 1M matches. The resulting `Arc<RoaringTreemap>`
+            // is handed to the vector side as-is (Issue #739) — no `Vec<u64>` /
+            // `AHashSet` round trip.
             let allowed = self.lexical.matching_doc_ids(filter_query.clone_box())?;
 
             if allowed.is_empty() {
                 return Ok(Vec::new());
             }
-
-            let ids: Vec<u64> = allowed.iter().collect();
 
             let new_lexical_query: Option<Box<dyn crate::lexical::query::Query>> =
                 if let Some(lex_req) = &lexical_search_request {
@@ -1271,7 +1272,7 @@ impl Engine {
                     None
                 };
 
-            (Some(ids), new_lexical_query)
+            (Some(allowed), new_lexical_query)
         } else {
             (None, None)
         };
@@ -1317,8 +1318,8 @@ impl Engine {
             {
                 vreq.params.limit = fetch_count.saturating_mul(2);
             }
-            if let Some(ids) = &allowed_ids {
-                vreq.params.allowed_ids = Some(ids.clone());
+            if let Some(filter) = &allowed_filter {
+                vreq.params.allowed_filter = Some(filter.clone());
             }
             // Embed Payloads into Vectors before searching.
             // NOTE: When using VectorQueryParser, query is already Vectors

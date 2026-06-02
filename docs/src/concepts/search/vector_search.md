@@ -275,6 +275,16 @@ allowed documents — never more than the walk would — and is **exact**, so a 
 selective filter returns the true nearest matches rather than an approximation.
 Larger allow-sets keep using the filter-aware traversal above.
 
+#### Allow-Set Representation
+
+The allow-set is a typed structure chosen by shape: a Roaring bitmap for dense
+filters and a hash set for sparse ones. For a filtered hybrid search the lexical
+side already produced the matching document set as a bitmap (see the lexical
+[Filter Result Cache](lexical_search.md#filter-result-cache)); that bitmap is
+handed to the vector side **as-is**, so the set is materialised once for the
+whole query instead of being rebuilt for each side. This is an internal
+optimisation — the public filter API is unchanged.
+
 ### Filter with Numeric Range
 
 ```rust

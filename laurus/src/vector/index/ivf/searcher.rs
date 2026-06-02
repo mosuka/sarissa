@@ -235,7 +235,7 @@ impl VectorIndexSearcher for IvfSearcher {
                 |(doc_id, field_name)| {
                     // Skip non-matching candidates before the distance kernel.
                     if let Some(allowed) = filter
-                        && !allowed.contains(doc_id)
+                        && !allowed.contains(*doc_id)
                     {
                         return Ok(None);
                     }
