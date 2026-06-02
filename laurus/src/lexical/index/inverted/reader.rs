@@ -535,27 +535,8 @@ impl SegmentReader {
 
     /// Load stored documents for this segment.
     fn load_stored_documents(&self) -> Result<()> {
-        // Try JSON format first (for compatibility)
-        let json_file = format!("{}.json", self.info.segment_id);
-        if self.storage.file_exists(&json_file) {
-            let mut input = self.storage.open_input(&json_file)?;
-            let mut json_data = String::new();
-            std::io::Read::read_to_string(&mut input, &mut json_data)?;
-
-            let docs: Vec<Document> = serde_json::from_str(&json_data)
-                .map_err(|e| LaurusError::index(format!("Failed to parse JSON documents: {e}")))?;
-
-            let mut documents = BTreeMap::new();
-            for (idx, doc) in docs.into_iter().enumerate() {
-                let doc_id = self.info.min_doc_id + idx as u64;
-                documents.insert(doc_id, doc);
-            }
-
-            *self.stored_documents.write().unwrap() = Some(documents);
-            return Ok(());
-        }
-
-        // Fallback to binary format with type information
+        // Primary: typed binary `.docs`, which records the real doc_id per
+        // document (correct for non-contiguous ids, e.g. merged segments).
         let docs_file = format!("{}.docs", self.info.segment_id);
         if let Ok(input) = self.storage.open_input(&docs_file) {
             let mut reader = StructReader::new(input)?;
@@ -659,6 +640,29 @@ impl SegmentReader {
                     doc.fields.insert(field_name, field_value);
                 }
 
+                documents.insert(doc_id, doc);
+            }
+
+            *self.stored_documents.write().unwrap() = Some(documents);
+            return Ok(());
+        }
+
+        // Legacy fallback: segments written before the binary `.docs` format
+        // stored fields as a positional JSON mirror (Issue #756 stopped writing
+        // it). Doc ids are assigned positionally — valid only for the
+        // contiguous ids those legacy segments used.
+        let json_file = format!("{}.json", self.info.segment_id);
+        if self.storage.file_exists(&json_file) {
+            let mut input = self.storage.open_input(&json_file)?;
+            let mut json_data = String::new();
+            std::io::Read::read_to_string(&mut input, &mut json_data)?;
+
+            let docs: Vec<Document> = serde_json::from_str(&json_data)
+                .map_err(|e| LaurusError::index(format!("Failed to parse JSON documents: {e}")))?;
+
+            let mut documents = BTreeMap::new();
+            for (idx, doc) in docs.into_iter().enumerate() {
+                let doc_id = self.info.min_doc_id + idx as u64;
                 documents.insert(doc_id, doc);
             }
 
