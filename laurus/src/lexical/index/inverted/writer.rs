@@ -696,9 +696,8 @@ impl InvertedIndexWriter {
         self.write_doc_values(segment_name)?;
         self.write_segment_metadata(segment_name)?;
         self.write_bkd_trees(segment_name)?;
-        // COMPATIBILITY: also write documents as JSON for BasicIndexReader
-        // (removed in #756).
-        self.write_json_documents(segment_name)?;
+        // The redundant `.json` stored-field mirror is no longer written
+        // (Issue #756); stored fields are read from the typed `.docs` file.
 
         // Collect every file written under this segment prefix (the BKD step
         // writes one `.{field}.bkd` per numeric/geo field, so enumerate rather
@@ -1142,29 +1141,6 @@ impl InvertedIndexWriter {
         // (Issue #753) passes the merged segment's name so accumulated values
         // land in the right `.dv` file.
         self.doc_values_writer.write_to(segment_name)?;
-        Ok(())
-    }
-
-    /// Write documents as JSON for compatibility with BasicIndexReader.
-    fn write_json_documents(&self, segment_name: &str) -> Result<()> {
-        // Convert analyzed documents back to Document format with preserved types
-        let mut documents = Vec::new();
-        for (_doc_id, analyzed_doc) in &self.buffered_docs {
-            let mut doc = Document::new();
-            for (field_name, field_value) in &analyzed_doc.stored_fields {
-                doc.fields.insert(field_name.clone(), field_value.clone());
-            }
-            documents.push(doc);
-        }
-
-        // Write as JSON
-        let json_file = format!("{segment_name}.json");
-        let mut output = self.storage.create_output(&json_file)?;
-        let segment_data = serde_json::to_string_pretty(&documents)
-            .map_err(|e| LaurusError::index(format!("Failed to serialize segment: {e}")))?;
-        std::io::Write::write_all(&mut output, segment_data.as_bytes())?;
-        output.close()?;
-
         Ok(())
     }
 
