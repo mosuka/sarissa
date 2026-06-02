@@ -120,7 +120,6 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ahash::AHashSet;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use laurus::storage::Storage;
 use laurus::storage::file::FileStorageConfig;
@@ -136,6 +135,7 @@ use laurus::vector::index::config::{
 use laurus::vector::index::flat::reader::FlatVectorIndexReader;
 use laurus::vector::index::ivf::reader::IvfIndexReader;
 use laurus::vector::reader::VectorIndexReader;
+use laurus::vector::search::filter_set::FilterSet;
 use laurus::vector::{
     FlatVectorSearcher, HnswSearcher, IvfSearcher, VectorIndexQuery, VectorIndexSearcher,
 };
@@ -200,9 +200,13 @@ const ALLOWSET_SELECTIVITIES: &[(&str, usize)] = &[("1pct", 100), ("10pct", 10),
 
 /// Build a deterministic allow-set keeping every `stride`-th doc id in
 /// `0..count`. Used by the inline filter benches (Issue #740 / #747) to drive
-/// the Flat / IVF scan at a known selectivity.
-fn make_allow_set(count: usize, stride: usize) -> Arc<AHashSet<u64>> {
-    Arc::new((0..count as u64).step_by(stride).collect())
+/// the Flat / IVF scan at a known selectivity. The typed [`FilterSet`]
+/// (Issue #739) auto-selects a Roaring bitmap for dense sets and a hash set for
+/// sparse ones, so the higher-selectivity cases (e.g. `50pct` on a large
+/// corpus) exercise the bitmap path and the low ones the hash path.
+fn make_allow_set(count: usize, stride: usize) -> Arc<FilterSet> {
+    let ids: Vec<u64> = (0..count as u64).step_by(stride).collect();
+    Arc::new(FilterSet::from_doc_ids(&ids))
 }
 
 /// Build a deterministic query vector. Uses a different starting seed from

@@ -62,7 +62,7 @@ impl VectorIndexSearcher for FlatVectorSearcher {
         let quant_pool = flat_reader.and_then(|r| r.vectors().quantized_pool().cloned());
 
         // Filter-aware allow-set honoured inline (Issue #740). Borrowed once
-        // before the scan; `&AHashSet` is `Send + Sync`, so it composes with
+        // before the scan; `&FilterSet` is `Send + Sync`, so it composes with
         // the rayon-parallel candidate loops below.
         let filter = request.filter.as_deref();
 
@@ -94,7 +94,7 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                 crate::vector::search::searcher::parallel_scan(&ids[..], |&doc_id| {
                     // Skip non-matching candidates before the distance kernel.
                     if let Some(allowed) = filter
-                        && !allowed.contains(&doc_id)
+                        && !allowed.contains(doc_id)
                     {
                         return Ok(None);
                     }
@@ -171,7 +171,7 @@ impl VectorIndexSearcher for FlatVectorSearcher {
                     |(doc_id, field_name)| {
                         // Skip non-matching candidates before the distance kernel.
                         if let Some(allowed) = filter
-                            && !allowed.contains(doc_id)
+                            && !allowed.contains(*doc_id)
                         {
                             return Ok(None);
                         }
@@ -251,8 +251,8 @@ mod tests {
     use crate::vector::core::distance::DistanceMetric;
     use crate::vector::index::FlatIndexConfig;
     use crate::vector::index::flat::writer::FlatIndexWriter;
+    use crate::vector::search::filter_set::FilterSet;
     use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
-    use ahash::AHashSet;
 
     /// Build a 20-vector flat index (all in field `f`) on a line so the
     /// nearest-to-query ordering is deterministic.
@@ -289,7 +289,7 @@ mod tests {
         let reader = build_flat_reader("test_flat_filter_inline");
         let searcher = FlatVectorSearcher::new(reader).unwrap();
         let query = Vector::new(vec![3.0, 0.0]);
-        let allow: Arc<AHashSet<u64>> = Arc::new([3u64, 7, 15].into_iter().collect());
+        let allow: Arc<FilterSet> = Arc::new(FilterSet::Hash([3u64, 7, 15].into_iter().collect()));
 
         // No filter (unfiltered path): every vector is scored — unchanged.
         let unfiltered = searcher
@@ -311,7 +311,7 @@ mod tests {
         );
         for r in &filtered.results {
             assert!(
-                allow.contains(&r.doc_id),
+                allow.contains(r.doc_id),
                 "result {} not in allow-set",
                 r.doc_id
             );
@@ -329,12 +329,44 @@ mod tests {
         assert_eq!(field_filtered.candidates_examined, 3);
         for r in &field_filtered.results {
             assert!(
-                allow.contains(&r.doc_id),
+                allow.contains(r.doc_id),
                 "result {} not in allow-set",
                 r.doc_id
             );
         }
         // Closest allowed vector to the query (3, 0) is doc 3.
         assert_eq!(field_filtered.results[0].doc_id, 3);
+    }
+
+    /// The Flat scan must return the same results whether the allow-set is a
+    /// `Hash` or a `Bitmap` (Issue #739) — the representation is an internal
+    /// detail that must not change which documents match.
+    #[test]
+    fn filter_hash_and_bitmap_agree() {
+        let reader = build_flat_reader("test_flat_filter_repr_agree");
+        let searcher = FlatVectorSearcher::new(reader).unwrap();
+        let query = Vector::new(vec![3.0, 0.0]);
+        let ids = [3u64, 7, 15];
+
+        let hash = Arc::new(FilterSet::Hash(ids.into_iter().collect()));
+        let bitmap = Arc::new(FilterSet::from_bitmap(Arc::new(ids.into_iter().collect())));
+
+        let run = |fs: Arc<FilterSet>| -> Vec<u64> {
+            let mut got: Vec<u64> = searcher
+                .search(&VectorIndexQuery::new(query.clone()).top_k(20).filter(fs))
+                .unwrap()
+                .results
+                .into_iter()
+                .map(|r| r.doc_id)
+                .collect();
+            got.sort_unstable();
+            got
+        };
+
+        assert_eq!(
+            run(hash),
+            run(bitmap),
+            "Hash and Bitmap allow-sets must yield identical results"
+        );
     }
 }

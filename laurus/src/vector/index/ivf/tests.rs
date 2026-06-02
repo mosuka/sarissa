@@ -266,8 +266,8 @@ fn test_ivf_searcher_honors_n_probe() {
 fn test_ivf_searcher_honors_filter_inline() {
     use crate::vector::index::ivf::reader::IvfIndexReader;
     use crate::vector::index::ivf::searcher::IvfSearcher;
+    use crate::vector::search::filter_set::FilterSet;
     use crate::vector::search::searcher::{VectorIndexQuery, VectorIndexSearcher};
-    use ahash::AHashSet;
 
     let storage = build_singleton_cluster_index("test_ivf_filter_inline");
     let reader: Arc<dyn crate::vector::reader::VectorIndexReader> = Arc::new(
@@ -285,7 +285,7 @@ fn test_ivf_searcher_honors_filter_inline() {
     assert_eq!(unfiltered.candidates_examined, 12);
 
     // Inline allow-set: only the allowed doc_ids reach the distance kernel.
-    let allow: Arc<AHashSet<u64>> = Arc::new([0u64, 5, 11].into_iter().collect());
+    let allow: Arc<FilterSet> = Arc::new(FilterSet::Hash([0u64, 5, 11].into_iter().collect()));
     let filtered = searcher
         .search(
             &VectorIndexQuery::new(query.clone())
@@ -299,7 +299,7 @@ fn test_ivf_searcher_honors_filter_inline() {
     );
     for r in &filtered.results {
         assert!(
-            allow.contains(&r.doc_id),
+            allow.contains(r.doc_id),
             "result {} not in allow-set",
             r.doc_id
         );
