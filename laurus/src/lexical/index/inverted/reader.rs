@@ -4,10 +4,13 @@
 //! handles multiple segments, caching, and optimized posting list access.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use ahash::AHashMap;
+use lru::LruCache;
+use parking_lot::Mutex;
 use roaring::RoaringTreemap;
 
 use crate::analysis::analyzer::analyzer::Analyzer;
@@ -1394,21 +1397,30 @@ impl crate::lexical::index::structures::visitor::IntersectVisitor for DeletionFi
     }
 }
 
+/// Rough per-entry footprint used to derive the term cache's entry capacity
+/// from the byte-based memory limit and to report `memory_usage` in
+/// [`CacheStats`]. The term cache is bounded by entry count (a proper LRU),
+/// not by exact bytes.
+const EST_TERM_ENTRY_BYTES: usize = 64;
+
 /// Cache manager for efficient data access.
 #[derive(Debug)]
 pub struct CacheManager {
-    /// Term information cache.
-    term_cache: RwLock<AHashMap<String, TermInfo>>,
+    /// Term information cache — a proper LRU (Issue #593).
+    ///
+    /// Keyed by `"field:term"`, valued by `Arc<TermInfo>` so a hit is a
+    /// refcount bump shared with the caller rather than a deep clone of the
+    /// `block_max` vector. A `Mutex` (not `RwLock`) guards it because
+    /// [`LruCache::get`] takes `&mut self` to update recency.
+    term_cache: Mutex<LruCache<String, Arc<TermInfo>>>,
 
     /// Posting list cache.
     #[allow(dead_code)]
     posting_cache:
         RwLock<AHashMap<String, Arc<Vec<crate::lexical::index::inverted::core::posting::Posting>>>>,
 
-    /// Current memory usage.
-    memory_usage: AtomicUsize,
-
-    /// Maximum memory limit.
+    /// Maximum memory limit in bytes (informational; also derives the term
+    /// cache's entry capacity).
     memory_limit: usize,
 
     /// Cache statistics.
@@ -1418,58 +1430,52 @@ pub struct CacheManager {
 
 impl CacheManager {
     /// Create a new cache manager.
+    ///
+    /// # Arguments
+    ///
+    /// * `memory_limit` - Soft memory budget in bytes; the term cache's entry
+    ///   capacity is derived as `memory_limit / EST_TERM_ENTRY_BYTES` (at
+    ///   least one entry).
     pub fn new(memory_limit: usize) -> Self {
+        let capacity = NonZeroUsize::new((memory_limit / EST_TERM_ENTRY_BYTES).max(1))
+            .unwrap_or(NonZeroUsize::MIN);
         CacheManager {
-            term_cache: RwLock::new(AHashMap::new()),
+            term_cache: Mutex::new(LruCache::new(capacity)),
             posting_cache: RwLock::new(AHashMap::new()),
-            memory_usage: AtomicUsize::new(0),
             memory_limit,
             cache_hits: AtomicUsize::new(0),
             cache_misses: AtomicUsize::new(0),
         }
     }
 
-    /// Get term information from cache.
-    pub fn get_term_info(&self, key: &str) -> Option<TermInfo> {
-        let cache = self.term_cache.read().unwrap();
-        if let Some(info) = cache.get(key) {
+    /// Get term information from cache, bumping its recency on a hit.
+    ///
+    /// Returns a shared `Arc<TermInfo>` (refcount bump) on a hit, or `None` on
+    /// a miss. Records the lookup in the hit / miss statistics.
+    pub fn get_term_info(&self, key: &str) -> Option<Arc<TermInfo>> {
+        let hit = self.term_cache.lock().get(key).cloned();
+        if hit.is_some() {
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
-            Some(info.clone())
         } else {
             self.cache_misses.fetch_add(1, Ordering::Relaxed);
-            None
         }
+        hit
     }
 
-    /// Cache term information.  When memory limit is reached, evict ~25% of
-    /// entries (random selection) to make room.
+    /// Cache term information. The LRU evicts the least-recently-used entry
+    /// when the capacity is reached (Issue #593 — replaced the previous
+    /// random ~25% eviction).
     pub fn cache_term_info(&self, key: String, info: TermInfo) {
-        if self.memory_usage.load(Ordering::Relaxed) >= self.memory_limit {
-            // Evict roughly 25% of cached entries
-            let mut cache = self.term_cache.write().unwrap();
-            let evict_count = cache.len() / 4;
-            if evict_count > 0 {
-                let keys_to_remove: Vec<String> = cache.keys().take(evict_count).cloned().collect();
-                for k in &keys_to_remove {
-                    cache.remove(k);
-                }
-                // Reclaim estimated memory
-                self.memory_usage
-                    .fetch_sub(evict_count * 64, Ordering::Relaxed);
-            }
-        }
-
-        let mut cache = self.term_cache.write().unwrap();
-        cache.insert(key, info);
-        self.memory_usage.fetch_add(64, Ordering::Relaxed);
+        self.term_cache.lock().put(key, Arc::new(info));
     }
 
     /// Get cache statistics.
     pub fn stats(&self) -> CacheStats {
+        let entries = self.term_cache.lock().len();
         CacheStats {
             hits: self.cache_hits.load(Ordering::Relaxed),
             misses: self.cache_misses.load(Ordering::Relaxed),
-            memory_usage: self.memory_usage.load(Ordering::Relaxed),
+            memory_usage: entries * EST_TERM_ENTRY_BYTES,
             memory_limit: self.memory_limit,
         }
     }
@@ -2503,6 +2509,36 @@ mod tests {
         assert_eq!(stats.hits, 1);
         assert_eq!(stats.misses, 1);
         assert!(stats.hit_ratio() > 0.0);
+    }
+
+    /// The term cache must evict the least-recently-used entry — not a random
+    /// one — when it reaches capacity (Issue #593).
+    #[test]
+    fn test_cache_manager_lru_eviction() {
+        // `memory_limit / EST_TERM_ENTRY_BYTES` = 128 / 64 = 2 entries.
+        let cache = CacheManager::new(2 * EST_TERM_ENTRY_BYTES);
+
+        cache.cache_term_info("a".to_string(), TermInfo::new(1, 1, 1, 1));
+        cache.cache_term_info("b".to_string(), TermInfo::new(2, 2, 2, 2));
+
+        // Touch "a" so "b" becomes the least-recently-used entry.
+        assert!(cache.get_term_info("a").is_some());
+
+        // Inserting "c" must evict "b" (the LRU victim), keeping "a" and "c".
+        cache.cache_term_info("c".to_string(), TermInfo::new(3, 3, 3, 3));
+
+        assert!(
+            cache.get_term_info("a").is_some(),
+            "recently-used 'a' survives"
+        );
+        assert!(
+            cache.get_term_info("c").is_some(),
+            "just-inserted 'c' survives"
+        );
+        assert!(
+            cache.get_term_info("b").is_none(),
+            "least-recently-used 'b' must be evicted, not a random entry"
+        );
     }
 
     #[test]
