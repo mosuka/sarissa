@@ -34,10 +34,13 @@
 use std::any::Any;
 use std::sync::{Arc, RwLock};
 
+use roaring::RoaringTreemap;
+
 use crate::error::Result;
 use crate::lexical::core::document::Document;
 use crate::lexical::index::inverted::reader::SegmentReader;
 use crate::lexical::index::structures::bkd_tree::BKDTree;
+use crate::lexical::query::Query;
 use crate::lexical::reader::{FieldStats, LexicalIndexReader, PostingIterator, ReaderTermInfo};
 
 /// Cross-segment term-info lookup function. Returns the **global**
@@ -46,6 +49,14 @@ use crate::lexical::reader::{FieldStats, LexicalIndexReader, PostingIterator, Re
 /// signals that no segment has the term — the per-segment view will
 /// then also report `None` from its `term_info`.
 type GlobalTermInfoFn = dyn Fn(&str, &str) -> Result<Option<ReaderTermInfo>> + Send + Sync;
+
+/// Cross-segment matching-doc-ids lookup function (#764). Resolves a query's
+/// matched document set against the **cross-segment** reader's snapshot-scoped
+/// query/filter cache, so a filter clause evaluated under this per-segment
+/// fanout view reuses the same cache as the top-level reader. Doc ids are
+/// global, so the returned set intersects correctly with this segment's local
+/// matchers.
+type GlobalMatchingDocIdsFn = dyn Fn(&dyn Query) -> Result<Arc<RoaringTreemap>> + Send + Sync;
 
 /// Adapter that exposes a single [`SegmentReader`] as a
 /// [`LexicalIndexReader`] backed by per-segment posting / field data
@@ -61,24 +72,48 @@ pub(crate) struct PerSegmentReaderView {
     global_doc_count: u64,
     global_max_doc: u64,
     global_term_info_fn: Arc<GlobalTermInfoFn>,
+    global_matching_doc_ids_fn: Arc<GlobalMatchingDocIdsFn>,
 }
 
 impl PerSegmentReaderView {
     /// Create a view over `segment` that reports the supplied global
-    /// `doc_count` / `max_doc` and looks up cross-segment term-info via
-    /// `global_term_info_fn`.
+    /// `doc_count` / `max_doc`, looks up cross-segment term-info via
+    /// `global_term_info_fn`, and resolves cached filter doc-id sets via
+    /// `global_matching_doc_ids_fn` (#764).
     pub fn new(
         segment: Arc<RwLock<SegmentReader>>,
         global_doc_count: u64,
         global_max_doc: u64,
         global_term_info_fn: Arc<GlobalTermInfoFn>,
+        global_matching_doc_ids_fn: Arc<GlobalMatchingDocIdsFn>,
     ) -> Self {
         PerSegmentReaderView {
             segment,
             global_doc_count,
             global_max_doc,
             global_term_info_fn,
+            global_matching_doc_ids_fn,
         }
+    }
+
+    /// Resolve the cross-segment cached doc-id set for `query` (#764).
+    ///
+    /// Delegates to the cross-segment reader's
+    /// [`matching_doc_ids`](crate::lexical::index::inverted::reader::InvertedIndexReader::matching_doc_ids),
+    /// so a filter clause evaluated under this per-segment fanout view reuses
+    /// the same snapshot-scoped cache as the top-level reader. The returned
+    /// set uses global doc ids and therefore intersects correctly with this
+    /// segment's local matchers.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The (cacheable) filter query whose doc-id set is requested.
+    ///
+    /// # Returns
+    ///
+    /// An `Arc<RoaringTreemap>` of matching global document ids.
+    pub fn matching_doc_ids(&self, query: &dyn Query) -> Result<Arc<RoaringTreemap>> {
+        (self.global_matching_doc_ids_fn)(query)
     }
 
     /// Per-segment field length for `(doc_id, field)`. Mirrors

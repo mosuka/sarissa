@@ -334,6 +334,10 @@ walk.
   so the cached value is a plain doc-id set (a Roaring bitmap). It is used for
   the `filter_query` of a [hybrid / filtered search](hybrid_search.md) and feeds
   both the lexical and vector sides.
+- **Reused inside boolean queries.** An `Occur::Filter` clause within a
+  `BooleanQuery` (e.g. `must(user_query).filter(tenant_filter)`) also draws its
+  matched set from the cache instead of re-walking postings — including the
+  per-segment fan-out path on multi-segment indexes.
 - **Safe by construction.** Only queries with a canonical key are cached. Term,
   phrase, prefix, wildcard, regexp, fuzzy, range, geo, and geo3d queries are
   cacheable, as are boolean queries composed entirely of cacheable clauses with
