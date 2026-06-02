@@ -3,7 +3,6 @@
 //! This module provides the core functionality for merging multiple segments
 //! into a single optimized segment with proper handling of deletions and updates.
 
-use crate::lexical::core::field::FieldValue;
 use std::sync::Arc;
 
 use ahash::{AHashMap, AHashSet};
@@ -16,6 +15,8 @@ use crate::lexical::index::inverted::segment::manager::{
     ManagedSegmentInfo, MergeCandidate, MergeStrategy,
 };
 use crate::lexical::index::inverted::writer::{InvertedIndexWriter, InvertedIndexWriterConfig};
+use crate::lexical::index::structures::aabb::AABB;
+use crate::lexical::index::structures::visitor::{CellRelation, IntersectVisitor};
 use crate::lexical::reader::LexicalIndexReader;
 use crate::storage::Storage;
 
@@ -291,7 +292,12 @@ impl MergeEngine {
         for segment in segments {
             let reader = SegmentReader::open(segment.segment_info.clone(), self.storage.clone())?;
             let deleted = self.load_deleted_docs(&segment.segment_info)?;
-            let reconstructed = Self::reconstruct_segment(&reader, &deleted, &mut store_positions)?;
+            let reconstructed = self.reconstruct_segment(
+                &reader,
+                &segment.segment_info.segment_id,
+                &deleted,
+                &mut store_positions,
+            )?;
             stats.deleted_docs_removed += deleted.len() as u64;
             for (doc_id, analyzed) in reconstructed {
                 if docs.insert(doc_id, analyzed).is_none() {
@@ -406,14 +412,18 @@ impl MergeEngine {
     ///
     /// `field_terms` are rebuilt from the segment's postings (the authoritative
     /// source for the inverted index, so index-only fields survive);
-    /// `stored_fields` from the stored documents; `point_values` are re-derived
-    /// from the stored numeric / geo / datetime fields; `field_lengths` are read
-    /// back from the segment. Deleted docs are excluded.
+    /// `stored_fields` from the stored documents; `point_values` (BKD entries)
+    /// are read back from the segment's BKD trees — the authoritative source
+    /// for numeric/geo points, so index-only (`stored=false`) and multi-valued
+    /// numeric fields are preserved (Issue #758); `field_lengths` are read back
+    /// from the segment. Deleted docs are excluded.
     ///
     /// `store_positions` is set from the first posting seen (whether the source
     /// stored term positions) so the merged segment matches.
     fn reconstruct_segment(
+        &self,
         reader: &SegmentReader,
+        segment_id: &str,
         deleted: &AHashSet<u64>,
         store_positions: &mut Option<bool>,
     ) -> Result<Vec<(u64, AnalyzedDocument)>> {
@@ -466,6 +476,37 @@ impl MergeEngine {
             }
         }
 
+        // Collect BKD points per (doc, field) straight from the segment's BKD
+        // trees — the authoritative source for numeric/geo points. This keeps
+        // index-only (`stored=false`) and multi-valued numeric fields, which a
+        // stored-field derivation would miss (Issue #758).
+        let mut points: AHashMap<u64, AHashMap<String, Vec<Vec<f64>>>> = AHashMap::new();
+        let bkd_prefix = format!("{segment_id}.");
+        let bkd_suffix = ".bkd";
+        for file in self.storage.list_files()? {
+            let Some(field) = file
+                .strip_prefix(&bkd_prefix)
+                .and_then(|rest| rest.strip_suffix(bkd_suffix))
+            else {
+                continue;
+            };
+            if let Some(tree) = reader.get_bkd_tree(field)? {
+                let mut visitor = CollectPointsVisitor::default();
+                tree.intersect(&mut visitor)?;
+                for (doc_id, point) in visitor.entries {
+                    if deleted.contains(&doc_id) {
+                        continue;
+                    }
+                    points
+                        .entry(doc_id)
+                        .or_default()
+                        .entry(field.to_string())
+                        .or_default()
+                        .push(point);
+                }
+            }
+        }
+
         // Pass 2: assemble each live document.
         let mut out = Vec::new();
         for doc_id in reader.doc_ids()? {
@@ -478,16 +519,12 @@ impl MergeEngine {
 
             let mut analyzed = AnalyzedDocument::new();
             analyzed.field_terms = field_terms.remove(&doc_id).unwrap_or_default();
+            analyzed.point_values = points.remove(&doc_id).unwrap_or_default();
 
             for (field_name, value) in &stored.fields {
                 analyzed
                     .stored_fields
                     .insert(field_name.clone(), value.clone());
-                if let Some(point) = Self::data_value_point(value) {
-                    analyzed
-                        .point_values
-                        .insert(field_name.clone(), vec![point]);
-                }
             }
 
             // Field lengths are read back from the segment so BM25 length
@@ -504,21 +541,6 @@ impl MergeEngine {
         }
 
         Ok(out)
-    }
-
-    /// Re-derive the BKD point for a numeric / geo / datetime field value,
-    /// mirroring the analyzer's point extraction. Returns `None` for field
-    /// types that do not contribute a point (text, bool, bytes, vector, null,
-    /// arrays).
-    fn data_value_point(value: &FieldValue) -> Option<Vec<f64>> {
-        match value {
-            FieldValue::Int64(n) => Some(vec![*n as f64]),
-            FieldValue::Float64(f) => Some(vec![*f]),
-            FieldValue::DateTime(dt) => Some(vec![dt.timestamp() as f64]),
-            FieldValue::Geo(p) => Some(vec![p.lat, p.lon]),
-            FieldValue::GeoEcef(p) => Some(vec![p.x, p.y, p.z]),
-            _ => None,
-        }
     }
 
     /// Verify the integrity of a merged segment.
@@ -542,6 +564,34 @@ impl MergeEngine {
     /// Get merge configuration.
     pub fn get_config(&self) -> &MergeConfig {
         &self.config
+    }
+}
+
+/// BKD visitor that enumerates **every** `(doc_id, point)` entry in a tree.
+///
+/// Used by the merge to read back all stored points (Issue #758). `compare`
+/// always returns [`CellRelation::Crosses`] so the traversal descends to every
+/// leaf and yields each point through `visit` (a `CellRelation::Inside` verdict
+/// would report doc ids via `visit_inside` *without* the point coordinates,
+/// which the merge needs). `visit_inside` is therefore never called.
+#[derive(Default)]
+struct CollectPointsVisitor {
+    entries: Vec<(u64, Vec<f64>)>,
+}
+
+impl IntersectVisitor for CollectPointsVisitor {
+    fn compare(&self, _cell: &AABB) -> CellRelation {
+        // Force a full descent so every point is reported via `visit`.
+        CellRelation::Crosses
+    }
+
+    fn visit_inside(&mut self, _doc_id: u64) {
+        // Unreachable: `compare` never returns `Inside`. Points (not just doc
+        // ids) are required, so all entries must arrive through `visit`.
+    }
+
+    fn visit(&mut self, doc_id: u64, point: &[f64]) {
+        self.entries.push((doc_id, point.to_vec()));
     }
 }
 
