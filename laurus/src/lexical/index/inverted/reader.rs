@@ -23,6 +23,7 @@ use crate::lexical::index::inverted::core::posting::{DecodedPostingList, Posting
 use crate::lexical::index::inverted::core::terms::{
     InvertedIndexTerms, MergedInvertedIndexTerms, TermDictionaryAccess, Terms,
 };
+use crate::lexical::index::inverted::posting_cache::PostingCache;
 use crate::lexical::index::inverted::query_cache::QueryFilterCache;
 use crate::lexical::index::inverted::segment::SegmentInfo;
 use crate::lexical::index::structures::bkd_tree::{BKDReader, BKDTree};
@@ -453,6 +454,12 @@ pub struct SegmentReader {
     /// Cached BKD trees: field -> tree
     bkd_trees: RwLock<AHashMap<String, Arc<dyn BKDTree>>>,
 
+    /// Decoded posting-list cache (Issue #612). Disabled by default
+    /// (`open` builds it with a zero budget); query readers enable it via
+    /// [`Self::with_posting_cache_bytes`]. Per-segment because a segment is
+    /// immutable for a reader snapshot.
+    posting_cache: PostingCache,
+
     /// Whether the segment is loaded.
     loaded: AtomicBool,
 }
@@ -478,10 +485,31 @@ impl SegmentReader {
             doc_values: RwLock::new(None),
             deletion_bitmap: RwLock::new(None),
             bkd_trees: RwLock::new(AHashMap::new()),
+            // Disabled by default; query readers enable it (Issue #612).
+            posting_cache: PostingCache::new(0),
             loaded: AtomicBool::new(false),
         };
 
         Ok(reader)
+    }
+
+    /// Enable (or resize) this segment's decoded posting-list cache with a byte
+    /// budget (Issue #612). `0` keeps it disabled. Returns `self` for chaining
+    /// after [`Self::open`].
+    ///
+    /// # Arguments
+    ///
+    /// * `max_bytes` - Soft heap budget for cached posting lists in this segment.
+    pub fn with_posting_cache_bytes(mut self, max_bytes: usize) -> Self {
+        self.posting_cache = PostingCache::new(max_bytes);
+        self
+    }
+
+    /// Snapshot of this segment's posting-cache hit / miss counters (Issue #612).
+    pub fn posting_cache_stats(
+        &self,
+    ) -> crate::lexical::index::inverted::posting_cache::PostingCacheStats {
+        self.posting_cache.stats()
     }
 
     /// Get all document IDs in this segment.
@@ -1060,6 +1088,24 @@ impl SegmentReader {
             return self.scan_documents_for_term(field, term);
         }
 
+        // Posting cache (#612): a repeated `(field, term)` lookup within this
+        // reader snapshot reuses the decoded, deletion-filtered list instead of
+        // re-opening + re-decoding the `.post` file (the read dominates on
+        // remote storage). The key allocation, lookup, and the clone are
+        // skipped entirely when the cache is disabled (budget 0), so the
+        // uncached path — merge / test readers — is byte-for-byte unchanged.
+        let cache_key = self
+            .posting_cache
+            .is_enabled()
+            .then(|| format!("{field}\u{1}{term}"));
+        if let Some(key) = &cache_key
+            && let Some(cached) = self.posting_cache.get(key)
+        {
+            return Ok(Some(Box::new(
+                InvertedIndexPostingIterator::from_decoded_soa_with_blocks((*cached).clone(), 64),
+            )));
+        }
+
         if let Some(term_info) = self.term_info(field, term)? {
             let input = self.storage.open_input(&postings_file)?;
             let mut reader = StructReader::new(input)?;
@@ -1090,8 +1136,21 @@ impl SegmentReader {
             let filtered = self.filter_deleted_soa(decoded)?;
 
             if filtered.is_empty() {
+                // Empty lists are not cached — `None` is cheap to recompute.
                 Ok(None)
+            } else if let Some(key) = cache_key {
+                // Cache the shared decoded list and build the iterator from a
+                // clone (a `Vec` memcpy — cheaper than the decode it replaces).
+                let shared = Arc::new(filtered);
+                self.posting_cache.put(key, Arc::clone(&shared));
+                Ok(Some(Box::new(
+                    InvertedIndexPostingIterator::from_decoded_soa_with_blocks(
+                        (*shared).clone(),
+                        64,
+                    ),
+                )))
             } else {
+                // Cache disabled — build directly from the owned list, no clone.
                 Ok(Some(Box::new(
                     InvertedIndexPostingIterator::from_decoded_soa_with_blocks(filtered, 64),
                 )))
@@ -1414,11 +1473,6 @@ pub struct CacheManager {
     /// [`LruCache::get`] takes `&mut self` to update recency.
     term_cache: Mutex<LruCache<String, Arc<TermInfo>>>,
 
-    /// Posting list cache.
-    #[allow(dead_code)]
-    posting_cache:
-        RwLock<AHashMap<String, Arc<Vec<crate::lexical::index::inverted::core::posting::Posting>>>>,
-
     /// Maximum memory limit in bytes (informational; also derives the term
     /// cache's entry capacity).
     memory_limit: usize,
@@ -1441,7 +1495,6 @@ impl CacheManager {
             .unwrap_or(NonZeroUsize::MIN);
         CacheManager {
             term_cache: Mutex::new(LruCache::new(capacity)),
-            posting_cache: RwLock::new(AHashMap::new()),
             memory_limit,
             cache_hits: AtomicUsize::new(0),
             cache_misses: AtomicUsize::new(0),
@@ -1553,9 +1606,17 @@ impl InvertedIndexReader {
         let mut segment_readers = Vec::new();
         let mut total_doc_count = 0;
 
+        // Enable the per-segment posting cache (Issue #612) for query readers,
+        // gated by `enable_posting_cache` and budgeted by `max_cache_memory`.
+        let posting_cache_bytes = if config.enable_posting_cache {
+            config.max_cache_memory
+        } else {
+            0
+        };
         for segment_info in &segments {
             total_doc_count += segment_info.doc_count;
-            let mut reader = SegmentReader::open(segment_info.clone(), storage.clone())?;
+            let mut reader = SegmentReader::open(segment_info.clone(), storage.clone())?
+                .with_posting_cache_bytes(posting_cache_bytes);
 
             if config.preload_segments {
                 reader.load()?;
@@ -2538,6 +2599,72 @@ mod tests {
         assert!(
             cache.get_term_info("b").is_none(),
             "least-recently-used 'b' must be evicted, not a random entry"
+        );
+    }
+
+    /// A repeated `postings(field, term)` within a snapshot is served from the
+    /// per-segment posting cache (Issue #612), and a commit (new snapshot) does
+    /// not serve a stale, pre-deletion list.
+    #[test]
+    fn posting_cache_hit_and_snapshot_invalidation() {
+        use crate::Document;
+        use crate::lexical::store::LexicalStore;
+        use crate::lexical::store::config::LexicalIndexConfig;
+        use crate::storage::memory::{MemoryStorage, MemoryStorageConfig};
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let store = LexicalStore::new(storage, LexicalIndexConfig::default()).unwrap();
+        for id in 0..5u64 {
+            store
+                .upsert_document(
+                    id,
+                    Document::builder().add_text("body", "shared term").build(),
+                )
+                .unwrap();
+        }
+        store.commit().unwrap();
+
+        let drain = |it: Option<Box<dyn crate::lexical::reader::PostingIterator>>| -> Vec<u64> {
+            let mut ids = Vec::new();
+            if let Some(mut it) = it {
+                while it.next().unwrap() {
+                    ids.push(it.doc_id());
+                }
+            }
+            ids.sort_unstable();
+            ids
+        };
+
+        // First snapshot: the second `postings` call is a cache hit.
+        {
+            let reader = store.reader_for_tests().unwrap();
+            let inverted = reader
+                .as_any()
+                .downcast_ref::<InvertedIndexReader>()
+                .unwrap();
+            let seg = inverted.segment_readers()[0].read().unwrap();
+
+            let first = drain(seg.postings("body", "shared").unwrap());
+            let second = drain(seg.postings("body", "shared").unwrap());
+            assert_eq!(first, vec![0, 1, 2, 3, 4]);
+            assert_eq!(first, second, "cached postings must match the decoded list");
+
+            let stats = seg.posting_cache_stats();
+            assert_eq!(stats.misses, 1, "the first decode is a cache miss");
+            assert!(stats.hits >= 1, "the repeat lookup hits the cache");
+        }
+
+        // Delete a doc + commit: the fresh snapshot must exclude it (a new
+        // segment reader with an empty cache re-decodes against the new
+        // deletions — no stale cached list).
+        store.delete_document_by_internal_id(2).unwrap();
+        store.commit().unwrap();
+        let reader2 = store.reader_for_tests().unwrap();
+        let after = drain(reader2.postings("body", "shared").unwrap());
+        assert_eq!(
+            after,
+            vec![0, 1, 3, 4],
+            "deleted doc 2 must be excluded in the new snapshot"
         );
     }
 

@@ -372,6 +372,30 @@ let config = LexicalIndexConfig::builder()
     .build();
 ```
 
+## Posting キャッシュ（Posting Cache）
+
+語の評価ではセグメントの `.post` ファイルから posting list を読み、デコードします
+（varint doc-id、削除フィルタ、skip table）。キャッシュがないと同じ語のクエリごとに read +
+デコードを繰り返し、クラウド/リモートストレージでは read が支配的になります。各セグメント
+リーダーはデコード済み・削除フィルタ後の posting list を小さくキャッシュし、スナップショット
+内の同一 `(field, term)` 参照を再利用します。
+
+セグメントはスナップショット内で immutable なので、キャッシュ済みリストは常にその削除と整合
+します。commit すると空キャッシュの新しいセグメントリーダーが構築されます。キャッシュは
+**byte-budget で上限制御**され（posting list はサイズ分散が大きい）、予算超過で
+least-recently-used リストを退避し、予算全体より大きい単一リストはキャッシュしません。
+デフォルトで有効で `max_cache_memory` の予算を共有します。インデックス設定で制御できます。
+
+```rust
+use laurus::lexical::store::config::LexicalIndexConfig;
+use laurus::lexical::index::config::InvertedIndexConfig;
+
+let mut inverted = InvertedIndexConfig::default();
+inverted.enable_posting_cache = false;        // 完全に無効化
+inverted.max_cache_memory = 256 * 1024 * 1024; // またはキャッシュ予算（バイト）を変更
+let config = LexicalIndexConfig::Inverted(inverted);
+```
+
 ## 次のステップ
 
 - 意味的類似性検索: [Vector 検索](vector_search.md)

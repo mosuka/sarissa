@@ -37,6 +37,7 @@ pub mod core;
 pub mod maintenance;
 pub mod parsed_query_cache;
 pub(crate) mod per_segment_view;
+pub mod posting_cache;
 pub mod query_cache;
 pub mod reader;
 pub mod searcher;
