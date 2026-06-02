@@ -140,6 +140,7 @@ pub struct LexicalIndexConfigBuilder {
     default_fields: Vec<String>,
     fields: HashMap<String, FieldOption>,
     query_filter_cache_capacity: Option<usize>,
+    parsed_query_cache_capacity: Option<usize>,
 }
 
 use crate::lexical::core::field::FieldOption;
@@ -164,6 +165,7 @@ impl LexicalIndexConfigBuilder {
             default_fields: Vec::new(),
             fields: HashMap::new(),
             query_filter_cache_capacity: None,
+            parsed_query_cache_capacity: None,
         }
     }
 
@@ -291,6 +293,17 @@ impl LexicalIndexConfigBuilder {
         self
     }
 
+    /// Set the maximum number of entries in the snapshot-scoped parsed-DSL
+    /// query cache (Issue #590).
+    ///
+    /// A repeated DSL query string is parsed once per searcher snapshot and
+    /// reused. `0` disables the cache.
+    /// Default: 1024
+    pub fn parsed_query_cache_capacity(mut self, capacity: usize) -> Self {
+        self.parsed_query_cache_capacity = Some(capacity);
+        self
+    }
+
     /// Add a field-specific configuration.
     pub fn add_field(mut self, name: impl Into<String>, option: FieldOption) -> Self {
         self.fields.insert(name.into(), option);
@@ -333,6 +346,9 @@ impl LexicalIndexConfigBuilder {
         }
         if let Some(capacity) = self.query_filter_cache_capacity {
             config.query_filter_cache_capacity = capacity;
+        }
+        if let Some(capacity) = self.parsed_query_cache_capacity {
+            config.parsed_query_cache_capacity = capacity;
         }
 
         LexicalIndexConfig::Inverted(config)

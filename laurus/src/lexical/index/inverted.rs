@@ -35,6 +35,7 @@ use crate::storage::file::{FileStorage, FileStorageConfig};
 pub(crate) mod bmw;
 pub mod core;
 pub mod maintenance;
+pub mod parsed_query_cache;
 pub(crate) mod per_segment_view;
 pub mod query_cache;
 pub mod reader;
@@ -585,7 +586,8 @@ impl LexicalIndex for InvertedIndex {
         self.check_closed()?;
         let reader = self.reader()?;
         let searcher = InvertedIndexSearcher::from_arc(reader)
-            .with_default_fields(self.config.default_fields.clone());
+            .with_default_fields(self.config.default_fields.clone())
+            .with_parsed_query_cache_capacity(self.config.parsed_query_cache_capacity);
         Ok(Box::new(searcher))
     }
 
