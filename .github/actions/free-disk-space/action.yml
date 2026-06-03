@@ -1,0 +1,32 @@
+name: Free disk space
+description: >
+  Reclaim disk space on GitHub-hosted Ubuntu runners by removing large
+  preinstalled toolchains the build does not use. Needed because the
+  `--features embeddings-all` build (candle / tokenizers / hf-hub / image /
+  reqwest) plus the restored Rust build cache can otherwise exhaust the
+  runner's root disk ("No space left on device"). See issue #775.
+
+  Linux-only: the caller gates this with `if: runner.os == 'Linux'`. The
+  removed paths are unused by the Rust / Python / Node toolchains these jobs
+  rely on, so they are safe to delete.
+
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      shell: bash
+      run: |
+        echo "Disk usage before cleanup:"
+        df -h /
+        # Remove large preinstalled toolchains the build never touches. Each
+        # `|| true` keeps the step succeeding even if a path is already absent
+        # (paths differ slightly between runner images).
+        sudo rm -rf /usr/share/dotnet || true
+        sudo rm -rf /usr/local/lib/android || true
+        sudo rm -rf /opt/ghc || true
+        sudo rm -rf /usr/local/.ghcup || true
+        sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+        # Reclaim space held by cached Docker images (none of these jobs use Docker).
+        sudo docker image prune --all --force || true
+        echo "Disk usage after cleanup:"
+        df -h /

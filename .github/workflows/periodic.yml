@@ -36,6 +36,10 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v6
 
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
+
       - name: Install protoc
         uses: ./.github/actions/install-protoc
         with:
@@ -83,6 +87,10 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v6
 
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
+
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
@@ -125,6 +133,10 @@ jobs:
     steps:
       - name: Run checkout
         uses: actions/checkout@v6
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
 
       - name: Install protoc
         uses: ./.github/actions/install-protoc
@@ -174,6 +186,10 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v6
 
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
+
       - name: Install protoc
         uses: ./.github/actions/install-protoc
         with:
@@ -222,6 +238,10 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v6
 
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
+
       - name: Install protoc
         uses: ./.github/actions/install-protoc
         with:
@@ -269,6 +289,10 @@ jobs:
     steps:
       - name: Run checkout
         uses: actions/checkout@v6
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -323,6 +347,10 @@ jobs:
       - name: Run checkout
         uses: actions/checkout@v6
 
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -365,6 +393,10 @@ jobs:
     steps:
       - name: Run checkout
         uses: actions/checkout@v6
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -410,6 +442,10 @@ jobs:
     steps:
       - name: Run checkout
         uses: actions/checkout@v6
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/free-disk-space
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
