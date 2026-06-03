@@ -68,6 +68,7 @@ use std::sync::Arc;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
+use laurus::lexical::core::field::FieldValue;
 use laurus::lexical::index::structures::bkd_tree::BKDTree;
 use laurus::lexical::reader::{FieldStats, LexicalIndexReader, PostingIterator, ReaderTermInfo};
 use laurus::lexical::search::features::facet::{FacetCollector, FacetConfig};
@@ -146,15 +147,43 @@ impl LexicalIndexReader for MockFacetReader {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
+    // DocValues are available for every stored field (mirrors the real
+    // writer, which stores every field into DocValues). This lets
+    // `collect_doc` take the #597 fast path and read facet values directly
+    // instead of decoding + cloning the whole document.
+    fn has_doc_values(&self, _field: &str) -> bool {
+        true
+    }
+
+    fn get_doc_value(&self, field: &str, doc_id: u64) -> LaurusResult<Option<FieldValue>> {
+        Ok(self
+            .documents
+            .get(doc_id as usize)
+            .and_then(|d| d.get(field).cloned()))
+    }
 }
 
 /// Build `n` documents with a single flat facet field (`field_a`),
 /// drawing values from a 50-value pool deterministically.
+/// A non-facet stored-field payload (title + body) so each document is
+/// "fat". The pre-#597 path decodes and clones *every* field via
+/// `reader.document()`, while the #597 path reads only the facet field's
+/// DocValue — this payload models the asymmetry between a whole-document
+/// decode and a single-field DocValues read.
+fn payload(i: usize) -> String {
+    format!("doc {i}: {}", "lorem ipsum dolor sit amet ".repeat(10))
+}
+
 fn build_flat_documents(n: usize) -> Vec<Document> {
     (0..n)
         .map(|i| {
             let value = format!("value_{}", i % FACET_VALUES_PER_FIELD);
-            Document::builder().add_text("field_a", value).build()
+            Document::builder()
+                .add_text("field_a", value)
+                .add_text("title", format!("Title {i}"))
+                .add_text("body", payload(i))
+                .build()
         })
         .collect()
 }
@@ -172,6 +201,8 @@ fn build_multi_field_documents(n: usize) -> Vec<Document> {
                 .add_text("field_a", v_a)
                 .add_text("field_b", v_b)
                 .add_text("field_c", v_c)
+                .add_text("title", format!("Title {i}"))
+                .add_text("body", payload(i))
                 .build()
         })
         .collect()
@@ -192,7 +223,11 @@ fn build_hierarchical_documents(n: usize) -> Vec<Document> {
             let state = (leaf_idx / 25) % 5;
             let city = leaf_idx % 5;
             let path = format!("r{region}/c{country}/s{state}/v{city}");
-            Document::builder().add_text("hier_field", path).build()
+            Document::builder()
+                .add_text("hier_field", path)
+                .add_text("title", format!("Title {i}"))
+                .add_text("body", payload(i))
+                .build()
         })
         .collect()
 }
