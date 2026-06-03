@@ -199,6 +199,37 @@ pub struct FacetCollector {
     /// Counter map for depth ≥ 2 paths. Key is `[field_id, level0_id,
     /// level1_id, …]`.
     hier_counts: HashMap<Box<[u32]>, u64>,
+    /// Per-field DocValues availability, parallel to `facet_fields`
+    /// (Issue #597). Lazily populated on the first `collect_doc` call from
+    /// `reader.has_doc_values(field)` — availability is doc-independent, so
+    /// it is resolved once instead of re-probing the (lock-guarded) reader
+    /// for every collected hit. Empty until the first call.
+    field_has_dv: Vec<bool>,
+}
+
+/// Append the facet path components of a single field `value` to `out`.
+///
+/// Shared by the DocValues fast path and the stored-document fallback in
+/// [`FacetCollector::collect_doc`] so both derive identical facet paths
+/// (Issue #597). A `Text` value containing `/` is split into a hierarchical
+/// path; scalar values stringify to a single component; any other variant
+/// falls back to its `Debug` form, matching the original inline behaviour.
+fn push_path_components(value: &crate::data::DataValue, out: &mut Vec<String>) {
+    match value {
+        crate::data::DataValue::Text(value) => {
+            if value.contains('/') {
+                for s in value.split('/') {
+                    out.push(s.to_string());
+                }
+            } else {
+                out.push(value.clone());
+            }
+        }
+        crate::data::DataValue::Int64(v) => out.push(v.to_string()),
+        crate::data::DataValue::Float64(v) => out.push(v.to_string()),
+        crate::data::DataValue::Bool(v) => out.push(v.to_string()),
+        _ => out.push(format!("{value:?}")),
+    }
 }
 
 impl FacetCollector {
@@ -230,6 +261,7 @@ impl FacetCollector {
             value_names: Vec::new(),
             flat_counts: HashMap::new(),
             hier_counts: HashMap::new(),
+            field_has_dv: Vec::new(),
         }
     }
 
@@ -249,11 +281,28 @@ impl FacetCollector {
 
     /// Add a document to the facet counts.
     pub fn collect_doc(&mut self, doc_id: u64, reader: &dyn LexicalIndexReader) -> Result<()> {
-        // Fetch the document **once per call** instead of once per facet
-        // field. Multi-field collectors used to invoke
-        // `reader.document(doc_id)` and pay one `Document::clone()` per
-        // call, repeated `facet_fields.len()` times per doc. (#409)
-        let doc_result = reader.document(doc_id);
+        // Resolve per-field DocValues availability once (Issue #597). It is
+        // doc-independent, so caching it here keeps `collect_doc` free of a
+        // lock-guarded `has_doc_values` probe per hit.
+        if self.field_has_dv.len() != self.facet_fields.len() {
+            self.field_has_dv = self
+                .facet_fields
+                .iter()
+                .map(|f| reader.has_doc_values(f))
+                .collect();
+        }
+
+        // Only decode the stored-fields blob (`reader.document`) when at
+        // least one facet field lacks a DocValues column. When every facet
+        // field has DocValues we read the per-field values directly and skip
+        // the whole-document decode + `Document::clone()` entirely (#597).
+        // The document, when needed, is still fetched once per call (#409).
+        let needs_document = self.field_has_dv.iter().any(|&has| !has);
+        let doc_result = if needs_document {
+            Some(reader.document(doc_id))
+        } else {
+            None
+        };
 
         // Reusable scratch buffers — allocated once per call, cleared at
         // each field iteration. Avoids per-field `Vec` reallocations that
@@ -264,50 +313,44 @@ impl FacetCollector {
 
         for field_idx in 0..self.facet_fields.len() {
             let field_id = self.field_ids[field_idx];
+            let has_dv = self.field_has_dv[field_idx];
 
-            // Phase 1: extract path components from the cached document.
-            // Borrows `self.facet_fields[field_idx]` only until the end
-            // of this block, so `intern_value` (which needs `&mut self`)
-            // is free to run in phase 2 without a conflict.
+            // Phase 1: extract path components. Borrows
+            // `self.facet_fields[field_idx]` only until the end of this
+            // block, so `intern_value` (which needs `&mut self`) is free to
+            // run in phase 2 without a conflict.
             path_components.clear();
             {
                 let field_name: &str = &self.facet_fields[field_idx];
-                match &doc_result {
-                    Ok(Some(document)) => {
-                        if let Some(val) = document.get(field_name) {
-                            match val {
-                                crate::data::DataValue::Text(value) => {
-                                    if value.contains('/') {
-                                        for s in value.split('/') {
-                                            path_components.push(s.to_string());
-                                        }
-                                    } else {
-                                        path_components.push(value.clone());
-                                    }
-                                }
-                                crate::data::DataValue::Int64(v) => {
-                                    path_components.push(v.to_string());
-                                }
-                                crate::data::DataValue::Float64(v) => {
-                                    path_components.push(v.to_string());
-                                }
-                                crate::data::DataValue::Bool(v) => {
-                                    path_components.push(v.to_string());
-                                }
-                                _ => {
-                                    path_components.push(format!("{val:?}"));
-                                }
+                if has_dv {
+                    // DocValues fast path (#597). `FieldValue` is
+                    // `DataValue`, so the value maps to facet path
+                    // components exactly as the stored document would; a
+                    // read error or absent value yields no contribution.
+                    if let Ok(Some(value)) = reader.get_doc_value(field_name, doc_id) {
+                        push_path_components(&value, &mut path_components);
+                    }
+                } else {
+                    match &doc_result {
+                        Some(Ok(Some(document))) => {
+                            if let Some(val) = document.get(field_name) {
+                                push_path_components(val, &mut path_components);
                             }
                         }
-                    }
-                    Ok(None) => {
-                        // Document not found — no facet contribution.
-                    }
-                    Err(_) => {
-                        // Synthetic fallback preserved from the pre-#409
-                        // implementation: 5 distinct values stratified
-                        // by `doc_id`.
-                        path_components.push(format!("value_{}", doc_id % 5));
+                        Some(Ok(None)) => {
+                            // Document not found — no facet contribution.
+                        }
+                        Some(Err(_)) => {
+                            // Synthetic fallback preserved from the pre-#409
+                            // implementation: 5 distinct values stratified
+                            // by `doc_id`.
+                            path_components.push(format!("value_{}", doc_id % 5));
+                        }
+                        None => {
+                            // Unreachable: a field without DocValues forces
+                            // `needs_document = true`, so `doc_result` is
+                            // `Some`. Guard defensively rather than panic.
+                        }
                     }
                 }
             }
@@ -1011,6 +1054,194 @@ impl RangeFacet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::Document;
+    use crate::data::DataValue;
+    use crate::lexical::index::structures::bkd_tree::BKDTree;
+    use crate::lexical::reader::{FieldStats, PostingIterator, ReaderTermInfo};
+    use std::any::Any;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    /// Configurable reader for `FacetCollector::collect_doc` DocValues tests
+    /// (Issue #597). `dv_fields` lists the fields exposed via DocValues;
+    /// `panic_on_document` asserts the stored-document path is never taken.
+    #[derive(Debug)]
+    struct DvMockReader {
+        docs: Vec<Document>,
+        dv_fields: HashSet<String>,
+        panic_on_document: bool,
+    }
+
+    impl DvMockReader {
+        fn new(docs: Vec<Document>, dv_fields: &[&str], panic_on_document: bool) -> Self {
+            Self {
+                docs,
+                dv_fields: dv_fields.iter().map(|s| (*s).to_string()).collect(),
+                panic_on_document,
+            }
+        }
+    }
+
+    impl LexicalIndexReader for DvMockReader {
+        fn doc_count(&self) -> u64 {
+            self.docs.len() as u64
+        }
+        fn max_doc(&self) -> u64 {
+            self.docs.len() as u64
+        }
+        fn is_deleted(&self, _doc_id: u64) -> bool {
+            false
+        }
+        fn document(&self, doc_id: u64) -> Result<Option<Document>> {
+            assert!(
+                !self.panic_on_document,
+                "document() must not be called when all facet fields have DocValues"
+            );
+            Ok(self.docs.get(doc_id as usize).cloned())
+        }
+        fn term_info(&self, _field: &str, _term: &str) -> Result<Option<ReaderTermInfo>> {
+            Ok(None)
+        }
+        fn postings(&self, _field: &str, _term: &str) -> Result<Option<Box<dyn PostingIterator>>> {
+            Ok(None)
+        }
+        fn field_stats(&self, _field: &str) -> Result<Option<FieldStats>> {
+            Ok(None)
+        }
+        fn close(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn is_closed(&self) -> bool {
+            false
+        }
+        fn get_bkd_tree(&self, _field: &str) -> Result<Option<Arc<dyn BKDTree>>> {
+            Ok(None)
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn has_doc_values(&self, field: &str) -> bool {
+            self.dv_fields.contains(field)
+        }
+        fn get_doc_value(&self, field: &str, doc_id: u64) -> Result<Option<FieldValue>> {
+            if !self.dv_fields.contains(field) {
+                return Ok(None);
+            }
+            Ok(self
+                .docs
+                .get(doc_id as usize)
+                .and_then(|d| d.get(field).cloned()))
+        }
+    }
+
+    /// Build a document from `(field, text-value)` pairs.
+    fn text_doc(pairs: &[(&str, &str)]) -> Document {
+        let mut b = Document::builder();
+        for (f, v) in pairs {
+            b = b.add_field(*f, DataValue::Text((*v).to_string()));
+        }
+        b.build()
+    }
+
+    /// Recursively flatten a field's facet counts into sorted `(path, count)`
+    /// pairs, so two collection runs can be compared for exact equivalence.
+    fn flatten(results: &FacetResults, field: &str) -> Vec<(Vec<String>, u64)> {
+        fn walk(c: &FacetCount, out: &mut Vec<(Vec<String>, u64)>) {
+            out.push((c.path.path.clone(), c.count));
+            for ch in &c.children {
+                walk(ch, out);
+            }
+        }
+        let mut out = Vec::new();
+        if let Some(counts) = results.get_field_facets(field) {
+            for c in counts {
+                walk(c, &mut out);
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// Run a full facet collection over `docs` and return the results.
+    fn collect(docs: Vec<Document>, fields: &[&str], dv: &[&str], panic_doc: bool) -> FacetResults {
+        let n = docs.len() as u64;
+        let reader = DvMockReader::new(docs, dv, panic_doc);
+        let mut collector = FacetCollector::new(
+            FacetConfig::default(),
+            fields.iter().map(|s| s.to_string()).collect(),
+        );
+        for doc_id in 0..n {
+            collector
+                .collect_doc(doc_id, &reader)
+                .expect("collect_doc must not error");
+        }
+        collector.finalize().expect("finalize must not error")
+    }
+
+    #[test]
+    fn facet_docvalues_counts_match_stored_doc() {
+        // Identical corpus: flat field `brand` + hierarchical field `cat`.
+        let docs = vec![
+            text_doc(&[("brand", "apple"), ("cat", "a/x")]),
+            text_doc(&[("brand", "apple"), ("cat", "a/y")]),
+            text_doc(&[("brand", "dell"), ("cat", "b/x")]),
+        ];
+        // DocValues path: all fields have DocValues, so `document()` would
+        // panic if the collector took the stored-doc path.
+        let via_dv = collect(docs.clone(), &["brand", "cat"], &["brand", "cat"], true);
+        // Stored-document fallback: no DocValues.
+        let via_doc = collect(docs, &["brand", "cat"], &[], false);
+
+        assert_eq!(flatten(&via_dv, "brand"), flatten(&via_doc, "brand"));
+        assert_eq!(flatten(&via_dv, "cat"), flatten(&via_doc, "cat"));
+        // Guard against "both empty": assert the concrete flat counts.
+        assert_eq!(
+            flatten(&via_dv, "brand"),
+            vec![
+                (vec!["apple".to_string()], 2),
+                (vec!["dell".to_string()], 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn facet_docvalues_skips_document_fetch() {
+        // Every facet field has DocValues → `document()` must never be called
+        // (the mock panics if it is).
+        let docs = vec![text_doc(&[("cat", "a")]), text_doc(&[("cat", "b")])];
+        let results = collect(docs, &["cat"], &["cat"], true);
+        assert_eq!(
+            flatten(&results, "cat"),
+            vec![(vec!["a".to_string()], 1), (vec!["b".to_string()], 1)]
+        );
+    }
+
+    #[test]
+    fn facet_falls_back_to_document_without_docvalues() {
+        let docs = vec![text_doc(&[("cat", "a")]), text_doc(&[("cat", "a")])];
+        let results = collect(docs, &["cat"], &[], false);
+        assert_eq!(flatten(&results, "cat"), vec![(vec!["a".to_string()], 2)]);
+    }
+
+    #[test]
+    fn facet_mixed_docvalues_and_stored() {
+        // `brand` has DocValues; `cat` does not → `document()` is fetched for
+        // `cat` while `brand` is read from DocValues. Both must be counted.
+        let docs = vec![
+            text_doc(&[("brand", "apple"), ("cat", "a")]),
+            text_doc(&[("brand", "dell"), ("cat", "a")]),
+        ];
+        let results = collect(docs, &["brand", "cat"], &["brand"], false);
+        assert_eq!(
+            flatten(&results, "brand"),
+            vec![
+                (vec!["apple".to_string()], 1),
+                (vec!["dell".to_string()], 1),
+            ]
+        );
+        assert_eq!(flatten(&results, "cat"), vec![(vec!["a".to_string()], 2)]);
+    }
 
     #[test]
     fn test_facet_path_creation() {

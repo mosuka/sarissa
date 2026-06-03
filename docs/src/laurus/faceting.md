@@ -77,3 +77,13 @@ Each node in this tree corresponds to a `FacetCount` with its `children` populat
 - **E-commerce**: Filter by category, brand, price range, rating
 - **Document search**: Filter by author, department, date range, document type
 - **Content management**: Filter by tags, topics, content status
+
+## Performance
+
+Facet counts are read from each field's **DocValues** column, not from the
+stored document. For every collected hit the collector reads only the facet
+field's value via the per-field DocValues lookup, so it never decodes or clones
+the whole stored-fields blob when every faceted field has a DocValues column
+(which is the default — every stored field is written to DocValues at index
+time). A field that lacks DocValues transparently falls back to the stored
+document, so results are identical either way; only the read path changes.
