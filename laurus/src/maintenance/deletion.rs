@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use ahash::AHashMap;
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{LaurusError, Result};
@@ -54,8 +55,14 @@ pub struct DeletionBitmap {
     /// Segment ID this bitmap belongs to.
     pub segment_id: String,
 
-    /// Set of deleted document IDs.
-    pub deleted_docs: RwLock<ahash::AHashSet<u64>>,
+    /// Set of deleted document IDs, stored as a Roaring bitmap (Issue #684).
+    ///
+    /// `RoaringTreemap` (u64) is far more compact than the previous
+    /// `AHashSet<u64>` for the dense deletion sets that accumulate over a
+    /// segment's life, and `contains` is a branch-light bit test rather than a
+    /// hashed probe — measurable on the per-doc / per-neighbour `is_deleted`
+    /// hot paths.
+    pub deleted_docs: RwLock<RoaringTreemap>,
 
     /// Total number of documents in the segment.
     pub total_docs: AtomicU64,
@@ -86,7 +93,7 @@ impl DeletionBitmap {
         };
         DeletionBitmap {
             segment_id,
-            deleted_docs: RwLock::new(ahash::AHashSet::new()),
+            deleted_docs: RwLock::new(RoaringTreemap::new()),
             total_docs: AtomicU64::new(total_docs),
             min_doc_id,
             max_doc_id,
@@ -118,16 +125,16 @@ impl DeletionBitmap {
         }
 
         let mut docs = self.deleted_docs.write().unwrap();
-        let was_already_deleted = docs.contains(&doc_id);
-        if !was_already_deleted {
-            docs.insert(doc_id);
+        // `RoaringTreemap::insert` returns `true` when the id was newly added.
+        let newly_deleted = docs.insert(doc_id);
+        if newly_deleted {
             self.deleted_count.fetch_add(1, Ordering::SeqCst);
             self.last_modified
                 .store(crate::util::time::now_secs(), Ordering::SeqCst);
             self.version.fetch_add(1, Ordering::SeqCst);
         }
 
-        Ok(!was_already_deleted)
+        Ok(newly_deleted)
     }
 
     /// Resize the bitmap to accommodate more documents.
@@ -137,7 +144,7 @@ impl DeletionBitmap {
 
     /// Check if a document is deleted.
     pub fn is_deleted(&self, doc_id: u64) -> bool {
-        self.deleted_docs.read().unwrap().contains(&doc_id)
+        self.deleted_docs.read().unwrap().contains(doc_id)
     }
 
     /// Get deletion ratio (0.0 to 1.0).
@@ -160,30 +167,34 @@ impl DeletionBitmap {
         self.deletion_ratio() > threshold
     }
 
-    /// Get all deleted document IDs.
+    /// Get all deleted document IDs, in ascending order.
     pub fn get_deleted_docs(&self) -> Vec<u64> {
         let docs = self.deleted_docs.read().unwrap();
-        docs.iter().cloned().collect()
+        docs.iter().collect()
     }
 
     /// Get an approximate memory usage of this deletion tracker in bytes.
     ///
     /// The estimate includes the struct itself, the segment ID string buffer,
-    /// and a rough approximation of the hash set overhead. The hash set term
-    /// is computed as `AHashSet::capacity() / 8`, which is a coarse heuristic
-    /// because `capacity()` returns the number of element slots (not bits),
-    /// so the true heap usage of the set may differ significantly.
+    /// and the Roaring bitmap's serialized size (Issue #684) as a proxy for its
+    /// in-memory footprint — far more accurate, and far smaller for dense
+    /// deletion sets, than the previous `AHashSet::capacity()` heuristic.
     pub fn memory_usage(&self) -> usize {
-        std::mem::size_of::<Self>() +
-        self.deleted_docs.read().unwrap().capacity() / 8 + // element capacity to approximate bytes
-        self.segment_id.capacity()
+        std::mem::size_of::<Self>()
+            + self.deleted_docs.read().unwrap().serialized_size()
+            + self.segment_id.capacity()
     }
 
     /// Write bitmap to storage.
+    ///
+    /// Writes the v4 format (Issue #684): the metadata header is unchanged from
+    /// v3, but the deleted-id set is a `RoaringTreemap::serialize_into` payload
+    /// rather than a raw `u64` list — orders of magnitude smaller for dense
+    /// deletion sets. v1/v2/v3 remain readable (see [`Self::read_from_storage`]).
     pub fn write_to_storage<W: StorageOutput>(&self, writer: &mut StructWriter<W>) -> Result<()> {
         // Write header
         writer.write_u32(0x44454C42)?; // "DELB" - Deletion Bitmap
-        writer.write_u32(3)?; // Version 3 (HashSet based with min/max doc_id)
+        writer.write_u32(4)?; // Version 4 (Roaring bitmap with min/max doc_id)
 
         // Write metadata
         writer.write_string(&self.segment_id)?;
@@ -194,12 +205,12 @@ impl DeletionBitmap {
         writer.write_u64(self.min_doc_id)?;
         writer.write_u64(self.max_doc_id)?;
 
-        // Write deleted IDs
+        // Write the deleted-id set as a Roaring payload (length-prefixed bytes).
         let docs = self.deleted_docs.read().unwrap();
-        writer.write_varint(docs.len() as u64)?;
-        for &doc_id in docs.iter() {
-            writer.write_u64(doc_id)?;
-        }
+        let mut payload = Vec::with_capacity(docs.serialized_size());
+        docs.serialize_into(&mut payload)
+            .map_err(|e| LaurusError::index(format!("Failed to serialize deletion bitmap: {e}")))?;
+        writer.write_bytes(&payload)?;
 
         Ok(())
     }
@@ -225,7 +236,7 @@ impl DeletionBitmap {
             let bitmap_bytes = reader.read_bytes()?;
             let bitvec = bit_vec::BitVec::from_bytes(&bitmap_bytes);
 
-            let mut deleted_docs = ahash::AHashSet::new();
+            let mut deleted_docs = RoaringTreemap::new();
             let mut min_doc_id = u64::MAX;
             let mut max_doc_id = 0;
             for (idx, bit) in bitvec.iter().enumerate() {
@@ -267,7 +278,8 @@ impl DeletionBitmap {
             let bitmap_version = reader.read_u64()?;
 
             let deleted_id_count = reader.read_varint()? as usize;
-            let mut deleted_docs = ahash::AHashSet::with_capacity(deleted_id_count);
+            let _ = deleted_id_count; // count is informational; Roaring grows as needed
+            let mut deleted_docs = RoaringTreemap::new();
             let mut min_doc_id = u64::MAX;
             let mut max_doc_id = 0;
             for _ in 0..deleted_id_count {
@@ -307,10 +319,36 @@ impl DeletionBitmap {
             let max_doc_id = reader.read_u64()?;
 
             let deleted_id_count = reader.read_varint()? as usize;
-            let mut deleted_docs = ahash::AHashSet::with_capacity(deleted_id_count);
+            let _ = deleted_id_count; // count is informational; Roaring grows as needed
+            let mut deleted_docs = RoaringTreemap::new();
             for _ in 0..deleted_id_count {
                 deleted_docs.insert(reader.read_u64()?);
             }
+
+            Ok(DeletionBitmap {
+                segment_id,
+                deleted_docs: RwLock::new(deleted_docs),
+                total_docs: AtomicU64::new(total_docs),
+                min_doc_id,
+                max_doc_id,
+                deleted_count: AtomicU64::new(deleted_count),
+                last_modified: AtomicU64::new(last_modified),
+                version: AtomicU64::new(bitmap_version),
+            })
+        } else if version == 4 {
+            // Version 4 (Roaring bitmap with min/max doc_id) — Issue #684.
+            let segment_id = reader.read_string()?;
+            let total_docs = reader.read_u64()?;
+            let deleted_count = reader.read_u64()?;
+            let last_modified = reader.read_u64()?;
+            let bitmap_version = reader.read_u64()?;
+            let min_doc_id = reader.read_u64()?;
+            let max_doc_id = reader.read_u64()?;
+
+            let payload = reader.read_bytes()?;
+            let deleted_docs = RoaringTreemap::deserialize_from(&payload[..]).map_err(|e| {
+                LaurusError::index(format!("Failed to deserialize deletion bitmap: {e}"))
+            })?;
 
             Ok(DeletionBitmap {
                 segment_id,
@@ -1078,6 +1116,80 @@ mod tests {
         assert!(result.is_err());
 
         assert!(!bitmap.is_deleted(150));
+    }
+
+    /// v4 (Roaring) `.delmap` round-trips: write then read yields the same
+    /// deleted set, ordering, and metadata (Issue #684).
+    #[test]
+    fn test_deletion_bitmap_v4_round_trip() {
+        let storage = MemoryStorage::new(MemoryStorageConfig::default());
+
+        let bitmap = DeletionBitmap::new("seg-v4".to_string(), 0, 999);
+        for id in [3u64, 7, 42, 900, 999] {
+            bitmap.delete_document(id).unwrap();
+        }
+
+        {
+            let output = storage.create_output("seg-v4.delmap").unwrap();
+            let mut writer = StructWriter::new(output);
+            bitmap.write_to_storage(&mut writer).unwrap();
+            writer.close().unwrap();
+        }
+
+        let loaded = {
+            let input = storage.open_input("seg-v4.delmap").unwrap();
+            let mut reader = StructReader::new(input).unwrap();
+            DeletionBitmap::read_from_storage(&mut reader).unwrap()
+        };
+
+        assert_eq!(loaded.segment_id, "seg-v4");
+        assert_eq!(loaded.min_doc_id, 0);
+        assert_eq!(loaded.max_doc_id, 999);
+        assert_eq!(loaded.deleted_count.load(Ordering::SeqCst), 5);
+        // `get_deleted_docs` is ascending for a Roaring bitmap.
+        assert_eq!(loaded.get_deleted_docs(), vec![3, 7, 42, 900, 999]);
+        assert!(loaded.is_deleted(42));
+        assert!(!loaded.is_deleted(43));
+    }
+
+    /// Legacy v3 (raw-`u64`-list) `.delmap` payloads must still be readable
+    /// after the Roaring migration (Issue #684 back-compat).
+    #[test]
+    fn test_deletion_bitmap_reads_v3_format() {
+        let storage = MemoryStorage::new(MemoryStorageConfig::default());
+
+        // Hand-write a v3 payload (the format prior to this change).
+        {
+            let output = storage.create_output("seg-v3.delmap").unwrap();
+            let mut writer = StructWriter::new(output);
+            writer.write_u32(0x44454C42).unwrap(); // magic "DELB"
+            writer.write_u32(3).unwrap(); // version 3
+            writer.write_string("seg-v3").unwrap();
+            writer.write_u64(1000).unwrap(); // total_docs
+            writer.write_u64(3).unwrap(); // deleted_count
+            writer.write_u64(12345).unwrap(); // last_modified
+            writer.write_u64(7).unwrap(); // bitmap version
+            writer.write_u64(0).unwrap(); // min_doc_id
+            writer.write_u64(999).unwrap(); // max_doc_id
+            writer.write_varint(3).unwrap(); // deleted id count
+            for id in [11u64, 222, 888] {
+                writer.write_u64(id).unwrap();
+            }
+            writer.close().unwrap();
+        }
+
+        let loaded = {
+            let input = storage.open_input("seg-v3.delmap").unwrap();
+            let mut reader = StructReader::new(input).unwrap();
+            DeletionBitmap::read_from_storage(&mut reader).unwrap()
+        };
+
+        assert_eq!(loaded.segment_id, "seg-v3");
+        assert_eq!(loaded.min_doc_id, 0);
+        assert_eq!(loaded.max_doc_id, 999);
+        assert_eq!(loaded.get_deleted_docs(), vec![11, 222, 888]);
+        assert!(loaded.is_deleted(222));
+        assert!(!loaded.is_deleted(223));
     }
 
     #[test]
