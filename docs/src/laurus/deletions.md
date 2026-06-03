@@ -99,10 +99,16 @@ graph LR
 
 The deletion bitmap tracks which internal IDs have been deleted:
 
-- **Storage**: HashSet of deleted document IDs (`AHashSet<u64>`)
-- **Lookup**: O(1) — hash set lookup
+- **Storage**: a [Roaring bitmap](https://roaringbitmap.org/) of deleted document IDs. For the
+  dense deletion sets that accumulate over a segment's life this is dramatically smaller than a
+  plain ID list — e.g. a 10M-doc segment at 10% deletion is ~125 KB on disk instead of ~8 MB.
+- **Lookup**: a branch-light bit test, which stays CPU-cache-resident even for large deletion
+  sets — `is_deleted` is on the per-document (lexical) and per-neighbour (vector) search hot
+  paths.
 
-The bitmap is persisted alongside the index segments and is rebuilt from the WAL during recovery.
+The bitmap is persisted alongside the index segments (the `.delmap` file) and is rebuilt from
+the WAL during recovery. The on-disk format is versioned: the current writer emits v4 (Roaring),
+and the reader still loads the older v1–v3 (raw ID list) layouts for backward compatibility.
 
 ## Next Steps
 
