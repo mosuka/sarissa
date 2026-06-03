@@ -569,6 +569,12 @@ impl HnswSearcher {
         {
             let mut found = BinaryHeap::new();
             for doc_id in filter.iter() {
+                // Skip logically deleted docs (Issue #665): the brute path
+                // would otherwise score and return them, since nothing
+                // downstream re-checks deletion.
+                if reader.is_deleted(doc_id) {
+                    continue;
+                }
                 let d = self.calc_dist(reader, query, quant_ctx.as_ref(), doc_id, field_name)?;
                 // Skip docs with no vector in this field (Issue #676);
                 // `finalize_graph_results` also guards this, but skipping here
@@ -637,14 +643,35 @@ impl HnswSearcher {
         let mut candidates = BinaryHeap::new(); // Min-heap (nearest first)
         let mut found = BinaryHeap::new(); // Max-heap (furthest first)
 
+        // A node enters the result heap only if it satisfies the admission
+        // predicate; the frontier (`candidates`) always expands through every
+        // node to preserve connectivity. Bookkeeping (the allow-set probe and
+        // the per-neighbour deletion check) is needed when a filter is present
+        // (Issue #645) OR the reader has deletions (Issue #665). When neither
+        // holds, the pristine `else` branch below runs unchanged. `check_deletions`
+        // is hoisted so the filter-only path never pays for `is_deleted` calls.
+        let check_deletions = reader.has_deletions();
+        let needs_bookkeeping = request.filter.is_some() || check_deletions;
+
         candidates.push(Candidate {
             id: curr_obj,
             distance: dist,
         });
-        found.push(ResultCandidate {
-            id: curr_obj,
-            distance: dist,
-        });
+        // Seed the result heap with the entry only if it is admissible. The
+        // pre-#665 code admitted the entry unconditionally, which let a deleted
+        // (or, under #645, filter-rejected) entry leak into results.
+        let entry_admitted = !needs_bookkeeping
+            || (request
+                .filter
+                .as_deref()
+                .is_none_or(|f| f.contains(curr_obj))
+                && !(check_deletions && reader.is_deleted(curr_obj)));
+        if entry_admitted {
+            found.push(ResultCandidate {
+                id: curr_obj,
+                distance: dist,
+            });
+        }
 
         // Visited set as a dense bitmap. doc_ids in laurus are assigned
         // sequentially from 0, so the bitmap is sized to fit every node
@@ -656,21 +683,25 @@ impl HnswSearcher {
         let mut visited = BitVec::from_elem(graph.max_doc_id() as usize + 1, false);
         visited.set(curr_obj as usize, true);
 
-        // Filter-aware traversal (Issue #645). When a filter is present the
-        // result heap (`found`) admits only matching documents, while the
-        // frontier (`candidates`) still expands through every neighbour so the
-        // search can cross non-matching regions to reach matching clusters — a
-        // plain post-filter cannot, which is why a selective filter could
-        // otherwise return far fewer hits than exist (or none). `max_visits`
-        // bounds the worst case where matches are rare.
+        // Bookkeeping traversal (Issues #645 and #665). The result heap
+        // (`found`) admits a node only if it passes the admission predicate —
+        // it matches the filter (if any) AND is not logically deleted — while
+        // the frontier (`candidates`) still expands through every neighbour so
+        // the search can cross rejected regions to reach admissible clusters.
+        // A plain post-filter cannot (its slots are already spent), which is
+        // why a selective filter or a high deletion ratio could otherwise
+        // return far fewer hits than exist (or none). `max_visits` bounds the
+        // worst case where admissible nodes are rare.
         //
-        // The two paths are split deliberately: the unfiltered `else` branch
-        // is byte-for-byte the pre-#645 loop, so adding filter support cannot
-        // change the codegen (and thus the latency) of the common, unfiltered
-        // search — the dominant production case. The filtered branch carries
-        // the extra per-neighbour bookkeeping (`n_visited`, the allow-set
-        // probe) that the unfiltered path must not pay for.
-        if let Some(filter) = request.filter.as_deref() {
+        // The two paths are split deliberately: the pristine `else` branch is
+        // byte-for-byte the pre-#645 loop, so this bookkeeping cannot change
+        // the codegen (and thus the latency) of the common search that has
+        // neither a filter nor deletions — the dominant production case. The
+        // bookkeeping branch carries the extra per-neighbour work (`n_visited`,
+        // the allow-set probe, the deletion check) that the pristine path must
+        // not pay for.
+        if needs_bookkeeping {
+            let filter = request.filter.as_deref();
             // Deliberately NOT clamped to the node count: `n_visited` rises at
             // most once per node (the `visited` guard), so when
             // `ef_search * MAX_VISIT_FACTOR >= N` the cap is simply never hit
@@ -722,13 +753,19 @@ impl HnswSearcher {
 
                         if d < furthest_dist || found.len() < ef_search {
                             // Frontier expands through every neighbour, even
-                            // ones the filter rejects, to preserve connectivity.
+                            // ones the filter rejects or that are deleted, to
+                            // preserve connectivity.
                             candidates.push(Candidate {
                                 id: neighbor_id,
                                 distance: d,
                             });
-                            // Result heap keeps only filter-matching docs.
-                            if filter.contains(neighbor_id) {
+                            // Result heap keeps only admissible docs: matching
+                            // the filter (if any) AND not deleted (Issue #665).
+                            // `check_deletions` short-circuits the `is_deleted`
+                            // call away on the filter-only path.
+                            let admitted = filter.is_none_or(|f| f.contains(neighbor_id))
+                                && !(check_deletions && reader.is_deleted(neighbor_id));
+                            if admitted {
                                 found.push(ResultCandidate {
                                     id: neighbor_id,
                                     distance: d,
@@ -742,7 +779,9 @@ impl HnswSearcher {
                 }
             }
         } else {
-            // Unfiltered path — unchanged from before #645.
+            // Pristine path (no filter, no deletions) — byte-for-byte the
+            // pre-#645 loop, so neither filtering (#645) nor deletion-awareness
+            // (#665) can perturb its codegen or latency.
             while let Some(curr) = candidates.pop() {
                 if let Some(furthest) = found.peek()
                     && curr.distance > furthest.distance
