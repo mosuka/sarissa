@@ -275,6 +275,27 @@ allowed documents — never more than the walk would — and is **exact**, so a 
 selective filter returns the true nearest matches rather than an approximation.
 Larger allow-sets keep using the filter-aware traversal above.
 
+#### Deletion-Aware HNSW Traversal
+
+Logically deleted documents stay in the HNSW graph until compaction (see
+[Deletions & Compaction](../../laurus/deletions.md)), so the walk must skip them
+the same way it skips filtered-out documents. The graph traversal applies a
+single admission rule: a node enters the result set only if it matches the
+filter (when one is present) **and** is not deleted, while the frontier still
+expands through deleted nodes to preserve connectivity.
+
+This is what keeps recall correct as deletions accumulate. If deleted nodes were
+allowed into the result heap, they would consume the fixed `ef_search` slots and
+push out live neighbours — in the worst case an `ef_search` window made entirely
+of deleted documents would return nothing. Skipping them during the walk means
+the same slots fill with live results instead, so a 10-hit page stays full even
+after the nearest documents are deleted. The exact tiny-allow-set scan above and
+the Flat/IVF inline paths apply the same deletion check.
+
+The fast path is preserved: when a search has neither a filter nor any
+deletions, the traversal runs the original loop unchanged, paying nothing for
+the per-neighbour admission bookkeeping.
+
 #### Allow-Set Representation
 
 The allow-set is a typed structure chosen by shape: a Roaring bitmap for dense

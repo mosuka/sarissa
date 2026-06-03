@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use crate::error::{LaurusError, Result};
 use crate::storage::Storage;
@@ -522,12 +523,46 @@ impl HnswIndexReader {
         self.deletion_bitmap = Some(bitmap);
     }
 
-    fn is_deleted(&self, doc_id: u64) -> bool {
+    /// Returns whether `doc_id` has been logically deleted.
+    ///
+    /// `pub(crate)` so the HNSW searcher can consult it during graph traversal
+    /// (Issue #665): a deleted node must not be admitted to the result heap,
+    /// otherwise it consumes an `ef_search` slot and leaks into results (the
+    /// quantized distance path never calls `get_vector`, the only place
+    /// deletions were previously honoured).
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` - Internal document ID to test.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a deletion bitmap is attached and marks `doc_id` deleted;
+    /// `false` when no bitmap is attached.
+    pub(crate) fn is_deleted(&self, doc_id: u64) -> bool {
         if let Some(bitmap) = &self.deletion_bitmap {
             bitmap.is_deleted(doc_id)
         } else {
             false
         }
+    }
+
+    /// Returns whether this reader has any logically deleted documents.
+    ///
+    /// Used by [`HnswSearcher`](crate::vector::index::hnsw::HnswSearcher) to
+    /// decide whether graph traversal needs the per-neighbour deletion
+    /// bookkeeping at all. When no bitmap is attached, or it is attached but
+    /// empty (e.g. a freshly initialized segment), this returns `false` so the
+    /// pristine, no-bookkeeping search path is preserved unchanged.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a deletion bitmap is attached and holds at least one deleted
+    /// document; `false` otherwise.
+    pub(crate) fn has_deletions(&self) -> bool {
+        self.deletion_bitmap
+            .as_ref()
+            .is_some_and(|bitmap| bitmap.deleted_count.load(Ordering::Relaxed) > 0)
     }
 
     /// Get HNSW parameters.
