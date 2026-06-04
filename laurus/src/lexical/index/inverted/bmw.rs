@@ -17,6 +17,7 @@
 
 use crate::error::{LaurusError, Result};
 use crate::lexical::index::inverted::reader::InvertedIndexReader;
+use crate::lexical::index::inverted::searcher::Deadline;
 use crate::lexical::query::Query;
 use crate::lexical::query::boolean::{BooleanQuery, Occur};
 use crate::lexical::query::collector::Collector;
@@ -89,7 +90,12 @@ impl<'r> BlockMaxOrExecutor<'r> {
     /// Drive the pivot loop and feed competitive documents into
     /// `collector`. Returns the same collector once exhausted or
     /// short-circuited via `needs_more()`.
-    pub fn run<C: Collector>(mut self, mut collector: C) -> Result<C> {
+    ///
+    /// `deadline` (Issue #600) is consulted once per
+    /// [`crate::lexical::index::inverted::searcher::DEADLINE_CHECK_INTERVAL`]
+    /// pivot iterations so a timed search aborts this loop mid-flight rather
+    /// than running it to completion.
+    pub fn run<C: Collector>(mut self, mut collector: C, deadline: Option<Deadline>) -> Result<C> {
         // Active clauses (still iterating). Indexed into `self.clauses`.
         let mut active: Vec<usize> = Vec::with_capacity(self.clauses.len());
         for (i, c) in self.clauses.iter().enumerate() {
@@ -98,7 +104,13 @@ impl<'r> BlockMaxOrExecutor<'r> {
             }
         }
 
+        let mut scanned: u64 = 0;
         loop {
+            if let Some(d) = deadline {
+                d.check(scanned)?;
+            }
+            scanned = scanned.wrapping_add(1);
+
             if active.is_empty() {
                 break;
             }
