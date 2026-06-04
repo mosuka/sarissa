@@ -259,9 +259,16 @@ Lexical search behavior is controlled via `LexicalSearchOptions` on the `SearchR
 | :--- | :--- | :--- |
 | `field_boosts` | empty | Per-field score multipliers |
 | `min_score` | 0.0 | Minimum score threshold |
-| `timeout_ms` | None | Search timeout in milliseconds |
+| `timeout_ms` | None | Search time budget in milliseconds (see note below) |
 | `parallel` | false | Enable parallel search across segments |
 | `sort_by` | `Score` | Sort by relevance score, or by a field (`asc` / `desc`) |
+
+When `timeout_ms` is set, the time budget is enforced **cooperatively during**
+the search: the scan loops (including each segment of a multi-segment fanout)
+check the deadline periodically and abort as soon as it is exceeded, returning a
+timeout error rather than running the query to completion first. The check is
+batched (every few thousand scanned documents), so an unset `timeout_ms` and the
+common in-budget case pay no measurable overhead.
 
 ### Builder Methods
 

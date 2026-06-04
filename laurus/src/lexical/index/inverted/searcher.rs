@@ -41,6 +41,43 @@ use crate::lexical::search::searcher::{
 /// (Issue #590) when none is configured.
 const DEFAULT_PARSED_QUERY_CACHE_CAPACITY: usize = 1024;
 
+/// How often the scan loops consult the wall clock for a search deadline,
+/// measured in scanned documents (Issue #600). Checking every document would
+/// make `Timer::elapsed` a per-doc cost; checking once per this many keeps the
+/// overhead negligible while still bounding worst-case latency (the same
+/// batched approach as Lucene's `TimeLimitingCollector`).
+const DEADLINE_CHECK_INTERVAL: u64 = 2048;
+
+/// A wall-clock deadline for cooperative search interruption (Issue #600).
+///
+/// Threaded through every scan loop (the default matcher loop, the Block-Max
+/// WAND executor, and the per-segment fanout) so a timed search aborts
+/// mid-flight instead of only being detected after it has already run to
+/// completion. On `wasm32` `Timer` reports zero elapsed, so a deadline never
+/// fires there.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Deadline {
+    start: Timer,
+    timeout: Duration,
+}
+
+impl Deadline {
+    /// Create a deadline of `timeout` measured from `start`.
+    pub(crate) fn new(start: Timer, timeout: Duration) -> Self {
+        Self { start, timeout }
+    }
+
+    /// Return `Err` if the time budget is exhausted. Safe to call on every
+    /// loop iteration: the clock is only read every [`DEADLINE_CHECK_INTERVAL`]
+    /// scanned documents, so `scanned` is the caller's running document count.
+    pub(crate) fn check(&self, scanned: u64) -> Result<()> {
+        if scanned.is_multiple_of(DEADLINE_CHECK_INTERVAL) && self.start.elapsed() > self.timeout {
+            return Err(LaurusError::index("Search timeout exceeded"));
+        }
+        Ok(())
+    }
+}
+
 /// A searcher that executes queries against an index reader.
 #[derive(Debug)]
 pub struct InvertedIndexSearcher {
@@ -111,12 +148,28 @@ impl InvertedIndexSearcher {
     pub fn search_with_collector_parallel<C: Collector>(
         &self,
         query: Box<dyn Query>,
+        collector: C,
+        parallel: bool,
+    ) -> Result<C> {
+        self.search_with_collector_deadline(query, collector, parallel, None)
+    }
+
+    /// Internal search entry point that additionally honours an optional
+    /// wall-clock [`Deadline`] (Issue #600). The public
+    /// [`Self::search_with_collector_parallel`] delegates here with
+    /// `deadline = None`, so non-timed searches pay nothing; the timeout path
+    /// passes `Some(..)` and every scan loop below (plus the per-segment
+    /// fanout it recurses into) aborts mid-flight once the budget is spent.
+    fn search_with_collector_deadline<C: Collector>(
+        &self,
+        query: Box<dyn Query>,
         mut collector: C,
         parallel: bool,
+        deadline: Option<Deadline>,
     ) -> Result<C> {
         // For BooleanQuery with multiple clauses, try to execute sub-queries in parallel
         if parallel && let Some(boolean_query) = query.as_any().downcast_ref::<BooleanQuery>() {
-            return self.search_boolean_query_parallel(boolean_query, collector);
+            return self.search_boolean_query_parallel(boolean_query, collector, deadline);
         }
 
         // Per-segment fanout fast path (#476 Phase 1). For multi-
@@ -131,7 +184,7 @@ impl InvertedIndexSearcher {
                 self.reader.as_any().downcast_ref::<InvertedIndexReader>()
             && inverted_reader.segment_count() >= 2
         {
-            return self.search_per_segment_fanout(query, collector);
+            return self.search_per_segment_fanout(query, collector, deadline);
         }
 
         // Block-Max-WAND fast path (#475 PR-F). Eligible for Should-only
@@ -142,7 +195,7 @@ impl InvertedIndexSearcher {
             && let Some(boolean_query) = is_bmw_eligible(query.as_ref())
             && let Ok(executor) = BlockMaxOrExecutor::new(boolean_query, self.reader.as_ref())
         {
-            return executor.run(collector);
+            return executor.run(collector, deadline);
         }
 
         // Default single-threaded execution
@@ -175,8 +228,18 @@ impl InvertedIndexSearcher {
         let avg_fl = scorer.avg_field_length();
         let query_field = query.field().map(|s| s.to_string());
 
+        // Running count of scanned documents, used to throttle the deadline
+        // clock read (Issue #600). Starts at 0 so the first iteration checks
+        // immediately, which makes a zero/expired budget fail fast.
+        let mut scanned: u64 = 0;
+
         // Iterate through matching documents
         while !matcher.is_exhausted() {
+            if let Some(d) = deadline {
+                d.check(scanned)?;
+            }
+            scanned = scanned.wrapping_add(1);
+
             let doc_id = matcher.doc_id();
 
             if doc_id == u64::MAX {
@@ -332,6 +395,7 @@ impl InvertedIndexSearcher {
         &self,
         query: Box<dyn Query>,
         mut collector: C,
+        deadline: Option<Deadline>,
     ) -> Result<C> {
         // Downcast ensured by the caller, but re-resolve here to
         // borrow the segment list.
@@ -405,8 +469,16 @@ impl InvertedIndexSearcher {
                 let view_reader: Arc<dyn LexicalIndexReader> = Arc::new(view);
                 let temp_searcher = InvertedIndexSearcher::from_arc(view_reader);
                 let temp_collector = TopDocsCollector::new(per_segment_k);
-                let collected =
-                    temp_searcher.search_with_collector(query.clone_box(), temp_collector)?;
+                // Propagate the deadline so each per-segment search aborts
+                // mid-flight too — segments run in parallel, so a single slow
+                // segment would otherwise leave the whole fanout unbounded
+                // (Issue #600).
+                let collected = temp_searcher.search_with_collector_deadline(
+                    query.clone_box(),
+                    temp_collector,
+                    false,
+                    deadline,
+                )?;
                 Ok(collected.results())
             })
             .collect();
@@ -435,6 +507,7 @@ impl InvertedIndexSearcher {
         &self,
         boolean_query: &BooleanQuery,
         mut collector: C,
+        deadline: Option<Deadline>,
     ) -> Result<C> {
         let clauses = boolean_query.clauses();
 
@@ -444,10 +517,11 @@ impl InvertedIndexSearcher {
 
         // Single clause: no need for parallel execution
         if clauses.len() == 1 {
-            return self.search_with_collector_parallel(
+            return self.search_with_collector_deadline(
                 clauses[0].query.clone_box(),
                 collector,
                 false,
+                deadline,
             );
         }
 
@@ -463,7 +537,12 @@ impl InvertedIndexSearcher {
                 // full result set from each clause, so we use an unbounded collector.
                 let temp_collector = TopDocsCollector::new(usize::MAX);
                 let result = self
-                    .search_with_collector_parallel(clause.query.clone_box(), temp_collector, false)
+                    .search_with_collector_deadline(
+                        clause.query.clone_box(),
+                        temp_collector,
+                        false,
+                        deadline,
+                    )
                     .map(|c| c.results());
                 (clause.occur, result)
             })
@@ -620,6 +699,11 @@ impl InvertedIndexSearcher {
         timeout: Duration,
     ) -> Result<LexicalSearchResults> {
         let start_time = Timer::now();
+        // Cooperative deadline (Issue #600). Threading it through the scan
+        // loops lets the search abort mid-flight once the budget is spent,
+        // instead of only being detected after the query has already run to
+        // completion as the old post-hoc `elapsed()` check did.
+        let deadline = Some(Deadline::new(start_time, timeout));
 
         // Create collector based on sort type
         let (mut hits, total_hits) = match &params.sort_by {
@@ -634,10 +718,11 @@ impl InvertedIndexSearcher {
                     self.reader.as_ref(),
                 );
 
-                let result_collector = self.search_with_collector_parallel(
+                let result_collector = self.search_with_collector_deadline(
                     query.clone_box(),
                     collector,
                     params.parallel,
+                    deadline,
                 )?;
 
                 (result_collector.results(), result_collector.total_hits())
@@ -646,17 +731,20 @@ impl InvertedIndexSearcher {
                 // Use TopDocsCollector for score-based sorting
                 let collector = TopDocsCollector::with_min_score(params.limit, params.min_score);
 
-                let result_collector =
-                    self.search_with_collector_parallel(query, collector, params.parallel)?;
+                let result_collector = self.search_with_collector_deadline(
+                    query,
+                    collector,
+                    params.parallel,
+                    deadline,
+                )?;
 
                 (result_collector.results(), result_collector.total_hits())
             }
         };
 
-        // Check if we exceeded timeout.
-        // NOTE: Timeout is checked after scoring completes, not during scoring.
-        // Per-document timeout checks would add overhead to every document match.
-        // For very large result sets, consider using limit to bound scoring.
+        // Final safety net: the scan loops abort mid-flight on the deadline,
+        // but a search that finished just over budget (or spent the time
+        // outside a scan loop) is still reported as timed out.
         if start_time.elapsed() > timeout {
             return Err(LaurusError::index("Search timeout exceeded"));
         }
@@ -1094,6 +1182,115 @@ mod tests {
         // Should complete within timeout
         assert_eq!(results.hits.len(), 0);
         assert_eq!(results.total_hits, 0);
+    }
+
+    #[test]
+    fn deadline_check_semantics() {
+        // The deadline primitive (Issue #600): it fires only at check-interval
+        // indices, and only when the budget is actually exhausted.
+        let now = Timer::now();
+        // Index 0 is a multiple of the interval, so an exhausted (zero) budget
+        // is detected immediately — a search fails fast.
+        assert!(Deadline::new(now, Duration::ZERO).check(0).is_err());
+        // Between check intervals the clock is never read, so even a zero
+        // budget does not fire — this is what keeps the per-document cost out.
+        assert!(Deadline::new(now, Duration::ZERO).check(1).is_ok());
+        assert!(
+            Deadline::new(now, Duration::ZERO)
+                .check(DEADLINE_CHECK_INTERVAL - 1)
+                .is_ok()
+        );
+        // A check-interval index with the budget spent fires.
+        assert!(
+            Deadline::new(now, Duration::ZERO)
+                .check(DEADLINE_CHECK_INTERVAL)
+                .is_err()
+        );
+        // An ample budget never fires, even at a check-interval index.
+        assert!(
+            Deadline::new(now, Duration::from_secs(3600))
+                .check(0)
+                .is_ok()
+        );
+    }
+
+    /// Build a searcher over a populated index. `segments` commits the docs in
+    /// that many batches so we can exercise both the single-segment scan loop
+    /// and the multi-segment fanout (Issue #600).
+    fn populated_searcher(segments: usize) -> InvertedIndexSearcher {
+        use crate::analysis::analyzer::standard::StandardAnalyzer;
+        use crate::lexical::index::inverted::writer::{
+            InvertedIndexWriter, InvertedIndexWriterConfig,
+        };
+        use crate::lexical::writer::LexicalIndexWriter;
+
+        let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+        let config = InvertedIndexWriterConfig {
+            analyzer: Arc::new(StandardAnalyzer::new().unwrap()),
+            ..Default::default()
+        };
+        let mut writer = InvertedIndexWriter::new(storage, config).unwrap();
+        let per_segment = 200;
+        for seg in 0..segments.max(1) {
+            for i in 0..per_segment {
+                let n = seg * per_segment + i;
+                writer
+                    .add_document(
+                        crate::Document::builder()
+                            .add_text("content", format!("hello world doc {n}"))
+                            .build(),
+                    )
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        InvertedIndexSearcher::from_arc(writer.build_reader().unwrap())
+    }
+
+    #[test]
+    fn search_with_zero_timeout_interrupts_real_docs() {
+        // With real matches the scan loop is entered, so the first deadline
+        // check (scanned == 0) fires on an already-spent zero budget — proving
+        // the timeout interrupts the search rather than only being reported
+        // after it completes (Issue #600).
+        let searcher = populated_searcher(1);
+        let query = Box::new(TermQuery::new("content", "hello")) as Box<dyn Query>;
+        let request = LexicalSearchRequest::new(query).timeout_ms(0);
+
+        let err = searcher.search(request).unwrap_err();
+        assert!(
+            err.to_string().contains("timeout"),
+            "expected a timeout error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn search_with_zero_timeout_interrupts_multi_segment_fanout() {
+        // The per-segment fanout must honour the deadline too (a single slow
+        // segment would otherwise leave the parallel fanout unbounded).
+        let searcher = populated_searcher(3);
+        let query = Box::new(TermQuery::new("content", "hello")) as Box<dyn Query>;
+        let request = LexicalSearchRequest::new(query).timeout_ms(0);
+
+        let err = searcher.search(request).unwrap_err();
+        assert!(
+            err.to_string().contains("timeout"),
+            "expected a timeout error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn search_without_timeout_returns_hits() {
+        // Regression guard: a search with no timeout still returns results
+        // (the deadline path is inert when `timeout_ms` is unset).
+        let searcher = populated_searcher(1);
+        let query = Box::new(TermQuery::new("content", "hello")) as Box<dyn Query>;
+
+        let results = searcher.search(LexicalSearchRequest::new(query)).unwrap();
+        assert!(
+            !results.hits.is_empty(),
+            "a non-timed search must return matching docs"
+        );
     }
 
     #[test]
