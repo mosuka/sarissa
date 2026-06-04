@@ -293,7 +293,7 @@ impl VectorIndexSearcher for HnswSearcher {
                 }
             }
 
-            candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+            candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
 
             let top_k = request.params.top_k.min(candidates.len());
             for (doc_id, similarity, distance, vector) in candidates.into_iter().take(top_k) {
@@ -333,7 +333,7 @@ impl VectorIndexSearcher for HnswSearcher {
                 }
             }
 
-            candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal));
+            candidates.sort_by(|a, b| b.2.total_cmp(&a.2));
 
             let top_k = request.params.top_k.min(candidates.len());
             for (doc_id, field_name, similarity, distance, vector) in
@@ -432,10 +432,7 @@ impl Ord for Candidate {
         // Then BinaryHeap is MaxHeap (largest at top).
 
         // This impl makes BinaryHeap a MIN-HEAP (smallest distance at top)
-        other
-            .distance
-            .partial_cmp(&self.distance)
-            .unwrap_or(Ordering::Equal)
+        other.distance.total_cmp(&self.distance)
     }
 }
 
@@ -455,9 +452,7 @@ impl Eq for ResultCandidate {}
 impl Ord for ResultCandidate {
     fn cmp(&self, other: &Self) -> Ordering {
         // Max-heap: larger distance at top (to remove worst)
-        self.distance
-            .partial_cmp(&other.distance)
-            .unwrap_or(Ordering::Equal)
+        self.distance.total_cmp(&other.distance)
     }
 }
 impl PartialOrd for ResultCandidate {
@@ -943,11 +938,7 @@ impl HnswSearcher {
         }
 
         // Sort results (similarity descending)
-        final_results.sort_by(|a, b| {
-            b.similarity
-                .partial_cmp(&a.similarity)
-                .unwrap_or(Ordering::Equal)
-        });
+        final_results.sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
 
         // Top K
         let top_k = request.params.top_k.min(final_results.len());
@@ -1125,5 +1116,57 @@ mod ef_search_tests {
         // rerank_factor = Some(0) is treated as 1 (defensive) so we never
         // collapse the candidate widening to zero.
         assert_eq!(s.effective_ef(&req(10, None, Some(0))), 50);
+    }
+}
+
+#[cfg(test)]
+mod nan_ordering_tests {
+    //! Issue #667: the HNSW candidate / result heaps order by an `f32`
+    //! `distance`. The previous `partial_cmp(...).unwrap_or(Equal)` made a
+    //! NaN distance compare equal to everything — a non-total order, which
+    //! `BinaryHeap` / `sort_unstable` forbid (silent reorder, or a panic on
+    //! recent std). `total_cmp` restores a total order so a NaN is handled
+    //! deterministically without losing or misordering the finite entries.
+
+    use super::{Candidate, ResultCandidate};
+    use std::collections::BinaryHeap;
+
+    #[test]
+    fn candidate_min_heap_handles_nan_without_panic() {
+        // `Candidate` is a min-heap by distance (nearest pops first).
+        let mut heap = BinaryHeap::new();
+        for d in [3.0_f32, 1.0, f32::NAN, 2.0] {
+            heap.push(Candidate { id: 0, distance: d });
+        }
+        let popped: Vec<f32> = std::iter::from_fn(|| heap.pop().map(|c| c.distance)).collect();
+        assert_eq!(popped.len(), 4, "no candidate is lost");
+        let finite: Vec<f32> = popped.iter().copied().filter(|d| !d.is_nan()).collect();
+        assert_eq!(
+            finite,
+            vec![1.0, 2.0, 3.0],
+            "finite distances pop nearest-first regardless of the NaN"
+        );
+        assert_eq!(
+            popped.iter().filter(|d| d.is_nan()).count(),
+            1,
+            "the NaN is retained, not silently dropped"
+        );
+    }
+
+    #[test]
+    fn result_candidate_max_heap_handles_nan_without_panic() {
+        // `ResultCandidate` is a max-heap by distance (furthest pops first).
+        let mut heap = BinaryHeap::new();
+        for d in [3.0_f32, 1.0, f32::NAN, 2.0] {
+            heap.push(ResultCandidate { id: 0, distance: d });
+        }
+        let popped: Vec<f32> = std::iter::from_fn(|| heap.pop().map(|c| c.distance)).collect();
+        assert_eq!(popped.len(), 4, "no candidate is lost");
+        let finite: Vec<f32> = popped.iter().copied().filter(|d| !d.is_nan()).collect();
+        assert_eq!(
+            finite,
+            vec![3.0, 2.0, 1.0],
+            "finite distances pop furthest-first regardless of the NaN"
+        );
     }
 }

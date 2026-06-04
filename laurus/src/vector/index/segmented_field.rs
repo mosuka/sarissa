@@ -26,7 +26,6 @@ use crate::vector::search::searcher::{
 };
 use crate::vector::store::config::VectorFieldConfig;
 use crate::vector::writer::VectorIndexWriterConfig;
-use std::cmp::Ordering;
 
 /// A vector field implementation that partitions data into segments.
 ///
@@ -361,7 +360,7 @@ impl SegmentedVectorField {
         }
 
         // Sort by similarity descending
-        candidates.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+        candidates.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
 
         let hits = candidates
             .into_iter()
@@ -508,7 +507,7 @@ impl VectorFieldReader for SegmentedVectorField {
         }
 
         let mut hits: Vec<FieldHit> = merged.into_values().collect();
-        hits.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+        hits.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
         if hits.len() > request.limit {
             hits.truncate(request.limit);
         }

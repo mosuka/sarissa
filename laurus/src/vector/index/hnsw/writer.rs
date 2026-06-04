@@ -182,9 +182,7 @@ impl Ord for Candidate {
         // Wait, for BinaryHeap in Rust, it's a max-heap.
         // If we want smallest distance at top, we need reverse.
         // If we want largest distance at top (to remove worst candidate), we use standard.
-        self.distance
-            .partial_cmp(&other.distance)
-            .unwrap_or(Ordering::Equal)
+        self.distance.total_cmp(&other.distance)
     }
 }
 
@@ -769,11 +767,10 @@ impl HnswIndexWriter {
                 let candidates =
                     writer_ref.search_layer(&graph, curr_obj, vector, ef_construction, lc)?;
 
-                if let Some(min_cand) = candidates.iter().min_by(|a, b| {
-                    a.distance
-                        .partial_cmp(&b.distance)
-                        .unwrap_or(Ordering::Equal)
-                }) {
+                if let Some(min_cand) = candidates
+                    .iter()
+                    .min_by(|a, b| a.distance.total_cmp(&b.distance))
+                {
                     curr_obj = min_cand.id;
                 }
 
@@ -873,10 +870,7 @@ impl HnswIndexWriter {
         impl Ord for VisitorCandidate {
             fn cmp(&self, other: &Self) -> Ordering {
                 // Min-heap: smaller distance > larger distance
-                other
-                    .distance
-                    .partial_cmp(&self.distance)
-                    .unwrap_or(Ordering::Equal)
+                other.distance.total_cmp(&self.distance)
             }
         }
         impl PartialOrd for VisitorCandidate {
@@ -954,11 +948,7 @@ impl HnswIndexWriter {
         // Simple heuristic: take M nearest.
         // Collect without cloning the heap, then sort by ascending distance.
         let mut sorted: Vec<_> = candidates.iter().cloned().collect();
-        sorted.sort_unstable_by(|a, b| {
-            a.distance
-                .partial_cmp(&b.distance)
-                .unwrap_or(Ordering::Equal)
-        });
+        sorted.sort_unstable_by(|a, b| a.distance.total_cmp(&b.distance));
         sorted.truncate(m);
         sorted.into_iter().map(|c| c.id).collect()
     }
@@ -993,11 +983,7 @@ impl HnswIndexWriter {
         }
 
         // We want to keep nearest. Move to min-heap or just sort.
-        candidates.sort_by(|a, b| {
-            a.distance
-                .partial_cmp(&b.distance)
-                .unwrap_or(Ordering::Equal)
-        });
+        candidates.sort_by(|a, b| a.distance.total_cmp(&b.distance));
         candidates.truncate(max_conn);
 
         Ok(candidates.into_iter().map(|c| c.id).collect())

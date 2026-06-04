@@ -696,8 +696,7 @@ impl SegmentManager {
             .filter(|s| s.deletion_ratio() > self.config.max_deletion_ratio / 2.0)
             .collect();
 
-        high_deletion_segments
-            .sort_by(|a, b| b.deletion_ratio().partial_cmp(&a.deletion_ratio()).unwrap());
+        high_deletion_segments.sort_by(|a, b| b.deletion_ratio().total_cmp(&a.deletion_ratio()));
 
         // Group high-deletion segments
         for chunk in high_deletion_segments.chunks(self.config.segments_per_tier) {
@@ -765,7 +764,7 @@ impl SegmentManager {
         all_candidates.extend(self.generate_time_based_candidates(segments));
 
         // Sort by priority and remove duplicates
-        all_candidates.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap());
+        all_candidates.sort_by(|a, b| b.priority.total_cmp(&a.priority));
         all_candidates.dedup_by(|a, b| a.segments == b.segments);
 
         // Take top candidates

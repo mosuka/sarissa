@@ -206,13 +206,8 @@ impl GeoDistanceQuery {
         // Sort by distance (closest first), then by relevance score
         matches.sort_by(|a, b| {
             a.distance_m
-                .partial_cmp(&b.distance_m)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    b.relevance_score
-                        .partial_cmp(&a.relevance_score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
+                .total_cmp(&b.distance_m)
+                .then_with(|| b.relevance_score.total_cmp(&a.relevance_score))
         });
 
         Ok(matches)
@@ -575,9 +570,8 @@ impl GeoBoundingBoxQuery {
         // Sort by relevance score (highest first), then by distance to center
         matches.sort_by(|a, b| {
             b.relevance_score
-                .partial_cmp(&a.relevance_score)
-                .unwrap()
-                .then_with(|| a.distance_m.partial_cmp(&b.distance_m).unwrap())
+                .total_cmp(&a.relevance_score)
+                .then_with(|| a.distance_m.total_cmp(&b.distance_m))
         });
 
         Ok(matches)
@@ -831,11 +825,7 @@ impl GeoMatcher {
     /// Create a new geo matcher.
     pub fn new(mut matches: Vec<GeoMatch>) -> Self {
         // Sort matches by distance (closest first)
-        matches.sort_by(|a, b| {
-            a.distance_m
-                .partial_cmp(&b.distance_m)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        matches.sort_by(|a, b| a.distance_m.total_cmp(&b.distance_m));
 
         GeoMatcher {
             matches,

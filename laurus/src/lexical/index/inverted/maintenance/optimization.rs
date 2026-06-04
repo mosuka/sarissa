@@ -227,7 +227,7 @@ impl IndexOptimizer {
 
         // Get all segments sorted by deletion ratio (highest first)
         let mut segments = segment_manager.get_segments();
-        segments.sort_by(|a, b| b.deletion_ratio().partial_cmp(&a.deletion_ratio()).unwrap());
+        segments.sort_by(|a, b| b.deletion_ratio().total_cmp(&a.deletion_ratio()));
 
         // Merge segments with any deletions first
         let segments_with_deletions: Vec<_> = segments

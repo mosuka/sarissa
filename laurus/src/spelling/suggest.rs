@@ -52,10 +52,7 @@ impl Eq for Suggestion {}
 impl Ord for Suggestion {
     fn cmp(&self, other: &Self) -> Ordering {
         // Higher scores come first
-        other
-            .score
-            .partial_cmp(&self.score)
-            .unwrap_or(Ordering::Equal)
+        other.score.total_cmp(&self.score)
     }
 }
 

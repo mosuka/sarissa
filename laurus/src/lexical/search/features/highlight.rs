@@ -145,11 +145,9 @@ impl FieldHighlight {
 
     /// Get the best fragment (highest score).
     pub fn best_fragment(&self) -> Option<&HighlightFragment> {
-        self.fragments.iter().max_by(|a, b| {
-            a.score
-                .partial_cmp(&b.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        self.fragments
+            .iter()
+            .max_by(|a, b| a.score.total_cmp(&b.score))
     }
 
     /// Combine all fragments into a single string.
@@ -441,11 +439,7 @@ impl Highlighter {
         }
 
         // Sort fragments by score (highest first)
-        fragments.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        fragments.sort_by(|a, b| b.score.total_cmp(&a.score));
 
         // Limit number of fragments
         fragments.truncate(self.config.max_fragments);

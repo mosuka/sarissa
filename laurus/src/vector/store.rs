@@ -659,23 +659,11 @@ impl VectorStore {
             // than the requested limit.
             let limit = request.params.limit.min(hits.len());
             if limit > 0 && limit < hits.len() {
-                hits.select_nth_unstable_by(limit - 1, |a, b| {
-                    b.score
-                        .partial_cmp(&a.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                hits.select_nth_unstable_by(limit - 1, |a, b| b.score.total_cmp(&a.score));
                 hits.truncate(limit);
-                hits.sort_unstable_by(|a, b| {
-                    b.score
-                        .partial_cmp(&a.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                hits.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
             } else if !hits.is_empty() {
-                hits.sort_unstable_by(|a, b| {
-                    b.score
-                        .partial_cmp(&a.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                hits.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
             }
 
             return Ok(VectorSearchResults { hits });
@@ -738,8 +726,7 @@ impl VectorStore {
 
         hits.sort_by(|a, b| {
             b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .total_cmp(&a.score)
                 .then_with(|| a.doc_id.cmp(&b.doc_id))
         });
 

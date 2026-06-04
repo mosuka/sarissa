@@ -115,16 +115,10 @@ pub mod utils {
             }
             VectorNormalization::MinMax => {
                 for vector in vectors.iter_mut() {
-                    if let (Some(&min_val), Some(&max_val)) =
-                        (
-                            vector.data.iter().min_by(|a, b| {
-                                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                            }),
-                            vector.data.iter().max_by(|a, b| {
-                                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                            }),
-                        )
-                    {
+                    if let (Some(&min_val), Some(&max_val)) = (
+                        vector.data.iter().min_by(|a, b| a.total_cmp(b)),
+                        vector.data.iter().max_by(|a, b| a.total_cmp(b)),
+                    ) {
                         let range = max_val - min_val;
                         if range > 0.0 {
                             for value in Arc::make_mut(&mut vector.data) {
