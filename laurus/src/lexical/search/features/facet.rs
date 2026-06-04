@@ -1,6 +1,5 @@
 //! Faceted search functionality for categorizing and filtering search results.
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -623,7 +622,7 @@ impl FacetedSearchEngine {
         }
 
         // Sort hits by score
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+        hits.sort_by(|a, b| b.score.total_cmp(&a.score));
 
         // Finalize facet collection
         let facet_results = facet_collector.finalize()?;
@@ -776,8 +775,7 @@ impl SearchGroup {
 
     /// Sort documents in this group by score.
     pub fn sort_by_score(&mut self) {
-        self.documents
-            .sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+        self.documents.sort_by(|a, b| b.score.total_cmp(&a.score));
     }
 
     /// Limit the number of documents in this group.

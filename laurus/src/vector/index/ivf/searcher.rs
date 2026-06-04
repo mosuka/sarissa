@@ -145,9 +145,7 @@ impl IvfSearcher {
                 return Ok(Vec::new());
             }
             if n < centroid_distances.len() {
-                centroid_distances.select_nth_unstable_by(n - 1, |a, b| {
-                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                centroid_distances.select_nth_unstable_by(n - 1, |a, b| a.1.total_cmp(&b.1));
             }
 
             // Collect vector IDs from the `n` nearest clusters.
@@ -277,8 +275,7 @@ impl VectorIndexSearcher for IvfSearcher {
             )?;
 
         // Sort by similarity (descending)
-        candidates
-            .sort_unstable_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.sort_unstable_by(|a, b| b.2.total_cmp(&a.2));
 
         // Take top_k results
         let candidates_len = candidates.len();

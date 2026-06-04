@@ -212,8 +212,7 @@ impl MergeEngine {
     ) -> Result<MergeResult> {
         // Sort by deletion ratio (highest first for better compaction)
         let mut sorted_segments = segments.to_vec();
-        sorted_segments
-            .sort_by(|a, b| b.deletion_ratio().partial_cmp(&a.deletion_ratio()).unwrap());
+        sorted_segments.sort_by(|a, b| b.deletion_ratio().total_cmp(&a.deletion_ratio()));
 
         self.perform_merge(&sorted_segments, new_segment_id)
     }
@@ -251,7 +250,7 @@ impl MergeEngine {
             .collect();
 
         // Sort by composite score (highest first)
-        scored_segments.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        scored_segments.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         let sorted_segments: Vec<_> = scored_segments.into_iter().map(|(seg, _)| seg).collect();
 

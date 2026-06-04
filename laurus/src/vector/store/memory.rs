@@ -2,7 +2,6 @@
 //!
 //! このモジュールはインメモリでベクトルを管理するフィールド実装を提供する。
 
-use std::cmp::Ordering as CmpOrdering;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
@@ -428,7 +427,7 @@ impl VectorFieldReader for InMemoryFieldReader {
         }
 
         let mut hits: Vec<FieldHit> = merged.into_values().collect();
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(CmpOrdering::Equal));
+        hits.sort_by(|a, b| b.score.total_cmp(&a.score));
         if hits.len() > limit {
             hits.truncate(limit);
         }

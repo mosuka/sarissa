@@ -136,19 +136,13 @@ impl Geo3dDistanceQuery {
 
         // Multi-segment readers can produce duplicates; keep the closest.
         matches.sort_by(|a, b| {
-            a.doc_id.cmp(&b.doc_id).then_with(|| {
-                a.distance_m
-                    .partial_cmp(&b.distance_m)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+            a.doc_id
+                .cmp(&b.doc_id)
+                .then_with(|| a.distance_m.total_cmp(&b.distance_m))
         });
         matches.dedup_by_key(|m| m.doc_id);
         // Final order: distance ascending.
-        matches.sort_by(|a, b| {
-            a.distance_m
-                .partial_cmp(&b.distance_m)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        matches.sort_by(|a, b| a.distance_m.total_cmp(&b.distance_m));
 
         Ok(matches)
     }
@@ -718,11 +712,9 @@ impl Geo3dNearestQuery {
             // duplicates) to get an accurate "unique candidates" count.
             let mut deduped = current.hits.clone();
             deduped.sort_by(|a, b| {
-                a.doc_id.cmp(&b.doc_id).then_with(|| {
-                    a.distance_sq
-                        .partial_cmp(&b.distance_sq)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
+                a.doc_id
+                    .cmp(&b.doc_id)
+                    .then_with(|| a.distance_sq.total_cmp(&b.distance_sq))
             });
             deduped.dedup_by_key(|h| h.doc_id);
             let unique_count = deduped.len();
@@ -761,11 +753,7 @@ impl Geo3dNearestQuery {
 
         // Final sort by distance ascending and truncation to top-k.
         let mut hits = visitor.hits;
-        hits.sort_by(|a, b| {
-            a.distance_sq
-                .partial_cmp(&b.distance_sq)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        hits.sort_by(|a, b| a.distance_sq.total_cmp(&b.distance_sq));
         hits.truncate(self.k);
 
         // Normalize scores against the farthest distance in the returned

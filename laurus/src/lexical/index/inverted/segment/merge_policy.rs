@@ -213,7 +213,7 @@ impl MergePolicy for TieredMergePolicy {
         }
 
         // Sort by priority (highest first)
-        all_candidates.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap());
+        all_candidates.sort_by(|a, b| b.priority.total_cmp(&a.priority));
 
         all_candidates
     }
@@ -336,7 +336,7 @@ impl MergePolicy for LogStructuredMergePolicy {
             }
         }
 
-        candidates.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap());
+        candidates.sort_by(|a, b| b.priority.total_cmp(&a.priority));
         candidates
     }
 

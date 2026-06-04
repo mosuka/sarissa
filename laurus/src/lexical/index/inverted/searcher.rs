@@ -814,9 +814,7 @@ impl InvertedIndexSearcher {
             SortField::Score => {
                 // Default behavior: already sorted by score from collector
                 // Re-sort to ensure descending order
-                hits.sort_unstable_by(|a, b| {
-                    b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal)
-                });
+                hits.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
             }
             SortField::Field { name, order } => {
                 // Sort by field value
@@ -853,16 +851,13 @@ impl InvertedIndexSearcher {
             // Same type comparisons
             (Text(a_str), Text(b_str)) => a_str.cmp(b_str),
             (Integer(a_int), Integer(b_int)) => a_int.cmp(b_int),
-            (Float(a_float), Float(b_float)) => {
-                a_float.partial_cmp(b_float).unwrap_or(Ordering::Equal)
-            }
+            (Float(a_float), Float(b_float)) => a_float.total_cmp(b_float),
             (Boolean(a_bool), Boolean(b_bool)) => a_bool.cmp(b_bool),
             (DateTime(a_dt), DateTime(b_dt)) => a_dt.cmp(b_dt),
             (Geo(a), Geo(b)) => a
                 .lat
-                .partial_cmp(&b.lat)
-                .unwrap_or(Ordering::Equal)
-                .then_with(|| a.lon.partial_cmp(&b.lon).unwrap_or(Ordering::Equal)),
+                .total_cmp(&b.lat)
+                .then_with(|| a.lon.total_cmp(&b.lon)),
             (Bytes(_, a_bytes), Bytes(_, b_bytes)) => a_bytes.cmp(b_bytes),
             (Null, Null) => Ordering::Equal,
 
@@ -1259,21 +1254,13 @@ mod tests {
                 .search(LexicalSearchRequest::new(make_query()).limit(usize::MAX))
                 .unwrap();
             let mut hits: Vec<_> = big.hits.into_iter().map(|h| (h.doc_id, h.score)).collect();
-            hits.sort_by(|x, y| {
-                y.1.partial_cmp(&x.1)
-                    .unwrap_or(Ordering::Equal)
-                    .then(x.0.cmp(&y.0))
-            });
+            hits.sort_by(|x, y| y.1.total_cmp(&x.1).then(x.0.cmp(&y.0)));
             hits.truncate(10);
             hits
         };
 
         let mut bmw_hits: Vec<_> = bmw.hits.iter().map(|h| (h.doc_id, h.score)).collect();
-        bmw_hits.sort_by(|x, y| {
-            y.1.partial_cmp(&x.1)
-                .unwrap_or(Ordering::Equal)
-                .then(x.0.cmp(&y.0))
-        });
+        bmw_hits.sort_by(|x, y| y.1.total_cmp(&x.1).then(x.0.cmp(&y.0)));
         assert_eq!(bmw_hits.len(), reference.len(), "result count differs");
         for (idx, (x, y)) in bmw_hits.iter().zip(reference.iter()).enumerate() {
             assert_eq!(x.0, y.0, "rank {idx}: doc_id mismatch");

@@ -312,20 +312,14 @@ impl VectorIndexQueryResults {
 
     /// Sort results by similarity (descending).
     pub fn sort_by_similarity(&mut self) {
-        self.results.sort_by(|a, b| {
-            b.similarity
-                .partial_cmp(&a.similarity)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        self.results
+            .sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
     }
 
     /// Sort results by distance (ascending).
     pub fn sort_by_distance(&mut self) {
-        self.results.sort_by(|a, b| {
-            a.distance
-                .partial_cmp(&b.distance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        self.results
+            .sort_by(|a, b| a.distance.total_cmp(&b.distance));
     }
 
     /// Take the top k results.
@@ -343,11 +337,9 @@ impl VectorIndexQueryResults {
 
     /// Get the best (highest similarity) result.
     pub fn best_result(&self) -> Option<&VectorIndexQueryResult> {
-        self.results.iter().max_by(|a, b| {
-            a.similarity
-                .partial_cmp(&b.similarity)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        self.results
+            .iter()
+            .max_by(|a, b| a.similarity.total_cmp(&b.similarity))
     }
 }
 
