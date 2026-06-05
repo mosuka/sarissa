@@ -36,6 +36,14 @@ sequenceDiagram
     Engine-->>User: Vec of SearchResult
 ```
 
+The lexical and vector searches are independent, so the engine runs them
+concurrently rather than one after the other. Any query embedding is computed
+first (the vector search depends on it), then both searches execute in parallel.
+As a result the hybrid latency is bounded by the *slower* of the two searches
+(`max(lexical, vector)`) instead of their sum, which matters most when both
+sides do substantial work. Fusion is order-independent, so concurrent execution
+returns exactly the same ranked list as a sequential run.
+
 ## Basic Usage
 
 ### Builder API

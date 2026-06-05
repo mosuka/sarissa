@@ -1295,24 +1295,27 @@ impl Engine {
 
         let fetch_count = request_offset.saturating_add(request_limit);
 
-        let lexical_hits = if let Some(query) = &lexical_query_to_use {
+        // Build the lexical request; the search itself runs in parallel below.
+        let lex_req = if let Some(query) = &lexical_query_to_use {
             let q = query.clone_box();
             let overfetch_limit = if vector_search_request.is_some() {
                 fetch_count.saturating_mul(2)
             } else {
                 fetch_count
             };
-            let req = crate::lexical::search::searcher::LexicalSearchRequest::new(q)
-                .limit(overfetch_limit)
-                .load_documents(false);
-
-            self.lexical.search(req)?.hits
+            Some(
+                crate::lexical::search::searcher::LexicalSearchRequest::new(q)
+                    .limit(overfetch_limit)
+                    .load_documents(false),
+            )
         } else {
-            Vec::new()
+            None
         };
 
-        // 2. Execute Vector Search
-        let vector_hits = if let Some(vector_req) = &vector_search_request {
+        // 2. Build the vector request — including the async payload embedding,
+        // which must complete before the (synchronous) search runs in parallel
+        // below.
+        let vec_req = if let Some(vector_req) = &vector_search_request {
             let mut vreq = vector_req.clone();
             if lexical_search_request.is_some() && vreq.params.limit < fetch_count.saturating_mul(2)
             {
@@ -1380,10 +1383,26 @@ impl Engine {
                 vreq.query =
                     crate::vector::search::searcher::VectorSearchQuery::Vectors(query_vectors);
             }
-            self.vector.search(vreq)?.hits
+            Some(vreq)
         } else {
-            Vec::new()
+            None
         };
+
+        // Run the independent lexical and vector searches (#659). On native
+        // builds both synchronous searches overlap via `rayon::join`, so the
+        // hybrid latency drops from `lex + vec` toward `max(lex, vec)`. The
+        // closures take disjoint immutable borrows of `self.lexical` /
+        // `self.vector` plus the moved requests, so they are `Send`. On wasm32
+        // (no rayon) they run sequentially. Fusion below is order-independent,
+        // so the result set is identical either way.
+        let run_lexical = || lex_req.map(|r| self.lexical.search(r)).transpose();
+        let run_vector = || vec_req.map(|r| self.vector.search(r)).transpose();
+        #[cfg(feature = "native")]
+        let (lex_res, vec_res) = rayon::join(run_lexical, run_vector);
+        #[cfg(not(feature = "native"))]
+        let (lex_res, vec_res) = (run_lexical(), run_vector());
+        let lexical_hits = lex_res?.map(|r| r.hits).unwrap_or_default();
+        let vector_hits = vec_res?.map(|r| r.hits).unwrap_or_default();
 
         // 3. Fusion
         if lexical_search_request.is_some() && vector_search_request.is_some() {
