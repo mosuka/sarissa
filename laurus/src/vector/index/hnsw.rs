@@ -16,7 +16,9 @@ use parking_lot::RwLock;
 
 use crate::embedding::embedder::Embedder;
 use crate::error::{LaurusError, Result};
+use crate::maintenance::deletion::DeletionBitmap;
 use crate::storage::Storage;
+use crate::storage::structured::{StructReader, StructWriter};
 use crate::vector::index::config::HnswIndexConfig;
 use crate::vector::index::hnsw::searcher::HnswSearcher;
 use crate::vector::index::hnsw::writer::HnswIndexWriter;
@@ -67,6 +69,15 @@ pub struct HnswIndex {
 
     /// Index metadata (thread-safe).
     metadata: RwLock<IndexMetadata>,
+
+    /// Logical deletion bitmap for this single-segment index (Issue #624).
+    ///
+    /// Lazily loaded from `<name>.delmap` (or created on the first soft
+    /// delete). When present and non-empty it is attached to readers so the
+    /// deletion-aware HNSW traversal (Issue #665) excludes deleted documents
+    /// without rebuilding the graph; [`Self::optimize`] physically reclaims
+    /// them. `None` means "not yet loaded / no deletions".
+    deletion: RwLock<Option<Arc<DeletionBitmap>>>,
 }
 
 impl std::fmt::Debug for HnswIndex {
@@ -95,6 +106,7 @@ impl HnswIndex {
             config,
             closed: AtomicBool::new(false),
             metadata: RwLock::new(metadata),
+            deletion: RwLock::new(None),
         };
 
         index.write_metadata()?;
@@ -123,6 +135,7 @@ impl HnswIndex {
             config,
             closed: AtomicBool::new(false),
             metadata: RwLock::new(metadata),
+            deletion: RwLock::new(None),
         })
     }
 
@@ -188,6 +201,77 @@ impl HnswIndex {
         }
         Ok(())
     }
+
+    /// File name holding this index's deletion bitmap (`<name>.delmap`).
+    fn delmap_file_name(&self) -> String {
+        format!("{}.delmap", self.name)
+    }
+
+    /// Resolve this index's deletion bitmap (Issue #624).
+    ///
+    /// Returns the cached bitmap if present; otherwise loads it from
+    /// `<name>.delmap` when that file exists. When `create_if_missing` is
+    /// `true` and no bitmap exists yet, a fresh empty bitmap is created and
+    /// cached. The returned `Arc` shares interior mutability with the cached
+    /// instance, so callers see subsequent marks.
+    ///
+    /// The bitmap is created with an unbounded id range (`[0, u64::MAX - 1]`)
+    /// because the single-segment index has no fixed doc-id span; the range
+    /// check is therefore a no-op and `total_docs` is not used (compaction is
+    /// driven explicitly by [`Self::optimize`], not by deletion ratio).
+    ///
+    /// # Arguments
+    ///
+    /// * `create_if_missing` - Create and cache an empty bitmap when none exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading an existing `.delmap` file fails.
+    fn load_or_get_bitmap(&self, create_if_missing: bool) -> Result<Option<Arc<DeletionBitmap>>> {
+        if let Some(bitmap) = self.deletion.read().as_ref() {
+            return Ok(Some(bitmap.clone()));
+        }
+
+        let mut guard = self.deletion.write();
+        // Re-check under the write lock in case another thread populated it.
+        if let Some(bitmap) = guard.as_ref() {
+            return Ok(Some(bitmap.clone()));
+        }
+
+        let file = self.delmap_file_name();
+        if self.storage.file_exists(&file) {
+            let input = self.storage.open_input(&file)?;
+            let mut reader = StructReader::new(input)?;
+            let bitmap = Arc::new(DeletionBitmap::read_from_storage(&mut reader)?);
+            *guard = Some(bitmap.clone());
+            return Ok(Some(bitmap));
+        }
+
+        if create_if_missing {
+            let bitmap = Arc::new(DeletionBitmap::new(self.name.clone(), 0, u64::MAX - 1));
+            *guard = Some(bitmap.clone());
+            return Ok(Some(bitmap));
+        }
+
+        Ok(None)
+    }
+
+    /// Drop all logical deletions and remove the `.delmap` file (Issue #624).
+    ///
+    /// Called after [`Self::optimize`] has physically rebuilt the graph
+    /// without the deleted documents.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deleting the `.delmap` file fails.
+    fn clear_deletions(&self) -> Result<()> {
+        *self.deletion.write() = None;
+        let file = self.delmap_file_name();
+        if self.storage.file_exists(&file) {
+            self.storage.delete_file(&file)?;
+        }
+        Ok(())
+    }
 }
 
 impl VectorIndex for HnswIndex {
@@ -196,11 +280,18 @@ impl VectorIndex for HnswIndex {
 
         use crate::vector::index::hnsw::reader::HnswIndexReader;
 
-        let reader = HnswIndexReader::load(
+        let mut reader = HnswIndexReader::load(
             self.storage.clone(),
             &self.name,
             self.config.distance_metric,
         )?;
+        // Attach the logical-deletion bitmap so the deletion-aware traversal
+        // (Issue #665) excludes soft-deleted documents (Issue #624).
+        if let Some(bitmap) = self.load_or_get_bitmap(false)?
+            && bitmap.deleted_count.load(Ordering::Relaxed) > 0
+        {
+            reader.set_deletion_bitmap(bitmap);
+        }
         Ok(Arc::new(reader))
     }
 
@@ -252,6 +343,35 @@ impl VectorIndex for HnswIndex {
 
     fn optimize(&self) -> Result<()> {
         self.check_closed()?;
+
+        // Physically reclaim soft-deleted documents (Issue #624). Reuse the
+        // writer's existing full-rebuild path: load the current graph +
+        // vectors, drop the deleted ids (this removes them from the buffer and
+        // invalidates the graph), then commit to rebuild a clean graph without
+        // them. The expensive rebuild happens here (intentional compaction),
+        // not on every delete.
+        let deleted: Vec<u64> = match self.load_or_get_bitmap(false)? {
+            Some(bitmap) if bitmap.deleted_count.load(Ordering::Relaxed) > 0 => {
+                bitmap.get_deleted_docs()
+            }
+            _ => {
+                self.update_metadata()?;
+                return Ok(());
+            }
+        };
+
+        let mut writer = HnswIndexWriter::with_storage(
+            self.config.clone(),
+            VectorIndexWriterConfig::default(),
+            self.name.clone(),
+            self.storage.clone(),
+        )?;
+        for doc_id in &deleted {
+            writer.delete_document(*doc_id)?;
+        }
+        writer.commit()?;
+
+        self.clear_deletions()?;
         self.update_metadata()?;
         Ok(())
     }
@@ -271,6 +391,33 @@ impl VectorIndex for HnswIndex {
 
     fn embedder(&self) -> Arc<dyn Embedder> {
         Arc::clone(&self.config.embedder)
+    }
+
+    fn supports_soft_delete(&self) -> bool {
+        true
+    }
+
+    fn soft_delete_document(&self, doc_id: u64) -> Result<()> {
+        self.check_closed()?;
+        let bitmap = self
+            .load_or_get_bitmap(true)?
+            .ok_or_else(|| LaurusError::internal("deletion bitmap unexpectedly missing"))?;
+        bitmap.delete_document(doc_id)?;
+        Ok(())
+    }
+
+    fn persist_deletions(&self) -> Result<()> {
+        let guard = self.deletion.read();
+        if let Some(bitmap) = guard.as_ref()
+            && bitmap.deleted_count.load(Ordering::Relaxed) > 0
+        {
+            let file = self.delmap_file_name();
+            let output = self.storage.create_output(&file)?;
+            let mut writer = StructWriter::new(output);
+            bitmap.write_to_storage(&mut writer)?;
+            writer.close()?;
+        }
+        Ok(())
     }
 }
 #[cfg(test)]
