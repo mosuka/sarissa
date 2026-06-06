@@ -217,6 +217,10 @@ name = "vector_indexing_bench"
 harness = false
 
 [[bench]]
+name = "vector_delete_bench"
+harness = false
+
+[[bench]]
 name = "hybrid_search_bench"
 harness = false
 

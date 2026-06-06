@@ -292,6 +292,19 @@ impl VectorStore {
     /// Returns an error if obtaining/creating the writer fails or if the
     /// underlying delete operation fails.
     pub async fn delete_document_by_internal_id(&self, doc_id: u64) -> Result<()> {
+        // Prefer logical (soft) deletion when the index supports it (Issue
+        // #624): mark the deletion bitmap and invalidate the searcher cache so
+        // the next search filters the document out via the deletion-aware
+        // traversal (Issue #665). This avoids the full graph rebuild that the
+        // writer-side delete triggers, and applies equally to updates (the
+        // engine deletes the old internal id, which is monotonic and never
+        // reused, before adding the new version).
+        if self.index.supports_soft_delete() {
+            self.index.soft_delete_document(doc_id)?;
+            *self.searcher_cache.write() = None;
+            return Ok(());
+        }
+
         let mut guard = self.writer_cache.lock().await;
         if guard.is_none() {
             *guard = Some(self.index.writer()?);
@@ -321,6 +334,10 @@ impl VectorStore {
             // commit() calls finalize() then write() to persist to storage
             writer.commit()?;
         }
+        // Persist any pending logical deletions (Issue #624) so the deletion
+        // bitmap survives restarts. The WAL also records deletions, so this is
+        // a durability optimization rather than the source of truth.
+        self.index.persist_deletions()?;
         // Sync storage to ensure all file metadata (creation, rename, size) is
         // flushed to disk. This is critical on Windows where directory listings
         // and file visibility may be cached until the directory is synced.

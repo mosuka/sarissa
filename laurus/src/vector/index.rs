@@ -120,6 +120,51 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     fn set_last_wal_seq(&self, _seq: u64) -> Result<()> {
         Ok(())
     }
+
+    /// Whether this index supports logical (soft) deletion.
+    ///
+    /// When `true`, callers should route deletions through
+    /// [`Self::soft_delete_document`] (mark a deletion bitmap, filtered at
+    /// search time, physically reclaimed by [`Self::optimize`]) instead of the
+    /// writer-side deletion path that rebuilds the whole index. Defaults to
+    /// `false`, so existing index types keep their current behaviour.
+    fn supports_soft_delete(&self) -> bool {
+        false
+    }
+
+    /// Logically delete a document by its internal ID (Issue #624).
+    ///
+    /// Marks `doc_id` in the index's deletion bitmap so that subsequent
+    /// searches exclude it, without rebuilding the underlying graph. The
+    /// vector is physically removed only by a later [`Self::optimize`]
+    /// (compaction). Implementations must persist durably no later than the
+    /// next [`Self::persist_deletions`] call.
+    ///
+    /// # Arguments
+    ///
+    /// * `doc_id` - The internal document ID to mark as deleted.
+    ///
+    /// # Errors
+    ///
+    /// The default implementation returns an error because soft deletion is
+    /// unsupported; callers should gate on [`Self::supports_soft_delete`].
+    fn soft_delete_document(&self, _doc_id: u64) -> Result<()> {
+        Err(crate::error::LaurusError::InvalidOperation(
+            "soft deletion is not supported by this index".to_string(),
+        ))
+    }
+
+    /// Persist any pending logical deletions to storage (Issue #624).
+    ///
+    /// Called by the store on commit so the deletion bitmap survives restarts.
+    /// Defaults to a no-op for indexes that do not buffer soft deletions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing the deletion bitmap to storage fails.
+    fn persist_deletions(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Statistics about a vector index.

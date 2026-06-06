@@ -24,6 +24,12 @@ graph LR
 2. The bitmap is checked during every search, filtering out deleted documents from results
 3. The original data remains in the segment files
 
+This applies uniformly to the **lexical** and **vector (HNSW)** indexes. For HNSW the
+deleted node stays in the graph — its vector is still used to keep the graph connected —
+but the [deletion-aware traversal](../concepts/search/vector_search.md) excludes it from
+results. A delete therefore never rebuilds the graph; the cost is the same O(1) bitmap
+mark regardless of index size. Physical reclamation happens later, during compaction.
+
 ### Why Logical Deletion?
 
 | Benefit | Description |
