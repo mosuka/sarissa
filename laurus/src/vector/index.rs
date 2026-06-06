@@ -165,6 +165,22 @@ pub trait VectorIndex: Send + Sync + std::fmt::Debug {
     fn persist_deletions(&self) -> Result<()> {
         Ok(())
     }
+
+    /// Compact the index automatically if the deletion ratio warrants it (Issue
+    /// #782).
+    ///
+    /// Called by the store after a commit. Implementations that buffer logical
+    /// deletions (Issue #624) should physically reclaim them via
+    /// [`Self::optimize`] when the deleted fraction crosses their configured
+    /// threshold, so tombstones do not accumulate unboundedly. Returns whether
+    /// a compaction actually ran. Defaults to a no-op (`Ok(false)`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the triggered compaction fails.
+    fn maybe_auto_compact(&self) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 /// Statistics about a vector index.

@@ -256,6 +256,32 @@ impl HnswIndex {
         Ok(None)
     }
 
+    /// Number of vectors in the committed graph, including logically deleted
+    /// ones (Issue #782).
+    ///
+    /// Read cheaply from the leading `u64` of `<name>.hnsw` (the same vector
+    /// count the reader loads, `hnsw/reader.rs`) without materializing the
+    /// graph. Returns `0` when no segment has been written yet. Deleted nodes
+    /// remain in the graph until compaction, so this is the correct denominator
+    /// for the deletion ratio (the `DeletionBitmap`'s synthetic `total_docs` is
+    /// not).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the segment file exists but cannot be read.
+    fn committed_node_count(&self) -> Result<u64> {
+        use std::io::Read;
+
+        let file = format!("{}.hnsw", self.name);
+        if !self.storage.file_exists(&file) {
+            return Ok(0);
+        }
+        let mut input = self.storage.open_input(&file)?;
+        let mut buf = [0u8; 8];
+        input.read_exact(&mut buf)?;
+        Ok(u64::from_le_bytes(buf))
+    }
+
     /// Drop all logical deletions and remove the `.delmap` file (Issue #624).
     ///
     /// Called after [`Self::optimize`] has physically rebuilt the graph
@@ -418,6 +444,31 @@ impl VectorIndex for HnswIndex {
             writer.close()?;
         }
         Ok(())
+    }
+
+    fn maybe_auto_compact(&self) -> Result<bool> {
+        if !self.config.auto_compaction {
+            return Ok(false);
+        }
+        let deleted = match self.load_or_get_bitmap(false)? {
+            Some(bitmap) => bitmap.deleted_count.load(Ordering::Relaxed),
+            None => 0,
+        };
+        if deleted == 0 {
+            return Ok(false);
+        }
+        // Denominator is the committed graph size (deleted nodes still live in
+        // the graph until compaction), not the bitmap's synthetic `total_docs`.
+        let total = self.committed_node_count()?;
+        if total == 0 {
+            return Ok(false);
+        }
+        let ratio = deleted as f64 / total as f64;
+        if ratio >= self.config.compaction_threshold {
+            self.optimize()?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 }
 #[cfg(test)]

@@ -101,6 +101,16 @@ graph LR
 - **High-write workloads**: Compact when the deletion ratio exceeds a threshold
 - **After bulk updates**: Compact after a large batch of upserts
 
+### Automatic Compaction
+
+For the HNSW vector index, compaction can run automatically. When
+`DeletionConfig::auto_compaction` is enabled (the default), `commit()` checks
+the deletion ratio (deleted nodes / total committed nodes) and triggers
+compaction once it reaches `DeletionConfig::compaction_threshold` (default
+`0.3`). Compaction resets the ratio to zero, so it does not re-fire until
+deletions accumulate again — bounding tombstone growth without a manual
+`optimize()`. Set `auto_compaction` to `false` to manage compaction yourself.
+
 ## Deletion Bitmap
 
 The deletion bitmap tracks which internal IDs have been deleted:

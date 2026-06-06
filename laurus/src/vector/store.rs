@@ -139,6 +139,10 @@ impl VectorStore {
                         m: opt.m,
                         ef_construction: opt.ef_construction,
                         default_ef_search: opt.default_ef_search,
+                        // Wire the deletion config's compaction policy into the
+                        // index so commit can auto-compact (Issue #782).
+                        auto_compaction: config.deletion_config.auto_compaction,
+                        compaction_threshold: config.deletion_config.compaction_threshold,
                         embedder: config.embedder.clone(),
                         ..Default::default()
                     }),
@@ -156,6 +160,8 @@ impl VectorStore {
 
         // Default to HNSW with config's embedder
         VectorIndexTypeConfig::HNSW(HnswIndexConfig {
+            auto_compaction: config.deletion_config.auto_compaction,
+            compaction_threshold: config.deletion_config.compaction_threshold,
             embedder: config.embedder.clone(),
             ..Default::default()
         })
@@ -338,6 +344,11 @@ impl VectorStore {
         // bitmap survives restarts. The WAL also records deletions, so this is
         // a durability optimization rather than the source of truth.
         self.index.persist_deletions()?;
+        // Automatically compact when the deletion ratio crosses the configured
+        // threshold (Issue #782), so logically deleted vectors are physically
+        // reclaimed rather than accumulating indefinitely. A no-op unless the
+        // index supports it and `auto_compaction` is enabled.
+        self.index.maybe_auto_compact()?;
         // Sync storage to ensure all file metadata (creation, rename, size) is
         // flushed to disk. This is critical on Windows where directory listings
         // and file visibility may be cached until the directory is synced.
