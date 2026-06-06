@@ -30,6 +30,7 @@ sequenceDiagram
 2. **Buffered writes**: In-memory buffers accumulate changes until `commit()` is called
 3. **Atomic commit**: `commit()` flushes all buffered changes to segment files and truncates the WAL
 4. **Crash safety**: If the process crashes between writes and commit, the WAL is replayed on the next startup
+5. **Atomic file writes**: Segment files (e.g. the HNSW `.hnsw` graph, its metadata, and the deletion bitmap) are written to a temporary file and atomically renamed into place, so a crash mid-write leaves the previously committed file intact rather than a truncated one
 
 ## Write-Ahead Log (WAL)
 

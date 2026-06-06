@@ -1154,9 +1154,12 @@ impl VectorIndexWriter for HnswIndexWriter {
             .as_ref()
             .ok_or_else(|| LaurusError::InvalidOperation("No storage configured".to_string()))?;
 
-        // Create the index file
+        // Write to a temp file and atomically rename into place (Issue #784)
+        // so a crash mid-write leaves the previously committed `.hnsw` intact
+        // instead of a truncated, unreadable segment.
         let file_name = format!("{}.hnsw", self.path);
-        let mut output = storage.create_output(&file_name)?;
+        let tmp_name = format!("{}.hnsw.tmp", self.path);
+        let mut output = storage.create_output(&tmp_name)?;
 
         // Write metadata (vector count as u64 to avoid truncation)
         output.write_all(&(self.vectors.len() as u64).to_le_bytes())?;
@@ -1331,6 +1334,7 @@ impl VectorIndexWriter for HnswIndexWriter {
 
         output.flush()?;
         drop(output);
+        storage.rename_file(&tmp_name, &file_name)?;
 
         // Stage 2 (Issue #481): emit the optional LRS1 rerank sidecar
         // alongside the main int8 segment. The sidecar's payload order
@@ -1340,8 +1344,10 @@ impl VectorIndexWriter for HnswIndexWriter {
         // only when explicitly enabled per field; absence keeps Stage 1
         // (int8-only) behavior intact.
         if let Some(rerank_kind) = self.index_config.rerank_storage {
+            // Same temp-then-rename atomicity for the rerank sidecar (#784).
             let sidecar_name = format!("{}.f32", file_name);
-            let mut sidecar_out = storage.create_output(&sidecar_name)?;
+            let sidecar_tmp = format!("{}.f32.tmp", file_name);
+            let mut sidecar_out = storage.create_output(&sidecar_tmp)?;
             let mut payload: Vec<f32> =
                 Vec::with_capacity(sorted_vectors.len() * self.index_config.dimension);
             for (_, _, v) in &sorted_vectors {
@@ -1354,6 +1360,8 @@ impl VectorIndexWriter for HnswIndexWriter {
                 &payload,
             )?;
             sidecar_out.flush()?;
+            drop(sidecar_out);
+            storage.rename_file(&sidecar_tmp, &sidecar_name)?;
         }
 
         Ok(())
