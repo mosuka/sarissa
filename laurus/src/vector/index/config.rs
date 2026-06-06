@@ -473,6 +473,24 @@ pub struct HnswIndexConfig {
     /// Maximum number of segments before merging.
     pub max_segments: u32,
 
+    /// Automatically compact (purge logically deleted vectors) on commit when
+    /// the deletion ratio crosses [`Self::compaction_threshold`] (Issue #782).
+    ///
+    /// Deletions are logical (Issue #624): the node stays in the HNSW graph and
+    /// is filtered at search time until compaction rebuilds the graph without
+    /// it. When `true`, `commit()` triggers that rebuild automatically once
+    /// enough of the index is deleted, so tombstones do not accumulate
+    /// unboundedly. Defaults to `false` here; the `VectorStore` populates it
+    /// from [`crate::maintenance::deletion::DeletionConfig::auto_compaction`].
+    #[serde(default)]
+    pub auto_compaction: bool,
+
+    /// Deletion ratio (deleted / total committed nodes, `0.0`–`1.0`) at or above
+    /// which [`Self::auto_compaction`] triggers a compaction on commit (Issue
+    /// #782). Ignored when `auto_compaction` is `false`.
+    #[serde(default = "default_compaction_threshold")]
+    pub compaction_threshold: f64,
+
     /// Embedder for converting text/images to vectors.
     ///
     /// This embedder is used when documents contain text or image fields that need to be
@@ -481,6 +499,15 @@ pub struct HnswIndexConfig {
     #[serde(skip)]
     #[serde(default = "default_embedder")]
     pub embedder: Arc<dyn Embedder>,
+}
+
+/// Default deletion ratio threshold for auto-compaction (Issue #782).
+///
+/// Mirrors [`crate::maintenance::deletion::DeletionConfig`]'s default so a
+/// `HnswIndexConfig` deserialized from an older on-disk layout (without the
+/// field) behaves like a freshly configured one.
+fn default_compaction_threshold() -> f64 {
+    0.3
 }
 
 impl Default for HnswIndexConfig {
@@ -501,6 +528,8 @@ impl Default for HnswIndexConfig {
             rerank_storage: None,
             merge_factor: 10,
             max_segments: 100,
+            auto_compaction: false,
+            compaction_threshold: default_compaction_threshold(),
             embedder: default_embedder(),
         }
     }
@@ -523,6 +552,8 @@ impl std::fmt::Debug for HnswIndexConfig {
             .field("rerank_storage", &self.rerank_storage)
             .field("merge_factor", &self.merge_factor)
             .field("max_segments", &self.max_segments)
+            .field("auto_compaction", &self.auto_compaction)
+            .field("compaction_threshold", &self.compaction_threshold)
             .field("embedder", &self.embedder.name())
             .finish()
     }

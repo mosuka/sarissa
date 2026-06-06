@@ -112,7 +112,13 @@ fn make_config() -> VectorIndexConfig {
         embedder: Arc::new(MockEmbedder { dimension: DIM }),
         default_fields: vec!["vec".to_string()],
         metadata: HashMap::new(),
-        deletion_config: laurus::DeletionConfig::default(),
+        // These tests exercise the manual soft-delete + explicit-optimize
+        // lifecycle (#624), so disable auto-compaction (#782) — otherwise the
+        // 33%-deletion commits would purge the bitmap before the assertions.
+        deletion_config: laurus::DeletionConfig {
+            auto_compaction: false,
+            ..Default::default()
+        },
         shard_id: 0,
         metadata_config: LexicalIndexConfig::default(),
     }
