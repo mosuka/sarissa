@@ -1159,7 +1159,10 @@ impl VectorIndexWriter for HnswIndexWriter {
         // instead of a truncated, unreadable segment.
         let file_name = format!("{}.hnsw", self.path);
         let tmp_name = format!("{}.hnsw.tmp", self.path);
-        let mut output = storage.create_output(&tmp_name)?;
+        // Wrap the output so a CRC-32 accumulates over the segment bytes as
+        // they are written; a checksum footer is appended below (Issue #786).
+        let mut output =
+            crate::storage::checksum::CrcWriter::new(storage.create_output(&tmp_name)?);
 
         // Write metadata (vector count as u64 to avoid truncation)
         output.write_all(&(self.vectors.len() as u64).to_le_bytes())?;
@@ -1332,6 +1335,11 @@ impl VectorIndexWriter for HnswIndexWriter {
             output.write_all(&[has_graph])?;
         }
 
+        // Append the CRC-32 footer (magic + checksum over all preceding bytes)
+        // so a corrupted segment is rejected on load (Issue #786).
+        let content_crc = output.checksum();
+        output.write_all(&crate::vector::index::hnsw::HNSW_FOOTER_MAGIC.to_le_bytes())?;
+        output.write_all(&content_crc.to_le_bytes())?;
         output.flush()?;
         drop(output);
         storage.rename_file(&tmp_name, &file_name)?;

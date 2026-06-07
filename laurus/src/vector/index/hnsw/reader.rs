@@ -90,6 +90,56 @@ impl HnswIndexReader {
         ))
     }
 
+    /// Verify the CRC-32 footer of a `.hnsw` segment if present (Issue #786).
+    ///
+    /// New segments end with `[magic u32][crc-32 u32]` over all preceding
+    /// bytes (written via [`crate::storage::checksum::CrcWriter`]). The footer
+    /// is detected by the magic at `size - 8`; legacy segments without it skip
+    /// verification (back-compat). On a present footer the CRC over the
+    /// content is recomputed and compared. The input is left rewound to the
+    /// start so the caller's structural parse runs unchanged.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - The opened `.hnsw` segment stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LaurusError::index`] if a footer is present but its checksum
+    /// does not match the content (corruption), or on I/O failure.
+    fn verify_checksum_footer(input: &mut dyn crate::storage::StorageInput) -> Result<()> {
+        use std::io::{Read, SeekFrom};
+
+        let size = input.size()?;
+        if size >= crate::vector::index::hnsw::HNSW_FOOTER_LEN {
+            let content_len = size - crate::vector::index::hnsw::HNSW_FOOTER_LEN;
+            input.seek(SeekFrom::Start(content_len))?;
+            let mut footer = [0u8; 8];
+            input.read_exact(&mut footer)?;
+            let magic = u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]]);
+            if magic == crate::vector::index::hnsw::HNSW_FOOTER_MAGIC {
+                let stored = u32::from_le_bytes([footer[4], footer[5], footer[6], footer[7]]);
+                input.seek(SeekFrom::Start(0))?;
+                let mut crc_in = crate::storage::checksum::CrcReader::new(&mut *input);
+                let mut remaining = content_len;
+                let mut buf = [0u8; 64 * 1024];
+                while remaining > 0 {
+                    let want = remaining.min(buf.len() as u64) as usize;
+                    crc_in.read_exact(&mut buf[..want])?;
+                    remaining -= want as u64;
+                }
+                let computed = crc_in.checksum();
+                if computed != stored {
+                    return Err(LaurusError::index(
+                        "HNSW segment checksum mismatch: .hnsw file is corrupted",
+                    ));
+                }
+            }
+        }
+        input.seek(SeekFrom::Start(0))?;
+        Ok(())
+    }
+
     /// Load an HNSW vector index from storage.
     ///
     /// # Arguments
@@ -115,6 +165,13 @@ impl HnswIndexReader {
         // Open the index file
         let file_name = format!("{}.hnsw", path);
         let mut input = storage.open_input(&file_name)?;
+
+        // Verify the CRC-32 footer if present (Issue #786), then rewind. This
+        // is an independent sequential pass that does not touch the structural
+        // parse below (which stops at the end of the graph and never reads the
+        // trailing footer), so it works for every loading mode and leaves
+        // legacy footer-less segments untouched.
+        Self::verify_checksum_footer(&mut *input)?;
 
         // Read metadata (vector count stored as u64)
         let mut num_vectors_buf = [0u8; 8];
