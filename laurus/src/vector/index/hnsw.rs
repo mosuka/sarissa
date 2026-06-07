@@ -170,9 +170,13 @@ impl HnswIndex {
             .map_err(|e| LaurusError::index(format!("Failed to serialize metadata: {e}")))?;
         drop(metadata);
 
-        let mut output = self.storage.create_output("metadata.json")?;
+        // Write to a temp file and atomically rename into place (Issue #784)
+        // so a crash mid-write leaves the previous metadata intact.
+        let mut output = self.storage.create_output("metadata.json.tmp")?;
         std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
         output.close()?;
+        self.storage
+            .rename_file("metadata.json.tmp", "metadata.json")?;
 
         Ok(())
     }
@@ -438,10 +442,14 @@ impl VectorIndex for HnswIndex {
             && bitmap.deleted_count.load(Ordering::Relaxed) > 0
         {
             let file = self.delmap_file_name();
-            let output = self.storage.create_output(&file)?;
+            // Temp-then-rename for crash safety (Issue #784); the payload is
+            // already CRC-32 protected by `StructWriter` (Issue #684).
+            let tmp = format!("{file}.tmp");
+            let output = self.storage.create_output(&tmp)?;
             let mut writer = StructWriter::new(output);
             bitmap.write_to_storage(&mut writer)?;
             writer.close()?;
+            self.storage.rename_file(&tmp, &file)?;
         }
         Ok(())
     }
