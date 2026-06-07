@@ -28,6 +28,24 @@ use crate::vector::search::searcher::VectorIndexSearcher;
 use crate::vector::store::embedding_writer::EmbeddingVectorIndexWriter;
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
 
+/// Magic marker for the CRC-framed `metadata.json` layout (Issue #786).
+///
+/// A new `metadata.json` is written through [`StructWriter`] as
+/// `[magic u32][json bytes][crc-32 trailer]`. The magic lets the reader tell a
+/// checksummed file from a legacy raw-JSON one (which starts with `{`), so old
+/// indexes keep loading without migration.
+const METADATA_MAGIC: u32 = 0x4C4D_4431; // "LMD1"
+
+/// Magic marker for the CRC-32 footer appended to a `.hnsw` segment (Issue #786).
+///
+/// New segments end with `[magic u32][crc-32 u32]` over all preceding bytes.
+/// The footer is detected by file size (legacy segments have none), so old
+/// `.hnsw` files still load.
+pub(crate) const HNSW_FOOTER_MAGIC: u32 = 0x4C56_4331; // "LVC1"
+
+/// Byte length of the `.hnsw` CRC footer (`magic u32` + `crc u32`).
+pub(crate) const HNSW_FOOTER_LEN: u64 = 8;
+
 /// Metadata for the HNSW index.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct IndexMetadata {
@@ -170,11 +188,15 @@ impl HnswIndex {
             .map_err(|e| LaurusError::index(format!("Failed to serialize metadata: {e}")))?;
         drop(metadata);
 
-        // Write to a temp file and atomically rename into place (Issue #784)
-        // so a crash mid-write leaves the previous metadata intact.
-        let mut output = self.storage.create_output("metadata.json.tmp")?;
-        std::io::Write::write_all(&mut output, metadata_json.as_bytes())?;
-        output.close()?;
+        // CRC-frame the JSON via StructWriter (Issue #786) and write it to a
+        // temp file, then atomically rename into place (Issue #784): a crash
+        // mid-write leaves the previous metadata intact, and a corrupted file
+        // is rejected on load.
+        let output = self.storage.create_output("metadata.json.tmp")?;
+        let mut writer = StructWriter::new(output);
+        writer.write_u32(METADATA_MAGIC)?;
+        writer.write_bytes(metadata_json.as_bytes())?;
+        writer.close()?;
         self.storage
             .rename_file("metadata.json.tmp", "metadata.json")?;
 
@@ -182,11 +204,31 @@ impl HnswIndex {
     }
 
     /// Read metadata from storage.
+    ///
+    /// Reads the CRC-framed layout (Issue #786) and verifies the checksum,
+    /// falling back to the legacy raw-JSON format for pre-existing files so old
+    /// indexes keep loading.
     fn read_metadata(storage: &dyn Storage, _: &str) -> Result<IndexMetadata> {
         let input = storage.open_input("metadata.json")?;
-        let metadata: IndexMetadata = serde_json::from_reader(input)
-            .map_err(|e| LaurusError::index(format!("Failed to deserialize metadata: {e}")))?;
-        Ok(metadata)
+        let mut reader = StructReader::new(input)?;
+        if let Ok(magic) = reader.read_u32()
+            && magic == METADATA_MAGIC
+        {
+            let bytes = reader.read_bytes()?;
+            if !reader.verify_checksum()? {
+                return Err(LaurusError::index(
+                    "metadata.json checksum mismatch: file is corrupted",
+                ));
+            }
+            return serde_json::from_slice(&bytes)
+                .map_err(|e| LaurusError::index(format!("Failed to deserialize metadata: {e}")));
+        }
+
+        // Legacy raw-JSON metadata (written before Issue #786): reopen and read
+        // directly.
+        let input = storage.open_input("metadata.json")?;
+        serde_json::from_reader(input)
+            .map_err(|e| LaurusError::index(format!("Failed to deserialize metadata: {e}")))
     }
 
     /// Update metadata.
