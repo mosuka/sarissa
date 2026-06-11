@@ -291,6 +291,8 @@ offset  size  field
     16     4  dim           u32 LE
     20     4  vector_count  u32 LE
     24     -  payload       vector_count * dim * bytes_per_element
+   end     8  footer        magic "LRC1" u32 LE + CRC-32 u32 LE
+                             over header + payload
 ```
 
 Vectors are written in the same `(doc_id, field_name)` order as the
@@ -300,6 +302,15 @@ mapping is the identity. The HNSW reader loads the sidecar into a
 Eager; Lazy mode skips the sidecar to honor its memory-savings
 promise (Stage 2 segments opened in Lazy mode silently degrade to
 Stage 1).
+
+New sidecars end with an 8-byte CRC-32 footer over the header and
+payload that is verified whenever the sidecar is read (both the
+searcher load and the writer reload), so silent on-disk corruption is
+rejected instead of skewing rerank scores. Because the header fully
+determines the content length, the footer is detected by the bytes
+remaining after the payload — sidecars written before the footer was
+introduced have zero trailing bytes and still load, with verification
+skipped.
 
 #### Recall vs speed trade-off
 

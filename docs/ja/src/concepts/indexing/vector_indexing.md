@@ -294,6 +294,8 @@ offset  size  field
     16     4  dim           u32 LE
     20     4  vector_count  u32 LE
     24     -  payload       vector_count * dim * bytes_per_element
+   end     8  footer        magic "LRC1" u32 LE + CRC-32 u32 LE
+                             （header + payload が対象）
 ```
 
 ベクトルは LVS1 セグメントと同じ `(doc_id, field_name)` 順で書かれる
@@ -303,6 +305,14 @@ offset  size  field
 memory savings の前提を尊重するため sidecar 読み込みをスキップします
 （Lazy mode で開いた Stage 2 セグメントは silent に Stage 1 へ
 degrade します）。
+
+新しい sidecar は末尾に header + payload を対象とする 8 バイトの
+CRC-32 footer を持ち、sidecar を読むすべての経路（searcher のロードと
+writer の再ロード）で検証されます。これにより、ディスク上の静かな破損
+が rerank スコアを歪める代わりに拒否されます。header からコンテンツ長
+が一意に決まるため、footer は payload の後ろに残っているバイト数で
+検出されます — footer 導入前に書かれた sidecar は末尾バイトがゼロ
+なのでそのままロードでき、検証はスキップされます。
 
 #### recall と速度の trade-off
 
