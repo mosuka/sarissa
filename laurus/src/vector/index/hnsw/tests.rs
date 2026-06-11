@@ -426,6 +426,88 @@ fn writer_load_round_trips_byte_exact_via_sidecar() -> Result<()> {
     Ok(())
 }
 
+/// A corrupted sidecar must fail `HnswIndexWriter::load` (Issue #788).
+///
+/// This is the anti-laundering guarantee: if the writer-reload path
+/// accepted a corrupted sidecar, the broken f32 values would enter the
+/// writer's in-memory state and be re-emitted with a fresh, valid CRC
+/// on the next commit — silently converting detectable corruption into
+/// undetectable corruption.
+#[test]
+fn writer_load_rejects_corrupted_sidecar() -> Result<()> {
+    use std::io::{Read, Write};
+
+    let storage = StorageFactory::create(StorageConfig::Memory(MemoryStorageConfig::default()))?;
+    let config = HnswIndexConfig {
+        dimension: 4,
+        m: 4,
+        ef_construction: 16,
+        distance_metric: DistanceMetric::Cosine,
+        normalize_vectors: false,
+        rerank_storage: Some(RerankStorageKind::F32),
+        ..Default::default()
+    };
+    {
+        let mut writer = HnswIndexWriter::with_storage(
+            config.clone(),
+            VectorIndexWriterConfig::default(),
+            "stage2_corrupt",
+            Arc::clone(&storage),
+        )?;
+        writer.add_vectors(vec![
+            (1u64, "f".to_string(), Vector::new(vec![1.0, 0.0, 0.0, 0.0])),
+            (2u64, "f".to_string(), Vector::new(vec![0.0, 1.0, 0.0, 0.0])),
+        ])?;
+        writer.finalize()?;
+        writer.write()?;
+    }
+
+    // Flip one byte in the middle of the sidecar payload.
+    let sidecar_name = "stage2_corrupt.hnsw.f32";
+    let mut bytes = Vec::new();
+    storage
+        .open_input(sidecar_name)?
+        .read_to_end(&mut bytes)
+        .map_err(crate::error::LaurusError::from)?;
+    let payload_mid = crate::vector::index::rerank_sidecar::HEADER_SIZE
+        + (bytes.len()
+            - crate::vector::index::rerank_sidecar::HEADER_SIZE
+            - crate::vector::index::rerank_sidecar::FOOTER_SIZE)
+            / 2;
+    bytes[payload_mid] ^= 0xff;
+    let mut out = storage.create_output(sidecar_name)?;
+    out.write_all(&bytes)
+        .map_err(crate::error::LaurusError::from)?;
+    out.close()?;
+
+    let result = HnswIndexWriter::load(
+        config,
+        VectorIndexWriterConfig::default(),
+        Arc::clone(&storage),
+        "stage2_corrupt",
+    );
+    // Pin the failure to the CRC check: the load path also has
+    // dim/count-mismatch (InvalidOperation) and Io exits right after
+    // read_sidecar, and those must not satisfy this test.
+    match result {
+        Err(crate::error::LaurusError::Index(msg)) => {
+            assert!(
+                msg.contains("checksum mismatch"),
+                "expected a checksum mismatch, got: {msg}"
+            );
+        }
+        Err(other) => panic!(
+            "a corrupted .hnsw.f32 must fail the writer reload path \
+             with a checksum error, got {other:?}"
+        ),
+        Ok(_) => panic!(
+            "a corrupted .hnsw.f32 must be rejected by the writer \
+             reload path, got Ok"
+        ),
+    }
+    Ok(())
+}
+
 #[test]
 fn test_hnsw_pq_search_returns_corpus_neighbour() -> Result<()> {
     use crate::vector::core::quantization::QuantizationMethod;
