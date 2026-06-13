@@ -193,6 +193,18 @@ message QuantizationConfig {
   uint32 subvector_count = 2;
 }
 
+// Stage-2 rerank sidecar storage kind (Issue #481 / #793). Mirrors
+// laurus::vector::core::rerank::RerankStorageKind. Selecting a kind on
+// an HNSW field makes the writer emit an extra full-precision sidecar
+// (`<segment>.hnsw.f32`) so the searcher can rescore int8 candidates
+// against the original vectors when a query sets `rerank_factor`.
+enum RerankStorageKind {
+  // No rerank sidecar (Stage 1, int8-only). Same as omitting the field.
+  RERANK_STORAGE_KIND_UNSPECIFIED = 0;
+  // Full IEEE-754 single-precision float sidecar (4 bytes per dim).
+  RERANK_STORAGE_KIND_F32 = 1;
+}
+
 message HnswOption {
   uint32 dimension = 1;
   DistanceMetric distance = 2;
@@ -207,6 +219,11 @@ message HnswOption {
   // take precedence. When unset, the searcher uses an internal
   // fallback (`50`). Issue #644.
   optional uint32 default_ef_search = 8;
+  // Stage-2 rerank sidecar storage (Issue #481 / #793). When set to
+  // `F32`, commit emits the `.hnsw.f32` sidecar so searches with
+  // `rerank_factor` rescore against full-precision vectors. Unset (or
+  // `UNSPECIFIED`) keeps Stage-1 int8-only ranking.
+  optional RerankStorageKind rerank_storage = 9;
 }
 
 message FlatOption {
@@ -216,6 +233,10 @@ message FlatOption {
   optional QuantizationConfig quantizer = 4;
   // Embedder name (empty = no auto-embedding).
   string embedder = 5;
+  // Stage-2 rerank sidecar storage (Issue #481 / #793). Carried through
+  // for schema round-tripping; the Flat index does not emit a sidecar
+  // yet, so this is currently inert for Flat fields.
+  optional RerankStorageKind rerank_storage = 6;
 }
 
 message IvfOption {
@@ -227,6 +248,10 @@ message IvfOption {
   optional QuantizationConfig quantizer = 6;
   // Embedder name (empty = no auto-embedding).
   string embedder = 7;
+  // Stage-2 rerank sidecar storage (Issue #481 / #793). Carried through
+  // for schema round-tripping; the IVF index does not emit a sidecar
+  // yet, so this is currently inert for IVF fields.
+  optional RerankStorageKind rerank_storage = 8;
 }
 
 // An embedder configuration.

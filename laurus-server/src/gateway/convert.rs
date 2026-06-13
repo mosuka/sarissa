@@ -601,6 +601,26 @@ fn quantizer_to_json(q: &v1::QuantizationConfig) -> Value {
     })
 }
 
+/// Parse the JSON `rerank_storage` field (string, e.g. `"F32"`) into the
+/// proto enum value (Issue #793). Returns `None` (no sidecar) when the
+/// field is absent or unrecognized.
+fn json_to_rerank_storage(json: &Value) -> Option<i32> {
+    match json.get("rerank_storage").and_then(|v| v.as_str()) {
+        Some(s) if s.eq_ignore_ascii_case("f32") => Some(v1::RerankStorageKind::F32 as i32),
+        _ => None,
+    }
+}
+
+/// Render a proto `rerank_storage` enum value as a JSON string (Issue
+/// #793). Returns `None` for `UNSPECIFIED`/unknown so the field is
+/// omitted from the JSON object.
+fn rerank_storage_to_json(value: i32) -> Option<&'static str> {
+    match v1::RerankStorageKind::try_from(value) {
+        Ok(v1::RerankStorageKind::F32) => Some("F32"),
+        _ => None,
+    }
+}
+
 fn json_to_hnsw_option(json: &Value) -> Result<v1::HnswOption, String> {
     Ok(v1::HnswOption {
         dimension: json.get("dimension").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
@@ -629,6 +649,8 @@ fn json_to_hnsw_option(json: &Value) -> Result<v1::HnswOption, String> {
             .get("default_ef_search")
             .and_then(|v| v.as_u64())
             .map(|n| n as u32),
+        // Issue #793: optional Stage-2 rerank sidecar storage.
+        rerank_storage: json_to_rerank_storage(json),
     })
 }
 
@@ -650,6 +672,8 @@ fn json_to_flat_option(json: &Value) -> Result<v1::FlatOption, String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
+        // Issue #793: optional Stage-2 rerank sidecar storage.
+        rerank_storage: json_to_rerank_storage(json),
     })
 }
 
@@ -673,6 +697,8 @@ fn json_to_ivf_option(json: &Value) -> Result<v1::IvfOption, String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
+        // Issue #793: optional Stage-2 rerank sidecar storage.
+        rerank_storage: json_to_rerank_storage(json),
     })
 }
 
@@ -690,6 +716,9 @@ fn hnsw_option_to_json(opt: &v1::HnswOption) -> Value {
     if !opt.embedder.is_empty() {
         obj["embedder"] = json!(opt.embedder);
     }
+    if let Some(s) = opt.rerank_storage.and_then(rerank_storage_to_json) {
+        obj["rerank_storage"] = json!(s);
+    }
     obj
 }
 
@@ -704,6 +733,9 @@ fn flat_option_to_json(opt: &v1::FlatOption) -> Value {
     }
     if !opt.embedder.is_empty() {
         obj["embedder"] = json!(opt.embedder);
+    }
+    if let Some(s) = opt.rerank_storage.and_then(rerank_storage_to_json) {
+        obj["rerank_storage"] = json!(s);
     }
     obj
 }
@@ -721,6 +753,9 @@ fn ivf_option_to_json(opt: &v1::IvfOption) -> Value {
     }
     if !opt.embedder.is_empty() {
         obj["embedder"] = json!(opt.embedder);
+    }
+    if let Some(s) = opt.rerank_storage.and_then(rerank_storage_to_json) {
+        obj["rerank_storage"] = json!(s);
     }
     obj
 }
