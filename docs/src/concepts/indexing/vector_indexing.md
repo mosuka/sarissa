@@ -21,7 +21,7 @@ sequenceDiagram
 ### Step by Step
 
 1. **Embed**: The text (or image) is converted to a vector by the configured embedder
-2. **Normalize**: The vector is L2-normalized (for cosine similarity)
+2. **Normalize**: The vector is L2-normalized **only for the Cosine metric** (a magnitude-invariant metric). Euclidean, DotProduct, and Manhattan fields keep their original vectors so their distances are preserved
 3. **Index**: The vector is inserted into the configured index structure (Flat, HNSW, or IVF)
 4. **Commit**: On `commit()`, the index is flushed to persistent storage
 
@@ -194,7 +194,9 @@ let metric = DistanceMetric::DotProduct;   // For pre-normalized vectors
 let metric = DistanceMetric::Angular;      // Angular distance
 ```
 
-> **Note:** For cosine similarity, vectors are automatically L2-normalized before indexing. Lower distance = more similar.
+> **Note:** Vectors are automatically L2-normalized before indexing **only for the `Cosine` metric**. Normalizing is magnitude-invariant, so it is safe for Cosine (and additionally tightens the int8 quantization range), but it would change the distances of magnitude-sensitive metrics — so `Euclidean`, `DotProduct`, and `Manhattan` fields are stored without normalization. Lower distance = more similar.
+>
+> **Migration note:** non-Cosine fields created before this behavior was corrected have L2-normalized vectors on disk (the original magnitudes are not recoverable). Rebuild such an index to get correct distances.
 
 ## Quantization
 
