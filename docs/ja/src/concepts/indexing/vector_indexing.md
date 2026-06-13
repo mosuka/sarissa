@@ -306,6 +306,12 @@ memory savings の前提を尊重するため sidecar 読み込みをスキッ�
 （Lazy mode で開いた Stage 2 セグメントは silent に Stage 1 へ
 degrade します）。
 
+sidecar はスキーマの HNSW オプションの `rerank_storage` でフィールド
+ごとに有効化され、その設定はすべての書き込み経路で尊重されます。直接
+の commit、アクティブな書き込みセグメント、セグメントの merge いずれも
+生成したセグメントに対して sidecar を再出力します（マージ後セグメント
+の sidecar はマージ後のベクトルから再構築されます）。
+
 新しい sidecar は末尾に header + payload を対象とする 8 バイトの
 CRC-32 footer を持ち、sidecar を読むすべての経路（searcher のロードと
 writer の再ロード）で検証されます。これにより、ディスク上の静かな破損

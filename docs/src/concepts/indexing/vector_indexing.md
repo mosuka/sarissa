@@ -303,6 +303,12 @@ Eager; Lazy mode skips the sidecar to honor its memory-savings
 promise (Stage 2 segments opened in Lazy mode silently degrade to
 Stage 1).
 
+The sidecar is enabled per field by `rerank_storage` in the schema's
+HNSW options, and that setting is honored on every write path: direct
+commits, the active write segment, and segment merges all re-emit the
+sidecar for the segment they produce (a merged segment's sidecar is
+rebuilt from the merged vectors).
+
 New sidecars end with an 8-byte CRC-32 footer over the header and
 payload that is verified whenever the sidecar is read (both the
 searcher load and the writer reload), so silent on-disk corruption is

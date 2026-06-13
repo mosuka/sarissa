@@ -1,9 +1,12 @@
+use laurus::storage::Storage;
 use laurus::storage::memory::{MemoryStorage, MemoryStorageConfig};
 use laurus::vector::DistanceMetric;
 use laurus::vector::StoredVector;
 use laurus::vector::Vector;
 use laurus::vector::VectorFieldConfig;
+use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::vector::index::field::{FieldSearchInput, VectorFieldReader, VectorFieldWriter};
+use laurus::vector::index::hnsw::reader::HnswIndexReader;
 use laurus::vector::index::hnsw::segment::manager::{SegmentManager, SegmentManagerConfig};
 use laurus::vector::index::segmented_field::SegmentedVectorField;
 use laurus::vector::store::request::QueryVector;
@@ -230,6 +233,214 @@ async fn segmented_field_reader_cache_reuses_and_invalidates()
         "cache should have at most the one survivor pre-search; got {}",
         field.reader_cache.len()
     );
+
+    Ok(())
+}
+
+/// Regression test for Issue [#790]: `SegmentedVectorField` dropped
+/// `rerank_storage` (and the quantizer) when converting `HnswOption`
+/// into `HnswIndexConfig`, so neither flushed segments nor merged
+/// segments ever emitted the Stage-2 LRS1 sidecar (`<segment>.hnsw.f32`).
+///
+/// [#790]: https://github.com/mosuka/laurus/issues/790
+#[tokio::test]
+async fn segmented_flush_and_merge_emit_rerank_sidecar() -> Result<(), Box<dyn std::error::Error>> {
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+    let manager_config = SegmentManagerConfig {
+        max_segments: 2,
+        merge_factor: 2,
+        min_vectors_per_segment: 1,
+        ..Default::default()
+    };
+    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+
+    let field_config = VectorFieldConfig {
+        vector: Some(FieldOption::Hnsw(HnswOption {
+            dimension: 4,
+            distance: DistanceMetric::Cosine,
+            m: 16,
+            ef_construction: 200,
+            rerank_storage: Some(RerankStorageKind::F32),
+            ..HnswOption::default()
+        })),
+        lexical: None,
+    };
+
+    let field = SegmentedVectorField::create(
+        "embedding",
+        field_config,
+        manager.clone(),
+        storage.clone(),
+        None,
+    )?;
+
+    field
+        .add_stored_vector(1, &StoredVector::new(vec![1.0, 0.0, 0.0, 0.0]), 0)
+        .await?;
+    field.flush().await?;
+    field
+        .add_stored_vector(2, &StoredVector::new(vec![0.0, 1.0, 0.0, 0.0]), 0)
+        .await?;
+    field.flush().await?;
+    field
+        .add_stored_vector(3, &StoredVector::new(vec![0.0, 0.0, 1.0, 0.0]), 0)
+        .await?;
+    field.flush().await?;
+
+    // Every flushed segment must carry its LRS1 sidecar (Issue #790:
+    // the active-segment config previously dropped rerank_storage).
+    let before_ids: Vec<String> = manager
+        .list_segments()
+        .iter()
+        .map(|s| s.segment_id.clone())
+        .collect();
+    assert_eq!(before_ids.len(), 3);
+    for id in &before_ids {
+        let sidecar = format!("{id}.hnsw.f32");
+        assert!(
+            storage.file_exists(&sidecar),
+            "flushed segment must emit {sidecar}"
+        );
+    }
+
+    field.perform_merge()?;
+
+    // Locate the merged segment (the id that was not present before).
+    let after = manager.list_segments();
+    assert_eq!(after.len(), 2);
+    let merged_id = after
+        .iter()
+        .map(|s| s.segment_id.clone())
+        .find(|id| !before_ids.contains(id))
+        .expect("merge must create a new segment");
+
+    let merged_sidecar = format!("{merged_id}.hnsw.f32");
+    assert!(
+        storage.file_exists(&merged_sidecar),
+        "merged segment must re-emit {merged_sidecar} (Issue #790: the \
+         merge-engine config previously dropped rerank_storage)"
+    );
+
+    // The merged sidecar must load into the rerank pool (Eager mode)
+    // and contain exactly the two merged vectors — the anti-fallback
+    // guard from the #788 test.
+    let reader = HnswIndexReader::load(
+        storage.clone() as Arc<dyn Storage>,
+        &merged_id,
+        DistanceMetric::Cosine,
+    )?;
+    let pool = reader
+        .rerank_storage()
+        .expect("merged sidecar must load into the rerank pool");
+    let merged_doc_count = [1u64, 2, 3]
+        .iter()
+        .filter(|doc_id| pool.contains(**doc_id, "embedding"))
+        .count();
+    assert_eq!(
+        merged_doc_count, 2,
+        "the merged pool must contain exactly the 2 merged vectors"
+    );
+
+    Ok(())
+}
+
+/// Regression test for the latent merge-config bug fixed with Issue
+/// [#790]: `perform_merge_with_policy` built its `HnswIndexConfig`
+/// without `distance_metric` (default Cosine) and without
+/// `normalize_vectors` (default `true`), so merging a **Euclidean**
+/// segmented field silently L2-normalized the merged vectors. The
+/// merged vectors must keep their original (non-unit) norms.
+///
+/// [#790]: https://github.com/mosuka/laurus/issues/790
+#[tokio::test]
+async fn segmented_merge_keeps_vectors_unnormalized_for_euclidean()
+-> Result<(), Box<dyn std::error::Error>> {
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+    let manager_config = SegmentManagerConfig {
+        max_segments: 2,
+        merge_factor: 2,
+        min_vectors_per_segment: 1,
+        ..Default::default()
+    };
+    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+
+    let field_config = VectorFieldConfig {
+        vector: Some(FieldOption::Hnsw(HnswOption {
+            dimension: 4,
+            distance: DistanceMetric::Euclidean,
+            m: 16,
+            ef_construction: 200,
+            rerank_storage: Some(RerankStorageKind::F32),
+            ..HnswOption::default()
+        })),
+        lexical: None,
+    };
+
+    let field = SegmentedVectorField::create(
+        "embedding",
+        field_config,
+        manager.clone(),
+        storage.clone(),
+        None,
+    )?;
+
+    // All vectors have norms far from 1 so an accidental L2
+    // normalization during merge is unambiguously detectable.
+    let originals: [(u64, [f32; 4]); 3] = [
+        (1, [2.0, 0.0, 0.0, 0.0]),
+        (2, [0.0, 3.0, 0.0, 0.0]),
+        (3, [0.0, 0.0, 4.0, 0.0]),
+    ];
+    for (doc_id, vec) in &originals {
+        field
+            .add_stored_vector(*doc_id, &StoredVector::new(vec.to_vec()), 0)
+            .await?;
+        field.flush().await?;
+    }
+
+    let before_ids: Vec<String> = manager
+        .list_segments()
+        .iter()
+        .map(|s| s.segment_id.clone())
+        .collect();
+    field.perform_merge()?;
+
+    let merged_id = manager
+        .list_segments()
+        .iter()
+        .map(|s| s.segment_id.clone())
+        .find(|id| !before_ids.contains(id))
+        .expect("merge must create a new segment");
+
+    let reader = HnswIndexReader::load(
+        storage.clone() as Arc<dyn Storage>,
+        &merged_id,
+        DistanceMetric::Euclidean,
+    )?;
+    let pool = reader
+        .rerank_storage()
+        .expect("merged sidecar must load into the rerank pool");
+
+    // Whichever two of the three docs were merged, their vectors must
+    // keep the original norms (2/3/4) within int8 dequantization
+    // tolerance — a normalized vector would have norm 1.0.
+    let mut checked = 0;
+    for (doc_id, original) in &originals {
+        if let Some(slice) = pool.get_f32_slice(*doc_id, "embedding") {
+            let norm: f32 = slice.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let expected: f32 = original.iter().map(|v| v * v).sum::<f32>().sqrt();
+            assert!(
+                (norm - expected).abs() < 0.1,
+                "merged vector for doc {doc_id} must keep its original norm \
+                 {expected} (got {norm}); norm 1.0 means the merge config \
+                 normalized a Euclidean field (Issue #790 latent bug)"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 2, "the merged pool must contain 2 of the 3 docs");
 
     Ok(())
 }

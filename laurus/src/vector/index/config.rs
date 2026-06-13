@@ -559,6 +559,55 @@ impl std::fmt::Debug for HnswIndexConfig {
     }
 }
 
+impl HnswIndexConfig {
+    /// Build an index config from the schema-level
+    /// [`HnswOption`](crate::vector::core::field::HnswOption)
+    /// (Issue #790).
+    ///
+    /// This is the single place that maps the option-derived fields, so
+    /// a field added to `HnswOption` is propagated (or consciously
+    /// excluded) here instead of being silently dropped at every
+    /// conversion site — the bug class behind Issue #790, where
+    /// `rerank_storage` and `quantizer` never reached the writers.
+    ///
+    /// Mapped fields: `dimension`, `distance` → `distance_metric`, `m`,
+    /// `ef_construction`, `default_ef_search`, `quantizer` →
+    /// `quantization_method`, and `rerank_storage`. All other fields
+    /// keep [`HnswIndexConfig::default`] values; in particular the
+    /// following are *intentionally* not mapped:
+    ///
+    /// * `normalize_vectors` — a per-call-site decision (the segmented
+    ///   path normalizes only for Cosine; the store path keeps its
+    ///   historical default), so callers overlay it explicitly.
+    /// * `embedder` — `HnswOption::embedder` is an embedder *name*
+    ///   (`Option<String>`) while the config holds an
+    ///   `Arc<dyn Embedder>`; resolution happens at the store level.
+    /// * `base_weight` — a scoring-level knob with no config
+    ///   counterpart.
+    ///
+    /// # Arguments
+    ///
+    /// * `opt` - The schema-level HNSW field option to convert.
+    ///
+    /// # Returns
+    ///
+    /// A config carrying the option-derived fields above and defaults
+    /// for everything else; combine with struct-update syntax to set
+    /// site-specific fields.
+    pub fn from_hnsw_option(opt: &crate::vector::core::field::HnswOption) -> Self {
+        Self {
+            dimension: opt.dimension,
+            distance_metric: opt.distance,
+            m: opt.m,
+            ef_construction: opt.ef_construction,
+            default_ef_search: opt.default_ef_search,
+            quantization_method: opt.quantizer,
+            rerank_storage: opt.rerank_storage,
+            ..Self::default()
+        }
+    }
+}
+
 /// Configuration specific to IVF index.
 ///
 /// These settings control the behavior of the IVF (Inverted File)
@@ -665,5 +714,52 @@ impl std::fmt::Debug for IvfIndexConfig {
             .field("max_segments", &self.max_segments)
             .field("embedder", &self.embedder.name())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vector::core::field::HnswOption;
+    use crate::vector::core::rerank::RerankStorageKind;
+
+    /// Issue #790: every option-derived field must be mapped by
+    /// `from_hnsw_option`, and the intentionally unmapped fields must
+    /// keep their `HnswIndexConfig::default()` values.
+    #[test]
+    fn from_hnsw_option_maps_every_option_derived_field() {
+        let opt = HnswOption {
+            dimension: 8,
+            distance: DistanceMetric::Euclidean,
+            m: 5,
+            ef_construction: 33,
+            default_ef_search: Some(77),
+            base_weight: 2.5,
+            quantizer: quantization::QuantizationMethod::ProductQuantization { subvector_count: 4 },
+            rerank_storage: Some(RerankStorageKind::F32),
+            embedder: Some("my-embedder".to_string()),
+        };
+
+        let config = HnswIndexConfig::from_hnsw_option(&opt);
+
+        // Mapped fields (all chosen to differ from the defaults).
+        assert_eq!(config.dimension, 8);
+        assert_eq!(config.distance_metric, DistanceMetric::Euclidean);
+        assert_eq!(config.m, 5);
+        assert_eq!(config.ef_construction, 33);
+        assert_eq!(config.default_ef_search, Some(77));
+        assert_eq!(
+            config.quantization_method,
+            quantization::QuantizationMethod::ProductQuantization { subvector_count: 4 }
+        );
+        assert_eq!(config.rerank_storage, Some(RerankStorageKind::F32));
+
+        // Intentionally unmapped fields stay at their defaults.
+        let defaults = HnswIndexConfig::default();
+        assert_eq!(config.normalize_vectors, defaults.normalize_vectors);
+        assert_eq!(config.use_quantization, defaults.use_quantization);
+        assert_eq!(config.auto_compaction, defaults.auto_compaction);
+        assert_eq!(config.max_segments, defaults.max_segments);
+        assert_eq!(config.embedder.name(), defaults.embedder.name());
     }
 }

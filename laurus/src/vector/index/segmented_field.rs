@@ -112,15 +112,8 @@ impl SegmentedVectorField {
         let segment_id = self.segment_manager.generate_segment_id();
 
         // Get HNSW parameters from config
-        let (dimension, distance, m, ef_construction, default_ef_search) = match &self.config.vector
-        {
-            Some(FieldOption::Hnsw(opt)) => (
-                opt.dimension,
-                opt.distance,
-                opt.m,
-                opt.ef_construction,
-                opt.default_ef_search,
-            ),
+        let opt = match &self.config.vector {
+            Some(FieldOption::Hnsw(opt)) => opt,
             _ => {
                 return Err(LaurusError::invalid_config(
                     "SegmentedVectorField requires HNSW configuration".to_string(),
@@ -128,14 +121,12 @@ impl SegmentedVectorField {
             }
         };
 
+        // Option-derived fields (incl. rerank_storage and the quantizer,
+        // Issue #790) come from the shared conversion helper.
         let hnsw_config = HnswIndexConfig {
-            dimension,
-            distance_metric: distance,
-            m,
-            ef_construction,
-            default_ef_search,
-            normalize_vectors: distance == crate::vector::core::distance::DistanceMetric::Cosine,
-            ..Default::default()
+            normalize_vectors: opt.distance
+                == crate::vector::core::distance::DistanceMetric::Cosine,
+            ..HnswIndexConfig::from_hnsw_option(opt)
         };
 
         let writer_config = VectorIndexWriterConfig {
@@ -165,13 +156,8 @@ impl SegmentedVectorField {
         policy: &dyn crate::vector::index::hnsw::segment::merge_policy::MergePolicy,
     ) -> Result<()> {
         if let Some(candidate) = self.segment_manager.check_merge(policy) {
-            let (dimension, m, ef_construction, default_ef_search) = match &self.config.vector {
-                Some(FieldOption::Hnsw(opt)) => (
-                    opt.dimension,
-                    opt.m,
-                    opt.ef_construction,
-                    opt.default_ef_search,
-                ),
+            let opt = match &self.config.vector {
+                Some(FieldOption::Hnsw(opt)) => opt,
                 _ => {
                     return Err(LaurusError::invalid_config(
                         "SegmentedVectorField requires HNSW configuration".to_string(),
@@ -179,15 +165,20 @@ impl SegmentedVectorField {
                 }
             };
 
+            // Option-derived fields come from the shared conversion
+            // helper (Issue #790). This also fixes a latent bug: the
+            // merge config previously dropped `distance_metric` (and
+            // left `normalize_vectors` at its always-on default), so a
+            // non-Cosine segmented field was merged with the default
+            // Cosine metric and unconditional normalization. Mirror the
+            // active-segment writer: normalize only for Cosine.
             let mut engine = MergeEngine::new(
                 MergeConfig::default(),
                 self.storage.clone(),
                 HnswIndexConfig {
-                    dimension,
-                    m,
-                    ef_construction,
-                    default_ef_search,
-                    ..Default::default()
+                    normalize_vectors: opt.distance
+                        == crate::vector::core::distance::DistanceMetric::Cosine,
+                    ..HnswIndexConfig::from_hnsw_option(opt)
                 },
                 VectorIndexWriterConfig {
                     ..Default::default()
