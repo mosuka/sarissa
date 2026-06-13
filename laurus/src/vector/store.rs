@@ -130,6 +130,12 @@ impl VectorStore {
                     FieldOption::Flat(opt) => VectorIndexTypeConfig::Flat(FlatIndexConfig {
                         dimension: opt.dimension,
                         distance_metric: opt.distance,
+                        // L2-normalize only for the magnitude-invariant
+                        // Cosine metric (Issue #794); normalizing a
+                        // Euclidean/DotProduct/Manhattan field changes its
+                        // distances.
+                        normalize_vectors: opt.distance
+                            == crate::vector::core::distance::DistanceMetric::Cosine,
                         embedder: config.embedder.clone(),
                         ..Default::default()
                     }),
@@ -150,6 +156,10 @@ impl VectorStore {
                         distance_metric: opt.distance,
                         n_clusters: opt.n_clusters,
                         n_probe: opt.n_probe,
+                        // L2-normalize only for the magnitude-invariant
+                        // Cosine metric (Issue #794).
+                        normalize_vectors: opt.distance
+                            == crate::vector::core::distance::DistanceMetric::Cosine,
                         embedder: config.embedder.clone(),
                         ..Default::default()
                     }),
@@ -999,8 +1009,67 @@ mod tests {
                 assert_eq!(c.ef_construction, 33);
                 assert_eq!(c.default_ef_search, Some(77));
                 assert_eq!(c.auto_compaction, config.deletion_config.auto_compaction);
+                // Issue #794: a Euclidean field must not be normalized.
+                assert!(!c.normalize_vectors);
             }
             other => panic!("expected HNSW config, got {}", other.index_type_name()),
         }
+    }
+
+    /// Issue #794: the store-level conversion must set `normalize_vectors`
+    /// from the distance metric for every vector index type — only the
+    /// magnitude-invariant Cosine metric is L2-normalized. Before this
+    /// fix the Hnsw/Flat/Ivf arms all left it at the always-on default,
+    /// silently corrupting non-Cosine distances.
+    #[test]
+    fn extract_index_type_config_normalize_is_metric_conditional() {
+        use crate::vector::core::distance::DistanceMetric;
+        use crate::vector::core::field::{FieldOption, FlatOption, HnswOption, IvfOption};
+        use crate::vector::store::config::{VectorFieldConfig, VectorIndexConfig};
+
+        fn normalize_of(opt: FieldOption) -> bool {
+            let config = VectorIndexConfig::builder()
+                .field(
+                    "vec",
+                    VectorFieldConfig {
+                        vector: Some(opt),
+                        lexical: None,
+                    },
+                )
+                .build()
+                .unwrap();
+            match VectorStore::extract_index_type_config(&config) {
+                VectorIndexTypeConfig::HNSW(c) => c.normalize_vectors,
+                VectorIndexTypeConfig::Flat(c) => c.normalize_vectors,
+                VectorIndexTypeConfig::IVF(c) => c.normalize_vectors,
+            }
+        }
+
+        let hnsw = |distance| {
+            FieldOption::Hnsw(HnswOption {
+                distance,
+                ..Default::default()
+            })
+        };
+        let flat = |distance| {
+            FieldOption::Flat(FlatOption {
+                distance,
+                ..Default::default()
+            })
+        };
+        let ivf = |distance| {
+            FieldOption::Ivf(IvfOption {
+                distance,
+                ..Default::default()
+            })
+        };
+
+        // Cosine normalizes on every path; Euclidean does not.
+        assert!(normalize_of(hnsw(DistanceMetric::Cosine)));
+        assert!(!normalize_of(hnsw(DistanceMetric::Euclidean)));
+        assert!(normalize_of(flat(DistanceMetric::Cosine)));
+        assert!(!normalize_of(flat(DistanceMetric::Euclidean)));
+        assert!(normalize_of(ivf(DistanceMetric::Cosine)));
+        assert!(!normalize_of(ivf(DistanceMetric::Euclidean)));
     }
 }

@@ -121,13 +121,10 @@ impl SegmentedVectorField {
             }
         };
 
-        // Option-derived fields (incl. rerank_storage and the quantizer,
-        // Issue #790) come from the shared conversion helper.
-        let hnsw_config = HnswIndexConfig {
-            normalize_vectors: opt.distance
-                == crate::vector::core::distance::DistanceMetric::Cosine,
-            ..HnswIndexConfig::from_hnsw_option(opt)
-        };
+        // Option-derived fields (incl. rerank_storage, the quantizer, and
+        // metric-conditional normalize_vectors) come from the shared
+        // conversion helper (Issues #790 / #794).
+        let hnsw_config = HnswIndexConfig::from_hnsw_option(opt);
 
         let writer_config = VectorIndexWriterConfig {
             ..Default::default()
@@ -166,20 +163,16 @@ impl SegmentedVectorField {
             };
 
             // Option-derived fields come from the shared conversion
-            // helper (Issue #790). This also fixes a latent bug: the
-            // merge config previously dropped `distance_metric` (and
-            // left `normalize_vectors` at its always-on default), so a
-            // non-Cosine segmented field was merged with the default
-            // Cosine metric and unconditional normalization. Mirror the
-            // active-segment writer: normalize only for Cosine.
+            // helper (Issues #790 / #794). The helper maps
+            // `distance_metric` and the metric-conditional
+            // `normalize_vectors` (normalize only for Cosine), so a
+            // non-Cosine segmented field is merged with its own metric
+            // and without the magnitude-corrupting normalization the
+            // merge config used to apply via the always-on default.
             let mut engine = MergeEngine::new(
                 MergeConfig::default(),
                 self.storage.clone(),
-                HnswIndexConfig {
-                    normalize_vectors: opt.distance
-                        == crate::vector::core::distance::DistanceMetric::Cosine,
-                    ..HnswIndexConfig::from_hnsw_option(opt)
-                },
+                HnswIndexConfig::from_hnsw_option(opt),
                 VectorIndexWriterConfig {
                     ..Default::default()
                 },

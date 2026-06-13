@@ -572,18 +572,27 @@ impl HnswIndexConfig {
     ///
     /// Mapped fields: `dimension`, `distance` → `distance_metric`, `m`,
     /// `ef_construction`, `default_ef_search`, `quantizer` →
-    /// `quantization_method`, and `rerank_storage`. All other fields
-    /// keep [`HnswIndexConfig::default`] values; in particular the
-    /// following are *intentionally* not mapped:
+    /// `quantization_method`, `rerank_storage`, and `normalize_vectors`
+    /// (derived from the metric — see below). All other fields keep
+    /// [`HnswIndexConfig::default`] values; the following are
+    /// *intentionally* not mapped:
     ///
-    /// * `normalize_vectors` — a per-call-site decision (the segmented
-    ///   path normalizes only for Cosine; the store path keeps its
-    ///   historical default), so callers overlay it explicitly.
     /// * `embedder` — `HnswOption::embedder` is an embedder *name*
     ///   (`Option<String>`) while the config holds an
     ///   `Arc<dyn Embedder>`; resolution happens at the store level.
     /// * `base_weight` — a scoring-level knob with no config
     ///   counterpart.
+    ///
+    /// `normalize_vectors` is set to `distance == Cosine` (Issue #794):
+    /// L2-normalizing the stored vectors only makes sense for
+    /// magnitude-invariant metrics. Normalizing a Euclidean /
+    /// DotProduct / Manhattan field would change its distances, so
+    /// those keep their original vectors; Cosine is magnitude-invariant
+    /// and normalization additionally tightens the int8 quantization
+    /// range. Folding the rule here (rather than overlaying it at each
+    /// call site) keeps every HNSW config-construction path consistent
+    /// — the bug class behind Issue #794, where the store path left
+    /// `normalize_vectors` at the always-on default.
     ///
     /// # Arguments
     ///
@@ -603,6 +612,7 @@ impl HnswIndexConfig {
             default_ef_search: opt.default_ef_search,
             quantization_method: opt.quantizer,
             rerank_storage: opt.rerank_storage,
+            normalize_vectors: opt.distance == DistanceMetric::Cosine,
             ..Self::default()
         }
     }
@@ -753,13 +763,36 @@ mod tests {
             quantization::QuantizationMethod::ProductQuantization { subvector_count: 4 }
         );
         assert_eq!(config.rerank_storage, Some(RerankStorageKind::F32));
+        // Issue #794: normalize_vectors is derived from the metric — this
+        // option is Euclidean, so it must NOT be normalized.
+        assert!(!config.normalize_vectors);
 
         // Intentionally unmapped fields stay at their defaults.
         let defaults = HnswIndexConfig::default();
-        assert_eq!(config.normalize_vectors, defaults.normalize_vectors);
         assert_eq!(config.use_quantization, defaults.use_quantization);
         assert_eq!(config.auto_compaction, defaults.auto_compaction);
         assert_eq!(config.max_segments, defaults.max_segments);
         assert_eq!(config.embedder.name(), defaults.embedder.name());
+    }
+
+    /// Issue #794: `from_hnsw_option` sets `normalize_vectors` from the
+    /// distance metric — only the magnitude-invariant Cosine metric is
+    /// L2-normalized; Euclidean/DotProduct/Manhattan keep their original
+    /// vectors so their distances are not corrupted.
+    #[test]
+    fn from_hnsw_option_normalizes_only_for_cosine() {
+        let normalize_for = |distance: DistanceMetric| {
+            HnswIndexConfig::from_hnsw_option(&HnswOption {
+                distance,
+                ..Default::default()
+            })
+            .normalize_vectors
+        };
+
+        assert!(normalize_for(DistanceMetric::Cosine));
+        assert!(!normalize_for(DistanceMetric::Euclidean));
+        assert!(!normalize_for(DistanceMetric::DotProduct));
+        assert!(!normalize_for(DistanceMetric::Manhattan));
+        assert!(!normalize_for(DistanceMetric::Angular));
     }
 }
