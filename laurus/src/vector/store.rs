@@ -133,18 +133,17 @@ impl VectorStore {
                         embedder: config.embedder.clone(),
                         ..Default::default()
                     }),
+                    // Option-derived fields (incl. rerank_storage and the
+                    // quantizer, Issue #790) come from the shared
+                    // conversion helper; only store-level fields are
+                    // overlaid here.
                     FieldOption::Hnsw(opt) => VectorIndexTypeConfig::HNSW(HnswIndexConfig {
-                        dimension: opt.dimension,
-                        distance_metric: opt.distance,
-                        m: opt.m,
-                        ef_construction: opt.ef_construction,
-                        default_ef_search: opt.default_ef_search,
                         // Wire the deletion config's compaction policy into the
                         // index so commit can auto-compact (Issue #782).
                         auto_compaction: config.deletion_config.auto_compaction,
                         compaction_threshold: config.deletion_config.compaction_threshold,
                         embedder: config.embedder.clone(),
-                        ..Default::default()
+                        ..HnswIndexConfig::from_hnsw_option(opt)
                     }),
                     FieldOption::Ivf(opt) => VectorIndexTypeConfig::IVF(IvfIndexConfig {
                         dimension: opt.dimension,
@@ -949,5 +948,59 @@ mod tests {
         assert!(!store.is_closed());
         store.close().await.unwrap();
         assert!(store.is_closed());
+    }
+
+    /// Issue #790: the store-level config conversion must carry
+    /// `rerank_storage` and the quantizer into `HnswIndexConfig`
+    /// (previously dropped to `..Default::default()`, so the Stage-2
+    /// sidecar was never emitted through `VectorStore`/`Engine`).
+    #[test]
+    fn extract_index_type_config_propagates_rerank_and_quantizer() {
+        use crate::vector::core::distance::DistanceMetric;
+        use crate::vector::core::field::{FieldOption, HnswOption};
+        use crate::vector::core::quantization::QuantizationMethod;
+        use crate::vector::core::rerank::RerankStorageKind;
+        use crate::vector::store::config::{VectorFieldConfig, VectorIndexConfig};
+
+        let config = VectorIndexConfig::builder()
+            .field(
+                "vec",
+                VectorFieldConfig {
+                    vector: Some(FieldOption::Hnsw(HnswOption {
+                        dimension: 8,
+                        distance: DistanceMetric::Euclidean,
+                        m: 5,
+                        ef_construction: 33,
+                        default_ef_search: Some(77),
+                        quantizer: QuantizationMethod::ProductQuantization { subvector_count: 4 },
+                        rerank_storage: Some(RerankStorageKind::F32),
+                        ..Default::default()
+                    })),
+                    lexical: None,
+                },
+            )
+            .build()
+            .unwrap();
+
+        let index_config = VectorStore::extract_index_type_config(&config);
+
+        match index_config {
+            VectorIndexTypeConfig::HNSW(c) => {
+                // Issue #790: the previously dropped fields.
+                assert_eq!(c.rerank_storage, Some(RerankStorageKind::F32));
+                assert_eq!(
+                    c.quantization_method,
+                    QuantizationMethod::ProductQuantization { subvector_count: 4 }
+                );
+                // Pre-existing propagation still flows.
+                assert_eq!(c.dimension, 8);
+                assert_eq!(c.distance_metric, DistanceMetric::Euclidean);
+                assert_eq!(c.m, 5);
+                assert_eq!(c.ef_construction, 33);
+                assert_eq!(c.default_ef_search, Some(77));
+                assert_eq!(c.auto_compaction, config.deletion_config.auto_compaction);
+            }
+            other => panic!("expected HNSW config, got {}", other.index_type_name()),
+        }
     }
 }

@@ -1,10 +1,13 @@
-//! End-to-end engine wiring test for Issue #481 Stage 2.
+//! End-to-end engine wiring tests for Issue #481 Stage 2 / Issue #790.
 //!
-//! Verifies that `SearchRequestBuilder::vector_rerank_factor` flows
-//! through `Engine::search` to the HNSW searcher when the field has
-//! `rerank_storage` enabled, and that the request succeeds (no
-//! NotImplemented) for both Stage 2 (sidecar) and Stage 1 (no
-//! sidecar) configurations.
+//! Verifies that `rerank_storage: Some(_)` on a schema field actually
+//! reaches the HNSW writer through the `Engine` → `VectorStore` config
+//! conversion (Issue #790): the commit must emit the LRS1 sidecar
+//! (`vector_index.hnsw.f32`), and `SearchRequestBuilder::vector_rerank_factor`
+//! must flow to the Stage-2 rerank path — not the silent Stage-1
+//! fallback, which by construction returns bit-identical scores with
+//! and without `rerank_factor`. Stage-1 fields (no `rerank_storage`)
+//! must keep their behavior: no sidecar, silent int8 ranking.
 
 use tempfile::TempDir;
 
@@ -12,12 +15,37 @@ use laurus::DistanceMetric;
 use laurus::Engine;
 use laurus::SearchRequestBuilder;
 use laurus::storage::file::FileStorageConfig;
-use laurus::storage::{StorageConfig, StorageFactory};
+use laurus::storage::prefixed::PrefixedStorage;
+use laurus::storage::{Storage, StorageConfig, StorageFactory};
 use laurus::vector::HnswOption;
 use laurus::vector::Vector;
+use laurus::vector::core::distance::DistanceMetric as VectorDistanceMetric;
 use laurus::vector::core::rerank::RerankStorageKind;
+use laurus::vector::index::hnsw::reader::HnswIndexReader;
 use laurus::{DataValue, Document};
 use laurus::{FieldOption, QueryVector, Schema, VectorSearchQuery};
+use std::sync::Arc;
+
+/// Sidecar name as seen by the engine's outer storage: the vector
+/// store works behind `PrefixedStorage("vector", ..)`, and the HNSW
+/// index file is `vector_index.hnsw`.
+const SIDECAR_NAME: &str = "vector/vector_index.hnsw.f32";
+
+/// Build a search request for `query`, optionally asking for Stage-2
+/// rerank with the given factor.
+fn vector_request(query: &[f32], rerank_factor: Option<usize>) -> laurus::SearchRequest {
+    let mut builder = SearchRequestBuilder::new()
+        .vector_query(VectorSearchQuery::Vectors(vec![QueryVector {
+            vector: Vector::new(query.to_vec()),
+            weight: 1.0,
+            fields: Some(vec!["embedding".to_string()]),
+        }]))
+        .limit(1);
+    if let Some(factor) = rerank_factor {
+        builder = builder.vector_rerank_factor(factor);
+    }
+    builder.build()
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn engine_search_with_rerank_factor_succeeds_on_stage2_field() -> laurus::Result<()> {
@@ -40,39 +68,79 @@ async fn engine_search_with_rerank_factor_succeeds_on_stage2_field() -> laurus::
 
     let engine = Engine::new(storage.clone(), schema).await?;
 
-    let doc1 = Document::builder()
-        .add_field("embedding", DataValue::Vector(vec![1.0, 0.0, 0.0, 0.0]))
-        .build();
-    let doc2 = Document::builder()
-        .add_field("embedding", DataValue::Vector(vec![0.0, 1.0, 0.0, 0.0]))
-        .build();
-    let doc3 = Document::builder()
-        .add_field("embedding", DataValue::Vector(vec![0.0, 0.0, 1.0, 0.0]))
-        .build();
-
-    engine.put_document("doc1", doc1).await?;
-    engine.put_document("doc2", doc2).await?;
-    engine.put_document("doc3", doc3).await?;
+    // Non-grid components (not exactly representable on the segment's
+    // int8 affine grid) so the exact-f32 rerank score measurably
+    // differs from the int8 score, and a query *between* the docs so
+    // similarities stay away from the 1.0 clamp.
+    let vectors: [(&str, [f32; 4]); 4] = [
+        ("doc1", [0.92, 0.31, 0.17, 0.05]),
+        ("doc2", [0.13, 0.83, 0.41, 0.27]),
+        ("doc3", [0.05, 0.19, 0.77, 0.61]),
+        ("doc4", [0.33, 0.47, 0.29, 0.71]),
+    ];
+    for (id, vec) in &vectors {
+        let doc = Document::builder()
+            .add_field("embedding", DataValue::Vector(vec.to_vec()))
+            .build();
+        engine.put_document(id, doc).await?;
+    }
     engine.commit().await?;
 
-    // Query close to doc1, asking for rerank_factor = 3. The wiring
-    // must let the request succeed and return doc1 as the top hit.
-    let query_vec = Vector::new(vec![0.99, 0.01, 0.0, 0.0]);
-    let request = SearchRequestBuilder::new()
-        .vector_query(VectorSearchQuery::Vectors(vec![QueryVector {
-            vector: query_vec,
-            weight: 1.0,
-            fields: Some(vec!["embedding".to_string()]),
-        }]))
-        .vector_rerank_factor(3)
-        .limit(1)
-        .build();
+    // Issue #790 acceptance: the commit must have emitted the LRS1
+    // sidecar through the Engine → VectorStore config conversion.
+    assert!(
+        storage.file_exists(SIDECAR_NAME),
+        "commit with rerank_storage: Some(F32) must emit {SIDECAR_NAME} \
+         (Issue #790: option was dropped in extract_index_type_config)"
+    );
 
-    let results = engine.search(request).await?;
-    assert_eq!(results.len(), 1, "expected exactly 1 hit");
+    // Stronger, deterministic guard: reopen the committed segment the
+    // way the vector store does (behind `PrefixedStorage("vector", ..)`,
+    // index file `vector_index`) and assert the sidecar actually loads
+    // into the rerank pool. A fresh `PrefixedStorage` reports Eager
+    // loading (the trait default), so the pool is populated on load —
+    // this proves "the f32 pool exists and is populated", independent
+    // of the score comparison below.
+    let vector_storage: Arc<dyn Storage> =
+        Arc::new(PrefixedStorage::new("vector", storage.clone()));
+    let reader =
+        HnswIndexReader::load(vector_storage, "vector_index", VectorDistanceMetric::Cosine)?;
+    let pool = reader
+        .rerank_storage()
+        .expect("the committed Stage-2 segment must load its rerank pool");
+    let positions = pool
+        .field_position_index("embedding")
+        .expect("the rerank pool must index the 'embedding' field (Issue #790)");
     assert_eq!(
-        results[0].id, "doc1",
+        positions.len(),
+        vectors.len(),
+        "the rerank pool must hold one f32 vector per committed document"
+    );
+
+    let query = [0.87, 0.36, 0.21, 0.09];
+
+    let with_rerank = engine.search(vector_request(&query, Some(3))).await?;
+    assert_eq!(with_rerank.len(), 1, "expected exactly 1 hit");
+    assert_eq!(
+        with_rerank[0].id, "doc1",
         "doc1 should be the closest match to the rerank-augmented query"
+    );
+
+    let without_rerank = engine.search(vector_request(&query, None)).await?;
+    assert_eq!(without_rerank.len(), 1);
+    assert_eq!(without_rerank[0].id, "doc1");
+
+    // The silent Stage-1 fallback returns bit-identical scores with
+    // and without rerank_factor (the searcher's `_` match arm reuses
+    // the same int8 candidates). A real Stage-2 rerank rescores the
+    // top candidates against the original f32 vectors, whose non-grid
+    // components differ from their int8 dequantization — so a score
+    // difference proves the f32 pool was used.
+    assert_ne!(
+        with_rerank[0].score, without_rerank[0].score,
+        "rerank_factor must change the score via the f32 sidecar pool; \
+         identical scores mean the silent Stage-1 fallback was taken \
+         (Issue #790)"
     );
     Ok(())
 }
@@ -109,19 +177,18 @@ async fn engine_search_with_rerank_factor_silently_falls_back_on_stage1_field() 
     engine.put_document("doc2", doc2).await?;
     engine.commit().await?;
 
+    // Pins the no-behavior-change guarantee of Issue #790: a Stage-1
+    // schema must not start emitting a sidecar.
+    assert!(
+        !storage.file_exists(SIDECAR_NAME),
+        "a field without rerank_storage must not emit {SIDECAR_NAME}"
+    );
+
     // Stage 1 segment + rerank_factor must succeed (no NotImplemented)
     // because the searcher silently degrades to int8 ranking.
-    let request = SearchRequestBuilder::new()
-        .vector_query(VectorSearchQuery::Vectors(vec![QueryVector {
-            vector: Vector::new(vec![0.95, 0.05, 0.0, 0.0]),
-            weight: 1.0,
-            fields: Some(vec!["embedding".to_string()]),
-        }]))
-        .vector_rerank_factor(5)
-        .limit(1)
-        .build();
-
-    let results = engine.search(request).await?;
+    let results = engine
+        .search(vector_request(&[0.95, 0.05, 0.0, 0.0], Some(5)))
+        .await?;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].id, "doc1");
     Ok(())

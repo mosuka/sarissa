@@ -7,11 +7,12 @@
 //! loads it, while legacy footer-less sidecars (written before #788)
 //! must still load and serve rerank-augmented searches.
 //!
-//! The tests drive the public `HnswIndex` API directly because that is
-//! where `rerank_storage` takes effect today: the `VectorStore`-level
-//! config conversion does not yet propagate `HnswOption::rerank_storage`
-//! into `HnswIndexConfig` (issue #790), so a store-level commit never
-//! emits a sidecar.
+//! The tests drive the public `HnswIndex` API directly so they target
+//! the sidecar format in isolation. (Store/engine-level sidecar
+//! emission is covered separately by `vector_rerank_engine_test.rs`
+//! and `vector_merge_test.rs` since issue #790 wired
+//! `HnswOption::rerank_storage` through the `VectorStore` config
+//! conversion.)
 
 use std::io::{Read, Write};
 use std::sync::Arc;
