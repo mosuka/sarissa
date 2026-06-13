@@ -100,9 +100,9 @@ Each `FieldOption` is a `oneof` with one of the following field types:
 
 | Lexical Fields | Vector Fields |
 | :--- | :--- |
-| `TextOption` (`indexed`, `stored`, `term_vectors`, `analyzer`) | `HnswOption` (`dimension`, `distance`, `m`, `ef_construction`, `base_weight`, `quantizer`, `embedder`) |
-| `IntegerOption` (`indexed`, `stored`, `multi_valued`) | `FlatOption` (`dimension`, `distance`, `base_weight`, `quantizer`, `embedder`) |
-| `FloatOption` (`indexed`, `stored`, `multi_valued`) | `IvfOption` (`dimension`, `distance`, `n_clusters`, `n_probe`, `base_weight`, `quantizer`, `embedder`) |
+| `TextOption` (`indexed`, `stored`, `term_vectors`, `analyzer`) | `HnswOption` (`dimension`, `distance`, `m`, `ef_construction`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
+| `IntegerOption` (`indexed`, `stored`, `multi_valued`) | `FlatOption` (`dimension`, `distance`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
+| `FloatOption` (`indexed`, `stored`, `multi_valued`) | `IvfOption` (`dimension`, `distance`, `n_clusters`, `n_probe`, `base_weight`, `quantizer`, `embedder`, `rerank_storage`) |
 | `BooleanOption` (`indexed`, `stored`) | |
 | `DateTimeOption` (`indexed`, `stored`) | |
 | `GeoOption` (`indexed`, `stored`) | |
@@ -116,6 +116,8 @@ The `embedder` field in vector options specifies the name of an embedder defined
 **Quantization methods:** `SCALAR_8BIT` (default), `PRODUCT_QUANTIZATION` (reserved for Issue #481 Stage 3, currently `Unimplemented`).
 
 `NONE` (no quantization) was removed in Issue #481 Stage 1. The proto enum value `0` (`QUANTIZATION_METHOD_NONE`) is kept as a wire-compat reservation; if the server receives it, it falls back to `SCALAR_8BIT` via `Default::default()`.
+
+**Rerank storage:** the optional `rerank_storage` field (enum `RerankStorageKind`: `UNSPECIFIED` = no sidecar, `F32`) enables the Stage-2 rerank sidecar (Issue #481 / #793). When set to `F32` on an HNSW field, commit writes an extra full-precision `.hnsw.f32` sidecar so searches that set `rerank_factor` rescore int8 candidates against the original vectors. Omitting the field (or `UNSPECIFIED`) keeps Stage-1 int8-only ranking. The field is also carried on `FlatOption` / `IvfOption` for schema round-tripping, but those indexes do not emit a sidecar yet.
 
 **QuantizationConfig structure:**
 

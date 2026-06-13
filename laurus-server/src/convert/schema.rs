@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use laurus::vector::core::rerank::RerankStorageKind;
 use laurus::{
     AnalyzerDefinition, AnalyzerSpec, BooleanOption, BuiltinAnalyzerSpec, BytesOption,
     CharFilterConfig, DateTimeOption, DistanceMetric, DynamicFieldPolicy, EmbedderDefinition,
@@ -146,6 +147,7 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             quantizer: Some(quantization_to_proto(&o.quantizer)),
             embedder: o.embedder.clone().unwrap_or_default(),
             default_ef_search: o.default_ef_search.map(|v| v as u32),
+            rerank_storage: o.rerank_storage.map(|k| rerank_storage_to_proto(k) as i32),
         })),
         FieldOption::Flat(o) => Some(Opt::Flat(v1::FlatOption {
             dimension: o.dimension as u32,
@@ -153,6 +155,7 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             base_weight: o.base_weight,
             quantizer: Some(quantization_to_proto(&o.quantizer)),
             embedder: o.embedder.clone().unwrap_or_default(),
+            rerank_storage: o.rerank_storage.map(|k| rerank_storage_to_proto(k) as i32),
         })),
         FieldOption::Ivf(o) => Some(Opt::Ivf(v1::IvfOption {
             dimension: o.dimension as u32,
@@ -162,6 +165,7 @@ pub fn field_option_to_proto(fo: &FieldOption) -> v1::FieldOption {
             base_weight: o.base_weight,
             quantizer: Some(quantization_to_proto(&o.quantizer)),
             embedder: o.embedder.clone().unwrap_or_default(),
+            rerank_storage: o.rerank_storage.map(|k| rerank_storage_to_proto(k) as i32),
         })),
     };
     v1::FieldOption { option }
@@ -222,7 +226,7 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
                 .as_ref()
                 .map(quantization_from_proto)
                 .unwrap_or_default(),
-            rerank_storage: None,
+            rerank_storage: o.rerank_storage.and_then(rerank_storage_from_proto),
             embedder: if o.embedder.is_empty() {
                 None
             } else {
@@ -238,7 +242,7 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
                 .as_ref()
                 .map(quantization_from_proto)
                 .unwrap_or_default(),
-            rerank_storage: None,
+            rerank_storage: o.rerank_storage.and_then(rerank_storage_from_proto),
             embedder: if o.embedder.is_empty() {
                 None
             } else {
@@ -256,7 +260,7 @@ pub fn field_option_from_proto(fo: &v1::FieldOption) -> Option<FieldOption> {
                 .as_ref()
                 .map(quantization_from_proto)
                 .unwrap_or_default(),
-            rerank_storage: None,
+            rerank_storage: o.rerank_storage.and_then(rerank_storage_from_proto),
             embedder: if o.embedder.is_empty() {
                 None
             } else {
@@ -335,6 +339,25 @@ fn quantization_from_proto(q: &v1::QuantizationConfig) -> QuantizationMethod {
         // Phase 1 and revisit when FastScan exits experimental.
         #[cfg(not(feature = "pq-fastscan"))]
         Ok(v1::QuantizationMethod::ProductQuantizationFastscan) => QuantizationMethod::Scalar8Bit,
+    }
+}
+
+/// Convert a laurus [`RerankStorageKind`] into the proto enum (Issue #793).
+fn rerank_storage_to_proto(kind: RerankStorageKind) -> v1::RerankStorageKind {
+    match kind {
+        RerankStorageKind::F32 => v1::RerankStorageKind::F32,
+    }
+}
+
+/// Convert a proto `rerank_storage` enum value into an optional laurus
+/// [`RerankStorageKind`] (Issue #793).
+///
+/// `UNSPECIFIED` and any unknown value map to `None` (Stage-1, no
+/// sidecar), so an absent or zero field keeps the historical behavior.
+fn rerank_storage_from_proto(value: i32) -> Option<RerankStorageKind> {
+    match v1::RerankStorageKind::try_from(value) {
+        Ok(v1::RerankStorageKind::F32) => Some(RerankStorageKind::F32),
+        Ok(v1::RerankStorageKind::Unspecified) | Err(_) => None,
     }
 }
 
@@ -820,6 +843,99 @@ mod tests {
         let proto = to_proto(&schema);
         let back = from_proto(&proto).unwrap();
         assert_eq!(back.dynamic_field_policy, DynamicFieldPolicy::Dynamic);
+    }
+
+    /// Issue #793: an HNSW field's `rerank_storage` and `quantizer`
+    /// survive a proto round-trip. Before #793 the proto `HnswOption`
+    /// had no `rerank_storage` field, so `from_proto` hard-coded `None`
+    /// and the Stage-2 sidecar could never be enabled over gRPC. The
+    /// quantizer assertion is the "audit quantizer" part of the issue —
+    /// it was already wired and must keep round-tripping.
+    #[test]
+    fn hnsw_rerank_storage_and_quantizer_round_trip_through_proto() {
+        let schema = Schema::builder()
+            .add_field(
+                "embedding",
+                FieldOption::Hnsw(HnswOption {
+                    dimension: 8,
+                    rerank_storage: Some(RerankStorageKind::F32),
+                    quantizer: QuantizationMethod::ProductQuantization { subvector_count: 4 },
+                    ..Default::default()
+                }),
+            )
+            .build();
+
+        // Laurus -> proto carries the field (it is absent in the proto
+        // representation before this fix).
+        let proto = to_proto(&schema);
+        let proto_field = proto
+            .fields
+            .get("embedding")
+            .and_then(|f| f.option.as_ref())
+            .expect("embedding field option must be present");
+        match proto_field {
+            v1::field_option::Option::Hnsw(h) => {
+                assert_eq!(
+                    h.rerank_storage,
+                    Some(v1::RerankStorageKind::F32 as i32),
+                    "to_proto must serialize rerank_storage"
+                );
+            }
+            other => panic!("expected proto Hnsw option, got {other:?}"),
+        }
+
+        // proto -> Laurus restores both fields (previously rerank_storage
+        // was hard-coded to None).
+        let back = from_proto(&proto).expect("from_proto must succeed");
+        match back.fields.get("embedding") {
+            Some(FieldOption::Hnsw(h)) => {
+                assert_eq!(h.rerank_storage, Some(RerankStorageKind::F32));
+                assert_eq!(
+                    h.quantizer,
+                    QuantizationMethod::ProductQuantization { subvector_count: 4 }
+                );
+            }
+            other => panic!("expected FieldOption::Hnsw, got {other:?}"),
+        }
+    }
+
+    /// Issue #793: `rerank_storage` round-trips for Flat and IVF fields
+    /// too (carried for schema fidelity even though those indexes do not
+    /// emit a sidecar yet), and an unset value stays `None`.
+    #[test]
+    fn flat_and_ivf_rerank_storage_round_trip_through_proto() {
+        let schema = Schema::builder()
+            .add_field(
+                "flat_vec",
+                FieldOption::Flat(FlatOption {
+                    dimension: 8,
+                    rerank_storage: Some(RerankStorageKind::F32),
+                    ..Default::default()
+                }),
+            )
+            .add_field(
+                "ivf_vec",
+                FieldOption::Ivf(IvfOption {
+                    dimension: 8,
+                    rerank_storage: None,
+                    ..Default::default()
+                }),
+            )
+            .build();
+
+        let back = from_proto(&to_proto(&schema)).expect("from_proto must succeed");
+        match back.fields.get("flat_vec") {
+            Some(FieldOption::Flat(f)) => {
+                assert_eq!(f.rerank_storage, Some(RerankStorageKind::F32));
+            }
+            other => panic!("expected FieldOption::Flat, got {other:?}"),
+        }
+        match back.fields.get("ivf_vec") {
+            Some(FieldOption::Ivf(i)) => {
+                assert_eq!(i.rerank_storage, None);
+            }
+            other => panic!("expected FieldOption::Ivf, got {other:?}"),
+        }
     }
 
     /// `FieldOption::Geo3d` round-trips through the proto `Geo3dOption`
