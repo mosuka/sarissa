@@ -444,3 +444,123 @@ async fn segmented_merge_keeps_vectors_unnormalized_for_euclidean()
 
     Ok(())
 }
+
+/// Issue [#795]: a segment merge must rebuild the merged `.hnsw.f32`
+/// rerank sidecar from the source segments' **original f32** sidecars,
+/// not from int8-dequantized values. Otherwise each merge bakes one
+/// round of scalar-quantization error (~`scale/2`, on the order of
+/// `1e-3` for these vectors) into the "lossless" rerank payload.
+///
+/// The test uses a Euclidean field (so #794 does not normalize the
+/// stored vectors) with components that do not land on the int8
+/// quantization grid, then asserts the merged pool's f32 equals the
+/// original input within `f32::EPSILON` — which only holds if the merge
+/// read the source sidecar rather than the dequantized int8 segment.
+///
+/// [#795]: https://github.com/mosuka/laurus/issues/795
+#[tokio::test]
+async fn segmented_merge_preserves_rerank_sidecar_f32_losslessly()
+-> Result<(), Box<dyn std::error::Error>> {
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+    let manager_config = SegmentManagerConfig {
+        max_segments: 2,
+        merge_factor: 2,
+        min_vectors_per_segment: 1,
+        ..Default::default()
+    };
+    let manager = Arc::new(SegmentManager::new(manager_config, storage.clone())?);
+
+    let field_config = VectorFieldConfig {
+        vector: Some(FieldOption::Hnsw(HnswOption {
+            dimension: 4,
+            distance: DistanceMetric::Euclidean,
+            m: 16,
+            ef_construction: 200,
+            rerank_storage: Some(RerankStorageKind::F32),
+            ..HnswOption::default()
+        })),
+        lexical: None,
+    };
+
+    let field = SegmentedVectorField::create(
+        "embedding",
+        field_config,
+        manager.clone(),
+        storage.clone(),
+        None,
+    )?;
+
+    // Each segment shares one (offset, scale) computed from all of its
+    // vectors. Pairing each probe vector with a large-magnitude anchor
+    // widens the int8 range so the probe's fractional components land
+    // well off the quantization grid (dequant error ~0.05, far above
+    // f32::EPSILON). With int8-rebuilt sidecars the merged probe would
+    // be that coarse; only reading the source f32 sidecar preserves it.
+    let probes: [(u64, [f32; 4]); 3] = [
+        (1, [0.137, 0.642, 0.319, 0.808]),
+        (2, [0.251, 0.563, 0.174, 0.926]),
+        (3, [0.488, 0.071, 0.655, 0.302]),
+    ];
+    let anchor = [40.0_f32, 40.0, 40.0, 40.0];
+    let mut anchor_id = 100u64;
+    for (doc_id, vec) in &probes {
+        field
+            .add_stored_vector(*doc_id, &StoredVector::new(vec.to_vec()), 0)
+            .await?;
+        field
+            .add_stored_vector(anchor_id, &StoredVector::new(anchor.to_vec()), 0)
+            .await?;
+        anchor_id += 1;
+        field.flush().await?;
+    }
+
+    let before_ids: Vec<String> = manager
+        .list_segments()
+        .iter()
+        .map(|s| s.segment_id.clone())
+        .collect();
+    field.perform_merge()?;
+
+    let merged_id = manager
+        .list_segments()
+        .iter()
+        .map(|s| s.segment_id.clone())
+        .find(|id| !before_ids.contains(id))
+        .expect("merge must create a new segment");
+
+    let reader = HnswIndexReader::load(
+        storage.clone() as Arc<dyn Storage>,
+        &merged_id,
+        DistanceMetric::Euclidean,
+    )?;
+    let pool = reader
+        .rerank_storage()
+        .expect("merged sidecar must load into the rerank pool");
+
+    // Whichever two segments were merged, the probe vectors they
+    // contain must equal the original input exactly (the source sidecar
+    // carried the original f32). int8-dequantized values would differ
+    // by ~0.05 here.
+    let mut checked = 0;
+    for (doc_id, original) in &probes {
+        if let Some(slice) = pool.get_f32_slice(*doc_id, "embedding") {
+            for (i, (got, want)) in slice.iter().zip(original.iter()).enumerate() {
+                assert!(
+                    (got - want).abs() <= f32::EPSILON,
+                    "probe doc {doc_id} component {i}: merged f32 {got} != original {want} \
+                     (diff {:.2e}); a coarse difference means the merge rebuilt the \
+                     sidecar from int8-dequantized values (Issue #795)",
+                    (got - want).abs()
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert_eq!(
+        checked, 2,
+        "the merged pool must contain the probes from the 2 merged segments"
+    );
+
+    Ok(())
+}
