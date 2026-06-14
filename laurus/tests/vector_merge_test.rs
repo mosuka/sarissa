@@ -503,15 +503,13 @@ async fn segmented_merge_preserves_rerank_sidecar_f32_losslessly()
         (3, [0.488, 0.071, 0.655, 0.302]),
     ];
     let anchor = [40.0_f32, 40.0, 40.0, 40.0];
-    let mut anchor_id = 100u64;
-    for (doc_id, vec) in &probes {
+    for (i, (doc_id, vec)) in probes.iter().enumerate() {
         field
             .add_stored_vector(*doc_id, &StoredVector::new(vec.to_vec()), 0)
             .await?;
         field
-            .add_stored_vector(anchor_id, &StoredVector::new(anchor.to_vec()), 0)
+            .add_stored_vector(100 + i as u64, &StoredVector::new(anchor.to_vec()), 0)
             .await?;
-        anchor_id += 1;
         field.flush().await?;
     }
 
