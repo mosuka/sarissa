@@ -292,9 +292,6 @@ pub struct FlatIndexConfig {
     /// Larger buffers improve write performance but use more memory.
     pub write_buffer_size: usize,
 
-    /// Whether to use quantization.
-    pub use_quantization: bool,
-
     /// Quantization method.
     pub quantization_method: quantization::QuantizationMethod,
 
@@ -374,7 +371,6 @@ impl Default for FlatIndexConfig {
             normalize_vectors: true,
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
-            use_quantization: false,
             quantization_method: quantization::QuantizationMethod::Scalar8Bit,
             rerank_storage: None,
             merge_factor: 10,
@@ -393,7 +389,6 @@ impl std::fmt::Debug for FlatIndexConfig {
             .field("normalize_vectors", &self.normalize_vectors)
             .field("max_vectors_per_segment", &self.max_vectors_per_segment)
             .field("write_buffer_size", &self.write_buffer_size)
-            .field("use_quantization", &self.use_quantization)
             .field("quantization_method", &self.quantization_method)
             .field("rerank_storage", &self.rerank_storage)
             .field("merge_factor", &self.merge_factor)
@@ -450,9 +445,6 @@ pub struct HnswIndexConfig {
 
     /// Buffer size for writing operations (in bytes).
     pub write_buffer_size: usize,
-
-    /// Whether to use quantization.
-    pub use_quantization: bool,
 
     /// Quantization method.
     pub quantization_method: quantization::QuantizationMethod,
@@ -523,7 +515,6 @@ impl Default for HnswIndexConfig {
             default_ef_search: None,
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
-            use_quantization: false,
             quantization_method: quantization::QuantizationMethod::Scalar8Bit,
             rerank_storage: None,
             merge_factor: 10,
@@ -547,7 +538,6 @@ impl std::fmt::Debug for HnswIndexConfig {
             .field("default_ef_search", &self.default_ef_search)
             .field("max_vectors_per_segment", &self.max_vectors_per_segment)
             .field("write_buffer_size", &self.write_buffer_size)
-            .field("use_quantization", &self.use_quantization)
             .field("quantization_method", &self.quantization_method)
             .field("rerank_storage", &self.rerank_storage)
             .field("merge_factor", &self.merge_factor)
@@ -654,9 +644,6 @@ pub struct IvfIndexConfig {
     /// Buffer size for writing operations (in bytes).
     pub write_buffer_size: usize,
 
-    /// Whether to use quantization.
-    pub use_quantization: bool,
-
     /// Quantization method.
     pub quantization_method: quantization::QuantizationMethod,
 
@@ -696,7 +683,6 @@ impl Default for IvfIndexConfig {
             n_probe: 1,
             max_vectors_per_segment: 1000000,
             write_buffer_size: 1024 * 1024, // 1MB
-            use_quantization: false,
             quantization_method: quantization::QuantizationMethod::Scalar8Bit,
             rerank_storage: None,
             merge_factor: 10,
@@ -717,7 +703,6 @@ impl std::fmt::Debug for IvfIndexConfig {
             .field("n_probe", &self.n_probe)
             .field("max_vectors_per_segment", &self.max_vectors_per_segment)
             .field("write_buffer_size", &self.write_buffer_size)
-            .field("use_quantization", &self.use_quantization)
             .field("quantization_method", &self.quantization_method)
             .field("rerank_storage", &self.rerank_storage)
             .field("merge_factor", &self.merge_factor)
@@ -769,7 +754,6 @@ mod tests {
 
         // Intentionally unmapped fields stay at their defaults.
         let defaults = HnswIndexConfig::default();
-        assert_eq!(config.use_quantization, defaults.use_quantization);
         assert_eq!(config.auto_compaction, defaults.auto_compaction);
         assert_eq!(config.max_segments, defaults.max_segments);
         assert_eq!(config.embedder.name(), defaults.embedder.name());
