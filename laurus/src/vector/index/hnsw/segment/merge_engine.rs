@@ -169,6 +169,15 @@ impl MergeEngine {
             )?;
             // vectors_merged += reader.vector_count() as u64;
 
+            // Issue #795: prefer the source segment's original f32 rerank
+            // sidecar (lossless) over the int8-dequantized iterator value,
+            // so a merge does not bake one round of quantization error into
+            // the merged sidecar. The pool is already loaded by the reader
+            // (Eager mode, zero extra I/O); when absent (no sidecar, or Lazy
+            // mode) we keep the int8-dequantized vector — the best available
+            // source.
+            let rerank_pool = reader.rerank_storage().cloned();
+
             let mut iterator = reader.vector_iterator()?;
             while let Some((doc_id, field, vector)) = iterator.next()? {
                 if let Some(bitmap) = &self.deletion_bitmap
@@ -177,6 +186,13 @@ impl MergeEngine {
                     deletions_removed += 1;
                     continue;
                 }
+                let vector = match rerank_pool
+                    .as_ref()
+                    .and_then(|pool| pool.get_f32_slice(doc_id, &field))
+                {
+                    Some(f32_vector) => Vector::new(f32_vector.to_vec()),
+                    None => vector,
+                };
                 all_vectors.push((doc_id, field, vector));
             }
         }

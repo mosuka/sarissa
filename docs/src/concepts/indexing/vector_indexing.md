@@ -308,8 +308,11 @@ Stage 1).
 The sidecar is enabled per field by `rerank_storage` in the schema's
 HNSW options, and that setting is honored on every write path: direct
 commits, the active write segment, and segment merges all re-emit the
-sidecar for the segment they produce (a merged segment's sidecar is
-rebuilt from the merged vectors).
+sidecar for the segment they produce. A merged segment's sidecar is
+rebuilt from the **source segments' original f32 sidecars** (not from
+the int8-dequantized segment data), so a merge stays lossless for the
+rerank vectors instead of compounding one round of quantization error
+per merge.
 
 New sidecars end with an 8-byte CRC-32 footer over the header and
 payload that is verified whenever the sidecar is read (both the
