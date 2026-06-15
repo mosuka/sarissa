@@ -33,6 +33,7 @@ compile_error!(
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::error::{LaurusError, Result};
 use crate::vector::core::rerank::RerankStorageKind;
 
 /// In-memory rerank storage for one segment's full-precision vectors.
@@ -133,29 +134,52 @@ impl RerankStoragePool {
     /// `field_index` without re-encoding the bytes. The assignment
     /// must be `vector_count` long and ordered by position.
     ///
-    /// # Panics
+    /// # Arguments
     ///
-    /// Panics if `payload.len()` does not equal `vector_count * dim *
-    /// bytes_per_element` or if `field_assignment.len()` does not
-    /// equal `vector_count`.
+    /// * `kind` - On-disk encoding of each stored element.
+    /// * `dim` - Vector dimension.
+    /// * `vector_count` - Number of vectors the payload is expected to hold.
+    /// * `payload` - Raw LRS1 payload bytes (becomes [`Self::data`]).
+    /// * `field_assignment` - Per-position `(doc_id, field_name)` pairs,
+    ///   ordered by position.
+    ///
+    /// # Returns
+    ///
+    /// The constructed [`RerankStoragePool`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LaurusError::Index`] if `payload.len()` does not equal
+    /// `vector_count * dim * bytes_per_element`, or if
+    /// `field_assignment.len()` does not equal `vector_count` — both
+    /// indicate the sidecar payload and its declared shape are
+    /// inconsistent (corruption). Validating here instead of panicking
+    /// keeps a corrupt or hostile sidecar from aborting the process
+    /// (Issue #805).
     pub fn from_sidecar_payload(
         kind: RerankStorageKind,
         dim: usize,
         vector_count: usize,
         payload: Vec<u8>,
         field_assignment: &[(u64, String)],
-    ) -> Self {
+    ) -> Result<Self> {
         let record_size = Self::record_size(dim, kind);
-        assert_eq!(
-            payload.len(),
-            vector_count * record_size,
-            "sidecar payload length mismatch"
-        );
-        assert_eq!(
-            field_assignment.len(),
-            vector_count,
-            "field assignment length mismatch"
-        );
+        let expected_len = vector_count * record_size;
+        if payload.len() != expected_len {
+            return Err(LaurusError::index(format!(
+                "rerank sidecar payload length mismatch: expected {expected_len} bytes \
+                 (vector_count={vector_count} * dim={dim} * \
+                 bytes_per_element={}), got {}",
+                kind.bytes_per_element(),
+                payload.len()
+            )));
+        }
+        if field_assignment.len() != vector_count {
+            return Err(LaurusError::index(format!(
+                "rerank sidecar field assignment length mismatch: expected {vector_count}, got {}",
+                field_assignment.len()
+            )));
+        }
 
         let mut by_field: HashMap<String, HashMap<u64, u32>> = HashMap::new();
         for (pos, (doc_id, field)) in field_assignment.iter().enumerate() {
@@ -170,13 +194,13 @@ impl RerankStoragePool {
             .map(|(field, map)| (field, Arc::new(map)))
             .collect();
 
-        Self {
+        Ok(Self {
             kind,
             dim,
             data: payload,
             field_index,
             vector_count,
-        }
+        })
     }
 
     /// Borrow the f32 slice for `(doc_id, field)`.
@@ -386,34 +410,49 @@ mod tests {
             2,
             payload,
             &assignment,
-        );
+        )
+        .unwrap();
         assert_eq!(pool.vector_count, 2);
         assert_eq!(pool.get_f32_slice(7, "f").unwrap(), &vectors[0..4]);
         assert_eq!(pool.get_f32_slice(9, "f").unwrap(), &vectors[4..8]);
     }
 
+    /// Assert `err` is a [`LaurusError::Index`] whose message contains
+    /// `fragment`.
+    fn assert_index_error(err: LaurusError, fragment: &str) {
+        match err {
+            LaurusError::Index(msg) => assert!(
+                msg.contains(fragment),
+                "message {msg:?} should contain {fragment:?}"
+            ),
+            other => panic!("expected Index error, got {other:?}"),
+        }
+    }
+
     #[test]
-    #[should_panic(expected = "payload length mismatch")]
-    fn from_sidecar_payload_panics_on_wrong_payload_size() {
-        RerankStoragePool::from_sidecar_payload(
+    fn from_sidecar_payload_rejects_wrong_payload_size() {
+        let err = RerankStoragePool::from_sidecar_payload(
             RerankStorageKind::F32,
             4,
             2,
             vec![0u8; 10], // expects 32 bytes
             &[(1u64, "f".to_string()), (2u64, "f".to_string())],
-        );
+        )
+        .unwrap_err();
+        assert_index_error(err, "payload length mismatch");
     }
 
     #[test]
-    #[should_panic(expected = "field assignment length mismatch")]
-    fn from_sidecar_payload_panics_on_wrong_assignment_size() {
-        RerankStoragePool::from_sidecar_payload(
+    fn from_sidecar_payload_rejects_wrong_assignment_size() {
+        let err = RerankStoragePool::from_sidecar_payload(
             RerankStorageKind::F32,
             4,
             2,
             vec![0u8; 32],
             &[(1u64, "f".to_string())], // wrong length
-        );
+        )
+        .unwrap_err();
+        assert_index_error(err, "field assignment length mismatch");
     }
 
     #[test]

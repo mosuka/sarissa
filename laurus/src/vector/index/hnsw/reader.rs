@@ -553,7 +553,7 @@ impl HnswIndexReader {
                         header.vector_count as usize,
                         payload,
                         &vector_ids,
-                    );
+                    )?;
                     Some(Arc::new(pool))
                 } else {
                     None
