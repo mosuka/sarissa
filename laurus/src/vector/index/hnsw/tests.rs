@@ -158,7 +158,8 @@ fn writer_emits_sidecar_with_matching_header_when_rerank_storage_is_f32() -> Res
         "sidecar must be written when rerank_storage is Some(F32)"
     );
     let mut sidecar_in = storage.open_input("stage2_f32.hnsw.f32")?;
-    let (header, payload) = read_sidecar(&mut sidecar_in)?;
+    let sidecar_size = sidecar_in.size()?;
+    let (header, payload) = read_sidecar(&mut sidecar_in, sidecar_size)?;
     assert_eq!(header.dim as usize, dim);
     assert_eq!(header.vector_count as usize, originals.len());
     assert_eq!(header.storage_kind, RerankStorageKind::F32);

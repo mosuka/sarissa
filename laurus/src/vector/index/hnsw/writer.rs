@@ -364,7 +364,8 @@ impl HnswIndexWriter {
         let sidecar_name = format!("{}.f32", file_name);
         if storage.file_exists(&sidecar_name) {
             let mut sidecar_in = storage.open_input(&sidecar_name)?;
-            let (header, payload) = read_sidecar(&mut sidecar_in)?;
+            let sidecar_size = sidecar_in.size()?;
+            let (header, payload) = read_sidecar(&mut sidecar_in, sidecar_size)?;
             if header.dim as usize != dimension {
                 return Err(LaurusError::InvalidOperation(format!(
                     "rerank sidecar dim mismatch: LVS1 segment uses {dimension}, sidecar uses {}",

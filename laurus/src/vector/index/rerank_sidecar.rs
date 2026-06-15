@@ -42,11 +42,17 @@
 //! `[RERANK_SIDECAR_FOOTER_MAGIC u32 LE][crc-32 u32 LE]` whose CRC-32
 //! covers every preceding byte (header + payload), mirroring the
 //! `.hnsw` footer added by Issue #786. Because the header fully
-//! determines the content length, [`read_sidecar`] detects the footer
-//! by the number of bytes remaining after the payload — no file-size
-//! heuristics: zero remaining bytes is a legacy footer-less sidecar
-//! (verification is skipped), exactly eight is a footer (verified),
-//! anything else is corruption.
+//! determines the content length, [`read_sidecar`] *detects* the footer
+//! by the number of bytes remaining after the payload — footer
+//! detection itself needs no file-size heuristics: zero remaining bytes
+//! is a legacy footer-less sidecar (verification is skipped), exactly
+//! eight is a footer (verified), anything else is corruption.
+//!
+//! Separately, the on-disk file size *is* used up front to bound the
+//! payload allocation before the header is trusted (Issue #791); see
+//! [`read_sidecar`]. That bound only caps how many bytes may be
+//! allocated — it does not participate in the footer classification
+//! above.
 //!
 //! # Backward compatibility
 //!
@@ -139,8 +145,41 @@ impl RerankSidecarHeader {
     }
 
     /// Bytes occupied by the payload that follows the header.
-    pub fn payload_size(&self) -> usize {
-        self.vector_count as usize * self.dim as usize * self.storage_kind.bytes_per_element()
+    ///
+    /// Computed with checked arithmetic (Issue #791): the
+    /// `vector_count * dim * bytes_per_element` product is evaluated in
+    /// `u64` with `checked_mul` so a corrupt or hostile header (whose
+    /// `dim` / `vector_count` an attacker controls) can never wrap in a
+    /// release build, and the result is range-checked into `usize` so it
+    /// stays valid on 32-bit targets (e.g. wasm32). Both failures surface
+    /// as a clean error instead of an undersized buffer or a panic.
+    ///
+    /// # Returns
+    ///
+    /// The payload length in bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`LaurusError::Index`] if the product overflows `u64`, or if the
+    /// resulting byte count does not fit in `usize` on this platform.
+    pub fn payload_size(&self) -> Result<usize> {
+        let bytes = (self.vector_count as u64)
+            .checked_mul(self.dim as u64)
+            .and_then(|v| v.checked_mul(self.storage_kind.bytes_per_element() as u64))
+            .ok_or_else(|| {
+                LaurusError::index(format!(
+                    "rerank sidecar payload size overflow: vector_count={} * dim={} * \
+                     bytes_per_element={} exceeds u64",
+                    self.vector_count,
+                    self.dim,
+                    self.storage_kind.bytes_per_element()
+                ))
+            })?;
+        usize::try_from(bytes).map_err(|_| {
+            LaurusError::index(format!(
+                "rerank sidecar payload size {bytes} bytes does not fit in usize on this platform"
+            ))
+        })
     }
 
     /// Write the header to `writer`.
@@ -329,17 +368,70 @@ pub fn write_sidecar<W: Write>(
 ///   header and payload is compared against the stored value.
 /// * anything else — the file is corrupted.
 ///
+/// # Allocation safety (Issue #791)
+///
+/// The payload buffer is sized from the just-parsed header, which has
+/// **not** been integrity-checked yet (the CRC footer is necessarily
+/// verified only after the payload is read). A corrupt or hostile
+/// header could therefore declare a multi-GiB payload and abort the
+/// process via `handle_alloc_error` (OOM) before the footer ever
+/// reports the corruption. To prevent this, `file_size` (the real,
+/// on-disk byte length of the sidecar — ground truth the caller obtains
+/// from [`crate::storage::StorageInput::size`]) bounds the allocation:
+/// because the header fully determines the content length, the file
+/// must be at least `HEADER_SIZE + payload_size` bytes (the optional
+/// footer only ever follows the payload). A header that declares more
+/// payload than the file can hold is rejected as corruption *before*
+/// any buffer is allocated.
+///
+/// # Arguments
+///
+/// * `reader` - The source to read the sidecar bytes from.
+/// * `file_size` - The total byte length of the sidecar file, used to
+///   bound the payload allocation before the header is trusted.
+///
 /// # Errors
 ///
 /// * Any error from [`RerankSidecarHeader::read_from`].
+/// * [`LaurusError::Index`] if the header declares a payload that does
+///   not fit within `file_size`, or if [`RerankSidecarHeader::payload_size`]
+///   overflows (both treated as corruption).
 /// * [`LaurusError::Io`] if the payload bytes can't be fully read.
 /// * [`LaurusError::Index`] if the checksum does not match the
 ///   content, the footer magic is wrong, the footer is truncated, or
 ///   data trails a valid footer (all corruption).
-pub fn read_sidecar<R: Read>(reader: &mut R) -> Result<(RerankSidecarHeader, Vec<u8>)> {
+pub fn read_sidecar<R: Read>(
+    reader: &mut R,
+    file_size: u64,
+) -> Result<(RerankSidecarHeader, Vec<u8>)> {
     let mut crc_reader = crate::storage::checksum::CrcReader::new(&mut *reader);
     let header = RerankSidecarHeader::read_from(&mut crc_reader)?;
-    let mut payload = vec![0u8; header.payload_size()];
+
+    // Bound the payload allocation by ground truth (the real file size)
+    // before trusting the not-yet-verified header (Issue #791). The
+    // header fully determines the content length, so the file must hold
+    // at least `HEADER_SIZE + payload_size` bytes (the optional #788
+    // footer only follows the payload). Rejecting an oversized claim
+    // here keeps a corrupt `dim` / `vector_count` from requesting a huge
+    // `vec![0u8; payload_size]` that would abort the process before the
+    // CRC footer could report the corruption cleanly.
+    let payload_size = header.payload_size()?;
+    let min_content = (HEADER_SIZE as u64)
+        .checked_add(payload_size as u64)
+        .ok_or_else(|| {
+            LaurusError::index(
+                "rerank sidecar declared content length overflows u64: \
+                 .hnsw.f32 file is corrupted",
+            )
+        })?;
+    if min_content > file_size {
+        return Err(LaurusError::index(format!(
+            "rerank sidecar header declares a {payload_size}-byte payload but the file is only \
+             {file_size} bytes: .hnsw.f32 file is corrupted"
+        )));
+    }
+
+    let mut payload = vec![0u8; payload_size];
     crc_reader.read_exact(&mut payload)?;
     let computed = crc_reader.checksum();
     // The footer must not enter the running CRC, so read it from the
@@ -414,7 +506,17 @@ mod tests {
     #[test]
     fn payload_size_is_count_times_dim_times_element_bytes() {
         let header = RerankSidecarHeader::new(RerankStorageKind::F32, 16, 100);
-        assert_eq!(header.payload_size(), 100 * 16 * 4);
+        assert_eq!(header.payload_size().unwrap(), 100 * 16 * 4);
+    }
+
+    #[test]
+    fn payload_size_rejects_overflowing_dimensions() {
+        // A hostile header whose `dim` * `vector_count` * 4 overflows
+        // u64 must surface a clean error instead of wrapping to a tiny
+        // (or zero) allocation in release builds (Issue #791).
+        let header = RerankSidecarHeader::new(RerankStorageKind::F32, u32::MAX, u32::MAX);
+        let err = header.payload_size().unwrap_err();
+        assert_index_error(err, "payload size overflow");
     }
 
     #[test]
@@ -497,11 +599,11 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         write_sidecar(&mut buf, RerankStorageKind::F32, dim, &vectors).unwrap();
 
-        let (header, payload) = read_sidecar(&mut Cursor::new(&buf)).unwrap();
+        let (header, payload) = read_sidecar(&mut Cursor::new(&buf), buf.len() as u64).unwrap();
         assert_eq!(header.dim, dim);
         assert_eq!(header.vector_count, 3);
         assert_eq!(header.storage_kind, RerankStorageKind::F32);
-        assert_eq!(payload.len(), header.payload_size());
+        assert_eq!(payload.len(), header.payload_size().unwrap());
 
         for (i, expected) in vectors.iter().enumerate() {
             let lo = i * 4;
@@ -593,9 +695,9 @@ mod tests {
             buf.extend_from_slice(&v.to_le_bytes());
         }
 
-        let (parsed, payload) = read_sidecar(&mut Cursor::new(&buf)).unwrap();
+        let (parsed, payload) = read_sidecar(&mut Cursor::new(&buf), buf.len() as u64).unwrap();
         assert_eq!(parsed, header);
-        assert_eq!(payload.len(), parsed.payload_size());
+        assert_eq!(payload.len(), parsed.payload_size().unwrap());
     }
 
     #[test]
@@ -604,7 +706,7 @@ mod tests {
         let payload_mid = HEADER_SIZE + (buf.len() - HEADER_SIZE - FOOTER_SIZE) / 2;
         buf[payload_mid] ^= 0xff;
 
-        let err = read_sidecar(&mut Cursor::new(&buf)).unwrap_err();
+        let err = read_sidecar(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         assert_index_error(err, "checksum mismatch");
     }
 
@@ -616,7 +718,7 @@ mod tests {
         let mut buf = sample_sidecar_bytes();
         buf[10] ^= 0xff;
 
-        let err = read_sidecar(&mut Cursor::new(&buf)).unwrap_err();
+        let err = read_sidecar(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         assert_index_error(err, "checksum mismatch");
     }
 
@@ -626,7 +728,7 @@ mod tests {
         let magic_pos = buf.len() - FOOTER_SIZE;
         buf[magic_pos] ^= 0xff;
 
-        let err = read_sidecar(&mut Cursor::new(&buf)).unwrap_err();
+        let err = read_sidecar(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         assert_index_error(err, "unexpected trailing bytes");
     }
 
@@ -635,7 +737,8 @@ mod tests {
         let buf = sample_sidecar_bytes();
         for keep in 1..FOOTER_SIZE {
             let truncated = &buf[..buf.len() - FOOTER_SIZE + keep];
-            let err = read_sidecar(&mut Cursor::new(truncated)).unwrap_err();
+            let err =
+                read_sidecar(&mut Cursor::new(truncated), truncated.len() as u64).unwrap_err();
             assert_index_error(err, "truncated checksum footer");
         }
     }
@@ -645,7 +748,50 @@ mod tests {
         let mut buf = sample_sidecar_bytes();
         buf.push(0u8);
 
-        let err = read_sidecar(&mut Cursor::new(&buf)).unwrap_err();
+        let err = read_sidecar(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
         assert_index_error(err, "trailing bytes after the checksum footer");
+    }
+
+    #[test]
+    fn oversized_header_is_rejected_before_allocating() {
+        // Reproduce the Issue #791 hazard: a valid-looking header whose
+        // `vector_count` declares far more payload than the file can
+        // possibly hold. Here the buffer is a bare 24-byte header but the
+        // header claims `dim=16 * vector_count=2^28` f32 elements
+        // (~17 GiB). `read_sidecar` must reject this against the real
+        // file size *before* allocating `vec![0u8; payload_size]`, so the
+        // process is never asked for gigabytes (which would abort via
+        // `handle_alloc_error`).
+        let dim = 16u32;
+        let huge_count = 1u32 << 28; // 268_435_456 vectors
+        let header = RerankSidecarHeader::new(RerankStorageKind::F32, dim, huge_count);
+        let mut buf: Vec<u8> = Vec::new();
+        header.write_to(&mut buf).unwrap();
+        assert_eq!(buf.len(), HEADER_SIZE);
+        // Sanity-check the declared payload really is huge and in-range
+        // for `payload_size` (so the rejection is the file-size bound,
+        // not the overflow guard).
+        assert_eq!(
+            header.payload_size().unwrap(),
+            huge_count as usize * dim as usize * 4
+        );
+
+        let err = read_sidecar(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
+        assert_index_error(err, "declares a");
+    }
+
+    #[test]
+    fn header_declaring_one_byte_too_many_is_rejected() {
+        // The bound is exact: a footer-less sidecar whose payload is one
+        // byte short of the header's claim must be rejected, never read
+        // with a truncating allocation.
+        let header = RerankSidecarHeader::new(RerankStorageKind::F32, 4, 1);
+        let mut buf: Vec<u8> = Vec::new();
+        header.write_to(&mut buf).unwrap();
+        // payload should be 4 * 4 = 16 bytes; write only 15.
+        buf.extend_from_slice(&[0u8; 15]);
+
+        let err = read_sidecar(&mut Cursor::new(&buf), buf.len() as u64).unwrap_err();
+        assert_index_error(err, "declares a");
     }
 }
