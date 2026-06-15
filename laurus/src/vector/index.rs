@@ -6,6 +6,7 @@
 //! - Vector quantization and compression
 //! - Index optimization and maintenance
 
+pub(crate) mod alloc_bounds;
 pub mod config;
 pub mod factory;
 pub mod field;

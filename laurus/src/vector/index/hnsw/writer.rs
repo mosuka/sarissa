@@ -7,11 +7,13 @@ use crate::storage::Storage;
 use crate::vector::core::rerank::RerankStorageKind;
 use crate::vector::core::vector::Vector;
 use crate::vector::index::HnswIndexConfig;
+use crate::vector::index::alloc_bounds::{checked_capacity, checked_len};
 use crate::vector::index::field::LegacyVectorFieldWriter;
 use crate::vector::index::format::{QuantHeader, VectorSegmentHeader};
 use crate::vector::index::hnsw::graph::HnswGraph;
 use crate::vector::index::quantized_io::{
-    quantize_segment, read_dequantized_vector, write_quantized_record,
+    quantize_segment, quantized_record_payload_size, read_dequantized_vector,
+    write_quantized_record,
 };
 use crate::vector::index::rerank_sidecar::{read_sidecar, write_sidecar};
 use crate::vector::writer::{VectorIndexWriter, VectorIndexWriterConfig};
@@ -272,11 +274,17 @@ impl HnswIndexWriter {
         storage: Arc<dyn Storage>,
         path: &str,
     ) -> Result<Self> {
-        use std::io::Read;
+        use std::io::{Read, Seek};
 
         // Open the index file
         let file_name = format!("{}.hnsw", path);
         let mut input = storage.open_input(&file_name)?;
+
+        // Ground truth for bounding allocations sized from unverified header
+        // counts below (Issue #806). Unlike the reader, this writer load path
+        // runs no checksum footer verification, so every count — including
+        // those of footer-carrying segments — reaches its allocation unverified.
+        let file_size = input.size()?;
 
         // Read metadata (vector count stored as u64)
         let mut num_vectors_buf = [0u8; 8];
@@ -316,6 +324,25 @@ impl HnswIndexWriter {
         // approximation of the originals; if a Stage 2 sidecar is
         // present we'll overwrite them below with the lossless f32
         // payload.
+        // Bytes left for the per-vector records section (Issue #806). Each
+        // record is at least doc_id (8) + field_name_len (4) + the per-kind
+        // fixed payload, so `record_stride` also bounds the per-record payload
+        // read decoded below.
+        let records_remaining =
+            file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+        let min_payload = match &header.quant {
+            QuantHeader::Scalar8Bit(_) => quantized_record_payload_size(dimension) as u64,
+            QuantHeader::ProductQuantization { params, .. } => params.m as u64,
+            #[cfg(feature = "pq-fastscan")]
+            QuantHeader::ProductQuantizationFastScan { .. } => 1,
+        };
+        let record_stride = 12 + min_payload;
+        checked_capacity(
+            num_vectors,
+            record_stride,
+            records_remaining,
+            "hnsw num_vectors",
+        )?;
         let mut vectors = Vec::with_capacity(num_vectors);
         for _ in 0..num_vectors {
             let mut doc_id_buf = [0u8; 8];
@@ -326,6 +353,7 @@ impl HnswIndexWriter {
             let mut field_name_len_buf = [0u8; 4];
             input.read_exact(&mut field_name_len_buf)?;
             let field_name_len = u32::from_le_bytes(field_name_len_buf) as usize;
+            checked_len(field_name_len, records_remaining, "hnsw field_name_len")?;
 
             let mut field_name_buf = vec![0u8; field_name_len];
             input.read_exact(&mut field_name_buf)?;
@@ -443,6 +471,14 @@ impl HnswIndexWriter {
                 input.read_exact(&mut node_count_buf)?;
                 let node_count = u64::from_le_bytes(node_count_buf) as usize;
 
+                // Bound every graph allocation by the bytes left in the file
+                // (Issue #806). Reused for the inner layer / neighbor counts so
+                // no extra syscall is taken inside the per-node / per-layer
+                // loops.
+                let graph_remaining =
+                    file_size.saturating_sub(input.stream_position().map_err(LaurusError::Io)?);
+                // Each node serializes at least doc_id (8) + layer_count (4).
+                checked_capacity(node_count, 12, graph_remaining, "hnsw node_count")?;
                 let mut nodes = HashMap::with_capacity(node_count);
 
                 for _ in 0..node_count {
@@ -454,6 +490,8 @@ impl HnswIndexWriter {
                     input.read_exact(&mut layer_count_buf)?;
                     let layer_count = u32::from_le_bytes(layer_count_buf) as usize;
 
+                    // Each layer serializes at least its neighbor_count (4).
+                    checked_capacity(layer_count, 4, graph_remaining, "hnsw layer_count")?;
                     let mut layers = Vec::with_capacity(layer_count);
 
                     for _ in 0..layer_count {
@@ -461,6 +499,13 @@ impl HnswIndexWriter {
                         input.read_exact(&mut neighbor_count_buf)?;
                         let neighbor_count = u32::from_le_bytes(neighbor_count_buf) as usize;
 
+                        // Each neighbor serializes as a u64 (8 bytes).
+                        checked_capacity(
+                            neighbor_count,
+                            8,
+                            graph_remaining,
+                            "hnsw neighbor_count",
+                        )?;
                         let mut neighbors = Vec::with_capacity(neighbor_count);
                         for _ in 0..neighbor_count {
                             let mut neighbor_buf = [0u8; 8];
