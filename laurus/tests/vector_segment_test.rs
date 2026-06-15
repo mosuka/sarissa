@@ -118,3 +118,150 @@ async fn test_vector_segment_integration() {
     println!("Stats document count: {}", stats.document_count);
     assert_eq!(stats.document_count, 3);
 }
+
+/// End-to-end regression guard for Issue #798 (follow-up of #790).
+///
+/// Commits a dense, well-separated 16-document corpus through
+/// `VectorStore` with `HnswOption::quantizer =
+/// QuantizationMethod::ProductQuantization`, then reads the produced
+/// on-disk LVS1 segment header back and asserts it reports
+/// `QuantHeader::ProductQuantization` — a deterministic, PQ-specific
+/// observable, not merely that search succeeds.
+///
+/// This is the only **behavioral** assertion that PQ is honored through
+/// a store/engine commit: it exercises the `from_hnsw_option` converter
+/// path (#790). If a regression dropped `quantizer` from that converter
+/// (while keeping `rerank_storage`), the field would fall back to the
+/// default `Scalar8Bit`, the segment header would report
+/// `quant_kind = 1`, and this test would fail. The existing `pq_*` tests
+/// build `HnswIndexConfig` directly and so bypass `from_hnsw_option`,
+/// leaving this path uncovered until now.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pq_quantizer_honored_through_engine_commit() {
+    use laurus::storage::Storage;
+    use laurus::vector::core::quantization::QuantizationMethod;
+    use laurus::vector::index::format::{QuantHeader, VectorSegmentHeader};
+    use std::io::{Read, Seek, SeekFrom};
+
+    // dim % subvector_count must be 0 (PqParams::from_dim_and_m).
+    const DIM: usize = 4;
+    const SUBVECTOR_COUNT: usize = 2;
+
+    // 1. Storage + config carrying ProductQuantization on the HNSW field.
+    let storage = Arc::new(MemoryStorage::new(MemoryStorageConfig::default()));
+
+    let mut field_configs = std::collections::HashMap::new();
+    field_configs.insert(
+        "vector_field".to_string(),
+        VectorFieldConfig {
+            vector: Some(FieldOption::Hnsw(HnswOption {
+                dimension: DIM,
+                distance: DistanceMetric::Euclidean,
+                m: 8,
+                ef_construction: 50,
+                default_ef_search: None,
+                base_weight: 1.0,
+                quantizer: QuantizationMethod::ProductQuantization {
+                    subvector_count: SUBVECTOR_COUNT,
+                },
+                rerank_storage: None,
+                embedder: None,
+            })),
+            lexical: None,
+        },
+    );
+
+    let collection_config = VectorIndexConfig {
+        fields: field_configs,
+        embedder: Arc::new(MockTextEmbedder { dimension: DIM }),
+        default_fields: vec!["vector_field".to_string()],
+        metadata: std::collections::HashMap::new(),
+        deletion_config: laurus::DeletionConfig::default(),
+        shard_id: 0,
+        metadata_config: LexicalIndexConfig::default(),
+    };
+
+    let engine = laurus::vector::VectorStore::new(storage.clone(), collection_config).unwrap();
+
+    // 2. Commit two widely-separated clusters of 8 points each. PQ trains a
+    //    per-sub-vector k-means codebook; a tiny corpus makes the codebook
+    //    degenerate, and platform-dependent f32 reduction order can flip a
+    //    quantization code (issue #730). A denser corpus with a large cluster
+    //    separation keeps the quantizer stable across platforms. (Only the
+    //    header's quant kind is asserted here, but the stable corpus avoids
+    //    any PQ-training edge case on the write path.)
+    let near_offsets = [
+        [0.0, 0.0, 0.0, 0.0],
+        [0.1, 0.1, 0.1, 0.1],
+        [-0.1, -0.1, -0.1, -0.1],
+        [0.2, -0.2, 0.2, -0.2],
+        [-0.2, 0.2, -0.2, 0.2],
+        [0.05, 0.05, -0.05, -0.05],
+        [-0.05, -0.05, 0.05, 0.05],
+        [0.15, -0.1, 0.1, -0.15],
+    ];
+    let near_base = [10.0_f32, 10.0, 20.0, 20.0];
+    let far_base = [-100.0_f32, -100.0, -200.0, -200.0];
+
+    let mut internal_id = 1u64;
+    for base in [near_base, far_base] {
+        for off in &near_offsets {
+            let v: Vec<f32> = base.iter().zip(off).map(|(b, o)| b + o).collect();
+            let doc = Document::builder()
+                .add_field("vector_field", DataValue::Vector(v))
+                .build();
+            engine
+                .upsert_document_by_internal_id(internal_id, doc)
+                .await
+                .unwrap();
+            internal_id += 1;
+        }
+    }
+
+    engine.commit().await.unwrap();
+
+    // 3. Locate the committed on-disk HNSW segment. The `.hnsw.tmp` is
+    //    renamed away on success and the `.hnsw.f32` rerank sidecar is not
+    //    written (rerank_storage is None), so exactly one `.hnsw` remains.
+    let segment_name = storage
+        .list_files()
+        .unwrap()
+        .into_iter()
+        .find(|name| name.ends_with(".hnsw"))
+        .expect("a committed .hnsw segment must exist");
+
+    let mut input = storage.open_input(&segment_name).unwrap();
+
+    // The `.hnsw` file starts with a 20-byte HNSW preamble
+    // (num_vectors:u64 + dimension:u32 + m:u32 + ef_construction:u32)
+    // written before the LVS1 `VectorSegmentHeader`. Read it to advance to
+    // the header and sanity-check the committed vector count.
+    let mut num_vectors_buf = [0u8; 8];
+    input.read_exact(&mut num_vectors_buf).unwrap();
+    assert_eq!(
+        u64::from_le_bytes(num_vectors_buf),
+        16,
+        "all 16 committed vectors should land in the segment"
+    );
+    // Skip dimension / m / ef_construction (3 x u32) to reach the LVS1 header.
+    input.seek(SeekFrom::Current(12)).unwrap();
+
+    // 4. The header must report ProductQuantization (quant_kind = 2). The
+    //    default Scalar8Bit would report quant_kind = 1 and fail here, so this
+    //    catches a regression that drops `quantizer` from `from_hnsw_option`.
+    let header = VectorSegmentHeader::read_from(&mut input).unwrap();
+    match header.quant {
+        QuantHeader::ProductQuantization { params, .. } => {
+            assert_eq!(
+                params.m as usize, SUBVECTOR_COUNT,
+                "PQ header must record the configured subvector_count"
+            );
+            assert_eq!(
+                params.sub_dim as usize,
+                DIM / SUBVECTOR_COUNT,
+                "PQ header sub_dim must be dim / subvector_count"
+            );
+        }
+        other => panic!("expected a ProductQuantization segment header, got {other:?}"),
+    }
+}
